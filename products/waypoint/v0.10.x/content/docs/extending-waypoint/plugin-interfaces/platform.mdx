@@ -1,0 +1,50 @@
+---
+layout: docs
+page_title: 'Platform'
+description: |-
+  How to implement the Platform component for a Waypoint plugin
+---
+
+# Platform
+
+https://pkg.go.dev/github.com/hashicorp/waypoint-plugin-sdk/component#Platform
+
+The `Platform` component is where you handle interaction between Waypoint and the destination platform. It is handled
+through the implementation of the DeployFunc interface and optionally the `PlatformReleaser` interface.
+
+![Platform](/img/extending-waypoint/platform.png)
+
+The Platform component is responsible for deploying your application to the destination platform, for example say you
+wish to deploy the application to Google Cloud Run, the DeployFunc callback would be where you would define the interaction
+with the Cloud Run APIs.
+
+A platform component can be created by implementing the Platform interface, Platform has a single function DeployFunc from
+which you return a function which will be called by Waypoint.
+
+```go
+type Platform interface {
+  DeployFunc() interface{}
+}
+```
+
+The following code snippet shows an example of the implementation of `DeployFunc`, the signature for the function returned
+from DeployFunc can be defined to accept the Default Mappers, in addition it can accept the data model which was returned
+from the `Registry` component.
+
+```go
+type Platform struct {
+  // Other component fields
+}
+
+func (p *Platform) DeployFunc() interface{} {
+  return d.Deploy
+}
+
+func (p *Platform) Deploy(
+  ctx context.Context,
+  ji *component.JobInfo,
+  artifact *registry.Artifact,
+  hc history.Client,
+  ui terminal.UI,
+) (*Deployment, error)
+```

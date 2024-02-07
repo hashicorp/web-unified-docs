@@ -1,0 +1,180 @@
+---
+page_title: >-
+  Migrate from Alternative Worker Images to Custom Agents - v202302-1
+description: Migrate from using alternative worker images to custom agents. Available as of Terraform Enterprise v202302-1.
+---
+
+# Migrate Alternative Worker Images to Agents: v202302-1
+
+## Summary
+
+The base image responsible for executing Terraform runs will change, beginning
+with Terraform Enterprise v202302-1 (target date: February 21, 2023). Terraform Enterprise will stop supporting worker images in v202305-1 (target date: May 16, 2023).
+
+If you are using the _default_ worker image, no further action is required. Terraform Enterprise will migrate you to the new image automatically in v202302-1 or later.
+
+If you
+currently use an [alternative worker
+image](/enterprise/install/interactive/installer#alternative-terraform-worker-image), Terraform Enterprise will continue using your image by default until you migrate your alternative worker image and manually switch to a custom agent.
+Before adopting v202305-1, you must rebuild your alternative image using the [agent base
+image](https://hub.docker.com/r/hashicorp/tfc-agent). If you also use the
+[initialize](/enterprise/install/interactive/installer#initialize-script) or
+[finalize](/enterprise/install/interactive/installer#finalize-script) hooks
+available on custom worker images, you must update your customizations to use
+the tfc-agent hooks instead.
+
+Keep reading to learn how to check if you are impacted, and what action to take
+if you are.
+
+## What are alternative worker images?
+
+Terraform Enterprise executes Terraform runs (plans and applies) in short-lived Docker containers. In some cases you may want to use tools that are not included in the default base image for these containers. Terraform Enterprise lets you upload an [alternative worker image](/enterprise/install/interactive/installer#alternative-terraform-worker-image) that includes these tools. You can also use the initialize or finalize hooks included in the image to execute custom scripts before and after the run, respectively. 
+
+## What’s changing and why?
+
+We are replacing three components of the run pipeline, `terraform-build-worker`,
+`terraform-build-manager`, and `tfe-rabbitmq` with local Terraform Cloud/Enterprise
+agents. If you use an alternative worker image to execute custom logic within
+the run lifecycle, you will need to migrate that logic to a custom
+agent image.
+
+Like Terraform runs that use alternative worker images, runs that use custom agents will still execute in isolated,
+short-lived [Docker
+containers](/enterprise/system-overview/security-model#terraform-enterprise-isolates-terraform-operations-via-docker-containers).
+The Terraform Runs API and UI are also unaffected by this change.
+
+This change is part of an ongoing effort to refresh the architecture of
+Terraform Enterprise, improve performance and reliability of runs, and support
+new application-level features. Some immediate benefits of this change include:
+
+- The run pipeline contains fewer components, making it easier to understand and debug.
+- Local runs and remote agent runs can now use the same base images, and the
+  same pre- and post- run hooks. 
+- Run distribution across Active/Active nodes is more even because we eliminated
+  a redundant queue. 
+- You can now access previously inaccessible run logs (Sentinel, cost
+  estimation, and plan-export-worker logs) via Docker logs and any tool that can
+  interact with it. This includes the `docker logs` command, the Docker API, and
+  [TFE log forwarding](/enterprise/admin/infrastructure/logging).
+
+In v202302-1, Terraform Enterprise installations using the default worker image (not an alternative worker image) will automatically use the new run pipeline.
+
+Installations that  use an alternative worker image will continue to use the legacy run pipeline when you upgrade to v202302-1. You must migrate your TFE installation to use a custom agent before adopting v202305-1, which involves rebuilding your alternative worker image as a custom agent image. 
+
+Once you rebuild your image, you must manually switch to the new run pipeline by setting the `run_pipeline_mode = “agent”`. You can revert back to the legacy run pipeline at any time before you adopt v202305-1 by setting `run_pipeline_mode = “legacy”`. The legacy option will become unavailable in v202305-1 and later.
+
+## Check for an alternative worker image
+
+By default Terraform Enterprise uses a standard image included in all releases. Check your config to find out if you have previously specified an Alternative Worker Image. 
+
+In the Admin Console's **Settings** tab, check if **Provide the location of a custom image** is selected. If yes, your Alternative Worker Image location is specified in the **Custom Image Tag** field that follows.
+
+![Screenshot of the TFE Admin Console with the option to provide the location of a
+custom image selected with a radio button, and the location of the image in a
+text box below](/img/docs/build-worker.png)
+
+You can also check if you are using an alternative worker image directly in your
+config file. In your config file, the field `custom_image_tag` is the name of
+your alternative worker image.
+
+## Migrate to a custom agent image
+
+To migrate to a custom agent image, start by understanding the customizations on
+your worker image. Then build your new agent image, add your customizations, and
+test the new, customized image. 
+
+### Step 1: Evaluate customizations in your current image
+
+Before making any changes, you must evaluate your current image and familiarize yourself with all customizations that have been implemented in the past. 
+
+
+Consider the following:
+- What custom tools are embedded in your image?
+- Are you using the initialize and/or finalize hook(s)?
+- If yes, what do your initialize and/or finalize script(s) do?
+
+### Step 2: Build your new custom agent image
+
+The Docker container that Terraform Cloud and Enterprise will use for Terraform
+operations starting with v202302-1 is based on the
+[`hashicorp/tfc-agent`](https://hub.docker.com/r/hashicorp/tfc-agent) Docker
+image. Like the old worker image, the agent image can be customized to execute
+custom functionality, but there are several implementation differences between
+worker images and agent images to consider.
+
+The following tables describe the differences between the
+old alternative worker image and the new custom agent image.
+
+#### Use an image
+
+||Alternative Worker Image|Custom Agent Image|
+|---|---|---|
+|Docs: build a custom image|[Documentation](/enterprise/install/interactive/installer#requirements)|[Documentation](/cloud-docs/agents/agents#optional-configuration-run-an-agent-using-docker)|
+|Docs: execute scripts|[Documentation](/enterprise/install/interactive/installer#executing-custom-scripts)|[Documentation](/cloud-docs/agents/hooks)|
+|Use the image in your config|Set the name of the alternative docker image using the `custom_image_tag` config option.|Set the name of the alternative Docker image using the `custom_agent_image_tag` config option.|
+|Image location|The image must be located on the host.|If Terraform Enterprise doesn't find the image on the host, it will try to pull it from the specified location.|
+
+#### Customize an image 
+
+||Alternative Worker Image|Custom Agent Image|
+|---|---|---|
+|Base image|The base image must be `ubuntu:bionic` or an official RHEL7 image (e.g., `registry.access.redhat.com/ubi7/ubi-minimal`).|The base image must be the `hashicorp/tfc-agent`.|
+|Image location|The image must exist on the Terraform Enterprise host. You can add it by running `docker pull` from a local registry or any other similar method.|We recommend that the image exist locally, but if the image doesn’t exist locally, the `tfe-task-worker` docker driver will pull the image from the specified source.|
+|Required software|The software packages defined [here](/enterprise/install/interactive/installer#requirements) must be installed on the image.|N/A|
+|Certificates|All necessary PEM-encoded CA certificates must be placed within the `/usr/local/share/ca-certificates` directory. Each file added to this directory must end with the `.crt` extension. The CA certificates configured in the CA Bundle settings will not be automatically added to this image at runtime.|All necessary PEM-encoded CA certificates must be placed within the `/usr/local/share/ca-certificates` directory. Each file added to this directory must end with the `.crt` extension. The CA certificates configured in the CA Bundle settings will not be automatically added to this image at runtime. <br/><br/> This will be similar to the certificate config in this [Dockerfile example](/enterprise/install/interactive/installer#ubuntu).|
+|Terraform binary|Terraform must not be installed on the image. Terraform Enterprise installs Terraform at runtime.|Terraform must not be installed on the image. Terraform Enterprise installs Terraform at runtime.|
+|Rhel 7|In addition to the packages that yum installs, curl installs the envdir tool Python port because it is a dependency of the Terraform Build Worker service. If the envdir tool is not installed on the alternative worker image, Terraform runs will fail within Terraform Enterprise.|N/A|
+|Run before plans and applies|The same [initialize script](/enterprise/install/interactive/installer#initialize-script) runs before a `terraform init` during both plans and applies.|You can have separate [hooks](/cloud-docs/agents/hooks#supported-hooks) that run before and after plans and applies: <br/> `terraform-pre-plan` <br/> `terraform-pre-apply`.|
+|Run after plans and applies|The same [finalize script](/enterprise/install/interactive/installer#finalize-script) runs after terraform plan  and terraform apply are finished executing.|You can have separate [hooks](/cloud-docs/agents/hooks#supported-hooks) that run before and after plans and applies: <br/> `terraform-post-plan` <br/> `terraform-post-apply`|
+|Configuration|Ensure your worker image contains an executable shell script at: <br/> `/usr/local/bin/init_custom_worker.sh` <br/> `/usr/local/bin/finalize_custom_worker.sh`|Store hooks in a hooks directory, and name them according to their purpose. For example: <br/> `~/.tfc-agent/hooks/terraform-pre-plan` <br/> `~/.tfc-agent/hooks/terraform-post-plan` <br/> `~/.tfc-agent/hooks/terraform-pre-apply` <br/> `~/.tfc-agent/hooks/terraform-post-apply`|
+|Non-zero exit codes|If the script exits with a non-zero exit code, the Terraform Enterprise run will immediately fail with an error.|If a `terraform apply` does not complete successfully, the hook will still run. If a hook exits with a non-zero exit code, the Terraform run will fail immediately.|
+|`stdout`/`stderr`|The build worker logs whether or not a custom script has executed but does not log the script's standard output and standard error. If the custom script exits non-zero, then its standard output and standard error print to the UI logs.|The standard output and standard error from the hook will print alongside the Terraform run output in the Terraform Cloud/Enterprise user interface, but not in the UI logs.|
+|File locations|You can not customize the name or location of the script.|The hook name must match one of the [supported hooks](/cloud-docs/agents/hooks#supported-hooks). You cannot customize or change these names. Because of this, there can only be one hook of each type configured for each agent. For example, you could create a pre-plan and pre-apply hook, but you cannot create two pre-plan hooks.|
+|Script permissions|The script must have execute permissions.|Each hook must have the execute permission set.|
+|Execution timeout|The execution of the script does not have a timeout. It is up to the Terraform Enterprise administrator to ensure scripts execute in a timely fashion.|Each hook has a 60 second timeout. If a hook times out the Terraform run will fail immediately.|
+|Execution context|The execution of the script is not sandboxed. The script executes in the same container where `terraform` runs, and both can access the same set of environment variables.|Like with alternative worker images, the execution of the script is not sandboxed. The script executes in the same container where `terraform` runs, and both can access the same set of environment variables.|
+|Reading and writing variables|Users can "export" environment variables for subsequent Terraform commands (plan, apply, etc) to use, by writing their environment variable value to a file `/env/FOO` where `FOO` is the name of the environment variable.|You can not persist environment variables from the custom script to subsequent Terraform commands (plan, apply, etc) like you could with build workers. There is no concept of an `/env` directory in agents. Custom scripts run as a child process, so environment variables from the export command will not persist after the custom script finishes executing.|
+|Running in Docker|Example Dockerfile snippet: <br/> `ADD init_custom_worker.sh /usr/local/bin/init_custom_worker.sh`|When running `tfc-agent` using Docker, you must build a new Docker image containing the hooks. To configure hooks, [follow these instructions](/cloud-docs/agents/hooks#running-an-agent-with-docker).|
+|Execute/running as a binary|Scripts always run in the worker container. To execute, initialize and finalize scripts and all the commands they invoke, ensure your worker image contains an executable shell script at `/usr/local/bin/<init or finalize>_custom_worker.sh`.|If you want to run agents outside of containers, you must create your own remote agent pool. <br/><br/> To run hooks as a binary, you need to [change the permissions to the hook scripts](/cloud-docs/agents/hooks#running-an-agent-as-a-binary).|
+
+### Step 3: Test your custom agent image
+
+We strongly recommend that you test your custom agent image before applying it to your production installation of Terraform Enterprise.
+
+#### Test on Terraform Enterprise v202301 or earlier
+
+Agents have not yet replaced build workers in v202301 and earlier, but you can still test your agent image by configuring a test workspace to use a remote agent. You will need to install your agent on the host of your choice, and configure your workspace to use that agent. Follow the process described [here](/cloud-docs/agents/agents) for more details.
+
+#### Test on Terraform Enterprise v202302 or later
+
+To test in v202302 or later, install a test installation of Terraform Enterprise, define a `custom_agent_image_tag`, and set `run_pipeline_mode = “agent”` in your test installation’s config.
+
+### Step 4: Adopt the new image
+
+Once you have completed your migration and tested the new custom agent image, adopt the new image into your production Terraform Enterprise installation (v202302 or later) by defining a `custom_agent_image_tag`, and setting `run_pipeline_mode = “agent”` in your config file.
+
+## Frequently Asked Questions
+
+**Q. I had an Alternative Worker Image configured, but I don’t need the customizations anymore. What should I do?**
+
+**A.** If you want to use the default agent image going forward instead of a customized image, please remove your alternative worker image from use before you upgrade to v202302-1. If you want to remove the alternative worker image after upgrading to v202302-1 or higher, set `run_pipeline_mode = “agent”` in your config without specifying a custom agent image.
+
+**Q. I’m already using a custom image for my remote agents. Can I re-use that image for my local agent image?**
+
+**A.** Yes. If your remote agent image accomplishes everything you want, you can specify that image as your Custom Agent Image.
+
+**Q. I’m using an alternative worker image, when do I need to complete my migration to a custom agent image?**
+
+**A.** Terraform Enterprise will stop supporting workers in v202305-1. To maintain your customizations, you must complete your migration to a custom agent image before upgrading to v202305-1 or later.
+
+**Q. Can I switch back to the legacy run pipeline?**
+
+**A.** Yes, until v202305-1 you can switch between workers and agents. To switch back to the worker run pipeline, set `run_pipeline_mode = “legacy”` in your config. We will remove legacy mode in v202305-1.
+
+**Q. I am using an alternative worker image to dynamically manage run credentials. What is the best way to accomplish this with a custom agent image?**
+
+**A.** You can dynamically manage credentials using workspace variables and/or agent hooks. Upcoming enhancements to Terraform Enterprise will make this easier. Please reach out to your HashiCorp account representative for more information.
+
+**Q. I have a custom workflow on my alternative worker image that doesn’t seem possible on a custom agent image. What should I do?**
+
+**A.** Please reach out to your HashiCorp account representative for further guidance.

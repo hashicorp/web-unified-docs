@@ -1,0 +1,462 @@
+---
+page_title: Plugin Development - OpenAPI Provider Spec Generator
+description: >-
+  Learn about the OpenAPI Provider Spec Generator that transforms an OpenAPI specification into a Provider code specification
+---
+
+# OpenAPI Provider Spec Generator
+<Note>
+Code Generation is currently in tech preview.
+</Note>
+
+The [OpenAPI Provider Spec Generator](https://github.com/hashicorp/terraform-plugin-codegen-openapi) is a CLI tool that transforms an OpenAPI Specification (OAS) into a [Provider Code Specification](/terraform/plugin/code-generation/specification). This section contains usage documentation and examples for using the generator.
+
+## Overview
+
+![diagram: Code Generation - OpenAPI Expanded Overview](/img/docs/tfcodegen-openapi-expanded.png)
+
+The OpenAPI Provider Spec Generator receives two sources as input: an OAS file and a [Generator Config](#generator-config) file. This generator supports both [OpenAPI 3.1.x](https://spec.openapis.org/oas/v3.1.0) and [OpenAPI 3.0.x](https://spec.openapis.org/oas/v3.0.3).
+
+The generator outputs a [Provider Code Specification](/terraform/plugin/code-generation/specification) which, as shown in the diagram above, can be used as input to a provider code generator, such as the [Framework Code Generator](/terraform/plugin/code-generation/framework-generator), to create Terraform Provider code.
+
+## Usage
+
+### Installation
+
+The CLI tool can be installed with the [Go](https://go.dev/doc/install) toolchain, via `go install`:
+
+```shell-session
+go install github.com/hashicorp/terraform-plugin-codegen-openapi/cmd/tfplugingen-openapi@latest
+```
+
+### Generate
+
+The primary command for the spec generator is the `generate` command, which requires a [generator config](#generator-config) and an OpenAPI 3.x spec as input:
+
+```shell-session
+tfplugingen-openapi generate \
+  --config <path/to/generator_config.yml> \
+  --output <output/for/provider_code_spec.json> \
+  <path/to/openapi_spec.json>
+```
+
+#### Flags
+
+The available flags for the `generate` command:
+
+| Flag     | Required? | Default                     | Description                                                                                     |
+|----------|-----------|-----------------------------|-------------------------------------------------------------------------------------------------|
+| `config` | No        | `./generator_config.yml`    | String path to a [generator config](#generator-config) YAML file                                |
+| `output` | No        | `./provider_code_spec.json` | String path to destination file for the generated provider code specification JSON.             |
+
+#### Arguments
+
+ After the flags is one **required** positional argument that is the path to an OpenAPI [3.1.x](https://spec.openapis.org/oas/v3.1.0) or [3.0.x](https://spec.openapis.org/oas/v3.0.3) specification file. This file can be in either JSON or YAML format.
+
+```shell-session
+tfplugingen-openapi generate \
+	--config ./generator_config.yml \
+	--output ./provider_code_spec.json \
+	./openapi_spec.yml
+```
+
+```shell-session
+tfplugingen-openapi generate \
+	--config ./generator_config.yml \
+	--output ./provider_code_spec.json \
+	./openapi_spec.json
+```
+
+## Generator Config
+As OpenAPI is designed to describe HTTP APIs in a general format, a developer will need to configure which API operations (GET, POST, etc.) and components map to a given Terraform resource, data source, or provider.
+
+A YAML file (**generator config**) is used to define these mappings for generating the provider code specification. It also provides configuration options such as [aliasing path and query parameters](#aliasing-oas-operation-parameters) and [overriding description fields](#overriding-attribute-descriptions).
+
+Here is an [example of a generator config](https://github.com/hashicorp/terraform-plugin-codegen-openapi/blob/main/internal/cmd/testdata/petstore3/generator_config.yml) for the standard [Petstore OpenAPI spec](https://github.com/hashicorp/terraform-plugin-codegen-openapi/blob/main/internal/cmd/testdata/petstore3/openapi_spec.json).
+
+### Provider
+
+For generating the [Provider](/terraform/plugin/code-generation/specification#provider) specification, the generator config defines a single `provider` object:
+
+```yml
+provider:
+  name: examplecloud
+  schema_ref: '#/components/schemas/examplecloud_provider_schema'
+```
+
+The `provider` object has the following properties:
+
+| Property     | Type   | Required | Description                                                                                                                                                                                          |
+|--------------|--------|----------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `name`       | String | Yes      | The provider type name (e.g. `examplecloud`)                                                                                                                                                         |
+| `schema_ref` | String | No       | [JSON schema reference](https://json-schema.org/understanding-json-schema/structuring.html#ref) to an existing schema in the OAS. This can be used to map to the provider schema.                    |
+| `ignores`    | Array  | No       | List of OAS properties to ignore during mapping. Each item is a string indicating the location of a property in an OAS schema, dot-separated. See [ignores section below](#ignoring-oas-properties). |
+
+For a detailed description of the schema mapping rules, see the [Mapping OAS to Provider Code Specification](https://github.com/hashicorp/terraform-plugin-codegen-openapi/blob/main/DESIGN.md#provider) section of the repo's design documentation.
+
+### Resources
+
+For generating [Resource](/terraform/plugin/code-generation/specification#resource) specifications, the generator config defines a map `resources`:
+
+```yml
+resources:
+  thing:
+    create:
+      path: /thing
+      method: POST
+    read:
+      path: /thing/{id}
+      method: GET
+    update:
+      path: /thing
+      method: PUT
+    delete:
+      path: /thing/{id}
+      method: DELETE
+```
+
+For an item in the `resources` map, the key is the name of the resource (ex. `thing`), and the value is an object which has the following properties:
+
+| Property | Type   | Required? | Description                                                                                           |
+|----------|--------|-----------|-------------------------------------------------------------------------------------------------------|
+| `create` | Object | Yes       | Create API operation                                                                                  |
+| `read`   | Object | No        | Read API operation                                                                                    |
+| `update` | Object | No        | Update API operation **(this API operation currently does not affect the mapping)**                   |
+| `delete` | Object | No        | Delete API operation **(this API operation currently does not affect the mapping)**                   |
+| `schema` | Object | No        | Allows configuration of the generated schema for this resource, see [Schema Options](#schema-options) |
+
+Each API operation is an object that represents it's location in an OAS, with the following properties:
+
+| Property | Type   | Required? | Description                                                                                                                                 |
+|----------|--------|-----------|---------------------------------------------------------------------------------------------------------------------------------------------|
+| `path`   | String | Yes       | Exactly matches the `path` key in the [OAS paths](https://spec.openapis.org/oas/v3.1.0#paths-object) object                                 |
+| `method` | String | Yes       | Matches the API operation in an [OAS path item](https://spec.openapis.org/oas/v3.1.0#fixed-fields-6) (`GET`, `POST`, `PUT`, `DELETE`, etc.) |
+
+For a detailed description of how the generator uses the `create` and `read` operations to generate the resource schema, see the [Mapping OAS to Provider Code Specification](https://github.com/hashicorp/terraform-plugin-codegen-openapi/blob/main/DESIGN.md#resources) section of the repo's design documentation.
+
+### Data Sources
+
+For generating [Data Source](/terraform/plugin/code-generation/specification#data-source) specifications, the generator config defines a map `data_sources`:
+
+```yml
+data_sources:
+  thing:
+    read:
+      path: /thing/{id}
+      method: GET
+```
+
+For an item in the `data_sources` map, the key is the name of the data source (ex. `thing`), and the value is an object which has the following properties:
+
+| Property | Type   | Required? | Description                                                                                              |
+|----------|--------|-----------|----------------------------------------------------------------------------------------------------------|
+| `read`   | Object | Yes       | Read API operation                                                                                       |
+| `schema` | Object | No        | Allows configuration of the generated schema for this data source, see [Schema Options](#schema-options) |
+
+
+The `read` API operation is an object that represents it's location in an OAS, with the following properties:
+
+| Property | Type   | Required? | Description                                                                                                                                 |
+|----------|--------|-----------|---------------------------------------------------------------------------------------------------------------------------------------------|
+| `path`   | String | Yes       | Exactly matches the `path` key in the [OAS paths](https://spec.openapis.org/oas/v3.1.0#paths-object) object                                 |
+| `method` | String | Yes       | Matches the API operation in an [OAS path item](https://spec.openapis.org/oas/v3.1.0#fixed-fields-6) (`GET`, `POST`, `PUT`, `DELETE`, etc.) |
+
+
+For a detailed description of how the generator uses the `read` operation to generate the data source schema, see the [Mapping OAS to Provider Code Specification](https://github.com/hashicorp/terraform-plugin-codegen-openapi/blob/main/DESIGN.md#data-sources) section of the repo's design documentation.
+
+### Schema Options
+
+There are certain scenarios where you need to configure how a resource/data source is mapped to provider code specification. These options are defined in a `schema` object for both resource and data sources:
+
+```yaml
+resources:
+  thing:
+    # create, read, update, delete configuration
+    # ...
+    schema:
+      # Configure the 'thing' resource mapping
+data_sources:
+  thing:
+    # read configuration
+    # ...
+    schema:
+      # Configure the 'thing' data source mapping
+```
+
+The `schema` object has the following properties:
+
+| Property     | Type   | Required? | Description                                                                                                                                                                                          |
+|--------------|--------|-----------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `attributes` | Object | No        | Defines mapping options for [attributes](/terraform/plugin/code-generation/specification#attributes)                                                                                                 |
+| `ignores`    | Array  | No        | List of OAS properties to ignore during mapping. Each item is a string indicating the location of a property in an OAS schema, dot-separated. See [ignores section below](#ignoring-oas-properties). |
+
+The `attributes` object has the following properties:
+
+| Property    | Type   | Required? | Description                                                                                                                |
+|-------------|--------|-----------|----------------------------------------------------------------------------------------------------------------------------|
+| `aliases`   | Object | No        | Allows aliasing of path/query parameter names (e.g. `petId` -> `id` ), see [below](#aliasing-oas-operation-parameters)     |
+| `overrides` | Object | No        | Allows overriding attribute information after mapping, like `description`, see [below](#overriding-attribute-descriptions) |
+
+
+#### Ignoring OAS Properties
+
+A common scenario that can occur during mapping is having additional properties on an OAS schema that you want to exclude from the final Terraform schema. You may want to exclude properties because:
+- The property is needed for an API call, but unrelated to Terraform and not needed in the schema (pagination properties, duplicated properties, etc.)
+- The property is not supported by the OpenAPI Provider Spec generator (multi-type or dynamic type properties)
+
+The configuration for ignoring properties is an array of strings, each string representing a location of an OAS property to be ignored. A simple dot notation can be used to ignore child properties of objects. Using the [Pet OAS](https://github.com/hashicorp/terraform-plugin-codegen-openapi/blob/e61922cc72100086ad8a989ffbc090af44f0d4be/internal/cmd/testdata/petstore3/openapi_spec.json#L1105), some valid ignores could look like:
+
+```yaml
+resources:
+  pet:
+    # create, read, update, delete configuration
+    # ...
+    schema:
+      ignores:
+        # Ignore the "id" property
+        - id
+        # Ignore the entire nested object "category"
+        - category
+        # Ignore the "id" property of the nested object "category"
+        - category.id
+        # Ignore the entire nested list "tags"
+        - tags
+        # Ignore the "name" property of the nested list "tags"
+        - tags.name
+```
+
+<Note>
+The ignores apply to all OAS operation schemas (request/response bodies) and parameters.
+</Note>
+
+#### Aliasing OAS Operation Parameters
+
+In an OAS, it's possible for `path` or `query` parameters to have slightly different names then it's associated attribute in a create request body/response body schema. For example, `petId` (path parameter) and `id` (defined on Pet schema):
+
+```json
+// OpenAPI Specification
+// ...
+    "paths": {
+        "/pet/{petId}": {
+            "get": {
+                "tags": [
+                    "pet"
+                ],
+                "summary": "Find pet by ID",
+                "description": "Returns a single pet",
+                "operationId": "getPetById",
+                "parameters": [
+                    {
+                        "name": "petId",
+                        "in": "path",
+                        "description": "ID of pet to return",
+                        "required": true,
+                        "schema": {
+                            "type": "integer",
+                            "format": "int64"
+                        }
+                    }
+                ],
+				// ...
+			},
+		},
+	},
+    "components": {
+        "schemas": {
+            "Pet": {
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "format": "int64",
+                        "example": 10
+                    },
+					// ...
+				},
+			},
+		},
+	},
+```
+
+Merging `petId` with `Pet.id` can be achieved by using the `schema.aliases` option in a [resource](#resources) or [data source](#data-sources):
+```yaml
+resources:
+  pet:
+    # create, read, update, delete configuration
+    # ...
+    schema:
+      attributes:
+        aliases:
+          # Match 'petId' parameter to 'id'
+          petId: id
+```
+
+#### Overriding Attribute Descriptions
+
+In an OAS, it's possible for the [`description`](https://json-schema.org/understanding-json-schema/reference/generic.html) fields of request/response body schemas to either be omitted, or the provided `description` may not be written with Terraform nuance in mind.
+
+To override the `description` used for the provider code specification for an attribute, you can utilize the `schema.overrides` map option in a [resource](#resources) or [data source](#data-sources).
+
+The `overrides` map key is a string that represents the location of the attribute to be overridden. A simple dot notation can be used to represent nested attributes, like below:
+
+```yaml
+resources:
+  pet:
+    # create, read, update, delete configuration
+    # ...
+    schema:
+      attributes:
+        overrides:
+          id:
+            description: The ID of the pet resource, this is a string
+          category:
+            description: The pet category, this is a single nested object
+          "category.id":
+            description: The ID of the pet category, this is a string
+```
+
+## Example
+
+This example shows how to use the [generator](#installation) CLI with a sample OpenAPI spec ([Petstore](https://petstore3.swagger.io/api/v3/openapi.json)) to generate a provider code specification.
+
+- Start by downloading the [Petstore OpenAPI 3.0 spec](https://petstore3.swagger.io/api/v3/openapi.json)
+```shell-session
+curl https://petstore3.swagger.io/api/v3/openapi.json --output openapi.json
+```
+- Next, create an empty generator config file
+```shell-session
+touch generator_config.yml
+```
+- Add the following content to the `generator_config.yml`
+  - This config describes a new `pet` resource for the `petstore` provider
+```yaml
+provider:
+  name: petstore
+resources:
+  pet:
+    create:
+      path: /pet
+      method: POST
+    read:
+      path: /pet/{petId}
+      method: GET
+```
+- Run the [`generate`](#generate) command
+```shell-session
+tfplugingen-openapi generate \
+  --config ./generator_config.yml \
+  --output ./provider_code_spec.json \
+  ./openapi.json
+```
+- The resulting provider code specification will contain all the schema information provided by the `create` and `read` operations in `provider_code_spec.json`
+```json
+{
+	"provider": {
+		"name": "petstore"
+	},
+	"resources": [
+		{
+			"name": "pet",
+			"schema": {
+				"attributes": [
+					{
+						"name": "category",
+						"single_nested": {
+							"computed_optional_required": "computed_optional",
+							"attributes": [
+								{
+									"name": "id",
+									"int64": {
+										"computed_optional_required": "computed_optional"
+									}
+								},
+								{
+									"name": "name",
+									"string": {
+										"computed_optional_required": "computed_optional"
+									}
+								}
+							]
+						}
+					},
+					{
+						"name": "id",
+						"int64": {
+							"computed_optional_required": "computed_optional"
+						}
+					},
+					{
+						"name": "name",
+						"string": {
+							"computed_optional_required": "required"
+						}
+					},
+					{
+						"name": "photo_urls",
+						"list": {
+							"computed_optional_required": "required",
+							"element_type": {
+								"string": {}
+							}
+						}
+					},
+					{
+						"name": "status",
+						"string": {
+							"computed_optional_required": "computed_optional",
+							"description": "pet status in the store",
+							"validators": [
+								{
+									"custom": {
+										"imports": [
+											{
+												"path": "github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+											}
+										],
+										"schema_definition": "stringvalidator.OneOf(\n\"available\",\n\"pending\",\n\"sold\",\n)"
+									}
+								}
+							]
+						}
+					},
+					{
+						"name": "tags",
+						"list_nested": {
+							"computed_optional_required": "computed_optional",
+							"nested_object": {
+								"attributes": [
+									{
+										"name": "id",
+										"int64": {
+											"computed_optional_required": "computed_optional"
+										}
+									},
+									{
+										"name": "name",
+										"string": {
+											"computed_optional_required": "computed_optional"
+										}
+									}
+								]
+							}
+						}
+					},
+					{
+						"name": "pet_id",
+						"int64": {
+							"computed_optional_required": "computed_optional",
+							"description": "ID of pet to return"
+						}
+					}
+				]
+			}
+		}
+	]
+}
+```
+- This provider code specification file can now be used as input to a provider code generator, such as the [Framework Code Generator](/terraform/plugin/code-generation/framework-generator), to create Terraform Provider code.
+  - For a full demo using the OpenAPI Spec Generator and the Framework Code Generator on a Terraform provider, see the [Workflow Example](/terraform/plugin/code-generation/workflow-example) section.
+
+## Known Limitations
+As OpenAPI is designed to describe HTTP APIs in general, it doesn't always fully align with [Terraform Provider design principles](/terraform/plugin/best-practices/hashicorp-provider-design-principles). There are pieces of logic in this generator that make assumptions on what portions of the OAS to use when mapping to the provider code specification, however there are some limitations on what can be supported.
+
+See the [Known Limitations](https://github.com/hashicorp/terraform-plugin-codegen-openapi/blob/main/DESIGN.md#known-limitations) section in the repo's design document for more details.

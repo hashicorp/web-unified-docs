@@ -1,0 +1,143 @@
+---
+page_title: 'Plugin Development - Framework: Plan Modification'
+description: >-
+  How to modify plan values and behaviors using the provider development
+  framework.
+---
+
+# Plan Modification
+
+After [validation](/plugin/framework/validation) and before applying configuration changes, Terraform generates a plan that describes the expected values and behaviors of those changes. Resources can then tailor the plan to match the expected end state, prevent errant in-place updates, or return any [diagnostics](/plugin/framework/diagnostics).
+
+Terraform and the framework support multiple types of plan modification on resources:
+
+- Adjusting unknown attribute values, such as providing a known remote default value when a configuration is not present.
+- Marking resources that should be replaced, such as when an in-place update is not supported for a change.
+- Returning warning or error diagnostics on planned resource creation, update, or deletion.
+
+Plan modification can be added on resource schema attributes or an entire resource. Use resource-based plan modification if access to the [configured resource](/plugin/framework/resources/configure) is necessary.
+
+## Plan Modification Process
+
+When the provider receives a request to generate the plan for a resource change via the framework, the following occurs:
+
+1. If the plan differs from the current resource state, the framework marks computed attributes that are null in the configuration as unknown in the plan. This is intended to prevent unexpected Terraform errors. Providers can later enter any values that may be known.
+1. Run attribute plan modifiers.
+1. Run resource plan modifiers.
+
+When the `Resource` interface `Update` method runs to apply a change, all attribute state values must match their associated planned values or Terraform will generate a `Provider produced inconsistent result` error. You can mark values as [unknown](/plugin/framework/types#unknown) in the plan if the full expected value is not known.
+
+Refer to the [Resource Instance Change Lifecycle document](https://github.com/hashicorp/terraform/blob/main/docs/resource-instance-change-lifecycle.md) for more details about the concepts and processes relevant to the plan and apply workflows.
+
+## Attribute Plan Modification
+
+You can supply the attribute type `PlanModifiers` field with a list of plan modifiers for that attribute. For example:
+
+```go
+// Typically within the schema.Schema returned by Schema() for a resource.
+schema.StringAttribute{
+    // ... other Attribute configuration ...
+
+    PlanModifiers: []planmodifier.String{
+        stringplanmodifier.RequiresReplace(),
+    },
+}
+```
+
+If defined, plan modifiers are applied to the current attribute. If any nested attributes define plan modifiers, then those are applied afterwards. Any plan modifiers that return an error will prevent Terraform from applying further modifiers of that attribute as well as any nested attribute plan modifiers.
+
+### Common Use Case Attribute Plan Modifiers
+
+The framework implements some common use case modifiers in the typed packages under `resource/schema/`, such as `resource/schema/stringplanmodifier`:
+
+- `RequiresReplace()`: If the value of the attribute changes, in-place update is not possible and instead the resource should be replaced for the change to occur. Refer to the Go documentation for full details on its behavior.
+- `RequiresReplaceIf()`: Similar to `resource.RequiresReplace()`, however it also accepts provider-defined conditional logic. Refer to the Go documentation for full details on its behavior.
+- `RequiresReplaceIfConfigured()`: Similar to `resource.RequiresReplace()`, however it also will only trigger if the practitioner has configured a value. Refer to the Go documentation for full details on its behavior.
+- `UseStateForUnknown()`: Copies the prior state value, if not null. This is useful for reducing `(known after apply)` plan outputs for computed attributes which are known to not change over time.
+
+### Creating Attribute Plan Modifiers
+
+To create an attribute plan modifier, you must implement the one of the [`planmodifier` package](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier) interfaces. For example:
+
+```go
+// stringDefaultModifier is a plan modifier that sets a default value for a
+// types.StringType attribute when it is not configured. The attribute must be
+// marked as Optional and Computed. When setting the state during the resource
+// Create, Read, or Update methods, this default value must also be included or
+// the Terraform CLI will generate an error.
+type stringDefaultModifier struct {
+    Default string
+}
+
+// Description returns a plain text description of the validator's behavior, suitable for a practitioner to understand its impact.
+func (m stringDefaultModifier) Description(ctx context.Context) string {
+    return fmt.Sprintf("If value is not configured, defaults to %s", m.Default)
+}
+
+// MarkdownDescription returns a markdown formatted description of the validator's behavior, suitable for a practitioner to understand its impact.
+func (m stringDefaultModifier) MarkdownDescription(ctx context.Context) string {
+    return fmt.Sprintf("If value is not configured, defaults to `%s`", m.Default)
+}
+
+// PlanModifyString runs the logic of the plan modifier.
+// Access to the configuration, plan, and state is available in `req`, while
+// `resp` contains fields for updating the planned value, triggering resource
+// replacement, and returning diagnostics.
+func (m stringDefaultModifier) PlanModifyString(ctx context.Context, req planmodifier.StringRequest, resp *planmodifier.StringResponse) {
+    // If the value is unknown or known, do not set default value.
+    if !req.PlanValue.IsNull() {
+        return
+    }
+
+    resp.PlanValue = types.StringValue(m.Default)
+}
+```
+
+Optionally, you may also want to create a helper function to instantiate the plan modifier. For example:
+
+```go
+func stringDefault(defaultValue string) planmodifier.String {
+    return stringDefaultModifier{
+        Default: defaultValue,
+    }
+}
+```
+
+## Resource Plan Modification
+
+Resources also support plan modification across all attributes. This is helpful when working with logic that applies to the resource as a whole, or in Terraform 1.3 and later, to return diagnostics during resource destruction. Implement the [`resource.ResourceWithModifyPlan` interface](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/resource#ResourceWithModifyPlan) to support resource-level plan modification. For example:
+
+```go
+// Ensure the Resource satisfies the resource.ResourceWithModifyPlan interface.
+// Other methods to implement the resource.Resource interface are omitted for brevity
+var _ resource.ResourceWithModifyPlan = ThingResource{}
+
+type ThingResource struct {}
+
+func (r ThingResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+    // Fill in logic.
+}
+```
+
+### Resource Destroy Plan Diagnostics
+
+-> Support for handling resource destruction during planning is available in Terraform 1.3 and later.
+
+Implement the `ModifyPlan` method by checking if the [`resource.ModifyPlanRequest` type `Plan` field](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/resource#ModifyPlanRequest.Plan) is a `null` value:
+
+```go
+func (r ThingResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+    // If the entire plan is null, the resource is planned for destruction.
+    if req.Plan.Raw.IsNull() {
+        // Return an example warning diagnostic to practitioners.
+        resp.Diagnostics.AddWarning(
+            "Resource Destruction Considerations",
+            "Applying this resource destruction will only remove the resource from the Terraform state "+
+                "and will not call the deletion API due to API limitations. Manually use the web "+
+                "interface to fully destroy this resource.",
+        )
+    }
+}
+```
+
+Ensure the response plan remains entirely `null` when the request plan is entirely `null`.

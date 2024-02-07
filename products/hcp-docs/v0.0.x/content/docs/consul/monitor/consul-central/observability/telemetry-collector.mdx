@@ -1,0 +1,240 @@
+---
+page_title: Deploy Consul telemetry collector
+description: |-
+  The Consul telemetry collector captures Envoy proxy metrics for HCP Consul Central. Learn how to deploy the telemetry collector manually on Kubernetes deployments.
+---
+
+# Deploy the Consul telemetry collector
+
+This page describes the process to deploy the Consul telemetry collector for cluster observability. [HCP Consul Central](/hcp/docs/consul/monitor/consul-central) uses the collected data to visualize service mesh metrics. Refer to [Consul observability](/hcp/docs/consul/monitor/consul-central/observability) for more information.
+
+## Prerequisites
+
+To deploy the telemetry collector manually, you must meet the following prerequisites:
+
+- The Consul cluster must be running on Kubernetes.
+- The Consul cluster must be managed by or linked to HCP Consul Central.
+- Consul on Kubernetes users must use `consul-k8s` v1.1.2 or later.
+- Helm users must update their chart to use new Consul telemetry collector configuration values.
+
+## Automated collector deployment
+
+The Consul telemetry collector supports automated proxy telemetry collection for self-managed `consul-k8s` clusters that link to HCP Consul using the `cloud` preset. Refer to [link self-managed clusters to HCP Consul](/hcp/docs/consul/self-managed) for more information about this process.
+
+## Deploy the collector manually
+
+The workflow to manually deploy the telemetry collector consists of the following steps:
+
+1. Update the cluster's configuration
+1. Create service intentions to authorize the collector
+1. Restart proxies to pick up the new [Envoy bootstrap configuration](https://www.envoyproxy.io/docs/envoy/latest/configuration/overview/bootstrap)
+
+### Upgrade cluster configuration
+
+You must enable the telemetry collector by updating your cluster's configuration. To access the current configuration, run the appropriate command for your runtime:
+
+<Tabs>
+
+<Tab heading="consul-k8s" group="consul-k8s">
+
+```shell-session
+$ consul-k8s config read > values.yaml
+```
+
+</Tab>
+
+<Tab heading="Helm" group="helm">
+
+```shell-session
+$ helm get values consul --namespace consul --output yaml > values.yaml
+```
+
+</Tab>
+</Tabs>
+
+Update the configuration file by adding the following values:
+
+- `telemetryCollector.enabled: true`
+- `telemetryCollector.cloud.clientId.secretKey: client-id`
+- `telemetryCollector.cloud.clientId.secretName: consul-hcp-client-id`
+- `telemetryCollector.cloud.clientSecret.secretKey: client-secret`
+- `telemetryCollector.cloud.clientSecret.secretName: consul-hcp-client-secret`
+- `global.metrics.enableTelemetryCollector: true`
+
+The following example example configuration highlights these values in context:
+
+<CodeBlockConfig filename="values.yaml" highlight="6-14,17-18" hideClipboard>
+
+```yaml
+connectInject:
+  enabled: true
+controller:
+  enabled: true
+
+telemetryCollector:
+  enabled: true
+  cloud:
+    clientId:
+      secretKey: client-id
+      secretName: consul-hcp-client-id
+    clientSecret:
+      secretKey: client-secret
+      secretName: consul-hcp-client-secret
+
+global:
+  metrics:
+    enableTelemetryCollector: true
+  cloud:
+    enabled: true
+    clientId:
+      secretKey: client-id
+      secretName: consul-hcp-client-id
+    clientSecret:
+      secretKey: client-secret
+      secretName: consul-hcp-client-secret
+    resourceId:
+      secretKey: resource-id
+      secretName: consul-hcp-resource-id
+  acls:
+    manageSystemACLs: true
+  datacenter: mesh-metrics
+  name: consul
+  tls:
+    enableAutoEncrypt: true
+    enabled: true
+```
+
+</CodeBlockConfig>
+
+After updating the configuration file, apply it to your Kubernetes cluster.
+
+<Tabs>
+
+<Tab heading="consul-k8s" group="consul-k8s">
+
+```shell-session
+$ consul-k8s upgrade -f values.yaml
+```
+
+</Tab>
+
+<Tab heading="Helm" group="helm">
+
+```shell-session
+$ helm upgrade consul hashicorp/consul --namespace consul --values values.yaml
+```
+
+</Tab>
+</Tabs>
+
+### Authorize collector with service intentions
+
+The Consul telemetry collector runs as a service in the mesh. To get metrics from other service's proxies, you need to create a service intention that authorizes proxies to push metrics to the collector.
+
+<Note>
+
+When you install the demo application by including the `-demo` flag, `consul-k8s` automatically creates a wildcard service intention for the Consul telemetry collector as part of the installation process.
+
+</Note>
+
+Create a `service-intentions` configuration entry that allows all traffic to `consul-telemetry-collector`:
+
+<CodeBlockConfig filename="consul-telemetry-collector.yaml">
+
+```yaml
+apiVersion: consul.hashicorp.com/v1alpha1
+kind: ServiceIntentions
+metadata:
+  name: consul-telemetry-collector
+spec:
+  destination:
+    name: consul-telemetry-collector
+  sources:
+  - action: allow
+    name: '*'
+```
+
+</CodeBlockConfig>
+
+Create the configuration entry:
+
+```shell-session
+$ kubectl apply --namespace consul --filename consul-telemetry-collector.yaml
+```
+
+### Restart Envoy proxies to pick up new bootstrap configuration
+
+Consul configures Envoy to [send metrics](https://www.envoyproxy.io/docs/envoy/latest/api-v3/config/metrics/v3/stats.proto) to the Consul Telemetry Collector in its [bootstrap configuration](https://www.envoyproxy.io/docs/envoy/latest/configuration/overview/bootstrap).
+
+If this is your first time deploying the Consul Telemetry Collector, you will need to restart pods to pick up the changed configuration. For example:
+
+```bash
+kubectl rollout restart deployments
+```
+
+## Forward metrics to another collector
+
+It is possible to forward metrics from the Consul Telemetry Collector to a compatible OpenTelemetry Collector.
+
+For more information on setting up a compatible OpenTelemetry collector, visit this [documentation](https://opentelemetry.io/docs/collector/getting-started/).
+
+At minimum, the compatible collector must be configured with an [OTLP HTTP receiver](https://github.com/open-telemetry/opentelemetry-collector/blob/main/receiver/otlpreceiver/README.md) and a [metrics pipeline](https://opentelemetry.io/docs/collector/configuration/#service) that uses the OTLP receiver.
+
+To forward metrics from the Consul Telemetry Collector, add the `customExporterConfig` field to the `telemetryCollector` stanza of the configuration file. Set the `exporter_config` stanza to configure an exporter and forward metrics to an OTLP compatible endpoint.
+
+The following examples demonstrates the formatting for the `customExporterConfig` field:
+
+<Tabs>
+<Tab heading="Version 0.1.0 and above" group="0.1.0">
+Config using the otlphttp exporter:
+
+```yaml
+telemetryCollector:
+  enabled: true
+  customExporterConfig: |-
+    {
+      "exporter_config": {
+				"otlphttp": {
+					"endpoint": "otel.example.com",
+					"headers": {
+						"authorization": "queiMo2xaijaongaegee"
+					},
+					"timeout": "2s"
+				}
+			}
+    }
+```
+
+Config using the otlp exporter:
+
+```yaml
+telemetryCollector:
+  enabled: true
+  customExporterConfig: |-
+    {
+      "exporter_config": {
+				"otlp": {
+					"endpoint": "otel.example.com",
+					"headers": {
+						"authorization": "queiMo2xaijaongaegee"
+					},
+					"timeout": "2s"
+				}
+			}
+    }
+```
+
+</Tab>
+
+<Tab heading="Version 0.0.2 and below" group="0.0.2">
+
+```yaml
+telemetryCollector:
+  enabled: true
+  customExporterConfig: |
+      {"http_collector_endpoint": "otel-collector:4318"}
+```
+
+</Tab>
+</Tabs>
+Apply the updated configuration to your deployment to begin forwarding metrics.
