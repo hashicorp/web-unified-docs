@@ -1,0 +1,246 @@
+---
+page_title: 'Plugin Development - Acceptance Testing: Plan Checks'
+description: >-
+  Plan Checks are test assertions that can inspect a plan at different phases in a TestStep. The testing module
+  provides built-in Plan Checks for common use-cases, but custom Plan Checks can also be implemented.
+---
+
+# Plan Checks
+
+During the **Lifecycle (config)** and **Refresh** [modes](/terraform/plugin/testing/acceptance-tests/teststep#test-modes) of a `TestStep`, the testing framework will run `terraform plan` before and after certain operations. For example, the **Lifecycle (config)** mode will run a plan before the `terraform apply` phase, as well as a plan before and after the `terraform refresh` phase.
+
+These `terraform plan` operations results in a [plan file](/terraform/cli/commands/plan#out-filename) and can be represented by this [JSON format](/terraform/internals/json-format#plan-representation).
+
+A **plan check** is a test assertion that inspects the plan file at a specific phase during the current testing mode. Multiple plan checks can be run at each defined phase, all assertion errors returned are aggregated, reported as a test failure, and all test cleanup logic is executed.
+
+- Available plan phases for **Lifecycle (config)** mode are defined in the [`TestStep.ConfigPlanChecks`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-testing/helper/resource#TestStep) struct
+- Available plan phases for **Refresh** mode are defined in the [`TestStep.RefreshPlanChecks`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-testing/helper/resource#TestStep) struct
+- **Import** mode currently does not run any plan operations, and therefore does not support plan checks.
+
+## Built-in Plan Checks
+
+The `terraform-plugin-testing` module provides a package [`plancheck`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-testing/plancheck) with built-in plan checks for common use-cases:
+
+| Check | Description |
+|---|---|
+| [`plancheck.ExpectEmptyPlan()`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-testing/plancheck#ExpectEmptyPlan) | Asserts the entire plan has no operations for apply. |
+| [`plancheck.ExpectNonEmptyPlan()`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-testing/plancheck#ExpectNonEmptyPlan) | Asserts the entire plan contains at least one operation for apply. |
+| [`plancheck.ExpectResourceAction(address, operation)`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-testing/plancheck#ExpectResourceAction) | Asserts the given resource has the specified operation for apply. |
+
+### Examples using `plancheck.ExpectResourceAction`
+
+One of the built-in plan checks, [`plancheck.ExpectResourceAction`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-testing/plancheck#ExpectResourceAction), is useful for determining the exact action type a resource will under-go during, say, the `terraform apply` phase.
+
+Given the following example with the [random provider](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/string), we have written a test that asserts that `random_string.one` will be destroyed and re-created when the `length` attribute is changed:
+
+```go
+package example_test
+
+import (
+	"testing"
+
+	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
+)
+
+func Test_Random_ForcesRecreate(t *testing.T) {
+	t.Parallel()
+
+	resource.Test(t, resource.TestCase{
+		ExternalProviders: map[string]resource.ExternalProvider{
+			"random": {
+				Source: "registry.terraform.io/hashicorp/random",
+			},
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: `resource "random_string" "one" {
+					length = 16
+				}`,
+			},
+			{
+				Config: `resource "random_string" "one" {
+					length = 15
+				}`,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("random_string.one", plancheck.ResourceActionDestroyBeforeCreate),
+					},
+				},
+			},
+		},
+	})
+}
+```
+
+Another example with the [time provider](https://registry.terraform.io/providers/hashicorp/time/latest/docs/resources/offset) asserts that `time_offset.one` will be updated in-place when the `offset_days` attribute is changed:
+
+```go
+package example_test
+
+import (
+	"testing"
+
+	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
+)
+
+func Test_Time_UpdateInPlace(t *testing.T) {
+	t.Parallel()
+
+	resource.Test(t, resource.TestCase{
+		ExternalProviders: map[string]resource.ExternalProvider{
+			"time": {
+				Source: "registry.terraform.io/hashicorp/time",
+			},
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: `resource "time_offset" "one" {
+					offset_days = 1
+				  }`,
+			},
+			{
+				Config: `resource "time_offset" "one" {
+					offset_days = 2
+				  }`,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("time_offset.one", plancheck.ResourceActionUpdate),
+					},
+				},
+			},
+		},
+	})
+}
+```
+
+Multiple plan checks can be combined if you want to assert multiple resource actions:
+```go
+package example_test
+
+import (
+	"testing"
+
+	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
+)
+
+func Test_Time_UpdateInPlace_and_NoOp(t *testing.T) {
+	t.Parallel()
+
+	resource.Test(t, resource.TestCase{
+		ExternalProviders: map[string]resource.ExternalProvider{
+			"time": {
+				Source: "registry.terraform.io/hashicorp/time",
+			},
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: `resource "time_offset" "one" {
+					offset_days = 1
+				  }
+				  resource "time_offset" "two" {
+					offset_days = 1
+				  }`,
+			},
+			{
+				Config: `resource "time_offset" "one" {
+					offset_days = 2
+				  }
+				  resource "time_offset" "two" {
+					offset_days = 1
+				  }`,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("time_offset.one", plancheck.ResourceActionUpdate),
+						plancheck.ExpectResourceAction("time_offset.two", plancheck.ResourceActionNoop),
+					},
+				},
+			},
+		},
+	})
+}
+```
+
+## Custom Plan Checks
+
+The package [`plancheck`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-testing/plancheck) also provides the [`PlanCheck`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-testing/plancheck#PlanCheck) interface, which can be implemented for a custom plan check.
+
+The [`plancheck.CheckPlanRequest`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-testing/plancheck#CheckPlanRequest) contains the current plan file, parsed by the [terraform-json package](https://pkg.go.dev/github.com/hashicorp/terraform-json#Plan).
+
+Here is an example implementation of a plan check that asserts that every resource change is a no-op, aka, an empty plan:
+```go
+package example_test
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
+)
+
+var _ plancheck.PlanCheck = expectEmptyPlan{}
+
+type expectEmptyPlan struct{}
+
+func (e expectEmptyPlan) CheckPlan(ctx context.Context, req plancheck.CheckPlanRequest, resp *plancheck.CheckPlanResponse) {
+	var result error
+
+	for _, rc := range req.Plan.ResourceChanges {
+		if !rc.Change.Actions.NoOp() {
+			result = errors.Join(result, fmt.Errorf("expected empty plan, but %s has planned action(s): %v", rc.Address, rc.Change.Actions))
+		}
+	}
+
+	resp.Error = result
+}
+
+func ExpectEmptyPlan() plancheck.PlanCheck {
+	return expectEmptyPlan{}
+}
+```
+
+And example usage:
+```go
+package example_test
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"testing"
+
+	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
+)
+
+func Test_CustomPlanCheck_ExpectEmptyPlan(t *testing.T) {
+	t.Parallel()
+
+	resource.Test(t, resource.TestCase{
+		ExternalProviders: map[string]resource.ExternalProvider{
+			"random": {
+				Source: "registry.terraform.io/hashicorp/random",
+			},
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: `resource "random_string" "one" {
+					length = 16
+				}`,
+			},
+			{
+				Config: `resource "random_string" "one" {
+					length = 16
+				}`,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						ExpectEmptyPlan(),
+					},
+				},
+			},
+		},
+	})
+}
+```

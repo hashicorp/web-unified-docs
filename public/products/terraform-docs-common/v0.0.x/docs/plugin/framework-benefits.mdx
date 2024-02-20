@@ -1,0 +1,258 @@
+---
+page_title: 'Home - Plugin Development: Plugin Framework Benefits'
+description: >-
+  Compare the prior SDKv2 and the framework for provider development. The framework is easier and more extensible than SDKv2.
+---
+
+# Plugin Framework Benefits
+
+HashiCorp offers two Go programming language Software Development Kits (SDKs) for building Terraform providers:
+
+- **[Terraform Plugin Framework](/terraform/plugin/framework):** The most recent SDK that is easier to use and more extensible than SDKv2.
+- **[SDKv2](/terraform/plugin/sdkv2):** SDKv2 is the prior SDK that many existing providers use. It is maintained for Terraform versions 1.x and earlier, but we have stopped most feature development so we can focus on improving the framework.
+
+We recommend using the framework for new provider development because it offers significant advantages as compared to the SDKv2. We also recommend migrating existing providers to the framework when possible. If you manage a large existing provider, you can use [`terraform-plugin-mux`](/terraform/plugin/mux) to migrate individual resources or data sources to the framework one at a time. Refer to [Migrating from SDK](/terraform/plugin/framework/migrating/providers#muxing) for details.
+
+This page is intended for developers experienced with SDKv2 plugins, and explains how the framework makes provider development and maintenance easier. If you are just getting started with provider development, we recommend viewing the [Framework documentation](/terraform/plugin/framework) instead. For a continued list of new or improved functionality in the framework, refer to [Framework Feature Comparison](/terraform/plugin/framework/migrating/benefits).
+
+## Concise Abstractions
+
+The framework uses clear concepts and object types that help you better understand and customize implementation.
+
+### Separate Packages for Each Type
+
+The framework exposes concepts in separate packages that only provide functionality for that concept.
+
+For example, the [`datasource` package](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/datasource) contains the functionality for implementing data sources, and the [`provider` package](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/provider) contains the functionality for implementing the provider. This separation helps make it clear how and when to use each type.
+
+In contrast, the SDK requires you to implement abstract, recursive types, such as [`helper/schema.Resource` type](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema#Resource) and [`helper/schema.Schema` type](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema#Schema). A `schema.Resource` implementation could be a managed resource, a data source, or block definition within a schema. These generic abstractions make it difficult to understand the specific requirements for each type. For example, a data source requires a schema and read functionality while a block only requires a schema.
+
+### Significantly Improved Data Access
+
+Data in the framework is fully exposed as compared to SDKv2.
+
+The majority of data handling in SDKv2 uses the [`helper/schema.ResourceData` type](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema#ResourceData), which could contain a merged configuration, plan, or state value, depending on the operation. SDKv2 also does not expose Terraform's null or unknown value concepts unambiguously, typically returning both null and unknown values as the same zero-value for the underlying Go type. For example, the SDK returns an empty string (`""`) for `schema.TypeString` values that are either null or unknown.
+
+The framework exposes the sources for data separately and lets you inspect whether a value is null or unknown. Refer to the [Framework Feature Comparison](/terraform/plugin/framework/migrating/benefits) for more details and examples.
+
+### Control Over Built-In Behaviors
+
+The framework gives you more control over built-in behaviors that can cause confusion or major issues for SDKv2 providers. For example, SDKv2 attributes containing `Computed: true` automatically kept the prior saved state when users removed them from a configuration. The framework lets you specify whether you want to use that behavior in your provider, depending on your use case.
+
+## Idiomatic Go Patterns
+
+Go coding standards have evolved since we developed SDKv2. The framework lets you use familiar, more modern patterns to write your provider code. This design makes the framework easier to understand and use.
+
+### Interfaces Instead of Declarative Structs
+
+SDKv2 primarily uses declarative `struct` types, such as the [`helper/schema.Resource` type](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema#Resource). Over time, these types have accumulated functionality that makes it difficult to distinguish between requirements and optional capabilities. SDKv2 types also only surface problems like misconfigured code at runtime, requiring extra testing and effort to avoid issues.
+
+In the following SDK example, a managed resource implementation is missing read and delete definitions. You must write tests to identify these omissions when you develop providers with SDKv2.
+
+```go
+// Example managed resource definition.
+&schema.Resource{
+  Schema: map[string]*schema.Schema{ /* ... */ },
+  CreateContext: func(ctx context.Context, d *schema.ResourceData, meta any) diag.Diagnostics { /* ... */ },
+  // Missing Read and Delete
+}
+```
+
+Instead of declarative structs, the framework exposes interface types, such as [resource.Resource](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/resource#Resource) and [resource.ResourceWithImportState](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/resource#ResourceWithImportState). These interface types produce compiler errors when you do not define required functionality, making development easier.
+
+In the following example, a managed resource implementation is missing methods required by the `resource.Resource` interface, such as `Read()` and `Delete()`. This code will trigger Go compiler errors because of the missing methods.
+
+```go
+// Ensure provider-defined type satisfies the framework interface.
+// Since the type is missing methods, the Go compiler will return
+// errors about those missing methods.
+var _ resource.Resource = &ThingResource{}
+
+// Provider-defined type for example managed resource definition.
+type ThingResource struct{}
+
+func (r ThingResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) { /* ... */ }
+```
+
+Interfaces also let you extend the framework’s functionality beyond the available types. Refer to [Extensiblility](#extensibility) for details.
+
+### Request and Response Pattern
+
+Terraform providers are logically similar to other servers, such as HTTP servers. They receive Remote Procedure Call (RPC) requests from Terraform and return responses for each operation. SDKv2 and the framework use different approaches to define the required logic to handle RPC requests.
+
+Specifically, the framework embraces the request-response pattern by exposing the majority of functions required for RPC requests and including the request or response action in the function signature. This approach lets the framework enhance these types over time without requiring updates to the method signatures in your provider code. In contrast, SDKv2 provided functionality using fields with function signatures that needed to keep backwards compatibility, meaning SDK changes over time were achieved by duplicating fields such as `Create`, `CreateContext`, and `CreateWithoutTimeout`. These signatures also were duplicated across operations, which made tooling such as static analysis more difficult.
+
+In the following SDKv2 example, the `CreateContext` and `ReadContext` fields use similar, but generic function signatures. Other field implementations such as the `Create` and `CreateWithoutTimeout` required additional discovery or development knowledge for the same provider functionality.
+
+```go
+// Example managed resource definition.
+&schema.Resource{
+  Schema: map[string]*schema.Schema{ /* ... */ },
+  CreateContext: func(ctx context.Context, d *schema.ResourceData, meta any) diag.Diagnostics { /* ... */ },
+  ReadContext: func(ctx context.Context, d *schema.ResourceData, meta any) diag.Diagnostics { /* ... */ },
+  // other fields omitted for brevity
+}
+```
+
+In the following framework example, the `Create` and `Read` methods demonstrate the request and response pattern. The framework tailors the request and response types for each operation and its available functionality and data.
+
+```go
+// Provider-defined type for example managed resource definition.
+// Other required methods are omitted for brevity.
+type ThingResource struct{}
+
+func (r ThingResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) { /* ... */ }
+
+func (r ThingResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) { /* ... */ }
+```
+
+### Context Availability
+
+Server-based Go programs commonly store data across an entire request by threading the Go standard library [`context.Context`](https://pkg.go.dev/context#Context) through all logic. The framework uses this approach to provide rich logging information automatically to all provider-defined logic. This makes it easier to troubleshoot production provider issues based on log data. In contrast, the SDKv2 only uses this approach in a few code locations, and it could not be updated without introducing breaking changes.
+
+### Less Type Assertions
+
+SDKv2 providers must interact with empty interface types (`interface{}`/`any`) and use [type assertions](https://go.dev/tour/methods/15) to convert incoming data. This is an anti-pattern in the Go ecosystem, and it makes defining data handling and other provider logic more difficult.
+
+Type assertions can be confusing, and it’s often unclear how to properly prevent panics. This is especially true in schemas involving more complex data structures, such as block objects that you must assert out of `map[string]any`.
+
+For example, the following SDKv2 code attempts to extract list data while manually preventing potential panics.
+
+```go
+// Example extracting a list of strings
+var list []string
+listIface := d.Get("list_attribute") // listIface is []any
+
+for _, stringIface := range listIface { // stringIface is any
+  stringValue, ok := stringIface.(string)
+
+  if !ok {
+    // provider-defined error handling
+  }
+
+  list = append(list, stringValue)
+}
+```
+
+The framework requires significantly less type assertions, instead preferring type conversions with built-in error handling. The following framework example code reads list data with error handling.
+
+```go
+var list []string
+diags := req.Config.GetAttribute(ctx, path.Root("list_attribute"), &list)
+
+resp.Diagnostics.Append(diags...) // framework-defined error handling
+
+if resp.Diagnostics.HasError() {
+  return
+}
+```
+
+SDKv2 often required type assertions for a common provider-level client type, such as an API client, available for all resources.
+
+In the following SDKv2 example, a managed resource create operation receives a provider-level client type. The provider would need to repeat this type assertion for all other resource operations.
+
+```go
+func ThingResourceCreate(ctx context.Context, d *schema.ResourceData, meta any) diag.Diagnostics {
+  apiClient, ok := meta.(ExampleAPIClient)
+
+  if !ok {
+    // provider-defined error handling
+  }
+}
+
+func ThingResourceRead(ctx context.Context, d *schema.ResourceData, meta any) diag.Diagnostics {
+  apiClient, ok := meta.(ExampleAPIClient)
+
+  if !ok {
+    // provider-defined error handling
+  }
+}
+```
+
+The framework significantly reduces the amount of times this provider-specific implementation detail occurs. For example, the following framework code handles type assertion once for the resource.
+
+```go
+// Example managed resource implementation.
+// Other methods omitted for brevity.
+type ThingResource struct{
+  client ExampleAPIClient
+}
+
+func (r *ThingResource) Configure(ctx context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+  client, ok := meta.(ExampleAPIClient)
+
+  if !ok {
+    // provider-defined error handling
+  }
+
+  r.client = client
+}
+
+func (r ThingResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+  // operations using r.client
+}
+```
+
+When you develop with the framework, you can further reduce the amount of type assertion logic across your codebase with standard Go coding techniques. For example, you could create a base resource type that all resources embed.
+
+## Extensibility
+
+You can extend the framework to meet a broader range of use cases than SDKv2.
+
+The SDKv2 does not offer many candidates for extension because we implemented features to accomplish a specific task. This approach often constrained providers to the singular implementation offered in the SDK. For example, rather than providing an extensible multiple attribute configuration validation framework, fields such as `ConflictsWith` offer one piece of desired functionality.
+
+The framework provides base abstractions that you can extend for both provider development and shared Go modules. The framework also offers similar benefits within a single provider, such as making resources and data sources self-contained.
+
+In the following SDKv2 example, the provider maintains a single and potentially large resource map where changes can easily conflict.
+
+```go
+schema.Provider{
+  // ... other fields omitted for brevity
+  ResourcesMap: map[string]*schema.Resource{
+    "examplecloud_service1_thing": /* ... */,
+    "examplecloud_service1_widget": /* ... */,
+    "examplecloud_service2_doodad": /* ... */,
+    // ... potentially many more ...
+  },
+}
+```
+
+The following framework example encapsulates the resource implementation within a larger group of resources. This approach allows you to change the functionality without accidentally affecting other types of resources.
+
+```go
+// In a separate provider package
+func (p ExampleCloudProvider) Resources() []func() resource.Resource {
+  return []func() resource.Resource{
+    service1.Resources()...,
+    service2.Resources()...,
+  }
+}
+
+// In a separate service1 package
+func Resources() []func() resource.Resource {
+  return []func() resource.Resource{
+    NewThingResource,
+    NewWidgetResource,
+  }
+}
+
+func NewThingResource() resource.Resource {
+  return &ThingResource{}
+}
+
+func NewWidgetResource() resource.Resource {
+  return &WidgetResource{}
+}
+```
+
+## Other New and Improved Functionality
+
+Additional new and improved features in the framework include:
+
+- **Data Access**: The framework makes it easier to access Terraform data (configuration, plan, and state) and value states (null, known, unknown).
+- **Unrestricted Type System**: The framework lets you create custom attribute types and nested attributes for resources and data sources. The framework type system does not have any restrictions for using complex types as the value for a map type.
+- **Validation Capabilities**: The framework exposes many more configuration validation integration points than the SDK. It is also extensible with provider-defined types that implement validation in the type itself.
+- **Functions**: The framework supports provider-defined functions which are exposed for practitioner configurations.
+- **Enhanced Import and Planning Capabilities**: The framework enables additional import and plan handling capabilities not available in SDKv2.
+
+Refer to [Framework Feature Comparison](/terraform/plugin/framework/migrating/benefits) for a continued list of features, details, and examples.
