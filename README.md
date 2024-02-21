@@ -12,8 +12,11 @@ This repo is a work-in-progress experimental exploration of an approach the Web 
 - Since we can make edits to all docs for all products and versions from a single PR, making platform-level changes is dramatically simplified (such as updating to MDX v2, or rewriting URLs).
 - Adding new features like content conformance (basically linting for docs) can be done for the entire codebase at once.
 - Removes the ability for docs to break the release workflow in product repos.
+- Enables us to support fully versioned deployment previews, whereas current previews are limited to the branch being modified.
 
 ## Clone Time
+
+As of writing, cloning this repo takes about the same amount of time as cloning a single one of our larger repos. It can be reduced with features like [sparse checkout](https://github.blog/2020-01-17-bring-your-monorepo-down-to-size-with-sparse-checkout/).
 
 ```
 $ time git clone https://github.com/hashicorp/web-presence-experimental-docs
@@ -27,3 +30,12 @@ Resolving deltas: 100% (16052/16052), done.
 Updating files: 100% (43670/43670), done.
 git clone https://github.com/hashicorp/web-presence-experimental-docs  4.41s user 2.36s system 15% cpu 44.755 total
 ```
+
+For comparison:
+
+| Repo                           | Time to clone (seconds) |
+| ------------------------------ | ----------------------- |
+| web-presence-experimental-docs | 44                      |
+| consul                         | 80                      |
+| terraform                      | 49                      |
+| vault                          | 46                      |
