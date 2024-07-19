@@ -1,30 +1,35 @@
+import grayMatter from "gray-matter";
+
+const SELF_URL = "http://localhost:3000";
+
 export async function GET(
-  request: Request,
-  {
-    params,
-  }: { params: { productSlug: string; version: string; docsPath: string[] } }
+	request: Request,
+	{
+		params,
+	}: { params: { productSlug: string; version: string; docsPath: string[] } }
 ) {
-  const { productSlug, version, docsPath } = params;
+	const { productSlug, version, docsPath } = params;
 
-  const res = await Promise.all([
-    fetch(
-      `http://localhost:3000/products/${productSlug}/${version}/content/${docsPath.join(
-        "/"
-      )}.mdx`
-    ),
-    fetch(
-      `http://localhost:3000/products/${productSlug}/${version}/content/${docsPath.join(
-        "/"
-      )}/index.mdx`
-    ),
-  ]);
+	const res = await Promise.all([
+		fetch(
+			`${SELF_URL}/products/${productSlug}/${version}/content/${docsPath.join(
+				"/"
+			)}.mdx`
+		),
+		fetch(
+			`${SELF_URL}/products/${productSlug}/${version}/content/${docsPath.join(
+				"/"
+			)}/index.mdx`
+		),
+	]);
 
-  for (const r of res) {
-    if (r.ok) {
-      const text = await r.text();
-      return new Response(text);
-    }
-  }
+	for (const r of res) {
+		if (r.ok) {
+			const text = await r.text();
+			const { data: metadata, content: markdownSource } = grayMatter(text);
+			return Response.json({ result: { markdownSource, metadata } });
+		}
+	}
 
-  return new Response("Not found", { status: 404 });
+	return new Response("Not found", { status: 404 });
 }
