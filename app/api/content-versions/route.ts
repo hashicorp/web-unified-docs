@@ -7,15 +7,17 @@ import versionMetadata from "../content/[productSlug]/version-metadata/data.json
  * similar to `build-version-metadata`, that makes some kind of lookup or
  * something, where given a product and a document path, we can return a list
  * of the version directories in which that document is present.
+ *
+ * Note that we query parameters to get the `product`.
  */
-export async function GET(
-	request: Request,
-	{ params }: { params: { productSlug: string } }
-) {
-	const { productSlug } = params;
+export async function GET(request: Request) {
+	const url = new URL(request.url);
+	const product = url.searchParams.get("product");
+	// Actual implementation would use `fullPath` too, but we're not there yet
+	// const fullPath = url.searchParams.get("fullPath");
 
-	if (versionMetadata[productSlug]) {
-		return Response.json(versionMetadata[productSlug]);
+	if (versionMetadata[product]) {
+		return Response.json({ versions: versionMetadata[product] });
 	}
 
 	return new Response("Not found", { status: 404 });
