@@ -1,4 +1,4 @@
-# ADR 0: Document architecture decisions
+# ADR 000: Document architecture decisions
 
 ## Status
 
