@@ -60,7 +60,8 @@ These operations are used by other parts of our web presence. They may be used i
 Some specific examples of operations that are not used directly by [hashicorp/dev-portal](https://github.com/hashicorp/dev-portal):
 
 - `POST` and `DELETE` methods on `/api/content/...` routes
-  - These operations are used to update the content database served by our existing content API They may no longer be used at all once we've fully completed our migration.
+  - These operations are used to update the content database served by our existing content API
+  - These operations may no longer be used once we've fully completed our migration.
 - `/api/algolia` (all HTTP operations)
   - This endpoint is used indirectly by [hashicorp/dev-portal](https://github.com/hashicorp/dev-portal), as it manages the `integrations` content in our Algolia search index. This endpoint also manages Algolia indices used on `www.hashicorp.com`.
 - `/api/event` (all HTTP operations)
