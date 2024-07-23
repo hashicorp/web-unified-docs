@@ -27,11 +27,13 @@ export function cloneRepoShallow(targetDir, repoOwner, repoName) {
 	 * the repository directory to be given the same name as the repository.
 	 */
 	const repoDir = path.join(targetDir, repoName);
+	const repoDirExists = fs.existsSync(repoDir);
+	console.log({ targetDir, repoDir, repoDirExists });
 	// If the repository already exists, we skip cloning
 	if (!fs.existsSync(repoDir)) {
 		execSync(`gh repo clone ${repoOwner}/${repoName} -- --filter=blob:none`, {
 			stdio: "inherit", // Nice to see progress for large repos
-			targetDir,
+			cwd: targetDir,
 		});
 	}
 	// Return the path to the previously-existing or newly-cloned directory

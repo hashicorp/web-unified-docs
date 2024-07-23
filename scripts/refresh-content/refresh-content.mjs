@@ -84,6 +84,7 @@ function extractVersionedDocs(repoDir, repoName, repoConfig, targetVersion) {
  *
  */
 function extractFromFilesystem(repoName, repoDir, releaseRef, repoConfig) {
+	const projectRoot = process.cwd();
 	//
 	console.log(
 		`Checking out ref "${releaseRef.ref}" (hash "${releaseRef.hash}")...`
@@ -106,19 +107,19 @@ function extractFromFilesystem(repoName, repoDir, releaseRef, repoConfig) {
 	 */
 	const assetDirPath = path.join(websiteDirPath, repoConfig.assetDir);
 	const assetDest = path.join(
-		process.cwd(),
+		projectRoot,
 		"public",
 		"assets",
 		repoName,
 		releaseRef.versionString,
-		repoConfig.assetDir.replace("public/", "")
+		repoConfig.assetDir.replace("public", "")
 	);
 	// Execute the copy
 	clearAndCopy(assetDirPath, assetDest);
 	// Copy content into versioned destination directory
 	const contentDirPath = path.join(websiteDirPath, repoConfig.contentDir);
 	const contentDest = path.join(
-		process.cwd(),
+		projectRoot,
 		"public",
 		"products",
 		repoName,
@@ -129,7 +130,7 @@ function extractFromFilesystem(repoName, repoDir, releaseRef, repoConfig) {
 	// Copy data into versioned destination directory
 	const dataDirPath = path.join(websiteDirPath, repoConfig.dataDir);
 	const dataDest = path.join(
-		process.cwd(),
+		projectRoot,
 		"public",
 		"products",
 		repoName,

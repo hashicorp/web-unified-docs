@@ -21,7 +21,7 @@ export function getGitRefs(repoDir) {
 		return { hash, ref };
 	});
 	//
-	console.log(`Found ${refsList.length} refs in ${path.dirname(repoName)}.`);
+	console.log(`Found ${refsList.length} refs in ${path.dirname(repoDir)}.`);
 	console.log(refsList.map((r) => r.ref).slice(-50));
 	// Return the list of { hash, ref } objects
 	return refsList;
