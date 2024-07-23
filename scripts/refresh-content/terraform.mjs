@@ -135,123 +135,161 @@ const allRepoConfig = {
 main();
 
 function main() {
-	const projectRoot = process.cwd();
-	console.log("Refreshing Terraform content...");
-	console.log("🚧 TODO actually make this happen!");
-	// Ensure the temporary directory exists
+	// Ensure the temporary directory exists, this is where repos will be cloned.
 	if (!fs.existsSync(TEMP_DIR)) {
 		fs.mkdirSync(TEMP_DIR, { recursive: true });
 	}
-	// Change into the temporary directory
-	process.chdir(TEMP_DIR);
-	// Clone in the Terraform content source repositories
 	/**
-	 * hashicorp/terraform
+	 * TODO: work through ALL repositories. Could iterate over `repoConfig`?
+	 *
+	 * For now, doing hashicorp/terraform only. Code below could likely
+	 * be extracted to a function, and called for each repository.
 	 */
 	const repoOwner = "hashicorp";
 	const repoName = "terraform";
+	//
+	const repoDir = shallowCloneRepo(TEMP_DIR, repoOwner, repoName);
+	//
+	const refsList = listGitRefs(path.join(TEMP_DIR, repoName));
+	//
 	const repoConfig = allRepoConfig[repoName];
-	const { assetDir, contentDir, websiteDir, releaseRefPattern } = repoConfig;
-	if (!fs.existsSync("terraform")) {
-		// Clone the source repository
-		execSync(`gh repo clone ${repoOwner}/${repoName} -- --filter=blob:none`, {
-			stdio: "inherit",
-		});
-	}
-	// Change into the repository directory
-	process.chdir(repoName);
-	// List all the refs
-	const gitShowRefsOutput = execSync("git show-ref").toString();
-	const refsList = gitShowRefsOutput
-		.split("\n")
-		.filter((l) => l !== "")
-		.map((line) => {
-			const [hash, ref] = line.split(" ");
-			return { hash, ref };
-		});
 	/**
 	 * Filter for release refs. These are refs which we would have extracted
 	 * with our content API, so content in these refs should be published
 	 * to our docs website.
 	 */
-	const releaseRefs = refsList.filter(({ ref }) => releaseRefPattern.test(ref));
-	console.log(releaseRefs.map((r) => r.ref));
+	const releaseRefs = refsList.filter(({ ref }) =>
+		repoConfig.releaseRefPattern.test(ref)
+	);
 	/**
 	 * For each release ref, check out the ref, and copy the content from
 	 * the website directory into this project.
-	 *
-	 * TODO: currently doing just one ref, should do all.
 	 */
 	for (let i = releaseRefs.length - 1; i > releaseRefs.length - 2; i--) {
 		const releaseRef = releaseRefs[i];
-		console.log(releaseRef);
+		// Check out the hash corresponding to this release ref
 		execSync(`git checkout ${releaseRef.hash}`, {
 			stdio: "inherit",
+			cwd: repoDir,
 		});
-		/**
-		 * Determine the versionString to use
-		 */
-		// TODO: version format varies for PTFE, need to account for this...
-		// probably best to do with `repoConfig` rather than conditional...
-		const rawVersionString = releaseRefPattern.exec(releaseRef.ref)[2];
-		const versionSemver = semver.coerce(rawVersionString);
-		let versionString;
-		if (repoConfig.patch === "generic") {
-			const { major, minor } = versionSemver;
-			versionString = `v${major}.${minor}.x`;
-		} else {
-			const { major, minor, patch } = versionSemver;
-			versionString = `v${major}.${minor}.${patch}`;
-		}
-		/**
-		 * Determine the website directory path. The content, assets, and data
-		 * for the website are expected to exist within this directory.
-		 */
-		const websiteDirPath = path.join(process.cwd(), websiteDir);
-		// Copy the assets directory to a new destination in the public folder
-		/**
-		 * TODO: need to account for versioning here... maybe start with the newest
-		 * version, and work backwards... if we hit a file conflict, then rename
-		 * with the version number?
-		 */
-		const assetDirPath = path.join(websiteDirPath, assetDir);
-		const assetDest = path.join(
-			projectRoot,
-			"public",
-			"assets",
-			repoName,
-			versionString,
-			repoConfig.assetDir
-		);
-		// Execute the copy
-		clearAndCopyDir(assetDirPath, assetDest);
-		// Copy content into versioned destination directory
-		const contentDirPath = path.join(websiteDirPath, contentDir);
-		const contentDest = path.join(
-			projectRoot,
-			"public",
-			"products",
-			repoName,
-			versionString,
-			repoConfig.contentDir
-		);
-		clearAndCopyDir(contentDirPath, contentDest);
-		// Copy data into versioned destination directory
-		const dataDirPath = path.join(websiteDirPath, repoConfig.dataDir);
-		const dataDest = path.join(
-			projectRoot,
-			"public",
-			"products",
-			repoName,
-			versionString,
-			repoConfig.dataDir
-		);
-		clearAndCopyDir(dataDirPath, dataDest);
+		// Extract content, data, and assets from the repo
+
+		extractFromContentRepo(repoName, repoDir, releaseRef, repoConfig);
 	}
 	/**
 	 * TODO: many more content source repos for Terraform
 	 * ...
 	 */
+}
+
+/**
+ *
+ */
+function extractFromContentRepo(repoName, repoDir, releaseRef, repoConfig) {
+	//
+	const versionString = versionStringFromReleaseRef(releaseRef, repoConfig);
+	/**
+	 * Determine the website directory path. The content, assets, and data
+	 * for the website are expected to exist within this directory.
+	 */
+	const websiteDirPath = path.join(repoDir, repoConfig.websiteDir);
+	// Copy the assets directory to a new destination in the public folder
+	/**
+	 * TODO: need to account for versioning here... maybe start with the newest
+	 * version, and work backwards... if we hit a file conflict, then rename
+	 * with the version number?
+	 */
+	const assetDirPath = path.join(websiteDirPath, repoConfig.assetDir);
+	const assetDest = path.join(
+		process.cwd(),
+		"public",
+		"assets",
+		repoName,
+		versionString,
+		repoConfig.assetDir
+	);
+	// Execute the copy
+	clearAndCopyDir(assetDirPath, assetDest);
+	// Copy content into versioned destination directory
+	const contentDirPath = path.join(websiteDirPath, repoConfig.contentDir);
+	const contentDest = path.join(
+		process.cwd(),
+		"public",
+		"products",
+		repoName,
+		versionString,
+		repoConfig.contentDir
+	);
+	clearAndCopyDir(contentDirPath, contentDest);
+	// Copy data into versioned destination directory
+	const dataDirPath = path.join(websiteDirPath, repoConfig.dataDir);
+	const dataDest = path.join(
+		process.cwd(),
+		"public",
+		"products",
+		repoName,
+		versionString,
+		repoConfig.dataDir
+	);
+	clearAndCopyDir(dataDirPath, dataDest);
+	//
+	return;
+}
+
+/**
+ *
+ */
+function listGitRefs(repoDir) {
+	// List all the refs with `git show-ref`, and parse each ref and hash
+	const gitShowRefsOutput = execSync("git show-ref", {
+		cwd: repoDir,
+	}).toString();
+	const refsList = gitShowRefsOutput
+		.split("\n") // git show-ref logs a hash and ref on each line
+		.filter((l) => l !== "") // Filter out empty lines
+		.map((line) => {
+			// Parse the hash and ref from each line
+			const [hash, ref] = line.split(" ");
+			return { hash, ref };
+		});
+	//
+	return refsList;
+}
+
+/**
+ *
+ */
+function shallowCloneRepo(cwd, repoOwner, repoName) {
+	/**
+	 * Clone the repository if it doesn't already exist. We use a shallow
+	 * clone since there's only a small percentage of refs we'll actually use.
+	 */
+	if (!fs.existsSync(path.join(cwd, repoName))) {
+		execSync(`gh repo clone ${repoOwner}/${repoName} -- --filter=blob:none`, {
+			stdio: "inherit",
+			cwd,
+		});
+	}
+	//
+	return path.join(cwd, repoName);
+}
+
+/**
+ * TODO: version format varies for PTFE, need to account for this...
+ * probably best to do with `repoConfig` rather than conditional...
+ */
+function versionStringFromReleaseRef(releaseRef, repoConfig) {
+	const rawVersionString = repoConfig.releaseRefPattern.exec(releaseRef.ref)[2];
+	const versionSemver = semver.coerce(rawVersionString);
+	let versionString;
+	if (repoConfig.patch === "generic") {
+		const { major, minor } = versionSemver;
+		versionString = `v${major}.${minor}.x`;
+	} else {
+		const { major, minor, patch } = versionSemver;
+		versionString = `v${major}.${minor}.${patch}`;
+	}
+	return versionString;
 }
 
 /**
