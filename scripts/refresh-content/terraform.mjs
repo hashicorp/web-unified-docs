@@ -3,134 +3,10 @@ import path from "path";
 import { execSync } from "child_process";
 // Third-party
 import semver from "semver";
+// Local
+import { ALL_REPO_CONFIG } from "./repo-config.mjs";
 
 const TEMP_DIR = ".content-source-repos";
-
-/**
- * TODO: we have different content directory structures across repos.
- *
- * In the current API, powered by mktg-content-workflows, we have repo-config
- * that handles these differences. In the short term, it probably makes sense
- * to mirror that type of config in this repository.
- *
- * On the other hand, it would be nice to not have to deal with these cases...
- * Maybe during the process of migrating docs to this repo, we standardize
- * the directory structure? As long as the API routes are still drop-in
- * replacements for the previous API, maybe that'd make sense... rather than
- * migrating repo-config, we migrate in a way that requires less (maybe zero)
- * "repo-config".
- *
- * Related thought: migration scripting probably makes sense? Script would:
- * - Pull down the content source repo
- * - Iterate over known versions (based on our existing live content API), and
- *   for each known version of content...
- * - Check out the ref for that version
- * - Copy content into `public/products`, with the content directory now
- *   normalized (probably to `content`, since that's most common?)
- *
- * @type Record<string, { websiteDir: string, contentDir: string }>
- */
-const allRepoConfig = {
-	// boundary: {
-	// 	contentDir: "content",
-	// 	websiteDir: "website",
-	// 	releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
-	// },
-	// consul: {
-	// 	contentDir: "content",
-	// 	websiteDir: "website",
-	// 	releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
-	// },
-	// "hcp-docs": {
-	// 	contentDir: "content",
-	// 	websiteDir: "website",
-	// 	releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
-	// },
-	// nomad: {
-	// 	contentDir: "content",
-	// 	websiteDir: "website",
-	// 	releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
-	// },
-	// packer: {
-	// 	contentDir: "content",
-	// 	websiteDir: "website",
-	// 	releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
-	// },
-	// "ptfe-releases": {
-	// 	contentDir: "docs",
-	// 	websiteDir: "website",
-	// 	releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
-	// },
-	// sentinel: {
-	// 	contentDir: "content",
-	// 	websiteDir: "website",
-	// 	releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
-	// },
-	terraform: {
-		assetDir: "img",
-		contentDir: "docs",
-		dataDir: "data",
-		releaseRefPattern:
-			/^(refs\/heads\/|refs\/remotes\/origin\/)?(v\d+[.]\d+)$/i,
-		websiteDir: "website",
-		patch: "generic",
-	},
-	// "terraform-cdk": {
-	// 	contentDir: "docs",
-	// 	websiteDir: "website",
-	// 	releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
-	// },
-	// "terraform-docs-agents": {
-	// 	contentDir: "docs",
-	// 	websiteDir: "website",
-	// 	releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
-	// },
-	// "terraform-docs-common": {
-	// 	contentDir: "docs",
-	// 	websiteDir: "website",
-	// 	releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
-	// },
-	// "terraform-plugin-framework": {
-	// 	contentDir: "docs",
-	// 	websiteDir: "website",
-	// 	releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
-	// },
-	// "terraform-plugin-log": {
-	// 	contentDir: "docs",
-	// 	websiteDir: "website",
-	// 	releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
-	// },
-	// "terraform-plugin-mux": {
-	// 	contentDir: "docs",
-	// 	websiteDir: "website",
-	// 	releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
-	// },
-	// "terraform-plugin-sdk": {
-	// 	contentDir: "docs",
-	// 	websiteDir: "website",
-	// 	releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
-	// },
-	// "terraform-plugin-testing": {
-	// 	contentDir: "docs",
-	// 	websiteDir: "website",
-	// 	releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
-	// },
-	// vagrant: {
-	// 	contentDir: "content",
-	// 	websiteDir: "website",
-	// 	releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
-	// },
-	// vault: {
-	// 	contentDir: "content",
-	// 	websiteDir: "website",
-	// 	releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
-	// },
-	// waypoint: {
-	// 	contentDir: "content",
-	// 	websiteDir: "website",
-	// 	releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
-	// },
-};
 
 main();
 
@@ -139,55 +15,215 @@ function main() {
 	if (!fs.existsSync(TEMP_DIR)) {
 		fs.mkdirSync(TEMP_DIR, { recursive: true });
 	}
-	/**
-	 * TODO: work through ALL repositories. Could iterate over `repoConfig`?
-	 *
-	 * For now, doing hashicorp/terraform only. Code below could likely
-	 * be extracted to a function, and called for each repository.
-	 */
-	const repoOwner = "hashicorp";
-	const repoName = "terraform";
 	//
-	const repoDir = shallowCloneRepo(TEMP_DIR, repoOwner, repoName);
-	//
-	const refsList = listGitRefs(path.join(TEMP_DIR, repoName));
-	//
-	const repoConfig = allRepoConfig[repoName];
-	/**
-	 * Filter for release refs. These are refs which we would have extracted
-	 * with our content API, so content in these refs should be published
-	 * to our docs website.
-	 */
-	const releaseRefs = refsList.filter(({ ref }) =>
-		repoConfig.releaseRefPattern.test(ref)
-	);
-	/**
-	 * For each release ref, check out the ref, and copy the content from
-	 * the website directory into this project.
-	 */
-	for (let i = releaseRefs.length - 1; i > releaseRefs.length - 2; i--) {
-		const releaseRef = releaseRefs[i];
-		// Check out the hash corresponding to this release ref
-		execSync(`git checkout ${releaseRef.hash}`, {
-			stdio: "inherit",
-			cwd: repoDir,
-		});
-		// Extract content, data, and assets from the repo
-
-		extractFromContentRepo(repoName, repoDir, releaseRef, repoConfig);
-	}
-	/**
-	 * TODO: many more content source repos for Terraform
-	 * ...
-	 */
+	let repoName;
+	let repoDir;
+	let targetVersion;
+	let repoConfig;
+	// Testing out Boundary content, extracting a specific version
+	// repoName = "boundary";
+	// targetVersion = "v0.16.x";
+	// repoDir = shallowCloneRepo(TEMP_DIR, "hashicorp", repoName);
+	// extractVersionedDocs(
+	// 	repoDir,
+	// 	repoName,
+	// 	ALL_REPO_CONFIG[repoName],
+	// 	targetVersion
+	// );
+	repoName = "boundary";
+	repoConfig = ALL_REPO_CONFIG[repoName];
+	repoDir = shallowCloneRepo(TEMP_DIR, "hashicorp", repoName);
+	extractAllVersionedDocs(repoDir, repoName, repoConfig);
+	// Testing out Terraform content, extracting all versions
+	// repoName = "terraform";
+	// repoConfig = ALL_REPO_CONFIG[repoName]
+	// repoDir = shallowCloneRepo(TEMP_DIR, "hashicorp", repoName);
+	// extractAllVersionedDocs(repoDir, repoName, repoConfig);
 }
 
 /**
  *
  */
-function extractFromContentRepo(repoName, repoDir, releaseRef, repoConfig) {
+function extractAllVersionedDocs(repoDir, repoName, repoConfig) {
 	//
-	const versionString = versionStringFromReleaseRef(releaseRef, repoConfig);
+	const releaseRefs = getReleaseRefs(repoName, repoDir, repoConfig);
+	const uniqueReleaseRefs = getUniqueReleaseRefs(releaseRefs, repoConfig);
+	/**
+	 * For each release ref, check out the ref, and copy the content from
+	 * the website directory into this project.
+	 */
+	for (let i = uniqueReleaseRefs.length - 1; i > 0; i--) {
+		// Extract content, data, and assets from the repo
+		extractFromFilesystem(repoName, repoDir, uniqueReleaseRefs[i], repoConfig);
+	}
+}
+
+/**
+ *
+ */
+function extractVersionedDocs(repoDir, repoName, repoConfig, targetVersion) {
+	//
+	const releaseRefs = getReleaseRefs(repoName, repoDir, repoConfig);
+	//
+	const targetRef = releaseRefs.find((r) => r.versionString === targetVersion);
+	if (!targetRef) {
+		throw new Error(
+			`Error: Could not find release ref for version "${targetVersion}".`
+		);
+	}
+	// Extract content, data, and assets from the repo
+	extractFromFilesystem(repoName, repoDir, targetRef, repoConfig);
+}
+
+/**
+ * TODO: need to implement
+ *
+ * - getReleaseRefs
+ * - semver sort
+ *
+ * @param {*} repoName
+ * @param {*} repoDir
+ * @param {*} repoConfig
+ */
+function getUniqueReleaseRefs(releaseRefs, repoConfig) {
+	//
+	if (repoConfig.patch !== "generic") {
+		throw new Error("TODO: need to handle non-generic patch case");
+	}
+	//
+	const uniqueRefs = {};
+	//
+	const sortedRefs = releaseRefs.sort((a, b) => {
+		return semver.compare(a.version, b.version);
+	});
+	//
+	for (const refEntry of sortedRefs) {
+		const versionString = refEntry.versionString;
+		const genericVersionString = versionString.replace(/\d+$/, "x");
+		if (!uniqueRefs[genericVersionString]) {
+			uniqueRefs[genericVersionString] = refEntry;
+			continue;
+		}
+		//
+		const existingRef = uniqueRefs[genericVersionString];
+		// If the existing ref is a tag, and the incoming ref is a release branch,
+		// use the incoming ref
+		if (
+			existingRef.ref.startsWith("refs/tags") &&
+			refEntry.ref.startsWith("refs/remotes/origin")
+		) {
+			uniqueRefs[genericVersionString] = refEntry;
+			continue;
+		} else if (
+			existingRef.ref.startsWith("refs/remotes/origin") &&
+			refEntry.ref.startsWith("refs/tags")
+		) {
+			continue;
+		}
+		// If the existing ref and the incoming ref are different versions,
+		// use the latest one
+		if (semver.gt(refEntry.version, existingRef.version)) {
+			uniqueRefs[genericVersionString] = refEntry;
+			continue;
+		} else if (semver.lt(refEntry.version, existingRef.version)) {
+			continue;
+		}
+
+		// Otherwise, just continue, using the existing ref
+		continue;
+	}
+	const uniqueRefsArray = Object.values(uniqueRefs)
+		.sort((a, b) => {
+			return semver.compare(a.version, b.version);
+		})
+		.map((refEntry) => {
+			const versionString = refEntry.versionString;
+			const genericVersionString = versionString.replace(/\d+$/, "x");
+			return { ...refEntry, versionString: genericVersionString };
+		});
+
+	console.log(
+		sortedRefs.map(({ ref, versionString }) => ({
+			ref,
+			versionString,
+		}))
+	);
+	console.log(
+		uniqueRefsArray.map(({ ref, versionString }) => ({
+			ref,
+			versionString,
+		}))
+	);
+	return uniqueRefsArray;
+}
+
+/**
+ *
+ */
+function getReleaseRefs(repoName, repoDir, repoConfig) {
+	//
+	const refsList = getRefs(repoDir);
+	//
+	console.log(`Found ${refsList.length} refs in ${repoName}.`);
+	console.log(refsList.map((r) => r.ref).slice(-50));
+	/**
+	 * Find the relevant release refs.
+	 *
+	 * Release refs are refs used to populate our existing content API. We want
+	 * to mirror the content in our existing API in this repository, so we want
+	 * to extract content from any refs that match the previous releaseRefPattern.
+	 */
+	const rawReleaseRefs = refsList
+		.filter(({ ref }) => repoConfig.releaseRefPattern.test(ref))
+		.map((releaseRef) => {
+			const versionString = repoConfig.versionStringFromRef(releaseRef.ref);
+			return { ...releaseRef, versionString };
+		});
+	console.log(`Found ${rawReleaseRefs.length} pattern-matched release refs.`);
+	//
+	const releaseRefs = rawReleaseRefs
+		.map((releaseRef) => {
+			const versionSemver = semver.coerce(releaseRef.versionString);
+			return {
+				...releaseRef,
+				version: versionSemver,
+			};
+		})
+		.filter(({ version }) => {
+			//
+			if (!repoConfig.earliestVersion) {
+				return true;
+			}
+			//
+			const earliestVersion = semver.coerce(repoConfig.earliestVersion);
+			if (!earliestVersion) {
+				throw new Error(
+					`Error: Earliest version "${repoConfig.earliestVersion}" is not a valid semver version.`
+				);
+			} else {
+				//
+				const isInRange = semver.gte(version, earliestVersion);
+				return isInRange;
+			}
+		});
+
+	console.log(`Found ${releaseRefs.length} release refs with valid versions.`);
+	return releaseRefs;
+}
+
+/**
+ *
+ */
+function extractFromFilesystem(repoName, repoDir, releaseRef, repoConfig) {
+	//
+	console.log(
+		`Checking out ref "${releaseRef.ref}" (hash "${releaseRef.hash}")...`
+	);
+	// Check out the hash corresponding to this release ref
+	execSync(`git checkout ${releaseRef.hash}`, {
+		stdio: "inherit",
+		cwd: repoDir,
+	});
 	/**
 	 * Determine the website directory path. The content, assets, and data
 	 * for the website are expected to exist within this directory.
@@ -205,8 +241,8 @@ function extractFromContentRepo(repoName, repoDir, releaseRef, repoConfig) {
 		"public",
 		"assets",
 		repoName,
-		versionString,
-		repoConfig.assetDir
+		releaseRef.versionString,
+		repoConfig.assetDir.replace("public/", "")
 	);
 	// Execute the copy
 	clearAndCopyDir(assetDirPath, assetDest);
@@ -217,7 +253,7 @@ function extractFromContentRepo(repoName, repoDir, releaseRef, repoConfig) {
 		"public",
 		"products",
 		repoName,
-		versionString,
+		releaseRef.versionString,
 		repoConfig.contentDir
 	);
 	clearAndCopyDir(contentDirPath, contentDest);
@@ -228,7 +264,7 @@ function extractFromContentRepo(repoName, repoDir, releaseRef, repoConfig) {
 		"public",
 		"products",
 		repoName,
-		versionString,
+		releaseRef.versionString,
 		repoConfig.dataDir
 	);
 	clearAndCopyDir(dataDirPath, dataDest);
@@ -239,7 +275,7 @@ function extractFromContentRepo(repoName, repoDir, releaseRef, repoConfig) {
 /**
  *
  */
-function listGitRefs(repoDir) {
+function getRefs(repoDir) {
 	// List all the refs with `git show-ref`, and parse each ref and hash
 	const gitShowRefsOutput = execSync("git show-ref", {
 		cwd: repoDir,
@@ -257,39 +293,27 @@ function listGitRefs(repoDir) {
 }
 
 /**
+ * Clone the repository into the temporary directory, using the `gh` CLI.
  *
+ * You must be authenticated, and have read access to the target repository,
+ * in order for this to work. We use a shallow clone since there are only a
+ * small percentage of refs with content we'll actually use.
+ *
+ * Note that if the repository already exists, we do _not_ clone it again.
  */
 function shallowCloneRepo(cwd, repoOwner, repoName) {
+	const repoDir = path.join(cwd, repoName);
 	/**
-	 * Clone the repository if it doesn't already exist. We use a shallow
-	 * clone since there's only a small percentage of refs we'll actually use.
+	 * Clone the repository if it doesn't already exist.
 	 */
-	if (!fs.existsSync(path.join(cwd, repoName))) {
+	if (!fs.existsSync(repoDir)) {
 		execSync(`gh repo clone ${repoOwner}/${repoName} -- --filter=blob:none`, {
-			stdio: "inherit",
+			stdio: "inherit", // Nice to see progress for large repos
 			cwd,
 		});
 	}
 	//
-	return path.join(cwd, repoName);
-}
-
-/**
- * TODO: version format varies for PTFE, need to account for this...
- * probably best to do with `repoConfig` rather than conditional...
- */
-function versionStringFromReleaseRef(releaseRef, repoConfig) {
-	const rawVersionString = repoConfig.releaseRefPattern.exec(releaseRef.ref)[2];
-	const versionSemver = semver.coerce(rawVersionString);
-	let versionString;
-	if (repoConfig.patch === "generic") {
-		const { major, minor } = versionSemver;
-		versionString = `v${major}.${minor}.x`;
-	} else {
-		const { major, minor, patch } = versionSemver;
-		versionString = `v${major}.${minor}.${patch}`;
-	}
-	return versionString;
+	return repoDir;
 }
 
 /**
