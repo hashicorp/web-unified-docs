@@ -52,7 +52,7 @@ function extractAllVersionedDocs(repoDir, repoName, repoConfig) {
 	 * For each release ref, check out the ref, and copy the content from
 	 * the website directory into this project.
 	 */
-	for (let i = uniqueReleaseRefs.length - 1; i > 0; i--) {
+	for (let i = uniqueReleaseRefs.length - 1; i >= 0; i--) {
 		// Extract content, data, and assets from the repo
 		extractFromFilesystem(repoName, repoDir, uniqueReleaseRefs[i], repoConfig);
 	}
@@ -119,6 +119,19 @@ function getUniqueReleaseRefs(releaseRefs, repoConfig) {
 			refEntry.ref.startsWith("refs/tags")
 		) {
 			continue;
+		}
+		// If both the existing ref and incoming refs are release branches,
+		// prefer the one using the `generic` patch
+		if (
+			existingRef.ref.startsWith("refs/remotes/origin") &&
+			refEntry.ref.startsWith("refs/remotes/origin")
+		) {
+			if (existingRef.versionString.endsWith("x")) {
+				continue;
+			} else if (refEntry.versionString.endsWith("x")) {
+				uniqueRefs[genericVersionString] = refEntry;
+				continue;
+			}
 		}
 		// If the existing ref and the incoming ref are different versions,
 		// use the latest one
