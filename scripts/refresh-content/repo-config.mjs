@@ -137,11 +137,24 @@ export const ALL_REPO_CONFIG = {
 	// 	websiteDir: "website",
 	// 	releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
 	// },
-	// vault: {
-	// 	contentDir: "content",
-	// 	websiteDir: "website",
-	// 	releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
-	// },
+	vault: {
+		assetDir: "public",
+		contentDir: "content",
+		dataDir: "data",
+		earliestVersion: "v1.4.0",
+		patch: "generic",
+		releaseRefPattern:
+			/^refs\/(remotes\/origin\/release\/|tags\/v)(\d+\.\d+\.[x,\d]+)$/i,
+		versionStringFromRef: (ref) => {
+			const versionRegex = /(\d+\.\d+\.[x,\d]+)$/;
+			if (!versionRegex.test(ref)) {
+				return null;
+			}
+			const versionString = ref.match(versionRegex)[1];
+			return `v${versionString}`;
+		},
+		websiteDir: "website",
+	},
 	// waypoint: {
 	// 	contentDir: "content",
 	// 	websiteDir: "website",

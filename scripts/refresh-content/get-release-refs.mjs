@@ -20,7 +20,8 @@ export function getReleaseRefs(refsList, repoConfig) {
 		.map((releaseRef) => {
 			const versionString = repoConfig.versionStringFromRef(releaseRef.ref);
 			return { ...releaseRef, versionString };
-		});
+		})
+		.filter((entry) => Boolean(entry.versionString));
 	console.log(`Found ${rawReleaseRefs.length} pattern-matched release refs.`);
 	//
 	const releaseRefs = rawReleaseRefs

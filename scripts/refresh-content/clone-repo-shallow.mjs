@@ -28,9 +28,8 @@ export function cloneRepoShallow(targetDir, repoOwner, repoName) {
 	 */
 	const repoDir = path.join(targetDir, repoName);
 	const repoDirExists = fs.existsSync(repoDir);
-	console.log({ targetDir, repoDir, repoDirExists });
 	// If the repository already exists, we skip cloning
-	if (!fs.existsSync(repoDir)) {
+	if (!repoDirExists) {
 		execSync(`gh repo clone ${repoOwner}/${repoName} -- --filter=blob:none`, {
 			stdio: "inherit", // Nice to see progress for large repos
 			cwd: targetDir,

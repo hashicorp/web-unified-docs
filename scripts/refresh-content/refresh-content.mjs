@@ -19,29 +19,18 @@ function main() {
 		fs.mkdirSync(TEMP_DIR, { recursive: true });
 	}
 	//
-	let repoName;
-	let repoDir;
-	let targetVersion;
-	let repoConfig;
-	// Testing out Boundary content, extracting a specific version
-	// repoName = "boundary";
-	// targetVersion = "v0.16.x";
-	// repoDir = cloneRepoShallow(TEMP_DIR, "hashicorp", repoName);
-	// extractVersionedDocs(
-	// 	repoDir,
-	// 	repoName,
-	// 	ALL_REPO_CONFIG[repoName],
-	// 	targetVersion
-	// );
-	repoName = "boundary";
-	repoConfig = ALL_REPO_CONFIG[repoName];
-	repoDir = cloneRepoShallow(TEMP_DIR, "hashicorp", repoName);
-	extractAllVersionedDocs(repoDir, repoName, repoConfig);
-	// Testing out Terraform content, extracting all versions
-	// repoName = "terraform";
-	// repoConfig = ALL_REPO_CONFIG[repoName]
-	// repoDir = cloneRepoShallow(TEMP_DIR, "hashicorp", repoName);
-	// extractAllVersionedDocs(repoDir, repoName, repoConfig);
+	const targetRepos = ["vault"];
+	const repoSlugs = Object.keys(ALL_REPO_CONFIG).filter((slug) => {
+		return targetRepos.includes(slug);
+	});
+	console.log(`Target repos: ${repoSlugs.join(", ")}`);
+	//
+	for (const repoSlug of repoSlugs) {
+		console.log(`Refreshing content for "${repoSlug}"...`);
+		const repoConfig = ALL_REPO_CONFIG[repoSlug];
+		const repoDir = cloneRepoShallow(TEMP_DIR, "hashicorp", repoSlug);
+		extractAllVersionedDocs(repoDir, repoSlug, repoConfig);
+	}
 }
 
 /**
@@ -101,9 +90,20 @@ function extractFromFilesystem(repoName, repoDir, releaseRef, repoConfig) {
 	const websiteDirPath = path.join(repoDir, repoConfig.websiteDir);
 	// Copy the assets directory to a new destination in the public folder
 	/**
-	 * TODO: need to account for versioning here... maybe start with the newest
-	 * version, and work backwards... if we hit a file conflict, then rename
-	 * with the version number?
+	 * TODO: need to account for versioning here... Possible approach:
+	 * - Assets can either be versioned, or shared across versions
+	 * - Versioned assets in `public/assets/${repoName}/${version}/...`
+	 * - Shared assets in `public/assets/${repoName}/common`
+	 *
+	 * Starting with the newest version, copy all assets to the shared directory
+	 * Working back through earlier versions:
+	 * - If an identical assets exists in `common`, skip it
+	 * - Else, copy the asset to the specific version directory
+	 *
+	 * Then, to fetch assets:
+	 * - Front-end will *always* use a versioned URL, leading to an API route
+	 * - We receive the request, and fetch both the common and versioned URLs
+	 *   from the Vercel CDN. We return whichever one exists.
 	 */
 	const assetDirPath = path.join(websiteDirPath, repoConfig.assetDir);
 	const assetDest = path.join(
