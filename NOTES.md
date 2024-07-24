@@ -17,3 +17,9 @@
 ### Versioned images and assets
 
 🚧 TODO
+
+### Variable content location in very old versions
+
+- Some very old versions that are currently published on `developer.hashicorp.com` do _not_ follow the structure defined in `repo-config`
+- Instead, they still have website source present. For example, for `vault`, in version `1.6.x`, the `.mdx` documents are located in the `pages` directory amidst other page files, and nav data is in `.js` format in the `website/data` directory, alongside a deprecated `version.js` file.
+- In our existing system, we have some deeply buried conditionals that handle this case. I'm honestly not exactly sure how those conditionals work
