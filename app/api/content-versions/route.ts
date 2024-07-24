@@ -17,7 +17,9 @@ export async function GET(request: Request) {
 	// const fullPath = url.searchParams.get("fullPath");
 
 	if (versionMetadata[product]) {
-		return Response.json({ versions: versionMetadata[product] });
+		return Response.json({
+			versions: versionMetadata[product].map((v) => v.version),
+		});
 	}
 
 	return new Response("Not found", { status: 404 });
