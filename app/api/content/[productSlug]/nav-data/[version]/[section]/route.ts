@@ -1,4 +1,5 @@
-const SELF_URL = "http://localhost:3000";
+const IS_DEV = process.env.VERCEL_ENV === "development";
+const SELF_URL = IS_DEV ? "http://localhost:3000" : process.env.VERCEL_URL;
 
 export async function GET(
 	request: Request,
