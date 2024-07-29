@@ -10,6 +10,7 @@ import { getUniqueReleaseRefs } from "./get-unique-release-refs.mjs";
 import { ALL_REPO_CONFIG } from "./repo-config.mjs";
 
 const TEMP_DIR = ".content-source-repos";
+const OUTPUT_DIR = path.join(process.cwd(), ".migrated-content");
 
 main();
 
@@ -19,7 +20,7 @@ function main() {
 		fs.mkdirSync(TEMP_DIR, { recursive: true });
 	}
 	//
-	const targetRepos = ["vault"];
+	const targetRepos = ["boundary", "consul", "vault"];
 	const repoSlugs = Object.keys(ALL_REPO_CONFIG).filter((slug) => {
 		return targetRepos.includes(slug);
 	});
@@ -45,7 +46,8 @@ function extractAllVersionedDocs(repoDir, repoName, repoConfig) {
 	 * For each release ref, check out the ref, and copy the content from
 	 * the website directory into this project.
 	 */
-	for (let i = uniqueReleaseRefs.length - 1; i >= 0; i--) {
+	// for (let i = uniqueReleaseRefs.length - 1; i >= 0; i--) {
+	for (let i = 0; i >= 0; i--) {
 		// Extract content, data, and assets from the repo
 		extractFromFilesystem(repoName, repoDir, uniqueReleaseRefs[i], repoConfig);
 	}
@@ -73,7 +75,6 @@ function extractVersionedDocs(repoDir, repoName, repoConfig, targetVersion) {
  *
  */
 function extractFromFilesystem(repoName, repoDir, releaseRef, repoConfig) {
-	const projectRoot = process.cwd();
 	//
 	console.log(
 		`Checking out ref "${releaseRef.ref}" (hash "${releaseRef.hash}")...`
@@ -107,8 +108,7 @@ function extractFromFilesystem(repoName, repoDir, releaseRef, repoConfig) {
 	 */
 	const assetDirPath = path.join(websiteDirPath, repoConfig.assetDir);
 	const assetDest = path.join(
-		projectRoot,
-		"public",
+		OUTPUT_DIR,
 		"assets",
 		repoName,
 		releaseRef.versionString,
@@ -119,8 +119,7 @@ function extractFromFilesystem(repoName, repoDir, releaseRef, repoConfig) {
 	// Copy content into versioned destination directory
 	const contentDirPath = path.join(websiteDirPath, repoConfig.contentDir);
 	const contentDest = path.join(
-		projectRoot,
-		"public",
+		OUTPUT_DIR,
 		"products",
 		repoName,
 		releaseRef.versionString,
@@ -130,8 +129,7 @@ function extractFromFilesystem(repoName, repoDir, releaseRef, repoConfig) {
 	// Copy data into versioned destination directory
 	const dataDirPath = path.join(websiteDirPath, repoConfig.dataDir);
 	const dataDest = path.join(
-		projectRoot,
-		"public",
+		OUTPUT_DIR,
 		"products",
 		repoName,
 		releaseRef.versionString,

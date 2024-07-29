@@ -36,11 +36,19 @@ export const ALL_REPO_CONFIG = {
 		},
 		websiteDir: "website",
 	},
-	// consul: {
-	// 	contentDir: "content",
-	// 	websiteDir: "website",
-	// 	releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
-	// },
+	consul: {
+		assetDir: "public",
+		contentDir: "content",
+		dataDir: "data",
+		patch: "generic",
+		releaseRefPattern:
+			/^refs\/(remotes\/origin\/release\/|tags\/v)(\d+\.\d+\.[x,\d]+)$/i,
+		versionStringFromRef: (ref) => {
+			const versionString = ref.match(/(\d+\.\d+\.[x,\d]+)$/)[1];
+			return `v${versionString}`;
+		},
+		websiteDir: "website",
+	}
 	// "hcp-docs": {
 	// 	contentDir: "content",
 	// 	websiteDir: "website",
