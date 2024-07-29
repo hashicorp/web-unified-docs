@@ -49,21 +49,53 @@ export const ALL_REPO_CONFIG = {
 		},
 		websiteDir: "website",
 	},
-	// "hcp-docs": {
-	// 	contentDir: "content",
-	// 	websiteDir: "website",
-	// 	releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
-	// },
-	// nomad: {
-	// 	contentDir: "content",
-	// 	websiteDir: "website",
-	// 	releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
-	// },
-	// packer: {
-	// 	contentDir: "content",
-	// 	websiteDir: "website",
-	// 	releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
-	// },
+	"hcp-docs": {
+		assetDir: "public",
+		contentDir: "content",
+		dataDir: "data",
+		patch: "generic",
+		/**
+		 * Note: Versioned docs is not enabled for `hcp-docs`.
+		 * `branchForLatest` is set to `main`.
+		 */
+		releaseRefPattern: /^refs\/remotes\/origin\/main$/i,
+		versionStringFromRef: (_ref) => "v0.0.0",
+		websiteDir: ".",
+	},
+	nomad: {
+		assetDir: "public",
+		contentDir: "content",
+		dataDir: "data",
+		patch: "generic",
+		releaseRefPattern:
+			/^refs\/(remotes\/origin\/release\/|tags\/v)(\d+\.\d+\.[x,\d]+)$/i,
+		versionStringFromRef: (ref) => {
+			const versionString = ref.match(/(\d+\.\d+\.[x,\d]+)$/)[1];
+			return `v${versionString}`;
+		},
+		websiteDir: "website",
+	},
+	/**
+	 * TODO: for Packer, will probably need to do _something_ to sort out
+	 * the Packer plugin documentation. We didn't fully complete the migration
+	 * to Packer integrations, so I think there might still be plugin docs
+	 * we need to fetch from third-party repos?
+	 *
+	 * Or this may be a non-issue, I'm not actually sure.
+	 */
+	packer: {
+		assetDir: "public",
+		contentDir: "content",
+		dataDir: "data",
+		patch: "generic",
+		releaseRefPattern:
+			/^refs\/(remotes\/origin\/release\/|tags\/v)(\d+\.\d+\.[x,\d]+)$/i,
+		versionStringFromRef: (ref) => {
+			const versionString = ref.match(/(\d+\.\d+\.[x,\d]+)$/)[1];
+			return `v${versionString}`;
+		},
+		websiteDir: "website",
+	},
 	// "ptfe-releases": {
 	// 	contentDir: "docs",
 	// 	websiteDir: "website",
@@ -163,9 +195,9 @@ export const ALL_REPO_CONFIG = {
 		},
 		websiteDir: "website",
 	},
-	// waypoint: {
-	// 	contentDir: "content",
-	// 	websiteDir: "website",
-	// 	releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
-	// },
+	/**
+	 * Note: waypoint documentation is no longer published, as the Community
+	 * edition of Waypoint is no longer actively maintained. HCP Waypoint docs
+	 * are maintained in the `hashicorp/hcp-docs` repository.
+	 */
 };

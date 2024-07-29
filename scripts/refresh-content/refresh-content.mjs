@@ -20,7 +20,7 @@ function main() {
 		fs.mkdirSync(TEMP_DIR, { recursive: true });
 	}
 	//
-	const targetRepos = ["boundary", "consul", "vault"];
+	const targetRepos = ["packer"];
 	const repoSlugs = Object.keys(ALL_REPO_CONFIG).filter((slug) => {
 		return targetRepos.includes(slug);
 	});
