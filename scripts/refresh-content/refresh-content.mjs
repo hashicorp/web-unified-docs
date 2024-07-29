@@ -47,7 +47,11 @@ function extractAllVersionedDocs(repoDir, repoName, repoConfig) {
 	 * the website directory into this project.
 	 */
 	// for (let i = uniqueReleaseRefs.length - 1; i >= 0; i--) {
-	for (let i = 0; i >= 0; i--) {
+	for (
+		let i = uniqueReleaseRefs.length - 1;
+		i >= uniqueReleaseRefs.length - 1;
+		i--
+	) {
 		// Extract content, data, and assets from the repo
 		extractFromFilesystem(repoName, repoDir, uniqueReleaseRefs[i], repoConfig);
 	}

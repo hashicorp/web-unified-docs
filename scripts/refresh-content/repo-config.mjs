@@ -48,7 +48,7 @@ export const ALL_REPO_CONFIG = {
 			return `v${versionString}`;
 		},
 		websiteDir: "website",
-	}
+	},
 	// "hcp-docs": {
 	// 	contentDir: "content",
 	// 	websiteDir: "website",
