@@ -35,6 +35,7 @@ As a more specific commitment to parity, we will implement `GET` operations on t
   - Purpose: Returns individual `.mdx` documents
 - [`/api/content-versions`](https://github.com/hashicorp/mktg-content-workflows/blob/01c3c1bd8c1be5d0d036835f90d191b2b1cca3a1/api/content-versions.ts)
   - Purpose: Returns version metadata on specific `.mdx` documents, which allows us to filter our versioned docs dropdowns to only show links to documents that actually exist in the associated versioned set of content.
+  - Note: we'd ideally like to move this API route to `/api/content/<productSlug>/content-versions/doc/<...docsPath>`, for consistency with other API routes. We intend to adopt this new route after migration is complete.
 
 Note that our front-end code in [hashicorp/dev-portal](https://github.com/hashicorp/dev-portal) makes use of an additional endpoint which we do _not_ intend to replace at this time:
 
