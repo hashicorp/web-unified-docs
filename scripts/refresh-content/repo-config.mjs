@@ -123,11 +123,26 @@ export const ALL_REPO_CONFIG = {
 		},
 		websiteDir: "website",
 	},
-	// sentinel: {
-	// 	contentDir: "content",
-	// 	websiteDir: "website",
-	// 	releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
-	// },
+	sentinel: {
+		assetDir: "public",
+		/**
+		 * Note: Sentinel content is located in `website/content/sentinel`.
+		 * Copying over the content is easy enough, but for internal links,
+		 * and search object IDs, and other concerns that involve the content file
+		 * path, it's a bit of an outlier, so will probably present some
+		 * interesting challenges.
+		 */
+		contentDir: "content/sentinel",
+		dataDir: "data",
+		patch: "generic",
+		releaseRefPattern:
+			/^refs\/(remotes\/origin\/release\/|tags\/v)(\d+\.\d+\.[x,\d]+)$/i,
+		versionStringFromRef: (ref) => {
+			const versionString = ref.match(/(\d+\.\d+\.[x,\d]+)$/)[1];
+			return `v${versionString}`;
+		},
+		websiteDir: "website",
+	},
 	terraform: {
 		assetDir: "img",
 		contentDir: "docs",

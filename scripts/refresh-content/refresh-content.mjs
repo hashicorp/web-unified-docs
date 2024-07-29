@@ -20,7 +20,7 @@ function main() {
 		fs.mkdirSync(TEMP_DIR, { recursive: true });
 	}
 	//
-	const targetRepos = ["ptfe-releases"];
+	const targetRepos = ["sentinel"];
 	const repoSlugs = Object.keys(ALL_REPO_CONFIG).filter((slug) => {
 		return targetRepos.includes(slug);
 	});
@@ -39,6 +39,21 @@ function main() {
  */
 function extractAllVersionedDocs(repoDir, repoName, repoConfig) {
 	//
+	/**
+	 * TODO: could use git refs directly, as below... or may make more sense
+	 * to grab the refs for each known version from the content API directly:
+	 * https://web-platform-dashboard-hashicorp.vercel.app/
+	 *
+	 * Example case: some release branch `release/vX.Y.Z` may already exist, but
+	 * may not yet have a corresponding release tag. Concrete example: sentinel.
+	 *
+	 * In this case, we'd want to ignore the release branch. With the info we
+	 * have available in git, we might technically be able to detect this type
+	 * of case (eg look for tags in a separate step, cross-check etc), but given
+	 * our goal is parity with the existing API, seems more pragmatic to ask the
+	 * existing content API what refs are currently powering the docs for each
+	 * version.
+	 */
 	const refsList = getGitRefs(repoDir);
 	const releaseRefs = getReleaseRefs(refsList, repoConfig);
 	const uniqueReleaseRefs = getUniqueReleaseRefs(releaseRefs, repoConfig);
