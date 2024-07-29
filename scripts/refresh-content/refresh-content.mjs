@@ -20,7 +20,7 @@ function main() {
 		fs.mkdirSync(TEMP_DIR, { recursive: true });
 	}
 	//
-	const targetRepos = ["packer"];
+	const targetRepos = ["ptfe-releases"];
 	const repoSlugs = Object.keys(ALL_REPO_CONFIG).filter((slug) => {
 		return targetRepos.includes(slug);
 	});

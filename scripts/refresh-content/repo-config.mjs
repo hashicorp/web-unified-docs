@@ -1,3 +1,5 @@
+import semver from "semver";
+
 /**
  * TODO: we have different content directory structures across repos.
  *
@@ -96,11 +98,31 @@ export const ALL_REPO_CONFIG = {
 		},
 		websiteDir: "website",
 	},
-	// "ptfe-releases": {
-	// 	contentDir: "docs",
-	// 	websiteDir: "website",
-	// 	releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
-	// },
+	"ptfe-releases": {
+		assetDir: "img",
+		contentDir: "docs",
+		dataDir: "data",
+		patch: "exact",
+		releaseRefPattern: /^refs\/(tags\/)v\d\d\d\d\d\d-[\d]+$/i,
+		versionStringFromRef: (ref) => {
+			const versionString = ref.match(/v(\d\d\d\d\d\d-[\d]+)$/i)[1];
+			return `v${versionString}`;
+		},
+		/**
+		 * Note: we need to sort versions for various reasons. Nearly all
+		 * our documentation is semver-versioned. PTFE is not. Rather than
+		 * implement custom sorting from the ground up, we can coerce PTFE
+		 * date-based versions into semver, purely for the purpose of sorting.
+		 */
+		semverCoerce: (versionString) => {
+			const versionRegex = /v(\d\d\d\d)(\d\d)-([\d]+)/;
+			const versionParts = versionRegex.exec(versionString);
+			const [_match, year, date, patch] = versionParts;
+			const semverString = `v${year}.${parseInt(date)}.${patch}`;
+			return semver.coerce(semverString);
+		},
+		websiteDir: "website",
+	},
 	// sentinel: {
 	// 	contentDir: "content",
 	// 	websiteDir: "website",
