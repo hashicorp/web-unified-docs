@@ -14,7 +14,7 @@ Without a clear direction for the shape of our new API, we have a wide open fiel
 
 ## Decision
 
-We will implement our new API with exact parity relative to the relevant operations of the existing API.
+The new API will have parity with existing `GET` endpoints used to fetch product documentation content for dev portal.
 
 This parity will apply to the shape of requests and responses for each operation that is directly used by our [hashicorp/dev-portal](https://github.com/hashicorp/dev-portal) front-end. To achieve this parity in operations, we will implement endpoints in the `app/api` directory of this repository.
 
