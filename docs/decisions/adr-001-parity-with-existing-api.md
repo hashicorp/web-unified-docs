@@ -28,6 +28,7 @@ As a more specific commitment to parity, we will implement `GET` operations for 
 
 - [`/api/content/<productSlug>/version-metadata`](https://github.com/hashicorp/mktg-content-workflows/blob/01c3c1bd8c1be5d0d036835f90d191b2b1cca3a1/api/content.ts#L41)
   - Purpose: Returns version metadata. Version metadata determines which versioned `nav-data` will be fetched, and serves as the content source for versioned docs dropdowns.
+  - Note: we'd ideally like to move this API route to `/api/version-metadata/<product>`. We intend to adopt this new route after migration is complete. See [this GitHub comment](https://github.com/hashicorp/web-presence-experimental-docs/pull/9#discussion_r1695970388) for more context.
 - [`/api/content/<productSlug>/nav-data/<version>/<section>`](https://github.com/hashicorp/mktg-content-workflows/blob/01c3c1bd8c1be5d0d036835f90d191b2b1cca3a1/api/content.ts#L41)
   - Purpose: Returns `nav-data`. Nav data determines which individual documents will be rendered, and serves as the content source for the sidebars for each documentation section.
   - Note that `section` is sometimes referred to as a docs "category". Some products, such as `boundary`, have a single `docs` section. Other products include sections such as `intro`, `commands`, `tools`, `guides`, and others.
@@ -35,7 +36,7 @@ As a more specific commitment to parity, we will implement `GET` operations for 
   - Purpose: Returns individual `.mdx` documents
 - [`/api/content-versions`](https://github.com/hashicorp/mktg-content-workflows/blob/01c3c1bd8c1be5d0d036835f90d191b2b1cca3a1/api/content-versions.ts)
   - Purpose: Returns version metadata on specific `.mdx` documents, which allows us to filter our versioned docs dropdowns to only show links to documents that actually exist in the associated versioned set of content.
-  - Note: we'd ideally like to move this API route to `/api/content/<productSlug>/content-versions/doc/<...docsPath>`, for consistency with other API routes. We intend to adopt this new route after migration is complete.
+  - Note: we'd ideally like to move this API route to `/api/content/<productSlug>/content-versions/doc/<...docsPath>`, for consistency with other API routes. We intend to adopt this new route after migration is complete. See [this GitHub comment](https://github.com/hashicorp/web-presence-experimental-docs/pull/9#discussion_r1695450448) for more context.
 
 Note that our front-end code in [hashicorp/dev-portal](https://github.com/hashicorp/dev-portal) makes use of an additional endpoint which we do _not_ intend to replace at this time:
 
