@@ -22,7 +22,10 @@ This parity will apply to the shape of requests and responses for each operation
 
 This parity will also apply to the specific content returned from each endpoint in our new API. One way to achieve content parity is through scripts that clone source repositories and extract content in much the same way our [checkout-and-upload](https://github.com/hashicorp/mktg-content-workflows/tree/main/workflows/checkout-and-upload) workflow populates the database that underpins our existing content API. At time of writing, we've populated the `public/products` directory with extracted content, though it does not yet fully match the content in our database.
 
-Notably, we will _not_ aim for parity with unused operations, that is, operations that are not directly used by our [hashicorp/dev-portal](https://github.com/hashicorp/dev-portal) front-end. For specific examples of unused operations, see [Examples of unused operations](#examples-of-unused-operations).
+### What we will not do
+
+- Aim for parity with unused operations, that is, operations that are not directly used by our [hashicorp/dev-portal](https://github.com/hashicorp/dev-portal) front-end. For specific examples of unused operations, see [Examples of unused operations](#examples-of-unused-operations).
+
 
 As a more specific commitment to parity, we will implement `GET` operations on the following endpoints:
 
