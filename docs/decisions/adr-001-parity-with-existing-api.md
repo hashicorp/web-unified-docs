@@ -6,7 +6,7 @@ Proposed
 
 ## Context
 
-This project <repo name / name of application> aims to implement [[DEVDOT-023] Unified Product Documentation Repository](https://docs.google.com/document/d/1p8kOqySttvWUVfn7qiC4wGBR73LMBGMelwLt69pM3FQ/edit). The RFC for this project was intentionally light on implementation details, in order to foster consensus on the broad direction.
+The project in this repository, `hashicorp/web-presence-experimental-docs`, aims to implement [[DEVDOT-023] Unified Product Documentation Repository](https://docs.google.com/document/d/1p8kOqySttvWUVfn7qiC4wGBR73LMBGMelwLt69pM3FQ/edit). The RFC for this project was intentionally light on implementation details, in order to foster consensus on the broad direction.
 
 The existing API (`content.hashicorp.com`) has endpoints that serve documentation content, the source code for which can be found in [hashicorp/mktg-content-workflows](https://github.com/hashicorp/mktg-content-workflows/blob/main/api/content.ts). The endpoints related to documentation content will be replaced with a new API.
 
