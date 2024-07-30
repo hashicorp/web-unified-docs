@@ -24,7 +24,7 @@ This parity will also apply to the specific content returned from each endpoint 
 
 - Aim for parity with unused operations, that is, operations that are not directly used by our [hashicorp/dev-portal](https://github.com/hashicorp/dev-portal) front-end. For specific examples of unused operations, see [Examples of unused operations](#examples-of-unused-operations).
 
-As a more specific commitment to parity, we will implement `GET` operations on the following endpoints:
+As a more specific commitment to parity, we will implement `GET` operations for the following endpoints:
 
 - [`/api/content/<productSlug>/version-metadata`](https://github.com/hashicorp/mktg-content-workflows/blob/01c3c1bd8c1be5d0d036835f90d191b2b1cca3a1/api/content.ts#L41)
   - Purpose: Returns version metadata. Version metadata determines which versioned `nav-data` will be fetched, and serves as the content source for versioned docs dropdowns.
