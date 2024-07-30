@@ -8,9 +8,7 @@ Proposed
 
 This project <repo name / name of application> aims to implement [[DEVDOT-023] Unified Product Documentation Repository](https://docs.google.com/document/d/1p8kOqySttvWUVfn7qiC4wGBR73LMBGMelwLt69pM3FQ/edit). The RFC for this project was intentionally light on implementation details, in order to foster consensus on the broad direction.
 
-We have an existing API that is currently in use. The parts of this API that serve documentation content are the parts we are aiming to replace with this new API.
-
-The existing API is served from `content.hashicorp.com`, and the source code for the existing API lives in [hashicorp/mktg-content-workflows](https://github.com/hashicorp/mktg-content-workflows).
+The existing API (`content.hashicorp.com`) has endpoints that serve documentation content, the source code for which can be found in [hashicorp/mktg-content-workflows](https://github.com/hashicorp/mktg-content-workflows/blob/main/api/content.ts). The endpoints related to documentation content will be replaced with a new API.
 
 Without a clear direction for the shape of our new API, we have a wide open field in terms of how we might approach the API surfaced by our new product documentation repository. This lack of direction creates uncertainty and potential for scope creep. Any changes we make relative to the existing API will complicate an already complex migration process.
 
