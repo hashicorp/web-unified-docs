@@ -10,7 +10,7 @@ This project <repo name / name of application> aims to implement [[DEVDOT-023] U
 
 The existing API (`content.hashicorp.com`) has endpoints that serve documentation content, the source code for which can be found in [hashicorp/mktg-content-workflows](https://github.com/hashicorp/mktg-content-workflows/blob/main/api/content.ts). The endpoints related to documentation content will be replaced with a new API.
 
-Without a clear direction for the shape of our new API, we have a wide open field in terms of how we might approach the API surfaced by our new product documentation repository. This lack of direction creates uncertainty and potential for scope creep. Any changes we make relative to the existing API will complicate an already complex migration process.
+Without a clear direction for the shape of our new API, we have a wide open field in terms of how we might approach the API surfaced by our new product documentation repository. This lack of direction creates uncertainty and potential for scope creep. As well, any changes we introduce relative to the existing API will complicate an already complex migration process, as our front-end will need to adapt to new endpoints or formats during the migration process.
 
 ## Decision
 
@@ -23,7 +23,6 @@ This parity will also apply to the specific content returned from each endpoint 
 ### What we will not do
 
 - Aim for parity with unused operations, that is, operations that are not directly used by our [hashicorp/dev-portal](https://github.com/hashicorp/dev-portal) front-end. For specific examples of unused operations, see [Examples of unused operations](#examples-of-unused-operations).
-
 
 As a more specific commitment to parity, we will implement `GET` operations on the following endpoints:
 
