@@ -1,5 +1,15 @@
 # Experimental Docs
 
+> **Please note**: 🚨 The `public` folder in this repository is served on the public internet, as this project is now [deployed through Vercel](https://vercel.com/hashicorp/web-presence-experimental-docs/deployments). Please exercise caution when testing content migration scripts, _especially_ when pushing your work up. For the majority of content source repositories, this presents very little risk, as the content source repositories themselves are already public.
+>
+> However, some content source repositories are _not_ public. Specifically:
+>
+> - [hcp-docs](https://github.com/hashicorp/hcp-docs)
+> - [ptfe-releases](https://github.com/hashicorp/ptfe-releases)
+> - [sentinel](https://github.com/hashicorp/sentinel)
+>
+> For these repositories in particular, please take care to ensure that only the content that is already published through our `content.hashicorp.com` API is migrated into this repository.
+
 This repo is a work-in-progress experimental exploration of an approach the Web Presence team is considering to simplify and streamline the documentation process for our products. Put simply, this approach stores all the versioned docs in one branch of one repo, rather than many branches in many repos. We are in the process of validating the approach, and would appreciate any feedback before we move on to writing a formal RFC.
 
 ## Advantages
