@@ -20,10 +20,16 @@ export async function GET(
 	 * this special case.
 	 */
 	const rawSection = section.join("/");
-	const parsedSection =
-		productSlug === "sentinel"
-			? rawSection.replace(/^sentinel\//, "")
-			: rawSection;
+	let parsedSection;
+	if (productSlug === "sentinel") {
+		if (rawSection === "sentinel") {
+			parsedSection = "docs";
+		} else {
+			parsedSection = rawSection.replace(/^sentinel\//, "");
+		}
+	} else {
+		parsedSection = rawSection;
+	}
 
 	const res = await fetch(
 		`${SELF_URL}/content/${productSlug}/${version}/data/${parsedSection}-nav-data.json`

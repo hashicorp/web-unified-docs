@@ -47,6 +47,28 @@ export async function GET(
 	const { productSlug, version, docsPath } = params;
 	// Determine the content directory based on the "product" (actually repo) slug
 	const contentDir = contentDirMap[productSlug];
+
+	/**
+	 * NOTE: our `content.hashicorp.com` API accepts more complex "section"
+	 * values. It seems this is mainly to handle Sentinel content, which is
+	 * organized differently than other products, as the content is in a
+	 * `sentinel` subdirectory. To ensure parity with the existing API,
+	 * we handle this here. In the future, post-migration, it probably makes
+	 * sense to try to standardize on `section` format, to avoid having
+	 * this special case.
+	 */
+	const rawDocsPath = docsPath.join("/");
+	let parsedDocsPath;
+	if (productSlug === "sentinel") {
+		if (rawDocsPath.startsWith("sentinel/intro")) {
+			parsedDocsPath = rawDocsPath;
+		} else {
+			parsedDocsPath = rawDocsPath.replace(/^sentinel\/?/, "sentinel/docs");
+		}
+	} else {
+		parsedDocsPath = rawDocsPath;
+	}
+
 	/**
 	 * Note: at present, we don't have a good way to determine in advance whether
 	 * the file will exist as a named file or an index file. We therefore have
@@ -69,14 +91,10 @@ export async function GET(
 	 */
 	const res = await Promise.all([
 		fetch(
-			`${SELF_URL}/content/${productSlug}/${version}/${contentDir}/${docsPath.join(
-				"/"
-			)}.mdx`
+			`${SELF_URL}/content/${productSlug}/${version}/${contentDir}/${parsedDocsPath}.mdx`
 		),
 		fetch(
-			`${SELF_URL}/content/${productSlug}/${version}/${contentDir}/${docsPath.join(
-				"/"
-			)}/index.mdx`
+			`${SELF_URL}/content/${productSlug}/${version}/${contentDir}/${parsedDocsPath}/index.mdx`
 		),
 	]);
 
