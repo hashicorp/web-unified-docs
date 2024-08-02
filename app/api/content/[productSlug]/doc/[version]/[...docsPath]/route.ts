@@ -1,6 +1,8 @@
 import grayMatter from "gray-matter";
 
-const SELF_URL = `https://${process.env.VERCEL_URL}` || "http://localhost:3000";
+const SELF_URL = process.env.VERCEL_URL
+	? `https://${process.env.VERCEL_URL}`
+	: "http://localhost:3000";
 
 /**
  * TODO: we have different content directory structures across repos.
