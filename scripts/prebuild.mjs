@@ -1,6 +1,8 @@
 import fs from "fs";
 import path from "path";
 import buildMdxTransforms from "./mdx-transforms/build-mdx-transforms.mjs";
+import batchPromises from "./utils/batch-promises.mjs";
+import listFiles from "./utils/list-files.mjs";
 import gatherVersionMetadata from "./gather-version-metadata.mjs";
 
 /**
@@ -19,12 +21,39 @@ const VERSION_METADATA_FILE = path.join(
  * Define the prebuild script.
  */
 async function main() {
-	// Apply MDX transforms
+	// Apply MDX transforms, writing out transformed MDX files to `public`
 	await buildMdxTransforms(CONTENT_DIR, CONTENT_DIR_OUT);
+	// Copy all `*-nav-data.json` files from `content` to `public/content`, using execSync
+	await copyNavDataFiles(CONTENT_DIR, CONTENT_DIR_OUT);
 	// Gather and write out version metadata
 	const versionMetadata = await gatherVersionMetadata(CONTENT_DIR_OUT);
 	const versionMetadataJson = JSON.stringify(versionMetadata, null, 2);
 	fs.writeFileSync(VERSION_METADATA_FILE, versionMetadataJson);
+}
+
+/**
+ * Copy all *-nav-data.json files from the source to the destination directory.
+ *
+ * TODO: approach here could maybe be refined, or maybe this would be nice
+ * to split out to a separate file... but felt fine to leave here for now.
+ */
+async function copyNavDataFiles(sourceDir, destDir) {
+	const navDataFiles = (await listFiles(sourceDir)).filter((f) =>
+		f.endsWith("-nav-data.json")
+	);
+	await batchPromises(
+		navDataFiles,
+		async (filePath) => {
+			const relativePath = path.relative(sourceDir, filePath);
+			const destPath = path.join(destDir, relativePath);
+			const parentDir = path.dirname(destPath);
+			if (!fs.existsSync(parentDir)) {
+				fs.mkdirSync(parentDir, { recursive: true });
+			}
+			fs.copyFileSync(filePath, destPath);
+		},
+		16
+	);
 }
 
 /**
