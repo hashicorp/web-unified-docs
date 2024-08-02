@@ -1,3 +1,4 @@
+import fs from "fs";
 import path from "path";
 import buildMdxTransforms from "./mdx-transforms/build-mdx-transforms.mjs";
 import gatherVersionMetadata from "./gather-version-metadata.mjs";
