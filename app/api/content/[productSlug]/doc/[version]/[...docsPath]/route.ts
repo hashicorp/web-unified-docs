@@ -63,11 +63,13 @@ export async function GET(
 		if (rawDocsPath.startsWith("sentinel/intro")) {
 			parsedDocsPath = rawDocsPath;
 		} else {
-			parsedDocsPath = rawDocsPath.replace(/^sentinel\/?/, "sentinel/docs");
+			parsedDocsPath = rawDocsPath.replace(/^sentinel(\/?)/, "sentinel/docs$1");
 		}
 	} else {
 		parsedDocsPath = rawDocsPath;
 	}
+
+	console.log({ rawDocsPath, parsedDocsPath });
 
 	/**
 	 * Note: at present, we don't have a good way to determine in advance whether
