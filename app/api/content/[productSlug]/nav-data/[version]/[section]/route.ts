@@ -13,7 +13,7 @@ export async function GET(
 	);
 	if (res.ok) {
 		const navData = await res.json();
-		return Response.json({ result: navData });
+		return Response.json({ result: { navData } });
 	}
 
 	return new Response("Not found", { status: 404 });
