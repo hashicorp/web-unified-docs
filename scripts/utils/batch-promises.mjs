@@ -13,10 +13,10 @@
 async function batchPromises(arrayToBatch, asyncMapFn, batchSize) {
 	let batches = [];
 	let results = [];
-	for (var i = 0, j = arrayToBatch.length; i < j - 1; i += batchSize) {
+	for (let i = 0, j = arrayToBatch.length; i < j - 1; i += batchSize) {
 		batches.push(arrayToBatch.slice(i, i + batchSize));
 	}
-	for (var n = 0; n < batches.length; n++) {
+	for (let n = 0; n < batches.length; n++) {
 		const thisBatch = batches[n];
 		const batchResults = await Promise.all(thisBatch.map(asyncMapFn));
 		/**
