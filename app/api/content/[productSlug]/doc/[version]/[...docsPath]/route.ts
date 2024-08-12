@@ -49,11 +49,30 @@ export async function GET(
   const { productSlug, version, docsPath } = params;
   // Determine the content directory based on the "product" (actually repo) slug
   const contentDir = contentDirMap[productSlug];
+  const productVersionMetadata = versionMetadata[productSlug];
 
-  const parsedVersion =
-    version === "latest"
-      ? versionMetadata[productSlug].filter((v) => v.isLatest)[0].version
-      : version;
+  if (!contentDir || !productVersionMetadata) {
+    return new Response("Not found", { status: 404 });
+  }
+
+  let parsedVersion;
+  if (version === "latest") {
+    // Grab the latest version of the product
+    const foundVersion = versionMetadata[productSlug].find((v) => v.isLatest);
+
+    if (!foundVersion) {
+      return new Response("Not found", { status: 404 });
+    }
+
+    parsedVersion = foundVersion.version;
+  } else {
+    // Ensure the requested version is valid
+    if (!productVersionMetadata.find((v) => v.version === version)) {
+      return new Response("Not found", { status: 404 });
+    }
+
+    parsedVersion = version;
+  }
 
   /**
    * NOTE: our `content.hashicorp.com` API accepts more complex "section"
