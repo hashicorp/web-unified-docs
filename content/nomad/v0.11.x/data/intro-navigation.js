@@ -6,11 +6,11 @@
 //   the landing page for the category
 
 export default [
-  'use-cases',
-  'who-uses-nomad',
-  { category: 'vs', content: ['kubernetes', 'ecs', 'mesos', 'terraform'] },
-  {
-    category: 'getting-started',
-    content: ['running', 'jobs', 'cluster', 'ui', 'next-steps']
-  }
+	'use-cases',
+	'who-uses-nomad',
+	{ category: 'vs', content: ['kubernetes', 'ecs', 'mesos', 'terraform'] },
+	{
+		category: 'getting-started',
+		content: ['running', 'jobs', 'cluster', 'ui', 'next-steps'],
+	},
 ]

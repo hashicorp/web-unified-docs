@@ -7,8 +7,8 @@
 //   serve as the category title in the sidebar
 
 export default [
-  'reseller',
-  'eula',
-  { title: 'Privacy Policy', href: 'https://www.hashicorp.com/privacy' },
-  'terms-of-service',
+	'reseller',
+	'eula',
+	{ title: 'Privacy Policy', href: 'https://www.hashicorp.com/privacy' },
+	'terms-of-service',
 ]

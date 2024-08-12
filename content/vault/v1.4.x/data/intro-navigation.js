@@ -6,19 +6,19 @@
 //   the landing page for the category
 
 export default [
-  {
-    category: 'getting-started',
-    content: [
-      'dev-server',
-      'first-secret',
-      'secrets-engines',
-      'dynamic-secrets',
-      'help',
-      'authentication',
-      'policies',
-      'deploy',
-      'apis',
-      'next-steps'
-    ]
-  }
+	{
+		category: 'getting-started',
+		content: [
+			'dev-server',
+			'first-secret',
+			'secrets-engines',
+			'dynamic-secrets',
+			'help',
+			'authentication',
+			'policies',
+			'deploy',
+			'apis',
+			'next-steps',
+		],
+	},
 ]

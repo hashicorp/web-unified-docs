@@ -1,2 +1,2 @@
 // This file is auto-generated - DO NOT EDIT
-export default "0.17.4"
+export default '0.17.4'

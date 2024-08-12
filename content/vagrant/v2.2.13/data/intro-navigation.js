@@ -7,19 +7,19 @@
 //   serve as the category title in the sidebar
 
 export default [
-  'index',
-  {
-    category: 'vs',
-    content: [
-      'cli-tools',
-      'docker',
-      'terraform',
-      { title: 'Getting Started', href: 'https://learn.hashicorp.com/vagrant' },
-    ],
-  },
-  {
-    category: 'getting-started',
-    name: `Getting Started`,
-  },
-  'contributing-guide',
+	'index',
+	{
+		category: 'vs',
+		content: [
+			'cli-tools',
+			'docker',
+			'terraform',
+			{ title: 'Getting Started', href: 'https://learn.hashicorp.com/vagrant' },
+		],
+	},
+	{
+		category: 'getting-started',
+		name: `Getting Started`,
+	},
+	'contributing-guide',
 ]
