@@ -9,12 +9,12 @@ export async function GET(
 
 	const productVersionMetadataResult = getProductVersionMetadata(productSlug)
 
-	if (productVersionMetadataResult.ok) {
-		return Response.json({
-			result: productVersionMetadataResult.value,
-		})
+	if (!productVersionMetadataResult.ok) {
+		console.error(errorResultToString('API', productVersionMetadataResult))
+		return new Response('Not found', { status: 404 })
 	}
 
-	console.error(errorResultToString('API', productVersionMetadataResult))
-	return new Response('Not found', { status: 404 })
+	return Response.json({
+		result: productVersionMetadataResult.value,
+	})
 }
