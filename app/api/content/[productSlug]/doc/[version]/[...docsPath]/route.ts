@@ -1,5 +1,3 @@
-import grayMatter from 'gray-matter'
-
 import { readFile, parseMarkdownFrontMatter } from '@utils/file'
 import { getProductVersion } from '@utils/contentVersions'
 import { errorResultToString } from '@utils/result'
