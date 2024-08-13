@@ -14,7 +14,7 @@ const CONTENT_DIR = path.join(CWD, "content");
 const CONTENT_DIR_OUT = path.join(CWD, "public", "content");
 const VERSION_METADATA_FILE = path.join(
 	CWD,
-	"app/api/content/[productSlug]/version-metadata/data.json"
+	"app/api/versionMetadata.json"
 );
 
 /**

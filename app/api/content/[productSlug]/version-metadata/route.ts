@@ -1,14 +1,20 @@
-import versionMetadata from "../../../content-versions.json";
+import { getProductVersionMetadata } from '@utils/contentVersions'
+import { errorResultToString } from '@utils/result'
 
 export async function GET(
-  request: Request,
-  { params }: { params: { productSlug: string } }
+	request: Request,
+	{ params }: { params: { productSlug: string } }
 ) {
-  const { productSlug } = params;
+	const { productSlug } = params
 
-  if (versionMetadata[productSlug]) {
-    return Response.json({ result: versionMetadata[productSlug] });
-  }
+	const productVersionMetadataResult = getProductVersionMetadata(productSlug)
 
-  return new Response("Not found", { status: 404 });
+	if (productVersionMetadataResult.ok) {
+		return Response.json({
+			result: productVersionMetadataResult.value,
+		})
+	}
+
+	console.error(errorResultToString('API', productVersionMetadataResult))
+	return new Response('Not found', { status: 404 })
 }
