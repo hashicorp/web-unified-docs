@@ -1,4 +1,4 @@
-import versionMetadata from "../content-versions.json";
+import versionMetadata from "../versionMetadata.json";
 
 /**
  * TODO: need to actually implement this endpoint.

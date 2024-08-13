@@ -1,6 +1,7 @@
-import versionMetadata from "../../../../../content-versions.json";
-
 import grayMatter from "gray-matter";
+
+import { getProductVersion } from "@utils/contentVersions";
+import { errorResultToString } from "@utils/result";
 
 const SELF_URL = process.env.VERCEL_URL
   ? `https://${process.env.VERCEL_URL}`
@@ -47,32 +48,23 @@ export async function GET(
 ) {
   // Grab the parameters we need to fetch content
   const { productSlug, version, docsPath } = params;
+
   // Determine the content directory based on the "product" (actually repo) slug
   const contentDir = contentDirMap[productSlug];
-  const productVersionMetadata = versionMetadata[productSlug];
-
-  if (!contentDir || !productVersionMetadata) {
+  if (!contentDir) {
+    console.error(
+      `API Error: Product, ${productSlug}, not found in contentDirMap`
+    );
     return new Response("Not found", { status: 404 });
   }
 
-  let parsedVersion;
-  if (version === "latest") {
-    // Grab the latest version of the product
-    const foundVersion = versionMetadata[productSlug].find((v) => v.isLatest);
-
-    if (!foundVersion) {
-      return new Response("Not found", { status: 404 });
-    }
-
-    parsedVersion = foundVersion.version;
-  } else {
-    // Ensure the requested version is valid
-    if (!productVersionMetadata.find((v) => v.version === version)) {
-      return new Response("Not found", { status: 404 });
-    }
-
-    parsedVersion = version;
+  const productVersionResult = getProductVersion(productSlug, version);
+  if (!productVersionResult.ok) {
+    console.error(errorResultToString("API", productVersionResult));
+    return new Response("Not found", { status: 404 });
   }
+
+  const parsedVersion = productVersionResult.value;
 
   /**
    * NOTE: our `content.hashicorp.com` API accepts more complex "section"
