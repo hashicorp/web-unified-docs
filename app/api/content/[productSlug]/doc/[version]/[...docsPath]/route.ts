@@ -1,4 +1,4 @@
-import versionMetadata from "../../../version-metadata/data.json";
+import versionMetadata from "../../../../../content-versions.json";
 
 import grayMatter from "gray-matter";
 
@@ -50,8 +50,6 @@ export async function GET(
   // Determine the content directory based on the "product" (actually repo) slug
   const contentDir = contentDirMap[productSlug];
   const productVersionMetadata = versionMetadata[productSlug];
-
-  console.log(params);
 
   if (!contentDir || !productVersionMetadata) {
     return new Response("Not found", { status: 404 });
