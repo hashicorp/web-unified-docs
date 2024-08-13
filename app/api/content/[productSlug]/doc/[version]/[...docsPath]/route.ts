@@ -51,6 +51,8 @@ export async function GET(
   const contentDir = contentDirMap[productSlug];
   const productVersionMetadata = versionMetadata[productSlug];
 
+  console.log(params);
+
   if (!contentDir || !productVersionMetadata) {
     return new Response("Not found", { status: 404 });
   }
@@ -131,10 +133,6 @@ export async function GET(
       const text = await r.text();
       const { data: metadata, content: markdownSource } = grayMatter(text);
 
-      console.log(r.url);
-
-      ("doc/latest/docs/configuration/acl");
-
       return Response.json({
         meta: {
           status_code: 200,
@@ -148,7 +146,7 @@ export async function GET(
           markdownSource,
           parsedVersion,
           created_at: "Fri Aug 13 2021 18:50:23 GMT+0000 (GMT)",
-          sha: "068b1fbd12d6eded8325407c0ef22c1ff127a91d",
+          sha: "", // TODO: Do we really need this?
         },
       });
     }
