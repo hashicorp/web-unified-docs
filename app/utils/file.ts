@@ -1,3 +1,5 @@
+import grayMatter from 'gray-matter'
+
 import { promises as fs } from 'fs'
 import path from 'path'
 import { Err, Ok } from './result'
@@ -20,5 +22,15 @@ export const parseJson = (jsonString: string) => {
 		return Ok(JSON.parse(jsonString))
 	} catch (error) {
 		return Err(`Failed to parse JSON: ${error}`)
+	}
+}
+
+export const parseMarkdownFrontMatter = (markdownString: string) => {
+	try {
+		const { data: metadata, content: markdownSource } =
+			grayMatter(markdownString)
+		return Ok({ metadata, markdownSource })
+	} catch (error) {
+		return Err(`Failed to parse Markdown front-matter: ${error}`)
 	}
 }

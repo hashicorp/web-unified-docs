@@ -1,11 +1,8 @@
 import grayMatter from 'gray-matter'
 
+import { readFile, parseMarkdownFrontMatter } from '@utils/file'
 import { getProductVersion } from '@utils/contentVersions'
 import { errorResultToString } from '@utils/result'
-
-const SELF_URL = process.env.VERCEL_URL
-	? `https://${process.env.VERCEL_URL}`
-	: 'http://localhost:3000'
 
 /**
  * TODO: we have different content directory structures across repos.
@@ -87,14 +84,7 @@ export async function GET(
 		parsedDocsPath = rawDocsPath
 	}
 
-	console.log({ rawDocsPath, parsedDocsPath })
-
 	/**
-	 * Note: at present, we don't have a good way to determine in advance whether
-	 * the file will exist as a named file or an index file. We therefore have
-	 * to make two separate requests to check for both, and we return whichever
-	 * returns, favouring the named file.
-	 *
 	 * TODO: possible improvement: rename files instead of two requests. Which
 	 * files are "named" files (`slug.mdx`) and "index" files (`slug/index.mdx`)
 	 * is known at build time. Named files are more common than index files. Maybe
@@ -107,40 +97,64 @@ export async function GET(
 	 * With this prebuild rename step in place, then for a given `docsPath`, we'll
 	 * have a consistent and predictable file path to fetch - always:
 	 * - `.../${contentDir}/${docsPath.join("/")}.mdx`. We'd be able to remove
-	 * one of the two fetches below.
+	 * one of the two locations below.
 	 */
-	const res = await Promise.all([
-		fetch(
-			`${SELF_URL}/content/${productSlug}/${parsedVersion}/${contentDir}/${parsedDocsPath}.mdx`
-		),
-		fetch(
-			`${SELF_URL}/content/${productSlug}/${parsedVersion}/${contentDir}/${parsedDocsPath}/index.mdx`
-		),
-	])
+	const possibleContentLocations = [
+		[
+			`content`,
+			productSlug,
+			parsedVersion,
+			contentDir,
+			`${parsedDocsPath}.mdx`,
+		],
+		[
+			`content`,
+			productSlug,
+			parsedVersion,
+			contentDir,
+			parsedDocsPath,
+			`index.mdx`,
+		],
+	]
 
-	for (const r of res) {
-		if (r.ok) {
-			const text = await r.text()
-			const { data: metadata, content: markdownSource } = grayMatter(text)
+	let foundContent
+	for (const loc of possibleContentLocations) {
+		const readFileResult = await readFile(loc)
 
-			return Response.json({
-				meta: {
-					status_code: 200,
-					status_text: 'OK',
-				},
-				result: {
-					fullPath: 'doc/latest/docs/configuration/acl',
-					product: productSlug,
-					metadata,
-					subpath: 'docs',
-					markdownSource,
-					parsedVersion,
-					created_at: 'Fri Aug 13 2021 18:50:23 GMT+0000 (GMT)',
-					sha: '', // TODO: Do we really need this?
-				},
-			})
+		if (readFileResult.ok) {
+			foundContent = readFileResult.value
+			break
 		}
 	}
 
-	return new Response('Not found', { status: 404 })
+	if (!foundContent) {
+		console.error(`API Error: No content found at ${possibleContentLocations}`)
+		return new Response('Not found', { status: 404 })
+	}
+
+	const markdownFrontMatterResult = parseMarkdownFrontMatter(foundContent)
+
+	if (!markdownFrontMatterResult.ok) {
+		console.error(errorResultToString('API', markdownFrontMatterResult))
+		return new Response('Not found', { status: 404 })
+	}
+
+	const { metadata, markdownSource } = markdownFrontMatterResult.value
+
+	return Response.json({
+		meta: {
+			status_code: 200,
+			status_text: 'OK',
+		},
+		result: {
+			fullPath: rawDocsPath,
+			product: productSlug,
+			version: parsedVersion,
+			metadata,
+			subpath: 'docs', // TODO: I guess we could grab the first part of the rawDocsPath? Is there something I am missing here?
+			markdownSource: markdownSource,
+			created_at: 'Fri Aug 13 2021 18:50:23 GMT+0000 (GMT)', // TODO: Currently we store this in dynamodb, but maybe we could just use the file system's/git's created date?
+			sha: '', // TODO: Do we really need this?
+		},
+	})
 }
