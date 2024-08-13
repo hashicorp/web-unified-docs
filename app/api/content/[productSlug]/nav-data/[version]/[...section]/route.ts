@@ -1,6 +1,6 @@
-const SELF_URL = process.env.VERCEL_URL
-  ? `https://${process.env.VERCEL_URL}`
-  : "http://localhost:3000";
+import { readFile, parseJson } from "@utils/file";
+import { getProductVersion } from "@utils/contentVersions";
+import { errorResultToString } from "@utils/result";
 
 export async function GET(
   request: Request,
@@ -9,6 +9,14 @@ export async function GET(
   }: { params: { productSlug: string; version: string; section: string[] } }
 ) {
   const { productSlug, version, section } = params;
+
+  const productVersionResult = getProductVersion(productSlug, version);
+  if (!productVersionResult.ok) {
+    console.error(errorResultToString("API", productVersionResult));
+    return new Response("Not found", { status: 404 });
+  }
+
+  const parsedVersion = productVersionResult.value;
 
   /**
    * NOTE: our `content.hashicorp.com` API accepts more complex "section"
@@ -31,15 +39,26 @@ export async function GET(
     parsedSection = rawSection;
   }
 
-  const res = await fetch(
-    `${SELF_URL}/content/${productSlug}/${version}/data/${parsedSection}-nav-data.json`
-  );
+  const readFileResult = await readFile([
+    "content",
+    productSlug,
+    parsedVersion,
+    "data",
+    `${parsedSection}-nav-data.json`,
+  ]);
 
-  if (res.ok) {
-    const navData = await res.json();
-
-    return Response.json({ result: { navData } });
+  if (!readFileResult.ok) {
+    console.error(errorResultToString("API", readFileResult));
+    return new Response("Not found", { status: 404 });
   }
 
-  return new Response("Not found", { status: 404 });
+  const fileData = readFileResult.value;
+  const navDataResult = parseJson(fileData);
+
+  if (!navDataResult.ok) {
+    console.error(errorResultToString("API", navDataResult));
+    return new Response("Not found", { status: 404 });
+  }
+
+  return Response.json({ result: { navData: navDataResult.value } });
 }
