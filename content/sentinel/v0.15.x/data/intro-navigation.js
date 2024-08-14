@@ -6,22 +6,22 @@
 //   the landing page for the category
 
 export default [
-  {
-    category: 'what'
-  },
-  {
-    category: 'why'
-  },
-  {
-    category: 'getting-started',
-    content: [
-      'install',
-      'first-policy',
-      'rules',
-      'logic',
-      'imports',
-      'testing',
-      'next-steps'
-    ]
-  }
+	{
+		category: 'what',
+	},
+	{
+		category: 'why',
+	},
+	{
+		category: 'getting-started',
+		content: [
+			'install',
+			'first-policy',
+			'rules',
+			'logic',
+			'imports',
+			'testing',
+			'next-steps',
+		],
+	},
 ]

@@ -7,26 +7,26 @@
 //   serve as the category title in the sidebar
 
 export default [
-  { title: 'Back to Vagrant Documentation', href: '/docs' },
-  {
-    category: 'boxes',
-    content: [
-      'catalog',
-      'create',
-      'create-version',
-      'distributing',
-      'lifecycle',
-      'private',
-      'release-workflow',
-      'using',
-    ],
-  },
-  {
-    category: 'organizations',
-    content: ['create', 'migrate', 'authentication-policy'],
-  },
-  { category: 'users', content: ['authentication', 'recovery'] },
-  'request-limits',
-  'support',
-  'api',
+	{ title: 'Back to Vagrant Documentation', href: '/docs' },
+	{
+		category: 'boxes',
+		content: [
+			'catalog',
+			'create',
+			'create-version',
+			'distributing',
+			'lifecycle',
+			'private',
+			'release-workflow',
+			'using',
+		],
+	},
+	{
+		category: 'organizations',
+		content: ['create', 'migrate', 'authentication-policy'],
+	},
+	{ category: 'users', content: ['authentication', 'recovery'] },
+	'request-limits',
+	'support',
+	'api',
 ]

@@ -7,89 +7,89 @@
 //   the sidebar
 
 export default [
-  {
-    category: 'getting-started',
-    content: ['run-and-login', 'connect-to-target'],
-  },
-  {
-    category: 'installing',
-    content: ['no-gen-resources', 'systemd', 'postgres', 'high-availability'],
-  },
-  {
-    category: 'api-clients',
-    content: ['api', 'cli', 'go-sdk', 'desktop'],
-  },
-  {
-    category: 'concepts',
-    content: [
-      {
-        category: 'security',
-        content: ['permissions', 'data-encryption', 'connections-tls'],
-      },
-      {
-        category: 'domain-model',
-        content: [
-          'accounts',
-          'auth-methods',
-          'groups',
-          'hosts',
-          'host-catalogs',
-          'host-sets',
-          'scopes',
-          'sessions',
-          'targets',
-          'roles',
-          'users',
-        ],
-      },
-      {
-        category: 'filtering',
-        content: ['resource-listing', 'worker-tags'],
-      },
-    ],
-  },
-  {
-    category: 'developing',
-    content: ['building', 'ui'],
-  },
-  '---',
-  {
-    category: 'configuration',
-    content: [
-      {
-        category: 'listener',
-        content: ['tcp', 'unix'],
-      },
-      {
-        category: 'kms',
-        content: [
-          'aead',
-          'awskms',
-          'alicloudkms',
-          'azurekeyvault',
-          'gcpckms',
-          'ocikms',
-          'transit',
-        ],
-      },
-      'controller',
-      'worker',
-    ],
-  },
-  {
-    title: 'Common Workflows',
-    href: 'https://learn.hashicorp.com/collections/boundary/common-workflows',
-  },
-  '---',
-  'roadmap',
+	{
+		category: 'getting-started',
+		content: ['run-and-login', 'connect-to-target'],
+	},
+	{
+		category: 'installing',
+		content: ['no-gen-resources', 'systemd', 'postgres', 'high-availability'],
+	},
+	{
+		category: 'api-clients',
+		content: ['api', 'cli', 'go-sdk', 'desktop'],
+	},
+	{
+		category: 'concepts',
+		content: [
+			{
+				category: 'security',
+				content: ['permissions', 'data-encryption', 'connections-tls'],
+			},
+			{
+				category: 'domain-model',
+				content: [
+					'accounts',
+					'auth-methods',
+					'groups',
+					'hosts',
+					'host-catalogs',
+					'host-sets',
+					'scopes',
+					'sessions',
+					'targets',
+					'roles',
+					'users',
+				],
+			},
+			{
+				category: 'filtering',
+				content: ['resource-listing', 'worker-tags'],
+			},
+		],
+	},
+	{
+		category: 'developing',
+		content: ['building', 'ui'],
+	},
+	'---',
+	{
+		category: 'configuration',
+		content: [
+			{
+				category: 'listener',
+				content: ['tcp', 'unix'],
+			},
+			{
+				category: 'kms',
+				content: [
+					'aead',
+					'awskms',
+					'alicloudkms',
+					'azurekeyvault',
+					'gcpckms',
+					'ocikms',
+					'transit',
+				],
+			},
+			'controller',
+			'worker',
+		],
+	},
+	{
+		title: 'Common Workflows',
+		href: 'https://learn.hashicorp.com/collections/boundary/common-workflows',
+	},
+	'---',
+	'roadmap',
 
-  {
-    category: 'releases',
-    content: [
-      {
-        category: 'release-notes',
-        content: ['v0_1_0'],
-      },
-    ],
-  },
+	{
+		category: 'releases',
+		content: [
+			{
+				category: 'release-notes',
+				content: ['v0_1_0'],
+			},
+		],
+	},
 ]

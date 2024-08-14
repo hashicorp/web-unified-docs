@@ -21,7 +21,7 @@
  * not prefixed with a product slug will be ignored.
  */
 module.exports = [
-  /*
+	/*
   Example redirect:
   {
     source: '/nomad/docs/internal-docs/my-page',
@@ -37,39 +37,40 @@ module.exports = [
 	{
 		source: '/nomad/s/vault-workload-identity-migration',
 		destination:
-      'https://developer.hashicorp.com/nomad/docs/integrations/vault/acl#migrating-to-using-workload-identity-with-vault',
+			'https://developer.hashicorp.com/nomad/docs/integrations/vault/acl#migrating-to-using-workload-identity-with-vault',
 		permanent: false,
 	},
-  // Rename and re-arrange Autoscaling Internals section
-  {
-    source: '/nomad/tools/autoscaling/internals/:path*',
-    destination: '/nomad/tools/autoscaling/concepts/:path*',
-    permanent: true,
-  },
-  {
-    source: '/nomad/tools/autoscaling/concepts/checks',
-    destination: '/nomad/tools/autoscaling/concepts/policy-eval/checks',
-    permanent: true,
-  },
-  {
-    source: '/nomad/tools/autoscaling/concepts/node-selector-strategy',
-    destination: '/nomad/tools/autoscaling/concepts/policy-eval/node-selector-strategy',
-    permanent: true,
-  },
-  // Redirect Consul and Vault integrations page
-  {
-    source: '/nomad/docs/integrations/vault-integration',
-    destination: '/nomad/docs/integrations/vault',
-    permanent: true,
-  },
-  {
-    source: '/nomad/docs/integrations/consul-integration',
-    destination: '/nomad/docs/integrations/consul',
-    permanent: true,
-  },
-  {
-    source: '/nomad/docs/integrations/consul-connect',
-    destination: '/nomad/docs/integrations/consul/service-mesh',
-    permanent: true,
-  },
+	// Rename and re-arrange Autoscaling Internals section
+	{
+		source: '/nomad/tools/autoscaling/internals/:path*',
+		destination: '/nomad/tools/autoscaling/concepts/:path*',
+		permanent: true,
+	},
+	{
+		source: '/nomad/tools/autoscaling/concepts/checks',
+		destination: '/nomad/tools/autoscaling/concepts/policy-eval/checks',
+		permanent: true,
+	},
+	{
+		source: '/nomad/tools/autoscaling/concepts/node-selector-strategy',
+		destination:
+			'/nomad/tools/autoscaling/concepts/policy-eval/node-selector-strategy',
+		permanent: true,
+	},
+	// Redirect Consul and Vault integrations page
+	{
+		source: '/nomad/docs/integrations/vault-integration',
+		destination: '/nomad/docs/integrations/vault',
+		permanent: true,
+	},
+	{
+		source: '/nomad/docs/integrations/consul-integration',
+		destination: '/nomad/docs/integrations/consul',
+		permanent: true,
+	},
+	{
+		source: '/nomad/docs/integrations/consul-connect',
+		destination: '/nomad/docs/integrations/consul/service-mesh',
+		permanent: true,
+	},
 ]

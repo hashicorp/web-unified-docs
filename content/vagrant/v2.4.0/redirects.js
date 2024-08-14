@@ -23,8 +23,8 @@
  * to ensure they are scoped to the product's section. Any redirects that are
  * not prefixed with a product slug will be ignored.
  */
- module.exports = [
-  /*
+module.exports = [
+	/*
   Example redirect:
   {
     source: '/vagrant/docs/internal-docs/my-page',
