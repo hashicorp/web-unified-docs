@@ -12,20 +12,25 @@
  */
 async function batchPromises(arrayToBatch, asyncMapFn, batchSize) {
 	let batches = [];
-	let results = [];
-	for (let i = 0, j = arrayToBatch.length; i < j - 1; i += batchSize) {
+	for (var i = 0, j = arrayToBatch.length; i < j - 1; i += batchSize) {
 		batches.push(arrayToBatch.slice(i, i + batchSize));
 	}
-	for (let n = 0; n < batches.length; n++) {
+
+	let results = [];
+	const tenPercBatchLen = batches.length / 10;
+	for (var n = 0; n < batches.length; n++) {
 		const thisBatch = batches[n];
 		const batchResults = await Promise.all(thisBatch.map(asyncMapFn));
-		/**
-		 * TODO: maybe preferable to log on time-based intervals? As-is, with small
-		 * batch sizes and large numbers of items, can get very noisy.
-		 */
-		console.log(`${batchSize * (n + 1)} / ${arrayToBatch.length} completed...`);
+
+		if (n % tenPercBatchLen === 0 || n === batches.length - 1) {
+			let batchesDone = Math.min(batchSize * (n + 1), arrayToBatch.length)
+
+			console.log(`${batchesDone} / ${arrayToBatch.length} completed...`);
+		}
+
 		results = results.concat(batchResults);
 	}
+
 	return results;
 }
 
