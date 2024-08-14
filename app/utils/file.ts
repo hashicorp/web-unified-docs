@@ -1,19 +1,24 @@
 import grayMatter from 'gray-matter'
 
-import { promises as fs } from 'fs'
-import path from 'path'
 import { Err, Ok } from './result'
 
-const CWD = process.cwd()
+const SELF_URL = process.env.VERCEL_URL
+	? `https://${process.env.VERCEL_URL}`
+	: 'http://localhost:3000'
 
 export const readFile = async (filePath: string[]) => {
-	const completeFilePath = path.join(CWD, ...filePath)
-
 	try {
-		const fileContent = await fs.readFile(completeFilePath, 'utf8')
-		return Ok(fileContent)
+		const res = await fetch(`${SELF_URL}/${filePath.join('/')}`)
+
+		if (!res.ok) {
+			return Err(`Failed to read file at path: ${filePath.join('/')}`)
+		}
+
+		const text = await res.text()
+
+		return Ok(text)
 	} catch (error) {
-		return Err(`Failed to read file at path: ${completeFilePath}`)
+		return Err(`Failed to read file at path: ${filePath.join('/')}`)
 	}
 }
 

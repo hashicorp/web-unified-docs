@@ -99,7 +99,6 @@ export async function GET(
 	 */
 	const possibleContentLocations = [
 		[
-			`public`,
 			`content`,
 			productSlug,
 			parsedVersion,
@@ -107,7 +106,6 @@ export async function GET(
 			`${parsedDocsPath}.mdx`,
 		],
 		[
-			`public`,
 			`content`,
 			productSlug,
 			parsedVersion,

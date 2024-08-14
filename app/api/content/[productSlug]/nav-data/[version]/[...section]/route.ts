@@ -40,7 +40,6 @@ export async function GET(
 	}
 
 	const readFileResult = await readFile([
-		'public',
 		'content',
 		productSlug,
 		parsedVersion,
