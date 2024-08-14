@@ -6,6 +6,16 @@ const SELF_URL = process.env.VERCEL_URL
 	? `https://${process.env.VERCEL_URL}`
 	: 'http://localhost:3000'
 
+/**
+ * NOTE: we currently read files by fetching them from the `public` folder
+ * via the Vercel CDN. We intend to explore being able to read from the
+ * filesystem directly rather than reading files through the Vercel CDN.
+ *
+ * Vercel has some reference on bundling files into Vercel Functions
+ * which may be relevant:
+ *
+ * https://vercel.com/guides/how-can-i-use-files-in-serverless-functions
+ */
 export const readFile = async (filePath: string[]) => {
 	try {
 		const res = await fetch(`${SELF_URL}/${filePath.join('/')}`)
