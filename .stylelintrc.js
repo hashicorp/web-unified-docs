@@ -1,3 +1,3 @@
 module.exports = {
-  extends: ['@hashicorp/platform-cli/config/stylelint.config']
+	extends: ['@hashicorp/platform-cli/config/stylelint.config'],
 }
