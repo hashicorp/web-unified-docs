@@ -4,9 +4,7 @@ import { execSync } from 'child_process'
 // Local
 import { clearAndCopy } from './clear-and-copy.mjs'
 import { cloneRepoShallow } from './clone-repo-shallow.mjs'
-import { getGitRefs } from './get-git-refs.mjs'
-import { getReleaseRefs } from './get-release-refs.mjs'
-import { getUniqueReleaseRefs } from './get-unique-release-refs.mjs'
+import { getReleaseRefsFromContentAPI } from './get-release-refs-from-content-api.mjs'
 import { ALL_REPO_CONFIG } from './repo-config.mjs'
 
 const TEMP_DIR = '.content-source-repos'
@@ -25,7 +23,7 @@ main()
  * to do the same during migration in order to maintain parity in what
  * content we're serving.
  */
-function main() {
+async function main() {
 	// Ensure the temporary directory exists, this is where repos will be cloned.
 	if (!fs.existsSync(TEMP_DIR)) {
 		fs.mkdirSync(TEMP_DIR, { recursive: true })
@@ -47,14 +45,14 @@ function main() {
 		console.log(`Migrating content for "${repoSlug}"...`)
 		const repoConfig = ALL_REPO_CONFIG[repoSlug]
 		const repoDir = cloneRepoShallow(TEMP_DIR, 'hashicorp', repoSlug)
-		extractAllVersionedDocs(repoDir, repoSlug, repoConfig)
+		await extractAllVersionedDocs(repoDir, repoSlug, repoConfig)
 	}
 }
 
 /**
  *
  */
-function extractAllVersionedDocs(repoDir, repoName, repoConfig) {
+async function extractAllVersionedDocs(repoDir, repoName, repoConfig) {
 	/**
 	 * TODO: probably makes more sense to grab the refs for each known version
 	 * from the content API directly:
@@ -73,9 +71,10 @@ function extractAllVersionedDocs(repoDir, repoName, repoConfig) {
 	 * As-is, we get git refs from git commands... should re-do the steps to
 	 * get `uniqueReleaseRefs`, I think!
 	 */
-	const refsList = getGitRefs(repoDir)
-	const releaseRefs = getReleaseRefs(refsList, repoConfig)
-	const uniqueReleaseRefs = getUniqueReleaseRefs(releaseRefs, repoConfig)
+	const uniqueReleaseRefs = await getReleaseRefsFromContentAPI(
+		repoName,
+		repoConfig
+	)
 	/**
 	 * For each release ref, check out the ref, and copy the content from
 	 * the website directory into this project.
