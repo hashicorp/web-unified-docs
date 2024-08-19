@@ -1,8 +1,8 @@
 // Third-party
-import remark from "remark";
-import remarkMdx from "remark-mdx";
+import remark from 'remark'
+import remarkMdx from 'remark-mdx'
 // Local
-import { remarkIncludePartials } from "./remark-include-partials.mjs";
+import { remarkIncludePartials } from './remark-include-partials.mjs'
 
 /**
  * Given an MDX file string, as well as a path to partials directory,
@@ -21,6 +21,6 @@ export async function includePartials(mdxString, partialsDir, filePath) {
 	const contents = await remark()
 		.use(remarkMdx)
 		.use(remarkIncludePartials, { partialsDir, filePath })
-		.process(mdxString);
-	return String(contents);
+		.process(mdxString)
+	return String(contents)
 }

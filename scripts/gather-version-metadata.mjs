@@ -1,7 +1,7 @@
-import fs from "fs";
-import path from "path";
+import fs from 'fs'
+import path from 'path'
 // Third-party
-import semver from "semver";
+import semver from 'semver'
 
 /**
  * Given a content directory, and a JSON output file, build version metadata
@@ -12,17 +12,17 @@ import semver from "semver";
  */
 export default async function gatherVersionMetadata(contentDir) {
 	// Set up the version metadata object, this is what we'll return
-	const versionMetadata = {};
+	const versionMetadata = {}
 	/**
 	 * We expect the content directory to contain a directory for each product.
 	 * Note that "product" and "content source repo" are used interchangeably.
 	 * Some products, such as Terraform, have multiple content source repos.
 	 */
-	const products = fs.readdirSync(contentDir);
+	const products = fs.readdirSync(contentDir)
 	// Iterate over each product directory, adding to `versionMetadata`
 	for (const product of products) {
 		// Initialize the product array
-		versionMetadata[product] = [];
+		versionMetadata[product] = []
 		/**
 		 * We expect the product directory to contain a directory for each version.
 		 * We expect that either:
@@ -31,25 +31,25 @@ export default async function gatherVersionMetadata(contentDir) {
 		 * - _None_ of the version directories are semver-valid. In this case,
 		 *   versions will be sorted alphabetically.
 		 */
-		const productDir = path.join(contentDir, product);
-		const rawVersions = fs.readdirSync(productDir);
+		const productDir = path.join(contentDir, product)
+		const rawVersions = fs.readdirSync(productDir)
 		// Sort versions by semver if possible, otherwise sort alphabetically
 		const isAllSemver = rawVersions.every((v) =>
-			semver.valid(normalizeGenericPatchVersion(v))
-		);
+			semver.valid(normalizeGenericPatchVersion(v)),
+		)
 		const versions = rawVersions
 			.sort((a, b) => {
-				const [aVersion, bVersion] = [a, b].map(normalizeGenericPatchVersion);
+				const [aVersion, bVersion] = [a, b].map(normalizeGenericPatchVersion)
 				if (isAllSemver) {
 					// Sort semver
-					return semver.compare(aVersion, bVersion);
+					return semver.compare(aVersion, bVersion)
 				} else {
 					// Sort alphabetically
-					return aVersion.localeCompare(bVersion);
+					return aVersion.localeCompare(bVersion)
 				}
 			})
 			// Reverse the array after sorting, so the latest version is first
-			.reverse();
+			.reverse()
 		/**
 		 * Iterate over the version entries, augmenting them with version metadata,
 		 * and adding them to the `versionMetadata` object.
@@ -64,14 +64,14 @@ export default async function gatherVersionMetadata(contentDir) {
 		 */
 		for (const [idx, version] of versions.entries()) {
 			// TODO: Placeholder `releaseStage` to make it work, needs more thought
-			const releaseStage = "stable";
+			const releaseStage = 'stable'
 			// TODO: Placeholder `isLatest` to make it work, needs more thought
-			const isLatest = idx === 0;
-			versionMetadata[product].push({ version, releaseStage, isLatest });
+			const isLatest = idx === 0
+			versionMetadata[product].push({ version, releaseStage, isLatest })
 		}
 	}
 	// Return the version metadata
-	return versionMetadata;
+	return versionMetadata
 }
 
 /**
@@ -82,5 +82,5 @@ export default async function gatherVersionMetadata(contentDir) {
  * @returns {string}
  */
 function normalizeGenericPatchVersion(version) {
-	return version.replace(/\.x$/, ".0");
+	return version.replace(/\.x$/, '.0')
 }

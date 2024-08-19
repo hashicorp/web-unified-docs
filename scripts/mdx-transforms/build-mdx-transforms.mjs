@@ -1,11 +1,11 @@
-import fs from "fs";
-import path from "path";
+import fs from 'fs'
+import path from 'path'
 // Third-party
-import grayMatter from "gray-matter";
+import grayMatter from 'gray-matter'
 // Local
-import listFiles from "../utils/list-files.mjs";
-import { includePartials } from "./include-partials/include-partials.mjs";
-import batchPromises from "../utils/batch-promises.mjs";
+import listFiles from '../utils/list-files.mjs'
+import { includePartials } from './include-partials/include-partials.mjs'
+import batchPromises from '../utils/batch-promises.mjs'
 
 /**
  * Given a target directory,
@@ -22,49 +22,49 @@ import batchPromises from "../utils/batch-promises.mjs";
  */
 export default async function buildMdxTransforms(targetDir, outputDir) {
 	// Walk the directory to get a list of all files
-	const allFiles = await listFiles(targetDir);
+	const allFiles = await listFiles(targetDir)
 	// Filter for `.mdx` files
 	const mdxFiles = allFiles.filter(
-		(filePath) => path.extname(filePath) === ".mdx"
-	);
+		(filePath) => path.extname(filePath) === '.mdx',
+	)
 	/**
 	 * Map over each `.mdx` file, and prepare the file for transformation
 	 */
 	const mdxFileEntries = mdxFiles.map((filePath) => {
-		const relativePath = path.relative(targetDir, filePath);
-		const [repoSlug, version, contentDir] = relativePath.split("/");
+		const relativePath = path.relative(targetDir, filePath)
+		const [repoSlug, version, contentDir] = relativePath.split('/')
 		const partialsDir = path.join(
 			targetDir,
 			repoSlug,
 			version,
 			contentDir,
-			"partials"
-		);
-		const outPath = path.join(outputDir, relativePath);
-		return { filePath, partialsDir, outPath };
-	});
+			'partials',
+		)
+		const outPath = path.join(outputDir, relativePath)
+		return { filePath, partialsDir, outPath }
+	})
 	/**
 	 * Apply MDX transforms to each file entry, in batches
 	 */
-	console.log(`🪄 Running MDX transforms on ${mdxFileEntries.length} files...`);
-	const batchSize = 16;
+	console.log(`🪄 Running MDX transforms on ${mdxFileEntries.length} files...`)
+	const batchSize = 16
 	const results = await batchPromises(
 		mdxFileEntries,
 		applyMdxTransforms,
-		batchSize
-	);
+		batchSize,
+	)
 	// Log out any errors encountered
 	const errors = results
 		.filter((result) => result.error !== null)
-		.map(({ error }) => error);
+		.map(({ error }) => error)
 	if (errors.length > 0) {
-		console.error(`❗ Encountered ${errors.length} errors:`);
+		console.error(`❗ Encountered ${errors.length} errors:`)
 		errors.forEach((error) => {
-			console.error(`❌ ${error}`);
-		});
+			console.error(`❌ ${error}`)
+		})
 	}
 	// Log out that the script has complete
-	console.log(`✅ Applied MDX transforms to ${mdxFileEntries.length} files.`);
+	console.log(`✅ Applied MDX transforms to ${mdxFileEntries.length} files.`)
 }
 
 /**
@@ -82,30 +82,23 @@ export default async function buildMdxTransforms(targetDir, outputDir) {
  */
 async function applyMdxTransforms(entry) {
 	try {
-		const { filePath, partialsDir, outPath } = entry;
-		const fileString = fs.readFileSync(filePath, "utf8");
-		const { data, content } = grayMatter(fileString);
-		let transformedContent = content;
-		if (content.includes("@include")) {
-			transformedContent = await includePartials(
-				content,
-				partialsDir,
-				filePath
-			);
+		const { filePath, partialsDir, outPath } = entry
+		const fileString = fs.readFileSync(filePath, 'utf8')
+		const { data, content } = grayMatter(fileString)
+		let transformedContent = content
+		if (content.includes('@include')) {
+			transformedContent = await includePartials(content, partialsDir, filePath)
 		}
-		const transformedFileString = grayMatter.stringify(
-			transformedContent,
-			data
-		);
+		const transformedFileString = grayMatter.stringify(transformedContent, data)
 		// Ensure the parent directory for the output file path exists
-		const outDir = path.dirname(outPath);
+		const outDir = path.dirname(outPath)
 		if (!fs.existsSync(outDir)) {
-			fs.mkdirSync(outDir, { recursive: true });
+			fs.mkdirSync(outDir, { recursive: true })
 		}
 		// Write out the file
-		fs.writeFileSync(outPath, transformedFileString);
-		return { error: null };
+		fs.writeFileSync(outPath, transformedFileString)
+		return { error: null }
 	} catch (e) {
-		return { error: String(e).split("\n")[0] };
+		return { error: String(e).split('\n')[0] }
 	}
 }

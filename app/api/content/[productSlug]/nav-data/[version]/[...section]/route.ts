@@ -6,7 +6,7 @@ export async function GET(
 	request: Request,
 	{
 		params,
-	}: { params: { productSlug: string; version: string; section: string[] } }
+	}: { params: { productSlug: string; version: string; section: string[] } },
 ) {
 	const { productSlug, version, section } = params
 
