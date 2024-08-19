@@ -1,4 +1,4 @@
-import semver from "semver";
+import semver from 'semver'
 
 /**
  * TODO: we have different content directory structures across repos.
@@ -26,56 +26,56 @@ import semver from "semver";
  */
 export const ALL_REPO_CONFIG = {
 	boundary: {
-		assetDir: "public",
-		contentDir: "content",
-		dataDir: "data",
-		patch: "generic",
+		assetDir: 'public',
+		contentDir: 'content',
+		dataDir: 'data',
+		patch: 'generic',
 		releaseRefPattern:
 			/^refs\/(remotes\/origin\/release\/|tags\/v)(\d+\.\d+\.[x,\d]+)$/i,
 		versionStringFromRef: (ref) => {
-			const versionString = ref.match(/(\d+\.\d+\.[x,\d]+)$/)[1];
-			return `v${versionString}`;
+			const versionString = ref.match(/(\d+\.\d+\.[x,\d]+)$/)[1]
+			return `v${versionString}`
 		},
-		websiteDir: "website",
+		websiteDir: 'website',
 	},
 	consul: {
-		assetDir: "public",
-		contentDir: "content",
-		dataDir: "data",
-		patch: "generic",
+		assetDir: 'public',
+		contentDir: 'content',
+		dataDir: 'data',
+		patch: 'generic',
 		releaseRefPattern:
 			/^refs\/(remotes\/origin\/release\/|tags\/v)(\d+\.\d+\.[x,\d]+)$/i,
 		versionStringFromRef: (ref) => {
-			const versionString = ref.match(/(\d+\.\d+\.[x,\d]+)$/)[1];
-			return `v${versionString}`;
+			const versionString = ref.match(/(\d+\.\d+\.[x,\d]+)$/)[1]
+			return `v${versionString}`
 		},
-		websiteDir: "website",
+		websiteDir: 'website',
 	},
-	"hcp-docs": {
-		assetDir: "public",
-		contentDir: "content",
-		dataDir: "data",
-		patch: "generic",
+	'hcp-docs': {
+		assetDir: 'public',
+		contentDir: 'content',
+		dataDir: 'data',
+		patch: 'generic',
 		/**
 		 * Note: Versioned docs is not enabled for `hcp-docs`.
 		 * `branchForLatest` is set to `main`.
 		 */
 		releaseRefPattern: /^refs\/remotes\/origin\/main$/i,
-		versionStringFromRef: (_ref) => "v0.0.0",
-		websiteDir: ".",
+		versionStringFromRef: (_ref) => 'v0.0.0',
+		websiteDir: '.',
 	},
 	nomad: {
-		assetDir: "public",
-		contentDir: "content",
-		dataDir: "data",
-		patch: "generic",
+		assetDir: 'public',
+		contentDir: 'content',
+		dataDir: 'data',
+		patch: 'generic',
 		releaseRefPattern:
 			/^refs\/(remotes\/origin\/release\/|tags\/v)(\d+\.\d+\.[x,\d]+)$/i,
 		versionStringFromRef: (ref) => {
-			const versionString = ref.match(/(\d+\.\d+\.[x,\d]+)$/)[1];
-			return `v${versionString}`;
+			const versionString = ref.match(/(\d+\.\d+\.[x,\d]+)$/)[1]
+			return `v${versionString}`
 		},
-		websiteDir: "website",
+		websiteDir: 'website',
 	},
 	/**
 	 * TODO: for Packer, will probably need to do _something_ to sort out
@@ -86,27 +86,27 @@ export const ALL_REPO_CONFIG = {
 	 * Or this may be a non-issue, I'm not actually sure.
 	 */
 	packer: {
-		assetDir: "public",
-		contentDir: "content",
-		dataDir: "data",
-		patch: "generic",
+		assetDir: 'public',
+		contentDir: 'content',
+		dataDir: 'data',
+		patch: 'generic',
 		releaseRefPattern:
 			/^refs\/(remotes\/origin\/release\/|tags\/v)(\d+\.\d+\.[x,\d]+)$/i,
 		versionStringFromRef: (ref) => {
-			const versionString = ref.match(/(\d+\.\d+\.[x,\d]+)$/)[1];
-			return `v${versionString}`;
+			const versionString = ref.match(/(\d+\.\d+\.[x,\d]+)$/)[1]
+			return `v${versionString}`
 		},
-		websiteDir: "website",
+		websiteDir: 'website',
 	},
-	"ptfe-releases": {
-		assetDir: "img",
-		contentDir: "docs",
-		dataDir: "data",
-		patch: "exact",
+	'ptfe-releases': {
+		assetDir: 'img',
+		contentDir: 'docs',
+		dataDir: 'data',
+		patch: 'exact',
 		releaseRefPattern: /^refs\/(tags\/)v\d\d\d\d\d\d-[\d]+$/i,
 		versionStringFromRef: (ref) => {
-			const versionString = ref.match(/v(\d\d\d\d\d\d-[\d]+)$/i)[1];
-			return `v${versionString}`;
+			const versionString = ref.match(/v(\d\d\d\d\d\d-[\d]+)$/i)[1]
+			return `v${versionString}`
 		},
 		/**
 		 * Note: we need to sort versions for various reasons. Nearly all
@@ -115,16 +115,16 @@ export const ALL_REPO_CONFIG = {
 		 * date-based versions into semver, purely for the purpose of sorting.
 		 */
 		semverCoerce: (versionString) => {
-			const versionRegex = /v(\d\d\d\d)(\d\d)-([\d]+)/;
-			const versionParts = versionRegex.exec(versionString);
-			const [_match, year, date, patch] = versionParts;
-			const semverString = `v${year}.${parseInt(date)}.${patch}`;
-			return semver.coerce(semverString);
+			const versionRegex = /v(\d\d\d\d)(\d\d)-([\d]+)/
+			const versionParts = versionRegex.exec(versionString)
+			const [_match, year, date, patch] = versionParts
+			const semverString = `v${year}.${parseInt(date)}.${patch}`
+			return semver.coerce(semverString)
 		},
-		websiteDir: "website",
+		websiteDir: 'website',
 	},
 	sentinel: {
-		assetDir: "public",
+		assetDir: 'public',
 		/**
 		 * Note: Sentinel content is located in `website/content/sentinel`.
 		 * Copying over the content is easy enough, but for internal links,
@@ -132,28 +132,28 @@ export const ALL_REPO_CONFIG = {
 		 * path, it's a bit of an outlier, so will probably present some
 		 * interesting challenges.
 		 */
-		contentDir: "content/sentinel",
-		dataDir: "data",
-		patch: "generic",
+		contentDir: 'content/sentinel',
+		dataDir: 'data',
+		patch: 'generic',
 		releaseRefPattern:
 			/^refs\/(remotes\/origin\/release\/|tags\/v)(\d+\.\d+\.[x,\d]+)$/i,
 		versionStringFromRef: (ref) => {
-			const versionString = ref.match(/(\d+\.\d+\.[x,\d]+)$/)[1];
-			return `v${versionString}`;
+			const versionString = ref.match(/(\d+\.\d+\.[x,\d]+)$/)[1]
+			return `v${versionString}`
 		},
-		websiteDir: "website",
+		websiteDir: 'website',
 	},
 	terraform: {
-		assetDir: "img",
-		contentDir: "docs",
-		dataDir: "data",
+		assetDir: 'img',
+		contentDir: 'docs',
+		dataDir: 'data',
 		/**
 		 * New config to cut-off at old versions. Not sure how our current
 		 * system handles this, but it does it somehow! Also for Terraform
 		 * specifically, am curious about the `v1.1 *and earlier*` text in our
 		 * version selector... where's the `and earlier` coming from?
 		 */
-		earliestVersion: "v1.1.0",
+		earliestVersion: 'v1.1.0',
 		/**
 		 * The "generic" vs "exact" patch versions seems like something we probably
 		 * want to not have to worry about in the future... right now it only seems
@@ -161,13 +161,13 @@ export const ALL_REPO_CONFIG = {
 		 * might be other ways to approach it in both cases. But trying to change it
 		 * at the same time as running the migration seems like it'd be tough.
 		 */
-		patch: "generic",
+		patch: 'generic',
 		releaseRefPattern: /^(refs\/heads\/|refs\/remotes\/origin\/)?(v\d+\.\d+)$/i,
 		versionStringFromRef: (ref) => {
-			const versionString = ref.match(/(v\d+\.\d+)$/)[1];
-			return versionString + ".x";
+			const versionString = ref.match(/(v\d+\.\d+)$/)[1]
+			return versionString + '.x'
 		},
-		websiteDir: "website",
+		websiteDir: 'website',
 	},
 	// "terraform-cdk": {
 	// 	contentDir: "docs",
@@ -215,26 +215,26 @@ export const ALL_REPO_CONFIG = {
 	// 	releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
 	// },
 	vault: {
-		assetDir: "public",
-		contentDir: "content",
-		dataDir: "data",
-		earliestVersion: "v1.4.0",
-		patch: "generic",
+		assetDir: 'public',
+		contentDir: 'content',
+		dataDir: 'data',
+		earliestVersion: 'v1.4.0',
+		patch: 'generic',
 		releaseRefPattern:
 			/^refs\/(remotes\/origin\/release\/|tags\/v)(\d+\.\d+\.[x,\d]+)$/i,
 		versionStringFromRef: (ref) => {
-			const versionRegex = /(\d+\.\d+\.[x,\d]+)$/;
+			const versionRegex = /(\d+\.\d+\.[x,\d]+)$/
 			if (!versionRegex.test(ref)) {
-				return null;
+				return null
 			}
-			const versionString = ref.match(versionRegex)[1];
-			return `v${versionString}`;
+			const versionString = ref.match(versionRegex)[1]
+			return `v${versionString}`
 		},
-		websiteDir: "website",
+		websiteDir: 'website',
 	},
 	/**
 	 * Note: waypoint documentation is no longer published, as the Community
 	 * edition of Waypoint is no longer actively maintained. HCP Waypoint docs
 	 * are maintained in the `hashicorp/hcp-docs` repository.
 	 */
-};
+}

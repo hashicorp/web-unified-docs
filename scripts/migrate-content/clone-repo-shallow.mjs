@@ -1,6 +1,6 @@
-import fs from "fs";
-import path from "path";
-import { execSync } from "child_process";
+import fs from 'fs'
+import path from 'path'
+import { execSync } from 'child_process'
 
 /**
  * Clone the repository into the target directory, using the `gh` CLI.
@@ -26,15 +26,15 @@ export function cloneRepoShallow(targetDir, repoOwner, repoName) {
 	 * Assuming the `gh repo clone` command will be successful, we expect
 	 * the repository directory to be given the same name as the repository.
 	 */
-	const repoDir = path.join(targetDir, repoName);
-	const repoDirExists = fs.existsSync(repoDir);
+	const repoDir = path.join(targetDir, repoName)
+	const repoDirExists = fs.existsSync(repoDir)
 	// If the repository already exists, we skip cloning
 	if (!repoDirExists) {
 		execSync(`gh repo clone ${repoOwner}/${repoName} -- --filter=blob:none`, {
-			stdio: "inherit", // Nice to see progress for large repos
+			stdio: 'inherit', // Nice to see progress for large repos
 			cwd: targetDir,
-		});
+		})
 	}
 	// Return the path to the previously-existing or newly-cloned directory
-	return repoDir;
+	return repoDir
 }

@@ -1,5 +1,5 @@
 // Third-party
-import semver from "semver";
+import semver from 'semver'
 
 /**
  * TODO: CLEAN THIS UP A BIT.
@@ -17,7 +17,7 @@ export function getReleaseRefs(refsList, repoConfig) {
 	 * Where semver versioning is used, this function can be omitted, and
 	 * we'll use `semver.coerce`.
 	 */
-	const semverCoerce = repoConfig.semverCoerce || semver.coerce;
+	const semverCoerce = repoConfig.semverCoerce || semver.coerce
 	/**
 	 * Find the relevant release refs.
 	 *
@@ -28,42 +28,42 @@ export function getReleaseRefs(refsList, repoConfig) {
 	const rawReleaseRefs = refsList
 		.filter(({ ref }) => repoConfig.releaseRefPattern.test(ref))
 		.map((releaseRef) => {
-			const rawVersionString = repoConfig.versionStringFromRef(releaseRef.ref);
+			const rawVersionString = repoConfig.versionStringFromRef(releaseRef.ref)
 			const versionString =
-				repoConfig.patch === "generic"
-					? rawVersionString.replace(/\d+$/, "x")
-					: rawVersionString;
-			return { ...releaseRef, rawVersionString, versionString };
+				repoConfig.patch === 'generic'
+					? rawVersionString.replace(/\d+$/, 'x')
+					: rawVersionString
+			return { ...releaseRef, rawVersionString, versionString }
 		})
-		.filter((entry) => Boolean(entry.versionString));
-	console.log(`Found ${rawReleaseRefs.length} pattern-matched release refs.`);
+		.filter((entry) => Boolean(entry.versionString))
+	console.log(`Found ${rawReleaseRefs.length} pattern-matched release refs.`)
 	//
 	const releaseRefs = rawReleaseRefs
 		.map((releaseRef) => {
-			const versionSemver = semverCoerce(releaseRef.versionString);
+			const versionSemver = semverCoerce(releaseRef.versionString)
 			return {
 				...releaseRef,
 				version: versionSemver,
-			};
+			}
 		})
 		.filter(({ version }) => {
 			//
 			if (!repoConfig.earliestVersion) {
-				return true;
+				return true
 			}
 			//
-			const earliestVersion = semverCoerce(repoConfig.earliestVersion);
+			const earliestVersion = semverCoerce(repoConfig.earliestVersion)
 			if (!earliestVersion) {
 				throw new Error(
 					`Error: Earliest version "${repoConfig.earliestVersion}" is not a valid semver version.`
-				);
+				)
 			} else {
 				//
-				const isInRange = semver.gte(version, earliestVersion);
-				return isInRange;
+				const isInRange = semver.gte(version, earliestVersion)
+				return isInRange
 			}
-		});
+		})
 
-	console.log(`Found ${releaseRefs.length} release refs with valid versions.`);
-	return releaseRefs;
+	console.log(`Found ${releaseRefs.length} release refs with valid versions.`)
+	return releaseRefs
 }
