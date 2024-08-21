@@ -64,8 +64,8 @@ export const ALL_REPO_CONFIG = {
 		 *
 		 * Fails for v1.8.x (and likely earlier) with error:
 		 * `consul/website/content: No such file or directory`
-		 * This likely indicates that older versions of `consul` docs are still
-		 * located in `pages` directories. Need to confirm.
+		 * This likely indicates that older versions of docs have a different
+		 * directory structure that needs to be accounted for. Need to confirm.
 		 */
 		assetDir: 'public',
 		contentDir: 'content',
@@ -94,8 +94,8 @@ export const ALL_REPO_CONFIG = {
 		 *
 		 * Fails for v0.12.x (and likely earlier) with error:
 		 * `nomad/website/content: No such file or directory`
-		 * This likely indicates that older versions of `nomad` docs are still
-		 * located in `pages` directories. Need to confirm.
+		 * This likely indicates that older versions of docs have a different
+		 * directory structure that needs to be accounted for. Need to confirm.
 		 */
 		assetDir: 'public',
 		contentDir: 'content',
@@ -109,13 +109,8 @@ export const ALL_REPO_CONFIG = {
 		 *
 		 * Fails for v1.5.6 (and likely earlier) with error:
 		 * `packer/website/content: No such file or directory`
-		 * This likely indicates that older versions of `packer` docs are still
-		 * located in `pages` directories. Need to confirm.
-		 */
-		/**
-		 * TODO: for Packer, do we need to retain the "exact" patch setup?
-		 * It feels like it'd be significantly simpler and more lightweight to
-		 * use the "generic" patch setup, as has been done for all other sources.
+		 * This likely indicates that older versions of docs have a different
+		 * directory structure that needs to be accounted for. Need to confirm.
 		 */
 		/**
 		 * TODO: for Packer, will probably need to do _something_ to sort out
@@ -133,14 +128,21 @@ export const ALL_REPO_CONFIG = {
 	},
 	'ptfe-releases': {
 		/**
-		 * Initial migration attempt:
+		 * ✅ Initial migration attempt: SEEMS TO WORK
 		 *
-		 * 🚧 TODO
+		 * TODO: handle `terraform-docs-common` and the `copy-docs` workflow.
+		 * In our current system, this copies a subset of `cloud-docs` into
+		 * `ptfe-releases`. We need to retain some form of this workflow
+		 * in our new setup, both during migration, and as a script that can
+		 * be run in the future to sync `cloud-docs` content
+		 * from `terraform-docs-common` into `ptfe-releases`.
+		 *
+		 * For more details see this gist:
+		 * https://gist.github.com/zchsh/73c36d4248880cb1a66216b2b00f89ed
 		 */
 		assetDir: 'img',
 		contentDir: 'docs',
 		dataDir: 'data',
-
 		/**
 		 * Note: we need to sort versions for various reasons. Nearly all
 		 * our documentation is semver-versioned. PTFE is not. Rather than
@@ -163,12 +165,12 @@ export const ALL_REPO_CONFIG = {
 	},
 	sentinel: {
 		/**
-		 * Initial migration attempt:
+		 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
 		 *
 		 * Fails for v0.16.x (and likely earlier) with error:
 		 * `sentinel/website/content: No such file or directory`
-		 * This likely indicates that older versions of `consul` docs are still
-		 * located in `pages` directories. Need to confirm.
+		 * This likely indicates that older versions of docs have a different
+		 * directory structure that needs to be accounted for. Need to confirm.
 		 * See note at top of this document on `pages` directories for details.
 		 */
 		assetDir: 'public',
@@ -183,140 +185,180 @@ export const ALL_REPO_CONFIG = {
 		 */
 		contentDir: 'content/sentinel',
 		dataDir: 'data',
-
 		semverCoerce: semver.coerce,
 		websiteDir: 'website',
 	},
 	terraform: {
 		/**
-		 * Initial migration attempt:
+		 * ✅ Initial migration attempt: SEEMS TO WORK
 		 *
-		 * 🚧 TODO
+		 * TODO: determine how to handle non-"stable" releases. For example,
+		 * `terraform` has `v1.10.x` releases that currently have the version
+		 * number `v1.10.0-alpha20240814`, the `releaseStage` `alpha`. This
+		 * will need to be accounted for in our new content API.
+		 *
+		 * TODO: `display` version for `v1.1.x` is "v1.1 and earlier". Ref:
+		 * https://content.hashicorp.com/api/content/terraform/version-metadata?partial=true
+		 * How should we handle this in our unified docs repo setup?
+		 * Maybe another data point in favour of some kind of
+		 * `_version-metadata.json` file at the top level of each versioned
+		 * content directory? Eg we'd write out a file to:
+		 * - content/${repoSlug}/${version}/_version-metadata.json
+		 * This file would have _some_ of the metadata we already have here:
+		 * https://content.hashicorp.com/api/content/terraform/version-metadata?partial=true
+		 * and would be collected via our `gather-version-metadata` script.
 		 */
 		assetDir: 'img',
 		contentDir: 'docs',
 		dataDir: 'data',
-		/**
-		 * New config to cut-off at old versions.
-		 *
-		 * TODO: determine if this cut-off is appropriate.
-		 * Not sure how our current system handles this, but it does it somehow!
-		 * Also for Terraform specifically, am curious about the
-		 * `v1.1 *and earlier*` text in our version selector...
-		 * where's the `and earlier` coming from?
-		 */
-		earliestVersion: 'v1.1.0',
-		/**
-		 * The "generic" vs "exact" patch versions seems like something we probably
-		 * want to not have to worry about in the future... right now it only seems
-		 * to apply to TFE, and also Packer for some reason, and it seems like there
-		 * might be other ways to approach it in both cases. But trying to change it
-		 * at the same time as running the migration seems like it'd be tough.
-		 */
 		semverCoerce: semver.coerce,
 		websiteDir: 'website',
 	},
 	'terraform-cdk': {
 		/**
-		 * Initial migration attempt:
+		 * ✅ Initial migration attempt: SEEMS TO WORK
 		 *
-		 * 🚧 TODO
+		 * TODO: `terraform-cdk` doesn't seem to have an asset directory.
+		 * Need to confirm this is true across ALL versions... if not,
+		 * need to figure out a workaround to only copy it in some versions,
+		 * without silently ignoring missing assets directories in other contexts.
+		 * Maybe like a `versionsWithoutAssets` array or something?
 		 */
-		assetDir: 'public',
-		contentDir: 'content',
+		assetDir: '',
+		contentDir: 'docs',
 		dataDir: 'data',
 		semverCoerce: semver.coerce,
 		websiteDir: 'website',
 	},
 	'terraform-docs-agents': {
 		/**
-		 * Initial migration attempt:
+		 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
 		 *
-		 * 🚧 TODO
+		 * Fails for v1.5.x (and likely earlier) with error:
+		 * `terraform-docs-agents/website/img: No such file or directory`
+		 * This likely indicates that older versions of docs have a different
+		 * directory structure that needs to be accounted for. Need to confirm.
+		 * See note at top of this document on `pages` directories for details.
 		 */
-		assetDir: 'public',
-		contentDir: 'content',
+		assetDir: 'img',
+		contentDir: 'docs',
 		dataDir: 'data',
 		semverCoerce: semver.coerce,
 		websiteDir: 'website',
 	},
 	'terraform-docs-common': {
 		/**
-		 * Initial migration attempt:
+		 * ✅ Initial migration attempt: SEEMS TO WORK
 		 *
-		 * 🚧 TODO
+		 * Maybe worth noting: versioned docs is not enabled for `terraform-docs-common`.
+		 * `branchForLatest` is set to `main`. We treat the single version
+		 * as `v0.0.x` in our version metadata in the current content API:
+		 * https://content.hashicorp.com/api/content/terraform-docs-common/version-metadata?partial=true
 		 */
-		assetDir: 'public',
-		contentDir: 'content',
+		/**
+		 * TODO: `terraform-docs-common` has _both_ an `img` folder, _and_ a
+		 * `public` folder. Need to investigate how these are used, and whether
+		 * we need to move both over (eg assetDirs could be an array?)
+		 */
+		assetDir: 'img',
+		contentDir: 'docs',
 		dataDir: 'data',
 		semverCoerce: semver.coerce,
 		websiteDir: 'website',
 	},
 	'terraform-plugin-framework': {
 		/**
-		 * Initial migration attempt:
+		 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
 		 *
-		 * 🚧 TODO
+		 * Fails for v0.7.x (and likely earlier) with error:
+		 * `terraform-plugin-framework/website/img: No such file or directory`
+		 * `terraform-plugin-framework/website/docs: No such file or directory`
+		 * `terraform-plugin-framework/website/data: No such file or directory`
+		 * This likely indicates that older versions of docs have a different
+		 * directory structure that needs to be accounted for. Need to confirm.
+		 * See note at top of this document on `pages` directories for details.
 		 */
-		assetDir: 'public',
-		contentDir: 'content',
+		assetDir: 'img',
+		contentDir: 'docs',
 		dataDir: 'data',
 		semverCoerce: semver.coerce,
 		websiteDir: 'website',
 	},
 	'terraform-plugin-log': {
 		/**
-		 * Initial migration attempt:
-		 *
-		 * 🚧 TODO
+		 * ✅ Initial migration attempt: SEEMS TO WORK
 		 */
-		assetDir: 'public',
-		contentDir: 'content',
+		assetDir: 'img',
+		contentDir: 'docs',
 		dataDir: 'data',
 		semverCoerce: semver.coerce,
 		websiteDir: 'website',
 	},
 	'terraform-plugin-mux': {
 		/**
-		 * Initial migration attempt:
+		 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
 		 *
-		 * 🚧 TODO
+		 * Fails for v0.6.x (and likely earlier) with error:
+		 * `terraform-plugin-mux/website/img: No such file or directory`
+		 * `terraform-plugin-mux/website/docs: No such file or directory`
+		 * `terraform-plugin-mux/website/data: No such file or directory`
+		 * This likely indicates that older versions of docs have a different
+		 * directory structure that needs to be accounted for. Need to confirm.
+		 * See note at top of this document on `pages` directories for details.
 		 */
-		assetDir: 'public',
-		contentDir: 'content',
+		assetDir: 'img',
+		contentDir: 'docs',
 		dataDir: 'data',
 		semverCoerce: semver.coerce,
 		websiteDir: 'website',
 	},
 	'terraform-plugin-sdk': {
 		/**
-		 * Initial migration attempt:
+		 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
 		 *
-		 * 🚧 TODO
+		 * Fails for v2.15.x (and likely earlier) with error:
+		 * `terraform-plugin-sdk/website/img: No such file or directory`
+		 * `terraform-plugin-sdk/website/docs: No such file or directory`
+		 * `terraform-plugin-sdk/website/data: No such file or directory`
+		 * This likely indicates that older versions of docs have a different
+		 * directory structure that needs to be accounted for. Need to confirm.
+		 * See note at top of this document on `pages` directories for details.
 		 */
-		assetDir: 'public',
-		contentDir: 'content',
+		assetDir: 'img',
+		contentDir: 'docs',
 		dataDir: 'data',
 		semverCoerce: semver.coerce,
 		websiteDir: 'website',
 	},
 	'terraform-plugin-testing': {
 		/**
-		 * Initial migration attempt:
+		 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
 		 *
-		 * 🚧 TODO
+		 * Fails for v1.0.x (and likely earlier) with error:
+		 * `terraform-plugin-testing/website/img: No such file or directory`
+		 * `terraform-plugin-testing/website/data: No such file or directory`
+		 * This likely indicates that older versions of docs have a different
+		 * directory structure that needs to be accounted for. Need to confirm.
+		 * See note at top of this document on `pages` directories for details.
 		 */
-		assetDir: 'public',
-		contentDir: 'content',
+		assetDir: 'img',
+		contentDir: 'docs',
 		dataDir: 'data',
 		semverCoerce: semver.coerce,
 		websiteDir: 'website',
 	},
 	vagrant: {
 		/**
-		 * Initial migration attempt:
+		 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
 		 *
-		 * 🚧 TODO
+		 * Fails for v2.2.15 (and likely earlier) with error:
+		 * `vagrant/website/content: No such file or directory`
+		 * This likely indicates that older versions of docs have a different
+		 * directory structure that needs to be accounted for. Need to confirm.
+		 * See note at top of this document on `pages` directories for details.
+		 *
+		 * TODO: revisit `exact` patch setup for Vagrant. Is it necessary?
+		 * See: https://gist.github.com/zchsh/f123819e5d0005f14fff3a518bcade35
 		 */
 		assetDir: 'public',
 		contentDir: 'content',
@@ -326,9 +368,13 @@ export const ALL_REPO_CONFIG = {
 	},
 	vault: {
 		/**
-		 * Initial migration attempt:
+		 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
 		 *
-		 * 🚧 TODO
+		 * Fails for v1.6.x (and likely earlier) with error:
+		 * `vault/website/content: No such file or directory`
+		 * This likely indicates that older versions of docs have a different
+		 * directory structure that needs to be accounted for. Need to confirm.
+		 * See note at top of this document on `pages` directories for details.
 		 */
 		assetDir: 'public',
 		contentDir: 'content',

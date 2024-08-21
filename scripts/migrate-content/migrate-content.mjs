@@ -197,13 +197,13 @@ async function migrateContent(targetRepos, ghCloneDir, outputDirs) {
 		)
 		for (let i = targetReleaseRefs.length - 1; i >= 0; i--) {
 			const targetRef = targetReleaseRefs[i]
-			await migrateRepoContentAtRef({
+			await migrateRepoContentAtRef(
 				repoSlug,
 				cloneDir,
 				targetRef,
 				repoConfig,
-				outputDirs,
-			})
+				outputDirs
+			)
 			console.log(
 				`🟢 Finished extracting "${repoSlug}" content from "${targetRef.ref}".`
 			)
@@ -218,28 +218,32 @@ async function migrateContent(targetRepos, ghCloneDir, outputDirs) {
 	 * sure what. Need to investigate further. Can uncomment `process.exit()`
 	 * for now as a stopgap when it's annoying.
 	 */
-	// process.exit()
-	return true
+	process.exit()
+	// return true
 }
 
 /**
- * TODO: write description
- *
- * @param {Object} config
- * @param {*} config.repoSlug
- * @param {*} config.cloneDir
- * @param {*} config.targetRef
- * @param {*} config.repoConfig
- * @param {*} config.outputDirs
+ * Extract content from the provided repo at the specified ref.
+
+ * @param {string} repoSlug
+ * @param {string} cloneDir
+ * @param {Object} targetRef
+ * @param {string} targetRef.hash
+ * @param {string} targetRef.ref
+ * @param {string} targetRef.versionString
+ * @param {Object} repoConfig
+ * @param {Object} outputDirs
+ * @param {string} outputDirs.content
+ * @param {string} outputDirs.assets
  * @return {void}
  */
-async function migrateRepoContentAtRef({
+async function migrateRepoContentAtRef(
 	repoSlug,
 	cloneDir,
 	targetRef,
 	repoConfig,
-	outputDirs,
-}) {
+	outputDirs
+) {
 	/**
 	 * `git checkout` out the hash corresponding to this release ref
 	 */
@@ -249,6 +253,8 @@ async function migrateRepoContentAtRef({
 		stdio: 'inherit',
 		cwd: cloneDir,
 	})
+	// Set up an array of source-destination directory paths, like { src, dest }
+	const dirsToCopy = []
 	/**
 	 * Determine the website directory path. The content, assets, and data
 	 * for the website are expected to exist within this directory.
@@ -258,13 +264,21 @@ async function migrateRepoContentAtRef({
 	 * set up destination directory paths.
 	 */
 	const websiteDirPath = path.join(cloneDir, repoConfig.websiteDir)
-	const assetsSrc = path.join(websiteDirPath, repoConfig.assetDir)
-	const assetsDest = path.join(
-		outputDirs.assets,
-		repoSlug,
-		targetRef.versionString,
-		repoConfig.assetDir.replace('public', '')
-	)
+	/**
+	 * TODO: investigate why `terraform-cdk` doesn't seem to have an asset
+	 * directory. Maybe intentional, in which case this conditional is fine.
+	 */
+	if (typeof repoConfig.assetsDir === 'string') {
+		const assetsSrc = path.join(websiteDirPath, repoConfig.assetDir)
+		const assetsDest = path.join(
+			outputDirs.assets,
+			repoSlug,
+			targetRef.versionString,
+			repoConfig.assetDir.replace('public', '')
+		)
+		dirsToCopy.push({ src: assetsSrc, dest: assetsDest })
+	}
+	// We expect all content source repos to have content and data directories
 	const contentSrc = path.join(websiteDirPath, repoConfig.contentDir)
 	const contentDest = path.join(
 		outputDirs.content,
@@ -279,13 +293,15 @@ async function migrateRepoContentAtRef({
 		targetRef.versionString,
 		repoConfig.dataDir
 	)
+	dirsToCopy.push({ src: contentSrc, dest: contentDest })
+	dirsToCopy.push({ src: dataSrc, dest: dataDest })
 	/**
 	 * Execute the copy commands in parallel, clearing out directories first
 	 */
-	await Promise.all([
-		clearAndCopy(assetsSrc, assetsDest),
-		clearAndCopy(contentSrc, contentDest),
-		clearAndCopy(dataSrc, dataDest),
-	])
+	await Promise.all(
+		dirsToCopy.map(({ src, dest }) => {
+			return clearAndCopy(src, dest)
+		})
+	)
 	return true
 }

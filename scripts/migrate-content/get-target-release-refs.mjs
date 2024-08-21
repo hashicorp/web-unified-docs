@@ -2,7 +2,6 @@
 import semver from 'semver'
 // Local
 import { fetchVersionMetadata } from './fetch-version-metadata.mjs'
-import { getIsVersionInRange } from './get-is-version-in-range.mjs'
 
 /**
  * TODO: write description
@@ -26,7 +25,7 @@ export async function getTargetReleaseRefs({
 	// Filter the fetched release refs based on provided target versions
 	const isTargetReleaseRefs = targetVersions?.length
 		? ({ versionString }) => targetVersions.includes(versionString)
-		: ({ version }) => getIsVersionInRange(version, repoConfig)
+		: () => true
 	const targetReleaseRefs = contentApiReleaseRefs.filter(isTargetReleaseRefs)
 	return targetReleaseRefs
 }
