@@ -4,13 +4,21 @@ import semver from 'semver'
 import { fetchVersionMetadata } from './fetch-version-metadata.mjs'
 
 /**
- * TODO: write description
+ * Given a `repoEntry` object, fetch version metadata from the content API,
+ * Return an array of release ref objects for the repo.
+ *
+ * If the provided `targetVersions` array is non-empty, we filter the fetched
+ * release refs, only returning those that match the provided target versions.
+ *
+ * If `targetVersions` is empty or undefined, we return all release refs.
  *
  * @param {Object} repoEntry
  * @param {*} repoEntry.repoSlug
  * @param {*} repoEntry.targetVersions
  * @param {*} repoEntry.repoConfig
- * @return
+ * @return {Promise<Array>} An array of release ref objects. Each object has
+ * { ref, hash, versionString, version }, where `version` is a semver object,
+ * and the rest of the properties are strings.
  */
 export async function getTargetReleaseRefs({
 	repoSlug,
