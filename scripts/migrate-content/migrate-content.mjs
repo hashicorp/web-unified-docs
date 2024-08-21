@@ -1,6 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { execSync } from 'child_process'
+import semver from 'semver'
 // Local
 import { clearAndCopy } from './clear-and-copy.mjs'
 import { cloneRepoShallow } from './clone-repo-shallow.mjs'
@@ -10,7 +11,81 @@ import { ALL_REPO_CONFIG } from './repo-config.mjs'
 const TEMP_DIR = '.content-source-repos'
 const OUTPUT_DIR = path.join(process.cwd(), '.migrated-content')
 
-main()
+/**
+ * Examples running this script from project root:
+ *
+ * Extract all Terraform content
+ * node ./scripts/migrate-content/migrate-content.mjs terraform
+ *
+ * Extract Terraform v1.1.x content
+ * node ./scripts/migrate-content/migrate-content.mjs terraform:v1.1.x
+ *
+ * Extract content for many products
+ * node ./scripts/migrate-content/migrate-content.mjs boundary consul terraform
+ */
+
+// Validate input arguments
+const args = process.argv.slice(2)
+if (args.length === 0) {
+	throw new Error(
+		`Please provide at least one repository slug as an argument. For example, to extract Terraform content, you can run "node migrate-content.mjs terraform". You can optionally pass specific versions to extract from each content repository. For example, to extract Terraform v1.1.x content, you can run "node migrate-content.mjs terraform:v1.1.x".`
+	)
+}
+const allRepoSlugs = Object.keys(ALL_REPO_CONFIG)
+const targetRepos = []
+for (const arg of args) {
+	const [repo, versionsPart] = arg.split(':')
+	if (!allRepoSlugs.includes(repo)) {
+		throw new Error(
+			`Invalid repo slug "${repo}". Repo slugs must be one of: ${JSON.stringify(
+				allRepoSlugs
+			)}`
+		)
+	}
+	const repoConfig = ALL_REPO_CONFIG[repo]
+	const targetVersions = versionsPart ? versionsPart.split(',') : []
+	targetRepos.push({ repo, targetVersions, repoConfig })
+}
+
+// Run the main script
+await migrateContent(targetRepos)
+/**
+ * TODO: add another step to process versioned assets in some way.
+ *
+ * Possible approach:
+ * - Assets can either be versioned, or shared across versions
+ * - Versioned assets in `public/assets/${repoName}/${version}/...`. The
+ *   `migrateContent` script is expected to handle ALL assets this way, even
+ *   if they are shared across versions.
+ * - Shared assets in `public/assets/${repoName}/common`. This directory will
+ *   start empty, and we'll use a script to populate it with shared assets.
+ *
+ * Starting with the newest version directory:
+ * - For each asset...
+ * - Check whether an identical asset exists in _any_ previous version. Must
+ *   share file name, and must be the same image (TODO: figure out how to check
+ *   this, visual diff tool would probably come in handy!). If the asset does
+ *   match, then copy the asset to "shared", and remove it from _all_ versioned
+ *   directories in which it appears. Create a map of "versioned asset path"
+ *   to "shared asset path", which we'll later use in a remark plugin to rewrite
+ *   asset paths.
+ * - If the asset doesn't exist in any previous version, retain it in the
+ *   versioned directory. This asset will _not_ be added to the map.
+ *
+ * Then, we'll run a remark plugin to rewrite asset paths in content:
+ *
+ * - For each asset path in the content:
+ * - If the asset path is in the map, rewrite the path to the shared asset path.
+ * - If the asset path is not in the map, rewrite it to a versioned path.
+ *
+ * After running this script, we should expect to have a decent chunk of assets
+ * moved into the "shared" directory. As well, we should expect that the asset
+ * paths referenced in MDX will now be _actual_ paths that can be fetched
+ * directly from our content API. This should remove the need for complex asset
+ * path rewriting... (though we'll probably still need to mess with things a
+ * bit to make `next-image` happy, maybe? I feel like it needs image dimensions
+ * or something but I can't remember exactly).
+ */
 
 /**
  * This script is intended to migrate content from the "content source" repos
@@ -22,67 +97,91 @@ main()
  * scripts in `mktg-content-workflows` somehow account for this, we'll need
  * to do the same during migration in order to maintain parity in what
  * content we're serving.
+ *
+ * TODO: write up edge cases, either below or in a separate file... maybe
+ * add Asana tasks for them... and then we can probably move forward and merge
+ * this script knowing that it's still a work in progress.
  */
-async function main() {
+async function migrateContent(targetRepos) {
 	// Ensure the temporary directory exists, this is where repos will be cloned.
 	if (!fs.existsSync(TEMP_DIR)) {
 		fs.mkdirSync(TEMP_DIR, { recursive: true })
 	}
-	/**
-	 * TODO: update to all of `Object.keys(ALL_REPO_CONFIG)`
-	 * For now, feels helpful to test a subset of repos, even one at a time.
-	 */
-	const targetRepos = ['sentinel']
-	const repoSlugs = Object.keys(ALL_REPO_CONFIG).filter((slug) => {
-		return targetRepos.includes(slug)
-	})
-	console.log(`Target repos: ${repoSlugs.join(', ')}`)
+	// Log that we're starting the extraction process for the target repos
+	console.log(`Extracting content from the follow repositories:`)
+	console.log(`Target repos: ${JSON.stringify(targetRepos)}`)
 	/**
 	 * Iterate over content source repos, cloning the repo,
 	 * and extracting content from the relevant `releaseRefs`.
 	 */
-	for (const repoSlug of repoSlugs) {
-		console.log(`Migrating content for "${repoSlug}"...`)
-		const repoConfig = ALL_REPO_CONFIG[repoSlug]
-		const repoDir = cloneRepoShallow(TEMP_DIR, 'hashicorp', repoSlug)
-		await extractAllVersionedDocs(repoDir, repoSlug, repoConfig)
+	for (const repoEntry of targetRepos) {
+		const { repo, targetVersions, repoConfig } = repoEntry
+		// Log that we're starting on this specific repo
+		console.log(`Migrating content for "${repo}"...`)
+		// Grab unique release refs from the content API
+		const contentApiReleaseRefs = await getReleaseRefsFromContentAPI(
+			repo,
+			repoConfig.semverCoerce
+		)
+		// Filter the fetched release refs based on provided target versions
+		const isTargetReleaseRefs = targetVersions.length
+			? ({ versionString }) => targetVersions.includes(versionString)
+			: ({ version }) => isVersionWithinConfigRange(version, repoConfig)
+		const targetReleaseRefs = contentApiReleaseRefs.filter(isTargetReleaseRefs)
+		// If we've filtered out all release refs, log and skip this repo
+		if (targetReleaseRefs.length === 0) {
+			console.log(`No target versions found for "${repo}". Skipping...`)
+			continue
+		}
+		// We have release refs to extract, so clone the content repo
+		// If the repo is already cloned, we'll check out the `main` branch.
+		const repoDir = cloneRepoShallow(TEMP_DIR, 'hashicorp', repo)
+		console.log(
+			`Extracting content from the "${repo}" repo at the following refs:`
+		)
+		console.log(
+			targetReleaseRefs.map(
+				({ versionString, ref }) => `${versionString} (${ref})`
+			)
+		)
+		/**
+		 * For each release ref, check out the ref, and copy the content, data,
+		 * and assets from the content source repository into this project.
+		 */
+		for (let i = targetReleaseRefs.length - 1; i >= 0; i--) {
+			extractFromFilesystem(repo, repoDir, targetReleaseRefs[i], repoConfig)
+		}
+		console.log(`✅ Done extracting content from ${repo}.`)
 	}
+	console.log(`✅ Done extracting content from all target repositories.`)
+	return true
 }
 
 /**
+ * TODO: write description
  *
+ * @param {*} version
+ * @param {*} repoConfig
+ * @returns
  */
-async function extractAllVersionedDocs(repoDir, repoName, repoConfig) {
-	/**
-	 * TODO: probably makes more sense to grab the refs for each known version
-	 * from the content API directly:
-	 * https://web-platform-dashboard-hashicorp.vercel.app/
-	 *
-	 * Example case: some release branch `release/vX.Y.Z` may already exist, but
-	 * may not yet have a corresponding release tag. Concrete example: sentinel.
-	 *
-	 * In this case, we'd want to ignore the release branch. With the info we
-	 * have available in git, we might technically be able to detect this type
-	 * of case (eg look for tags in a separate step, cross-check etc), but given
-	 * our goal is parity with the existing API, seems more pragmatic to ask the
-	 * existing content API what refs are currently powering the docs for each
-	 * version.
-	 *
-	 * As-is, we get git refs from git commands... should re-do the steps to
-	 * get `uniqueReleaseRefs`, I think!
-	 */
-	const uniqueReleaseRefs = await getReleaseRefsFromContentAPI(
-		repoName,
-		repoConfig
-	)
-	/**
-	 * For each release ref, check out the ref, and copy the content from
-	 * the website directory into this project.
-	 */
-	for (let i = uniqueReleaseRefs.length - 1; i >= 0; i--) {
-		// Extract content, data, and assets from the repo
-		extractFromFilesystem(repoName, repoDir, uniqueReleaseRefs[i], repoConfig)
+function isVersionWithinConfigRange(version, repoConfig) {
+	const { earliestVersion, semverCoerce } = repoConfig
+	if (!earliestVersion) {
+		return true
 	}
+	// If an earlier version is specified, first test if it's a valid semver
+	// version. If not, throw an error.
+	const semverEarliestVersion = semverCoerce(earliestVersion)
+	if (!semverEarliestVersion) {
+		throw new Error(
+			`Error: Earliest version "${earliestVersion}" is not a valid semver version.`
+		)
+	}
+	// At this point, we know we have a valid `earliestVersion` semver object.
+	// Compare this entry's version to determine if it is greater than or equal
+	// (gte) the specified earlier version. If it is, include, if not, drop.
+	const isInRange = semver.gte(version, semverEarliestVersion)
+	return isInRange
 }
 
 /**
@@ -103,23 +202,15 @@ function extractFromFilesystem(repoName, repoDir, releaseRef, repoConfig) {
 	 * for the website are expected to exist within this directory.
 	 */
 	const websiteDirPath = path.join(repoDir, repoConfig.websiteDir)
-	// Copy the assets directory to a new destination in the public folder
+	// TODO: make the code below a little more clear
 	/**
-	 * TODO: need to account for versioning here... Possible approach:
-	 * - Assets can either be versioned, or shared across versions
-	 * - Versioned assets in `public/assets/${repoName}/${version}/...`
-	 * - Shared assets in `public/assets/${repoName}/common`
-	 *
-	 * Starting with the newest version, copy all assets to the shared directory
-	 * Working back through earlier versions:
-	 * - If an identical assets exists in `common`, skip it
-	 * - Else, copy the asset to the specific version directory
-	 *
-	 * Then, to fetch assets:
-	 * - Front-end will *always* use a versioned URL, leading to an API route
-	 * - We receive the request, and fetch both the common and versioned URLs
-	 *   from the Vercel CDN. We return whichever one exists.
+	 * Copy the assets directory to a new destination in the public folder
+	 * Note that we do _not_ attempt to handle versioned assets in any clever
+	 * way here. We simply copy them over. We expect that subsequent scripts
+	 * could be run on the copied assets and content in order to resolve
+	 * duplicate assets across versions.
 	 */
+	console.log('Copying assets....')
 	const assetDirPath = path.join(websiteDirPath, repoConfig.assetDir)
 	const assetDest = path.join(
 		OUTPUT_DIR,
@@ -128,9 +219,10 @@ function extractFromFilesystem(repoName, repoDir, releaseRef, repoConfig) {
 		releaseRef.versionString,
 		repoConfig.assetDir.replace('public', '')
 	)
-	// Execute the copy
+	// Execute the copy, clearing out the target directory first
 	clearAndCopy(assetDirPath, assetDest)
 	// Copy content into versioned destination directory
+	console.log('Copying content....')
 	const contentDirPath = path.join(websiteDirPath, repoConfig.contentDir)
 	const contentDest = path.join(
 		OUTPUT_DIR,
@@ -139,8 +231,10 @@ function extractFromFilesystem(repoName, repoDir, releaseRef, repoConfig) {
 		releaseRef.versionString,
 		repoConfig.contentDir
 	)
+	// Execute the copy, clearing out the target directory first
 	clearAndCopy(contentDirPath, contentDest)
 	// Copy data into versioned destination directory
+	console.log('Copying data....')
 	const dataDirPath = path.join(websiteDirPath, repoConfig.dataDir)
 	const dataDest = path.join(
 		OUTPUT_DIR,
@@ -149,6 +243,7 @@ function extractFromFilesystem(repoName, repoDir, releaseRef, repoConfig) {
 		releaseRef.versionString,
 		repoConfig.dataDir
 	)
+	// Execute the copy, clearing out the target directory first
 	clearAndCopy(dataDirPath, dataDest)
 	//
 	return

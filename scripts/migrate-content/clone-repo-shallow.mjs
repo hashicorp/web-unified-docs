@@ -34,6 +34,12 @@ export function cloneRepoShallow(targetDir, repoOwner, repoName) {
 			stdio: 'inherit', // Nice to see progress for large repos
 			cwd: targetDir,
 		})
+	} else {
+		// Ensure the `main` branch is checked out, as a clean starting point
+		execSync(`git checkout main`, {
+			stdio: 'inherit',
+			cwd: repoDir,
+		})
 	}
 	// Return the path to the previously-existing or newly-cloned directory
 	return repoDir

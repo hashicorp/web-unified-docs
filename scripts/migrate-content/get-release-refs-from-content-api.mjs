@@ -9,9 +9,15 @@ const EXISTING_CONTENT_API = `https://content.hashicorp.com`
  * Return an array of release refs derived from the existing content API.
  *
  * @param {string} contentSourceRepo
- * @param {Object} repoConfig
- * @param {Function} repoConfig.semverCoerce
- * @param {string} repoConfig.earliestVersion
+ *
+ * Note: Nearly all repos use semver versioning. PTFE is one exception.
+ * If semver versioning is not being used, the repo config must provide
+ * a `semverCoerce` function, which given some custom version string,
+ * returns a semver version object.
+ *
+ * Where semver versioning is used, this function can be omitted, and
+ * we'll use `semver.coerce`.
+ * @param {Function} semverCoerce
  * @returns {Promise<Array>} An array of release ref objects. Each object
  * should have the shape `{ hash, ref, version, versionString}`, where
  * `hash`, `ref`, and `versionString` are strings, and `version` is a semver
@@ -19,18 +25,8 @@ const EXISTING_CONTENT_API = `https://content.hashicorp.com`
  */
 export async function getReleaseRefsFromContentAPI(
 	contentSourceRepo,
-	repoConfig
+	semverCoerce
 ) {
-	/**
-	 * Nearly all repos use semver versioning. PTFE is one exception.
-	 * If semver versioning is not being used, the repo config must provide
-	 * a `semverCoerce` function, which given some custom version string,
-	 * returns a semver version object.
-	 *
-	 * Where semver versioning is used, this function can be omitted, and
-	 * we'll use `semver.coerce`.
-	 */
-	const semverCoerce = repoConfig.semverCoerce || semver.coerce
 	// Fetch the version metadata from the existing content API
 	const versionMetadata = await fetchVersionMetadata(contentSourceRepo)
 	// Map version metadata to release ref entries
@@ -46,28 +42,8 @@ export async function getReleaseRefsFromContentAPI(
 			version: semverCoerce(entry.versionString),
 		}
 	})
-	// Filter out any release refs that don't match the earliest version
-	const releaseRefsInRange = releaseRefsWithVersions.filter(({ version }) => {
-		// If the repo config does not specify an earliest version, include all refs
-		if (!repoConfig.earliestVersion) {
-			return true
-		}
-		// If an earlier version is specified, first test if it's a valid semver
-		// version. If not, throw an error.
-		const earliestVersion = semverCoerce(repoConfig.earliestVersion)
-		if (!earliestVersion) {
-			throw new Error(
-				`Error: Earliest version "${repoConfig.earliestVersion}" is not a valid semver version.`
-			)
-		}
-		// At this point, we know we have a valid `earliestVersion` semver object.
-		// Compare this entry's version to determine if it is greater than or equal
-		// (gte) the specified earlier version. If it is, include, if not, drop.
-		const isInRange = semver.gte(version, earliestVersion)
-		return isInRange
-	})
 	// Sort versions by semver
-	const sortedReleaseRefs = releaseRefsInRange.sort((a, b) => {
+	const sortedReleaseRefs = releaseRefsWithVersions.sort((a, b) => {
 		return semver.compare(a.version, b.version)
 	})
 	// Return the sorted refs derived from existing content API version metadata

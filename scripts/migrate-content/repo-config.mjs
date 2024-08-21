@@ -32,6 +32,7 @@ export const ALL_REPO_CONFIG = {
 		patch: 'generic',
 		releaseRefPattern:
 			/^refs\/(remotes\/origin\/release\/|tags\/v)(\d+\.\d+\.[x,\d]+)$/i,
+		semverCoerce: semver.coerce,
 		versionStringFromRef: (ref) => {
 			const versionString = ref.match(/(\d+\.\d+\.[x,\d]+)$/)[1]
 			return `v${versionString}`
@@ -45,6 +46,8 @@ export const ALL_REPO_CONFIG = {
 		patch: 'generic',
 		releaseRefPattern:
 			/^refs\/(remotes\/origin\/release\/|tags\/v)(\d+\.\d+\.[x,\d]+)$/i,
+		semverCoerce: semver.coerce,
+
 		versionStringFromRef: (ref) => {
 			const versionString = ref.match(/(\d+\.\d+\.[x,\d]+)$/)[1]
 			return `v${versionString}`
@@ -61,6 +64,9 @@ export const ALL_REPO_CONFIG = {
 		 * `branchForLatest` is set to `main`.
 		 */
 		releaseRefPattern: /^refs\/remotes\/origin\/main$/i,
+		semverCoerce: semver.coerce,
+		// TODO: ignore no-unused-vars when var starts with `_`
+		// eslint-disable-next-line no-unused-vars
 		versionStringFromRef: (_ref) => 'v0.0.0',
 		websiteDir: '.',
 	},
@@ -71,6 +77,8 @@ export const ALL_REPO_CONFIG = {
 		patch: 'generic',
 		releaseRefPattern:
 			/^refs\/(remotes\/origin\/release\/|tags\/v)(\d+\.\d+\.[x,\d]+)$/i,
+		semverCoerce: semver.coerce,
+
 		versionStringFromRef: (ref) => {
 			const versionString = ref.match(/(\d+\.\d+\.[x,\d]+)$/)[1]
 			return `v${versionString}`
@@ -92,6 +100,8 @@ export const ALL_REPO_CONFIG = {
 		patch: 'generic',
 		releaseRefPattern:
 			/^refs\/(remotes\/origin\/release\/|tags\/v)(\d+\.\d+\.[x,\d]+)$/i,
+		semverCoerce: semver.coerce,
+
 		versionStringFromRef: (ref) => {
 			const versionString = ref.match(/(\d+\.\d+\.[x,\d]+)$/)[1]
 			return `v${versionString}`
@@ -104,10 +114,6 @@ export const ALL_REPO_CONFIG = {
 		dataDir: 'data',
 		patch: 'exact',
 		releaseRefPattern: /^refs\/(tags\/)v\d\d\d\d\d\d-[\d]+$/i,
-		versionStringFromRef: (ref) => {
-			const versionString = ref.match(/v(\d\d\d\d\d\d-[\d]+)$/i)[1]
-			return `v${versionString}`
-		},
 		/**
 		 * Note: we need to sort versions for various reasons. Nearly all
 		 * our documentation is semver-versioned. PTFE is not. Rather than
@@ -117,10 +123,17 @@ export const ALL_REPO_CONFIG = {
 		semverCoerce: (versionString) => {
 			const versionRegex = /v(\d\d\d\d)(\d\d)-([\d]+)/
 			const versionParts = versionRegex.exec(versionString)
+			// TODO: would be nice to ignore unused vars if they start with `_`
+			// eslint-disable-next-line no-unused-vars
 			const [_match, year, date, patch] = versionParts
 			const semverString = `v${year}.${parseInt(date)}.${patch}`
 			return semver.coerce(semverString)
 		},
+		versionStringFromRef: (ref) => {
+			const versionString = ref.match(/v(\d\d\d\d\d\d-[\d]+)$/i)[1]
+			return `v${versionString}`
+		},
+
 		websiteDir: 'website',
 	},
 	sentinel: {
@@ -137,6 +150,7 @@ export const ALL_REPO_CONFIG = {
 		patch: 'generic',
 		releaseRefPattern:
 			/^refs\/(remotes\/origin\/release\/|tags\/v)(\d+\.\d+\.[x,\d]+)$/i,
+		semverCoerce: semver.coerce,
 		versionStringFromRef: (ref) => {
 			const versionString = ref.match(/(\d+\.\d+\.[x,\d]+)$/)[1]
 			return `v${versionString}`
@@ -163,57 +177,58 @@ export const ALL_REPO_CONFIG = {
 		 */
 		patch: 'generic',
 		releaseRefPattern: /^(refs\/heads\/|refs\/remotes\/origin\/)?(v\d+\.\d+)$/i,
+		semverCoerce: semver.coerce,
 		versionStringFromRef: (ref) => {
 			const versionString = ref.match(/(v\d+\.\d+)$/)[1]
 			return versionString + '.x'
 		},
 		websiteDir: 'website',
 	},
-	// "terraform-cdk": {
-	// 	contentDir: "docs",
-	// 	websiteDir: "website",
-	// 	releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
-	// },
-	// "terraform-docs-agents": {
-	// 	contentDir: "docs",
-	// 	websiteDir: "website",
-	// 	releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
-	// },
-	// "terraform-docs-common": {
-	// 	contentDir: "docs",
-	// 	websiteDir: "website",
-	// 	releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
-	// },
-	// "terraform-plugin-framework": {
-	// 	contentDir: "docs",
-	// 	websiteDir: "website",
-	// 	releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
-	// },
-	// "terraform-plugin-log": {
-	// 	contentDir: "docs",
-	// 	websiteDir: "website",
-	// 	releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
-	// },
-	// "terraform-plugin-mux": {
-	// 	contentDir: "docs",
-	// 	websiteDir: "website",
-	// 	releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
-	// },
-	// "terraform-plugin-sdk": {
-	// 	contentDir: "docs",
-	// 	websiteDir: "website",
-	// 	releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
-	// },
-	// "terraform-plugin-testing": {
-	// 	contentDir: "docs",
-	// 	websiteDir: "website",
-	// 	releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
-	// },
-	// vagrant: {
-	// 	contentDir: "content",
-	// 	websiteDir: "website",
-	// 	releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
-	// },
+	'terraform-cdk': {
+		contentDir: 'docs',
+		websiteDir: 'website',
+		releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
+	},
+	'terraform-docs-agents': {
+		contentDir: 'docs',
+		websiteDir: 'website',
+		releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
+	},
+	'terraform-docs-common': {
+		contentDir: 'docs',
+		websiteDir: 'website',
+		releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
+	},
+	'terraform-plugin-framework': {
+		contentDir: 'docs',
+		websiteDir: 'website',
+		releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
+	},
+	'terraform-plugin-log': {
+		contentDir: 'docs',
+		websiteDir: 'website',
+		releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
+	},
+	'terraform-plugin-mux': {
+		contentDir: 'docs',
+		websiteDir: 'website',
+		releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
+	},
+	'terraform-plugin-sdk': {
+		contentDir: 'docs',
+		websiteDir: 'website',
+		releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
+	},
+	'terraform-plugin-testing': {
+		contentDir: 'docs',
+		websiteDir: 'website',
+		releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
+	},
+	vagrant: {
+		contentDir: 'content',
+		websiteDir: 'website',
+		releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
+	},
 	vault: {
 		assetDir: 'public',
 		contentDir: 'content',
