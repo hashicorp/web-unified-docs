@@ -141,7 +141,10 @@ export const ALL_REPO_CONFIG = {
 		semverCoerce: (versionString) => {
 			const versionRegex = /v(\d\d\d\d)(\d\d)-([\d]+)/
 			const versionParts = versionRegex.exec(versionString)
-			// TODO: would be nice to ignore unused vars if they start with `_`
+			/**
+			 * TODO: would be nice to ignore unused vars if they start with `_`
+			 * See: https://github.com/typescript-eslint/typescript-eslint/issues/8464
+			 */
 			// eslint-disable-next-line no-unused-vars
 			const [_match, year, date, patch] = versionParts
 			const semverString = `v${year}.${parseInt(date)}.${patch}`
@@ -210,7 +213,10 @@ export const ALL_REPO_CONFIG = {
 		 *
 		 * 🚧 TODO
 		 */
-		contentDir: 'docs',
+		assetDir: 'public',
+		contentDir: 'content',
+		dataDir: 'data',
+		semverCoerce: semver.coerce,
 		websiteDir: 'website',
 	},
 	'terraform-docs-agents': {
@@ -219,7 +225,10 @@ export const ALL_REPO_CONFIG = {
 		 *
 		 * 🚧 TODO
 		 */
-		contentDir: 'docs',
+		assetDir: 'public',
+		contentDir: 'content',
+		dataDir: 'data',
+		semverCoerce: semver.coerce,
 		websiteDir: 'website',
 	},
 	'terraform-docs-common': {
@@ -228,7 +237,10 @@ export const ALL_REPO_CONFIG = {
 		 *
 		 * 🚧 TODO
 		 */
-		contentDir: 'docs',
+		assetDir: 'public',
+		contentDir: 'content',
+		dataDir: 'data',
+		semverCoerce: semver.coerce,
 		websiteDir: 'website',
 	},
 	'terraform-plugin-framework': {
@@ -237,7 +249,10 @@ export const ALL_REPO_CONFIG = {
 		 *
 		 * 🚧 TODO
 		 */
-		contentDir: 'docs',
+		assetDir: 'public',
+		contentDir: 'content',
+		dataDir: 'data',
+		semverCoerce: semver.coerce,
 		websiteDir: 'website',
 	},
 	'terraform-plugin-log': {
@@ -246,7 +261,10 @@ export const ALL_REPO_CONFIG = {
 		 *
 		 * 🚧 TODO
 		 */
-		contentDir: 'docs',
+		assetDir: 'public',
+		contentDir: 'content',
+		dataDir: 'data',
+		semverCoerce: semver.coerce,
 		websiteDir: 'website',
 	},
 	'terraform-plugin-mux': {
@@ -255,7 +273,10 @@ export const ALL_REPO_CONFIG = {
 		 *
 		 * 🚧 TODO
 		 */
-		contentDir: 'docs',
+		assetDir: 'public',
+		contentDir: 'content',
+		dataDir: 'data',
+		semverCoerce: semver.coerce,
 		websiteDir: 'website',
 	},
 	'terraform-plugin-sdk': {
@@ -264,7 +285,10 @@ export const ALL_REPO_CONFIG = {
 		 *
 		 * 🚧 TODO
 		 */
-		contentDir: 'docs',
+		assetDir: 'public',
+		contentDir: 'content',
+		dataDir: 'data',
+		semverCoerce: semver.coerce,
 		websiteDir: 'website',
 	},
 	'terraform-plugin-testing': {
@@ -273,7 +297,10 @@ export const ALL_REPO_CONFIG = {
 		 *
 		 * 🚧 TODO
 		 */
-		contentDir: 'docs',
+		assetDir: 'public',
+		contentDir: 'content',
+		dataDir: 'data',
+		semverCoerce: semver.coerce,
 		websiteDir: 'website',
 	},
 	vagrant: {
@@ -282,7 +309,10 @@ export const ALL_REPO_CONFIG = {
 		 *
 		 * 🚧 TODO
 		 */
+		assetDir: 'public',
 		contentDir: 'content',
+		dataDir: 'data',
+		semverCoerce: semver.coerce,
 		websiteDir: 'website',
 	},
 	vault: {
@@ -294,7 +324,7 @@ export const ALL_REPO_CONFIG = {
 		assetDir: 'public',
 		contentDir: 'content',
 		dataDir: 'data',
-		earliestVersion: 'v1.4.0',
+		semverCoerce: semver.coerce,
 		websiteDir: 'website',
 	},
 }

@@ -12,20 +12,26 @@ import { getTargetReleaseRefs } from './get-target-release-refs.mjs'
  * This directory can be deleted after running any migration scripts.
  */
 const GH_CLONE_DIR = '.content-source-repos'
-// MIGRATION_OUTPUT_DIR is where extracted `.mdx` and `.json` will be placed.
-const MIGRATION_OUTPUT_DIR = path.join(
-	process.cwd(),
-	'.migrated-content/content'
-)
+
+/**
+ * MIGRATION_OUTPUT_ROOT is the root directory for extracted content.
+ * For now, we set it to a temporary `.migrated-content` directory.
+ * Later, when we're actually ready to run migrations, we'll want to
+ * output migrated content to `content` and `public` folders at the root
+ * of this repo, so we'll change MIGRATION_OUTPUT_ROOT to `process.cwd()`.
+ */ a
+const MIGRATION_OUTPUT_ROOT = path.join(process.cwd(), '.migrated-content')
+/**
+ * MIGRATION_CONTENT_DIR is where extracted content & data will be placed.
+ * This means `.mdx` files, `-nav-data.json` files, and redirects.
+ */
+const MIGRATION_CONTENT_DIR = path.join(MIGRATION_OUTPUT_ROOT, 'content')
 /**
  * MIGRATION_ASSETS_DIR is where extracted assets will be placed.
  * In this context "assets" mostly just means images, though many products
  * have a few other types of assets as well, even if they're not as common.
  */
-const MIGRATION_ASSETS_DIR = path.join(
-	process.cwd(),
-	'.migrated-content/public/assets'
-)
+const MIGRATION_ASSETS_DIR = path.join(MIGRATION_OUTPUT_ROOT, 'public/assets')
 
 /**
  * This script is intended to migrate content from "content source" repos
@@ -38,7 +44,7 @@ const MIGRATION_ASSETS_DIR = path.join(
  * in git history.
  *
  * During extraction, content, data, and redirects are written into
- * `MIGRATION_OUTPUT_DIR`. Assets are written into `MIGRATION_ASSETS_DIR`.
+ * `MIGRATION_CONTENT_DIR`. Assets are written into `MIGRATION_ASSETS_DIR`.
  * For example, after running this script with `content` and `public/assets`
  * respectively, we expect the following structure:
  * - content/${repoSlug}/${version}/content/<filepath>.mdx - MDX content
@@ -115,7 +121,7 @@ const targetRepos = buildTargetRepos(args)
 
 // Run the main script
 await migrateContent(targetRepos, GH_CLONE_DIR, {
-	content: MIGRATION_OUTPUT_DIR,
+	content: MIGRATION_CONTENT_DIR,
 	assets: MIGRATION_ASSETS_DIR,
 })
 

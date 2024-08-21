@@ -17,20 +17,20 @@ import { execSync } from 'child_process'
  *
  * @param {string} targetDir The directory where the repository will be cloned.
  * @param {string} repoOwner The owner of the repository.
- * @param {string} repoName The name of the repository.
+ * @param {string} repoSlug The name of the repository.
  * @returns {string} The path to the repository directory.
  */
-export function cloneRepo(targetDir, repoOwner, repoName, cloneArgs) {
+export function cloneRepo(targetDir, repoOwner, repoSlug, cloneArgs) {
 	/**
 	 * Assuming the `gh repo clone` command will be successful, we expect
 	 * the repository directory to be given the same name as the repository.
 	 */
-	const repoDir = path.join(targetDir, repoName)
+	const repoDir = path.join(targetDir, repoSlug)
 	const repoDirExists = fs.existsSync(repoDir)
 	// If the repository already exists, we skip cloning
 	if (!repoDirExists) {
-		console.log(`📡 Cloning "${repoSlug}" into "${ghCloneDir}"...`)
-		execSync(`gh repo clone ${repoOwner}/${repoName} -- ${cloneArgs}`, {
+		console.log(`📡 Cloning "${repoSlug}" into "${targetDir}"...`)
+		execSync(`gh repo clone ${repoOwner}/${repoSlug} -- ${cloneArgs}`, {
 			stdio: 'inherit', // Nice to see progress for large repos
 			cwd: targetDir,
 		})
