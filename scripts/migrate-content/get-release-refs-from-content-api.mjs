@@ -30,6 +30,16 @@ export async function getReleaseRefsFromContentAPI(
 	// Fetch the version metadata from the existing content API
 	const versionMetadata = await fetchVersionMetadata(contentSourceRepo)
 	// Map version metadata to release ref entries
+	// We drop a bunch of properties that we don't care about at this point.
+	/**
+	 * TODO: maybe we should care about more properties?
+	 *
+	 * For example, maybe we should care about`isLatest` and `releaseStage`?
+	 * And write these to `_version-metadata.json` or something, that can
+	 * then be collection in our `gather-version-metadata` script? This could
+	 * probably be separate from the initial migration scripts work...
+	 * but definitely needs to be accounted for.
+	 */
 	const releaseRefs = versionMetadata.map((entry) => ({
 		versionString: entry.version,
 		ref: entry.ref,
@@ -37,10 +47,7 @@ export async function getReleaseRefsFromContentAPI(
 	}))
 	// Add a coerced semver version to each entry
 	const releaseRefsWithVersions = releaseRefs.map((entry) => {
-		return {
-			...entry,
-			version: semverCoerce(entry.versionString),
-		}
+		return { ...entry, version: semverCoerce(entry.versionString) }
 	})
 	// Sort versions by semver
 	const sortedReleaseRefs = releaseRefsWithVersions.sort((a, b) => {
