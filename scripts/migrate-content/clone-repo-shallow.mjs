@@ -7,12 +7,11 @@ import { execSync } from 'child_process'
  *
  * You must be authenticated, and have read access to the target repository,
  * in order for this to work. We use a shallow clone since there are only a
- * small percentage of refs with content we'll actually use.
+ * small percentage of refs with content we'll actually use. If the clone
+ * command fails, we'll throw an error, and we expect this to stop the script.
  *
  * Note that if the repository already exists, we do _not_ clone it again.
- * Note that we expect the target directory to be empty.
- *
- * Note that it's _possible_ the directory is a stale clone of the repo,
+ * It is therefore _possible_ the directory is a stale clone of the repo,
  * or even something else entirely. We expect the consumer of this function
  * to handle such scenarios, for example by starting from an empty directory.
  *
@@ -30,16 +29,13 @@ export function cloneRepoShallow(targetDir, repoOwner, repoName) {
 	const repoDirExists = fs.existsSync(repoDir)
 	// If the repository already exists, we skip cloning
 	if (!repoDirExists) {
+		console.log(`📡 Cloning "${repoSlug}" into "${ghCloneDir}"...`)
 		execSync(`gh repo clone ${repoOwner}/${repoName} -- --filter=blob:none`, {
 			stdio: 'inherit', // Nice to see progress for large repos
 			cwd: targetDir,
 		})
 	} else {
-		// Ensure the `main` branch is checked out, as a clean starting point
-		execSync(`git checkout main`, {
-			stdio: 'inherit',
-			cwd: repoDir,
-		})
+		console.log(`🔄 Directory already exists at "${repoDir}". Skipping clone.`)
 	}
 	// Return the path to the previously-existing or newly-cloned directory
 	return repoDir

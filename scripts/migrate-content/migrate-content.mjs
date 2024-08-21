@@ -1,63 +1,85 @@
 import fs from 'fs'
 import path from 'path'
 import { execSync } from 'child_process'
-import semver from 'semver'
 // Local
+import { buildTargetRepos } from './build-target-repos.mjs'
 import { clearAndCopy } from './clear-and-copy.mjs'
 import { cloneRepoShallow } from './clone-repo-shallow.mjs'
-import { getReleaseRefsFromContentAPI } from './get-release-refs-from-content-api.mjs'
-import { ALL_REPO_CONFIG } from './repo-config.mjs'
-
-const TEMP_DIR = '.content-source-repos'
-const OUTPUT_DIR = path.join(process.cwd(), '.migrated-content')
+import { getTargetReleaseRefs } from './get-target-release-refs.mjs'
 
 /**
- * Examples running this script from project root:
+ * GH_CLONE_DIR temporarily holds cloned repos while we extract content
+ * This directory can be deleted after running any migration scripts.
+ */
+const GH_CLONE_DIR = '.content-source-repos'
+// MIGRATION_OUTPUT_DIR is where extracted `.mdx` and `.json` will be placed.
+const MIGRATION_OUTPUT_DIR = path.join(
+	process.cwd(),
+	'.migrated-content/content'
+)
+/**
+ * MIGRATION_ASSETS_DIR is where extracted assets will be placed.
+ * In this context "assets" mostly just means images, though many products
+ * have a few other types of assets as well, even if they're not as common.
+ */
+const MIGRATION_ASSETS_DIR = path.join(
+	process.cwd(),
+	'.migrated-content/public/assets'
+)
+
+/**
+ * This script is intended to migrate content from "content source" repos
+ * into this project.
  *
- * Extract all Terraform content
- * node ./scripts/migrate-content/migrate-content.mjs terraform
+ * This script uses our existing `content.hashicorp.com` API to determine which
+ * git refs provided the version content that is currently live on dev dot.
+ * This script then clones the content source repo, checks out those git refs
+ * fetched from our existing content API, and extracts content from each point
+ * in git history.
  *
- * Extract Terraform v1.1.x content
- * node ./scripts/migrate-content/migrate-content.mjs terraform:v1.1.x
+ * During extraction, content, data, and redirects are written into
+ * `MIGRATION_OUTPUT_DIR`. Assets are written into `MIGRATION_ASSETS_DIR`.
+ * For example, after running this script with `content` and `public/assets`
+ * respectively, we expect the following structure:
+ * - content/${repoSlug}/${version}/content/<filepath>.mdx - MDX content
+ * - content/${repoSlug}/${version}/data/<section>-nav-data.json - Nav data
+ * - content/${repoSlug}/${version}/redirects.js - all redirects in one file
+ * - public/assets/${repoSlug}/${version}/<filepath>.<ext> - assets, eg images
  *
- * Extract content for many products
- * node ./scripts/migrate-content/migrate-content.mjs boundary consul terraform
+ * EXAMPLES
+ *
+ * Running this script from project root:
+ *
+ * Extract all Terraform content:
+ * `node ./scripts/migrate-content/migrate-content.mjs terraform`
+ * Extract Terraform v1.1.x content:
+ * `node ./scripts/migrate-content/migrate-content.mjs terraform:v1.1.x`
+ * Extract content for many products:
+ * `node ./scripts/migrate-content/migrate-content.mjs boundary consul terraform`
  */
 
-// Validate input arguments
-const args = process.argv.slice(2)
-if (args.length === 0) {
-	throw new Error(
-		`Please provide at least one repository slug as an argument. For example, to extract Terraform content, you can run "node migrate-content.mjs terraform". You can optionally pass specific versions to extract from each content repository. For example, to extract Terraform v1.1.x content, you can run "node migrate-content.mjs terraform:v1.1.x".`
-	)
-}
-const allRepoSlugs = Object.keys(ALL_REPO_CONFIG)
-const targetRepos = []
-for (const arg of args) {
-	const [repo, versionsPart] = arg.split(':')
-	if (!allRepoSlugs.includes(repo)) {
-		throw new Error(
-			`Invalid repo slug "${repo}". Repo slugs must be one of: ${JSON.stringify(
-				allRepoSlugs
-			)}`
-		)
-	}
-	const repoConfig = ALL_REPO_CONFIG[repo]
-	const targetVersions = versionsPart ? versionsPart.split(',') : []
-	targetRepos.push({ repo, targetVersions, repoConfig })
-}
+/**
+ * TODO: this script is _not_ done. There are at least a few edge cases that
+ * still need to be handled. For example, in older versions of many products,
+ * content is in a `pages` directory, rather than `content`. Our existing
+ * scripts in `mktg-content-workflows` somehow account for this, we'll need
+ * to do the same during migration in order to maintain parity in what
+ * content we're serving.
+ *
+ * TODO: write up edge cases, either below or in a separate file... maybe
+ * add Asana tasks for them... and then we can probably move forward and merge
+ * this script knowing that it's still a work in progress.
+ */
 
-// Run the main script
-await migrateContent(targetRepos)
 /**
  * TODO: add another step to process versioned assets in some way.
  *
  * Possible approach:
  * - Assets can either be versioned, or shared across versions
- * - Versioned assets in `public/assets/${repoName}/${version}/...`. The
+ * - Versioned assets in `public/assets/${repoSlug}/${version}/...`. The
  *   `migrateContent` script is expected to handle ALL assets this way, even
  *   if they are shared across versions.
- * - Shared assets in `public/assets/${repoName}/common`. This directory will
+ * - Shared assets in `public/assets/${repoSlug}/common`. This directory will
  *   start empty, and we'll use a script to populate it with shared assets.
  *
  * Starting with the newest version directory:
@@ -87,164 +109,162 @@ await migrateContent(targetRepos)
  * or something but I can't remember exactly).
  */
 
+// Parse and validate input arguments
+const args = process.argv.slice(2)
+const targetRepos = buildTargetRepos(args)
+
+// Run the main script
+await migrateContent(targetRepos, GH_CLONE_DIR, {
+	content: MIGRATION_OUTPUT_DIR,
+	assets: MIGRATION_ASSETS_DIR,
+})
+
 /**
- * This script is intended to migrate content from the "content source" repos
- * that power the docs content in our existing `content.hashicorp.com` API.
+ * Given an array of { repo, targetVersions, repoConfig } objects,
+ * as well as an object that specifics target directories,
+ * Extract content from the target repos at the specified versions.
  *
- * TODO: this script is _not_ done. There are at least a few edge cases that
- * still need to be handled. For example, in older versions of many products,
- * content is in a `pages` directory, rather than `content`. Our existing
- * scripts in `mktg-content-workflows` somehow account for this, we'll need
- * to do the same during migration in order to maintain parity in what
- * content we're serving.
- *
- * TODO: write up edge cases, either below or in a separate file... maybe
- * add Asana tasks for them... and then we can probably move forward and merge
- * this script knowing that it's still a work in progress.
+ * @param {Array<{ repo: string, targetVersions: string[], repoConfig: Record<string, any> }>} targetRepos
+ * @param {string} ghCloneDir
+ * @param {Object} outputDirs
+ * @param {string} outputDirs.content
+ * @param {string} outputDirs.assets
+ * @returns
  */
-async function migrateContent(targetRepos) {
+async function migrateContent(targetRepos, ghCloneDir, outputDirs) {
 	// Ensure the temporary directory exists, this is where repos will be cloned.
-	if (!fs.existsSync(TEMP_DIR)) {
-		fs.mkdirSync(TEMP_DIR, { recursive: true })
+	if (!fs.existsSync(ghCloneDir)) {
+		fs.mkdirSync(ghCloneDir, { recursive: true })
 	}
 	// Log that we're starting the extraction process for the target repos
-	console.log(`Extracting content from the follow repositories:`)
-	console.log(`Target repos: ${JSON.stringify(targetRepos)}`)
+	const targetsDebug = targetRepos.map((t) => {
+		const targetVersionsDebug = t.targetVersions.length
+			? t.targetVersions.join(',')
+			: '(all versions)'
+		return `${t.repoSlug}:${targetVersionsDebug}`
+	})
+	console.log(
+		`ℹ️ Running migration for content source repos:\n${JSON.stringify(
+			targetsDebug,
+			null,
+			2
+		)}`
+	)
 	/**
-	 * Iterate over content source repos, cloning the repo,
+	 * Iterate over content source repos, cloning each repo,
 	 * and extracting content from the relevant `releaseRefs`.
 	 */
 	for (const repoEntry of targetRepos) {
-		const { repo, targetVersions, repoConfig } = repoEntry
+		const { repoSlug, repoConfig } = repoEntry
 		// Log that we're starting on this specific repo
-		console.log(`Migrating content for "${repo}"...`)
-		// Grab unique release refs from the content API
-		const contentApiReleaseRefs = await getReleaseRefsFromContentAPI(
-			repo,
-			repoConfig.semverCoerce
-		)
-		// Filter the fetched release refs based on provided target versions
-		const isTargetReleaseRefs = targetVersions.length
-			? ({ versionString }) => targetVersions.includes(versionString)
-			: ({ version }) => isVersionWithinConfigRange(version, repoConfig)
-		const targetReleaseRefs = contentApiReleaseRefs.filter(isTargetReleaseRefs)
-		// If we've filtered out all release refs, log and skip this repo
+		console.log(`💼 Migrating content for "${repoSlug}"...`)
+		// Determine the target release refs for this repo
+		const targetReleaseRefs = await getTargetReleaseRefs(repoEntry)
+		// If we have no target release refs, log and skip this repo
 		if (targetReleaseRefs.length === 0) {
-			console.log(`No target versions found for "${repo}". Skipping...`)
+			console.log(`⬇️ No target versions found for "${repoSlug}". Skipping...`)
 			continue
 		}
-		// We have release refs to extract, so clone the content repo
-		// If the repo is already cloned, we'll check out the `main` branch.
-		const repoDir = cloneRepoShallow(TEMP_DIR, 'hashicorp', repo)
-		console.log(
-			`Extracting content from the "${repo}" repo at the following refs:`
-		)
-		console.log(
-			targetReleaseRefs.map(
-				({ versionString, ref }) => `${versionString} (${ref})`
-			)
-		)
+		// Otherwise, we have release refs to extract. Start by cloning the repo.
+		const cloneDir = cloneRepoShallow(ghCloneDir, 'hashicorp', repoSlug)
 		/**
 		 * For each release ref, check out the ref, and copy the content, data,
 		 * and assets from the content source repository into this project.
+		 *
+		 * Note these must be done serially, as we're using the same cloned
+		 * repository directory to check out different points in git history
+		 * corresponding to each release ref.
 		 */
+		console.log(
+			`🛠️  Extracting content from the "${repoSlug}" repo at refs:\n${JSON.stringify(
+				targetReleaseRefs.map((t) => `${t.versionString} (${t.ref})`),
+				null,
+				2
+			)}`
+		)
 		for (let i = targetReleaseRefs.length - 1; i >= 0; i--) {
-			extractFromFilesystem(repo, repoDir, targetReleaseRefs[i], repoConfig)
+			const targetRef = targetReleaseRefs[i]
+			await migrateRepoContentAtRef({
+				repoSlug,
+				cloneDir,
+				targetRef,
+				repoConfig,
+				outputDirs,
+			})
+			console.log(
+				`🟢 Finished extracting "${repoSlug}" content from "${targetRef.ref}".`
+			)
 		}
-		console.log(`✅ Done extracting content from ${repo}.`)
+		console.log(`🟢 Finished migrating content from "${repoSlug}".`)
 	}
-	console.log(`✅ Done extracting content from all target repositories.`)
-	return true
+	// Log out that we're done with all repos, then return
+	console.log(`✅ Finished migrating all target repos and versions.`)
+	return
 }
 
 /**
  * TODO: write description
  *
- * @param {*} version
- * @param {*} repoConfig
- * @returns
+ * @param {Object} config
+ * @param {*} config.repoSlug
+ * @param {*} config.cloneDir
+ * @param {*} config.targetRef
+ * @param {*} config.repoConfig
+ * @param {*} config.outputDirs
+ * @return {void}
  */
-function isVersionWithinConfigRange(version, repoConfig) {
-	const { earliestVersion, semverCoerce } = repoConfig
-	if (!earliestVersion) {
-		return true
-	}
-	// If an earlier version is specified, first test if it's a valid semver
-	// version. If not, throw an error.
-	const semverEarliestVersion = semverCoerce(earliestVersion)
-	if (!semverEarliestVersion) {
-		throw new Error(
-			`Error: Earliest version "${earliestVersion}" is not a valid semver version.`
-		)
-	}
-	// At this point, we know we have a valid `earliestVersion` semver object.
-	// Compare this entry's version to determine if it is greater than or equal
-	// (gte) the specified earlier version. If it is, include, if not, drop.
-	const isInRange = semver.gte(version, semverEarliestVersion)
-	return isInRange
-}
-
-/**
- *
- */
-function extractFromFilesystem(repoName, repoDir, releaseRef, repoConfig) {
-	//
-	console.log(
-		`Checking out ref "${releaseRef.ref}" (hash "${releaseRef.hash}")...`
-	)
-	// Check out the hash corresponding to this release ref
-	execSync(`git checkout ${releaseRef.hash}`, {
+async function migrateRepoContentAtRef({
+	repoSlug,
+	cloneDir,
+	targetRef,
+	repoConfig,
+	outputDirs,
+}) {
+	/**
+	 * `git checkout` out the hash corresponding to this release ref
+	 */
+	console.log(`🥡 Checking out ref "${targetRef.ref}" (${targetRef.hash})...`)
+	execSync(`git checkout ${targetRef.hash}`, {
 		stdio: 'inherit',
-		cwd: repoDir,
+		cwd: cloneDir,
 	})
 	/**
 	 * Determine the website directory path. The content, assets, and data
 	 * for the website are expected to exist within this directory.
+	 *
+	 * Based on this website path, set up source directory paths.
+	 * Based on incoming repoConfig, releaseRef version, and outputDirs,
+	 * set up destination directory paths.
 	 */
-	const websiteDirPath = path.join(repoDir, repoConfig.websiteDir)
-	// TODO: make the code below a little more clear
-	/**
-	 * Copy the assets directory to a new destination in the public folder
-	 * Note that we do _not_ attempt to handle versioned assets in any clever
-	 * way here. We simply copy them over. We expect that subsequent scripts
-	 * could be run on the copied assets and content in order to resolve
-	 * duplicate assets across versions.
-	 */
-	console.log('Copying assets....')
-	const assetDirPath = path.join(websiteDirPath, repoConfig.assetDir)
-	const assetDest = path.join(
-		OUTPUT_DIR,
-		'assets',
-		repoName,
-		releaseRef.versionString,
+	const websiteDirPath = path.join(cloneDir, repoConfig.websiteDir)
+	const assetsSrc = path.join(websiteDirPath, repoConfig.assetDir)
+	const assetsDest = path.join(
+		outputDirs.assets,
+		repoSlug,
+		targetRef.versionString,
 		repoConfig.assetDir.replace('public', '')
 	)
-	// Execute the copy, clearing out the target directory first
-	clearAndCopy(assetDirPath, assetDest)
-	// Copy content into versioned destination directory
-	console.log('Copying content....')
-	const contentDirPath = path.join(websiteDirPath, repoConfig.contentDir)
+	const contentSrc = path.join(websiteDirPath, repoConfig.contentDir)
 	const contentDest = path.join(
-		OUTPUT_DIR,
-		'products',
-		repoName,
-		releaseRef.versionString,
+		outputDirs.content,
+		repoSlug,
+		targetRef.versionString,
 		repoConfig.contentDir
 	)
-	// Execute the copy, clearing out the target directory first
-	clearAndCopy(contentDirPath, contentDest)
-	// Copy data into versioned destination directory
-	console.log('Copying data....')
-	const dataDirPath = path.join(websiteDirPath, repoConfig.dataDir)
+	const dataSrc = path.join(websiteDirPath, repoConfig.dataDir)
 	const dataDest = path.join(
-		OUTPUT_DIR,
-		'products',
-		repoName,
-		releaseRef.versionString,
+		outputDirs.content,
+		repoSlug,
+		targetRef.versionString,
 		repoConfig.dataDir
 	)
-	// Execute the copy, clearing out the target directory first
-	clearAndCopy(dataDirPath, dataDest)
-	//
+	/**
+	 * Execute the copy commands in parallel, clearing out directories first
+	 */
+	await Promise.all([
+		clearAndCopy(assetsSrc, assetsDest),
+		clearAndCopy(contentSrc, contentDest),
+		clearAndCopy(dataSrc, dataDest),
+	])
 	return
 }
