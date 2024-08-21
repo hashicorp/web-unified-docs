@@ -1,119 +1,137 @@
 import semver from 'semver'
 
 /**
- * TODO: we have different content directory structures across repos.
+ * TODO: CONFIRM WE CAN IGNORE WAYPOINT COMMUNITY EDITION
+ *
+ * Waypoint Community documentation is no longer published, as the Community
+ * edition of Waypoint is no longer actively maintained. HCP Waypoint docs
+ * are maintained in the `hashicorp/hcp-docs` repository.
+ *
+ * Community documentation still exists in the `hashicorp/waypoint` repo.
+ *
+ * I'm almost certain can not worry about migrating Waypoint Community
+ * since the docs are not longer published on `developer.hashicorp.com`,
+ * but probably wouldn't hurt to double-check.
+ */
+
+/**
+ * TODO: NOTE ON `PAGES` DIRECTORIES IN OLDER CONTENT VERSIONS
+ *
+ * When attempting to migrate older content versions, we sometimes
+ * see errors like: `<product>/website/content: No such file or directory`.
+ *
+ * This likely relates to older versions of Sentinel docs still using
+ * the `pages` directory to store content... `mktg-content-workflows`
+ * somehow accounts for this... so our migration scripts probably need
+ * to account for it as well.
+ */
+
+/**
+ * TODO: CONSIDER APPROACH TO VARIABLE CONTENT DIRECTORIES
  *
  * In the current API, powered by mktg-content-workflows, we have repo-config
- * that handles these differences. In the short term, it probably makes sense
- * to mirror that type of config in this repository.
+ * that handles these differences.
  *
- * On the other hand, it would be nice to not have to deal with these cases...
+ * During migration, does it makes sense to mirror differences in this repo?
+ * Or...  would be nice to not have to deal with these cases?
+ *
  * Maybe during the process of migrating docs to this repo, we standardize
  * the directory structure? As long as the API routes are still drop-in
  * replacements for the previous API, maybe that'd make sense... rather than
  * migrating repo-config, we migrate in a way that requires less (maybe zero)
  * "repo-config".
  *
- * Related thought: migration scripting probably makes sense? Script would:
- * - Pull down the content source repo
- * - Iterate over known versions (based on our existing live content API), and
- *   for each known version of content...
- * - Check out the ref for that version
- * - Copy content into `public/products`, with the content directory now
- *   normalized (probably to `content`, since that's most common?)
- *
- * @type Record<string, { websiteDir: string, contentDir: string }>
+ * @type Record<string, { assetDir: string, contentDir: string, dataDir: string, semverCoerce: Function, websiteDir: string }>
  */
 export const ALL_REPO_CONFIG = {
 	boundary: {
+		/**
+		 * ✅ Initial migration attempt: SEEMS TO WORK
+		 *
+		 * Boundary content seems to be successfully copied into `content` and
+		 * `public/assets` as expected. Further investigation and testing is
+		 * of course needed, we've only confirmed that the migration script works.
+		 */
 		assetDir: 'public',
 		contentDir: 'content',
 		dataDir: 'data',
-		patch: 'generic',
-		releaseRefPattern:
-			/^refs\/(remotes\/origin\/release\/|tags\/v)(\d+\.\d+\.[x,\d]+)$/i,
 		semverCoerce: semver.coerce,
-		versionStringFromRef: (ref) => {
-			const versionString = ref.match(/(\d+\.\d+\.[x,\d]+)$/)[1]
-			return `v${versionString}`
-		},
 		websiteDir: 'website',
 	},
 	consul: {
+		/**
+		 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
+		 *
+		 * Fails for v1.8.x (and likely earlier) with error:
+		 * `consul/website/content: No such file or directory`
+		 * This likely indicates that older versions of `consul` docs are still
+		 * located in `pages` directories. Need to confirm.
+		 */
 		assetDir: 'public',
 		contentDir: 'content',
 		dataDir: 'data',
-		patch: 'generic',
-		releaseRefPattern:
-			/^refs\/(remotes\/origin\/release\/|tags\/v)(\d+\.\d+\.[x,\d]+)$/i,
 		semverCoerce: semver.coerce,
-
-		versionStringFromRef: (ref) => {
-			const versionString = ref.match(/(\d+\.\d+\.[x,\d]+)$/)[1]
-			return `v${versionString}`
-		},
 		websiteDir: 'website',
 	},
 	'hcp-docs': {
+		/**
+		 * ✅ Initial migration attempt: SEEMS TO WORK
+		 *
+		 * Maybe worth noting: versioned docs is not enabled for `hcp-docs`.
+		 * `branchForLatest` is set to `main`. We treat the single version
+		 * as `v0.0.x` in our version metadata in the current content API:
+		 * https://content.hashicorp.com/api/content/hcp-docs/version-metadata?partial=true
+		 */
 		assetDir: 'public',
 		contentDir: 'content',
 		dataDir: 'data',
-		patch: 'generic',
-		/**
-		 * Note: Versioned docs is not enabled for `hcp-docs`.
-		 * `branchForLatest` is set to `main`.
-		 */
-		releaseRefPattern: /^refs\/remotes\/origin\/main$/i,
 		semverCoerce: semver.coerce,
-		// TODO: ignore no-unused-vars when var starts with `_`
-		// eslint-disable-next-line no-unused-vars
-		versionStringFromRef: (_ref) => 'v0.0.0',
 		websiteDir: '.',
 	},
 	nomad: {
+		/**
+		 * 	🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
+		 *
+		 * Fails for v0.12.x (and likely earlier) with error:
+		 * `nomad/website/content: No such file or directory`
+		 * This likely indicates that older versions of `nomad` docs are still
+		 * located in `pages` directories. Need to confirm.
+		 */
 		assetDir: 'public',
 		contentDir: 'content',
 		dataDir: 'data',
-		patch: 'generic',
-		releaseRefPattern:
-			/^refs\/(remotes\/origin\/release\/|tags\/v)(\d+\.\d+\.[x,\d]+)$/i,
 		semverCoerce: semver.coerce,
-
-		versionStringFromRef: (ref) => {
-			const versionString = ref.match(/(\d+\.\d+\.[x,\d]+)$/)[1]
-			return `v${versionString}`
-		},
 		websiteDir: 'website',
 	},
-	/**
-	 * TODO: for Packer, will probably need to do _something_ to sort out
-	 * the Packer plugin documentation. We didn't fully complete the migration
-	 * to Packer integrations, so I think there might still be plugin docs
-	 * we need to fetch from third-party repos?
-	 *
-	 * Or this may be a non-issue, I'm not actually sure.
-	 */
 	packer: {
+		/**
+		 * Initial migration attempt:
+		 *
+		 * 🚧 TODO
+		 *
+		 * TODO: for Packer, will probably need to do _something_ to sort out
+		 * the Packer plugin documentation. We didn't fully complete the migration
+		 * to Packer integrations, so I think there might still be plugin docs
+		 * we need to fetch from third-party repos?
+		 *
+		 * Or this may be a non-issue, I'm not actually sure.
+		 */
 		assetDir: 'public',
 		contentDir: 'content',
 		dataDir: 'data',
-		patch: 'generic',
-		releaseRefPattern:
-			/^refs\/(remotes\/origin\/release\/|tags\/v)(\d+\.\d+\.[x,\d]+)$/i,
 		semverCoerce: semver.coerce,
-
-		versionStringFromRef: (ref) => {
-			const versionString = ref.match(/(\d+\.\d+\.[x,\d]+)$/)[1]
-			return `v${versionString}`
-		},
 		websiteDir: 'website',
 	},
 	'ptfe-releases': {
+		/**
+		 * Initial migration attempt:
+		 *
+		 * 🚧 TODO
+		 */
 		assetDir: 'img',
 		contentDir: 'docs',
 		dataDir: 'data',
-		patch: 'exact',
-		releaseRefPattern: /^refs\/(tags\/)v\d\d\d\d\d\d-[\d]+$/i,
+
 		/**
 		 * Note: we need to sort versions for various reasons. Nearly all
 		 * our documentation is semver-versioned. PTFE is not. Rather than
@@ -129,17 +147,23 @@ export const ALL_REPO_CONFIG = {
 			const semverString = `v${year}.${parseInt(date)}.${patch}`
 			return semver.coerce(semverString)
 		},
-		versionStringFromRef: (ref) => {
-			const versionString = ref.match(/v(\d\d\d\d\d\d-[\d]+)$/i)[1]
-			return `v${versionString}`
-		},
-
 		websiteDir: 'website',
 	},
 	sentinel: {
+		/**
+		 * Initial migration attempt:
+		 *
+		 * Fails for v0.16.x (and likely earlier) with error:
+		 * `sentinel/website/content: No such file or directory`
+		 * This likely indicates that older versions of `consul` docs are still
+		 * located in `pages` directories. Need to confirm.
+		 * See note at top of this document on `pages` directories for details.
+		 */
 		assetDir: 'public',
 		/**
-		 * Note: Sentinel content is located in `website/content/sentinel`.
+		 * TODO: consider implications of Sentinel's `contentDir`.
+		 *
+		 * Sentinel content is located in `website/content/sentinel`.
 		 * Copying over the content is easy enough, but for internal links,
 		 * and search object IDs, and other concerns that involve the content file
 		 * path, it's a bit of an outlier, so will probably present some
@@ -147,25 +171,27 @@ export const ALL_REPO_CONFIG = {
 		 */
 		contentDir: 'content/sentinel',
 		dataDir: 'data',
-		patch: 'generic',
-		releaseRefPattern:
-			/^refs\/(remotes\/origin\/release\/|tags\/v)(\d+\.\d+\.[x,\d]+)$/i,
+
 		semverCoerce: semver.coerce,
-		versionStringFromRef: (ref) => {
-			const versionString = ref.match(/(\d+\.\d+\.[x,\d]+)$/)[1]
-			return `v${versionString}`
-		},
 		websiteDir: 'website',
 	},
 	terraform: {
+		/**
+		 * Initial migration attempt:
+		 *
+		 * 🚧 TODO
+		 */
 		assetDir: 'img',
 		contentDir: 'docs',
 		dataDir: 'data',
 		/**
-		 * New config to cut-off at old versions. Not sure how our current
-		 * system handles this, but it does it somehow! Also for Terraform
-		 * specifically, am curious about the `v1.1 *and earlier*` text in our
-		 * version selector... where's the `and earlier` coming from?
+		 * New config to cut-off at old versions.
+		 *
+		 * TODO: determine if this cut-off is appropriate.
+		 * Not sure how our current system handles this, but it does it somehow!
+		 * Also for Terraform specifically, am curious about the
+		 * `v1.1 *and earlier*` text in our version selector...
+		 * where's the `and earlier` coming from?
 		 */
 		earliestVersion: 'v1.1.0',
 		/**
@@ -175,81 +201,100 @@ export const ALL_REPO_CONFIG = {
 		 * might be other ways to approach it in both cases. But trying to change it
 		 * at the same time as running the migration seems like it'd be tough.
 		 */
-		patch: 'generic',
-		releaseRefPattern: /^(refs\/heads\/|refs\/remotes\/origin\/)?(v\d+\.\d+)$/i,
 		semverCoerce: semver.coerce,
-		versionStringFromRef: (ref) => {
-			const versionString = ref.match(/(v\d+\.\d+)$/)[1]
-			return versionString + '.x'
-		},
 		websiteDir: 'website',
 	},
 	'terraform-cdk': {
+		/**
+		 * Initial migration attempt:
+		 *
+		 * 🚧 TODO
+		 */
 		contentDir: 'docs',
 		websiteDir: 'website',
-		releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
 	},
 	'terraform-docs-agents': {
+		/**
+		 * Initial migration attempt:
+		 *
+		 * 🚧 TODO
+		 */
 		contentDir: 'docs',
 		websiteDir: 'website',
-		releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
 	},
 	'terraform-docs-common': {
+		/**
+		 * Initial migration attempt:
+		 *
+		 * 🚧 TODO
+		 */
 		contentDir: 'docs',
 		websiteDir: 'website',
-		releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
 	},
 	'terraform-plugin-framework': {
+		/**
+		 * Initial migration attempt:
+		 *
+		 * 🚧 TODO
+		 */
 		contentDir: 'docs',
 		websiteDir: 'website',
-		releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
 	},
 	'terraform-plugin-log': {
+		/**
+		 * Initial migration attempt:
+		 *
+		 * 🚧 TODO
+		 */
 		contentDir: 'docs',
 		websiteDir: 'website',
-		releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
 	},
 	'terraform-plugin-mux': {
+		/**
+		 * Initial migration attempt:
+		 *
+		 * 🚧 TODO
+		 */
 		contentDir: 'docs',
 		websiteDir: 'website',
-		releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
 	},
 	'terraform-plugin-sdk': {
+		/**
+		 * Initial migration attempt:
+		 *
+		 * 🚧 TODO
+		 */
 		contentDir: 'docs',
 		websiteDir: 'website',
-		releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
 	},
 	'terraform-plugin-testing': {
+		/**
+		 * Initial migration attempt:
+		 *
+		 * 🚧 TODO
+		 */
 		contentDir: 'docs',
 		websiteDir: 'website',
-		releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
 	},
 	vagrant: {
+		/**
+		 * Initial migration attempt:
+		 *
+		 * 🚧 TODO
+		 */
 		contentDir: 'content',
 		websiteDir: 'website',
-		releaseRefPattern: /^(refs\/heads\/)?v\d+[.]\d+$/i,
 	},
 	vault: {
+		/**
+		 * Initial migration attempt:
+		 *
+		 * 🚧 TODO
+		 */
 		assetDir: 'public',
 		contentDir: 'content',
 		dataDir: 'data',
 		earliestVersion: 'v1.4.0',
-		patch: 'generic',
-		releaseRefPattern:
-			/^refs\/(remotes\/origin\/release\/|tags\/v)(\d+\.\d+\.[x,\d]+)$/i,
-		versionStringFromRef: (ref) => {
-			const versionRegex = /(\d+\.\d+\.[x,\d]+)$/
-			if (!versionRegex.test(ref)) {
-				return null
-			}
-			const versionString = ref.match(versionRegex)[1]
-			return `v${versionString}`
-		},
 		websiteDir: 'website',
 	},
-	/**
-	 * Note: waypoint documentation is no longer published, as the Community
-	 * edition of Waypoint is no longer actively maintained. HCP Waypoint docs
-	 * are maintained in the `hashicorp/hcp-docs` repository.
-	 */
 }

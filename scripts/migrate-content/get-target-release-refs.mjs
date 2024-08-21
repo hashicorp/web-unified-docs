@@ -24,7 +24,7 @@ export async function getTargetReleaseRefs({
 		repoConfig.semverCoerce
 	)
 	// Filter the fetched release refs based on provided target versions
-	const isTargetReleaseRefs = targetVersions.length
+	const isTargetReleaseRefs = targetVersions?.length
 		? ({ versionString }) => targetVersions.includes(versionString)
 		: ({ version }) => getIsVersionInRange(version, repoConfig)
 	const targetReleaseRefs = contentApiReleaseRefs.filter(isTargetReleaseRefs)

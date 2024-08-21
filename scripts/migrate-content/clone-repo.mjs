@@ -20,7 +20,7 @@ import { execSync } from 'child_process'
  * @param {string} repoName The name of the repository.
  * @returns {string} The path to the repository directory.
  */
-export function cloneRepoShallow(targetDir, repoOwner, repoName) {
+export function cloneRepo(targetDir, repoOwner, repoName, cloneArgs) {
 	/**
 	 * Assuming the `gh repo clone` command will be successful, we expect
 	 * the repository directory to be given the same name as the repository.
@@ -30,7 +30,7 @@ export function cloneRepoShallow(targetDir, repoOwner, repoName) {
 	// If the repository already exists, we skip cloning
 	if (!repoDirExists) {
 		console.log(`📡 Cloning "${repoSlug}" into "${ghCloneDir}"...`)
-		execSync(`gh repo clone ${repoOwner}/${repoName} -- --filter=blob:none`, {
+		execSync(`gh repo clone ${repoOwner}/${repoName} -- ${cloneArgs}`, {
 			stdio: 'inherit', // Nice to see progress for large repos
 			cwd: targetDir,
 		})

@@ -4,7 +4,7 @@ import { execSync } from 'child_process'
 // Local
 import { buildTargetRepos } from './build-target-repos.mjs'
 import { clearAndCopy } from './clear-and-copy.mjs'
-import { cloneRepoShallow } from './clone-repo-shallow.mjs'
+import { cloneRepo } from './clone-repo.mjs'
 import { getTargetReleaseRefs } from './get-target-release-refs.mjs'
 
 /**
@@ -162,11 +162,15 @@ async function migrateContent(targetRepos, ghCloneDir, outputDirs) {
 		const targetReleaseRefs = await getTargetReleaseRefs(repoEntry)
 		// If we have no target release refs, log and skip this repo
 		if (targetReleaseRefs.length === 0) {
-			console.log(`⬇️ No target versions found for "${repoSlug}". Skipping...`)
+			console.log(`🔄 No target versions found for "${repoSlug}". Skipping...`)
 			continue
 		}
-		// Otherwise, we have release refs to extract. Start by cloning the repo.
-		const cloneDir = cloneRepoShallow(ghCloneDir, 'hashicorp', repoSlug)
+		/**
+		 * Otherwise, we have release refs to extract.
+		 * Start by shallow cloning the repo.
+		 */
+		const cloneArgs = '--depth=1 --filter=blob:none'
+		const cloneDir = cloneRepo(ghCloneDir, 'hashicorp', repoSlug, cloneArgs)
 		/**
 		 * For each release ref, check out the ref, and copy the content, data,
 		 * and assets from the content source repository into this project.
@@ -175,12 +179,12 @@ async function migrateContent(targetRepos, ghCloneDir, outputDirs) {
 		 * repository directory to check out different points in git history
 		 * corresponding to each release ref.
 		 */
+		const refDebugStrings = targetReleaseRefs.map(
+			(t) => `${t.versionString} (${t.ref})`
+		)
 		console.log(
-			`🛠️  Extracting content from the "${repoSlug}" repo at refs:\n${JSON.stringify(
-				targetReleaseRefs.map((t) => `${t.versionString} (${t.ref})`),
-				null,
-				2
-			)}`
+			`🛠️  Extracting content from the "${repoSlug}" repo at refs:
+			${JSON.stringify(refDebugStrings, null, 2)}`
 		)
 		for (let i = targetReleaseRefs.length - 1; i >= 0; i--) {
 			const targetRef = targetReleaseRefs[i]
@@ -199,7 +203,14 @@ async function migrateContent(targetRepos, ghCloneDir, outputDirs) {
 	}
 	// Log out that we're done with all repos, then return
 	console.log(`✅ Finished migrating all target repos and versions.`)
-	return
+	/**
+	 * TODO: i feel like this script should just exit anyways, but it seems
+	 * to be doing so inconsistently. Probably an `await` thing but I'm not
+	 * sure what. Need to investigate further. Can uncomment `process.exit()`
+	 * for now as a stopgap when it's annoying.
+	 */
+	// process.exit()
+	return true
 }
 
 /**
@@ -224,6 +235,7 @@ async function migrateRepoContentAtRef({
 	 * `git checkout` out the hash corresponding to this release ref
 	 */
 	console.log(`🥡 Checking out ref "${targetRef.ref}" (${targetRef.hash})...`)
+	execSync(`git restore . && git clean -f`, { cwd: cloneDir })
 	execSync(`git checkout ${targetRef.hash}`, {
 		stdio: 'inherit',
 		cwd: cloneDir,
@@ -266,5 +278,5 @@ async function migrateRepoContentAtRef({
 		clearAndCopy(contentSrc, contentDest),
 		clearAndCopy(dataSrc, dataDest),
 	])
-	return
+	return true
 }
