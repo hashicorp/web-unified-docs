@@ -105,10 +105,19 @@ export const ALL_REPO_CONFIG = {
 	},
 	packer: {
 		/**
-		 * Initial migration attempt:
+		 * 	🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
 		 *
-		 * 🚧 TODO
-		 *
+		 * Fails for v1.5.6 (and likely earlier) with error:
+		 * `packer/website/content: No such file or directory`
+		 * This likely indicates that older versions of `packer` docs are still
+		 * located in `pages` directories. Need to confirm.
+		 */
+		/**
+		 * TODO: for Packer, do we need to retain the "exact" patch setup?
+		 * It feels like it'd be significantly simpler and more lightweight to
+		 * use the "generic" patch setup, as has been done for all other sources.
+		 */
+		/**
 		 * TODO: for Packer, will probably need to do _something_ to sort out
 		 * the Packer plugin documentation. We didn't fully complete the migration
 		 * to Packer integrations, so I think there might still be plugin docs

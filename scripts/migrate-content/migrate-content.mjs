@@ -19,7 +19,7 @@ const GH_CLONE_DIR = '.content-source-repos'
  * Later, when we're actually ready to run migrations, we'll want to
  * output migrated content to `content` and `public` folders at the root
  * of this repo, so we'll change MIGRATION_OUTPUT_ROOT to `process.cwd()`.
- */ a
+ */
 const MIGRATION_OUTPUT_ROOT = path.join(process.cwd(), '.migrated-content')
 /**
  * MIGRATION_CONTENT_DIR is where extracted content & data will be placed.
@@ -60,25 +60,28 @@ const MIGRATION_ASSETS_DIR = path.join(MIGRATION_OUTPUT_ROOT, 'public/assets')
  * `node ./scripts/migrate-content/migrate-content.mjs terraform`
  * Extract Terraform v1.1.x content:
  * `node ./scripts/migrate-content/migrate-content.mjs terraform:v1.1.x`
- * Extract content for many products:
+ * Extract content for many products at once:
  * `node ./scripts/migrate-content/migrate-content.mjs boundary consul terraform`
  */
 
 /**
  * TODO: this script is _not_ done. There are at least a few edge cases that
- * still need to be handled. For example, in older versions of many products,
- * content is in a `pages` directory, rather than `content`. Our existing
- * scripts in `mktg-content-workflows` somehow account for this, we'll need
- * to do the same during migration in order to maintain parity in what
- * content we're serving.
+ * still need to be handled.
  *
- * TODO: write up edge cases, either below or in a separate file... maybe
- * add Asana tasks for them... and then we can probably move forward and merge
- * this script knowing that it's still a work in progress.
+ * For example, in older versions of many products, content is in a `pages`
+ * directory, rather than `content`. Our existing scripts in
+ * `mktg-content-workflows` somehow account for this, we'll need to do the same
+ * during migration in order to maintain parity in what content we're serving.
+ *
+ * To discover all these edge cases and examples, we'll need to go beyond
+ * running the migration scripts, and actually testing that after migrating
+ * content, our new API returns responses that match the existing
+ * `content.hashicorp.com` API.
  */
 
 /**
  * TODO: add another step to process versioned assets in some way.
+ * Asana task: https://app.asana.com/0/1207899860738460/1207910088307871/f
  *
  * Possible approach:
  * - Assets can either be versioned, or shared across versions
