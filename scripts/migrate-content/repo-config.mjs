@@ -105,7 +105,7 @@ export const ALL_REPO_CONFIG = {
 	},
 	packer: {
 		/**
-		 * 	🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
+		 *  🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
 		 *
 		 * Fails for v1.5.6 (and likely earlier) with error:
 		 * `packer/website/content: No such file or directory`
