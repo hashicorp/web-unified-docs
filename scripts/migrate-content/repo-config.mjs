@@ -157,7 +157,7 @@ export const ALL_REPO_CONFIG = {
 			 * See: https://github.com/typescript-eslint/typescript-eslint/issues/8464
 			 */
 			// eslint-disable-next-line no-unused-vars
-			const [_match, year, date, patch] = versionParts
+			const [year, date, patch] = versionParts.slice(1);
 			const semverString = `v${year}.${parseInt(date)}.${patch}`
 			return semver.coerce(semverString)
 		},
