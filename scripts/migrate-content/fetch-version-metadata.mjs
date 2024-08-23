@@ -1,5 +1,5 @@
 // Define the base URL for the existing content API
-const CONTENT_API_BASE_URL = new URL('https://content.hashicorp.com')
+const CONTENT_API_BASE_URL = 'https://content.hashicorp.com'
 
 /**
  * Given a content source repo slug,
@@ -12,7 +12,10 @@ const CONTENT_API_BASE_URL = new URL('https://content.hashicorp.com')
  */
 export async function fetchVersionMetadata(contentSourceRepo) {
 	// Determine the endpoint to fetch from, based on the content source repo
-	const endpoint = `${EXISTING_CONTENT_API}/api/content/${contentSourceRepo}/version-metadata`
+	const endpoint = new URL(
+		`/api/content/${contentSourceRepo}/version-metadata`,
+		CONTENT_API_BASE_URL
+	)
 	// Run fetch
 	const response = await fetch(endpoint)
 	const responseJson = await response.json()
