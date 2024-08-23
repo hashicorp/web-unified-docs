@@ -90,7 +90,7 @@ export const ALL_REPO_CONFIG = {
 	},
 	nomad: {
 		/**
-		 * 	🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
+		 *  🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
 		 *
 		 * Fails for v0.12.x (and likely earlier) with error:
 		 * `nomad/website/content: No such file or directory`
