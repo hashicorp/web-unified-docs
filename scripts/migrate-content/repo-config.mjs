@@ -9,7 +9,7 @@ import semver from 'semver'
  *
  * Community documentation still exists in the `hashicorp/waypoint` repo.
  *
- * I'm almost certain can not worry about migrating Waypoint Community
+ * I'm almost certain don't need to worry about migrating Waypoint Community
  * since the docs are not longer published on `developer.hashicorp.com`,
  * but probably wouldn't hurt to double-check.
  */
