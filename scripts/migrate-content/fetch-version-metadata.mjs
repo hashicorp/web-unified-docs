@@ -1,5 +1,5 @@
 // Define the base URL for the existing content API
-const EXISTING_CONTENT_API = `https://content.hashicorp.com`
+const CONTENT_API_BASE_URL = new URL('https://content.hashicorp.com')
 
 /**
  * Given a content source repo slug,
