@@ -152,12 +152,7 @@ export const ALL_REPO_CONFIG = {
 		semverCoerce: (versionString) => {
 			const versionRegex = /v(\d\d\d\d)(\d\d)-([\d]+)/
 			const versionParts = versionRegex.exec(versionString)
-			/**
-			 * TODO: would be nice to ignore unused vars if they start with `_`
-			 * See: https://github.com/typescript-eslint/typescript-eslint/issues/8464
-			 */
-			// eslint-disable-next-line no-unused-vars
-			const [year, date, patch] = versionParts.slice(1);
+			const [year, date, patch] = versionParts.slice(1)
 			const semverString = `v${year}.${parseInt(date)}.${patch}`
 			return semver.coerce(semverString)
 		},
