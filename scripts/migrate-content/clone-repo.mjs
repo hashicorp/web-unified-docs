@@ -18,6 +18,7 @@ import { execSync } from 'child_process'
  * @param {string} targetDir The directory where the repository will be cloned.
  * @param {string} repoOwner The owner of the repository.
  * @param {string} repoSlug The name of the repository.
+ * @param {string} cloneArgs Additional arguments to pass to the `gh repo clone` command.
  * @returns {string} The path to the repository directory.
  */
 export function cloneRepo(targetDir, repoOwner, repoSlug, cloneArgs) {
