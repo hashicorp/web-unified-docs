@@ -12,7 +12,7 @@ const EXISTING_CONTENT_API = `https://content.hashicorp.com`
  */
 export async function fetchVersionMetadata(contentSourceRepo) {
 	// Determine the endpoint to fetch from, based on the content source repo
-	const endpoint = getVersionMetadataEndpoint(contentSourceRepo)
+	const endpoint = `${EXISTING_CONTENT_API}/api/content/${contentSourceRepo}/version-metadata`
 	// Run fetch
 	const response = await fetch(endpoint)
 	const responseJson = await response.json()
@@ -30,16 +30,4 @@ export async function fetchVersionMetadata(contentSourceRepo) {
 	}
 	// Return the response result
 	return responseJson
-}
-
-/**
- * Given a content source repo slug,
- * Return the endpoint on the existing content API from which we can
- * fetch version metadata for the provided content source repo.
- *
- * @param {string} contentSourceRepo
- * @returns {string}
- */
-function getVersionMetadataEndpoint(contentSourceRepo) {
-	return `${EXISTING_CONTENT_API}/api/content/${contentSourceRepo}/version-metadata?partial=true`
 }
