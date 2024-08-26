@@ -248,7 +248,7 @@ async function migrateContent(targetRepos, ghCloneDir, outputDirs) {
  * @param {string} outputDirs.assets
  * @return {void}
  */
-async function migrateRepoContentAtRef(
+function migrateRepoContentAtRef(
 	repoSlug,
 	cloneDir,
 	targetRef,
@@ -307,11 +307,9 @@ async function migrateRepoContentAtRef(
 	dirsToCopy.push({ src: contentSrc, dest: contentDest })
 	dirsToCopy.push({ src: dataSrc, dest: dataDest })
 	/**
-	 * Execute the copy commands in parallel, clearing out directories first
+	 * Execute the copy commands
 	 */
-	await Promise.all(
-		dirsToCopy.map(({ src, dest }) => {
-			return clearAndCopy(src, dest)
-		})
-	)
+	for (const { src, dest } of dirsToCopy) {
+		clearAndCopy(src, dest)
+	}
 }

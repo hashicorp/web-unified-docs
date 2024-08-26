@@ -22,14 +22,14 @@ import { execSync } from 'child_process'
  * will be completed deleted, before copying `src` into it.
  * @returns {void}
  */
-export async function clearAndCopy(src, dest) {
+export function clearAndCopy(src, dest) {
 	// Ensure the parent for the destination directory exists
 	if (!fs.existsSync(dest)) {
 		fs.mkdirSync(path.dirname(dest), { recursive: true })
 	}
 	// Clear any previously copied files
 	execSync(`rm -rf ${dest}`, { stdio: 'inherit' })
-	// Copy the directory
+	// Copy the director
 	execSync(`cp -r ${src} ${dest}`, {
 		stdio: 'inherit',
 	})
