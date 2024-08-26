@@ -138,7 +138,7 @@ await migrateContent(targetRepos, GH_CLONE_DIR, {
  * @param {Object} outputDirs
  * @param {string} outputDirs.content
  * @param {string} outputDirs.assets
- * @returns
+ * @return {void}
  */
 async function migrateContent(targetRepos, ghCloneDir, outputDirs) {
 	// Ensure the temporary directory exists, this is where repos will be cloned.
@@ -210,16 +210,8 @@ async function migrateContent(targetRepos, ghCloneDir, outputDirs) {
 		}
 		console.log(`🟢 Finished migrating content from "${repoSlug}".`)
 	}
-	// Log out that we're done with all repos, then return
+	// Log out that we're done with all repos
 	console.log(`✅ Finished migrating all target repos and versions.`)
-	/**
-	 * TODO: i feel like this script should just exit anyways, but it seems
-	 * to be doing so inconsistently. Probably an `await` thing but I'm not
-	 * sure what. Need to investigate further. Can uncomment `process.exit()`
-	 * for now as a stopgap when it's annoying.
-	 */
-	process.exit()
-	// return true
 }
 
 /**
@@ -303,5 +295,4 @@ async function migrateRepoContentAtRef(
 			return clearAndCopy(src, dest)
 		})
 	)
-	return true
 }
