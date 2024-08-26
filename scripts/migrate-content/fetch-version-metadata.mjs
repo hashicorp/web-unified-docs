@@ -16,8 +16,9 @@ export async function fetchVersionMetadata(contentSourceRepo) {
 		`/api/content/${contentSourceRepo}/version-metadata`,
 		CONTENT_API_BASE_URL
 	)
+	endpoint.searchParams.set('partial', 'true')
 	// Run fetch
-	const response = await fetch(endpoint)
+	const response = await fetch(endpoint.toString())
 	const responseJson = await response.json()
 	/**
 	 * Throw an error if we encounter an unexpected status code or result
