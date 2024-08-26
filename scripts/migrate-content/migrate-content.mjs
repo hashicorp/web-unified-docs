@@ -37,6 +37,21 @@ const MIGRATION_ASSETS_DIR = path.join(MIGRATION_OUTPUT_ROOT, 'public/assets')
  * This script is intended to migrate content from "content source" repos
  * into this project.
  *
+ * NOTE ON INCONSISTENT EXIT BEHAVIOUR:
+ * This script seems to exit unreliably in certain cases.
+ * It seems to exit most reliably when using Node v20 or later.
+ * If you see the logged message...
+ * "✅ Finished migrating all target repos and versions."
+ * ... but the script has not yet exited, this generally means the script has
+ * executed successfully, but for some strange reason hasn't exited... This
+ * seems to be related to `gh repo clone` commands, as when those commands are
+ * skipped, we don't seem to encounter this issue. While we could dig deep into
+ * this, our intent here is single-use migration scripts, so we have some
+ * comfort in leaving this as-is. If we want to start running these types of
+ * scripts in an automated may, we'd likely want to look for a different
+ * approach to clone repos, eg using a pre-built GitHub Action or whatnot.
+ *
+ *
  * This script uses our existing `content.hashicorp.com` API to determine which
  * git refs provided the version content that is currently live on dev dot.
  * This script then clones the content source repo, checks out those git refs
