@@ -51,7 +51,6 @@ const MIGRATION_ASSETS_DIR = path.join(MIGRATION_OUTPUT_ROOT, 'public/assets')
  * scripts in an automated may, we'd likely want to look for a different
  * approach to clone repos, eg using a pre-built GitHub Action or whatnot.
  *
- *
  * This script uses our existing `content.hashicorp.com` API to determine which
  * git refs provided the version content that is currently live on dev dot.
  * This script then clones the content source repo, checks out those git refs
@@ -212,7 +211,7 @@ async function migrateContent(targetRepos, ghCloneDir, outputDirs) {
 		)
 		for (let i = targetReleaseRefs.length - 1; i >= 0; i--) {
 			const targetRef = targetReleaseRefs[i]
-			await migrateRepoContentAtRef(
+			migrateRepoContentAtRef(
 				repoSlug,
 				cloneDir,
 				targetRef,
