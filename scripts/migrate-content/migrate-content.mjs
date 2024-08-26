@@ -138,7 +138,7 @@ const args = process.argv.slice(2)
 const targetRepos = buildTargetRepos(args)
 
 // Run the main script
-await migrateContent(targetRepos, GH_CLONE_DIR, {
+migrateContent(targetRepos, GH_CLONE_DIR, {
 	content: MIGRATION_CONTENT_DIR,
 	assets: MIGRATION_ASSETS_DIR,
 })
@@ -227,6 +227,10 @@ async function migrateContent(targetRepos, ghCloneDir, outputDirs) {
 	}
 	// Log out that we're done with all repos
 	console.log(`✅ Finished migrating all target repos and versions.`)
+	//
+	const activeHandles = process._getActiveHandles()
+	const activeRequests = process._getActiveRequests()
+	console.log({ activeHandles, activeRequests })
 }
 
 /**

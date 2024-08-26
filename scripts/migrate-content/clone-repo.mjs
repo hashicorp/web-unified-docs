@@ -31,10 +31,13 @@ export function cloneRepo(targetDir, repoOwner, repoSlug, cloneArgs) {
 	// If the repository already exists, we skip cloning
 	if (!repoDirExists) {
 		console.log(`📡 Cloning "${repoSlug}" into "${targetDir}"...`)
-		execSync(`gh repo clone ${repoOwner}/${repoSlug} -- ${cloneArgs}`, {
-			stdio: 'inherit', // Nice to see progress for large repos
-			cwd: targetDir,
-		})
+		execSync(
+			`git clone ${cloneArgs} https://github.com/${repoOwner}/${repoSlug}`,
+			{
+				stdio: 'inherit', // Nice to see progress for large repos
+				cwd: targetDir,
+			}
+		)
 	} else {
 		console.log(`🔄 Directory already exists at "${repoDir}". Skipping clone.`)
 	}
