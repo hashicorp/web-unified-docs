@@ -227,10 +227,6 @@ async function migrateContent(targetRepos, ghCloneDir, outputDirs) {
 	}
 	// Log out that we're done with all repos
 	console.log(`✅ Finished migrating all target repos and versions.`)
-	//
-	const activeHandles = process._getActiveHandles()
-	const activeRequests = process._getActiveRequests()
-	console.log({ activeHandles, activeRequests })
 }
 
 /**
