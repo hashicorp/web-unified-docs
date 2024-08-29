@@ -49,3 +49,19 @@ For comparison:
 | consul                         | 80                      |
 | terraform                      | 49                      |
 | vault                          | 46                      |
+
+## Local Previews
+
+To work with local previews you'll need to have [Docker](https://docs.docker.com/engine/install/) and [Node](https://nodejs.org/en/download/package-manager) installed.
+
+First, run the `prebuild` script to transform the MDX files and copy the nav data files:
+
+```zsh
+npm run prebuild
+```
+
+Now, you are able to preview the `dev-portal` UI in 2 different states.
+
+1. The migration preview. This shows `dev-portal` where some routes fetch data from the existing content API and whilst only the routes that have been intentionally migrated use the new unified docs api. For this run `npm run preview:migration`
+
+2. The unified docs preview. This preview is something of a 'stress test' to show how `dev-portal` would look if it pulled all of its content from this new unified docs api. For this preview run `npm run preview:unified-docs`

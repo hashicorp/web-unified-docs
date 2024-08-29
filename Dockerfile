@@ -1,13 +1,14 @@
-# Use the official Node.js image as the base image
-FROM node:18-alpine
+FROM node:20
 
 WORKDIR /server
 
 COPY package*.json ./
 
-RUN npm install --production
+RUN npm install
 
 COPY . .
+
+RUN  npm run build
 
 EXPOSE 8080
 
