@@ -4,7 +4,7 @@ import { Err, Ok } from './result'
 
 const SELF_URL = process.env.VERCEL_URL
 	? `https://${process.env.VERCEL_URL}`
-	: 'http://localhost:3000'
+	: `http://localhost:${process.env.UNIFIED_DOCS_PORT}`
 
 /**
  * NOTE: we currently read files by fetching them from the `public` folder
