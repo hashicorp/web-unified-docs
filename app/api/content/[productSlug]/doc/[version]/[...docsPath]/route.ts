@@ -125,12 +125,14 @@ export async function GET(
 	]
 
 	let foundContent
+	let foundContentLocation
 	for (const loc of possibleContentLocations) {
 		const readFileResult = await readFile(loc)
 
 		if (readFileResult.ok) {
 			console.log(`Found content at ${loc.join('/')}`)
 			foundContent = readFileResult.value
+			foundContentLocation = loc.join('/')
 			break
 		}
 	}
@@ -159,7 +161,7 @@ export async function GET(
 			status_text: 'OK',
 		},
 		result: {
-			fullPath: rawDocsPath,
+			fullPath: foundContentLocation,
 			product: productSlug,
 			version: parsedVersion,
 			metadata,
