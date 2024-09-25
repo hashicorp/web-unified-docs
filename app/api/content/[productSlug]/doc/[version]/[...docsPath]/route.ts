@@ -105,10 +105,19 @@ export async function GET(
 			contentDir,
 			`${parsedDocsPath}.mdx`,
 		],
+		[`content`, productSlug, 'fallback', contentDir, `${parsedDocsPath}.mdx`],
 		[
 			`content`,
 			productSlug,
 			parsedVersion,
+			contentDir,
+			parsedDocsPath,
+			`index.mdx`,
+		],
+		[
+			`content`,
+			productSlug,
+			'fallback',
 			contentDir,
 			parsedDocsPath,
 			`index.mdx`,
@@ -120,13 +129,18 @@ export async function GET(
 		const readFileResult = await readFile(loc)
 
 		if (readFileResult.ok) {
+			console.log(`Found content at ${loc.join('/')}`)
 			foundContent = readFileResult.value
 			break
 		}
 	}
 
 	if (!foundContent) {
-		console.error(`API Error: No content found at ${possibleContentLocations}`)
+		console.error(
+			`API Error: No content found at ${possibleContentLocations
+				.map((loc) => loc.join('/'))
+				.join(', ')}`
+		)
 		return new Response('Not found', { status: 404 })
 	}
 
