@@ -28,6 +28,9 @@ program
 		'Diff type for API type "content": "metadata", "markdown", or "everything"',
 		'markdown'
 	)
+	.option('-r, --drop-keys <keys>', 'Result keys to drop', (value) =>
+		value.split(',')
+	)
 	.option('-t, --num-of-tests <number>', 'Number of tests', parseInt)
 	.option('-s, --save-output', 'Save output', false)
 
