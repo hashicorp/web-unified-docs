@@ -1,7 +1,6 @@
 import { readFile, parseMarkdownFrontMatter } from '@utils/file'
 import { getProductVersion } from '@utils/contentVersions'
 import { errorResultToString } from '@utils/result'
-// small comment so git will pick up the change
 /**
  * TODO: we have different content directory structures across repos.
  *
