@@ -35,7 +35,7 @@ program
 		'markdown'
 	)
 	.option('-r, --drop-keys <keys>', 'Result keys to drop', (value) =>
-		value.split(',')
+		value.split(',').map((key) => key.trim())
 	)
 	.option('-t, --num-of-tests <number>', 'Number of tests', parseInt, 10)
 	.option('-s, --save-output', 'Save output', false)
@@ -98,6 +98,68 @@ function getAllContentApiPaths(directory) {
 	return apiPaths
 }
 
+function sortObjectByKeys(obj) {
+	if (obj !== null && typeof obj === 'object' && !Array.isArray(obj)) {
+		return Object.keys(obj)
+			.sort()
+			.reduce((result, key) => {
+				result[key] = sortObjectByKeys(obj[key])
+				return result
+			}, {})
+	} else if (Array.isArray(obj)) {
+		return obj.map(sortObjectByKeys)
+	}
+	return obj
+}
+
+function saveTestOutputIfSelected(outputString, newApiURL) {
+	if (options.saveOutput) {
+		const outputFileDirPath = path.join(__dirname, 'test-output')
+
+		if (!fs.existsSync(outputFileDirPath)) {
+			fs.mkdirSync(outputFileDirPath)
+		}
+
+		const apiURLFileName = newApiURL.replace(/\//g, '_').replace(/:/g, '-')
+		const outputFile = path.join(outputFileDirPath, `${apiURLFileName}.txt`)
+
+		const strippedOutputString = stripAnsi(outputString)
+		fs.writeFileSync(outputFile, strippedOutputString)
+	}
+}
+
+async function fetchApiTypeVersionAndNav(options, product, versionMetadata) {
+	let newApiURL
+	let oldApiURL
+
+	if (options.api === 'version-metadata') {
+		newApiURL = `${options.newApiUrl}/api/content/${product}/version-metadata`
+		oldApiURL = `${options.oldApiUrl}/api/content/${product}/version-metadata?partial=true`
+	} else if (options.api === 'nav-data') {
+		newApiURL = `${options.newApiUrl}/api/content/${product}/nav-data/${versionMetadata.version}`
+		oldApiURL = `${options.oldApiUrl}/api/content/${product}/nav-data/${versionMetadata.version}`
+	}
+
+	const newApiResponse = await fetch(newApiURL)
+	const oldApiResponse = await fetch(oldApiURL)
+
+	const newApiData = await newApiResponse.json()
+	const oldApiData = await oldApiResponse.json()
+
+	const newApiDataStrings = JSON.stringify(
+		sortObjectByKeys(newApiData.result),
+		null,
+		2
+	).split('\n')
+	const oldApiDataStrings = JSON.stringify(
+		sortObjectByKeys(oldApiData.result),
+		null,
+		2
+	).split('\n')
+
+	return { newApiDataStrings, oldApiDataStrings, newApiURL }
+}
+
 const testsPassed = []
 const testsFailed = []
 for (const [product, versions] of Object.entries(versionMetadata)) {
@@ -110,31 +172,14 @@ for (const [product, versions] of Object.entries(versionMetadata)) {
 			continue
 		}
 
-		if (options.api === 'version-metadata') {
-			const newApiURL = `${options.newApiUrl}/api/content/${product}/version-metadata`
-			const oldApiURL = `${options.oldApiUrl}/api/content/${product}/version-metadata?partial=true`
-
-			const newApiResponse = await fetch(newApiURL)
-			const oldApiResponse = await fetch(oldApiURL)
-
-			const newApiData = await newApiResponse.json()
-			const oldApiData = await oldApiResponse.json()
+		if (options.api === 'version-metadata' || options.api === 'nav-data') {
+			const { newApiDataStrings, oldApiDataStrings, newApiURL } =
+				await fetchApiTypeVersionAndNav(options, product, versionMetadata)
 
 			const diffOptions = {
 				contextLines: 1,
 				expand: false,
 			}
-
-			const newApiDataStrings = JSON.stringify(
-				newApiData.result,
-				null,
-				2
-			).split('\n')
-			const oldApiDataStrings = JSON.stringify(
-				oldApiData.result,
-				null,
-				2
-			).split('\n')
 
 			const difference = diffLinesUnified(
 				oldApiDataStrings,
@@ -143,72 +188,9 @@ for (const [product, versions] of Object.entries(versionMetadata)) {
 			)
 
 			const outputString = `Testing API URL:\n${newApiURL}\n${difference}`
-
 			console.log(outputString)
-			if (options.saveOutput) {
-				const outputFileDirPath = path.join(__dirname, 'test-output')
 
-				if (!fs.existsSync(outputFileDirPath)) {
-					fs.mkdirSync(outputFileDirPath)
-				}
-
-				const apiURLFileName = newApiURL.replace(/\//g, '_').replace(/:/g, '-')
-				const outputFile = path.join(outputFileDirPath, `${apiURLFileName}.txt`)
-
-				const strippedOutputString = stripAnsi(outputString)
-				fs.writeFileSync(outputFile, strippedOutputString)
-			}
-
-			break
-		} else if (options.api === 'nav-data') {
-			const newApiURL = `${options.newApiUrl}/api/content/${product}/nav-data/${versionMetadata.version}`
-			const oldApiURL = `${options.oldApiUrl}/api/content/${product}/nav-data/${versionMetadata.version}`
-
-			const newApiResponse = await fetch(newApiURL)
-			const oldApiResponse = await fetch(oldApiURL)
-
-			const newApiData = await newApiResponse.json()
-			const oldApiData = await oldApiResponse.json()
-
-			const diffOptions = {
-				contextLines: 1,
-				expand: false,
-			}
-
-			const newApiDataStrings = JSON.stringify(
-				newApiData.result,
-				null,
-				2
-			).split('\n')
-			const oldApiDataStrings = JSON.stringify(
-				oldApiData.result,
-				null,
-				2
-			).split('\n')
-
-			const difference = diffLinesUnified(
-				oldApiDataStrings,
-				newApiDataStrings,
-				diffOptions
-			)
-
-			const outputString = `Testing API URL:\n${newApiURL}\n${difference}`
-
-			console.log(outputString)
-			if (options.saveOutput) {
-				const outputFileDirPath = path.join(__dirname, 'test-output')
-
-				if (!fs.existsSync(outputFileDirPath)) {
-					fs.mkdirSync(outputFileDirPath)
-				}
-
-				const apiURLFileName = newApiURL.replace(/\//g, '_').replace(/:/g, '-')
-				const outputFile = path.join(outputFileDirPath, `${apiURLFileName}.txt`)
-
-				const strippedOutputString = stripAnsi(outputString)
-				fs.writeFileSync(outputFile, strippedOutputString)
-			}
-
+			saveTestOutputIfSelected(outputString, newApiURL)
 			break
 		} else if (options.api === 'content') {
 			const productContentDir = contentDirMap[product]
@@ -274,25 +256,29 @@ for (const [product, versions] of Object.entries(versionMetadata)) {
 					continue
 				}
 
-				const diffOptions = {
-					contextLines: 1,
-					expand: false,
+				if (options.dropKeys) {
+					options.dropKeys.forEach((key) => {
+						delete newApiData.result[key]
+						delete oldApiData.result[key]
+					})
 				}
 
-				let difference
+				let diffFunc
+				let newApiDataStrings
+				let oldApiDataStrings
 				if (options.diff === 'everything') {
-					const newApiDataStrings = JSON.stringify(
-						newApiData.result,
+					newApiDataStrings = JSON.stringify(
+						sortObjectByKeys(newApiData.result),
 						null,
 						2
 					).split('\n')
-					const oldApiDataStrings = JSON.stringify(
-						oldApiData.result,
+					oldApiDataStrings = JSON.stringify(
+						sortObjectByKeys(oldApiData.result),
 						null,
 						2
 					).split('\n')
 
-					difference = diff(oldApiDataStrings, newApiDataStrings, diffOptions)
+					diffFunc = diff
 				} else if (options.diff === 'metadata') {
 					const {
 						// eslint-disable-next-line no-unused-vars
@@ -305,30 +291,31 @@ for (const [product, versions] of Object.entries(versionMetadata)) {
 						...oldApiDataWithoutMarkdown
 					} = oldApiData.result
 
-					const newApiDataStrings = JSON.stringify(
-						newApiDataWithoutMarkdown,
+					newApiDataStrings = JSON.stringify(
+						sortObjectByKeys(newApiDataWithoutMarkdown),
 						null,
 						2
 					).split('\n')
-					const oldApiDataStrings = JSON.stringify(
-						oldApiDataWithoutMarkdown,
+					oldApiDataStrings = JSON.stringify(
+						sortObjectByKeys(oldApiDataWithoutMarkdown),
 						null,
 						2
 					).split('\n')
 
-					difference = diff(oldApiDataStrings, newApiDataStrings, diffOptions)
+					diffFunc = diff
 				} else if (options.diff === 'markdown') {
-					const newApiDataStrings = newApiData.result.markdownSource.split('\n')
+					newApiDataStrings = newApiData.result.markdownSource.split('\n')
 					// .map((line, index) => `${index + 1}: ${line}`) // Add line numbers
-					const oldApiDataStrings = oldApiData.result.markdownSource.split('\n')
+					oldApiDataStrings = oldApiData.result.markdownSource.split('\n')
 					// .map((line, index) => `${index + 1}: ${line}`) // Add line numbers
 
-					difference = diffLinesUnified(
-						oldApiDataStrings,
-						newApiDataStrings,
-						diffOptions
-					)
+					diffFunc = diffLinesUnified
 				}
+
+				const difference = diffFunc(oldApiDataStrings, newApiDataStrings, {
+					contextLines: 1,
+					expand: false,
+				})
 
 				const outputString = `Test ${i + 1} of ${
 					randomIndexes.length
@@ -344,22 +331,7 @@ for (const [product, versions] of Object.entries(versionMetadata)) {
 					console.log(`${difference}\n`)
 				}
 
-				if (options.saveOutput) {
-					const outputFileDirPath = path.join(__dirname, 'test-output')
-
-					if (!fs.existsSync(outputFileDirPath)) {
-						fs.mkdirSync(outputFileDirPath)
-					}
-
-					const apiURLFileName = apiURL.replace(/\//g, '_').replace(/:/g, '-')
-					const outputFile = path.join(
-						outputFileDirPath,
-						`${apiURLFileName}.txt`
-					)
-
-					const strippedOutputString = stripAnsi(outputString)
-					fs.writeFileSync(outputFile, strippedOutputString)
-				}
+				saveTestOutputIfSelected(outputString, newApiURL)
 			}
 		}
 
@@ -369,4 +341,10 @@ for (const [product, versions] of Object.entries(versionMetadata)) {
 	break
 }
 
-console.log(`Tests passed: ${testsPassed.length} out of ${options.numOfTests}`)
+if (options.api === 'content') {
+	console.log(
+		`Tests passed: ${testsPassed.length} of ${options.numOfTests} ${
+			testsPassed.length === options.numOfTests ? '🎉' : ''
+		}`
+	)
+}
