@@ -6,10 +6,16 @@ import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 
-import versionMetadata from '../../app/api/versionMetadata.json' assert { type: 'json' }
-
 const __filename = fileURLToPath(import.meta.url) // get the resolved path to the file
 const __dirname = path.dirname(__filename) // get the name of the directory
+
+const versionMetadataPath = path.resolve(
+	__dirname,
+	'../../app/api/versionMetadata.json'
+)
+const versionMetadata = JSON.parse(
+	fs.readFileSync(versionMetadataPath, 'utf-8')
+)
 
 const program = new Command()
 
