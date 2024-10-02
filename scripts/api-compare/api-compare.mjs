@@ -37,7 +37,7 @@ program
 	.option('-r, --drop-keys <keys>', 'Result keys to drop', (value) =>
 		value.split(',')
 	)
-	.option('-t, --num-of-tests <number>', 'Number of tests', parseInt)
+	.option('-t, --num-of-tests <number>', 'Number of tests', parseInt, 10)
 	.option('-s, --save-output', 'Save output', false)
 
 program.parse(process.argv)
@@ -98,6 +98,8 @@ function getAllContentApiPaths(directory) {
 	return apiPaths
 }
 
+const testsPassed = []
+const testsFailed = []
 for (const [product, versions] of Object.entries(versionMetadata)) {
 	if (options.product && options.product !== product) {
 		continue
@@ -330,9 +332,17 @@ for (const [product, versions] of Object.entries(versionMetadata)) {
 
 				const outputString = `Test ${i + 1} of ${
 					randomIndexes.length
-				}; Testing API URL:\n${apiURL}\n${difference}`
+				}; Testing API URL:\n${apiURL}`
 
 				console.log(outputString)
+
+				if (difference.includes('Compared values have no visual difference.')) {
+					testsPassed.push(i + 1)
+					console.log('✅ No visual difference found.\n')
+				} else {
+					testsFailed.push(i + 1)
+					console.log(`${difference}\n`)
+				}
 
 				if (options.saveOutput) {
 					const outputFileDirPath = path.join(__dirname, 'test-output')
@@ -358,3 +368,5 @@ for (const [product, versions] of Object.entries(versionMetadata)) {
 
 	break
 }
+
+console.log(`Tests passed: ${testsPassed.length} out of ${options.numOfTests}`)
