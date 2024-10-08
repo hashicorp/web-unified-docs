@@ -4,6 +4,7 @@ import { execSync } from 'child_process'
 // this file is executed by vercel
 // https://vercel.com/hashicorp/unified-docs-frontend-preview/settings/git
 
+console.log('[vercel-build-step.mjs]: executing...')
 const EXIT_CODES = {
 	BUILD: 1,
 	SKIP: 0,
@@ -18,6 +19,7 @@ function cloneDevPortal() {
 		execSync(
 			`git clone --depth=1 "https://github.com/${REPO_TO_CLONE}.git" "${PREVIEW_DIR}"`
 		)
+		console.log(`✅ Cloned ${REPO_TO_CLONE}`)
 	} catch (error) {
 		console.error('Error cloning dev-portal repo:', error)
 		process.exit(EXIT_CODES.SKIP)
@@ -35,7 +37,6 @@ if (!unifiedDocsPreviewUrl) {
 cloneDevPortal()
 process.chdir(PREVIEW_DIR)
 
-// Set environment variables
 process.env.IS_CONTENT_PREVIEW = 'true'
 process.env.UNIFIED_DOCS_API = `https://${unifiedDocsPreviewUrl}/`
 
