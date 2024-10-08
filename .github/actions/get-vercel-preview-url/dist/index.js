@@ -27596,18 +27596,15 @@ function computeVercelPreviewUrl(projectName, branchName, scope) {
 	return `https://${projectName}-git-${cleanedBranchName}-${scope}.vercel.app`
 }
 
-function computeBranchName() {
-	return (0,child_process__WEBPACK_IMPORTED_MODULE_1__.execSync)('git rev-parse --abbrev-ref HEAD', { encoding: 'utf8' }).trim()
-}
+
 
 function run() {
 	try {
 		const projectName = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput('project-name', { required: true })
 		const scope = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput('scope', { required: true })
+		const branchName = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput('branch-name', { required: true })
 
-		const branchName = computeBranchName()
 		const previewUrl = computeVercelPreviewUrl(projectName, branchName, scope)
-
 		_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(`Computed unified docs preview URL: ${previewUrl}`)
 		_actions_core__WEBPACK_IMPORTED_MODULE_0__.setOutput('preview-url', previewUrl)
 	} catch (error) {

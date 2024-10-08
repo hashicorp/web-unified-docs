@@ -7,18 +7,15 @@ function computeVercelPreviewUrl(projectName, branchName, scope) {
 	return `https://${projectName}-git-${cleanedBranchName}-${scope}.vercel.app`
 }
 
-function computeBranchName() {
-	return execSync('git rev-parse --abbrev-ref HEAD', { encoding: 'utf8' }).trim()
-}
+
 
 function run() {
 	try {
 		const projectName = core.getInput('project-name', { required: true })
 		const scope = core.getInput('scope', { required: true })
+		const branchName = core.getInput('branch-name', { required: true })
 
-		const branchName = computeBranchName()
 		const previewUrl = computeVercelPreviewUrl(projectName, branchName, scope)
-
 		core.info(`Computed unified docs preview URL: ${previewUrl}`)
 		core.setOutput('preview-url', previewUrl)
 	} catch (error) {

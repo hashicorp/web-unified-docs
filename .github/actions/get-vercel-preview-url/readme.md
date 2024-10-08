@@ -16,6 +16,7 @@ This action accepts the following inputs:
 
 - `project-name`: **string** — The name of the Vercel project.
 - `scope`: **string** — The scope slug for the Vercel project.
+- `branch-name`: **string** — The name of the branch to get the preview url for.
 
 ### Outputs
 
