@@ -7,51 +7,45 @@ const EXIT_CODES = {
 }
 
 const REPO_TO_CLONE = 'hashicorp/dev-portal'
-const VERCEL_PROJECT_NAME = 'unified-docs-dev-portal-preview' // we also use this as the working directory
+const WORKING_DIRECTORY = 'unified-docs-dev-portal-preview'
 
 async function main() {
-	try {
-		const unifiedDocsPreviewUrl = readEnvVar('VERCEL_BRANCH_URL')
-		const vercelToken = readEnvVar('VERCEL_TOKEN')
-		const vercelGlobalArgs = `--scope=hashicorp --token=${vercelToken}`
+	const unifiedDocsPreviewUrl = readEnvVar('VERCEL_BRANCH_URL')
+	const vercelToken = readEnvVar('VERCEL_TOKEN')
+	const vercelGlobalArgs = `--scope=hashicorp --token=${vercelToken}`
 
-		await cloneDevPortal(VERCEL_PROJECT_NAME)
-		process.chdir(VERCEL_PROJECT_NAME)
+	await cloneDevPortal(WORKING_DIRECTORY)
+	process.chdir(WORKING_DIRECTORY)
 
-		await runCommand('npm install')
-		await ensureVercelIsInstalled()
+	await runCommand('npm install')
+	await ensureVercelIsInstalled()
 
-		await runCommand(
-			`vercel pull --yes --environment=preview ${vercelGlobalArgs} --name=${VERCEL_PROJECT_NAME}`
-		)
+	await runCommand(
+		`vercel pull --yes --environment=preview ${vercelGlobalArgs}`
+	)
 
-		// override the env vars that are needed for the dev portal preview to work
-		process.env.IS_CONTENT_PREVIEW = 'true'
-		process.env.UNIFIED_DOCS_API = `https://${unifiedDocsPreviewUrl}/`
+	// override the env vars that are needed for the dev portal preview to work
+	process.env.IS_CONTENT_PREVIEW = 'true'
+	process.env.UNIFIED_DOCS_API = `https://${unifiedDocsPreviewUrl}/`
 
-		await runCommand(`vercel build ${vercelGlobalArgs}`)
+	await runCommand(`vercel build ${vercelGlobalArgs}`)
+	const previewUrl = await deployToVercel(vercelGlobalArgs)
 
-		const previewUrl = await deployToVercel(
-			vercelGlobalArgs,
-			VERCEL_PROJECT_NAME
-		)
-
-		console.log('Successfully built dev-portal preview')
-		const results = {
-			UNIFIED_DOCS_PREVIEW_URL: unifiedDocsPreviewUrl,
-			DEV_PORTAL_PREVIEW_URL: previewUrl,
-		}
-		console.log(JSON.stringify(results, null, 2))
-
-		process.exit(EXIT_CODES.BUILD)
-	} catch (error) {
-		console.error('Error deploying dev-portal preview:', error)
-		process.exit(EXIT_CODES.BUILD)
+	console.log('Successfully built dev-portal preview')
+	const results = {
+		UNIFIED_DOCS_PREVIEW_URL: unifiedDocsPreviewUrl,
+		DEV_PORTAL_PREVIEW_URL: previewUrl,
 	}
+	console.log(JSON.stringify(results, null, 2))
+	process.exit(EXIT_CODES.BUILD)
 }
 
 main().catch((error) => {
-	console.error('Unhandled error:', error)
+	console.error('Could not deploy dev-portal preview')
+	console.error('Unhandled error:\n', error)
+	console.error(
+		'See `scripts/vercel-build-step.mjs` for more details on what went wrong.'
+	)
 	process.exit(EXIT_CODES.BUILD)
 })
 
@@ -73,13 +67,14 @@ async function ensureVercelIsInstalled() {
 	}
 }
 
-async function deployToVercel(args, projectName) {
-	const vercelCommand = `vercel deploy --prebuilt ${args} --name=${projectName}`
+async function deployToVercel(args) {
+	const vercelCommand = `vercel deploy --prebuilt ${args}`
 	return runCommand(vercelCommand, { stdio: 'pipe' })
 }
 
 async function runCommand(command, options = {}) {
 	try {
+		console.log(`Running command: ${command}`)
 		const output = execSync(command, { ...options, encoding: 'utf8' })
 		return output.trim()
 	} catch (error) {
