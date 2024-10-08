@@ -59,4 +59,5 @@ function cloneDevPortal() {
 	console.log(
 		`Vercel Preview URL for branch "${unifiedDocsPreviewUrl}": ${previewUrl}`
 	)
+	process.exit(EXIT_CODES.BUILD)
 })()
