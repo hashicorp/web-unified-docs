@@ -24,40 +24,38 @@ function cloneDevPortal() {
 	}
 }
 
-;(function main() {
-	console.log(`env: ${JSON.stringify(process.env, null, 2)}`)
+console.log(`env: ${JSON.stringify(process.env, null, 2)}`)
 
-	const unifiedDocsPreviewUrl = process.env.VERCEL_BRANCH_URL
-	if (!unifiedDocsPreviewUrl) {
-		console.error('VERCEL_BRANCH_URL environment variable not set.')
-		process.exit(EXIT_CODES.SKIP)
-	}
+const unifiedDocsPreviewUrl = process.env.VERCEL_BRANCH_URL
+if (!unifiedDocsPreviewUrl) {
+	console.error('VERCEL_BRANCH_URL environment variable not set.')
+	process.exit(EXIT_CODES.SKIP)
+}
 
-	cloneDevPortal()
-	process.chdir(PREVIEW_DIR)
+cloneDevPortal()
+process.chdir(PREVIEW_DIR)
 
-	// Set environment variables
-	process.env.IS_CONTENT_PREVIEW = 'true'
-	process.env.UNIFIED_DOCS_API = `https://${unifiedDocsPreviewUrl}/`
+// Set environment variables
+process.env.IS_CONTENT_PREVIEW = 'true'
+process.env.UNIFIED_DOCS_API = `https://${unifiedDocsPreviewUrl}/`
 
-	execSync('npm install')
+execSync('npm install')
 
-	try {
-		execSync('vercel --version', { stdio: 'ignore' })
-	} catch (error) {
-		console.log('Vercel CLI not found, installing...')
-		execSync('npm install -g vercel')
-	}
-	execSync('vercel build')
+try {
+	execSync('vercel --version', { stdio: 'ignore' })
+} catch (error) {
+	console.log('Vercel CLI not found, installing...')
+	execSync('npm install -g vercel')
+}
+execSync('vercel build')
 
-	const vercelToken = 'Oq1fRHagxUo1tAxc0GeCcDet'
-	const vercelCommand = `vercel deploy --scope=hashicorp --prebuilt --token=${vercelToken}`
+const vercelToken = 'Oq1fRHagxUo1tAxc0GeCcDet'
+const vercelCommand = `vercel deploy --scope=hashicorp --prebuilt --token=${vercelToken}`
 
-	const previewUrl = execSync(vercelCommand, { stdio: 'pipe' }).toString()
-	console.log(`Deploy Result: ${previewUrl}`)
+const previewUrl = execSync(vercelCommand, { stdio: 'pipe' }).toString()
+console.log(`Deploy Result: ${previewUrl}`)
 
-	console.log(
-		`Vercel Preview URL for branch "${unifiedDocsPreviewUrl}": ${previewUrl}`
-	)
-	process.exit(EXIT_CODES.BUILD)
-})()
+console.log(
+	`Vercel Preview URL for branch "${unifiedDocsPreviewUrl}": ${previewUrl}`
+)
+process.exit(EXIT_CODES.BUILD)
