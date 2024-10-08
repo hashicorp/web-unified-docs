@@ -27608,6 +27608,7 @@ function run() {
 		const branchName = computeBranchName()
 		const previewUrl = computeVercelPreviewUrl(projectName, branchName, scope)
 
+		_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(`Computed unified docs preview URL: ${previewUrl}`)
 		_actions_core__WEBPACK_IMPORTED_MODULE_0__.setOutput('preview-url', previewUrl)
 	} catch (error) {
 		_actions_core__WEBPACK_IMPORTED_MODULE_0__.setFailed(error.message)

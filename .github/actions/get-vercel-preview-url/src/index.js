@@ -19,6 +19,7 @@ function run() {
 		const branchName = computeBranchName()
 		const previewUrl = computeVercelPreviewUrl(projectName, branchName, scope)
 
+		core.info(`Computed unified docs preview URL: ${previewUrl}`)
 		core.setOutput('preview-url', previewUrl)
 	} catch (error) {
 		core.setFailed(error.message)
