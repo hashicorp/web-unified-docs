@@ -88,21 +88,21 @@ export const ALL_REPO_CONFIG = {
 	// 	semverCoerce: semver.coerce,
 	// 	websiteDir: '.',
 	// },
-	nomad: {
-		/**
-		 *  🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
-		 *
-		 * Fails for v0.12.x (and likely earlier) with error:
-		 * `nomad/website/content: No such file or directory`
-		 * This likely indicates that older versions of docs have a different
-		 * directory structure that needs to be accounted for. Need to confirm.
-		 */
-		assetDir: 'public',
-		contentDir: 'content',
-		dataDir: 'data',
-		semverCoerce: semver.coerce,
-		websiteDir: 'website',
-	},
+	// nomad: {
+	// 	/**
+	// 	 *  🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
+	// 	 *
+	// 	 * Fails for v0.12.x (and likely earlier) with error:
+	// 	 * `nomad/website/content: No such file or directory`
+	// 	 * This likely indicates that older versions of docs have a different
+	// 	 * directory structure that needs to be accounted for. Need to confirm.
+	// 	 */
+	// 	assetDir: 'public',
+	// 	contentDir: 'content',
+	// 	dataDir: 'data',
+	// 	semverCoerce: semver.coerce,
+	// 	websiteDir: 'website',
+	// },
 	packer: {
 		/**
 		 *  🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
