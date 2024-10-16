@@ -14,6 +14,11 @@ import { errorResultToString } from '@utils/result'
  * the directory structure?
  */
 const contentDirMap: Record<string, string> = {
+	boundary: 'content',
+	consul: 'content',
+	'hcp-docs': 'content',
+	nomad: 'content',
+	packer: 'content',
 	'ptfe-releases': 'docs',
 	sentinel: 'content',
 	terraform: 'docs',
