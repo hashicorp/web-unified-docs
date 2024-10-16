@@ -20,6 +20,7 @@ const contentDirMap: Record<string, string> = {
 	nomad: 'content',
 	packer: 'content',
 	'ptfe-releases': 'docs',
+	sentinel: 'content',
 	terraform: 'docs',
 	'terraform-cdk': 'docs',
 	'terraform-docs-agents': 'docs',
