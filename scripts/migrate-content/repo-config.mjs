@@ -44,20 +44,6 @@ import semver from 'semver'
  * @type Record<string, { assetDir: string, contentDir: string, dataDir: string, semverCoerce: Function, websiteDir: string }>
  */
 export const ALL_REPO_CONFIG = {
-	boundary: {
-		/**
-		 * ✅ Initial migration attempt: SEEMS TO WORK
-		 *
-		 * Boundary content seems to be successfully copied into `content` and
-		 * `public/assets` as expected. Further investigation and testing is
-		 * of course needed, we've only confirmed that the migration script works.
-		 */
-		assetDir: 'public',
-		contentDir: 'content',
-		dataDir: 'data',
-		semverCoerce: semver.coerce,
-		websiteDir: 'website',
-	},
 	consul: {
 		/**
 		 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
