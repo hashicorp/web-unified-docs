@@ -14,7 +14,13 @@ import { errorResultToString } from '@utils/result'
  * the directory structure?
  */
 const contentDirMap: Record<string, string> = {
+	boundary: 'content',
+	consul: 'content',
+	'hcp-docs': 'content',
+	nomad: 'content',
+	packer: 'content',
 	'ptfe-releases': 'docs',
+	sentinel: 'content',
 	terraform: 'docs',
 	'terraform-cdk': 'docs',
 	'terraform-docs-agents': 'docs',
@@ -24,6 +30,9 @@ const contentDirMap: Record<string, string> = {
 	'terraform-plugin-mux': 'docs',
 	'terraform-plugin-sdk': 'docs',
 	'terraform-plugin-testing': 'docs',
+	vagrant: 'content',
+	vault: 'content',
+	waypoint: 'content',
 }
 
 export async function GET(
