@@ -44,21 +44,6 @@ import semver from 'semver'
  * @type Record<string, { assetDir: string, contentDir: string, dataDir: string, semverCoerce: Function, websiteDir: string }>
  */
 export const ALL_REPO_CONFIG = {
-	consul: {
-		/**
-		 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
-		 *
-		 * Fails for v1.8.x (and likely earlier) with error:
-		 * `consul/website/content: No such file or directory`
-		 * This likely indicates that older versions of docs have a different
-		 * directory structure that needs to be accounted for. Need to confirm.
-		 */
-		assetDir: 'public',
-		contentDir: 'content',
-		dataDir: 'data',
-		semverCoerce: semver.coerce,
-		websiteDir: 'website',
-	},
 	'hcp-docs': {
 		/**
 		 * ✅ Initial migration attempt: SEEMS TO WORK

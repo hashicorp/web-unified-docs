@@ -14,7 +14,6 @@ import { errorResultToString } from '@utils/result'
  * the directory structure?
  */
 const contentDirMap: Record<string, string> = {
-	consul: 'content',
 	'hcp-docs': 'content',
 	nomad: 'content',
 	packer: 'content',
