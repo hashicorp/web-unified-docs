@@ -1,4 +1,3 @@
-NODE_VERSION := 20
 NPM := npm
 
 # The default target that runs when you just type 'make'
@@ -15,24 +14,11 @@ node_modules:
 		$(NPM) install; \
 	fi
 
-.PHONY: check-node-version
-check-node-version:
-	@if ! command -v node >/dev/null 2>&1; then \
-		echo "Node.js is not installed. Please install Node.js version $(NODE_VERSION) or higher."; \
-		exit 1; \
-	fi
-	@current_version=$$(node -v | cut -d'v' -f2 | cut -d'.' -f1); \
-	if [ $$current_version -lt $(NODE_VERSION) ]; then \
-		echo "Node.js version $$current_version is lower than required version $(NODE_VERSION). Please update Node.js."; \
-		exit 1; \
-	fi
-
 # Target to run the preview:migration command
 .PHONY: preview-migration
-preview-migration: check-node-version node_modules
+preview-migration: node_modules
 	@echo "Running preview:migration..."
 	$(NPM) run preview:migration
-
 
 # Can be default or full, default will stop containers, full will stop containers and remove local images
 CLEAN_OPTION ?= default
