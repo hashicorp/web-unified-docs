@@ -5,10 +5,12 @@
 
 module.exports = {
 	root: true,
+	plugins: ['no-barrel-files'],
 	extends: './node_modules/@hashicorp/platform-cli/config/.eslintrc.js',
 
 	rules: {
 		curly: 'error',
+		'no-barrel-files/no-barrel-files': 'warn',
 	},
 
 	globals: {
@@ -20,6 +22,11 @@ module.exports = {
 			files: ['**/*.ts?(x)'],
 			rules: {
 				'arrow-body-style': ['warn', 'always'],
+				'no-restricted-exports': [
+					'warn',
+					{ restrictDefaultExports: { direct: true } },
+				],
+				'valid-typeof': ['warn', { requireStringLiterals: true }],
 				'@typescript-eslint/explicit-module-boundary-types': 'off',
 				'@typescript-eslint/no-inferrable-types': 'off',
 				'@typescript-eslint/typedef': [
