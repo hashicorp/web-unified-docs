@@ -27,7 +27,7 @@ export async function GET(request: Request) {
 	const fileNameQuery = splitPath.slice(1).join('/')
 	const versions = await searchNavDataFiles(product, fileNameQuery)
 	/**
-	 * return versions array or an empty array if no content exists for the query params,
+	 * return either A) versions array or B) an empty array (if no content matches the query params)
 	 * this matches the current Content API behaviour
 	 */
 	return Response.json({
