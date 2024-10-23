@@ -1,4 +1,4 @@
-import { searchNavDataFiles } from './_searchNavDataFiles'
+import { searchNavDataFiles } from '../../utils/searchNavDataFiles'
 
 export async function GET(request: Request) {
 	const url = new URL(request.url)
