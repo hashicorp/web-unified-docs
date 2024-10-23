@@ -10,7 +10,7 @@ import path from 'node:path'
  * @param fullPath - The path to be searched for within the `nav-data.json` files.
  * @returns A promise that resolves to an array of version strings where the `fullPath` was found.
  *
- * @throws Will throw an error if there is an issue reading directories or files, except for `ENOENT` errors which are logged.
+ * @throws Will throw an error if there is an issue reading directories or files
  */
 export async function searchNavDataFiles(
 	product: string,
