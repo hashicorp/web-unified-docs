@@ -1,3 +1,4 @@
+import { Result } from '@utils/result'
 import fs from 'node:fs'
 import path from 'node:path'
 
@@ -19,7 +20,9 @@ export async function searchNavDataFiles(
 	const versions: string[] = []
 	const productDir = path.join(process.cwd(), 'content', product)
 
-	async function searchDirectory(directory: string) {
+	async function searchDirectory(
+		directory: string
+	): Promise<Result<string[], Error>> {
 		let files
 		try {
 			files = await fs.promises.readdir(directory, { withFileTypes: true })
