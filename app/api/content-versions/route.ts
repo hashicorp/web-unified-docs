@@ -1,20 +1,10 @@
-import versionMetadata from '../versionMetadata.json'
+import { searchNavDataFiles } from './searchNavDataFiles'
 
-/**
- * TODO: need to actually implement this endpoint.
- *
- * For now, return all versions. Later, probably makes sense to make a script
- * similar to `build-version-metadata`, that makes some kind of lookup or
- * something, where given a product and a document path, we can return a list
- * of the version directories in which that document is present.
- *
- * Note that we query parameters to get the `product`.
- */
 export async function GET(request: Request) {
 	const url = new URL(request.url)
 	const product = url.searchParams.get('product')
-	// Note: implementation should use `fullPath`, but we're not there yet
 	const fullPath = url.searchParams.get('fullPath')
+
 	// If a `product` parameter has not been provided, return a 400
 	if (!product) {
 		return new Response(
@@ -30,20 +20,17 @@ export async function GET(request: Request) {
 		)
 	}
 	/**
-	 * If the `product` provided has version metadata, check which versions
-	 * of the specified document exist, and return those version strings.
-	 *
-	 * TODO: this doesn't actually check if the document exists in the given
-	 * product version. As a way to "make it work", this placeholder assumes that
-	 * the document exists in all versions. We need to revise our approach here
-	 * to surface accurate data.
+	 * reformat fullPath to searchable file path
+	 * e.g. doc#cdktf/api-reference/python/classes -> api-reference/python/classes
 	 */
-	if (versionMetadata[product]) {
-		return Response.json({
-			versions: versionMetadata[product].map((v) => v.version),
-		})
-	} else {
-		// If we have zero version metadata for the provided product, return a 404
-		return new Response('Not found', { status: 404 })
-	}
+	const splitPath = fullPath.split('/')
+	const fileNameQuery = splitPath.slice(1).join('/')
+	const versions = await searchNavDataFiles(product, fileNameQuery)
+	/**
+	 * return versions array or an empty array if no content exists for the query params,
+	 * this matches the current Content API behaviour
+	 */
+	return Response.json({
+		versions,
+	})
 }
