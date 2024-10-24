@@ -50,24 +50,24 @@ For comparison:
 | terraform                      | 49                      |
 | vault                          | 46                      |
 
-## Development
 
-Requirements:
+## Local Development
 
-- [Docker](https://docs.docker.com/engine/install/)
-- [Node](https://nodejs.org/en/download/package-manager)
+### Requirements:
+- [Node.js](https://nodejs.org/en) (version 20 or higher)
+- [Docker](https://www.docker.com/) and [Docker Compose](https://docs.docker.com/compose/) (for managing containers)
 
-To ensure the content is correctly built, you'll need to run the `prebuild` script before starting the dev server.
+### Terminology
+- `migration | migration-preview` - A preview of `hashicorp/dev-portal` where some routes fetch data from the existing content API and whilst only the routes that have been intentionally migrated use the new unified docs api ie this repo.
+- `unified-docs | unified-docs-preview` - A preview of `hashicorp/dev-portal` where it pulls all of its content from the new unified docs api ie this repo.
 
-```zsh
-npm run prebuild
-npm run dev
-```
+### Quick Start
 
-### Local Previews
+To get a migration preview running, run `make` from the root of this repo.
 
-Once you've run `npm run prebuild`, you are able to preview the `dev-portal` UI in 2 different states.
+To spin this down gracefully, run `make clean` in a seperate terminal. If you wish to remove the local Docker images as well, you can specify `make clean CLEAN_OPTION=full`.
 
-1. The migration preview. This shows `dev-portal` where some routes fetch data from the existing content API and whilst only the routes that have been intentionally migrated use the new unified docs api. For this run `npm run preview:migration`
+### More Commands
 
-2. The unified docs preview. This preview is something of a 'stress test' to show how `dev-portal` would look if it pulled all of its content from this new unified docs api. For this preview run `npm run preview:unified-docs`
+The `makefile` serves as a convenience tool to get a migration preview running. If you need more granular control a full list of the commands are available in the `package.json` file.
+To use these you will need to intentionally run `npm install` and `npm run prebuild` before anything else.
