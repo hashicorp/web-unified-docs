@@ -103,29 +103,29 @@ export const ALL_REPO_CONFIG = {
 	// 	semverCoerce: semver.coerce,
 	// 	websiteDir: 'website',
 	// },
-	packer: {
-		/**
-		 *  🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
-		 *
-		 * Fails for v1.5.6 (and likely earlier) with error:
-		 * `packer/website/content: No such file or directory`
-		 * This likely indicates that older versions of docs have a different
-		 * directory structure that needs to be accounted for. Need to confirm.
-		 */
-		/**
-		 * TODO: for Packer, will probably need to do _something_ to sort out
-		 * the Packer plugin documentation. We didn't fully complete the migration
-		 * to Packer integrations, so I think there might still be plugin docs
-		 * we need to fetch from third-party repos?
-		 *
-		 * Or this may be a non-issue, I'm not actually sure.
-		 */
-		assetDir: 'public',
-		contentDir: 'content',
-		dataDir: 'data',
-		semverCoerce: semver.coerce,
-		websiteDir: 'website',
-	},
+	// packer: {
+	// 	/**
+	// 	 *  🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
+	// 	 *
+	// 	 * Fails for v1.5.6 (and likely earlier) with error:
+	// 	 * `packer/website/content: No such file or directory`
+	// 	 * This likely indicates that older versions of docs have a different
+	// 	 * directory structure that needs to be accounted for. Need to confirm.
+	// 	 */
+	// 	/**
+	// 	 * TODO: for Packer, will probably need to do _something_ to sort out
+	// 	 * the Packer plugin documentation. We didn't fully complete the migration
+	// 	 * to Packer integrations, so I think there might still be plugin docs
+	// 	 * we need to fetch from third-party repos?
+	// 	 *
+	// 	 * Or this may be a non-issue, I'm not actually sure.
+	// 	 */
+	// 	assetDir: 'public',
+	// 	contentDir: 'content',
+	// 	dataDir: 'data',
+	// 	semverCoerce: semver.coerce,
+	// 	websiteDir: 'website',
+	// },
 	'ptfe-releases': {
 		/**
 		 * ✅ Initial migration attempt: SEEMS TO WORK
@@ -158,31 +158,31 @@ export const ALL_REPO_CONFIG = {
 		},
 		websiteDir: 'website',
 	},
-	sentinel: {
-		/**
-		 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
-		 *
-		 * Fails for v0.16.x (and likely earlier) with error:
-		 * `sentinel/website/content: No such file or directory`
-		 * This likely indicates that older versions of docs have a different
-		 * directory structure that needs to be accounted for. Need to confirm.
-		 * See note at top of this document on `pages` directories for details.
-		 */
-		assetDir: 'public',
-		/**
-		 * TODO: consider implications of Sentinel's `contentDir`.
-		 *
-		 * Sentinel content is located in `website/content/sentinel`.
-		 * Copying over the content is easy enough, but for internal links,
-		 * and search object IDs, and other concerns that involve the content file
-		 * path, it's a bit of an outlier, so will probably present some
-		 * interesting challenges.
-		 */
-		contentDir: 'content/sentinel',
-		dataDir: 'data',
-		semverCoerce: semver.coerce,
-		websiteDir: 'website',
-	},
+	// sentinel: {
+	// 	/**
+	// 	 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
+	// 	 *
+	// 	 * Fails for v0.16.x (and likely earlier) with error:
+	// 	 * `sentinel/website/content: No such file or directory`
+	// 	 * This likely indicates that older versions of docs have a different
+	// 	 * directory structure that needs to be accounted for. Need to confirm.
+	// 	 * See note at top of this document on `pages` directories for details.
+	// 	 */
+	// 	assetDir: 'public',
+	// 	/**
+	// 	 * TODO: consider implications of Sentinel's `contentDir`.
+	// 	 *
+	// 	 * Sentinel content is located in `website/content/sentinel`.
+	// 	 * Copying over the content is easy enough, but for internal links,
+	// 	 * and search object IDs, and other concerns that involve the content file
+	// 	 * path, it's a bit of an outlier, so will probably present some
+	// 	 * interesting challenges.
+	// 	 */
+	// 	contentDir: 'content/sentinel',
+	// 	dataDir: 'data',
+	// 	semverCoerce: semver.coerce,
+	// 	websiteDir: 'website',
+	// },
 	terraform: {
 		/**
 		 * ✅ Initial migration attempt: SEEMS TO WORK
@@ -342,39 +342,39 @@ export const ALL_REPO_CONFIG = {
 		semverCoerce: semver.coerce,
 		websiteDir: 'website',
 	},
-	vagrant: {
-		/**
-		 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
-		 *
-		 * Fails for v2.2.15 (and likely earlier) with error:
-		 * `vagrant/website/content: No such file or directory`
-		 * This likely indicates that older versions of docs have a different
-		 * directory structure that needs to be accounted for. Need to confirm.
-		 * See note at top of this document on `pages` directories for details.
-		 *
-		 * TODO: revisit `exact` patch setup for Vagrant. Is it necessary?
-		 * See: https://gist.github.com/zchsh/f123819e5d0005f14fff3a518bcade35
-		 */
-		assetDir: 'public',
-		contentDir: 'content',
-		dataDir: 'data',
-		semverCoerce: semver.coerce,
-		websiteDir: 'website',
-	},
-	vault: {
-		/**
-		 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
-		 *
-		 * Fails for v1.6.x (and likely earlier) with error:
-		 * `vault/website/content: No such file or directory`
-		 * This likely indicates that older versions of docs have a different
-		 * directory structure that needs to be accounted for. Need to confirm.
-		 * See note at top of this document on `pages` directories for details.
-		 */
-		assetDir: 'public',
-		contentDir: 'content',
-		dataDir: 'data',
-		semverCoerce: semver.coerce,
-		websiteDir: 'website',
-	},
+	// vagrant: {
+	// 	/**
+	// 	 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
+	// 	 *
+	// 	 * Fails for v2.2.15 (and likely earlier) with error:
+	// 	 * `vagrant/website/content: No such file or directory`
+	// 	 * This likely indicates that older versions of docs have a different
+	// 	 * directory structure that needs to be accounted for. Need to confirm.
+	// 	 * See note at top of this document on `pages` directories for details.
+	// 	 *
+	// 	 * TODO: revisit `exact` patch setup for Vagrant. Is it necessary?
+	// 	 * See: https://gist.github.com/zchsh/f123819e5d0005f14fff3a518bcade35
+	// 	 */
+	// 	assetDir: 'public',
+	// 	contentDir: 'content',
+	// 	dataDir: 'data',
+	// 	semverCoerce: semver.coerce,
+	// 	websiteDir: 'website',
+	// },
+	// vault: {
+	// 	/**
+	// 	 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
+	// 	 *
+	// 	 * Fails for v1.6.x (and likely earlier) with error:
+	// 	 * `vault/website/content: No such file or directory`
+	// 	 * This likely indicates that older versions of docs have a different
+	// 	 * directory structure that needs to be accounted for. Need to confirm.
+	// 	 * See note at top of this document on `pages` directories for details.
+	// 	 */
+	// 	assetDir: 'public',
+	// 	contentDir: 'content',
+	// 	dataDir: 'data',
+	// 	semverCoerce: semver.coerce,
+	// 	websiteDir: 'website',
+	// },
 }
