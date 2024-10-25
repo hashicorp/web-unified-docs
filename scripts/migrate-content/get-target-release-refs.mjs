@@ -28,12 +28,16 @@ export async function getTargetReleaseRefs({
 	// Grab unique release refs from the content API
 	const contentApiReleaseRefs = await getReleaseRefsFromContentAPI(
 		repoSlug,
-		repoConfig.semverCoerce
+		repoConfig.semverCoerce,
 	)
 	// Filter the fetched release refs based on provided target versions
 	const isTargetReleaseRefs = targetVersions?.length
-		? ({ versionString }) => targetVersions.includes(versionString)
-		: () => true
+		? ({ versionString }) => {
+				return targetVersions.includes(versionString)
+			}
+		: () => {
+				return true
+			}
 	const targetReleaseRefs = contentApiReleaseRefs.filter(isTargetReleaseRefs)
 	return targetReleaseRefs
 }
@@ -67,11 +71,13 @@ async function getReleaseRefsFromContentAPI(contentSourceRepo, semverCoerce) {
 	// Fetch the version metadata from the existing content API
 	const versionMetadata = await fetchVersionMetadata(contentSourceRepo)
 	// Map version metadata to release ref entries
-	const releaseRefs = versionMetadata.result.map((entry) => ({
-		versionString: entry.version,
-		ref: entry.ref,
-		hash: entry.sha,
-	}))
+	const releaseRefs = versionMetadata.result.map((entry) => {
+		return {
+			versionString: entry.version,
+			ref: entry.ref,
+			hash: entry.sha,
+		}
+	})
 	// Add a coerced semver version to each entry
 	const releaseRefsWithVersions = releaseRefs.map((entry) => {
 		return { ...entry, version: semverCoerce(entry.versionString) }

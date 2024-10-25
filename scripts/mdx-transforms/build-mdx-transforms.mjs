@@ -24,9 +24,9 @@ export default async function buildMdxTransforms(targetDir, outputDir) {
 	// Walk the directory to get a list of all files
 	const allFiles = await listFiles(targetDir)
 	// Filter for `.mdx` files
-	const mdxFiles = allFiles.filter(
-		(filePath) => path.extname(filePath) === '.mdx',
-	)
+	const mdxFiles = allFiles.filter((filePath) => {
+		return path.extname(filePath) === '.mdx'
+	})
 	/**
 	 * Map over each `.mdx` file, and prepare the file for transformation
 	 */
@@ -55,8 +55,12 @@ export default async function buildMdxTransforms(targetDir, outputDir) {
 	)
 	// Log out any errors encountered
 	const errors = results
-		.filter((result) => result.error !== null)
-		.map(({ error }) => error)
+		.filter((result) => {
+			return result.error !== null
+		})
+		.map(({ error }) => {
+			return error
+		})
 	if (errors.length > 0) {
 		console.error(`❗ Encountered ${errors.length} errors:`)
 		errors.forEach((error) => {

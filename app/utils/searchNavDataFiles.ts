@@ -15,13 +15,13 @@ import path from 'node:path'
  */
 export async function searchNavDataFiles(
 	product: string,
-	fullPath: string
+	fullPath: string,
 ): Promise<string[]> {
 	const versions: string[] = []
 	const productDir = path.join(process.cwd(), 'content', product)
 
 	async function searchDirectory(
-		directory: string
+		directory: string,
 	): Promise<Result<string[], Error>> {
 		let files
 		try {
@@ -41,7 +41,7 @@ export async function searchNavDataFiles(
 				// Only search in directories that match the pattern <version>/data
 				const versionDataPattern = new RegExp(
 					`^v\\d+\\.\\d+\\.x$|v[0-9]{6}-\\d+`,
-					'i'
+					'i',
 				)
 				if (versionDataPattern.test(file.name)) {
 					const dataDir = path.join(directory, file.name, 'data')
@@ -55,7 +55,7 @@ export async function searchNavDataFiles(
 
 					if (jsonData.includes(fullPath)) {
 						const versionMatch = fullPathToFile.match(
-							/\/content\/[^/]+\/([^/]+)\/data\//
+							/\/content\/[^/]+\/([^/]+)\/data\//,
 						)
 						if (versionMatch) {
 							versions.push(versionMatch[1])
@@ -64,7 +64,7 @@ export async function searchNavDataFiles(
 				} catch (parseError) {
 					console.error(
 						`Error parsing JSON in file ${fullPathToFile}:`,
-						parseError
+						parseError,
 					)
 				}
 			}

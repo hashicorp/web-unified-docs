@@ -34,9 +34,9 @@ export default async function gatherVersionMetadata(contentDir) {
 		const productDir = path.join(contentDir, product)
 		const rawVersions = fs.readdirSync(productDir)
 		// Sort versions by semver if possible, otherwise sort alphabetically
-		const isAllSemver = rawVersions.every((v) =>
-			semver.valid(normalizeGenericPatchVersion(v)),
-		)
+		const isAllSemver = rawVersions.every((v) => {
+			return semver.valid(normalizeGenericPatchVersion(v))
+		})
 		const versions = rawVersions
 			.sort((a, b) => {
 				const [aVersion, bVersion] = [a, b].map(normalizeGenericPatchVersion)

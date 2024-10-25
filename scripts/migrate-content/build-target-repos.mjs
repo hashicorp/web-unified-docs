@@ -19,7 +19,7 @@ export function buildTargetRepos(args) {
 	 */
 	if (args.length === 0) {
 		throw new Error(
-			`Please provide at least one repository slug as an argument. For example, to extract Terraform content, you can run "node migrate-content.mjs terraform". You can optionally pass specific versions to extract from each content repository. For example, to extract Terraform v1.1.x content, you can run "node migrate-content.mjs terraform:v1.1.x".`
+			`Please provide at least one repository slug as an argument. For example, to extract Terraform content, you can run "node migrate-content.mjs terraform". You can optionally pass specific versions to extract from each content repository. For example, to extract Terraform v1.1.x content, you can run "node migrate-content.mjs terraform:v1.1.x".`,
 		)
 	}
 	// Parse repoSlug and versions from args
@@ -31,16 +31,20 @@ export function buildTargetRepos(args) {
 	// Validate repo slugs
 	const allRepoSlugs = Object.keys(ALL_REPO_CONFIG)
 	const invalidRepoSlugs = targetRepos
-		.map((repoEntry) => repoEntry.repoSlug)
-		.filter((repoSlug) => !allRepoSlugs.includes(repoSlug))
+		.map((repoEntry) => {
+			return repoEntry.repoSlug
+		})
+		.filter((repoSlug) => {
+			return !allRepoSlugs.includes(repoSlug)
+		})
 	// Throw an error if any invalid repo slugs are found
 	if (invalidRepoSlugs.length > 0) {
 		throw new Error(
 			`Invalid repo slugs: ${JSON.stringify(
-				invalidRepoSlugs
+				invalidRepoSlugs,
 			)}. Repo slugs must be one of: ${JSON.stringify(
-				allRepoSlugs
-			)}. Please remove any invalid repo slugs.`
+				allRepoSlugs,
+			)}. Please remove any invalid repo slugs.`,
 		)
 	}
 	// At this point we know we have all valid repos, add repoConfig to each

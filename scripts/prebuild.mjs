@@ -35,9 +35,9 @@ async function main() {
  * to split out to a separate file... but felt fine to leave here for now.
  */
 async function copyNavDataFiles(sourceDir, destDir) {
-	const navDataFiles = (await listFiles(sourceDir)).filter((f) =>
-		f.endsWith('-nav-data.json'),
-	)
+	const navDataFiles = (await listFiles(sourceDir)).filter((f) => {
+		return f.endsWith('-nav-data.json')
+	})
 	await batchPromises(
 		navDataFiles,
 		async (filePath) => {

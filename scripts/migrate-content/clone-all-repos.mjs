@@ -50,7 +50,7 @@ async function main(repoSlugs, tempDir) {
 		for (let i = targetReleaseRefs.length - 1; i >= 0; i--) {
 			const targetRef = targetReleaseRefs[i]
 			console.log(
-				`🥡 Checking out ref "${targetRef.ref}" (${targetRef.hash})...`
+				`🥡 Checking out ref "${targetRef.ref}" (${targetRef.hash})...`,
 			)
 			execSync(`git restore . && git clean -f`, { cwd: cloneDir })
 			execSync(`git checkout ${targetRef.hash}`, {

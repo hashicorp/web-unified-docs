@@ -29,7 +29,7 @@ export function remarkIncludePartials({ partialsDir, filePath }) {
 		)
 	}
 	// Set up and return the transformer function to be used as a remark plugin
-	return function transformer(tree, file) {
+	return function transformer(tree) {
 		/**
 		 * Note: We use flapMap, as we expect to replace single MDX paragraph nodes
 		 * with detected `@include` statements with the contents of the included
@@ -37,7 +37,9 @@ export function remarkIncludePartials({ partialsDir, filePath }) {
 		 */
 		return flatMap(tree, (node) => {
 			// We only allow `@include` statements in paragraph nodes, so skip others
-			if (node.type !== 'paragraph') return [node]
+			if (node.type !== 'paragraph') {
+				return [node]
+			}
 			/**
 			 * Detect an `@include` statement in the paragraph using a regex.
 			 * Include statements follow a strict format.
@@ -45,7 +47,9 @@ export function remarkIncludePartials({ partialsDir, filePath }) {
 			const includeRegex = /^@include\s['"](.*)['"]$/
 			const includeMatch = node.children[0].value?.match(includeRegex)
 			// If we do not detect an `@include` statement, return the node unchanged
-			if (!includeMatch) return [node]
+			if (!includeMatch) {
+				return [node]
+			}
 			/**
 			 * Attempt to read the file contents.
 			 * If successful, we continue. If we fail, we throw an error, which
@@ -55,7 +59,7 @@ export function remarkIncludePartials({ partialsDir, filePath }) {
 			let includeContents
 			try {
 				includeContents = toVfile.readSync(includePath, 'utf8')
-			} catch (err) {
+			} catch {
 				throw new Error(
 					`@include file not found. In "${filePath}", on line ${node.position.start.line}, column ${node.position.start.column}, please ensure the referenced file "${includePath}" exists.`,
 				)

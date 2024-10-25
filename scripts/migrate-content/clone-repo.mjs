@@ -36,7 +36,7 @@ export function cloneRepo(targetDir, repoOwner, repoSlug, cloneArgs) {
 			{
 				stdio: 'inherit', // Nice to see progress for large repos
 				cwd: targetDir,
-			}
+			},
 		)
 	} else {
 		console.log(`🔄 Directory already exists at "${repoDir}". Skipping clone.`)
