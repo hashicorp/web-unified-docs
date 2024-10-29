@@ -18,10 +18,16 @@ export default [
 		},
 	},
 	{
+		files: ['**/*.{js,mjs,cjs,ts,jsx,tsx}'],
 		rules: {
 			curly: 'error',
-			'@typescript-eslint/no-explicit-any': 'off',
 			'arrow-body-style': ['warn', 'always'],
+		},
+	},
+	{
+		files: ['**/*.{ts,tsx}'],
+		rules: {
+			'@typescript-eslint/no-explicit-any': 'off',
 			'@typescript-eslint/explicit-module-boundary-types': 'off',
 			'@typescript-eslint/no-inferrable-types': 'off',
 			'@typescript-eslint/typedef': [
