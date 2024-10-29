@@ -9,12 +9,11 @@ fs.watch(contentDir, { recursive: true }, async (eventType, filename) => {
 		const filePath = path.join(contentDir, filename)
 
 		if (filePath.includes('/partials/')) {
-			let currentDir = path.dirname(filePath)
-			let docsDir = null
-
 			console.log(`Partial file changed: ${filePath}`)
 
 			// Traverse up the directory tree to find the "docs" folder
+			let currentDir = path.dirname(filePath)
+			let docsDir = null
 			while (currentDir !== path.resolve(currentDir, '..')) {
 				if (path.basename(currentDir) === 'docs') {
 					docsDir = currentDir
@@ -38,9 +37,11 @@ fs.watch(contentDir, { recursive: true }, async (eventType, filename) => {
 
 						const partialName = `@include '${filePath.split('/partials/')[1]}'`
 						if (fileContent.includes(partialName)) {
+							console.log("")
+
 							try {
 								console.log(
-									`- File containing partial "${partialName}" changed: ${fullPath}\n`
+									`- File containing partial "${partialName}" changed: ${fullPath}`
 								)
 
 								await buildFileMdxTransforms(fullPath)
