@@ -12,4 +12,4 @@ RUN  npm run build
 
 EXPOSE 8080
 
-CMD npm run watch-content & npm run dev
+CMD npm run dev
