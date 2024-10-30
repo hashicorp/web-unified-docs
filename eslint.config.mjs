@@ -2,6 +2,7 @@ import globals from 'globals'
 import pluginJs from '@eslint/js'
 import tseslint from 'typescript-eslint'
 import pluginReact from 'eslint-plugin-react'
+import noBarrelFiles from 'eslint-plugin-no-barrel-files'
 
 export default [
 	{ ignores: ['.next', '**/dist'] },
@@ -10,6 +11,11 @@ export default [
 	pluginJs.configs.recommended,
 	...tseslint.configs.recommended,
 	pluginReact.configs.flat.recommended,
+	{
+		plugins: {
+			'no-barrel-files': noBarrelFiles,
+		},
+	},
 	{
 		settings: {
 			react: {
@@ -22,6 +28,11 @@ export default [
 		rules: {
 			curly: 'error',
 			'arrow-body-style': ['warn', 'always'],
+			'no-barrel-files/no-barrel-files': 'warn',
+			'no-restricted-exports': [
+				'warn',
+				{ restrictDefaultExports: { direct: true } },
+			],
 		},
 	},
 	{
