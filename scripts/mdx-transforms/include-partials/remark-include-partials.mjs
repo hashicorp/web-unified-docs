@@ -3,10 +3,10 @@
  * SPDX-License-Identifier: MPL-2.0
  */
 
-import path from "path";
-import remark from "remark";
-import flatMap from "unist-util-flatmap";
-import toVfile from "to-vfile";
+import path from 'path'
+import remark from 'remark'
+import flatMap from 'unist-util-flatmap'
+import toVfile from 'to-vfile'
 
 /**
  * A remark plugin that allows including "partials" into other files.
@@ -25,11 +25,11 @@ export function remarkIncludePartials({ partialsDir, filePath }) {
 	// If the partialsDir has not been provided, throw an error.
 	if (!partialsDir) {
 		throw new Error(
-			"Error in remarkIncludePartials: The partialsDir argument is required. Please provide the path to the partials directory."
-		);
+			'Error in remarkIncludePartials: The partialsDir argument is required. Please provide the path to the partials directory.',
+		)
 	}
 	// Set up and return the transformer function to be used as a remark plugin
-	return function transformer(tree, file) {
+	return function transformer(tree) {
 		/**
 		 * Note: We use flapMap, as we expect to replace single MDX paragraph nodes
 		 * with detected `@include` statements with the contents of the included
@@ -37,28 +37,32 @@ export function remarkIncludePartials({ partialsDir, filePath }) {
 		 */
 		return flatMap(tree, (node) => {
 			// We only allow `@include` statements in paragraph nodes, so skip others
-			if (node.type !== "paragraph") return [node];
+			if (node.type !== 'paragraph') {
+				return [node]
+			}
 			/**
 			 * Detect an `@include` statement in the paragraph using a regex.
 			 * Include statements follow a strict format.
 			 */
-			const includeRegex = /^@include\s['"](.*)['"]$/;
-			const includeMatch = node.children[0].value?.match(includeRegex);
+			const includeRegex = /^@include\s['"](.*)['"]$/
+			const includeMatch = node.children[0].value?.match(includeRegex)
 			// If we do not detect an `@include` statement, return the node unchanged
-			if (!includeMatch) return [node];
+			if (!includeMatch) {
+				return [node]
+			}
 			/**
 			 * Attempt to read the file contents.
 			 * If successful, we continue. If we fail, we throw an error, which
 			 * should block our build from proceeding.
 			 */
-			const includePath = path.join(partialsDir, includeMatch[1]);
-			let includeContents;
+			const includePath = path.join(partialsDir, includeMatch[1])
+			let includeContents
 			try {
-				includeContents = toVfile.readSync(includePath, "utf8");
-			} catch (err) {
+				includeContents = toVfile.readSync(includePath, 'utf8')
+			} catch {
 				throw new Error(
-					`@include file not found. In "${filePath}", on line ${node.position.start.line}, column ${node.position.start.column}, please ensure the referenced file "${includePath}" exists.`
-				);
+					`@include file not found. In "${filePath}", on line ${node.position.start.line}, column ${node.position.start.column}, please ensure the referenced file "${includePath}" exists.`,
+				)
 			}
 
 			/**
@@ -70,19 +74,19 @@ export function remarkIncludePartials({ partialsDir, filePath }) {
 			 *
 			 * Else for other file types, we wrap the file contents in a code block.
 			 */
-			const isMarkdownOrMdx = includePath.match(/\.md(?:x)?$/);
+			const isMarkdownOrMdx = includePath.match(/\.md(?:x)?$/)
 			if (isMarkdownOrMdx) {
-				const processor = remark();
-				processor.use(remarkIncludePartials, { partialsDir });
-				const ast = processor.parse(includeContents);
-				return processor.runSync(ast, includeContents).children;
+				const processor = remark()
+				processor.use(remarkIncludePartials, { partialsDir })
+				const ast = processor.parse(includeContents)
+				return processor.runSync(ast, includeContents).children
 			} else {
 				// Trim any leading or trailing whitespace in the file
-				includeContents.contents = includeContents.contents.trim();
-				const includeLang = path.extname(includePath).slice(1);
+				includeContents.contents = includeContents.contents.trim()
+				const includeLang = path.extname(includePath).slice(1)
 				// Return the file contents wrapped inside a "code" node
-				return [{ type: "code", lang: includeLang, value: includeContents }];
+				return [{ type: 'code', lang: includeLang, value: includeContents }]
 			}
-		});
-	};
+		})
+	}
 }

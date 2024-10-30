@@ -3,7 +3,7 @@ import { errorResultToString } from '@utils/result'
 
 export async function GET(
 	request: Request,
-	{ params }: { params: { productSlug: string } }
+	{ params }: { params: { productSlug: string } },
 ) {
 	const { productSlug } = params
 

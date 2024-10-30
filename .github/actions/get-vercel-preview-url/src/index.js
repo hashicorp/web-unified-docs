@@ -13,7 +13,7 @@ fetch(
 		headers: {
 			Authorization: `Bearer ${VERCEL_TOKEN}`,
 		},
-	}
+	},
 )
 	.then((res) => {
 		if (!res.ok) {

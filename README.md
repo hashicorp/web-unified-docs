@@ -50,14 +50,15 @@ For comparison:
 | terraform                      | 49                      |
 | vault                          | 46                      |
 
-
 ## Local Development
 
 ### Requirements:
+
 - [Node.js](https://nodejs.org/en) (version 20 or higher)
 - [Docker](https://www.docker.com/) and [Docker Compose](https://docs.docker.com/compose/) (for managing containers)
 
 ### Terminology
+
 - `migration | migration-preview` - A preview of `hashicorp/dev-portal` where some routes fetch data from the existing content API and whilst only the routes that have been intentionally migrated use the new unified docs api ie this repo.
 - `unified-docs | unified-docs-preview` - A preview of `hashicorp/dev-portal` where it pulls all of its content from the new unified docs api ie this repo.
 
@@ -65,7 +66,7 @@ For comparison:
 
 To get a migration preview running, run `make` from the root of this repo.
 
-To spin this down gracefully, run `make clean` in a seperate terminal. If you wish to remove the local Docker images as well, you can specify `make clean CLEAN_OPTION=full`.
+To spin this down gracefully, run `make clean` in a separate terminal. If you wish to remove the local Docker images as well, you can specify `make clean CLEAN_OPTION=full`.
 
 ### More Commands
 

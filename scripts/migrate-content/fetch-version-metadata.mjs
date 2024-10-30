@@ -14,7 +14,7 @@ export async function fetchVersionMetadata(contentSourceRepo) {
 	// Determine the endpoint to fetch from, based on the content source repo
 	const endpoint = new URL(
 		`/api/content/${contentSourceRepo}/version-metadata`,
-		CONTENT_API_BASE_URL
+		CONTENT_API_BASE_URL,
 	)
 	endpoint.searchParams.set('partial', 'true')
 	// Run fetch
@@ -28,8 +28,8 @@ export async function fetchVersionMetadata(contentSourceRepo) {
 	if (responseJson.meta?.status_code !== 200 || !responseJson.result) {
 		throw new Error(
 			`Failed to fetch version metadata for ${contentSourceRepo}. Received unexpected result: ${JSON.stringify(
-				responseJson
-			)}.`
+				responseJson,
+			)}.`,
 		)
 	}
 	// Return the response result

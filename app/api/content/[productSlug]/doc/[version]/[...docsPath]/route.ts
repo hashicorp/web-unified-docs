@@ -39,7 +39,7 @@ export async function GET(
 	request: Request,
 	{
 		params,
-	}: { params: { productSlug: string; version: string; docsPath: string[] } }
+	}: { params: { productSlug: string; version: string; docsPath: string[] } },
 ) {
 	// Grab the parameters we need to fetch content
 	const { productSlug, version, docsPath } = params
@@ -48,7 +48,7 @@ export async function GET(
 	const contentDir = contentDirMap[productSlug]
 	if (!contentDir) {
 		console.error(
-			`API Error: Product, ${productSlug}, not found in contentDirMap`
+			`API Error: Product, ${productSlug}, not found in contentDirMap`,
 		)
 		return new Response('Not found', { status: 404 })
 	}

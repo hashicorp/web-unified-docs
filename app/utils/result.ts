@@ -14,7 +14,7 @@ export const Err = <E>(error?: E): Result<never, E> => {
 
 export const errorResultToString = (
 	category: string,
-	error: Result<any, string>
+	error: Result<any, string>,
 ): string => {
 	return `${category} Error: ${error.value}`
 }

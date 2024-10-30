@@ -170,8 +170,8 @@ async function migrateContent(targetRepos, ghCloneDir, outputDirs) {
 		`ℹ️ Running migration for content source repos:\n${JSON.stringify(
 			targetsDebug,
 			null,
-			2
-		)}`
+			2,
+		)}`,
 	)
 	/**
 	 * Iterate over content source repos, cloning each repo,
@@ -202,12 +202,12 @@ async function migrateContent(targetRepos, ghCloneDir, outputDirs) {
 		 * repository directory to check out different points in git history
 		 * corresponding to each release ref.
 		 */
-		const refDebugStrings = targetReleaseRefs.map(
-			(t) => `${t.versionString} (${t.ref})`
-		)
+		const refDebugStrings = targetReleaseRefs.map((t) => {
+			return `${t.versionString} (${t.ref})`
+		})
 		console.log(
 			`🛠️  Extracting content from the "${repoSlug}" repo at refs:
-			${JSON.stringify(refDebugStrings, null, 2)}`
+			${JSON.stringify(refDebugStrings, null, 2)}`,
 		)
 		for (let i = targetReleaseRefs.length - 1; i >= 0; i--) {
 			const targetRef = targetReleaseRefs[i]
@@ -216,10 +216,10 @@ async function migrateContent(targetRepos, ghCloneDir, outputDirs) {
 				cloneDir,
 				targetRef,
 				repoConfig,
-				outputDirs
+				outputDirs,
 			)
 			console.log(
-				`🟢 Finished extracting "${repoSlug}" content from "${targetRef.ref}".`
+				`🟢 Finished extracting "${repoSlug}" content from "${targetRef.ref}".`,
 			)
 		}
 		console.log(`🟢 Finished migrating content from "${repoSlug}".`)
@@ -248,7 +248,7 @@ function migrateRepoContentAtRef(
 	cloneDir,
 	targetRef,
 	repoConfig,
-	outputDirs
+	outputDirs,
 ) {
 	/**
 	 * `git checkout` out the hash corresponding to this release ref
@@ -280,7 +280,7 @@ function migrateRepoContentAtRef(
 			outputDirs.assets,
 			repoSlug,
 			targetRef.versionString,
-			repoConfig.assetDir.replace('public', '')
+			repoConfig.assetDir.replace('public', ''),
 		)
 		dirsToCopy.push({ src: assetsSrc, dest: assetsDest })
 	}
@@ -290,14 +290,14 @@ function migrateRepoContentAtRef(
 		outputDirs.content,
 		repoSlug,
 		targetRef.versionString,
-		repoConfig.contentDir
+		repoConfig.contentDir,
 	)
 	const dataSrc = path.join(websiteDirPath, repoConfig.dataDir)
 	const dataDest = path.join(
 		outputDirs.content,
 		repoSlug,
 		targetRef.versionString,
-		repoConfig.dataDir
+		repoConfig.dataDir,
 	)
 	dirsToCopy.push({ src: contentSrc, dest: contentDest })
 	dirsToCopy.push({ src: dataSrc, dest: dataDest })
