@@ -12,7 +12,9 @@ export const getProductVersion = (productSlug: string, version: string) => {
 	let parsedVersion
 	if (version === 'latest') {
 		// Grab the latest version of the product
-		const foundVersion = productVersionMetadata.find((v) => v.isLatest)
+		const foundVersion = productVersionMetadata.find((v) => {
+			return v.isLatest
+		})
 
 		if (!foundVersion) {
 			return Err(`Product, ${productSlug}, has no "${version}" version`)
@@ -21,7 +23,11 @@ export const getProductVersion = (productSlug: string, version: string) => {
 		parsedVersion = foundVersion.version
 	} else {
 		// Ensure the requested version is valid
-		if (!productVersionMetadata.find((v) => v.version === version)) {
+		if (
+			!productVersionMetadata.find((v) => {
+				return v.version === version
+			})
+		) {
 			return Err(`Product, ${productSlug}, has no "${version}" version`)
 		}
 

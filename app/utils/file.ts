@@ -29,7 +29,7 @@ export const readFile = async (filePath: string[]) => {
 		const text = await res.text()
 
 		return Ok(text)
-	} catch (error) {
+	} catch {
 		return Err(`Failed to read file at path: ${filePath.join('/')}`)
 	}
 }

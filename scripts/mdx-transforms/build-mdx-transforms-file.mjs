@@ -23,7 +23,7 @@ export default async function buildFileMdxTransforms(filePath) {
 		repoSlug,
 		version,
 		contentDir,
-		'partials'
+		'partials',
 	)
 	const outPath = path.join(outputDir, relativePath)
 

@@ -37,11 +37,11 @@ fs.watch(contentDir, { recursive: true }, async (eventType, filename) => {
 
 						const partialName = `@include '${filePath.split('/partials/')[1]}'`
 						if (fileContent.includes(partialName)) {
-							console.log("")
+							console.log('')
 
 							try {
 								console.log(
-									`- File containing partial "${partialName}" changed: ${fullPath}`
+									`- File containing partial "${partialName}" changed: ${fullPath}`,
 								)
 
 								await buildFileMdxTransforms(fullPath)

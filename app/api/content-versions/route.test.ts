@@ -2,28 +2,32 @@ import { expect, test } from 'vitest'
 import { GET } from './route'
 
 test('should return 400 if `product` query parameter is missing', async () => {
-	const mockRequest = (url: string) => new Request(url)
+	const mockRequest = (url: string) => {
+		return new Request(url)
+	}
 	const request = mockRequest(
-		'http://localhost:8080/api/content-versions?fullPath=doc#docs/internals'
+		'http://localhost:8080/api/content-versions?fullPath=doc#docs/internals',
 	)
 	const response = await GET(request)
 	expect(response.status).toBe(400)
 	const text = await response.text()
 	expect(text).toBe(
-		'Missing `product` query parameter. Please provide the `product` under which the requested document is expected to be found, for example `vault`.'
+		'Missing `product` query parameter. Please provide the `product` under which the requested document is expected to be found, for example `vault`.',
 	)
 })
 
 test('should return 400 if `fullPath` query parameter is missing', async () => {
-	const mockRequest = (url: string) => new Request(url)
+	const mockRequest = (url: string) => {
+		return new Request(url)
+	}
 	const request = mockRequest(
-		'http://localhost:8080/api/content-versions?product=vault'
+		'http://localhost:8080/api/content-versions?product=vault',
 	)
 	const response = await GET(request)
 	expect(response.status).toBe(400)
 	const text = await response.text()
 	expect(text).toBe(
-		'Missing `fullPath` query parameter. Please provide the full document path, in the format `doc#<path/to/document>`, for example `doc#docs/internals`.'
+		'Missing `fullPath` query parameter. Please provide the full document path, in the format `doc#<path/to/document>`, for example `doc#docs/internals`.',
 	)
 })
 
@@ -31,9 +35,11 @@ test('should return versions if `product` and `fullPath` query parameters are va
 	const mockedResponse = {
 		versions: ['v202401-1', 'v202401-2'],
 	}
-	const mockRequest = (url: string) => new Request(url)
+	const mockRequest = (url: string) => {
+		return new Request(url)
+	}
 	const request = mockRequest(
-		`http://localhost:8080/api/content-versions?product=ptfe-releases&fullPath=doc%23enterprise%2Freleases%2F2024%2Fv202401-1`
+		`http://localhost:8080/api/content-versions?product=ptfe-releases&fullPath=doc%23enterprise%2Freleases%2F2024%2Fv202401-1`,
 	)
 	const response = await GET(request)
 	expect(response.status).toBe(200)
@@ -42,9 +48,11 @@ test('should return versions if `product` and `fullPath` query parameters are va
 })
 
 test('should return 200 and empty array if no content exists for the query params', async () => {
-	const mockRequest = (url: string) => new Request(url)
+	const mockRequest = (url: string) => {
+		return new Request(url)
+	}
 	const request = mockRequest(
-		'http://localhost:8080/api/content-versions?product=nonexistent&fullPath=doc#docs/internals'
+		'http://localhost:8080/api/content-versions?product=nonexistent&fullPath=doc#docs/internals',
 	)
 	const response = await GET(request)
 	expect(response.status).toBe(200)
@@ -66,9 +74,11 @@ test('should return 200 and array of strings', async () => {
 			'v0.20.x',
 		],
 	}
-	const mockRequest = (url: string) => new Request(url)
+	const mockRequest = (url: string) => {
+		return new Request(url)
+	}
 	const request = mockRequest(
-		`http://localhost:8080/api/content-versions?product=terraform-cdk&fullPath=doc%23cdktf%2Fapi-reference%2Fpython`
+		`http://localhost:8080/api/content-versions?product=terraform-cdk&fullPath=doc%23cdktf%2Fapi-reference%2Fpython`,
 	)
 	const response = await GET(request)
 	expect(response.status).toBe(200)
@@ -105,9 +115,11 @@ test('should return 200 and array of strings for nav data', async () => {
 	const mockedResponse = {
 		versions: ['v202401-1', 'v202401-2'],
 	}
-	const mockRequest = (url: string) => new Request(url)
+	const mockRequest = (url: string) => {
+		return new Request(url)
+	}
 	const request = mockRequest(
-		`http://localhost:8080/api/content-versions?product=ptfe-releases&fullPath=doc%23enterprise%2Freleases%2F2024%2Fv202401-1`
+		`http://localhost:8080/api/content-versions?product=ptfe-releases&fullPath=doc%23enterprise%2Freleases%2F2024%2Fv202401-1`,
 	)
 	const response = await GET(request)
 	expect(response.status).toBe(200)
