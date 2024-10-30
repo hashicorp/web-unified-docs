@@ -33,7 +33,22 @@ test('should return 400 if `fullPath` query parameter is missing', async () => {
 
 test('should return versions if `product` and `fullPath` query parameters are valid', async () => {
 	const mockedResponse = {
-		versions: ['v202401-1', 'v202401-2'],
+		versions: [
+			'v202401-1',
+			'v202401-2',
+			'v202402-1',
+			'v202402-2',
+			'v202404-1',
+			'v202404-2',
+			'v202405-1',
+			'v202406-1',
+			'v202407-1',
+			'v202408-1',
+			'v202409-1',
+			'v202409-2',
+			'v202409-3',
+			'v202410-1',
+		],
 	}
 	const mockRequest = (url: string) => {
 		return new Request(url)
@@ -113,7 +128,22 @@ test('should return 200 and array of strings', async () => {
  */
 test('should return 200 and array of strings for nav data', async () => {
 	const mockedResponse = {
-		versions: ['v202401-1', 'v202401-2'],
+		versions: [
+			'v202401-1',
+			'v202401-2',
+			'v202402-1',
+			'v202402-2',
+			'v202404-1',
+			'v202404-2',
+			'v202405-1',
+			'v202406-1',
+			'v202407-1',
+			'v202408-1',
+			'v202409-1',
+			'v202409-2',
+			'v202409-3',
+			'v202410-1',
+		],
 	}
 	const mockRequest = (url: string) => {
 		return new Request(url)
