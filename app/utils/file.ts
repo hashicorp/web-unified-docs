@@ -18,7 +18,9 @@ const SELF_URL = process.env.VERCEL_URL
  */
 export const readFile = async (filePath: string[]) => {
 	try {
-		const res = await fetch(`${SELF_URL}/${filePath.join('/')}`)
+		const res = await fetch(`${SELF_URL}/${filePath.join('/')}`, {
+			cache: 'no-cache',
+		})
 
 		if (!res.ok) {
 			return Err(`Failed to read file at path: ${filePath.join('/')}`)
