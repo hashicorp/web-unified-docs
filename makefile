@@ -1,9 +1,9 @@
 NPM := npm
 
 # The default target that runs when you just type 'make'
-# It depends on the 'preview-migration' target
+# It depends on the 'preview-unified-docs' target
 .PHONY: all
-all: preview-migration
+all: preview-unified-docs
 
 # Target to ensure node_modules are installed
 .PHONY: node_modules
@@ -15,10 +15,10 @@ node_modules:
 	fi
 
 # Target to run the preview:migration command
-.PHONY: preview-migration
-preview-migration: node_modules
-	@echo "Running preview:migration..."
-	$(NPM) run preview:migration
+.PHONY: unified-docs
+unified-docs: node_modules
+	@echo "Running preview:unified-docs..."
+	$(NPM) run preview:unified-docs
 
 # Can be default or full, default will stop containers, full will stop containers and remove local images
 CLEAN_OPTION ?= default
@@ -27,9 +27,9 @@ CLEAN_OPTION ?= default
 clean:
 	@echo "Stopping and removing Docker containers..."
 	@if [ "$(CLEAN_OPTION)" = "full" ]; then \
-		docker-compose --profile migration down --rmi local; \
+		docker-compose --profile unified-docs down --rmi local; \
 	else \
-		docker-compose --profile migration down; \
+		docker-compose --profile unified-docs down; \
 	fi
 
 .PHONY: help
