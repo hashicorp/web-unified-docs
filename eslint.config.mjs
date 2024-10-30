@@ -29,6 +29,7 @@ export default [
 			curly: 'error',
 			'arrow-body-style': ['warn', 'always'],
 			'no-barrel-files/no-barrel-files': 'warn',
+			'valid-typeof': ['warn', { requireStringLiterals: true }],
 			'no-restricted-exports': [
 				'warn',
 				{ restrictDefaultExports: { direct: true } },
