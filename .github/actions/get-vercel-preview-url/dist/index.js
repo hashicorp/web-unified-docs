@@ -31599,11 +31599,11 @@ const processDeploymentData = (deploymentData) => {
 	_actions_core__WEBPACK_IMPORTED_MODULE_0__.setOutput('created_utc', formattedDate)
 
 	const previewUrl = `https://${deploymentData.url}`
-	_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(`Vercel preview URL for Unified Docs: ${previewUrl}`)
+	_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(`Vercel preview URL for ${DEVELOPMENT_TYPE}: ${previewUrl}`)
 	_actions_core__WEBPACK_IMPORTED_MODULE_0__.setOutput('preview_url', previewUrl)
 
 	const inspectorUrl = deploymentData.inspectorUrl
-	_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(`Vercel inspector URL for Unified Docs: ${inspectorUrl}`)
+	_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(`Vercel inspector URL for ${DEVELOPMENT_TYPE}: ${inspectorUrl}`)
 	_actions_core__WEBPACK_IMPORTED_MODULE_0__.setOutput('inspector_url', inspectorUrl)
 }
 
@@ -31641,7 +31641,7 @@ if (DEVELOPMENT_TYPE === 'url') {
 	_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(`Fetching Vercel preview URL for Unified Docs...`)
 
 	node_fetch__WEBPACK_IMPORTED_MODULE_1___default()(
-		`https://api.vercel.com/v6/deployments?limit=5&projectId=${PROJECT_ID}&teamId=${TEAM_ID}`,
+		`https://api.vercel.com/v6/deployments?limit=10&projectId=${PROJECT_ID}&teamId=${TEAM_ID}`,
 		{
 			headers: {
 				Authorization: `Bearer ${VERCEL_TOKEN}`,

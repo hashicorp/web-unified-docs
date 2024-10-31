@@ -30,11 +30,11 @@ const processDeploymentData = (deploymentData) => {
 	core.setOutput('created_utc', formattedDate)
 
 	const previewUrl = `https://${deploymentData.url}`
-	core.info(`Vercel preview URL for Unified Docs: ${previewUrl}`)
+	core.info(`Vercel preview URL for ${DEVELOPMENT_TYPE}: ${previewUrl}`)
 	core.setOutput('preview_url', previewUrl)
 
 	const inspectorUrl = deploymentData.inspectorUrl
-	core.info(`Vercel inspector URL for Unified Docs: ${inspectorUrl}`)
+	core.info(`Vercel inspector URL for ${DEVELOPMENT_TYPE}: ${inspectorUrl}`)
 	core.setOutput('inspector_url', inspectorUrl)
 }
 
@@ -72,7 +72,7 @@ if (DEVELOPMENT_TYPE === 'url') {
 	core.info(`Fetching Vercel preview URL for Unified Docs...`)
 
 	fetch(
-		`https://api.vercel.com/v6/deployments?limit=5&projectId=${PROJECT_ID}&teamId=${TEAM_ID}`,
+		`https://api.vercel.com/v6/deployments?limit=10&projectId=${PROJECT_ID}&teamId=${TEAM_ID}`,
 		{
 			headers: {
 				Authorization: `Bearer ${VERCEL_TOKEN}`,
