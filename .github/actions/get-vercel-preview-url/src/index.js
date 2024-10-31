@@ -68,7 +68,7 @@ if (DEVELOPMENT_TYPE === 'url') {
 			core.error(err)
 			core.setFailed(`Failed to fetch Vercel preview URL.`)
 		})
-} else if (DEVELOPMENT_TYPE !== 'unified-docs-api') {
+} else if (DEVELOPMENT_TYPE === 'unified-docs-api') {
 	core.info(`Fetching Vercel preview URL for Unified Docs...`)
 
 	fetch(

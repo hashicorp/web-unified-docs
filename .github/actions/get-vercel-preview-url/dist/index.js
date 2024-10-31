@@ -31637,7 +31637,7 @@ if (DEVELOPMENT_TYPE === 'url') {
 			_actions_core__WEBPACK_IMPORTED_MODULE_0__.error(err)
 			_actions_core__WEBPACK_IMPORTED_MODULE_0__.setFailed(`Failed to fetch Vercel preview URL.`)
 		})
-} else if (DEVELOPMENT_TYPE !== 'unified-docs-api') {
+} else if (DEVELOPMENT_TYPE === 'unified-docs-api') {
 	_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(`Fetching Vercel preview URL for Unified Docs...`)
 
 	node_fetch__WEBPACK_IMPORTED_MODULE_1___default()(
