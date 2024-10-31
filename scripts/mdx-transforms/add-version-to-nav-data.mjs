@@ -3,6 +3,33 @@ import path from 'node:path'
 
 const product = process.argv[2]
 
+// ${contentApiBaseUrl}/api/content/${product}/${fullPath}`
+// api/content/terraform/nav-data/v1.8.x/cli
+// nav node: <product>/<subpath>/<version>/path
+// example: { "path": "graph" }
+
+const terraformBasePaths = [
+	'/cdktf',
+	'/cli',
+	'/cloud-docs',
+	'/cloud-docs/agents',
+	'/docs',
+	'/enterprise',
+	'/internals',
+	'/intro',
+	'/language',
+	'/plugin',
+	'/plugin/framework',
+	'/plugin/log',
+	'/plugin/mux',
+	'/plugin/sdkv2',
+	'/plugin/testing',
+	'/registry',
+	'/downloads',
+]
+
+// href allows linking outside of content subpath
+// path is for content inside of subpath
 export async function addVersionToNavData() {
 	if (!product.length) {
 		throw new Error(
@@ -11,7 +38,7 @@ export async function addVersionToNavData() {
 	}
 
 	const productDir = path.join(process.cwd(), 'content', product)
-	console.log({ productDir })
+
 	async function searchDirectory(directory) {
 		let files
 		try {
@@ -54,24 +81,27 @@ export async function addVersionToNavData() {
 							for (const key in obj) {
 								if (typeof obj[key] === 'object') {
 									updatePaths(obj[key])
-								} else if (
-									key === 'href' &&
-									!obj[key].startsWith('http') &&
-									obj[key] !== ''
-								) {
-									obj[key] = `${version}${obj[key]}`
-								} else if (
-									key === 'path' &&
-									!obj[key].startsWith('http') &&
-									obj[key] !== ''
-								) {
+								} else if (key === 'href' && !obj[key].startsWith('http')) {
+									const basePath = terraformBasePaths.find((basePath) => {
+										return obj[key].startsWith(basePath)
+									})
+
+									// if the href starts with a basepath, e.g. "/cli", add version after the basepath
+									if (basePath && basePath.length) {
+										obj[key] =
+											`${basePath}/${version}${obj[key].substring(basePath.length)}`
+									} else {
+										obj[key] = `${version}${obj[key]}`
+									}
+								} else if (key === 'path') {
 									obj[key] = `${version}/${obj[key]}`
+									return
 								}
 							}
 						}
 
 						updatePaths(jsonData)
-						console.log({ navData: jsonData })
+
 						// Write the updated JSON back to the file
 						await fs.promises.writeFile(
 							fullPathToFile,
