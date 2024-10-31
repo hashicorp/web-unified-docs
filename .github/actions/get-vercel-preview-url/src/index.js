@@ -13,6 +13,8 @@ const PROJECT_ID = core.getInput('project_id')
 const GITHUB_BRANCH_NAME = core.getInput('github_branch_name')
 
 const processDeploymentData = (deploymentData) => {
+	core.info(`Deployment Data: ${JSON.stringify(deploymentData, null, 2)}`)
+
 	const createdUnixTimeStamp = deploymentData.created
 	const createdDate = new Date(createdUnixTimeStamp)
 

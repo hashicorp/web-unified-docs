@@ -31582,6 +31582,9 @@ const PROJECT_ID = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput('project_
 const GITHUB_BRANCH_NAME = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput('github_branch_name')
 
 const processDeploymentData = (deploymentData) => {
+
+	_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(`Deployment Data: ${JSON.stringify(deploymentData, null, 2)}`)
+
 	const createdUnixTimeStamp = deploymentData.created
 	const createdDate = new Date(createdUnixTimeStamp)
 
