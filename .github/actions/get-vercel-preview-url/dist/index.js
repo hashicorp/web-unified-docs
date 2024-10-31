@@ -31610,8 +31610,13 @@ const processDeploymentData = (deploymentData) => {
 if (DEVELOPMENT_TYPE === 'url') {
 	_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(`Fetching Vercel data for deployment url ${DEVELOPMENT_URL}...`)
 
+	let deploymentUrl = DEVELOPMENT_URL
+	if (DEVELOPMENT_URL.startsWith('https://')) {
+		deploymentUrl = DEVELOPMENT_URL.replace('https://', '');
+	}
+
 	node_fetch__WEBPACK_IMPORTED_MODULE_1___default()(
-		`https://api.vercel.com/v13/deployments/${DEVELOPMENT_URL}?teamId=${TEAM_ID}`,
+		`https://api.vercel.com/v13/deployments/${deploymentUrl}?teamId=${TEAM_ID}`,
 		{
 			headers: {
 				Authorization: `Bearer ${VERCEL_TOKEN}`,
