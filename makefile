@@ -6,7 +6,6 @@ unified-docs:
 	@echo "Starting up the unified-docs Docker container"
 	docker compose --profile unified-docs up
 
-
 .PHONY: clean
 clean:
 	@echo "Stopping and removing Docker containers and images..."
