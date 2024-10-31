@@ -3,7 +3,7 @@
 .PHONY: all
 all: unified-docs
 
-# Target to run the preview:migration command
+# Target to run the preview:unified-docs command
 .PHONY: unified-docs
 unified-docs:
 	@echo "Running preview:unified-docs..."
