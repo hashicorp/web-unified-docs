@@ -6,7 +6,7 @@ const TEAM_ID = core.getInput('team_id', { required: true })
 const VERCEL_TOKEN = core.getInput('vercel_token', { required: true })
 
 // required by DEVELOPMENT_TYPE="url"
-const DEVELOPMENT_URL = core.getInput('development_url')
+const DEVELOPMENT_URL = core.getInput('deployment_url')
 
 // required by DEVELOPMENT_TYPE="unified-docs-api"
 const PROJECT_ID = core.getInput('project_id')

@@ -31575,7 +31575,7 @@ const TEAM_ID = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput('team_id', {
 const VERCEL_TOKEN = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput('vercel_token', { required: true })
 
 // required by DEVELOPMENT_TYPE="url"
-const DEVELOPMENT_URL = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput('development_url')
+const DEVELOPMENT_URL = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput('deployment_url')
 
 // required by DEVELOPMENT_TYPE="unified-docs-api"
 const PROJECT_ID = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput('project_id')
@@ -31612,7 +31612,7 @@ if (DEVELOPMENT_TYPE === 'url') {
 
 	let deploymentUrl = DEVELOPMENT_URL
 	if (DEVELOPMENT_URL.startsWith('https://')) {
-		deploymentUrl = DEVELOPMENT_URL.replace('https://', '');
+		deploymentUrl = DEVELOPMENT_URL.replace('https://', '')
 	}
 
 	node_fetch__WEBPACK_IMPORTED_MODULE_1___default()(
