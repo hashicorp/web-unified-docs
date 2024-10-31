@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import versionMetadata from '../../app/api/versionMetadata.json' assert { type: 'json' }
 
 const product = process.argv[2]
 
@@ -28,8 +29,6 @@ const terraformBasePaths = [
 	'/downloads',
 ]
 
-// href allows linking outside of content subpath
-// path is for content inside of subpath
 export async function addVersionToNavData() {
 	if (!product.length) {
 		throw new Error(
@@ -73,6 +72,12 @@ export async function addVersionToNavData() {
 					const versionMatch = fullPathToFile.match(
 						/\/content\/[^/]+\/([^/]+)\/data\//,
 					)
+
+					// use app/api/versionMetadata.json to get the latest version
+					const latestVersion = versionMetadata[product].find((version) => {
+						return version.isLatest === true
+					}).version
+
 					if (versionMatch) {
 						const version = versionMatch[1]
 
@@ -81,7 +86,13 @@ export async function addVersionToNavData() {
 							for (const key in obj) {
 								if (typeof obj[key] === 'object') {
 									updatePaths(obj[key])
-								} else if (key === 'href' && !obj[key].startsWith('http')) {
+								} else if (
+									key === 'href' &&
+									!obj[key].startsWith('http') &&
+									version !== latestVersion &&
+									!obj[key].includes(version)
+								) {
+									// href allows linking outside of content subpath
 									const basePath = terraformBasePaths.find((basePath) => {
 										return obj[key].startsWith(basePath)
 									})
@@ -93,7 +104,12 @@ export async function addVersionToNavData() {
 									} else {
 										obj[key] = `${version}${obj[key]}`
 									}
-								} else if (key === 'path') {
+								} else if (
+									key === 'path' &&
+									version !== latestVersion &&
+									!obj[key].includes(version)
+								) {
+									// path is for content inside of subpath
 									obj[key] = `${version}/${obj[key]}`
 									return
 								}
