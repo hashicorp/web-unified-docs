@@ -1,26 +1,21 @@
-# The default target that runs when you just type 'make'
-# It depends on the 'preview-unified-docs' target
 .PHONY: all
 all: unified-docs
 
-# Target to run the preview:unified-docs command
 .PHONY: unified-docs
 unified-docs:
-	@echo "Running preview:unified-docs..."
+	@echo "Starting up the unified-docs Docker container"
 	docker compose --profile unified-docs up
 
-# Can be default or full, default will stop containers, full will stop containers and remove local images
-CLEAN_OPTION ?= default
 
 .PHONY: clean
 clean:
-	@echo "Stopping and removing Docker containers..."
+	@echo "Stopping and removing Docker containers and images..."
 	docker-compose --profile unified-docs down --rmi local; \
 	docker rmi hashicorp/dev-portal
 
 .PHONY: help
 help:
 	@echo "Available commands:"
-	@echo "  make                : Run the docker-compose --profile unified-docs"
-	@echo "  make clean          : Stop and remove Docker containers"
+	@echo "  make                : Run the unified-docs Docker container"
+	@echo "  make clean          : Stop and remove project Docker containers and images"
 	@echo "  make help           : Display this help message"
