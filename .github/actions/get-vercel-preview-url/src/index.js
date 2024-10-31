@@ -13,9 +13,10 @@ const PROJECT_ID = core.getInput('project_id')
 const GITHUB_BRANCH_NAME = core.getInput('github_branch_name')
 
 const processDeploymentData = (deploymentData) => {
-	core.info(`Deployment Data: ${JSON.stringify(deploymentData, null, 2)}`)
-
-	const createdUnixTimeStamp = deploymentData.created
+	const createdUnixTimeStamp =
+		DEVELOPMENT_TYPE === 'unified-docs-api'
+			? deploymentData.created
+			: deploymentData.createdAt
 	const createdDate = new Date(createdUnixTimeStamp)
 
 	const options = {
@@ -94,6 +95,8 @@ if (DEVELOPMENT_TYPE === 'url') {
 		})
 		.then((data) => {
 			if (data.deployments && data.deployments.length > 0) {
+				core.info(`Deployments data: ${JSON.stringify(data.deployments)}`)
+
 				// Double check if the deployment is for the current ref
 				const deploymentData = data.deployments.find((deployment) => {
 					return deployment.meta.githubCommitRef === GITHUB_BRANCH_NAME
