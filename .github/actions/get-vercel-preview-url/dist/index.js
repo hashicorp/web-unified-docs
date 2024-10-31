@@ -31579,7 +31579,7 @@ const DEVELOPMENT_URL = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput('dev
 
 // required by DEVELOPMENT_TYPE="unified-docs-api"
 const PROJECT_ID = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput('project_id')
-const GITHUB_REF_NAME = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput('github_ref_name')
+const GITHUB_BRANCH_NAME = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput('github_branch_name')
 
 const processDeploymentData = (deploymentData) => {
 	const createdUnixTimeStamp = deploymentData.created
@@ -31628,7 +31628,7 @@ if (DEVELOPMENT_TYPE === 'url') {
 			_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(`Fetching Vercel preview URL for Unified Docs...`)
 
 			if (!deploymentData) {
-				throw new Error(`No deployment found for the ref: ${GITHUB_REF_NAME}`)
+				throw new Error(`No deployment found for the url: ${DEVELOPMENT_URL}`)
 			}
 
 			processDeploymentData(deploymentData)
@@ -31658,11 +31658,13 @@ if (DEVELOPMENT_TYPE === 'url') {
 			if (data.deployments && data.deployments.length > 0) {
 				// Double check if the deployment is for the current ref
 				const deploymentData = data.deployments.find((deployment) => {
-					return deployment.meta.githubCommitRef === GITHUB_REF_NAME
+					return deployment.meta.githubCommitRef === GITHUB_BRANCH_NAME
 				})
 
 				if (!deploymentData) {
-					throw new Error(`No deployment found for the ref: ${GITHUB_REF_NAME}`)
+					throw new Error(
+						`No deployment found for the ref: ${GITHUB_BRANCH_NAME}`,
+					)
 				}
 
 				processDeploymentData(deploymentData)
