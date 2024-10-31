@@ -31591,13 +31591,32 @@ node_fetch__WEBPACK_IMPORTED_MODULE_1___default()(
 		return res.json()
 	})
 	.then((data) => {
-		const jsonString = JSON.stringify(data, null, 2)
-		_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(`Fetched data: ${jsonString}`)
-		console.log(`Fetched data: ${jsonString}`)
 		if (data.deployments && data.deployments.length > 0) {
-			const previewUrl = data.deployments[0].url
+			const deploymentData = data.deployments[0]
+
+			const createdUnixTimeStamp = deploymentData.created
+			const createdDate = new Date(createdUnixTimeStamp)
+
+			const options = {
+				year: 'numeric',
+				month: 'short',
+				day: 'numeric',
+				hour: 'numeric',
+				minute: 'numeric',
+				hour12: true,
+			}
+			const formattedDate = createdDate.toLocaleString('en-US', options)
+
+			_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(`Deployment created at (UTC): ${formattedDate}`)
+			_actions_core__WEBPACK_IMPORTED_MODULE_0__.setOutput('created_utc', formattedDate)
+
+			const previewUrl = deploymentData.url
 			_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(`Vercel preview URL for Unified Docs: ${previewUrl}`)
 			_actions_core__WEBPACK_IMPORTED_MODULE_0__.setOutput('preview_url', previewUrl)
+
+			const inspectorUrl = deploymentData.inspectorUrl
+			_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(`Vercel inspector URL for Unified Docs: ${inspectorUrl}`)
+			_actions_core__WEBPACK_IMPORTED_MODULE_0__.setOutput('inspector_url', inspectorUrl)
 		} else {
 			throw new Error('No deployments found.')
 		}
