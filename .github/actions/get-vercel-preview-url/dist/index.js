@@ -31582,7 +31582,7 @@ node_fetch__WEBPACK_IMPORTED_MODULE_1___default()(
 		headers: {
 			Authorization: `Bearer ${VERCEL_TOKEN}`,
 		},
-	}
+	},
 )
 	.then((res) => {
 		if (!res.ok) {
@@ -31591,6 +31591,9 @@ node_fetch__WEBPACK_IMPORTED_MODULE_1___default()(
 		return res.json()
 	})
 	.then((data) => {
+		const jsonString = JSON.stringify(data, null, 2)
+		_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(`Fetched data: ${jsonString}`)
+		console.log(`Fetched data: ${jsonString}`)
 		if (data.deployments && data.deployments.length > 0) {
 			const previewUrl = data.deployments[0].url
 			_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(`Vercel preview URL for Unified Docs: ${previewUrl}`)

@@ -22,6 +22,9 @@ fetch(
 		return res.json()
 	})
 	.then((data) => {
+		const jsonString = JSON.stringify(data, null, 2)
+		core.info(`Fetched data: ${jsonString}`)
+		console.log(`Fetched data: ${jsonString}`)
 		if (data.deployments && data.deployments.length > 0) {
 			const previewUrl = data.deployments[0].url
 			core.info(`Vercel preview URL for Unified Docs: ${previewUrl}`)
