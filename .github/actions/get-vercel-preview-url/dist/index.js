@@ -31573,6 +31573,7 @@ __nccwpck_require__.r(__webpack_exports__);
 const VERCEL_TOKEN = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput('vercel_token', { required: true })
 const TEAM_ID = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput('team_id', { required: true })
 const PROJECT_ID = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput('project_id', { required: true })
+const GITHUB_REF_NAME = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput('github_ref_name', { required: true })
 
 _actions_core__WEBPACK_IMPORTED_MODULE_0__.info(`Fetching Vercel preview URL for Unified Docs...`)
 
@@ -31592,7 +31593,16 @@ node_fetch__WEBPACK_IMPORTED_MODULE_1___default()(
 	})
 	.then((data) => {
 		if (data.deployments && data.deployments.length > 0) {
-			const deploymentData = data.deployments[0]
+			// Double check if the deployment is for the current ref
+			const deploymentData = data.deployments.find((deployment) => {
+				return deployment.meta.githubCommitRef === GITHUB_REF_NAME
+			})
+
+			if (!deploymentData) {
+				throw new Error(`No deployment found for the ref: ${GITHUB_REF_NAME}`)
+			}
+
+			// const deploymentData = data.deployments[0]
 
 			const createdUnixTimeStamp = deploymentData.created
 			const createdDate = new Date(createdUnixTimeStamp)
@@ -31610,7 +31620,7 @@ node_fetch__WEBPACK_IMPORTED_MODULE_1___default()(
 			_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(`Deployment created at (UTC): ${formattedDate}`)
 			_actions_core__WEBPACK_IMPORTED_MODULE_0__.setOutput('created_utc', formattedDate)
 
-			const previewUrl = deploymentData.url
+			const previewUrl = `https://${deploymentData.url}`
 			_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(`Vercel preview URL for Unified Docs: ${previewUrl}`)
 			_actions_core__WEBPACK_IMPORTED_MODULE_0__.setOutput('preview_url', previewUrl)
 
