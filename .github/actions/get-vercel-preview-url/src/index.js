@@ -4,6 +4,7 @@ import fetch from 'node-fetch'
 const VERCEL_TOKEN = core.getInput('vercel_token', { required: true })
 const TEAM_ID = core.getInput('team_id', { required: true })
 const PROJECT_ID = core.getInput('project_id', { required: true })
+const GITHUB_REF_NAME = core.getInput('github_ref_name', { required: true })
 
 core.info(`Fetching Vercel preview URL for Unified Docs...`)
 
@@ -23,7 +24,16 @@ fetch(
 	})
 	.then((data) => {
 		if (data.deployments && data.deployments.length > 0) {
-			const deploymentData = data.deployments[0]
+			// Double check if the deployment is for the current ref
+			const deploymentData = data.deployments.find((deployment) => {
+				return deployment.meta.githubCommitRef === GITHUB_REF_NAME
+			})
+
+			if (!deploymentData) {
+				throw new Error(`No deployment found for the ref: ${GITHUB_REF_NAME}`)
+			}
+
+			// const deploymentData = data.deployments[0]
 
 			const createdUnixTimeStamp = deploymentData.created
 			const createdDate = new Date(createdUnixTimeStamp)
@@ -41,7 +51,7 @@ fetch(
 			core.info(`Deployment created at (UTC): ${formattedDate}`)
 			core.setOutput('created_utc', formattedDate)
 
-			const previewUrl = deploymentData.url
+			const previewUrl = `https://${deploymentData.url}`
 			core.info(`Vercel preview URL for Unified Docs: ${previewUrl}`)
 			core.setOutput('preview_url', previewUrl)
 
