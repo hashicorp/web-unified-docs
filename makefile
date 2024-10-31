@@ -1,41 +1,20 @@
-NPM := npm
-
-# The default target that runs when you just type 'make'
-# It depends on the 'preview-migration' target
 .PHONY: all
-all: preview-migration
+all: unified-docs
 
-# Target to ensure node_modules are installed
-.PHONY: node_modules
-node_modules:
-	@echo "Checking for node_modules..."
-	@if [ ! -d "node_modules" ]; then \
-		echo "Installing dependencies..."; \
-		$(NPM) install; \
-	fi
-
-# Target to run the preview:migration command
-.PHONY: preview-migration
-preview-migration: node_modules
-	@echo "Running preview:migration..."
-	$(NPM) run preview:migration
-
-# Can be default or full, default will stop containers, full will stop containers and remove local images
-CLEAN_OPTION ?= default
+.PHONY: unified-docs
+unified-docs:
+	@echo "Starting up the unified-docs Docker container"
+	docker compose --profile unified-docs up
 
 .PHONY: clean
 clean:
-	@echo "Stopping and removing Docker containers..."
-	@if [ "$(CLEAN_OPTION)" = "full" ]; then \
-		docker-compose --profile migration down --rmi local; \
-	else \
-		docker-compose --profile migration down; \
-	fi
+	@echo "Stopping and removing Docker containers and images..."
+	docker-compose --profile unified-docs down --rmi local; \
+	docker rmi hashicorp/dev-portal
 
 .PHONY: help
 help:
 	@echo "Available commands:"
-	@echo "  make                : Run the preview:migration command"
-	@echo "  make clean          : Stop and remove Docker containers"
-	@echo "  make clean CLEAN_OPTION=full : Stop, remove containers, and remove local images"
+	@echo "  make                : Run the unified-docs Docker container"
+	@echo "  make clean          : Stop and remove project Docker containers and images"
 	@echo "  make help           : Display this help message"

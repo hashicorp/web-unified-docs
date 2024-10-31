@@ -51,12 +51,22 @@ fs.watch(contentDir, { recursive: true }, async (eventType, filename) => {
 						}
 					}
 				}
+
+				if (files.length !== 0) {
+					await fetch(`${process.env.DEV_PORTAL_URL}/api/refresh`, {
+						method: 'POST',
+					})
+				}
 			}
 		} else {
 			console.log(`- File changed: ${filePath}\n`)
 
 			try {
 				await buildFileMdxTransforms(filePath)
+
+				await fetch(`${process.env.DEV_PORTAL_URL}/api/refresh`, {
+					method: 'POST',
+				})
 			} catch (error) {
 				console.error(`Error processing file ${filePath}:`, error)
 			}
