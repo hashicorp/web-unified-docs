@@ -19,14 +19,14 @@ const VERSION_METADATA_FILE = path.join(CWD, 'app/api/versionMetadata.json')
  * Define the prebuild script.
  */
 async function main() {
+	// Gather and write out version metadata
+	const versionMetadata = await gatherVersionMetadata(CONTENT_DIR)
+	const versionMetadataJson = JSON.stringify(versionMetadata, null, 2)
+	fs.writeFileSync(VERSION_METADATA_FILE, versionMetadataJson)
 	// Apply MDX transforms, writing out transformed MDX files to `public`
 	await buildMdxTransforms(CONTENT_DIR, CONTENT_DIR_OUT)
 	// Copy all `*-nav-data.json` files from `content` to `public/content`, using execSync
 	await copyNavDataFiles(CONTENT_DIR, CONTENT_DIR_OUT)
-	// Gather and write out version metadata
-	const versionMetadata = await gatherVersionMetadata(CONTENT_DIR_OUT)
-	const versionMetadataJson = JSON.stringify(versionMetadata, null, 2)
-	fs.writeFileSync(VERSION_METADATA_FILE, versionMetadataJson)
 }
 
 /**
@@ -41,9 +41,7 @@ async function copyNavDataFiles(sourceDir, destDir) {
 	})
 	// add version to nav data paths/hrefs
 	navDataFiles.forEach(async (file) => {
-		let product = file.split('/content/')[1]
-		product = product.split('/').shift()
-		await addVersionToNavData(product)
+		await addVersionToNavData(file)
 	})
 	await batchPromises(
 		navDataFiles,
