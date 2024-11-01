@@ -4,6 +4,7 @@ import buildMdxTransforms from './mdx-transforms/build-mdx-transforms.mjs'
 import batchPromises from './utils/batch-promises.mjs'
 import listFiles from './utils/list-files.mjs'
 import gatherVersionMetadata from './gather-version-metadata.mjs'
+import { addVersionToNavData } from './mdx-transforms/add-version-to-nav-data.mjs'
 
 /**
  * We expect the current working directory to be the project root.
@@ -37,6 +38,12 @@ async function main() {
 async function copyNavDataFiles(sourceDir, destDir) {
 	const navDataFiles = (await listFiles(sourceDir)).filter((f) => {
 		return f.endsWith('-nav-data.json')
+	})
+	// add version to nav data paths/hrefs
+	navDataFiles.forEach(async (file) => {
+		let product = file.split('/content/')[1]
+		product = product.split('/').shift()
+		await addVersionToNavData(product)
 	})
 	await batchPromises(
 		navDataFiles,

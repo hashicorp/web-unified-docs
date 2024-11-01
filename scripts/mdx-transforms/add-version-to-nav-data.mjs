@@ -1,19 +1,14 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import versionMetadata from '../../app/api/versionMetadata.json' assert { type: 'json' }
-
-const product = process.argv[2]
-
-// ${contentApiBaseUrl}/api/content/${product}/${fullPath}`
-// api/content/terraform/nav-data/v1.8.x/cli
-// nav node: <product>/<subpath>/<version>/path
-// example: { "path": "graph" }
+import { createRequire } from 'module'
+const require = createRequire(import.meta.url)
+const versionMetadata = require('../../app/api/versionMetadata.json')
 
 const terraformBasePaths = [
 	'/cdktf',
 	'/cli',
-	'/cloud-docs',
 	'/cloud-docs/agents',
+	'/cloud-docs',
 	'/docs',
 	'/enterprise',
 	'/internals',
@@ -26,10 +21,9 @@ const terraformBasePaths = [
 	'/plugin/sdkv2',
 	'/plugin/testing',
 	'/registry',
-	'/downloads',
 ]
 
-export async function addVersionToNavData() {
+export async function addVersionToNavData(product) {
 	if (!product.length) {
 		throw new Error(
 			`Please provide at least one repository slug as an argument. For example, to add version to Terraform nav data, you can run "node migrate-content.mjs terraform".`,
@@ -137,5 +131,3 @@ export async function addVersionToNavData() {
 
 	await searchDirectory(productDir)
 }
-
-await addVersionToNavData(product)
