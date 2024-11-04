@@ -20,14 +20,16 @@ const terraformBasePaths = [
 ]
 
 /**
- * Adds a version to the navigation data in a JSON file.
+ * Adds version information to navigation data in a JSON file.
  *
- * This function reads a JSON file, updates the `href` or `path` properties
- * to include the version if necessary, and writes the updated JSON back to the file.
+ * This function reads a JSON file containing navigation data, updates the paths or hrefs
+ * with the version information extracted from the file path, and writes the updated data
+ * back to the file. It uses the provided version metadata to determine the latest version.
  *
- * @param {string} filePath - The path to the JSON file containing the navigation data.
- * @throws {Error} If the file path is not provided.
- * @returns {Promise<void>} A promise that resolves when the file has been updated.
+ * @param {string} filePath - The path to the JSON file containing navigation data.
+ * @param {Object} versionMetadata - An object containing version metadata for different products.
+ * @throws {Error} Throws an error if the file path is not provided.
+ * @returns {Promise<void>} A promise that resolves when the file has been successfully updated.
  */
 export async function addVersionToNavData(filePath, versionMetadata) {
 	if (!filePath) {
