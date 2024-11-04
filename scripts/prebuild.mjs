@@ -26,7 +26,7 @@ async function main() {
 	// Apply MDX transforms, writing out transformed MDX files to `public`
 	await buildMdxTransforms(CONTENT_DIR, CONTENT_DIR_OUT)
 	// Copy all `*-nav-data.json` files from `content` to `public/content`, using execSync
-	await copyNavDataFiles(CONTENT_DIR, CONTENT_DIR_OUT)
+	await copyNavDataFiles(CONTENT_DIR, CONTENT_DIR_OUT, versionMetadata)
 }
 
 /**
@@ -35,14 +35,11 @@ async function main() {
  * TODO: approach here could maybe be refined, or maybe this would be nice
  * to split out to a separate file... but felt fine to leave here for now.
  */
-async function copyNavDataFiles(sourceDir, destDir) {
+async function copyNavDataFiles(sourceDir, destDir, versionMetadata) {
 	const navDataFiles = (await listFiles(sourceDir)).filter((f) => {
 		return f.endsWith('-nav-data.json')
 	})
-	// add version to nav data paths/hrefs
-	navDataFiles.forEach(async (file) => {
-		await addVersionToNavData(file)
-	})
+
 	await batchPromises(
 		navDataFiles,
 		async (filePath) => {
@@ -52,6 +49,8 @@ async function copyNavDataFiles(sourceDir, destDir) {
 			if (!fs.existsSync(parentDir)) {
 				fs.mkdirSync(parentDir, { recursive: true })
 			}
+			// add version to nav data paths/hrefs
+			await addVersionToNavData(filePath, versionMetadata)
 			fs.copyFileSync(filePath, destPath)
 		},
 		16,

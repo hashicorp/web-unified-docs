@@ -1,12 +1,4 @@
 import fs from 'node:fs/promises'
-import path from 'path'
-import { createRequire } from 'module'
-const require = createRequire(import.meta.url)
-const versionMetadataFile = path.join(
-	process.cwd(),
-	'app/api/versionMetadata.json',
-)
-const versionMetadata = require(versionMetadataFile)
 
 const terraformBasePaths = [
 	'/cdktf',
@@ -37,7 +29,7 @@ const terraformBasePaths = [
  * @throws {Error} If the file path is not provided.
  * @returns {Promise<void>} A promise that resolves when the file has been updated.
  */
-export async function addVersionToNavData(filePath) {
+export async function addVersionToNavData(filePath, versionMetadata) {
 	if (!filePath) {
 		throw new Error(
 			`Please provide a file path as an argument. For example, to add version to a nav data file, you can run "node add-version-to-nav-data.mjs /path/to/nav-data.json".`,
