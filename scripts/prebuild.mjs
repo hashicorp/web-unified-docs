@@ -49,9 +49,9 @@ async function copyNavDataFiles(sourceDir, destDir, versionMetadata) {
 			if (!fs.existsSync(parentDir)) {
 				fs.mkdirSync(parentDir, { recursive: true })
 			}
-			// add version to nav data paths/hrefs
-			await addVersionToNavData(filePath, versionMetadata)
 			fs.copyFileSync(filePath, destPath)
+			// add version to nav data paths/hrefs
+			await addVersionToNavData(destPath, versionMetadata)
 		},
 		16,
 	)
