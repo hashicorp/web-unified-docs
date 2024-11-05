@@ -10,7 +10,7 @@ unified-docs:
 clean:
 	@echo "Stopping and removing Docker containers and images..."
 	docker-compose --profile unified-docs down --rmi local; \
-	docker rmi hashicorp/dev-portal
+	docker rmi hashicorp/dev-portal --force
 
 .PHONY: help
 help:
