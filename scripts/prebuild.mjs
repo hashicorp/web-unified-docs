@@ -4,6 +4,7 @@ import buildMdxTransforms from './mdx-transforms/build-mdx-transforms.mjs'
 import batchPromises from './utils/batch-promises.mjs'
 import listFiles from './utils/list-files.mjs'
 import gatherVersionMetadata from './gather-version-metadata.mjs'
+import { addVersionToNavData } from './mdx-transforms/add-version-to-nav-data.mjs'
 
 /**
  * We expect the current working directory to be the project root.
@@ -18,14 +19,14 @@ const VERSION_METADATA_FILE = path.join(CWD, 'app/api/versionMetadata.json')
  * Define the prebuild script.
  */
 async function main() {
+	// Gather and write out version metadata
+	const versionMetadata = await gatherVersionMetadata(CONTENT_DIR)
+	const versionMetadataJson = JSON.stringify(versionMetadata, null, 2)
+	fs.writeFileSync(VERSION_METADATA_FILE, versionMetadataJson)
 	// Apply MDX transforms, writing out transformed MDX files to `public`
 	await buildMdxTransforms(CONTENT_DIR, CONTENT_DIR_OUT)
 	// Copy all `*-nav-data.json` files from `content` to `public/content`, using execSync
-	await copyNavDataFiles(CONTENT_DIR, CONTENT_DIR_OUT)
-	// Gather and write out version metadata
-	const versionMetadata = await gatherVersionMetadata(CONTENT_DIR_OUT)
-	const versionMetadataJson = JSON.stringify(versionMetadata, null, 2)
-	fs.writeFileSync(VERSION_METADATA_FILE, versionMetadataJson)
+	await copyNavDataFiles(CONTENT_DIR, CONTENT_DIR_OUT, versionMetadata)
 }
 
 /**
@@ -34,10 +35,11 @@ async function main() {
  * TODO: approach here could maybe be refined, or maybe this would be nice
  * to split out to a separate file... but felt fine to leave here for now.
  */
-async function copyNavDataFiles(sourceDir, destDir) {
+async function copyNavDataFiles(sourceDir, destDir, versionMetadata) {
 	const navDataFiles = (await listFiles(sourceDir)).filter((f) => {
 		return f.endsWith('-nav-data.json')
 	})
+
 	await batchPromises(
 		navDataFiles,
 		async (filePath) => {
@@ -48,6 +50,8 @@ async function copyNavDataFiles(sourceDir, destDir) {
 				fs.mkdirSync(parentDir, { recursive: true })
 			}
 			fs.copyFileSync(filePath, destPath)
+			// add version to nav data paths/hrefs
+			await addVersionToNavData(destPath, versionMetadata)
 		},
 		16,
 	)
