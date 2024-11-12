@@ -31570,22 +31570,20 @@ __nccwpck_require__.r(__webpack_exports__);
 
 
 
-const DEVELOPMENT_TYPE = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput('development_type', { required: true })
+const DEPLOYMENT_TYPE = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput('deployment_type', { required: true })
 const TEAM_ID = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput('team_id', { required: true })
 const VERCEL_TOKEN = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput('vercel_token', { required: true })
 
 // required by DEVELOPMENT_TYPE="url"
 const DEVELOPMENT_URL = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput('deployment_url')
 
-// required by DEVELOPMENT_TYPE="unified-docs-api"
+// required by DEVELOPMENT_TYPE="id"
 const PROJECT_ID = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput('project_id')
-const GITHUB_BRANCH_NAME = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput('github_branch_name')
+const GITHUB_SHA = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput('github_sha')
 
 const processDeploymentData = (deploymentData) => {
 	const createdUnixTimeStamp =
-		DEVELOPMENT_TYPE === 'unified-docs-api'
-			? deploymentData.created
-			: deploymentData.createdAt
+		DEPLOYMENT_TYPE === 'id' ? deploymentData.created : deploymentData.createdAt
 	const createdDate = new Date(createdUnixTimeStamp)
 
 	const options = {
@@ -31602,15 +31600,15 @@ const processDeploymentData = (deploymentData) => {
 	_actions_core__WEBPACK_IMPORTED_MODULE_0__.setOutput('created_utc', formattedDate)
 
 	const previewUrl = `https://${deploymentData.url}`
-	_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(`Vercel preview URL for ${DEVELOPMENT_TYPE}: ${previewUrl}`)
+	_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(`Vercel preview URL for ${DEPLOYMENT_TYPE}: ${previewUrl}`)
 	_actions_core__WEBPACK_IMPORTED_MODULE_0__.setOutput('preview_url', previewUrl)
 
 	const inspectorUrl = deploymentData.inspectorUrl
-	_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(`Vercel inspector URL for ${DEVELOPMENT_TYPE}: ${inspectorUrl}`)
+	_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(`Vercel inspector URL for ${DEPLOYMENT_TYPE}: ${inspectorUrl}`)
 	_actions_core__WEBPACK_IMPORTED_MODULE_0__.setOutput('inspector_url', inspectorUrl)
 }
 
-if (DEVELOPMENT_TYPE === 'url') {
+if (DEPLOYMENT_TYPE === 'url') {
 	_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(`Fetching Vercel data for deployment url ${DEVELOPMENT_URL}...`)
 
 	let deploymentUrl = DEVELOPMENT_URL
@@ -31645,7 +31643,7 @@ if (DEVELOPMENT_TYPE === 'url') {
 			_actions_core__WEBPACK_IMPORTED_MODULE_0__.error(err)
 			_actions_core__WEBPACK_IMPORTED_MODULE_0__.setFailed(`Failed to fetch Vercel preview URL.`)
 		})
-} else if (DEVELOPMENT_TYPE === 'unified-docs-api') {
+} else if (DEPLOYMENT_TYPE === 'id') {
 	_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(`Fetching Vercel preview URL for Unified Docs...`)
 
 	node_fetch__WEBPACK_IMPORTED_MODULE_1___default()(
@@ -31664,18 +31662,15 @@ if (DEVELOPMENT_TYPE === 'url') {
 		})
 		.then((data) => {
 			if (data.deployments && data.deployments.length > 0) {
-
 				_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(`Deployments data: ${JSON.stringify(data.deployments)}`)
 
 				// Double check if the deployment is for the current ref
 				const deploymentData = data.deployments.find((deployment) => {
-					return deployment.meta.githubCommitRef === GITHUB_BRANCH_NAME
+					return deployment.meta.githubCommitSha === GITHUB_SHA
 				})
 
 				if (!deploymentData) {
-					throw new Error(
-						`No deployment found for the ref: ${GITHUB_BRANCH_NAME}`,
-					)
+					throw new Error(`No deployment found for the sha: ${GITHUB_SHA}`)
 				}
 
 				processDeploymentData(deploymentData)
