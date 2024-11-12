@@ -1,6 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import buildFileMdxTransforms from './mdx-transforms/build-mdx-transforms-file.mjs'
+import { buildFileMdxTransforms } from './mdx-transforms/build-mdx-transforms-file.mjs'
 
 const contentDir = path.resolve('content')
 
