@@ -31570,39 +31570,118 @@ __nccwpck_require__.r(__webpack_exports__);
 
 
 
-const VERCEL_TOKEN = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput('vercel_token', { required: true })
+const DEPLOYMENT_TYPE = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput('deployment_type', { required: true })
 const TEAM_ID = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput('team_id', { required: true })
-const PROJECT_ID = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput('project_id', { required: true })
+const VERCEL_TOKEN = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput('vercel_token', { required: true })
 
-_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(`Fetching Vercel preview URL for Unified Docs...`)
+// required by DEVELOPMENT_TYPE="url"
+const DEVELOPMENT_URL = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput('deployment_url')
 
-node_fetch__WEBPACK_IMPORTED_MODULE_1___default()(
-	`https://api.vercel.com/v6/deployments?limit=1&projectId=${PROJECT_ID}&teamId=${TEAM_ID}`,
-	{
-		headers: {
-			Authorization: `Bearer ${VERCEL_TOKEN}`,
-		},
+// required by DEVELOPMENT_TYPE="id"
+const PROJECT_ID = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput('project_id')
+const GITHUB_SHA = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput('github_sha')
+
+const processDeploymentData = (deploymentData) => {
+	const createdUnixTimeStamp =
+		DEPLOYMENT_TYPE === 'id' ? deploymentData.created : deploymentData.createdAt
+	const createdDate = new Date(createdUnixTimeStamp)
+
+	const options = {
+		year: 'numeric',
+		month: 'short',
+		day: 'numeric',
+		hour: 'numeric',
+		minute: 'numeric',
+		hour12: true,
 	}
-)
-	.then((res) => {
-		if (!res.ok) {
-			throw new Error(`HTTP error! Status: ${res.status}`)
-		}
-		return res.json()
-	})
-	.then((data) => {
-		if (data.deployments && data.deployments.length > 0) {
-			const previewUrl = data.deployments[0].url
-			_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(`Vercel preview URL for Unified Docs: ${previewUrl}`)
-			_actions_core__WEBPACK_IMPORTED_MODULE_0__.setOutput('preview_url', previewUrl)
-		} else {
-			throw new Error('No deployments found.')
-		}
-	})
-	.catch((err) => {
-		_actions_core__WEBPACK_IMPORTED_MODULE_0__.error(err)
-		_actions_core__WEBPACK_IMPORTED_MODULE_0__.setFailed(`Failed to fetch Vercel preview URL.`)
-	})
+	const formattedDate = createdDate.toLocaleString('en-US', options)
+
+	_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(`Deployment created at (UTC): ${formattedDate}`)
+	_actions_core__WEBPACK_IMPORTED_MODULE_0__.setOutput('created_utc', formattedDate)
+
+	const previewUrl = `https://${deploymentData.url}`
+	_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(`Vercel preview URL for ${DEPLOYMENT_TYPE}: ${previewUrl}`)
+	_actions_core__WEBPACK_IMPORTED_MODULE_0__.setOutput('preview_url', previewUrl)
+
+	const inspectorUrl = deploymentData.inspectorUrl
+	_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(`Vercel inspector URL for ${DEPLOYMENT_TYPE}: ${inspectorUrl}`)
+	_actions_core__WEBPACK_IMPORTED_MODULE_0__.setOutput('inspector_url', inspectorUrl)
+}
+
+if (DEPLOYMENT_TYPE === 'url') {
+	_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(`Fetching Vercel data for deployment url ${DEVELOPMENT_URL}...`)
+
+	let deploymentUrl = DEVELOPMENT_URL
+	if (DEVELOPMENT_URL.startsWith('https://')) {
+		deploymentUrl = DEVELOPMENT_URL.replace('https://', '')
+	}
+
+	node_fetch__WEBPACK_IMPORTED_MODULE_1___default()(
+		`https://api.vercel.com/v13/deployments/${deploymentUrl}?teamId=${TEAM_ID}`,
+		{
+			headers: {
+				Authorization: `Bearer ${VERCEL_TOKEN}`,
+			},
+		},
+	)
+		.then((res) => {
+			if (!res.ok) {
+				throw new Error(`HTTP error! Status: ${res.status}`)
+			}
+			return res.json()
+		})
+		.then((deploymentData) => {
+			_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(`Fetching Vercel preview URL for Unified Docs...`)
+
+			if (!deploymentData) {
+				throw new Error(`No deployment found for the url: ${DEVELOPMENT_URL}`)
+			}
+
+			processDeploymentData(deploymentData)
+		})
+		.catch((err) => {
+			_actions_core__WEBPACK_IMPORTED_MODULE_0__.error(err)
+			_actions_core__WEBPACK_IMPORTED_MODULE_0__.setFailed(`Failed to fetch Vercel preview URL.`)
+		})
+} else if (DEPLOYMENT_TYPE === 'id') {
+	_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(`Fetching Vercel preview URL for Unified Docs...`)
+
+	// In the future should we also filter by until?
+	node_fetch__WEBPACK_IMPORTED_MODULE_1___default()(
+		`https://api.vercel.com/v6/deployments?limit=10&projectId=${PROJECT_ID}&teamId=${TEAM_ID}`,
+		{
+			headers: {
+				Authorization: `Bearer ${VERCEL_TOKEN}`,
+			},
+		},
+	)
+		.then((res) => {
+			if (!res.ok) {
+				throw new Error(`HTTP error! Status: ${res.status}`)
+			}
+			return res.json()
+		})
+		.then((data) => {
+			if (data.deployments && data.deployments.length > 0) {
+				// Double check if the deployment is for the current sha
+				const deploymentData = data.deployments.find((deployment) => {
+					return deployment.meta.githubCommitSha === GITHUB_SHA
+				})
+
+				if (!deploymentData) {
+					throw new Error(`No deployment found for the sha: ${GITHUB_SHA}`)
+				}
+
+				processDeploymentData(deploymentData)
+			} else {
+				throw new Error('No deployments found.')
+			}
+		})
+		.catch((err) => {
+			_actions_core__WEBPACK_IMPORTED_MODULE_0__.error(err)
+			_actions_core__WEBPACK_IMPORTED_MODULE_0__.setFailed(`Failed to fetch Vercel preview URL.`)
+		})
+}
 
 })();
 
