@@ -16,7 +16,7 @@ This action accepts the following inputs:
 
 #### Always required
 
-- `deployment_type`: **string** — The type of Vercel deployment to fetch data from, wither 'id' or 'url'.
+- `deployment_type`: **string** — The type of Vercel deployment to fetch data from, whether 'id' or 'url'.
 - `vercel_token`: **string** — A valid authentication token to interface with the Vercel API. If one is not provided, it tries to see if one is present in the environment under `VERCEL_TOKEN`.
 - `team_id`: **string** — The team ID to use with the Vercel API. If one is not provided, it tries to see if one is present in the environment under `TEAM_ID`.
 
