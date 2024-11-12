@@ -1,22 +1,20 @@
 import * as core from '@actions/core'
 import fetch from 'node-fetch'
 
-const DEVELOPMENT_TYPE = core.getInput('development_type', { required: true })
+const DEPLOYMENT_TYPE = core.getInput('deployment_type', { required: true })
 const TEAM_ID = core.getInput('team_id', { required: true })
 const VERCEL_TOKEN = core.getInput('vercel_token', { required: true })
 
 // required by DEVELOPMENT_TYPE="url"
 const DEVELOPMENT_URL = core.getInput('deployment_url')
 
-// required by DEVELOPMENT_TYPE="unified-docs-api"
+// required by DEVELOPMENT_TYPE="id"
 const PROJECT_ID = core.getInput('project_id')
-const GITHUB_BRANCH_NAME = core.getInput('github_branch_name')
+const GITHUB_SHA = core.getInput('github_sha')
 
 const processDeploymentData = (deploymentData) => {
 	const createdUnixTimeStamp =
-		DEVELOPMENT_TYPE === 'unified-docs-api'
-			? deploymentData.created
-			: deploymentData.createdAt
+		DEPLOYMENT_TYPE === 'id' ? deploymentData.created : deploymentData.createdAt
 	const createdDate = new Date(createdUnixTimeStamp)
 
 	const options = {
@@ -33,15 +31,15 @@ const processDeploymentData = (deploymentData) => {
 	core.setOutput('created_utc', formattedDate)
 
 	const previewUrl = `https://${deploymentData.url}`
-	core.info(`Vercel preview URL for ${DEVELOPMENT_TYPE}: ${previewUrl}`)
+	core.info(`Vercel preview URL for ${DEPLOYMENT_TYPE}: ${previewUrl}`)
 	core.setOutput('preview_url', previewUrl)
 
 	const inspectorUrl = deploymentData.inspectorUrl
-	core.info(`Vercel inspector URL for ${DEVELOPMENT_TYPE}: ${inspectorUrl}`)
+	core.info(`Vercel inspector URL for ${DEPLOYMENT_TYPE}: ${inspectorUrl}`)
 	core.setOutput('inspector_url', inspectorUrl)
 }
 
-if (DEVELOPMENT_TYPE === 'url') {
+if (DEPLOYMENT_TYPE === 'url') {
 	core.info(`Fetching Vercel data for deployment url ${DEVELOPMENT_URL}...`)
 
 	let deploymentUrl = DEVELOPMENT_URL
@@ -76,7 +74,7 @@ if (DEVELOPMENT_TYPE === 'url') {
 			core.error(err)
 			core.setFailed(`Failed to fetch Vercel preview URL.`)
 		})
-} else if (DEVELOPMENT_TYPE === 'unified-docs-api') {
+} else if (DEPLOYMENT_TYPE === 'id') {
 	core.info(`Fetching Vercel preview URL for Unified Docs...`)
 
 	fetch(
@@ -99,13 +97,11 @@ if (DEVELOPMENT_TYPE === 'url') {
 
 				// Double check if the deployment is for the current ref
 				const deploymentData = data.deployments.find((deployment) => {
-					return deployment.meta.githubCommitRef === GITHUB_BRANCH_NAME
+					return deployment.meta.githubCommitSha === GITHUB_SHA
 				})
 
 				if (!deploymentData) {
-					throw new Error(
-						`No deployment found for the ref: ${GITHUB_BRANCH_NAME}`,
-					)
+					throw new Error(`No deployment found for the sha: ${GITHUB_SHA}`)
 				}
 
 				processDeploymentData(deploymentData)
