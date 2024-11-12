@@ -94,8 +94,6 @@ if (DEPLOYMENT_TYPE === 'url') {
 		})
 		.then((data) => {
 			if (data.deployments && data.deployments.length > 0) {
-				core.info(`Deployments data: ${JSON.stringify(data.deployments)}`)
-
 				// Double check if the deployment is for the current sha
 				const deploymentData = data.deployments.find((deployment) => {
 					return deployment.meta.githubCommitSha === GITHUB_SHA
