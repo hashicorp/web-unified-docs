@@ -1,4 +1,4 @@
-# Github Action: Get Vercel Preview Url
+# Github Action: Get Vercel Preview Data
 
 This action uses the Vercel Rest API to fetch the latest deployment.
 
@@ -14,9 +14,18 @@ However, the cli is designed for human readable output as opposed to being a res
 
 This action accepts the following inputs:
 
+#### Always required
+
+- `deployment_type`: **string** — The type of Vercel deployment to fetch data from, wither 'id' or 'url'.
 - `vercel_token`: **string** — A valid authentication token to interface with the Vercel API. If one is not provided, it tries to see if one is present in the environment under `VERCEL_TOKEN`.
 - `team_id`: **string** — The team ID to use with the Vercel API. If one is not provided, it tries to see if one is present in the environment under `TEAM_ID`.
+
+#### Required by deployment_type=url
+- `deployment_url`: **string** - 'The Vercel deployment URL to fetch data from'
+
+#### Required by deployment_type=id
 - `project_id`: **string** — The project ID to use with the Vercel API. If one is not provided, it tries to see if one is present in the environment under `PROJECT_ID`.
+- `github_sha`: **string** — The commit SHA that was used in the Vercel build
 
 ### Outputs
 

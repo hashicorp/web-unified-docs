@@ -31646,6 +31646,7 @@ if (DEPLOYMENT_TYPE === 'url') {
 } else if (DEPLOYMENT_TYPE === 'id') {
 	_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(`Fetching Vercel preview URL for Unified Docs...`)
 
+	// In the future should we also filter by until?
 	node_fetch__WEBPACK_IMPORTED_MODULE_1___default()(
 		`https://api.vercel.com/v6/deployments?limit=10&projectId=${PROJECT_ID}&teamId=${TEAM_ID}`,
 		{
@@ -31664,7 +31665,7 @@ if (DEPLOYMENT_TYPE === 'url') {
 			if (data.deployments && data.deployments.length > 0) {
 				_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(`Deployments data: ${JSON.stringify(data.deployments)}`)
 
-				// Double check if the deployment is for the current ref
+				// Double check if the deployment is for the current sha
 				const deploymentData = data.deployments.find((deployment) => {
 					return deployment.meta.githubCommitSha === GITHUB_SHA
 				})
