@@ -55,6 +55,7 @@ export function remarkIncludePartials({ partialsDir, filePath }) {
 			 * If successful, we continue. If we fail, we throw an error, which
 			 * should block our build from proceeding.
 			 */
+
 			const includePath = path.join(partialsDir, includeMatch[1])
 			let includeContents
 			try {
