@@ -12,7 +12,7 @@ import { includePartials } from './include-partials/include-partials.mjs'
  *
  * @param {string} filePath
  */
-export default async function buildFileMdxTransforms(filePath) {
+export async function buildFileMdxTransforms(filePath) {
 	const targetDir = 'content'
 	const outputDir = 'public/content'
 

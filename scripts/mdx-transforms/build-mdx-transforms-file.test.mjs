@@ -1,6 +1,7 @@
 import { expect, test, vi, afterEach, beforeEach } from 'vitest'
 import { vol } from 'memfs'
-import buildFileMdxTransforms, {
+import {
+	buildFileMdxTransforms,
 	applyFileMdxTransforms,
 } from './build-mdx-transforms-file.mjs'
 import fs from 'fs'
