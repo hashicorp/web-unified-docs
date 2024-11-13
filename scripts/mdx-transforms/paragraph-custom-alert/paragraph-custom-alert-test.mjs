@@ -10,7 +10,8 @@ main()
 /**
  * This is a simple test script to demo the transformParagraphCustomAlerts function.
  *
- * TODO: Set up some kind of testing framework.
+ * This file is run by the following command:
+ * node scripts/mdx-transforms/paragraph-custom-alert/paragraph-custom-alert-test.mjs
  */
 async function main() {
 	// We're using test data from a fixtures directory
@@ -25,6 +26,6 @@ async function main() {
 	const testMdxString = grayMatter(testFileString).content
 	// Transform the MDX
 	const transformed = await transformParagraphCustomAlerts(testMdxString)
-	// Log out the transformed MDX, then manually confirm the alerts are there
+	// Log out the transformed MDX, then manually confirm the alerts have been transformed
 	console.log({ transformed })
 }
