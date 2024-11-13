@@ -10,6 +10,7 @@ import {
 	sigils,
 	transformParagraphCustomAlerts,
 } from './paragraph-custom-alert/paragraph-custom-alert.mjs'
+import { transformRewriteInternalLinks } from './add-version-to-internal-links.mjs'
 
 /**
  * Given a target directory,
@@ -24,7 +25,7 @@ import {
  * @param {string} targetDir
  * @param {string} outputDir the directory to write transformed files to
  */
-export default async function buildMdxTransforms(targetDir, outputDir) {
+export async function buildMdxTransforms(targetDir, outputDir) {
 	// Walk the directory to get a list of all files
 	const allFiles = await listFiles(targetDir)
 	// Filter for `.mdx` files
@@ -105,6 +106,11 @@ async function applyMdxTransforms(entry) {
 			transformedContent =
 				await transformParagraphCustomAlerts(transformedContent)
 		}
+		transformedContent = await transformRewriteInternalLinks.transformer(
+			transformedContent,
+			entry,
+		)
+
 		const transformedFileString = grayMatter.stringify(transformedContent, data)
 		// Ensure the parent directory for the output file path exists
 		const outDir = path.dirname(outPath)

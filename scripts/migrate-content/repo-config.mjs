@@ -378,3 +378,27 @@ export const ALL_REPO_CONFIG = {
 	// 	websiteDir: 'website',
 	// },
 }
+
+/**
+ * An array of base paths used in the Terraform project.
+ * These paths represent various sections of the Terraform documentation and related resources.
+ * Used to rewrite internal links in docs and nav data
+ */
+export const TERRAFORM_BASE_PATHS = [
+	'/cdktf',
+	'/cli',
+	'/cloud-docs/agents',
+	'/cloud-docs',
+	'/docs',
+	'/enterprise',
+	'/internals',
+	'/intro',
+	'/language',
+	'/plugin',
+	'/plugin/framework',
+	'/plugin/log',
+	'/plugin/mux',
+	'/plugin/sdkv2',
+	'/plugin/testing',
+	'/registry',
+]

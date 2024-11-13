@@ -1,6 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import buildMdxTransforms from './mdx-transforms/build-mdx-transforms.mjs'
+import { buildMdxTransforms } from './mdx-transforms/build-mdx-transforms.mjs'
 import batchPromises from './utils/batch-promises.mjs'
 import listFiles from './utils/list-files.mjs'
 import gatherVersionMetadata from './gather-version-metadata.mjs'
