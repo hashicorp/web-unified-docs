@@ -16,7 +16,7 @@ import {
  *
  * @param {string} filePath
  */
-export default async function buildFileMdxTransforms(filePath) {
+export async function buildFileMdxTransforms(filePath) {
 	const targetDir = 'content'
 	const outputDir = 'public/content'
 
@@ -35,7 +35,6 @@ export default async function buildFileMdxTransforms(filePath) {
 
 	console.log(`🪄 Running MDX transform on ${filePath}...`)
 	const result = await applyFileMdxTransforms(entry)
-
 	if (result.error) {
 		console.error(`❗ Encountered an error: ${result.error}`)
 	} else {
@@ -56,7 +55,7 @@ export default async function buildFileMdxTransforms(filePath) {
  * @param {string} entry.outPath
  * @return {object} { error: string | null }
  */
-async function applyFileMdxTransforms(entry) {
+export async function applyFileMdxTransforms(entry) {
 	try {
 		const { filePath, partialsDir, outPath } = entry
 		const fileString = fs.readFileSync(filePath, 'utf8')
