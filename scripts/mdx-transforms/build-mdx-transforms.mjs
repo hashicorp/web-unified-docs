@@ -6,6 +6,10 @@ import grayMatter from 'gray-matter'
 import listFiles from '../utils/list-files.mjs'
 import { includePartials } from './include-partials/include-partials.mjs'
 import batchPromises from '../utils/batch-promises.mjs'
+import {
+	sigils,
+	transformParagraphCustomAlerts,
+} from './paragraph-custom-alert/paragraph-custom-alert.mjs'
 
 /**
  * Given a target directory,
@@ -92,6 +96,14 @@ async function applyMdxTransforms(entry) {
 		let transformedContent = content
 		if (content.includes('@include')) {
 			transformedContent = await includePartials(content, partialsDir, filePath)
+		}
+		if (
+			Object.keys(sigils).some((sigil) => {
+				return content.includes(sigil)
+			})
+		) {
+			transformedContent =
+				await transformParagraphCustomAlerts(transformedContent)
 		}
 		const transformedFileString = grayMatter.stringify(transformedContent, data)
 		// Ensure the parent directory for the output file path exists
