@@ -4,6 +4,10 @@ import path from 'path'
 import grayMatter from 'gray-matter'
 // Local
 import { includePartials } from './include-partials/include-partials.mjs'
+import {
+	sigils,
+	transformParagraphCustomAlerts,
+} from './paragraph-custom-alert/paragraph-custom-alert.mjs'
 
 /**
  * Given a file path,
@@ -59,6 +63,14 @@ export async function applyFileMdxTransforms(entry) {
 		let transformedContent = content
 		if (content.includes('@include')) {
 			transformedContent = await includePartials(content, partialsDir, filePath)
+		}
+		if (
+			Object.keys(sigils).some((sigil) => {
+				return content.includes(sigil)
+			})
+		) {
+			transformedContent =
+				await transformParagraphCustomAlerts(transformedContent)
 		}
 		const transformedFileString = grayMatter.stringify(transformedContent, data)
 		// Ensure the parent directory for the output file path exists
