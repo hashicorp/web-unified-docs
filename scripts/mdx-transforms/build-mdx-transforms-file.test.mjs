@@ -20,11 +20,10 @@ beforeEach(() => {
 })
 
 const mdxContent = `#Hello World
-            export const ComplexComponent = () => <div>Hello to the world</div>
-            </ComplexComponent />
-            `
+                    export const ComplexComponent = () => <div>Hello to the world</div>
+                    </ComplexComponent />`
 
-const transformedOutPath = '../../../content/terraform/v1.19.x/test.mdx'
+const transformedOutPath = '/content/terraform/v1.19.x/test.mdx'
 
 test('test buildfileMdxTransforms', async () => {
 	await buildFileMdxTransforms('/content/terraform/v1.19.x/test.mdx')
