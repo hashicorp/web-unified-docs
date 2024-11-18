@@ -25,7 +25,11 @@ import { transformRewriteInternalLinks } from './add-version-to-internal-links.m
  * @param {string} targetDir
  * @param {string} outputDir the directory to write transformed files to
  */
-export async function buildMdxTransforms(targetDir, outputDir) {
+export async function buildMdxTransforms(
+	targetDir,
+	outputDir,
+	versionMetadata,
+) {
 	// Walk the directory to get a list of all files
 	const allFiles = await listFiles(targetDir)
 	// Filter for `.mdx` files
@@ -55,7 +59,9 @@ export async function buildMdxTransforms(targetDir, outputDir) {
 	const batchSize = 16
 	const results = await batchPromises(
 		mdxFileEntries,
-		applyMdxTransforms,
+		(entry) => {
+			return applyMdxTransforms(entry, versionMetadata)
+		},
 		batchSize,
 	)
 	// Log out any errors encountered
@@ -89,7 +95,7 @@ export async function buildMdxTransforms(targetDir, outputDir) {
  * @param {string} entry.outPath
  * @return {object} { error: string | null }
  */
-async function applyMdxTransforms(entry) {
+async function applyMdxTransforms(entry, versionMetadata) {
 	try {
 		const { filePath, partialsDir, outPath } = entry
 		const fileString = fs.readFileSync(filePath, 'utf8')
@@ -109,6 +115,7 @@ async function applyMdxTransforms(entry) {
 		transformedContent = await transformRewriteInternalLinks.transformer(
 			transformedContent,
 			entry,
+			versionMetadata,
 		)
 
 		const transformedFileString = grayMatter.stringify(transformedContent, data)

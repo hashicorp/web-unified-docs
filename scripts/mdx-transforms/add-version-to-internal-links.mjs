@@ -2,9 +2,8 @@ import remark from 'remark'
 import remarkMdx from 'remark-mdx'
 import flatMap from 'unist-util-flatmap'
 import { ALL_REPO_CONFIG } from '../migrate-content/repo-config.mjs'
-import versionMetadata from '../../app/api/versionMetadata.json' assert { type: 'json' }
 
-const rewriteInternalLinksPlugin = ({ entry }) => {
+const rewriteInternalLinksPlugin = ({ entry, versionMetadata }) => {
 	const relativePath = entry.filePath.split('content/')[1]
 	const [product, version] = relativePath.split('/')
 	const latestVersion = versionMetadata[product].find((version) => {
@@ -29,11 +28,12 @@ const rewriteInternalLinksPlugin = ({ entry }) => {
 }
 
 export const transformRewriteInternalLinks = {
-	async transformer(content, entry) {
+	async transformer(content, entry, versionMetadata) {
 		const contents = await remark()
 			.use(remarkMdx)
 			.use(rewriteInternalLinksPlugin, {
 				entry,
+				versionMetadata,
 			})
 			.process(content)
 
