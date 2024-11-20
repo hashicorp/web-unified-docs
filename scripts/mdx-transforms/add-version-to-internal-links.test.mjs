@@ -66,25 +66,6 @@ describe('transformRewriteInternalLinks', () => {
 		expect(result).toBe(expectedOutput)
 	})
 
-	it('should not rewrite links if the basePaths array is empty', async () => {
-		const content = `[Link to base path](/terraform/docs/some-page)
-[Link to another base path](/terraform/tutorials/another-page)
-`
-		const entry = {
-			filePath:
-				'content/terraform-docs-common/v0.0.x/docs/cloud-docs/index.mdx',
-		}
-		const expectedOutput =
-			'[Link to base path](/terraform/docs/some-page)\n' +
-			'[Link to another base path](/terraform/tutorials/another-page)\n'
-		const result = await transformRewriteInternalLinks(
-			content,
-			entry,
-			versionMetadata,
-		)
-		expect(result).toBe(expectedOutput)
-	})
-
 	it('should rewrite internal links for ptfe-releases', async () => {
 		const content = `[Link to enterprise](/enterprise/some-page)`
 		const entry = {
@@ -130,7 +111,7 @@ describe('transformRewriteInternalLinks', () => {
 		expect(result).toBe(expectedOutput)
 	})
 
-	it('should not rewrite internal links for terraform-docs-common', async () => {
+	it('should not rewrite internal links for a product with no basePaths array', async () => {
 		const content = `[Link to cloud-docs](/cloud-docs/some-page)`
 		const entry = {
 			filePath: 'content/terraform-docs-common/v0.0.x/docs/some-file.mdx',
