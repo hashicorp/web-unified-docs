@@ -112,7 +112,7 @@ async function applyMdxTransforms(entry, versionMetadata) {
 			transformedContent =
 				await transformParagraphCustomAlerts(transformedContent)
 		}
-		transformedContent = await transformRewriteInternalLinks.transformer(
+		transformedContent = await transformRewriteInternalLinks(
 			transformedContent,
 			entry,
 			versionMetadata,
