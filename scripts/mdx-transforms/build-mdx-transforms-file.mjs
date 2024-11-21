@@ -8,6 +8,7 @@ import {
 	sigils,
 	transformParagraphCustomAlerts,
 } from './paragraph-custom-alert/paragraph-custom-alert.mjs'
+import { transformRewriteInternalRedirects } from './rewrite-internal-redirects/rewrite-internal-redirects.mjs'
 
 /**
  * Given a file path,
@@ -29,9 +30,17 @@ export async function buildFileMdxTransforms(filePath) {
 		contentDir,
 		'partials',
 	)
+	const redirectsDir = path.join(targetDir, repoSlug, version)
 	const outPath = path.join(outputDir, relativePath)
 
-	const entry = { filePath, partialsDir, outPath }
+	const entry = {
+		filePath,
+		partialsDir,
+		outPath,
+		version,
+		repoSlug,
+		redirectsDir,
+	}
 
 	console.log(`🪄 Running MDX transform on ${filePath}...`)
 	const result = await applyFileMdxTransforms(entry)
@@ -57,7 +66,8 @@ export async function buildFileMdxTransforms(filePath) {
  */
 export async function applyFileMdxTransforms(entry) {
 	try {
-		const { filePath, partialsDir, outPath } = entry
+		const { filePath, partialsDir, outPath, version, repoSlug, redirectsDir } =
+			entry
 		const fileString = fs.readFileSync(filePath, 'utf8')
 		const { data, content } = grayMatter(fileString)
 		let transformedContent = content
@@ -72,6 +82,12 @@ export async function applyFileMdxTransforms(entry) {
 			transformedContent =
 				await transformParagraphCustomAlerts(transformedContent)
 		}
+		transformedContent = await transformRewriteInternalRedirects(
+			transformedContent,
+			version,
+			repoSlug,
+			redirectsDir,
+		)
 		const transformedFileString = grayMatter.stringify(transformedContent, data)
 		// Ensure the parent directory for the output file path exists
 		const outDir = path.dirname(outPath)
