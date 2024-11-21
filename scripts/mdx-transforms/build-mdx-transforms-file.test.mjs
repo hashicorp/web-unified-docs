@@ -19,12 +19,15 @@ beforeEach(() => {
 	})
 })
 
-const mdxContent = `#Hello World
-            export const ComplexComponent = () => <div>Hello to the world</div>
-            </ComplexComponent />
-            `
+const mdxContent = `
+# Hello World
 
-const transformedOutPath = '../../../content/terraform/v1.19.x/test.mdx'
+export const ComplexComponent = () => <div>Hello to the world</div>
+
+</ComplexComponent />
+`
+
+const transformedOutPath = '/content/terraform/v1.19.x/test.mdx'
 
 test('test buildfileMdxTransforms', async () => {
 	await buildFileMdxTransforms('/content/terraform/v1.19.x/test.mdx')
@@ -38,9 +41,9 @@ test('test applyFileMdxTransforms', async () => {
 		partialsDir: '../../partials',
 		outPath: transformedOutPath,
 	}
-
 	const result = await applyFileMdxTransforms(entry)
 	expect(result).toStrictEqual({ error: null })
+
 	const transformedContent = fs.readFileSync(entry.outPath, 'utf8')
-	expect(transformedContent).toContain(mdxContent)
+	expect(transformedContent.trim()).toContain(mdxContent.trim())
 })

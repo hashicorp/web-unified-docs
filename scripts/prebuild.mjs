@@ -1,6 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import buildMdxTransforms from './mdx-transforms/build-mdx-transforms.mjs'
+import { buildMdxTransforms } from './mdx-transforms/build-mdx-transforms.mjs'
 import batchPromises from './utils/batch-promises.mjs'
 import listFiles from './utils/list-files.mjs'
 import gatherVersionMetadata from './gather-version-metadata.mjs'
@@ -24,7 +24,7 @@ async function main() {
 	const versionMetadataJson = JSON.stringify(versionMetadata, null, 2)
 	fs.writeFileSync(VERSION_METADATA_FILE, versionMetadataJson)
 	// Apply MDX transforms, writing out transformed MDX files to `public`
-	await buildMdxTransforms(CONTENT_DIR, CONTENT_DIR_OUT)
+	await buildMdxTransforms(CONTENT_DIR, CONTENT_DIR_OUT, versionMetadata)
 	// Copy all `*-nav-data.json` files from `content` to `public/content`, using execSync
 	await copyNavDataFiles(CONTENT_DIR, CONTENT_DIR_OUT, versionMetadata)
 }

@@ -11,6 +11,7 @@ import {
 	transformParagraphCustomAlerts,
 } from './paragraph-custom-alert/paragraph-custom-alert.mjs'
 import { transformRewriteInternalRedirects } from './rewrite-internal-redirects/rewrite-internal-redirects.mjs'
+import { transformRewriteInternalLinks } from './add-version-to-internal-links.mjs'
 
 /**
  * Given a target directory,
@@ -25,7 +26,11 @@ import { transformRewriteInternalRedirects } from './rewrite-internal-redirects/
  * @param {string} targetDir
  * @param {string} outputDir the directory to write transformed files to
  */
-export default async function buildMdxTransforms(targetDir, outputDir) {
+export async function buildMdxTransforms(
+	targetDir,
+	outputDir,
+	versionMetadata,
+) {
 	// Walk the directory to get a list of all files
 	const allFiles = await listFiles(targetDir)
 	// Filter for `.mdx` files
@@ -56,7 +61,9 @@ export default async function buildMdxTransforms(targetDir, outputDir) {
 	const batchSize = 16
 	const results = await batchPromises(
 		mdxFileEntries,
-		applyMdxTransforms,
+		(entry) => {
+			return applyMdxTransforms(entry, versionMetadata)
+		},
 		batchSize,
 	)
 	// Log out any errors encountered
@@ -90,7 +97,7 @@ export default async function buildMdxTransforms(targetDir, outputDir) {
  * @param {string} entry.outPath
  * @return {object} { error: string | null }
  */
-async function applyMdxTransforms(entry) {
+async function applyMdxTransforms(entry, versionMetadata) {
 	try {
 		const { filePath, partialsDir, outPath, version, repoSlug, redirectsDir } =
 			entry
@@ -114,6 +121,12 @@ async function applyMdxTransforms(entry) {
 			repoSlug,
 			redirectsDir,
 		)
+		transformedContent = await transformRewriteInternalLinks(
+			transformedContent,
+			entry,
+			versionMetadata,
+		)
+
 		const transformedFileString = grayMatter.stringify(transformedContent, data)
 		// Ensure the parent directory for the output file path exists
 		const outDir = path.dirname(outPath)
