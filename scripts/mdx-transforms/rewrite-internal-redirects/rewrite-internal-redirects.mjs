@@ -43,7 +43,6 @@ export const loadRedirects = async (version, redirectsDir) => {
 		// External URLs can't be passed to pathToRegexp directly, so we have to parse the URL
 		if (isExternalDestination) {
 			if (doesDestinationHaveTokens) {
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 				destination = (params) => {
 					const destUrl = new URL(redirect.destination)
 					const destCompile = pathToRegexp.compile(destUrl.pathname)
@@ -89,10 +88,6 @@ export const checkAndApplyRedirect = (url, redirects) => {
 	})
 
 	if (matchedRedirect && matchedResult) {
-		// If the matched destination has no tokens, we can just return it
-		if (typeof matchedRedirect.destination === 'string') {
-			return matchedRedirect.destination
-		}
 		return matchedRedirect.destination(
 			typeof matchedResult !== 'boolean' ? matchedResult.params : {},
 		)
@@ -112,11 +107,7 @@ const rewriteInternalRedirectsPlugin = ({ redirects }) => {
 			}
 			// Only check internal links
 			if (node.url && !node.url.startsWith('#') && node.url.startsWith('/')) {
-				const urlToRedirect = node.url.startsWith('/')
-					? node.url
-					: new URL(node.url).pathname
-
-				const redirectUrl = checkAndApplyRedirect(urlToRedirect, redirects)
+				const redirectUrl = checkAndApplyRedirect(node.url, redirects)
 
 				if (redirectUrl) {
 					node.url = redirectUrl
