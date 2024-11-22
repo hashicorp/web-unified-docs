@@ -26,6 +26,7 @@ const MIGRATION_OUTPUT_ROOT = path.join(process.cwd(), '.migrated-content')
  * This means `.mdx` files, `-nav-data.json` files, and redirects.
  */
 const MIGRATION_CONTENT_DIR = path.join(MIGRATION_OUTPUT_ROOT, 'content')
+
 /**
  * MIGRATION_ASSETS_DIR is where extracted assets will be placed.
  * In this context "assets" mostly just means images, though many products
