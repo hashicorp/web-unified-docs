@@ -19,7 +19,7 @@ export const loadRedirects = async (version, redirectsDir) => {
 
 	let redirectsSource = []
 
-	// Attempt to load from redirects.js or redirects.next.js
+	// Attempt to load from redirects.js
 	try {
 		const redirectsPath = path.join(redirectsDir, 'redirects.js')
 		const { default: imports } = await import(redirectsPath)
@@ -93,8 +93,6 @@ export const checkAndApplyRedirect = (url, redirects) => {
 		if (typeof matchedRedirect.destination === 'string') {
 			return matchedRedirect.destination
 		}
-
-		// TS is not cooperating, so having to use typecasting here
 		return matchedRedirect.destination(
 			typeof matchedResult !== 'boolean' ? matchedResult.params : {},
 		)
