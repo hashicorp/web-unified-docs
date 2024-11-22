@@ -38,7 +38,6 @@ export async function buildFileMdxTransforms(filePath) {
 		partialsDir,
 		outPath,
 		version,
-		repoSlug,
 		redirectsDir,
 	}
 
@@ -66,8 +65,7 @@ export async function buildFileMdxTransforms(filePath) {
  */
 export async function applyFileMdxTransforms(entry) {
 	try {
-		const { filePath, partialsDir, outPath, version, repoSlug, redirectsDir } =
-			entry
+		const { filePath, partialsDir, outPath, version, redirectsDir } = entry
 		const fileString = fs.readFileSync(filePath, 'utf8')
 		const { data, content } = grayMatter(fileString)
 		let transformedContent = content
@@ -85,7 +83,6 @@ export async function applyFileMdxTransforms(entry) {
 		transformedContent = await transformRewriteInternalRedirects(
 			transformedContent,
 			version,
-			repoSlug,
 			redirectsDir,
 		)
 		const transformedFileString = grayMatter.stringify(transformedContent, data)

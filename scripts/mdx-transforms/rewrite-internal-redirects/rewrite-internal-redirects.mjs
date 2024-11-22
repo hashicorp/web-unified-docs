@@ -1,15 +1,11 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 import remark from 'remark'
 import remarkMdx from 'remark-mdx'
 import flatMap from 'unist-util-flatmap'
 import is from 'unist-util-is'
 import path from 'path'
-import fs from 'fs'
 
 import { URL } from 'url'
 import * as pathToRegexp from 'path-to-regexp'
-import { parseNetlifyRedirects } from '@hashicorp/netlify-to-nextjs-redirect-exporter'
-import { isInternalUrl } from '../../utils/is-internal-url.mjs'
 
 /**
  * Loads redirects from the file-system and "caches" them in memory.
@@ -30,43 +26,7 @@ export const loadRedirects = async (version, redirectsDir) => {
 		if (Array.isArray(imports)) {
 			redirectsSource = imports
 		}
-	} catch (err) {
-		// noop
-	}
-
-	try {
-		const redirectsPath = path.join(redirectsDir, 'redirects.next.js')
-		if (redirectsSource.length === 0) {
-			const { default: imports } = await import(redirectsPath)
-			redirectsSource = imports
-			if (Array.isArray(imports)) {
-				redirectsSource = imports
-			}
-		}
-	} catch (err) {
-		// noop
-	}
-
-	// TODO: determine if this is needed
-	// If neither are found, check for the netlify redirects file and parse that
-	try {
-		const netlifyRedirectsPath = path.join(redirectsDir, '_redirects')
-		if (redirectsSource.length === 0 && fs.existsSync(netlifyRedirectsPath)) {
-			const netlifyRedirects = fs.readFileSync(netlifyRedirectsPath, 'utf-8')
-			let { redirects } = parseNetlifyRedirects(netlifyRedirects)
-
-			// transform /* to /(.*) for path-to-regexp
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
-			redirects = redirects.map((e) => {
-				return {
-					...e,
-					source: e.source.replace('/*', '/(.*)'),
-				}
-			})
-
-			redirectsSource = redirects
-		}
-	} catch (err) {
+	} catch {
 		// noop
 	}
 
@@ -74,7 +34,7 @@ export const loadRedirects = async (version, redirectsDir) => {
 		return []
 	}
 
-	cachedRedirects[version] = redirectsSource.map((redirect, i, arr) => {
+	cachedRedirects[version] = redirectsSource.map((redirect) => {
 		const isExternalDestination = !redirect.destination.startsWith('/')
 		const doesDestinationHaveTokens = redirect.destination.includes('/:')
 
@@ -146,18 +106,14 @@ export const checkAndApplyRedirect = (url, redirects) => {
 /**
  * Remark plugin which accepts a list of redirects and applies them to any matching links
  */
-const rewriteInternalRedirectsPlugin = ({ product, redirects }) => {
+const rewriteInternalRedirectsPlugin = ({ redirects }) => {
 	return function transformer(tree) {
 		return flatMap(tree, (node) => {
 			if (!is(node, 'link') && !is(node, 'definition')) {
 				return [node]
 			}
 			// Only check internal links
-			if (
-				node.url &&
-				!node.url.startsWith('#') &&
-				isInternalUrl(node.url, product)
-			) {
+			if (node.url && !node.url.startsWith('#') && node.url.startsWith('/')) {
 				const urlToRedirect = node.url.startsWith('/')
 					? node.url
 					: new URL(node.url).pathname
@@ -181,14 +137,12 @@ const rewriteInternalRedirectsPlugin = ({ product, redirects }) => {
 export const transformRewriteInternalRedirects = async (
 	mdxString,
 	version,
-	product,
 	redirectsDir,
 ) => {
 	const redirects = await loadRedirects(version, redirectsDir)
 	const contents = await remark()
 		.use(remarkMdx)
 		.use(rewriteInternalRedirectsPlugin, {
-			product,
 			redirects,
 		})
 		.process(mdxString)

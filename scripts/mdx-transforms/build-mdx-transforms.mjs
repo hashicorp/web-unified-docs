@@ -52,7 +52,7 @@ export async function buildMdxTransforms(
 		)
 		const redirectsDir = path.join(targetDir, repoSlug, version)
 		const outPath = path.join(outputDir, relativePath)
-		return { filePath, partialsDir, outPath, version, repoSlug, redirectsDir }
+		return { filePath, partialsDir, outPath, version, redirectsDir }
 	})
 	/**
 	 * Apply MDX transforms to each file entry, in batches
@@ -99,8 +99,7 @@ export async function buildMdxTransforms(
  */
 async function applyMdxTransforms(entry, versionMetadata) {
 	try {
-		const { filePath, partialsDir, outPath, version, repoSlug, redirectsDir } =
-			entry
+		const { filePath, partialsDir, outPath, version, redirectsDir } = entry
 		const fileString = fs.readFileSync(filePath, 'utf8')
 		const { data, content } = grayMatter(fileString)
 		let transformedContent = content
@@ -118,7 +117,6 @@ async function applyMdxTransforms(entry, versionMetadata) {
 		transformedContent = await transformRewriteInternalRedirects(
 			transformedContent,
 			version,
-			repoSlug,
 			redirectsDir,
 		)
 		transformedContent = await transformRewriteInternalLinks(
