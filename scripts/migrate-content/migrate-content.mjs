@@ -20,7 +20,7 @@ const GH_CLONE_DIR = '.content-source-repos'
  * output migrated content to `content` and `public` folders at the root
  * of this repo, so we'll change MIGRATION_OUTPUT_ROOT to `process.cwd()`.
  */
-const MIGRATION_OUTPUT_ROOT = path.join(process.cwd(), '.migrated-content')
+const MIGRATION_OUTPUT_ROOT = path.join(process.cwd())
 /**
  * MIGRATION_CONTENT_DIR is where extracted content & data will be placed.
  * This means `.mdx` files, `-nav-data.json` files, and redirects.
@@ -134,13 +134,29 @@ const MIGRATION_ASSETS_DIR = path.join(MIGRATION_OUTPUT_ROOT, 'public/assets')
 
 // Parse and validate input arguments
 const args = process.argv.slice(2)
+
+// Check if the user has passed the `force` flag
+let forceSync = false
+const forceIndex = args.findIndex((arg) => {
+	return ['force', '-force', '-f'].includes(arg)
+})
+if (forceIndex !== -1) {
+	forceSync = true
+	args.splice(forceIndex, 1)
+}
+
 const targetRepos = buildTargetRepos(args)
 
 // Run the main script
-migrateContent(targetRepos, GH_CLONE_DIR, {
-	content: MIGRATION_CONTENT_DIR,
-	assets: MIGRATION_ASSETS_DIR,
-})
+migrateContent(
+	targetRepos,
+	GH_CLONE_DIR,
+	{
+		content: MIGRATION_CONTENT_DIR,
+		assets: MIGRATION_ASSETS_DIR,
+	},
+	{ forceSync },
+)
 
 /**
  * Given an array of { repo, targetVersions, repoConfig } objects,
@@ -152,9 +168,10 @@ migrateContent(targetRepos, GH_CLONE_DIR, {
  * @param {Object} outputDirs
  * @param {string} outputDirs.content
  * @param {string} outputDirs.assets
+ * @param {Object} options
  * @return {void}
  */
-async function migrateContent(targetRepos, ghCloneDir, outputDirs) {
+async function migrateContent(targetRepos, ghCloneDir, outputDirs, options) {
 	// Ensure the temporary directory exists, this is where repos will be cloned.
 	if (!fs.existsSync(ghCloneDir)) {
 		fs.mkdirSync(ghCloneDir, { recursive: true })
@@ -192,8 +209,15 @@ async function migrateContent(targetRepos, ghCloneDir, outputDirs) {
 		 * Otherwise, we have release refs to extract.
 		 * Start by shallow cloning the repo.
 		 */
+
 		const cloneArgs = '--depth=1 --filter=blob:none'
-		const cloneDir = cloneRepo(ghCloneDir, 'hashicorp', repoSlug, cloneArgs)
+		const cloneDir = cloneRepo(
+			ghCloneDir,
+			'hashicorp',
+			repoSlug,
+			cloneArgs,
+			options.forceSync,
+		)
 		/**
 		 * For each release ref, check out the ref, and copy the content, data,
 		 * and assets from the content source repository into this project.
@@ -301,6 +325,11 @@ function migrateRepoContentAtRef(
 	)
 	dirsToCopy.push({ src: contentSrc, dest: contentDest })
 	dirsToCopy.push({ src: dataSrc, dest: dataDest })
+
+	console.log(
+		`📁 Copying content from "${repoSlug}" to ${JSON.stringify(dirsToCopy, null, 2)}`,
+	)
+
 	/**
 	 * Execute the copy commands
 	 */

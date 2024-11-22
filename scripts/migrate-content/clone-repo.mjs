@@ -19,9 +19,16 @@ import { execSync } from 'child_process'
  * @param {string} repoOwner The owner of the repository.
  * @param {string} repoSlug The name of the repository.
  * @param {string} cloneArgs Additional arguments to pass to the `gh repo clone` command.
+ * @param {boolean} forceSync Whether to force a sync by cloning the repository again.
  * @returns {string} The path to the repository directory.
  */
-export function cloneRepo(targetDir, repoOwner, repoSlug, cloneArgs) {
+export function cloneRepo(
+	targetDir,
+	repoOwner,
+	repoSlug,
+	cloneArgs,
+	forceSync = false,
+) {
 	/**
 	 * Assuming the `gh repo clone` command will be successful, we expect
 	 * the repository directory to be given the same name as the repository.
@@ -29,7 +36,14 @@ export function cloneRepo(targetDir, repoOwner, repoSlug, cloneArgs) {
 	const repoDir = path.join(targetDir, repoSlug)
 	const repoDirExists = fs.existsSync(repoDir)
 	// If the repository already exists, we skip cloning
-	if (!repoDirExists) {
+	if (!repoDirExists || forceSync) {
+		if (forceSync) {
+			console.log(
+				`🔁 Forcing sync by removing existing directory at "${repoDir}"...`,
+			)
+			fs.rmSync(repoDir, { recursive: true, force: true })
+		}
+
 		console.log(`📡 Cloning "${repoSlug}" into "${targetDir}"...`)
 		execSync(
 			`git clone ${cloneArgs} https://github.com/${repoOwner}/${repoSlug}`,
