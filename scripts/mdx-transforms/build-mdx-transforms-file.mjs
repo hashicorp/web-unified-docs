@@ -7,7 +7,7 @@ import { includePartials } from './include-partials/include-partials.mjs'
 import {
 	sigils,
 	transformParagraphCustomAlerts,
-} from './paragraph-custom-alert/paragraph-custom-alert.mjs'
+} from './paragraph-custom-alert/paragraph-custom-alert.ts'
 
 /**
  * Given a file path,

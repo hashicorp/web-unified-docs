@@ -9,7 +9,7 @@ import batchPromises from '../utils/batch-promises.mjs'
 import {
 	sigils,
 	transformParagraphCustomAlerts,
-} from './paragraph-custom-alert/paragraph-custom-alert.mjs'
+} from './paragraph-custom-alert/paragraph-custom-alert.ts'
 import { transformRewriteInternalLinks } from './add-version-to-internal-links.mjs'
 
 /**
