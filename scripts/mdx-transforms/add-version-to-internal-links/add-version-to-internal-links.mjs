@@ -1,7 +1,7 @@
 import remark from 'remark'
 import remarkMdx from 'remark-mdx'
 import flatMap from 'unist-util-flatmap'
-import { ALL_REPO_CONFIG } from '../migrate-content/repo-config.mjs'
+import { ALL_REPO_CONFIG } from '../../migrate-content/repo-config.mjs'
 
 /**
  * Rewrites internal links in a document tree to include version information.
@@ -12,7 +12,7 @@ import { ALL_REPO_CONFIG } from '../migrate-content/repo-config.mjs'
  *
  * @returns {Function} A transformer function that rewrites internal links in the document tree.
  */
-const rewriteInternalLinks = ({ entry, versionMetadata }) => {
+export const rewriteInternalLinksPlugin = ({ entry, versionMetadata }) => {
 	const relativePath = entry.filePath.split('content/')[1]
 	/**
 	 * product and version variables, which are assigned based on the
@@ -68,15 +68,13 @@ export const transformRewriteInternalLinks = async (
 	entry,
 	versionMetadata,
 ) => {
-	const contents = await remark()
+	const document = await remark()
 		.use(remarkMdx)
-		.use(rewriteInternalLinks, {
+		.use(rewriteInternalLinksPlugin, {
 			entry,
 			versionMetadata,
 		})
 		.process(content)
-
-	const document = contents
 
 	return document.contents
 }

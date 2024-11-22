@@ -1,13 +1,15 @@
 import fs from 'fs'
 import path from 'path'
+
 // Third-party
+import remark from 'remark'
+import remarkMdx from 'remark-mdx'
 import grayMatter from 'gray-matter'
+
 // Local
-import { includePartials } from './include-partials/include-partials.mjs'
-import {
-	sigils,
-	transformParagraphCustomAlerts,
-} from './paragraph-custom-alert/paragraph-custom-alert.ts'
+import { paragraphCustomAlertsPlugin } from './paragraph-custom-alert/paragraph-custom-alert.mjs'
+// import { rewriteInternalLinksPlugin } from './add-version-to-internal-links/add-version-to-internal-links.mjs'
+import { remarkIncludePartialsPlugin } from './include-partials/remark-include-partials.mjs'
 
 /**
  * Given a file path,
@@ -59,19 +61,19 @@ export async function applyFileMdxTransforms(entry) {
 	try {
 		const { filePath, partialsDir, outPath } = entry
 		const fileString = fs.readFileSync(filePath, 'utf8')
+		// const versionMetadata = await gatherVersionMetadata(CONTENT_DIR)
+
 		const { data, content } = grayMatter(fileString)
-		let transformedContent = content
-		if (content.includes('@include')) {
-			transformedContent = await includePartials(content, partialsDir, filePath)
-		}
-		if (
-			Object.keys(sigils).some((sigil) => {
-				return content.includes(sigil)
-			})
-		) {
-			transformedContent =
-				await transformParagraphCustomAlerts(transformedContent)
-		}
+
+		const remarkResults = await remark()
+			.use(remarkMdx)
+			.use(remarkIncludePartialsPlugin, { partialsDir, filePath })
+			.use(paragraphCustomAlertsPlugin)
+			// .use(rewriteInternalLinksPlugin, { entry, versionMetadata })
+			.process(content)
+
+		const transformedContent = String(remarkResults)
+
 		const transformedFileString = grayMatter.stringify(transformedContent, data)
 		// Ensure the parent directory for the output file path exists
 		const outDir = path.dirname(outPath)

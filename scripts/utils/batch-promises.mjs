@@ -10,7 +10,7 @@
  * @param {number} batchSize
  * @returns {Promise<unknown[]>}
  */
-async function batchPromises(arrayToBatch, asyncMapFn, batchSize) {
+export async function batchPromises(arrayToBatch, asyncMapFn, batchSize) {
 	let batches = []
 	for (var i = 0, j = arrayToBatch.length; i < j - 1; i += batchSize) {
 		batches.push(arrayToBatch.slice(i, i + batchSize))
@@ -33,5 +33,3 @@ async function batchPromises(arrayToBatch, asyncMapFn, batchSize) {
 
 	return results
 }
-
-export default batchPromises

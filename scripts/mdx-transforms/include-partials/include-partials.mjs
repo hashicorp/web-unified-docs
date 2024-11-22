@@ -2,7 +2,7 @@
 import remark from 'remark'
 import remarkMdx from 'remark-mdx'
 // Local
-import { remarkIncludePartials } from './remark-include-partials.mjs'
+import { remarkIncludePartialsPlugin } from './remark-include-partials.mjs'
 
 /**
  * Given an MDX file string, as well as a path to partials directory,
@@ -20,7 +20,7 @@ import { remarkIncludePartials } from './remark-include-partials.mjs'
 export async function includePartials(mdxString, partialsDir, filePath) {
 	const contents = await remark()
 		.use(remarkMdx)
-		.use(remarkIncludePartials, { partialsDir, filePath })
+		.use(remarkIncludePartialsPlugin, { partialsDir, filePath })
 		.process(mdxString)
 	return String(contents)
 }

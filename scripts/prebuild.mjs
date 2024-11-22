@@ -1,10 +1,10 @@
 import fs from 'fs'
 import path from 'path'
 import { buildMdxTransforms } from './mdx-transforms/build-mdx-transforms.mjs'
-import batchPromises from './utils/batch-promises.mjs'
-import listFiles from './utils/list-files.mjs'
-import gatherVersionMetadata from './gather-version-metadata.mjs'
-import { addVersionToNavData } from './mdx-transforms/add-version-to-nav-data.mjs'
+import { batchPromises } from './utils/batch-promises.mjs'
+import { listFiles } from './utils/list-files.mjs'
+import { gatherVersionMetadata } from './gather-version-metadata.mjs'
+import { addVersionToNavData } from './add-version-to-nav-data.mjs'
 
 /**
  * We expect the current working directory to be the project root.
