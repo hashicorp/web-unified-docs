@@ -7,9 +7,13 @@ import remarkMdx from 'remark-mdx'
 import grayMatter from 'gray-matter'
 
 // Local
+import { gatherVersionMetadata } from '../gather-version-metadata.mjs'
 import { paragraphCustomAlertsPlugin } from './paragraph-custom-alert/paragraph-custom-alert.mjs'
-// import { rewriteInternalLinksPlugin } from './add-version-to-internal-links/add-version-to-internal-links.mjs'
+import { rewriteInternalLinksPlugin } from './add-version-to-internal-links/add-version-to-internal-links.mjs'
 import { remarkIncludePartialsPlugin } from './include-partials/remark-include-partials.mjs'
+
+const CWD = process.cwd()
+const CONTENT_DIR = path.join(CWD, 'content')
 
 /**
  * Given a file path,
@@ -61,7 +65,7 @@ export async function applyFileMdxTransforms(entry) {
 	try {
 		const { filePath, partialsDir, outPath } = entry
 		const fileString = fs.readFileSync(filePath, 'utf8')
-		// const versionMetadata = await gatherVersionMetadata(CONTENT_DIR)
+		const versionMetadata = await gatherVersionMetadata(CONTENT_DIR)
 
 		const { data, content } = grayMatter(fileString)
 
@@ -69,7 +73,7 @@ export async function applyFileMdxTransforms(entry) {
 			.use(remarkMdx)
 			.use(remarkIncludePartialsPlugin, { partialsDir, filePath })
 			.use(paragraphCustomAlertsPlugin)
-			// .use(rewriteInternalLinksPlugin, { entry, versionMetadata })
+			.use(rewriteInternalLinksPlugin, { entry, versionMetadata })
 			.process(content)
 
 		const transformedContent = String(remarkResults)
