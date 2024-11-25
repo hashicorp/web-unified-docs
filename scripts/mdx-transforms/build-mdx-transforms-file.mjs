@@ -30,7 +30,7 @@ export async function buildFileMdxTransforms(filePath) {
 		contentDir,
 		'partials',
 	)
-	const redirectsDir = path.join(targetDir, repoSlug, version)
+	const redirectsDir = path.join('/server/', targetDir, repoSlug, version)
 	const outPath = path.join(outputDir, relativePath)
 
 	const entry = {
