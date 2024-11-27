@@ -6,7 +6,6 @@ import remark from 'remark'
 import remarkMdx from 'remark-mdx'
 import grayMatter from 'gray-matter'
 
-// Local
 import { gatherVersionMetadata } from '../gather-version-metadata.mjs'
 import { paragraphCustomAlertsPlugin } from './paragraph-custom-alert/paragraph-custom-alert.mjs'
 import { rewriteInternalLinksPlugin } from './add-version-to-internal-links/add-version-to-internal-links.mjs'
@@ -35,9 +34,16 @@ export async function buildFileMdxTransforms(filePath) {
 		contentDir,
 		'partials',
 	)
+	const redirectsDir = path.join('/server/', targetDir, repoSlug, version)
 	const outPath = path.join(outputDir, relativePath)
 
-	const entry = { filePath, partialsDir, outPath }
+	const entry = {
+		filePath,
+		partialsDir,
+		outPath,
+		version,
+		redirectsDir,
+	}
 
 	console.log(`🪄 Running MDX transform on ${filePath}...`)
 	const result = await applyFileMdxTransforms(entry)
@@ -63,7 +69,7 @@ export async function buildFileMdxTransforms(filePath) {
  */
 export async function applyFileMdxTransforms(entry) {
 	try {
-		const { filePath, partialsDir, outPath } = entry
+		const { filePath, partialsDir, outPath, version, redirectsDir } = entry
 		const fileString = fs.readFileSync(filePath, 'utf8')
 		const versionMetadata = await gatherVersionMetadata(CONTENT_DIR)
 
