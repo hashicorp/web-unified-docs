@@ -2,6 +2,7 @@ import fs from 'fs'
 import path from 'path'
 // Third-party
 import grayMatter from 'gray-matter'
+import semver from 'semver'
 // Local
 import listFiles from '../utils/list-files.mjs'
 import { includePartials } from './include-partials/include-partials.mjs'
@@ -43,11 +44,21 @@ export async function buildMdxTransforms(
 	const mdxFileEntries = mdxFiles.map((filePath) => {
 		const relativePath = path.relative(targetDir, filePath)
 		const [repoSlug, version, contentDir] = relativePath.split('/')
+		/**
+		 * handles version and content dir for versionless docs
+		 * these values are index based
+		 * if versionless, version becomes the content dir
+		 * which will cause an error when trying resolve partials
+		 */
+		const verifiedVersion = semver.valid(semver.coerce(version)) ? version : ''
+		const verifiedContentDir = semver.valid(semver.coerce(version))
+			? contentDir
+			: version
 		const partialsDir = path.join(
 			targetDir,
 			repoSlug,
-			version,
-			contentDir,
+			verifiedVersion,
+			verifiedContentDir,
 			'partials',
 		)
 		const redirectsDir = path.join(targetDir, repoSlug, version)
@@ -97,7 +108,7 @@ export async function buildMdxTransforms(
  * @param {string} entry.outPath
  * @return {object} { error: string | null }
  */
-async function applyMdxTransforms(entry, versionMetadata) {
+async function applyMdxTransforms(entry, versionMetadata = {}) {
 	try {
 		const { filePath, partialsDir, outPath, version, redirectsDir } = entry
 		const fileString = fs.readFileSync(filePath, 'utf8')
@@ -119,11 +130,13 @@ async function applyMdxTransforms(entry, versionMetadata) {
 			version,
 			redirectsDir,
 		)
-		transformedContent = await transformRewriteInternalLinks(
-			transformedContent,
-			entry,
-			versionMetadata,
-		)
+		if (!Object.keys(versionMetadata).length) {
+			transformedContent = await transformRewriteInternalLinks(
+				transformedContent,
+				entry,
+				versionMetadata,
+			)
+		}
 
 		const transformedFileString = grayMatter.stringify(transformedContent, data)
 		// Ensure the parent directory for the output file path exists
