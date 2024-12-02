@@ -9,6 +9,7 @@ import path from 'node:path'
  *
  * @param product - The name of the product whose directories are to be searched.
  * @param fullPath - The path to be searched for within the `nav-data.json` files.
+ * @param baseDir - The base directory to start the search from. Defaults to process.cwd().
  * @returns A promise that resolves to an array of version strings where the `fullPath` was found.
  *
  * @throws Will throw an error if there is an issue reading directories or files
@@ -16,9 +17,10 @@ import path from 'node:path'
 export async function searchNavDataFiles(
 	product: string,
 	fullPath: string,
+	baseDir: string = process.cwd(),
 ): Promise<string[]> {
 	const versions: string[] = []
-	const productDir = path.join(process.cwd(), 'content', product)
+	const productDir = path.join(baseDir, 'content', product)
 
 	async function searchDirectory(
 		directory: string,
@@ -52,7 +54,6 @@ export async function searchNavDataFiles(
 				try {
 					const data = await fs.promises.readFile(fullPathToFile, 'utf-8')
 					const jsonData = JSON.stringify(data)
-
 					if (jsonData.includes(fullPath)) {
 						const versionMatch = fullPathToFile.match(
 							/\/content\/[^/]+\/([^/]+)\/data\//,
@@ -61,11 +62,8 @@ export async function searchNavDataFiles(
 							versions.push(versionMatch[1])
 						}
 					}
-				} catch (parseError) {
-					console.error(
-						`Error parsing JSON in file ${fullPathToFile}:`,
-						parseError,
-					)
+				} catch {
+					console.log(`Error parsing JSON in file ${fullPathToFile}:`)
 				}
 			}
 		}
