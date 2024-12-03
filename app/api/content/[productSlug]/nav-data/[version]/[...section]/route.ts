@@ -10,11 +10,7 @@ export async function GET(
 ) {
 	const { productSlug, version, section } = params
 	const productVersionResult = getProductVersion(productSlug, version)
-	/**
-	 * we expect productVersionResult.ok to be false when requesting nav data for versionless docs
-	 * check that version is not 'latest' to avoid logging an error
-	 */
-	if (!productVersionResult.ok && version !== 'latest') {
+	if (!productVersionResult.ok) {
 		console.error(errorResultToString('API', productVersionResult))
 		return new Response('Not found', { status: 404 })
 	}

@@ -1,6 +1,6 @@
 import { beforeEach, expect, it, vi } from 'vitest'
 import { vol } from 'memfs'
-import gatherVersionMedata from './gather-version-metadata.mjs'
+import { gatherVersionMetadata } from './gather-version-metadata.mjs'
 
 // tell vitest to use fs mock from __mocks__ folder
 // this can be done in a setup file if fs should always be mocked
@@ -34,6 +34,6 @@ it('walk a directory of products and return a JSON representation of valid versi
 		'/content',
 	)
 
-	const result = await gatherVersionMedata('/content')
+	const result = await gatherVersionMetadata('/content')
 	expect(result).toStrictEqual(expected)
 })
