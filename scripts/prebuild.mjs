@@ -3,7 +3,7 @@ import path from 'path'
 import { buildMdxTransforms } from './mdx-transforms/build-mdx-transforms.mjs'
 import batchPromises from './utils/batch-promises.mjs'
 import listFiles from './utils/list-files.mjs'
-import gatherVersionMetadata from './gather-version-metadata.mjs'
+import { gatherVersionMetadata } from './gather-version-metadata.mjs'
 import { addVersionToNavData } from './mdx-transforms/add-version-to-nav-data.mjs'
 
 /**
@@ -35,7 +35,7 @@ async function main() {
  * TODO: approach here could maybe be refined, or maybe this would be nice
  * to split out to a separate file... but felt fine to leave here for now.
  */
-async function copyNavDataFiles(sourceDir, destDir, versionMetadata) {
+async function copyNavDataFiles(sourceDir, destDir, versionMetadata = {}) {
 	const navDataFiles = (await listFiles(sourceDir)).filter((f) => {
 		return f.endsWith('-nav-data.json')
 	})
@@ -50,8 +50,10 @@ async function copyNavDataFiles(sourceDir, destDir, versionMetadata) {
 				fs.mkdirSync(parentDir, { recursive: true })
 			}
 			fs.copyFileSync(filePath, destPath)
-			// add version to nav data paths/hrefs
-			await addVersionToNavData(destPath, versionMetadata)
+			if (!Object.keys(versionMetadata).length) {
+				// add version to nav data paths/hrefs
+				await addVersionToNavData(destPath, versionMetadata)
+			}
 		},
 		16,
 	)
