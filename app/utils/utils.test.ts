@@ -5,7 +5,7 @@ import {
 	getProductVersion,
 } from '@utils/contentVersions'
 import { searchNavDataFiles } from './searchNavDataFiles'
-import versionMetadata from '../../scripts/mdx-transforms/include-partials/__fixtures__/basic/versionMetadata.json'
+import versionMetadata from '../../__fixtures__/versionMetadata.json'
 import fs from 'node:fs'
 
 // Mock fs module
