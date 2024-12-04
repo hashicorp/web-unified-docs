@@ -5,11 +5,16 @@ import {
 	getProductVersion,
 } from '@utils/contentVersions'
 import { searchNavDataFiles } from './searchNavDataFiles'
+import versionMetadata from '../../scripts/mdx-transforms/include-partials/__fixtures__/basic/versionMetadata.json'
 import fs from 'node:fs'
 
 // Mock fs module
 vi.mock('node:fs')
 vi.mock('node:fs/promises')
+
+vi.mock('@api/version-metadata', () => {
+	return versionMetadata
+})
 
 beforeEach(() => {
 	// Reset the state of in-memory fs
@@ -54,7 +59,7 @@ test('getProductVersion should return correct version for existing version', () 
 test('getProductVersion should return latest version', () => {
 	const expected = {
 		ok: true,
-		value: 'v1.8.x',
+		value: 'v1.9.x',
 	}
 
 	const result = getProductVersion('terraform', 'latest')
@@ -65,7 +70,8 @@ test('getProductVersionMetadata should return metadata for existing product', ()
 	const expected = {
 		ok: true,
 		value: [
-			{ version: 'v1.8.x', releaseStage: 'stable', isLatest: true },
+			{ version: 'v1.9.x', releaseStage: 'stable', isLatest: true },
+			{ version: 'v1.8.x', releaseStage: 'stable', isLatest: false },
 			{ version: 'v1.7.x', releaseStage: 'stable', isLatest: false },
 			{ version: 'v1.6.x', releaseStage: 'stable', isLatest: false },
 			{ version: 'v1.5.x', releaseStage: 'stable', isLatest: false },
