@@ -132,7 +132,7 @@ test('getProductVersion should return error for undefined version', () => {
 		value: 'Product, terraform, has no "undefined" version',
 	}
 
-	const result = getProductVersion('terraform', undefined as unknown as string)
+	const result = getProductVersion('terraform', 'undefined')
 	expect(result).toStrictEqual(expected)
 })
 
