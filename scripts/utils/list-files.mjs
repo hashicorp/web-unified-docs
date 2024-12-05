@@ -14,7 +14,7 @@ const stat = promisify(fs.stat)
  * @param {string} dir
  * @returns {Promise<string[]>} a list of all files in the directory
  */
-export default async function listFiles(dir) {
+export async function listFiles(dir) {
 	// Gather all entries in the directory, which may be files or nested dirs
 	const entries = await readdir(dir)
 	// Map over each entry, keep files as-is, and recursively walk directories

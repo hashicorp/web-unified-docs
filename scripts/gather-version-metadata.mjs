@@ -18,7 +18,10 @@ export async function gatherVersionMetadata(contentDir) {
 	 * Note that "product" and "content source repo" are used interchangeably.
 	 * Some products, such as Terraform, have multiple content source repos.
 	 */
-	const products = fs.readdirSync(contentDir)
+	const products = fs.readdirSync(contentDir).filter((file) => {
+		return fs.statSync(path.join(contentDir, file)).isDirectory()
+	})
+
 	// Iterate over each product directory, adding to `versionMetadata`
 	for (const product of products) {
 		// Initialize the product array
