@@ -17,10 +17,10 @@ export const getProductVersion = (productSlug: string, version: string) => {
 		})
 
 		if (!foundVersion) {
-			return Err(`Product, ${productSlug}, has no "${version}" version`)
+			parsedVersion = '' // Set to an empty string if no latest version is found, as in the case for versionless docs such as terraform-docs-common
+		} else {
+			parsedVersion = foundVersion.version
 		}
-
-		parsedVersion = foundVersion.version
 	} else {
 		// Ensure the requested version is valid
 		if (

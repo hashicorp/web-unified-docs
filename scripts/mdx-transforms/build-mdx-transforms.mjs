@@ -6,13 +6,18 @@ import remark from 'remark'
 import remarkMdx from 'remark-mdx'
 import grayMatter from 'gray-matter'
 
-// Local
+import semver from 'semver'
+
 import { listFiles } from '../utils/list-files.mjs'
 import { batchPromises } from '../utils/batch-promises.mjs'
 
 import { paragraphCustomAlertsPlugin } from './paragraph-custom-alert/paragraph-custom-alert.mjs'
 import { rewriteInternalLinksPlugin } from './add-version-to-internal-links/add-version-to-internal-links.mjs'
 import { remarkIncludePartialsPlugin } from './include-partials/remark-include-partials.mjs'
+import {
+	rewriteInternalRedirectsPlugin,
+	loadRedirects,
+} from './rewrite-internal-redirects/rewrite-internal-redirects.mjs'
 
 /**
  * Given a target directory,
@@ -44,11 +49,21 @@ export async function buildMdxTransforms(
 	const mdxFileEntries = mdxFiles.map((filePath) => {
 		const relativePath = path.relative(targetDir, filePath)
 		const [repoSlug, version, contentDir] = relativePath.split('/')
+		/**
+		 * handles version and content dir for versionless docs
+		 * these values are index based
+		 * if versionless, version becomes the content dir
+		 * which will cause an error when trying resolve partials
+		 */
+		const verifiedVersion = semver.valid(semver.coerce(version)) ? version : ''
+		const verifiedContentDir = semver.valid(semver.coerce(version))
+			? contentDir
+			: version
 		const partialsDir = path.join(
 			targetDir,
 			repoSlug,
-			version,
-			contentDir,
+			verifiedVersion,
+			verifiedContentDir,
 			'partials',
 		)
 		const redirectsDir = path.join(targetDir, repoSlug, version)
@@ -98,9 +113,11 @@ export async function buildMdxTransforms(
  * @param {string} entry.outPath
  * @return {object} { error: string | null }
  */
-async function applyMdxTransforms(entry, versionMetadata) {
+async function applyMdxTransforms(entry, versionMetadata = {}) {
 	try {
 		const { filePath, partialsDir, outPath, version, redirectsDir } = entry
+		const redirects = await loadRedirects(version, redirectsDir)
+
 		const fileString = fs.readFileSync(filePath, 'utf8')
 		const { data, content } = grayMatter(fileString)
 
@@ -108,6 +125,9 @@ async function applyMdxTransforms(entry, versionMetadata) {
 			.use(remarkMdx)
 			.use(remarkIncludePartialsPlugin, { partialsDir, filePath })
 			.use(paragraphCustomAlertsPlugin)
+			.use(rewriteInternalRedirectsPlugin, {
+				redirects,
+			})
 			.use(rewriteInternalLinksPlugin, { entry, versionMetadata })
 			.process(content)
 

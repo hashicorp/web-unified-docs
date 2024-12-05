@@ -35,11 +35,16 @@ export async function gatherVersionMetadata(contentDir) {
 		 *   versions will be sorted alphabetically.
 		 */
 		const productDir = path.join(contentDir, product)
-		const rawVersions = fs.readdirSync(productDir)
+		const rawVersions = fs.readdirSync(productDir).filter((version) => {
+			// filter out non-version directories
+			return semver.valid(semver.coerce(version))
+		})
+
 		// Sort versions by semver if possible, otherwise sort alphabetically
 		const isAllSemver = rawVersions.every((v) => {
 			return semver.valid(normalizeGenericPatchVersion(v))
 		})
+
 		const versions = rawVersions
 			.sort((a, b) => {
 				const [aVersion, bVersion] = [a, b].map(normalizeGenericPatchVersion)
