@@ -66,7 +66,7 @@ export async function buildMdxTransforms(
 			verifiedContentDir,
 			'partials',
 		)
-		const redirectsDir = path.join(targetDir, repoSlug, version)
+		const redirectsDir = path.join(targetDir, repoSlug, verifiedVersion)
 		const outPath = path.join(outputDir, relativePath)
 		return { filePath, partialsDir, outPath, version, redirectsDir }
 	})

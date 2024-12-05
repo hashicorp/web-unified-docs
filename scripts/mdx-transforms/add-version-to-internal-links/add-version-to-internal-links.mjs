@@ -1,6 +1,8 @@
 import remark from 'remark'
 import remarkMdx from 'remark-mdx'
 import flatMap from 'unist-util-flatmap'
+import semver from 'semver'
+
 import { ALL_REPO_CONFIG } from '../../migrate-content/repo-config.mjs'
 
 /**
@@ -19,6 +21,12 @@ export const rewriteInternalLinksPlugin = ({ entry, versionMetadata }) => {
 	 * specific indices those strings are expected to be in the filepath
 	 */
 	const [product, version] = relativePath.split('/')
+
+	// We are looking at a versionless doc
+	if (!semver.valid(semver.coerce(version))) {
+		return
+	}
+
 	if (!versionMetadata[product]) {
 		throw new Error(`No version metadata found for product: ${product}`)
 	}
