@@ -63,7 +63,7 @@ export async function searchNavDataFiles(
 						}
 					}
 				} catch {
-					console.log(`Error parsing JSON in file ${fullPathToFile}:`)
+					console.error(`An error occurred while searching for the file ${fullPathToFile}`)
 				}
 			}
 		}
