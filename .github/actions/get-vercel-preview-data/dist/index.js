@@ -31621,6 +31621,7 @@ if (DEPLOYMENT_TYPE === 'url' || DEPLOYMENT_TYPE === 'check') {
 		deploymentUrl = DEVELOPMENT_URL.replace('https://', '')
 	}
 
+	let timeoutId
 	const deploymentFetch = (currentAttempt = 1) => {
 		node_fetch__WEBPACK_IMPORTED_MODULE_1___default()(
 			`https://api.vercel.com/v13/deployments/${deploymentUrl}?teamId=${TEAM_ID}`,
@@ -31647,19 +31648,28 @@ if (DEPLOYMENT_TYPE === 'url' || DEPLOYMENT_TYPE === 'check') {
 					if (deploymentData.readyState === 'READY') {
 						_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(`Deployment is ready.`)
 						processDeploymentData(deploymentData)
-					} else if (deploymentData.readyState === 'QUEUED' ||
+					} else if (
+						deploymentData.readyState === 'QUEUED' ||
 						deploymentData.readyState === 'BUILDING' ||
-						deploymentData.readyState === 'INITIALIZING') {
+						deploymentData.readyState === 'INITIALIZING'
+					) {
 						if (currentAttempt > NUM_OF_CHECKS) {
-							throw new Error(`Deployment is not ready after ${NUM_OF_CHECKS} attempts.`)
+							throw new Error(
+								`Deployment is not ready after ${NUM_OF_CHECKS} attempts.`,
+							)
 						}
 
-						_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(`Deployment is not ready yet. Retrying in ${MINS_BETWEEN_CHECKS} minutes...`)
-						setTimeout(() => {
-							deploymentFetch(currentAttempt + 1)
-						}, 1000 * 60 * MINS_BETWEEN_CHECKS)
+						_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(
+							`Deployment is not ready yet. Retrying in ${MINS_BETWEEN_CHECKS} minutes...`,
+						)
+						timeoutId = setTimeout(
+							() => {
+								deploymentFetch(currentAttempt + 1)
+							},
+							1000 * 60 * MINS_BETWEEN_CHECKS,
+						)
 
-						return;
+						return
 					} else {
 						throw new Error(`Deployment state: ${deploymentData.readyState}`)
 					}
@@ -31668,6 +31678,7 @@ if (DEPLOYMENT_TYPE === 'url' || DEPLOYMENT_TYPE === 'check') {
 				}
 			})
 			.catch((err) => {
+				clearTimeout(timeoutId)
 				_actions_core__WEBPACK_IMPORTED_MODULE_0__.error(err)
 				_actions_core__WEBPACK_IMPORTED_MODULE_0__.setFailed(`Failed to fetch Vercel preview URL.`)
 			})

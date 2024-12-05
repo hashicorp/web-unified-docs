@@ -52,6 +52,7 @@ if (DEPLOYMENT_TYPE === 'url' || DEPLOYMENT_TYPE === 'check') {
 		deploymentUrl = DEVELOPMENT_URL.replace('https://', '')
 	}
 
+	let timeoutId
 	const deploymentFetch = (currentAttempt = 1) => {
 		fetch(
 			`https://api.vercel.com/v13/deployments/${deploymentUrl}?teamId=${TEAM_ID}`,
@@ -92,7 +93,7 @@ if (DEPLOYMENT_TYPE === 'url' || DEPLOYMENT_TYPE === 'check') {
 						core.info(
 							`Deployment is not ready yet. Retrying in ${MINS_BETWEEN_CHECKS} minutes...`,
 						)
-						setTimeout(
+						timeoutId = setTimeout(
 							() => {
 								deploymentFetch(currentAttempt + 1)
 							},
@@ -108,6 +109,7 @@ if (DEPLOYMENT_TYPE === 'url' || DEPLOYMENT_TYPE === 'check') {
 				}
 			})
 			.catch((err) => {
+				clearTimeout(timeoutId)
 				core.error(err)
 				core.setFailed(`Failed to fetch Vercel preview URL.`)
 			})
