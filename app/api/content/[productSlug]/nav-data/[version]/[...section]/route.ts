@@ -9,14 +9,14 @@ export async function GET(
 	}: { params: { productSlug: string; version: string; section: string[] } },
 ) {
 	const { productSlug, version, section } = params
-
 	const productVersionResult = getProductVersion(productSlug, version)
 	if (!productVersionResult.ok) {
 		console.error(errorResultToString('API', productVersionResult))
 		return new Response('Not found', { status: 404 })
 	}
 
-	const parsedVersion = productVersionResult.value
+	const parsedVersion =
+		productVersionResult.ok === true ? productVersionResult.value : ''
 
 	/**
 	 * NOTE: our `content.hashicorp.com` API accepts more complex "section"
