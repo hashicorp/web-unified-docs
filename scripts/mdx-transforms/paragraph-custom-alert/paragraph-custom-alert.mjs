@@ -10,7 +10,7 @@ export const sigils = {
 	'!>': 'danger',
 }
 
-const paragraphCustomAlertsPlugin = () => {
+export const paragraphCustomAlertsPlugin = () => {
 	return function transformer(tree) {
 		visit(tree, 'paragraph', (pNode, _, parent) => {
 			let prevTextNode

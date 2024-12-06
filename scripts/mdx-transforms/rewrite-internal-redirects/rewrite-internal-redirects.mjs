@@ -99,7 +99,7 @@ export const checkAndApplyRedirect = (url, redirects) => {
 /**
  * Remark plugin which accepts a list of redirects and applies them to any matching links
  */
-const rewriteInternalRedirectsPlugin = ({ redirects }) => {
+export const rewriteInternalRedirectsPlugin = ({ redirects }) => {
 	return function transformer(tree) {
 		return flatMap(tree, (node) => {
 			if (!is(node, 'link') && !is(node, 'definition')) {
