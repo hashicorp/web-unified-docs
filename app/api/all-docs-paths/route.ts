@@ -17,14 +17,14 @@ const terraformDocs = [
 	'terraform-plugin-testing',
 ]
 
-function getAllContentApiPaths(directory: string, productSlug: string) {
-	const apiPaths = []
+export function getUDRPaths(directory: string, productSlug: string) {
 	// TODO: add this as part of productConfig https://app.asana.com/0/1207899860738460/1208799860712577/f
 	const productName = terraformDocs.includes(productSlug)
 		? 'terraform'
 		: productSlug === 'hcp-docs'
 			? 'hcp'
 			: productSlug
+	const apiPaths = []
 
 	function traverseDirectory(currentPath: string, relativePath: string = '') {
 		const items = fs.readdirSync(currentPath)
@@ -76,7 +76,7 @@ export const getAllDocsPaths = async () => {
 				ALL_REPO_CONFIG[productSlug].contentDir,
 			)
 
-			const allPaths = getAllContentApiPaths(contentPath, productSlug)
+			const allPaths = getUDRPaths(contentPath, productSlug)
 
 			return allPaths
 		})
@@ -85,9 +85,15 @@ export const getAllDocsPaths = async () => {
 	const getContentAPIDocsData = await fetch(
 		'https://content.hashicorp.com/api/all-docs-paths',
 	)
-	const { result: contentAPIDocsData } = await getContentAPIDocsData.json()
+	let contentAPIDocsData: { created_at: string; path: string }[]
+	if (getContentAPIDocsData !== undefined) {
+		const { result } = await getContentAPIDocsData.json()
+		contentAPIDocsData = result
+	} else {
+		contentAPIDocsData = []
+	}
 
-	// Filter the result from the content API to take out the duplication paths between
+	// Filter the result from the content API to take out the duplicate paths between
 	// the content API and UDR
 	const filteredContentAPIDocsData = contentAPIDocsData.filter(
 		(item: { path: string; created_at: string }) => {
@@ -100,10 +106,10 @@ export const getAllDocsPaths = async () => {
 	)
 
 	const allDocsData = [...filteredContentAPIDocsData, ...UDRDocsData]
+
 	if (allDocsData !== undefined && allDocsData.length > 0) {
 		return Ok(allDocsData)
 	}
-
 	return Err('All docs paths not found')
 }
 
@@ -114,7 +120,6 @@ export async function GET() {
 		console.error(errorResultToString('API', docsPaths))
 		return new Response('Not found', { status: 404 })
 	}
-
 	return Response.json({
 		result: docsPaths.value,
 	})
