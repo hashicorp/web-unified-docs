@@ -1,13 +1,21 @@
 import fs from 'fs'
 import path from 'path'
+
 // Third-party
+import remark from 'remark'
+import remarkMdx from 'remark-mdx'
 import grayMatter from 'gray-matter'
-// Local
-import { includePartials } from './include-partials/include-partials.mjs'
+
+import { paragraphCustomAlertsPlugin } from './paragraph-custom-alert/paragraph-custom-alert.mjs'
+// import { rewriteInternalLinksPlugin } from './add-version-to-internal-links/add-version-to-internal-links.mjs'
+import { remarkIncludePartialsPlugin } from './include-partials/remark-include-partials.mjs'
 import {
-	sigils,
-	transformParagraphCustomAlerts,
-} from './paragraph-custom-alert/paragraph-custom-alert.mjs'
+	rewriteInternalRedirectsPlugin,
+	loadRedirects,
+} from './rewrite-internal-redirects/rewrite-internal-redirects.mjs'
+
+// const CWD = process.cwd()
+// const VERSION_METADATA_FILE = path.join(CWD, 'app/api/versionMetadata.json')
 
 /**
  * Given a file path,
@@ -29,9 +37,16 @@ export async function buildFileMdxTransforms(filePath) {
 		contentDir,
 		'partials',
 	)
+	const redirectsDir = path.join('/server/', targetDir, repoSlug, version)
 	const outPath = path.join(outputDir, relativePath)
 
-	const entry = { filePath, partialsDir, outPath }
+	const entry = {
+		filePath,
+		partialsDir,
+		outPath,
+		version,
+		redirectsDir,
+	}
 
 	console.log(`🪄 Running MDX transform on ${filePath}...`)
 	const result = await applyFileMdxTransforms(entry)
@@ -57,21 +72,25 @@ export async function buildFileMdxTransforms(filePath) {
  */
 export async function applyFileMdxTransforms(entry) {
 	try {
-		const { filePath, partialsDir, outPath } = entry
+		const { filePath, partialsDir, outPath, version, redirectsDir } = entry
+		const redirects = await loadRedirects(version, redirectsDir)
+
 		const fileString = fs.readFileSync(filePath, 'utf8')
+
 		const { data, content } = grayMatter(fileString)
-		let transformedContent = content
-		if (content.includes('@include')) {
-			transformedContent = await includePartials(content, partialsDir, filePath)
-		}
-		if (
-			Object.keys(sigils).some((sigil) => {
-				return content.includes(sigil)
+
+		const remarkResults = await remark()
+			.use(remarkMdx)
+			.use(remarkIncludePartialsPlugin, { partialsDir, filePath })
+			.use(paragraphCustomAlertsPlugin)
+			.use(rewriteInternalRedirectsPlugin, {
+				redirects,
 			})
-		) {
-			transformedContent =
-				await transformParagraphCustomAlerts(transformedContent)
-		}
+			// .use(rewriteInternalLinksPlugin, { entry, VERSION_METADATA_FILE })
+			.process(content)
+
+		const transformedContent = String(remarkResults)
+
 		const transformedFileString = grayMatter.stringify(transformedContent, data)
 		// Ensure the parent directory for the output file path exists
 		const outDir = path.dirname(outPath)

@@ -10,7 +10,7 @@ import semver from 'semver'
  * @param {string} contentDir
  * @returns {object} versionMetadata
  */
-export default async function gatherVersionMetadata(contentDir) {
+export async function gatherVersionMetadata(contentDir) {
 	// Set up the version metadata object, this is what we'll return
 	const versionMetadata = {}
 	/**
@@ -18,7 +18,10 @@ export default async function gatherVersionMetadata(contentDir) {
 	 * Note that "product" and "content source repo" are used interchangeably.
 	 * Some products, such as Terraform, have multiple content source repos.
 	 */
-	const products = fs.readdirSync(contentDir)
+	const products = fs.readdirSync(contentDir).filter((file) => {
+		return fs.statSync(path.join(contentDir, file)).isDirectory()
+	})
+
 	// Iterate over each product directory, adding to `versionMetadata`
 	for (const product of products) {
 		// Initialize the product array
@@ -32,11 +35,16 @@ export default async function gatherVersionMetadata(contentDir) {
 		 *   versions will be sorted alphabetically.
 		 */
 		const productDir = path.join(contentDir, product)
-		const rawVersions = fs.readdirSync(productDir)
+		const rawVersions = fs.readdirSync(productDir).filter((version) => {
+			// filter out non-version directories
+			return semver.valid(semver.coerce(version))
+		})
+
 		// Sort versions by semver if possible, otherwise sort alphabetically
 		const isAllSemver = rawVersions.every((v) => {
 			return semver.valid(normalizeGenericPatchVersion(v))
 		})
+
 		const versions = rawVersions
 			.sort((a, b) => {
 				const [aVersion, bVersion] = [a, b].map(normalizeGenericPatchVersion)

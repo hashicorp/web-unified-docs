@@ -31581,6 +31581,11 @@ const DEVELOPMENT_URL = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput('dep
 const PROJECT_ID = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput('project_id')
 const GITHUB_SHA = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput('github_sha')
 
+// required by DEVELOPMENT_TYPE="check"
+// const DEVELOPMENT_URL = core.getInput('deployment_url')
+const NUM_OF_CHECKS = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput('num_of_checks')
+const MINS_BETWEEN_CHECKS = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput('mins_between_checks')
+
 const processDeploymentData = (deploymentData) => {
 	const createdUnixTimeStamp =
 		DEPLOYMENT_TYPE === 'id' ? deploymentData.created : deploymentData.createdAt
@@ -31608,7 +31613,7 @@ const processDeploymentData = (deploymentData) => {
 	_actions_core__WEBPACK_IMPORTED_MODULE_0__.setOutput('inspector_url', inspectorUrl)
 }
 
-if (DEPLOYMENT_TYPE === 'url') {
+if (DEPLOYMENT_TYPE === 'url' || DEPLOYMENT_TYPE === 'check') {
 	_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(`Fetching Vercel data for deployment url ${DEVELOPMENT_URL}...`)
 
 	let deploymentUrl = DEVELOPMENT_URL
@@ -31616,33 +31621,70 @@ if (DEPLOYMENT_TYPE === 'url') {
 		deploymentUrl = DEVELOPMENT_URL.replace('https://', '')
 	}
 
-	node_fetch__WEBPACK_IMPORTED_MODULE_1___default()(
-		`https://api.vercel.com/v13/deployments/${deploymentUrl}?teamId=${TEAM_ID}`,
-		{
-			headers: {
-				Authorization: `Bearer ${VERCEL_TOKEN}`,
+	let timeoutId
+	const deploymentFetch = (currentAttempt = 1) => {
+		node_fetch__WEBPACK_IMPORTED_MODULE_1___default()(
+			`https://api.vercel.com/v13/deployments/${deploymentUrl}?teamId=${TEAM_ID}`,
+			{
+				headers: {
+					Authorization: `Bearer ${VERCEL_TOKEN}`,
+				},
 			},
-		},
-	)
-		.then((res) => {
-			if (!res.ok) {
-				throw new Error(`HTTP error! Status: ${res.status}`)
-			}
-			return res.json()
-		})
-		.then((deploymentData) => {
-			_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(`Fetching Vercel preview URL for Unified Docs...`)
+		)
+			.then((res) => {
+				if (!res.ok) {
+					throw new Error(`HTTP error! Status: ${res.status}`)
+				}
+				return res.json()
+			})
+			.then((deploymentData) => {
+				_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(`Fetching Vercel preview URL for Unified Docs...`)
 
-			if (!deploymentData) {
-				throw new Error(`No deployment found for the url: ${DEVELOPMENT_URL}`)
-			}
+				if (!deploymentData) {
+					throw new Error(`No deployment found for the url: ${DEVELOPMENT_URL}`)
+				}
 
-			processDeploymentData(deploymentData)
-		})
-		.catch((err) => {
-			_actions_core__WEBPACK_IMPORTED_MODULE_0__.error(err)
-			_actions_core__WEBPACK_IMPORTED_MODULE_0__.setFailed(`Failed to fetch Vercel preview URL.`)
-		})
+				if (DEPLOYMENT_TYPE === 'check') {
+					if (deploymentData.readyState === 'READY') {
+						_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(`Deployment is ready.`)
+						processDeploymentData(deploymentData)
+					} else if (
+						deploymentData.readyState === 'QUEUED' ||
+						deploymentData.readyState === 'BUILDING' ||
+						deploymentData.readyState === 'INITIALIZING'
+					) {
+						if (currentAttempt > NUM_OF_CHECKS) {
+							throw new Error(
+								`Deployment is not ready after ${NUM_OF_CHECKS} attempts.`,
+							)
+						}
+
+						_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(
+							`Deployment is not ready yet. Retrying in ${MINS_BETWEEN_CHECKS} minutes...`,
+						)
+						timeoutId = setTimeout(
+							() => {
+								deploymentFetch(currentAttempt + 1)
+							},
+							1000 * 60 * MINS_BETWEEN_CHECKS,
+						)
+
+						return
+					} else {
+						throw new Error(`Deployment state: ${deploymentData.readyState}`)
+					}
+				} else {
+					processDeploymentData(deploymentData)
+				}
+			})
+			.catch((err) => {
+				clearTimeout(timeoutId)
+				_actions_core__WEBPACK_IMPORTED_MODULE_0__.error(err)
+				_actions_core__WEBPACK_IMPORTED_MODULE_0__.setFailed(`Failed to fetch Vercel preview URL.`)
+			})
+	}
+
+	deploymentFetch()
 } else if (DEPLOYMENT_TYPE === 'id') {
 	_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(`Fetching Vercel preview URL for Unified Docs...`)
 

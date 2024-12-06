@@ -1,15 +1,23 @@
 import fs from 'fs'
 import path from 'path'
+
 // Third-party
+import remark from 'remark'
+import remarkMdx from 'remark-mdx'
 import grayMatter from 'gray-matter'
-// Local
-import listFiles from '../utils/list-files.mjs'
-import { includePartials } from './include-partials/include-partials.mjs'
-import batchPromises from '../utils/batch-promises.mjs'
+
+import semver from 'semver'
+
+import { listFiles } from '../utils/list-files.mjs'
+import { batchPromises } from '../utils/batch-promises.mjs'
+
+import { paragraphCustomAlertsPlugin } from './paragraph-custom-alert/paragraph-custom-alert.mjs'
+import { rewriteInternalLinksPlugin } from './add-version-to-internal-links/add-version-to-internal-links.mjs'
+import { remarkIncludePartialsPlugin } from './include-partials/remark-include-partials.mjs'
 import {
-	sigils,
-	transformParagraphCustomAlerts,
-} from './paragraph-custom-alert/paragraph-custom-alert.mjs'
+	rewriteInternalRedirectsPlugin,
+	loadRedirects,
+} from './rewrite-internal-redirects/rewrite-internal-redirects.mjs'
 
 /**
  * Given a target directory,
@@ -24,7 +32,11 @@ import {
  * @param {string} targetDir
  * @param {string} outputDir the directory to write transformed files to
  */
-export default async function buildMdxTransforms(targetDir, outputDir) {
+export async function buildMdxTransforms(
+	targetDir,
+	outputDir,
+	versionMetadata,
+) {
 	// Walk the directory to get a list of all files
 	const allFiles = await listFiles(targetDir)
 	// Filter for `.mdx` files
@@ -37,15 +49,26 @@ export default async function buildMdxTransforms(targetDir, outputDir) {
 	const mdxFileEntries = mdxFiles.map((filePath) => {
 		const relativePath = path.relative(targetDir, filePath)
 		const [repoSlug, version, contentDir] = relativePath.split('/')
+		/**
+		 * handles version and content dir for versionless docs
+		 * these values are index based
+		 * if versionless, version becomes the content dir
+		 * which will cause an error when trying resolve partials
+		 */
+		const verifiedVersion = semver.valid(semver.coerce(version)) ? version : ''
+		const verifiedContentDir = semver.valid(semver.coerce(version))
+			? contentDir
+			: version
 		const partialsDir = path.join(
 			targetDir,
 			repoSlug,
-			version,
-			contentDir,
+			verifiedVersion,
+			verifiedContentDir,
 			'partials',
 		)
+		const redirectsDir = path.join(targetDir, repoSlug, verifiedVersion)
 		const outPath = path.join(outputDir, relativePath)
-		return { filePath, partialsDir, outPath }
+		return { filePath, partialsDir, outPath, version, redirectsDir }
 	})
 	/**
 	 * Apply MDX transforms to each file entry, in batches
@@ -54,7 +77,9 @@ export default async function buildMdxTransforms(targetDir, outputDir) {
 	const batchSize = 16
 	const results = await batchPromises(
 		mdxFileEntries,
-		applyMdxTransforms,
+		(entry) => {
+			return applyMdxTransforms(entry, versionMetadata)
+		},
 		batchSize,
 	)
 	// Log out any errors encountered
@@ -88,23 +113,25 @@ export default async function buildMdxTransforms(targetDir, outputDir) {
  * @param {string} entry.outPath
  * @return {object} { error: string | null }
  */
-async function applyMdxTransforms(entry) {
+async function applyMdxTransforms(entry, versionMetadata = {}) {
 	try {
-		const { filePath, partialsDir, outPath } = entry
+		const { filePath, partialsDir, outPath, version, redirectsDir } = entry
+		const redirects = await loadRedirects(version, redirectsDir)
+
 		const fileString = fs.readFileSync(filePath, 'utf8')
 		const { data, content } = grayMatter(fileString)
-		let transformedContent = content
-		if (content.includes('@include')) {
-			transformedContent = await includePartials(content, partialsDir, filePath)
-		}
-		if (
-			Object.keys(sigils).some((sigil) => {
-				return content.includes(sigil)
+
+		const remarkResults = await remark()
+			.use(remarkMdx)
+			.use(remarkIncludePartialsPlugin, { partialsDir, filePath })
+			.use(paragraphCustomAlertsPlugin)
+			.use(rewriteInternalRedirectsPlugin, {
+				redirects,
 			})
-		) {
-			transformedContent =
-				await transformParagraphCustomAlerts(transformedContent)
-		}
+			.use(rewriteInternalLinksPlugin, { entry, versionMetadata })
+			.process(content)
+
+		const transformedContent = String(remarkResults)
 		const transformedFileString = grayMatter.stringify(transformedContent, data)
 		// Ensure the parent directory for the output file path exists
 		const outDir = path.dirname(outPath)

@@ -157,6 +157,7 @@ export const ALL_REPO_CONFIG = {
 			return semver.coerce(semverString)
 		},
 		websiteDir: 'website',
+		basePaths: ['enterprise'],
 	},
 	// sentinel: {
 	// 	/**
@@ -208,6 +209,7 @@ export const ALL_REPO_CONFIG = {
 		dataDir: 'data',
 		semverCoerce: semver.coerce,
 		websiteDir: 'website',
+		basePaths: ['cli', 'internals', 'intro', 'language'],
 	},
 	'terraform-cdk': {
 		/**
@@ -224,6 +226,7 @@ export const ALL_REPO_CONFIG = {
 		dataDir: 'data',
 		semverCoerce: semver.coerce,
 		websiteDir: 'website',
+		basePaths: ['cdktf'],
 	},
 	'terraform-docs-agents': {
 		/**
@@ -240,6 +243,7 @@ export const ALL_REPO_CONFIG = {
 		dataDir: 'data',
 		semverCoerce: semver.coerce,
 		websiteDir: 'website',
+		basePaths: ['cloud-docs/agents'],
 	},
 	'terraform-docs-common': {
 		/**
@@ -278,6 +282,7 @@ export const ALL_REPO_CONFIG = {
 		dataDir: 'data',
 		semverCoerce: semver.coerce,
 		websiteDir: 'website',
+		basePaths: ['plugin/framework'],
 	},
 	'terraform-plugin-log': {
 		/**
@@ -288,6 +293,7 @@ export const ALL_REPO_CONFIG = {
 		dataDir: 'data',
 		semverCoerce: semver.coerce,
 		websiteDir: 'website',
+		basePaths: ['plugin/log'],
 	},
 	'terraform-plugin-mux': {
 		/**
@@ -306,6 +312,7 @@ export const ALL_REPO_CONFIG = {
 		dataDir: 'data',
 		semverCoerce: semver.coerce,
 		websiteDir: 'website',
+		basePaths: ['plugin/mux'],
 	},
 	'terraform-plugin-sdk': {
 		/**
@@ -324,6 +331,7 @@ export const ALL_REPO_CONFIG = {
 		dataDir: 'data',
 		semverCoerce: semver.coerce,
 		websiteDir: 'website',
+		basePaths: ['plugin/sdkv2'],
 	},
 	'terraform-plugin-testing': {
 		/**
@@ -341,6 +349,7 @@ export const ALL_REPO_CONFIG = {
 		dataDir: 'data',
 		semverCoerce: semver.coerce,
 		websiteDir: 'website',
+		basePaths: ['plugin/testing'],
 	},
 	// vagrant: {
 	// 	/**

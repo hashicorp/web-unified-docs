@@ -21,7 +21,7 @@ import toVfile from 'to-vfile'
  * - There must be no other content or whitespace around the `@include`.
  * Example: `@include 'path/to/file.mdx'` or `@include "path/to/file.mdx"`
  */
-export function remarkIncludePartials({ partialsDir, filePath }) {
+export function remarkIncludePartialsPlugin({ partialsDir, filePath }) {
 	// If the partialsDir has not been provided, throw an error.
 	if (!partialsDir) {
 		throw new Error(
@@ -78,7 +78,7 @@ export function remarkIncludePartials({ partialsDir, filePath }) {
 			const isMarkdownOrMdx = includePath.match(/\.md(?:x)?$/)
 			if (isMarkdownOrMdx) {
 				const processor = remark()
-				processor.use(remarkIncludePartials, { partialsDir })
+				processor.use(remarkIncludePartialsPlugin, { partialsDir })
 				const ast = processor.parse(includeContents)
 				return processor.runSync(ast, includeContents).children
 			} else {

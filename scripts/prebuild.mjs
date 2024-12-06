@@ -1,10 +1,10 @@
 import fs from 'fs'
 import path from 'path'
-import buildMdxTransforms from './mdx-transforms/build-mdx-transforms.mjs'
-import batchPromises from './utils/batch-promises.mjs'
-import listFiles from './utils/list-files.mjs'
-import gatherVersionMetadata from './gather-version-metadata.mjs'
-import { addVersionToNavData } from './mdx-transforms/add-version-to-nav-data.mjs'
+import { buildMdxTransforms } from './mdx-transforms/build-mdx-transforms.mjs'
+import { batchPromises } from './utils/batch-promises.mjs'
+import { listFiles } from './utils/list-files.mjs'
+import { gatherVersionMetadata } from './gather-version-metadata.mjs'
+import { addVersionToNavData } from './add-version-to-nav-data.mjs'
 
 /**
  * We expect the current working directory to be the project root.
@@ -24,7 +24,7 @@ async function main() {
 	const versionMetadataJson = JSON.stringify(versionMetadata, null, 2)
 	fs.writeFileSync(VERSION_METADATA_FILE, versionMetadataJson)
 	// Apply MDX transforms, writing out transformed MDX files to `public`
-	await buildMdxTransforms(CONTENT_DIR, CONTENT_DIR_OUT)
+	await buildMdxTransforms(CONTENT_DIR, CONTENT_DIR_OUT, versionMetadata)
 	// Copy all `*-nav-data.json` files from `content` to `public/content`, using execSync
 	await copyNavDataFiles(CONTENT_DIR, CONTENT_DIR_OUT, versionMetadata)
 }
@@ -35,7 +35,7 @@ async function main() {
  * TODO: approach here could maybe be refined, or maybe this would be nice
  * to split out to a separate file... but felt fine to leave here for now.
  */
-async function copyNavDataFiles(sourceDir, destDir, versionMetadata) {
+async function copyNavDataFiles(sourceDir, destDir, versionMetadata = {}) {
 	const navDataFiles = (await listFiles(sourceDir)).filter((f) => {
 		return f.endsWith('-nav-data.json')
 	})
@@ -50,8 +50,10 @@ async function copyNavDataFiles(sourceDir, destDir, versionMetadata) {
 				fs.mkdirSync(parentDir, { recursive: true })
 			}
 			fs.copyFileSync(filePath, destPath)
-			// add version to nav data paths/hrefs
-			await addVersionToNavData(destPath, versionMetadata)
+			if (!Object.keys(versionMetadata).length) {
+				// add version to nav data paths/hrefs
+				await addVersionToNavData(destPath, versionMetadata)
+			}
 		},
 		16,
 	)
