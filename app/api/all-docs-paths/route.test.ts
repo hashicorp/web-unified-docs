@@ -1,5 +1,6 @@
 import { expect, test, vi, afterEach } from 'vitest'
-import { GET, getUDRPaths, getAllDocsPaths } from './route'
+import { GET } from './route'
+import { getUDRPaths, getAllDocsPaths } from '@utils/allDocsPaths'
 import * as repoConfig from '../../../scripts/migrate-content/repo-config.mjs'
 
 afterEach(() => {
