@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { transformRewriteInternalLinks } from './add-version-to-internal-links.mjs'
-import versionMetadata from './include-partials/__fixtures__/basic/versionMetadata.json'
+import versionMetadata from '../include-partials/__fixtures__/basic/versionMetadata.json'
 
 describe('transformRewriteInternalLinks', () => {
 	it('should not rewrite internal links for paths other than the basePaths', async () => {

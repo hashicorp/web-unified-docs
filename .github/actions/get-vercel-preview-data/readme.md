@@ -16,7 +16,7 @@ This action accepts the following inputs:
 
 #### Always required
 
-- `deployment_type`: **string** — The type of Vercel deployment to fetch data from, whether 'id' or 'url'.
+- `deployment_type`: **string** — The type of Vercel deployment to fetch data from, can be 'id', 'url', or 'check'. 'check' will also wait till the deployment is ready.
 - `vercel_token`: **string** — A valid authentication token to interface with the Vercel API. If one is not provided, it tries to see if one is present in the environment under `VERCEL_TOKEN`.
 - `team_id`: **string** — The team ID to use with the Vercel API. If one is not provided, it tries to see if one is present in the environment under `TEAM_ID`.
 
@@ -26,6 +26,11 @@ This action accepts the following inputs:
 #### Required by deployment_type=id
 - `project_id`: **string** — The project ID to use with the Vercel API. If one is not provided, it tries to see if one is present in the environment under `PROJECT_ID`.
 - `github_sha`: **string** — The commit SHA that was used in the Vercel build
+
+#### Required by deployment_type=check
+- `deployment_url`: **string** - 'The Vercel deployment URL to fetch data from'
+- `num_of_checks`: **number** - 'The number of times to check if the deployment is ready'
+- `mins_between_checks`: **number** - 'The minutes to wait between deployment checks'
 
 ### Outputs
 
