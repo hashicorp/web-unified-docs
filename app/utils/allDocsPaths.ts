@@ -61,12 +61,12 @@ export function getUDRPaths(directory: string, productSlug: string) {
 }
 
 export const getAllDocsPaths = async () => {
-	const UDRDocsData = Object.keys(ALL_REPO_CONFIG)
+	const allDocsData = Object.keys(ALL_REPO_CONFIG)
 		.map((productSlug: string) => {
 			const latestProductVersion = getProductVersion(productSlug, 'latest')
 			if (!latestProductVersion.ok) {
 				console.error(errorResultToString('API', latestProductVersion))
-				return new Response('Not found', { status: 404 })
+				return Err('Product version not found')
 			}
 
 			const contentPath = path.join(
@@ -81,31 +81,6 @@ export const getAllDocsPaths = async () => {
 			return allPaths
 		})
 		.flat()
-
-	const getContentAPIDocsData = await fetch(
-		'https://content.hashicorp.com/api/all-docs-paths',
-	)
-	let contentAPIDocsData: { created_at: string; path: string }[]
-	if (getContentAPIDocsData !== undefined) {
-		const { result } = await getContentAPIDocsData.json()
-		contentAPIDocsData = result
-	} else {
-		contentAPIDocsData = []
-	}
-
-	// Filter the result from the content API to take out the duplicate paths between
-	// the content API and UDR
-	const filteredContentAPIDocsData = contentAPIDocsData.filter(
-		(item: { path: string; created_at: string }) => {
-			return !UDRDocsData.find(
-				(URDItem: { path: string; created_at: string }) => {
-					return URDItem.path === item.path
-				},
-			)
-		},
-	)
-
-	const allDocsData = [...filteredContentAPIDocsData, ...UDRDocsData]
 
 	if (allDocsData !== undefined && allDocsData.length > 0) {
 		return Ok(allDocsData)
