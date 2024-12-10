@@ -40,6 +40,18 @@ import semver from 'semver'
  * replacements for the previous API, maybe that'd make sense... rather than
  * migrating repo-config, we migrate in a way that requires less (maybe zero)
  * "repo-config".
+ */
+
+/**
+ * Product config attributes
+ *
+ * assetDir: directory where assets live in the product repo, used for migration script
+ * basePaths: paths where content may exist on the website for the product, used for rewrite-internal-links script. Not required for all products
+ * contentDir: directory where content lives in the product repo, used for migration script and all-docs-paths api route
+ * dataDir: directory where nav data lives in the product repo, used for migration script
+ * productSlug: product that is associated with the product repo, used for all-docs-paths api route
+ * semverCoerce: a function that coerces a version string into a semver version object, used for migration scripts
+ * websiteDir: directory where all docs content folders live in the product repo, used for migration script
  *
  * @type Record<string, { assetDir: string, basePaths?: string[], contentDir: string, dataDir: string, productSlug: string, semverCoerce: Function, websiteDir: string }>
  */
