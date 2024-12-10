@@ -1,4 +1,4 @@
-import { expect, test } from 'vitest'
+import { expect, test, vi } from 'vitest'
 import { GET } from './route'
 
 test('should return 400 if `product` query parameter is missing', async () => {
@@ -32,6 +32,7 @@ test('should return 400 if `fullPath` query parameter is missing', async () => {
 })
 
 test('should return versions if `product` and `fullPath` query parameters are valid', async () => {
+	vi.spyOn(console, 'error').mockImplementation(() => {}) // suppress console.error
 	const mockedResponse = {
 		versions: [
 			'v202401-1',
@@ -60,6 +61,7 @@ test('should return versions if `product` and `fullPath` query parameters are va
 	expect(response.status).toBe(200)
 	const json = await response.json()
 	expect(json).toEqual(mockedResponse)
+	vi.resetAllMocks()
 })
 
 test('should return 200 and empty array if no content exists for the query params', async () => {
