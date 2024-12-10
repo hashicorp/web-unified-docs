@@ -17,7 +17,7 @@ const terraformDocs = [
 	'terraform-plugin-testing',
 ]
 
-export function getUDRPaths(directory: string, productSlug: string) {
+export function getProductPaths(directory: string, productSlug: string) {
 	// TODO: add this as part of productConfig https://app.asana.com/0/1207899860738460/1208799860712577/f
 	const productName = terraformDocs.includes(productSlug)
 		? 'terraform'
@@ -76,7 +76,7 @@ export const getAllDocsPaths = async () => {
 				ALL_REPO_CONFIG[productSlug].contentDir,
 			)
 
-			const allPaths = getUDRPaths(contentPath, productSlug)
+			const allPaths = getProductPaths(contentPath, productSlug)
 
 			return allPaths
 		})

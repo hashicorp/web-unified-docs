@@ -1,16 +1,16 @@
 import { expect, test, vi, afterEach } from 'vitest'
 import { GET } from './route'
-import { getUDRPaths, getAllDocsPaths } from '@utils/allDocsPaths'
+import { getProductPaths, getAllDocsPaths } from '@utils/allDocsPaths'
 import * as repoConfig from '../../../scripts/migrate-content/repo-config.mjs'
 
 afterEach(() => {
 	vi.restoreAllMocks()
 })
 
-// getUDRPaths tests
+// getProductPaths tests
 
-test('getUDRPaths should determine correct productName for hcp-docs', () => {
-	const apiPaths = getUDRPaths(
+test('getProductPaths should determine correct productName for hcp-docs', () => {
+	const apiPaths = getProductPaths(
 		'app/api/all-docs-paths/__fixtures__/hcp-docs-test',
 		'hcp-docs',
 	)
@@ -18,8 +18,8 @@ test('getUDRPaths should determine correct productName for hcp-docs', () => {
 	expect(apiPaths[0].path).toBe('hcp/hcp-docs-test')
 })
 
-test('getUDRPaths should determine correct productName for terraform products', () => {
-	const apiPaths = getUDRPaths(
+test('getProductPaths should determine correct productName for terraform products', () => {
+	const apiPaths = getProductPaths(
 		'app/api/all-docs-paths/__fixtures__/terraform-test',
 		'ptfe-releases',
 	)
@@ -27,8 +27,8 @@ test('getUDRPaths should determine correct productName for terraform products', 
 	expect(apiPaths[0].path).toBe('terraform/terraform-test')
 })
 
-test('getUDRPaths should have the default productName for all other products', () => {
-	const apiPaths = getUDRPaths(
+test('getProductPaths should have the default productName for all other products', () => {
+	const apiPaths = getProductPaths(
 		'app/api/all-docs-paths/__fixtures__/consul-test',
 		'consul',
 	)
