@@ -1,7 +1,7 @@
 import { readFile, parseMarkdownFrontMatter } from '@utils/file'
 import { getProductVersion } from '@utils/contentVersions'
 import { errorResultToString } from '@utils/result'
-import { PRODUCT_CONFIG } from '../../../../../../../scripts/utils/productConfig'
+import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
 
 /**
  * TODO: we have different content directory structures across repos.
@@ -26,7 +26,6 @@ export async function GET(
 
 	// Determine the content directory based on the "product" (actually repo) slug
 	const contentDir = PRODUCT_CONFIG[productSlug].contentDir
-	console.log('### contentDir', contentDir)
 	if (!contentDir) {
 		console.error(
 			`API Error: Product, ${productSlug}, not found in contentDirMap`,

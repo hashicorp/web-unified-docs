@@ -1,7 +1,7 @@
 import { execSync } from 'child_process'
 // Local
 import { cloneRepo } from './clone-repo.mjs'
-import { PRODUCT_CONFIG } from '../../app/utils/productConfig'
+import { PRODUCT_CONFIG } from '../../app/utils/productConfig.mjs'
 import { getTargetReleaseRefs } from './get-target-release-refs.mjs'
 
 /**
@@ -41,13 +41,11 @@ main(Object.keys(PRODUCT_CONFIG), GH_CLONE_TEMP_DIR)
 async function main(repoSlugs, tempDir) {
 	for (const repoSlug of repoSlugs) {
 		const repoConfig = PRODUCT_CONFIG[repoSlug]
-		const semverCoerce = repoConfig.semverCoerce
-		console.log('### repoconfig and semvercoerce', repoConfig, semverCoerce)
 		const cloneArgs = '--depth=1 --filter=blob:none'
 		const cloneDir = cloneRepo(tempDir, 'hashicorp', repoSlug, cloneArgs)
 		const targetReleaseRefs = await getTargetReleaseRefs({
 			repoSlug,
-			semverCoerce,
+			repoConfig,
 		})
 		for (let i = targetReleaseRefs.length - 1; i >= 0; i--) {
 			const targetRef = targetReleaseRefs[i]

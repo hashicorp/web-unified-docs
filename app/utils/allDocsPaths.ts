@@ -1,29 +1,10 @@
 import { errorResultToString, Ok, Err } from '@utils/result'
 import { getProductVersion } from '@utils/contentVersions'
-import { ALL_REPO_CONFIG } from '../../scripts/migrate-content/repo-config.mjs'
+import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
 import fs from 'fs'
 import path from 'path'
 
-// TODO: add this as part of productConfig https://app.asana.com/0/1207899860738460/1208799860712577/f
-const terraformDocs = [
-	'ptfe-releases',
-	'terraform-cdk',
-	'terraform-docs-agents',
-	'terraform-docs-common',
-	'terraform-plugin-framework',
-	'terraform-plugin-log',
-	'terraform-plugin-mux',
-	'terraform-plugin-sdk',
-	'terraform-plugin-testing',
-]
-
 export function getProductPaths(directory: string, productSlug: string) {
-	// TODO: add this as part of productConfig https://app.asana.com/0/1207899860738460/1208799860712577/f
-	const productName = terraformDocs.includes(productSlug)
-		? 'terraform'
-		: productSlug === 'hcp-docs'
-			? 'hcp'
-			: productSlug
 	const apiPaths = []
 
 	function traverseDirectory(currentPath: string, relativePath: string = '') {
@@ -41,14 +22,14 @@ export function getProductPaths(directory: string, productSlug: string) {
 
 				if (itemName === 'index') {
 					apiPaths.push({
-						path: path.join(productName, relativePath),
+						path: path.join(productSlug, relativePath),
 						created_at: stat.mtime,
 					})
 					return
 				}
 
 				apiPaths.push({
-					path: path.join(productName, relativePath, itemName),
+					path: path.join(productSlug, relativePath, itemName),
 					created_at: stat.mtime,
 				})
 			}
@@ -61,7 +42,7 @@ export function getProductPaths(directory: string, productSlug: string) {
 }
 
 export const getAllDocsPaths = async () => {
-	const allDocsData = Object.keys(ALL_REPO_CONFIG)
+	const allDocsData = Object.keys(PRODUCT_CONFIG)
 		.map((productSlug: string) => {
 			const latestProductVersion = getProductVersion(productSlug, 'latest')
 			if (!latestProductVersion.ok) {
@@ -73,10 +54,13 @@ export const getAllDocsPaths = async () => {
 				'./content',
 				productSlug,
 				latestProductVersion.value,
-				ALL_REPO_CONFIG[productSlug].contentDir,
+				PRODUCT_CONFIG[productSlug].contentDir,
 			)
-
-			const allPaths = getProductPaths(contentPath, productSlug)
+			console.log('### Info', PRODUCT_CONFIG[productSlug].productSlug)
+			const allPaths = getProductPaths(
+				contentPath,
+				PRODUCT_CONFIG[productSlug].productSlug,
+			)
 
 			return allPaths
 		})

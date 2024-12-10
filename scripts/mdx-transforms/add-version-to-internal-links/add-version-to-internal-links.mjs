@@ -3,7 +3,7 @@ import remarkMdx from 'remark-mdx'
 import flatMap from 'unist-util-flatmap'
 import semver from 'semver'
 
-import { PRODUCT_CONFIG } from '../../utils/productConfig'
+import { PRODUCT_CONFIG } from '../../../app/utils/productConfig.mjs'
 
 /**
  * Rewrites internal links in a document tree to include version information.
@@ -34,7 +34,6 @@ export const rewriteInternalLinksPlugin = ({ entry, versionMetadata }) => {
 		return version.isLatest
 	}).version
 	const basePaths = PRODUCT_CONFIG[product].basePaths || []
-	console.log('### basePaths', basePaths)
 	/**
 	 * If the version in the filepath is the latest version or
 	 * no base paths exist for the product, then skip rewriting internal links
