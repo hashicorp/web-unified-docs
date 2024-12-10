@@ -15,7 +15,7 @@ import { fetchVersionMetadata } from './fetch-version-metadata.mjs'
  * @param {Object} repoEntry
  * @param {*} repoEntry.repoSlug
  * @param {*} repoEntry.targetVersions
- * @param {*} repoEntry.semverCoerce
+ * @param {*} repoEntry.repoConfig
  * @return {Promise<Array>} An array of release ref objects. Each object has
  * { ref, hash, versionString, version }, where `version` is a semver object,
  * and the rest of the properties are strings.
