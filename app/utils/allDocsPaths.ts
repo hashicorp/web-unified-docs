@@ -56,7 +56,6 @@ export const getAllDocsPaths = async () => {
 				latestProductVersion.value,
 				PRODUCT_CONFIG[productSlug].contentDir,
 			)
-			console.log('### Info', PRODUCT_CONFIG[productSlug].productSlug)
 			const allPaths = getProductPaths(
 				contentPath,
 				PRODUCT_CONFIG[productSlug].productSlug,
