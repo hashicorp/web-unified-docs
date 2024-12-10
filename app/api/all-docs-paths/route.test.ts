@@ -45,8 +45,6 @@ test('getAllDocsPaths should have an ok status for happy path', async () => {
 })
 
 test('getAllDocsPaths should return an error if the product version is not found', async () => {
-	// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-	// @ts-ignore
 	vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({
 		boundary: {
 			assetDir: 'public',
@@ -67,8 +65,6 @@ test('getAllDocsPaths should return an error if the product version is not found
 })
 
 test('getAllDocsPaths should return an error if there are no docs paths found', async () => {
-	// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-	// @ts-ignore
 	vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({})
 	global.fetch = vi.fn()
 
@@ -85,8 +81,6 @@ test('GET should return a 200 response for happy path', async () => {
 })
 
 test('GET should return error if docsPaths are not found', async () => {
-	// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-	// @ts-ignore
 	vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({})
 	global.fetch = vi.fn()
 	const mockConsole = vi.spyOn(console, 'error').mockImplementation(() => {})

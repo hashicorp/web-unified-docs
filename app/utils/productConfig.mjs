@@ -41,20 +41,8 @@ import semver from 'semver'
  * migrating repo-config, we migrate in a way that requires less (maybe zero)
  * "repo-config".
  *
+ * @type Record<string, { assetDir: string, basePaths?: string[], contentDir: string, dataDir: string, productSlug: string, semverCoerce: Function, websiteDir: string }>
  */
-
-// type ProductConfig = Record<
-// 	string,
-// 	{
-// 		assetDir?: string
-// 		basePaths?: string[]
-// 		contentDir: string
-// 		dataDir?: string
-// 		productSlug: string
-// 		semverCoerce: (version: string) => any
-// 		websiteDir?: string
-// 	}
-// >
 
 export const PRODUCT_CONFIG = {
 	// boundary: {
