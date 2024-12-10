@@ -63,7 +63,9 @@ export async function searchNavDataFiles(
 						}
 					}
 				} catch {
-					console.error(`An error occurred while searching for the file ${fullPathToFile}`)
+					console.error(
+						`An error occurred while searching for the file ${fullPathToFile}`,
+					)
 				}
 			}
 		}

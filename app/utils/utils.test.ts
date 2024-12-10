@@ -122,7 +122,7 @@ test('getProductVersion should return error for null version', () => {
 		value: 'Product, terraform, has no "null" version',
 	}
 
-	const result = getProductVersion('terraform', null as unknown as string)
+	const result = getProductVersion('terraform', null)
 	expect(result).toStrictEqual(expected)
 })
 
@@ -165,6 +165,7 @@ test('should return versions where the fullPath is found in nav-data.json', asyn
 })
 
 test('should handle directory not found (ENOENT error)', async () => {
+	const consoleLogSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 	const product = 'nonexistent'
 	const fullPath = '/some/path'
 
@@ -172,9 +173,14 @@ test('should handle directory not found (ENOENT error)', async () => {
 
 	const result = await searchNavDataFiles(product, fullPath)
 	expect(result).toStrictEqual([])
+	expect(consoleLogSpy).toHaveBeenCalledWith(
+		'Directory not found: /Users/aaron.vanderlip/projects/web-unified-docs/content/nonexistent',
+	)
+	consoleLogSpy.mockRestore()
 })
 
 test('should handle file reading error', async () => {
+	const consoleLogSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 	const product = 'terraform'
 	const fullPath = '/some/path'
 
@@ -186,6 +192,10 @@ test('should handle file reading error', async () => {
 
 	const result = await searchNavDataFiles(product, fullPath, '/')
 	expect(result).toStrictEqual([])
+	expect(consoleLogSpy).toHaveBeenCalledWith(
+		'An error occurred while searching for the file /content/terraform/v1.19.x/data/nav-data.json',
+	)
+	consoleLogSpy.mockRestore()
 })
 
 test('should handle other errors', async () => {
