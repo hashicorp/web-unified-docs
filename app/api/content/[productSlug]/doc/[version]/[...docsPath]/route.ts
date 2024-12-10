@@ -3,18 +3,6 @@ import { getProductVersion } from '@utils/contentVersions'
 import { errorResultToString } from '@utils/result'
 import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
 
-/**
- * TODO: we have different content directory structures across repos.
- *
- * In the current API, powered by mktg-content-workflows, we have repo-config
- * that handles these differences. In the short term, it may make sense
- * to mirror that type of config in this repository.
- *
- * On the other hand, it would be nice to not have to deal with these cases...
- * Maybe during the process of migrating docs to this repo, we standardize
- * the directory structure?
- */
-
 export async function GET(
 	request: Request,
 	{
