@@ -11,7 +11,7 @@ import * as pathToRegexp from 'path-to-regexp'
  * Loads redirects from the file-system and "caches" them in memory.
  */
 const cachedRedirects = {}
-export const loadRedirects = async (version, redirectsDir) => {
+export const loadRedirects = async (version = 'default', redirectsDir) => {
 	// Return the cached redirects if they are already present
 	if (cachedRedirects[version]?.length > 0) {
 		return cachedRedirects[version]
@@ -125,7 +125,7 @@ export const rewriteInternalRedirectsPlugin = ({ redirects }) => {
  */
 export const transformRewriteInternalRedirects = async (
 	mdxString,
-	version,
+	version = 'default',
 	redirectsDir,
 ) => {
 	const redirects = await loadRedirects(version, redirectsDir)

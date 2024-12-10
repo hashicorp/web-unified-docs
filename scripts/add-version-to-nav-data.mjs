@@ -1,23 +1,6 @@
 import fs from 'node:fs/promises'
-
-const terraformBasePaths = [
-	'/cdktf',
-	'/cli',
-	'/cloud-docs/agents',
-	'/cloud-docs',
-	'/docs',
-	'/enterprise',
-	'/internals',
-	'/intro',
-	'/language',
-	'/plugin',
-	'/plugin/framework',
-	'/plugin/log',
-	'/plugin/mux',
-	'/plugin/sdkv2',
-	'/plugin/testing',
-	'/registry',
-]
+import { ALL_REPO_CONFIG } from './migrate-content/repo-config.mjs'
+import semver from 'semver'
 
 /**
  * Adds version information to navigation data in a JSON file.
@@ -39,23 +22,35 @@ export async function addVersionToNavData(filePath, versionMetadata) {
 	}
 
 	try {
+		const relativePath = filePath.split('content/')[1]
+		/**
+		 * product and version variables, which are assigned based on the
+		 * specific indices those strings are expected to be in the filepath
+		 */
+		const [product, version] = relativePath.split('/')
+
+		// We are looking at a versionless doc
+		if (!semver.valid(semver.coerce(version))) {
+			return
+		}
+
+		if (!versionMetadata[product]) {
+			throw new Error(`No version metadata found for product: ${product}`)
+		}
+
 		const data = await fs.readFile(filePath, 'utf-8')
 		if (data === '') {
 			console.error(`File is empty: ${filePath}`)
 			return
 		}
-
 		const jsonData = JSON.parse(data)
+
 		const versionMatch = filePath.match(/\/content\/[^/]+\/([^/]+)\/data\//)
 
 		if (!versionMatch) {
 			console.error(`No version found in file path: ${filePath}`)
 			return
 		}
-
-		const version = versionMatch[1]
-		let product = filePath.split('/content/')[1]
-		product = product.split('/')[0]
 
 		// Use app/api/versionMetadata.json to get the latest version
 		const latestVersion = versionMetadata[product].find((version) => {
@@ -75,9 +70,13 @@ export async function addVersionToNavData(filePath, versionMetadata) {
 					!obj[key].includes(version)
 				) {
 					// href allows linking outside of content subpath
-					const basePath = terraformBasePaths.find((basePath) => {
-						return obj[key].startsWith(basePath)
-					})
+					let basePath = ALL_REPO_CONFIG[product].basePaths?.find(
+						(basePath) => {
+							return obj[key].startsWith(`/${basePath}`)
+						},
+					)
+					basePath =
+						typeof basePath === 'undefined' ? undefined : `/${basePath}`
 
 					// if the href starts with a basepath, e.g. "/cli", add version after the basepath
 					if (basePath && basePath.length) {
