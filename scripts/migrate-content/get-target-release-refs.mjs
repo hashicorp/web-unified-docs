@@ -15,21 +15,22 @@ import { fetchVersionMetadata } from './fetch-version-metadata.mjs'
  * @param {Object} repoEntry
  * @param {*} repoEntry.repoSlug
  * @param {*} repoEntry.targetVersions
- * @param {*} repoEntry.repoConfig
+ * @param {*} repoEntry.semverCoerce
  * @return {Promise<Array>} An array of release ref objects. Each object has
  * { ref, hash, versionString, version }, where `version` is a semver object,
  * and the rest of the properties are strings.
  */
 export async function getTargetReleaseRefs({
 	repoSlug,
-	repoConfig,
+	semverCoerce,
 	targetVersions,
 }) {
 	// Grab unique release refs from the content API
 	const contentApiReleaseRefs = await getReleaseRefsFromContentAPI(
 		repoSlug,
-		repoConfig.semverCoerce,
+		semverCoerce,
 	)
+	console.log('### contentAPireleaserefs', contentApiReleaseRefs)
 	// Filter the fetched release refs based on provided target versions
 	const isTargetReleaseRefs = targetVersions?.length
 		? ({ versionString }) => {

@@ -1,6 +1,7 @@
 import { readFile, parseMarkdownFrontMatter } from '@utils/file'
 import { getProductVersion } from '@utils/contentVersions'
 import { errorResultToString } from '@utils/result'
+import { PRODUCT_CONFIG } from '../../../../../../../scripts/utils/productConfig'
 
 /**
  * TODO: we have different content directory structures across repos.
@@ -13,27 +14,6 @@ import { errorResultToString } from '@utils/result'
  * Maybe during the process of migrating docs to this repo, we standardize
  * the directory structure?
  */
-const contentDirMap: Record<string, string> = {
-	boundary: 'content',
-	consul: 'content',
-	'hcp-docs': 'content',
-	nomad: 'content',
-	packer: 'content',
-	'ptfe-releases': 'docs',
-	sentinel: 'content',
-	terraform: 'docs',
-	'terraform-cdk': 'docs',
-	'terraform-docs-agents': 'docs',
-	'terraform-docs-common': 'docs',
-	'terraform-plugin-framework': 'docs',
-	'terraform-plugin-log': 'docs',
-	'terraform-plugin-mux': 'docs',
-	'terraform-plugin-sdk': 'docs',
-	'terraform-plugin-testing': 'docs',
-	vagrant: 'content',
-	vault: 'content',
-	waypoint: 'content',
-}
 
 export async function GET(
 	request: Request,
@@ -45,7 +25,8 @@ export async function GET(
 	const { productSlug, version, docsPath } = params
 
 	// Determine the content directory based on the "product" (actually repo) slug
-	const contentDir = contentDirMap[productSlug]
+	const contentDir = PRODUCT_CONFIG[productSlug].contentDir
+	console.log('### contentDir', contentDir)
 	if (!contentDir) {
 		console.error(
 			`API Error: Product, ${productSlug}, not found in contentDirMap`,
