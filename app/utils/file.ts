@@ -1,4 +1,5 @@
 import grayMatter from 'gray-matter'
+import { parse as jsoncParse } from 'jsonc-parser'
 
 import { Err, Ok } from './result'
 
@@ -37,6 +38,21 @@ export const readFile = async (filePath: string[]) => {
 export const parseJson = (jsonString: string) => {
 	try {
 		return Ok(JSON.parse(jsonString))
+	} catch (error) {
+		return Err(`Failed to parse JSON: ${error}`)
+	}
+}
+
+export const parseJsonc = (jsonString: string) => {
+	try {
+		const parserError = []
+		const json = jsoncParse(jsonString, parserError)
+
+		if (parserError.length > 0) {
+			return Err(`Failed to parse JSONC: ${parserError}`)
+		}
+
+		return Ok(json)
 	} catch (error) {
 		return Err(`Failed to parse JSON: ${error}`)
 	}
