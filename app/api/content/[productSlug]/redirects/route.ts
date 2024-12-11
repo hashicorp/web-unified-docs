@@ -1,4 +1,6 @@
+import { getProductVersion } from '@utils/contentVersions'
 import { readFile, parseJsonc } from '@utils/file'
+import { errorResultToString } from '@utils/result'
 
 const contentDirMap: Record<string, string> = {
 	boundary: 'content',
@@ -28,7 +30,6 @@ export async function GET(
 ) {
 	const { productSlug } = params
 
-	// Determine the content directory based on the "product" (actually repo) slug
 	if (!contentDirMap[productSlug]) {
 		console.error(
 			`API Error: Product, ${productSlug}, not found in contentDirMap`,
@@ -37,17 +38,32 @@ export async function GET(
 		return new Response('Not found', { status: 404 })
 	}
 
-	// TODO: this is just the base case for TFDC
-	// we also need to handle ptfe-releases, etc
-	const filePath = ['content', `${productSlug}`, 'redirects.jsonc']
-	const readFileResult = await readFile(filePath)
+	// TODO: Move this to a better check once our repoConfig file is done
+	let filePath = []
+	if (productSlug !== 'terraform-docs-common') {
+		const productVersionResult = getProductVersion(productSlug, 'latest')
 
+		if (!productVersionResult.ok) {
+			console.error(errorResultToString('API', productVersionResult))
+			return new Response('Not found', { status: 404 })
+		}
+
+		filePath = [
+			'content',
+			productSlug,
+			productVersionResult.value,
+			'redirects.jsonc',
+		]
+	} else {
+		filePath = ['content', productSlug, 'redirects.jsonc']
+	}
+
+	const readFileResult = await readFile(filePath)
 	if (!readFileResult.ok) {
 		return new Response('Not found', { status: 404 })
 	}
 
 	const redirects = parseJsonc(readFileResult.value)
-
 	if (!redirects.ok) {
 		console.error(
 			`API Error: Product, ${productSlug}, redirects.jsonc could not be parsed`,
