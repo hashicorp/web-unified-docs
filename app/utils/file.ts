@@ -46,7 +46,9 @@ export const parseJson = (jsonString: string) => {
 export const parseJsonc = (jsonString: string) => {
 	try {
 		const parserError = []
-		const json = jsoncParse(jsonString, parserError)
+		const json = jsoncParse(jsonString, parserError, {
+			allowTrailingComma: true,
+		})
 
 		if (parserError.length > 0) {
 			return Err(`Failed to parse JSONC: ${parserError}`)
