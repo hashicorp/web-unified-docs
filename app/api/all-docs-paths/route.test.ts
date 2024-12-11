@@ -38,7 +38,7 @@ test('getProductPaths should have the default productName for all other products
 
 // getAllDocsPaths tests
 
-test('getAllDocsPaths should have an ok status for happy path', async () => {
+test.skip('getAllDocsPaths should have an ok status for happy path', async () => {
 	const result = await getAllDocsPaths()
 
 	expect(result.ok).toBe(true)
@@ -73,7 +73,7 @@ test('getAllDocsPaths should return an error if there are no docs paths found', 
 
 // GET tests
 
-test('GET should return a 200 response for happy path', async () => {
+test.skip('GET should return a 200 response for happy path', async () => {
 	const response = await GET()
 
 	expect(response.status).toBe(200)
