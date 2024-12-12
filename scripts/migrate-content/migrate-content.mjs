@@ -27,10 +27,6 @@ const MIGRATION_OUTPUT_ROOT = path.join(process.cwd())
  * This means `.mdx` files, `-nav-data.json` files, and redirects.
  */
 
-// TODO: When importing the redirects.js file, we should convert it to a JSONC file
-// 1. eval the file so that we get it's content
-// 1a. when evaling coded do we still retain comments?
-// 2. convert it to JSONC and save
 const MIGRATION_CONTENT_DIR = path.join(MIGRATION_OUTPUT_ROOT, 'content')
 /**
  * MIGRATION_ASSETS_DIR is where extracted assets will be placed.
