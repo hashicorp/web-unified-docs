@@ -3,7 +3,7 @@ import remarkMdx from 'remark-mdx'
 import flatMap from 'unist-util-flatmap'
 import semver from 'semver'
 
-import { ALL_REPO_CONFIG } from '../../migrate-content/repo-config.mjs'
+import { PRODUCT_CONFIG } from '../../../app/utils/productConfig.mjs'
 
 /**
  * Rewrites internal links in a document tree to include version information.
@@ -33,7 +33,7 @@ export const rewriteInternalLinksPlugin = ({ entry, versionMetadata }) => {
 	const latestVersion = versionMetadata[product].find((version) => {
 		return version.isLatest
 	}).version
-	const basePaths = ALL_REPO_CONFIG[product].basePaths || []
+	const basePaths = PRODUCT_CONFIG[product].basePaths || []
 	/**
 	 * If the version in the filepath is the latest version or
 	 * no base paths exist for the product, then skip rewriting internal links
