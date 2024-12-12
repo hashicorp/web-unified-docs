@@ -1,7 +1,7 @@
 import { expect, test, vi, afterEach } from 'vitest'
 import { GET } from './route'
 import { getProductPaths, getAllDocsPaths } from '@utils/allDocsPaths'
-import * as repoConfig from '../../../scripts/migrate-content/repo-config.mjs'
+import * as repoConfig from '@utils/productConfig.mjs'
 
 afterEach(() => {
 	vi.restoreAllMocks()
@@ -12,7 +12,7 @@ afterEach(() => {
 test('getProductPaths should determine correct productName for hcp-docs', () => {
 	const apiPaths = getProductPaths(
 		'app/api/all-docs-paths/__fixtures__/hcp-docs-test',
-		'hcp-docs',
+		'hcp',
 	)
 
 	expect(apiPaths[0].path).toBe('hcp/hcp-docs-test')
@@ -21,7 +21,7 @@ test('getProductPaths should determine correct productName for hcp-docs', () => 
 test('getProductPaths should determine correct productName for terraform products', () => {
 	const apiPaths = getProductPaths(
 		'app/api/all-docs-paths/__fixtures__/terraform-test',
-		'ptfe-releases',
+		'terraform',
 	)
 
 	expect(apiPaths[0].path).toBe('terraform/terraform-test')
@@ -45,12 +45,14 @@ test.skip('getAllDocsPaths should have an ok status for happy path', async () =>
 })
 
 test('getAllDocsPaths should return an error if the product version is not found', async () => {
-	vi.spyOn(repoConfig, 'ALL_REPO_CONFIG', 'get').mockReturnValue({
+	vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({
 		boundary: {
 			assetDir: 'public',
 			contentDir: 'content',
 			dataDir: 'data',
+			productSlug: 'boundary',
 			semverCoerce: () => {},
+			versionedDocs: true,
 			websiteDir: 'website',
 		},
 	})
@@ -64,7 +66,7 @@ test('getAllDocsPaths should return an error if the product version is not found
 })
 
 test('getAllDocsPaths should return an error if there are no docs paths found', async () => {
-	vi.spyOn(repoConfig, 'ALL_REPO_CONFIG', 'get').mockReturnValue({})
+	vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({})
 	global.fetch = vi.fn()
 
 	const result = await getAllDocsPaths()
@@ -80,7 +82,7 @@ test.skip('GET should return a 200 response for happy path', async () => {
 })
 
 test('GET should return error if docsPaths are not found', async () => {
-	vi.spyOn(repoConfig, 'ALL_REPO_CONFIG', 'get').mockReturnValue({})
+	vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({})
 	global.fetch = vi.fn()
 	const mockConsole = vi.spyOn(console, 'error').mockImplementation(() => {})
 
