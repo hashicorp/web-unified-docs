@@ -44,7 +44,6 @@ export async function addVersionToNavData(filePath, versionMetadata) {
 			return
 		}
 		const jsonData = JSON.parse(data)
-
 		const versionMatch = filePath.match(/\/content\/[^/]+\/([^/]+)\/data\//)
 
 		if (!versionMatch) {

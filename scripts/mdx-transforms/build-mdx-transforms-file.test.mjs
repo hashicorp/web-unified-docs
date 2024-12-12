@@ -4,6 +4,7 @@ import {
 	buildFileMdxTransforms,
 	applyFileMdxTransforms,
 } from './build-mdx-transforms-file.mjs'
+import versionMetadata from 'scripts/mdx-transforms/include-partials/__fixtures__/basic/versionMetadata.json'
 import fs from 'fs'
 
 vi.mock('fs')
@@ -41,7 +42,7 @@ test('test applyFileMdxTransforms', async () => {
 		partialsDir: '../../partials',
 		outPath: transformedOutPath,
 	}
-	const result = await applyFileMdxTransforms(entry)
+	const result = await applyFileMdxTransforms(entry, versionMetadata)
 	expect(result).toStrictEqual({ error: null })
 
 	const transformedContent = fs.readFileSync(entry.outPath, 'utf8')

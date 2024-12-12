@@ -5,7 +5,6 @@ import path from 'path'
 import remark from 'remark'
 import remarkMdx from 'remark-mdx'
 import grayMatter from 'gray-matter'
-import semver from 'semver'
 
 import { paragraphCustomAlertsPlugin } from './paragraph-custom-alert/paragraph-custom-alert.mjs'
 import { rewriteInternalLinksPlugin } from './add-version-to-internal-links/add-version-to-internal-links.mjs'
@@ -50,7 +49,9 @@ export async function buildFileMdxTransforms(filePath) {
 	}
 
 	console.log(`🪄 Running MDX transform on ${filePath}...`)
-	const result = await applyFileMdxTransforms(entry)
+	const result = await applyFileMdxTransforms(entry, () => {
+		return fs.readFile(VERSION_METADATA_FILE)
+	})
 	if (result.error) {
 		console.error(`❗ Encountered an error: ${result.error}`)
 	} else {
@@ -71,13 +72,10 @@ export async function buildFileMdxTransforms(filePath) {
  * @param {string} entry.outPath
  * @return {object} { error: string | null }
  */
-export async function applyFileMdxTransforms(entry) {
+export async function applyFileMdxTransforms(entry, versionMetadata = {}) {
 	try {
 		const { filePath, partialsDir, outPath, version, redirectsDir } = entry
-		let redirects
-		if (!semver.valid(semver.coerce(version))) {
-			redirects = await loadRedirects(version, redirectsDir)
-		}
+		const redirects = await loadRedirects(version, redirectsDir)
 
 		const fileString = fs.readFileSync(filePath, 'utf8')
 
@@ -90,7 +88,7 @@ export async function applyFileMdxTransforms(entry) {
 			.use(rewriteInternalRedirectsPlugin, {
 				redirects,
 			})
-			.use(rewriteInternalLinksPlugin, { entry, VERSION_METADATA_FILE })
+			.use(rewriteInternalLinksPlugin, { entry, versionMetadata })
 			.process(content)
 
 		const transformedContent = String(remarkResults)
@@ -98,7 +96,7 @@ export async function applyFileMdxTransforms(entry) {
 		const transformedFileString = grayMatter.stringify(transformedContent, data)
 		// Ensure the parent directory for the output file path exists
 		const outDir = path.dirname(outPath)
-		console.log({ outDir })
+
 		if (!fs.existsSync(outDir)) {
 			fs.mkdirSync(outDir, { recursive: true })
 		}

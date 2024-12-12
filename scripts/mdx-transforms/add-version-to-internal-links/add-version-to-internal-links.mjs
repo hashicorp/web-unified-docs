@@ -16,17 +16,13 @@ import { PRODUCT_CONFIG } from '../../../app/utils/productConfig.mjs'
  */
 export const rewriteInternalLinksPlugin = ({ entry, versionMetadata }) => {
 	const relativePath = entry.filePath.split('content/')[1]
-	console.log('entry.filePath: ', entry.filePath)
 	/**
 	 * product and version variables, which are assigned based on the
 	 * specific indices those strings are expected to be in the filepath
 	 */
 	const [product, version] = relativePath.split('/')
-	console.log({ product, version })
+
 	// We are looking at a versionless doc
-	// console.log({
-	// 	'semver.valid(semver.coerce(version)': semver.valid(semver.coerce(version)),
-	// })
 	if (semver.valid(semver.coerce(version)) === null) {
 		return
 	}
@@ -37,7 +33,7 @@ export const rewriteInternalLinksPlugin = ({ entry, versionMetadata }) => {
 	const latestVersion = versionMetadata[product].find((version) => {
 		return version.isLatest
 	}).version
-	const basePaths = ALL_REPO_CONFIG[product]?.basePaths || []
+	const basePaths = ALL_REPO_CONFIG[product].basePaths || []
 	/**
 	 * If the version in the filepath is the latest version or
 	 * no base paths exist for the product, then skip rewriting internal links
@@ -60,7 +56,6 @@ export const rewriteInternalLinksPlugin = ({ entry, versionMetadata }) => {
 	return function transformer(tree) {
 		// Transforms the syntax tree by rewriting internal links to include the version.
 		return flatMap(tree, (node) => {
-			console.log({ node })
 			// Check if the node is a link and matches the pattern for links to rewrite
 			if (node.type === 'link' && isLinkToRewritePattern.test(node.url)) {
 				// Replace the matched part of the URL with the versioned path
@@ -87,6 +82,5 @@ export const transformRewriteInternalLinks = async (
 			versionMetadata,
 		})
 		.process(content)
-	console.log({ document })
 	return document.contents
 }
