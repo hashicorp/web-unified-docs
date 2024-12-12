@@ -74,6 +74,7 @@ export async function addVersionToNavData(filePath, versionMetadata) {
 							return obj[key].startsWith(`/${basePath}`)
 						},
 					)
+
 					basePath =
 						typeof basePath === 'undefined' ? undefined : `/${basePath}`
 
@@ -81,7 +82,7 @@ export async function addVersionToNavData(filePath, versionMetadata) {
 					if (basePath && basePath.length) {
 						obj[key] =
 							`${basePath}/${version}${obj[key].substring(basePath.length)}`
-					} else {
+					} else if (key === 'path') {
 						obj[key] = `${version}/${obj[key]}`
 					}
 				}
