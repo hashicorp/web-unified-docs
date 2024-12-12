@@ -52,6 +52,7 @@ test('getAllDocsPaths should return an error if the product version is not found
 			dataDir: 'data',
 			productSlug: 'boundary',
 			semverCoerce: () => {},
+			versionedDocs: true,
 			websiteDir: 'website',
 		},
 	})

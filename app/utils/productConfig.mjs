@@ -51,9 +51,10 @@ import semver from 'semver'
  * dataDir: directory where nav data lives in the product repo, used for migration script
  * productSlug: product that is associated with the product repo, used for all-docs-paths api route
  * semverCoerce: a function that coerces a version string into a semver version object, used for migration scripts
+ * versionedDocs: a boolean that indicates whether the product has versioned docs
  * websiteDir: directory where all docs content folders live in the product repo, used for migration script
  *
- * @type Record<string, { assetDir: string, basePaths?: string[], contentDir: string, dataDir: string, productSlug: string, semverCoerce: Function, websiteDir: string }>
+ * @type Record<string, { assetDir: string, basePaths?: string[], contentDir: string, dataDir: string, productSlug: string, semverCoerce: Function, versionedDocs: boolean, websiteDir: string }>
  */
 
 export const PRODUCT_CONFIG = {
@@ -70,6 +71,7 @@ export const PRODUCT_CONFIG = {
 	// 	dataDir: 'data',
 	//  productSlug: 'boundary',
 	// 	semverCoerce: semver.coerce,
+	//  versionedDocs: true,
 	// 	websiteDir: 'website',
 	// },
 	// consul: {
@@ -86,6 +88,7 @@ export const PRODUCT_CONFIG = {
 	// 	dataDir: 'data',
 	//  productSlug: 'consul',
 	// 	semverCoerce: semver.coerce,
+	// 	versionedDocs: true,
 	// 	websiteDir: 'website',
 	// },
 	// 'hcp-docs': {
@@ -102,6 +105,7 @@ export const PRODUCT_CONFIG = {
 	// 	dataDir: 'data',
 	//  productSlug: 'hcp',
 	// 	semverCoerce: semver.coerce,
+	//  versionedDocs: false,
 	// 	websiteDir: '.',
 	// },
 	// nomad: {
@@ -118,6 +122,7 @@ export const PRODUCT_CONFIG = {
 	// 	dataDir: 'data',
 	//  productSlug: 'nomad',
 	// 	semverCoerce: semver.coerce,
+	//  versionedDocs: true,
 	// 	websiteDir: 'website',
 	// },
 	// packer: {
@@ -142,6 +147,7 @@ export const PRODUCT_CONFIG = {
 	// 	dataDir: 'data',
 	//  productSlug: 'packer',
 	// 	semverCoerce: semver.coerce,
+	//  versionedDocs: true,
 	// 	websiteDir: 'website',
 	// },
 	'ptfe-releases': {
@@ -176,6 +182,7 @@ export const PRODUCT_CONFIG = {
 			const semverString = `v${year}.${parseInt(date)}.${patch}`
 			return semver.coerce(semverString)
 		},
+		versionedDocs: true,
 		websiteDir: 'website',
 	},
 	// sentinel: {
@@ -202,6 +209,7 @@ export const PRODUCT_CONFIG = {
 	// 	dataDir: 'data',
 	//  productSlug: 'sentinel',
 	// 	semverCoerce: semver.coerce,
+	//  versionedDocs: true,
 	// 	websiteDir: 'website',
 	// },
 	terraform: {
@@ -230,6 +238,7 @@ export const PRODUCT_CONFIG = {
 		dataDir: 'data',
 		productSlug: 'terraform',
 		semverCoerce: semver.coerce,
+		versionedDocs: true,
 		websiteDir: 'website',
 	},
 	'terraform-cdk': {
@@ -248,6 +257,7 @@ export const PRODUCT_CONFIG = {
 		dataDir: 'data',
 		productSlug: 'terraform',
 		semverCoerce: semver.coerce,
+		versionedDocs: true,
 		websiteDir: 'website',
 	},
 	'terraform-docs-agents': {
@@ -266,6 +276,7 @@ export const PRODUCT_CONFIG = {
 		dataDir: 'data',
 		productSlug: 'terraform',
 		semverCoerce: semver.coerce,
+		versionedDocs: true,
 		websiteDir: 'website',
 	},
 	'terraform-docs-common': {
@@ -287,6 +298,7 @@ export const PRODUCT_CONFIG = {
 		dataDir: 'data',
 		productSlug: 'terraform',
 		semverCoerce: semver.coerce,
+		versionedDocs: false,
 		websiteDir: 'website',
 	},
 	'terraform-plugin-framework': {
@@ -307,6 +319,7 @@ export const PRODUCT_CONFIG = {
 		dataDir: 'data',
 		productSlug: 'terraform',
 		semverCoerce: semver.coerce,
+		versionedDocs: true,
 		websiteDir: 'website',
 	},
 	'terraform-plugin-log': {
@@ -319,6 +332,7 @@ export const PRODUCT_CONFIG = {
 		dataDir: 'data',
 		productSlug: 'terraform',
 		semverCoerce: semver.coerce,
+		versionedDocs: true,
 		websiteDir: 'website',
 	},
 	'terraform-plugin-mux': {
@@ -339,6 +353,7 @@ export const PRODUCT_CONFIG = {
 		dataDir: 'data',
 		productSlug: 'terraform',
 		semverCoerce: semver.coerce,
+		versionedDocs: true,
 		websiteDir: 'website',
 	},
 	'terraform-plugin-sdk': {
@@ -359,6 +374,7 @@ export const PRODUCT_CONFIG = {
 		dataDir: 'data',
 		productSlug: 'terraform',
 		semverCoerce: semver.coerce,
+		versionedDocs: true,
 		websiteDir: 'website',
 	},
 	'terraform-plugin-testing': {
@@ -378,6 +394,7 @@ export const PRODUCT_CONFIG = {
 		dataDir: 'data',
 		productSlug: 'terraform',
 		semverCoerce: semver.coerce,
+		versionedDocs: true,
 		websiteDir: 'website',
 	},
 	// vagrant: {
@@ -398,6 +415,7 @@ export const PRODUCT_CONFIG = {
 	// 	dataDir: 'data',
 	//  productSlug: 'vagrant',
 	// 	semverCoerce: semver.coerce,
+	//  versionedDocs: true,
 	// 	websiteDir: 'website',
 	// },
 	// vault: {
@@ -415,6 +433,7 @@ export const PRODUCT_CONFIG = {
 	// 	dataDir: 'data',
 	//  productSlug: 'vault',
 	// 	semverCoerce: semver.coerce,
+	//  versionedDocs: true,
 	// 	websiteDir: 'website',
 	// },
 }
