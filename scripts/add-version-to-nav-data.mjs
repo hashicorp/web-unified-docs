@@ -1,5 +1,5 @@
 import fs from 'node:fs/promises'
-import { ALL_REPO_CONFIG } from './migrate-content/repo-config.mjs'
+import { PRODUCT_CONFIG } from '../app/utils/productConfig.mjs'
 import semver from 'semver'
 
 /**
@@ -69,11 +69,9 @@ export async function addVersionToNavData(filePath, versionMetadata) {
 					!obj[key].includes(version)
 				) {
 					// href allows linking outside of content subpath
-					let basePath = ALL_REPO_CONFIG[product].basePaths?.find(
-						(basePath) => {
-							return obj[key].startsWith(`/${basePath}`)
-						},
-					)
+					let basePath = PRODUCT_CONFIG[product].basePaths?.find((basePath) => {
+						return obj[key].startsWith(`/${basePath}`)
+					})
 
 					basePath =
 						typeof basePath === 'undefined' ? undefined : `/${basePath}`
