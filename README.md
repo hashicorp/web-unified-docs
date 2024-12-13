@@ -31,7 +31,11 @@ The existing API (`content.hashicorp.com`) has endpoints that serve documentatio
 
 ### Quick Start
 
-To get a migration preview running, run `make` from the root of this repo.
+To get a migration preview running, run `make` from the root of this repo. Once this command completes the following endpoints should be working:
+
+- http://localhost:3000 - A running instance of the current dev-portal frontend application that is configured to pull content from the local `public` direcotry.
+
+- http://localhost:8000 - An instance of the content API endpoint that serves content from the local `public` directory. Here is example of a request http://localhost:8080/api/content/terraform/doc/v1.1.x/cli that can be used to test this endpoint.
 
 To spin this down gracefully, run `make clean` in a separate terminal. If you wish to remove the local Docker images as well, you can specify `make clean CLEAN_OPTION=full`.
 
@@ -83,3 +87,6 @@ For comparison:
 | consul                         | 80                      |
 | terraform                      | 49                      |
 | vault                          | 46                      |
+
+
+### [Architectural Decision Records](https://github.com/hashicorp/web-unified-docs/tree/main/docs/decisions)
