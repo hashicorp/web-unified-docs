@@ -23,7 +23,7 @@ export const rewriteInternalLinksPlugin = ({ entry, versionMetadata }) => {
 	const [product, version] = relativePath.split('/')
 
 	// We are looking at a versionless doc
-	if (!semver.valid(semver.coerce(version))) {
+	if (semver.valid(semver.coerce(version)) === null) {
 		return
 	}
 
@@ -50,7 +50,6 @@ export const rewriteInternalLinksPlugin = ({ entry, versionMetadata }) => {
 	const isLinkToRewritePattern = new RegExp(
 		`^(?!https?:\\/\\/|http:\\/\\/)(((\\.+\\/)*)|\\/|\\/${product}(?:\\/${basePaths.join('|')})?\\/)`,
 	)
-
 	// Creates a regex pattern to match and replace internal links based on the provided base paths.
 	const replacePattern = new RegExp(`/(${basePaths.join('|')})(/)?`)
 
@@ -83,6 +82,5 @@ export const transformRewriteInternalLinks = async (
 			versionMetadata,
 		})
 		.process(content)
-
 	return document.contents
 }

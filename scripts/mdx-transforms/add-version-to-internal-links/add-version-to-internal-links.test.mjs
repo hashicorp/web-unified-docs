@@ -114,7 +114,7 @@ describe('transformRewriteInternalLinks', () => {
 	it('should not rewrite internal links for a product with no basePaths array', async () => {
 		const content = `[Link to cloud-docs](/cloud-docs/some-page)`
 		const entry = {
-			filePath: 'content/terraform-docs-common/v0.0.x/docs/some-file.mdx',
+			filePath: 'content/terraform-docs-common/docs/some-file.mdx',
 		}
 		const expectedOutput = content + '\n'
 		const result = await transformRewriteInternalLinks(
