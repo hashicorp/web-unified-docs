@@ -1,6 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { execSync } from 'child_process'
+
 // Local
 import { buildTargetRepos } from './build-target-repos.mjs'
 import { clearAndCopy } from './clear-and-copy.mjs'
@@ -20,11 +21,12 @@ const GH_CLONE_DIR = '.content-source-repos'
  * output migrated content to `content` and `public` folders at the root
  * of this repo, so we'll change MIGRATION_OUTPUT_ROOT to `process.cwd()`.
  */
-const MIGRATION_OUTPUT_ROOT = path.join(process.cwd(), '.migrated-content')
+const MIGRATION_OUTPUT_ROOT = path.join(process.cwd())
 /**
  * MIGRATION_CONTENT_DIR is where extracted content & data will be placed.
  * This means `.mdx` files, `-nav-data.json` files, and redirects.
  */
+
 const MIGRATION_CONTENT_DIR = path.join(MIGRATION_OUTPUT_ROOT, 'content')
 /**
  * MIGRATION_ASSETS_DIR is where extracted assets will be placed.
@@ -301,10 +303,54 @@ function migrateRepoContentAtRef(
 	)
 	dirsToCopy.push({ src: contentSrc, dest: contentDest })
 	dirsToCopy.push({ src: dataSrc, dest: dataDest })
+
+	// Check if redirects.js exists and convert it to JSONC
+	const redirectsSrc = path.join(websiteDirPath, 'redirects.js')
+	if (fs.existsSync(redirectsSrc)) {
+		const redirectsSrcJsonc = convertToJsonc(websiteDirPath, redirectsSrc)
+		if (redirectsSrcJsonc) {
+			const redirectsDest = path.join(
+				outputDirs.content,
+				repoSlug,
+				targetRef.versionString,
+				'redirects.jsonc',
+			)
+			dirsToCopy.push({ src: redirectsSrcJsonc, dest: redirectsDest })
+		}
+	}
+
 	/**
 	 * Execute the copy commands
 	 */
 	for (const { src, dest } of dirsToCopy) {
 		clearAndCopy(src, dest)
 	}
+}
+
+function convertToJsonc(websiteDirPath, redirectsSrc) {
+	const redirectsSrcString = fs.readFileSync(redirectsSrc, 'utf8')
+
+	if (!redirectsSrcString) {
+		console.error(`Unable to find file ${redirectsSrc}`)
+		return
+	}
+
+	// gross, gross, gross...
+	const redirectsSrcJsonString = redirectsSrcString
+		.replace('module.exports = ', '')
+		.replaceAll('destination', '"destination"')
+		.replaceAll('source', '"source"')
+		.replaceAll('permanent', '"permanent"')
+		.replaceAll(';', '')
+
+	const redirectsJsoncPath = path.join(websiteDirPath, 'redirects.jsonc')
+	try {
+		fs.writeFileSync(redirectsJsoncPath, redirectsSrcJsonString)
+	} catch (e) {
+		console.error(`Error writing JSONC to file ${redirectsJsoncPath}`, e)
+		return
+	}
+
+	const redirectsSrcJsonc = path.join(websiteDirPath, 'redirects.jsonc')
+	return redirectsSrcJsonc
 }

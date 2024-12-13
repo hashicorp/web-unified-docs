@@ -12,7 +12,7 @@
  */
 export async function batchPromises(arrayToBatch, asyncMapFn, batchSize) {
 	let batches = []
-	for (var i = 0, j = arrayToBatch.length; i < j - 1; i += batchSize) {
+	for (let i = 0, j = arrayToBatch.length; i <= j - 1; i += batchSize) {
 		batches.push(arrayToBatch.slice(i, i + batchSize))
 	}
 
