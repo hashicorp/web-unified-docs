@@ -33,7 +33,7 @@ export const rewriteInternalLinksPlugin = ({ entry, versionMetadata }) => {
 	const latestVersion = versionMetadata[product].find((version) => {
 		return version.isLatest
 	}).version
-	const basePaths = ALL_REPO_CONFIG[product].basePaths || []
+	const basePaths = PRODUCT_CONFIG[product].basePaths || []
 	/**
 	 * If the version in the filepath is the latest version or
 	 * no base paths exist for the product, then skip rewriting internal links
