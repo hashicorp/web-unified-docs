@@ -1,4 +1,4 @@
-import { ALL_REPO_CONFIG } from './repo-config.mjs'
+import { PRODUCT_CONFIG } from '../../app/utils/productConfig.mjs'
 
 /**
  * Given an array of argument strings, parse the intended target content
@@ -29,7 +29,7 @@ export function buildTargetRepos(args) {
 		return { repoSlug, targetVersions }
 	})
 	// Validate repo slugs
-	const allRepoSlugs = Object.keys(ALL_REPO_CONFIG)
+	const allRepoSlugs = Object.keys(PRODUCT_CONFIG)
 	const invalidRepoSlugs = targetRepos
 		.map((repoEntry) => {
 			return repoEntry.repoSlug
@@ -52,7 +52,7 @@ export function buildTargetRepos(args) {
 		return {
 			repoSlug: repoEntry.repoSlug,
 			targetVersions: repoEntry.targetVersions,
-			repoConfig: ALL_REPO_CONFIG[repoEntry.repoSlug],
+			repoConfig: PRODUCT_CONFIG[repoEntry.repoSlug],
 		}
 	})
 	// Return the array of target repo objects

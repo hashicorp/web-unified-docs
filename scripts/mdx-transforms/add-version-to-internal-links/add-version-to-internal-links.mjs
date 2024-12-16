@@ -1,7 +1,9 @@
 import remark from 'remark'
 import remarkMdx from 'remark-mdx'
 import flatMap from 'unist-util-flatmap'
-import { ALL_REPO_CONFIG } from '../migrate-content/repo-config.mjs'
+import semver from 'semver'
+
+import { PRODUCT_CONFIG } from '../../../app/utils/productConfig.mjs'
 
 /**
  * Rewrites internal links in a document tree to include version information.
@@ -12,20 +14,26 @@ import { ALL_REPO_CONFIG } from '../migrate-content/repo-config.mjs'
  *
  * @returns {Function} A transformer function that rewrites internal links in the document tree.
  */
-const rewriteInternalLinks = ({ entry, versionMetadata }) => {
+export const rewriteInternalLinksPlugin = ({ entry, versionMetadata }) => {
 	const relativePath = entry.filePath.split('content/')[1]
 	/**
 	 * product and version variables, which are assigned based on the
 	 * specific indices those strings are expected to be in the filepath
 	 */
 	const [product, version] = relativePath.split('/')
+
+	// We are looking at a versionless doc
+	if (semver.valid(semver.coerce(version)) === null) {
+		return
+	}
+
 	if (!versionMetadata[product]) {
 		throw new Error(`No version metadata found for product: ${product}`)
 	}
 	const latestVersion = versionMetadata[product].find((version) => {
 		return version.isLatest
 	}).version
-	const basePaths = ALL_REPO_CONFIG[product].basePaths || []
+	const basePaths = PRODUCT_CONFIG[product].basePaths || []
 	/**
 	 * If the version in the filepath is the latest version or
 	 * no base paths exist for the product, then skip rewriting internal links
@@ -42,7 +50,6 @@ const rewriteInternalLinks = ({ entry, versionMetadata }) => {
 	const isLinkToRewritePattern = new RegExp(
 		`^(?!https?:\\/\\/|http:\\/\\/)(((\\.+\\/)*)|\\/|\\/${product}(?:\\/${basePaths.join('|')})?\\/)`,
 	)
-
 	// Creates a regex pattern to match and replace internal links based on the provided base paths.
 	const replacePattern = new RegExp(`/(${basePaths.join('|')})(/)?`)
 
@@ -68,15 +75,12 @@ export const transformRewriteInternalLinks = async (
 	entry,
 	versionMetadata,
 ) => {
-	const contents = await remark()
+	const document = await remark()
 		.use(remarkMdx)
-		.use(rewriteInternalLinks, {
+		.use(rewriteInternalLinksPlugin, {
 			entry,
 			versionMetadata,
 		})
 		.process(content)
-
-	const document = contents
-
 	return document.contents
 }

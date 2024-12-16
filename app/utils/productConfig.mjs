@@ -40,10 +40,24 @@ import semver from 'semver'
  * replacements for the previous API, maybe that'd make sense... rather than
  * migrating repo-config, we migrate in a way that requires less (maybe zero)
  * "repo-config".
- *
- * @type Record<string, { assetDir: string, contentDir: string, dataDir: string, semverCoerce: Function, websiteDir: string }>
  */
-export const ALL_REPO_CONFIG = {
+
+/**
+ * Product config attributes
+ *
+ * assetDir: directory where assets live in the product repo, used for migration script
+ * basePaths: paths where content may exist on the website for the product, used for rewrite-internal-links script. Not required for all products
+ * contentDir: directory where content lives in the product repo, used for migration script and all-docs-paths api route
+ * dataDir: directory where nav data lives in the product repo, used for migration script
+ * productSlug: product that is associated with the product repo, used for all-docs-paths api route
+ * semverCoerce: a function that coerces a version string into a semver version object, used for migration scripts
+ * versionedDocs: a boolean that indicates whether the product has versioned docs
+ * websiteDir: directory where all docs content folders live in the product repo, used for migration script
+ *
+ * @type Record<string, { assetDir: string, basePaths?: string[], contentDir: string, dataDir: string, productSlug: string, semverCoerce: Function, versionedDocs: boolean, websiteDir: string }>
+ */
+
+export const PRODUCT_CONFIG = {
 	// boundary: {
 	// 	/**
 	// 	 * ✅ Initial migration attempt: SEEMS TO WORK
@@ -55,7 +69,9 @@ export const ALL_REPO_CONFIG = {
 	// 	assetDir: 'public',
 	// 	contentDir: 'content',
 	// 	dataDir: 'data',
+	//  productSlug: 'boundary',
 	// 	semverCoerce: semver.coerce,
+	//  versionedDocs: true,
 	// 	websiteDir: 'website',
 	// },
 	// consul: {
@@ -70,7 +86,9 @@ export const ALL_REPO_CONFIG = {
 	// 	assetDir: 'public',
 	// 	contentDir: 'content',
 	// 	dataDir: 'data',
+	//  productSlug: 'consul',
 	// 	semverCoerce: semver.coerce,
+	// 	versionedDocs: true,
 	// 	websiteDir: 'website',
 	// },
 	// 'hcp-docs': {
@@ -85,7 +103,9 @@ export const ALL_REPO_CONFIG = {
 	// 	assetDir: 'public',
 	// 	contentDir: 'content',
 	// 	dataDir: 'data',
+	//  productSlug: 'hcp',
 	// 	semverCoerce: semver.coerce,
+	//  versionedDocs: false,
 	// 	websiteDir: '.',
 	// },
 	// nomad: {
@@ -100,7 +120,9 @@ export const ALL_REPO_CONFIG = {
 	// 	assetDir: 'public',
 	// 	contentDir: 'content',
 	// 	dataDir: 'data',
+	//  productSlug: 'nomad',
 	// 	semverCoerce: semver.coerce,
+	//  versionedDocs: true,
 	// 	websiteDir: 'website',
 	// },
 	// packer: {
@@ -123,7 +145,9 @@ export const ALL_REPO_CONFIG = {
 	// 	assetDir: 'public',
 	// 	contentDir: 'content',
 	// 	dataDir: 'data',
+	//  productSlug: 'packer',
 	// 	semverCoerce: semver.coerce,
+	//  versionedDocs: true,
 	// 	websiteDir: 'website',
 	// },
 	'ptfe-releases': {
@@ -141,8 +165,10 @@ export const ALL_REPO_CONFIG = {
 		 * https://gist.github.com/zchsh/73c36d4248880cb1a66216b2b00f89ed
 		 */
 		assetDir: 'img',
+		basePaths: ['enterprise'],
 		contentDir: 'docs',
 		dataDir: 'data',
+		productSlug: 'terraform',
 		/**
 		 * Note: we need to sort versions for various reasons. Nearly all
 		 * our documentation is semver-versioned. PTFE is not. Rather than
@@ -156,8 +182,8 @@ export const ALL_REPO_CONFIG = {
 			const semverString = `v${year}.${parseInt(date)}.${patch}`
 			return semver.coerce(semverString)
 		},
+		versionedDocs: true,
 		websiteDir: 'website',
-		basePaths: ['enterprise'],
 	},
 	// sentinel: {
 	// 	/**
@@ -181,7 +207,9 @@ export const ALL_REPO_CONFIG = {
 	// 	 */
 	// 	contentDir: 'content/sentinel',
 	// 	dataDir: 'data',
+	//  productSlug: 'sentinel',
 	// 	semverCoerce: semver.coerce,
+	//  versionedDocs: true,
 	// 	websiteDir: 'website',
 	// },
 	terraform: {
@@ -205,11 +233,13 @@ export const ALL_REPO_CONFIG = {
 		 * and would be collected via our `gather-version-metadata` script.
 		 */
 		assetDir: 'img',
+		basePaths: ['cli', 'internals', 'intro', 'language'],
 		contentDir: 'docs',
 		dataDir: 'data',
+		productSlug: 'terraform',
 		semverCoerce: semver.coerce,
+		versionedDocs: true,
 		websiteDir: 'website',
-		basePaths: ['cli', 'internals', 'intro', 'language'],
 	},
 	'terraform-cdk': {
 		/**
@@ -222,11 +252,13 @@ export const ALL_REPO_CONFIG = {
 		 * Maybe like a `versionsWithoutAssets` array or something?
 		 */
 		assetDir: '',
+		basePaths: ['cdktf'],
 		contentDir: 'docs',
 		dataDir: 'data',
+		productSlug: 'terraform',
 		semverCoerce: semver.coerce,
+		versionedDocs: true,
 		websiteDir: 'website',
-		basePaths: ['cdktf'],
 	},
 	'terraform-docs-agents': {
 		/**
@@ -239,11 +271,13 @@ export const ALL_REPO_CONFIG = {
 		 * See note at top of this document on `pages` directories for details.
 		 */
 		assetDir: 'img',
+		basePaths: ['cloud-docs/agents'],
 		contentDir: 'docs',
 		dataDir: 'data',
+		productSlug: 'terraform',
 		semverCoerce: semver.coerce,
+		versionedDocs: true,
 		websiteDir: 'website',
-		basePaths: ['cloud-docs/agents'],
 	},
 	'terraform-docs-common': {
 		/**
@@ -262,7 +296,9 @@ export const ALL_REPO_CONFIG = {
 		assetDir: 'img',
 		contentDir: 'docs',
 		dataDir: 'data',
+		productSlug: 'terraform',
 		semverCoerce: semver.coerce,
+		versionedDocs: false,
 		websiteDir: 'website',
 	},
 	'terraform-plugin-framework': {
@@ -278,22 +314,26 @@ export const ALL_REPO_CONFIG = {
 		 * See note at top of this document on `pages` directories for details.
 		 */
 		assetDir: 'img',
+		basePaths: ['plugin/framework'],
 		contentDir: 'docs',
 		dataDir: 'data',
+		productSlug: 'terraform',
 		semverCoerce: semver.coerce,
+		versionedDocs: true,
 		websiteDir: 'website',
-		basePaths: ['plugin/framework'],
 	},
 	'terraform-plugin-log': {
 		/**
 		 * ✅ Initial migration attempt: SEEMS TO WORK
 		 */
 		assetDir: 'img',
+		basePaths: ['plugin/log'],
 		contentDir: 'docs',
 		dataDir: 'data',
+		productSlug: 'terraform',
 		semverCoerce: semver.coerce,
+		versionedDocs: true,
 		websiteDir: 'website',
-		basePaths: ['plugin/log'],
 	},
 	'terraform-plugin-mux': {
 		/**
@@ -308,11 +348,13 @@ export const ALL_REPO_CONFIG = {
 		 * See note at top of this document on `pages` directories for details.
 		 */
 		assetDir: 'img',
+		basePaths: ['plugin/mux'],
 		contentDir: 'docs',
 		dataDir: 'data',
+		productSlug: 'terraform',
 		semverCoerce: semver.coerce,
+		versionedDocs: true,
 		websiteDir: 'website',
-		basePaths: ['plugin/mux'],
 	},
 	'terraform-plugin-sdk': {
 		/**
@@ -327,11 +369,13 @@ export const ALL_REPO_CONFIG = {
 		 * See note at top of this document on `pages` directories for details.
 		 */
 		assetDir: 'img',
+		basePaths: ['plugin/sdkv2'],
 		contentDir: 'docs',
 		dataDir: 'data',
+		productSlug: 'terraform',
 		semverCoerce: semver.coerce,
+		versionedDocs: true,
 		websiteDir: 'website',
-		basePaths: ['plugin/sdkv2'],
 	},
 	'terraform-plugin-testing': {
 		/**
@@ -345,11 +389,13 @@ export const ALL_REPO_CONFIG = {
 		 * See note at top of this document on `pages` directories for details.
 		 */
 		assetDir: 'img',
+		basePaths: ['plugin/testing'],
 		contentDir: 'docs',
 		dataDir: 'data',
+		productSlug: 'terraform',
 		semverCoerce: semver.coerce,
+		versionedDocs: true,
 		websiteDir: 'website',
-		basePaths: ['plugin/testing'],
 	},
 	// vagrant: {
 	// 	/**
@@ -367,7 +413,9 @@ export const ALL_REPO_CONFIG = {
 	// 	assetDir: 'public',
 	// 	contentDir: 'content',
 	// 	dataDir: 'data',
+	//  productSlug: 'vagrant',
 	// 	semverCoerce: semver.coerce,
+	//  versionedDocs: true,
 	// 	websiteDir: 'website',
 	// },
 	// vault: {
@@ -383,7 +431,9 @@ export const ALL_REPO_CONFIG = {
 	// 	assetDir: 'public',
 	// 	contentDir: 'content',
 	// 	dataDir: 'data',
+	//  productSlug: 'vault',
 	// 	semverCoerce: semver.coerce,
+	//  versionedDocs: true,
 	// 	websiteDir: 'website',
 	// },
 }
