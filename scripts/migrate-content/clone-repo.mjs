@@ -53,7 +53,9 @@ export function cloneRepo(
 			},
 		)
 	} else {
-		console.log(`🔄 Directory already exists at "${repoDir}". Skipping clone.`)
+		console.log(
+			`🔄 Directory already exists at "${repoDir}". Skipping clone, if you wish to clone run again with '-force'`,
+		)
 	}
 	// Return the path to the previously-existing or newly-cloned directory
 	return repoDir
