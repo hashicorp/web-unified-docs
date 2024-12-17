@@ -23,10 +23,15 @@ async function main() {
 	const versionMetadata = await gatherVersionMetadata(CONTENT_DIR)
 	const versionMetadataJson = JSON.stringify(versionMetadata, null, 2)
 	fs.writeFileSync(VERSION_METADATA_FILE, versionMetadataJson)
+
 	// Apply MDX transforms, writing out transformed MDX files to `public`
 	await buildMdxTransforms(CONTENT_DIR, CONTENT_DIR_OUT, versionMetadata)
+
 	// Copy all `*-nav-data.json` files from `content` to `public/content`, using execSync
 	await copyNavDataFiles(CONTENT_DIR, CONTENT_DIR_OUT, versionMetadata)
+
+	// Copy all `redirects.jsonc` files from `content` to `public/content`, using execSync
+	await copyRedirectFiles(CONTENT_DIR, CONTENT_DIR_OUT)
 }
 
 /**
@@ -50,10 +55,29 @@ async function copyNavDataFiles(sourceDir, destDir, versionMetadata = {}) {
 				fs.mkdirSync(parentDir, { recursive: true })
 			}
 			fs.copyFileSync(filePath, destPath)
-			if (!Object.keys(versionMetadata).length) {
-				// add version to nav data paths/hrefs
-				await addVersionToNavData(destPath, versionMetadata)
+
+			// add version to nav data paths/hrefs
+			await addVersionToNavData(destPath, versionMetadata)
+		},
+		16,
+	)
+}
+
+async function copyRedirectFiles(sourceDir, destDir) {
+	const redirectFiles = (await listFiles(sourceDir)).filter((f) => {
+		return f.endsWith('redirects.jsonc')
+	})
+
+	await batchPromises(
+		redirectFiles,
+		async (filePath) => {
+			const relativePath = path.relative(sourceDir, filePath)
+			const destPath = path.join(destDir, relativePath)
+			const parentDir = path.dirname(destPath)
+			if (!fs.existsSync(parentDir)) {
+				fs.mkdirSync(parentDir, { recursive: true })
 			}
+			fs.copyFileSync(filePath, destPath)
 		},
 		16,
 	)

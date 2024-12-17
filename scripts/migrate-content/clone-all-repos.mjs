@@ -1,7 +1,7 @@
 import { execSync } from 'child_process'
 // Local
 import { cloneRepo } from './clone-repo.mjs'
-import { ALL_REPO_CONFIG } from './repo-config.mjs'
+import { PRODUCT_CONFIG } from '../../app/utils/productConfig.mjs'
 import { getTargetReleaseRefs } from './get-target-release-refs.mjs'
 
 /**
@@ -26,8 +26,8 @@ import { getTargetReleaseRefs } from './get-target-release-refs.mjs'
  */
 const GH_CLONE_TEMP_DIR = '.content-source-repos'
 
-// Run the clone & checkout refs for slugs of all repos in `ALL_REPO_CONFIG`
-main(Object.keys(ALL_REPO_CONFIG), GH_CLONE_TEMP_DIR)
+// Run the clone & checkout refs for slugs of all repos in `PRODUCT_CONFIG`
+main(Object.keys(PRODUCT_CONFIG), GH_CLONE_TEMP_DIR)
 
 /**
  * Given an array of repoSlugs, and a temp directory in which to clone repos,
@@ -40,7 +40,7 @@ main(Object.keys(ALL_REPO_CONFIG), GH_CLONE_TEMP_DIR)
  */
 async function main(repoSlugs, tempDir) {
 	for (const repoSlug of repoSlugs) {
-		const repoConfig = ALL_REPO_CONFIG[repoSlug]
+		const repoConfig = PRODUCT_CONFIG[repoSlug]
 		const cloneArgs = '--depth=1 --filter=blob:none'
 		const cloneDir = cloneRepo(tempDir, 'hashicorp', repoSlug, cloneArgs)
 		const targetReleaseRefs = await getTargetReleaseRefs({

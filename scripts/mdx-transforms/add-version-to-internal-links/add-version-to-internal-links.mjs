@@ -3,7 +3,7 @@ import remarkMdx from 'remark-mdx'
 import flatMap from 'unist-util-flatmap'
 import semver from 'semver'
 
-import { ALL_REPO_CONFIG } from '../../migrate-content/repo-config.mjs'
+import { PRODUCT_CONFIG } from '../../../app/utils/productConfig.mjs'
 
 /**
  * Rewrites internal links in a document tree to include version information.
@@ -23,7 +23,7 @@ export const rewriteInternalLinksPlugin = ({ entry, versionMetadata }) => {
 	const [product, version] = relativePath.split('/')
 
 	// We are looking at a versionless doc
-	if (!semver.valid(semver.coerce(version))) {
+	if (semver.valid(semver.coerce(version)) === null) {
 		return
 	}
 
@@ -33,7 +33,7 @@ export const rewriteInternalLinksPlugin = ({ entry, versionMetadata }) => {
 	const latestVersion = versionMetadata[product].find((version) => {
 		return version.isLatest
 	}).version
-	const basePaths = ALL_REPO_CONFIG[product].basePaths || []
+	const basePaths = PRODUCT_CONFIG[product].basePaths || []
 	/**
 	 * If the version in the filepath is the latest version or
 	 * no base paths exist for the product, then skip rewriting internal links
@@ -50,7 +50,6 @@ export const rewriteInternalLinksPlugin = ({ entry, versionMetadata }) => {
 	const isLinkToRewritePattern = new RegExp(
 		`^(?!https?:\\/\\/|http:\\/\\/)(((\\.+\\/)*)|\\/|\\/${product}(?:\\/${basePaths.join('|')})?\\/)`,
 	)
-
 	// Creates a regex pattern to match and replace internal links based on the provided base paths.
 	const replacePattern = new RegExp(`/(${basePaths.join('|')})(/)?`)
 
@@ -83,6 +82,5 @@ export const transformRewriteInternalLinks = async (
 			versionMetadata,
 		})
 		.process(content)
-
 	return document.contents
 }
