@@ -343,9 +343,6 @@ function migrateRepoContentAtRef(
 
 	dirsToCopy.push({ src: contentSrc, dest: contentDest })
 	dirsToCopy.push({ src: dataSrc, dest: dataDest })
-	console.log(
-		`📁 Copying content from "${repoSlug}" to ${JSON.stringify(dirsToCopy, null, 2)}`,
-	)
 
 	/**
 	 * Execute the copy commands
