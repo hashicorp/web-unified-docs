@@ -41,8 +41,16 @@ export function getProductPaths(directory: string, productSlug: string) {
 	return apiPaths
 }
 
-export const getAllDocsPaths = async () => {
-	const allDocsData = Object.keys(PRODUCT_CONFIG)
+export const getAllDocsPaths = async (products: string[]) => {
+	const allProducts = Object.keys(PRODUCT_CONFIG)
+	const filteredProducts =
+		products.length > 0
+			? allProducts.filter((product: string) => {
+					return products.includes(product)
+				})
+			: allProducts
+
+	const allDocsData = filteredProducts
 		.map((productSlug: string) => {
 			const latestProductVersion = getProductVersion(productSlug, 'latest')
 			if (!latestProductVersion.ok) {

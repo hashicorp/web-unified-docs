@@ -1,8 +1,13 @@
 import { errorResultToString } from '@utils/result'
 import { getAllDocsPaths } from '@utils/allDocsPaths'
+import { NextApiRequest } from 'next'
 
-export async function GET() {
-	const docsPaths = await getAllDocsPaths()
+export async function GET(
+	req: NextApiRequest,
+	{ params }: { params: { productSlugs: string[] } },
+) {
+	const productSlugs = params?.productSlugs ?? []
+	const docsPaths = await getAllDocsPaths(productSlugs)
 
 	if (!docsPaths.ok) {
 		console.error(errorResultToString('API', docsPaths))

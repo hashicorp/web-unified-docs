@@ -11,7 +11,7 @@ afterEach(() => {
 
 test('getProductPaths should determine correct productName for hcp-docs', () => {
 	const apiPaths = getProductPaths(
-		'app/api/all-docs-paths/__fixtures__/hcp-docs-test',
+		'app/api/all-docs-paths/[[...productSlugs]]/__fixtures__/hcp-docs-test',
 		'hcp',
 	)
 
@@ -20,7 +20,7 @@ test('getProductPaths should determine correct productName for hcp-docs', () => 
 
 test('getProductPaths should determine correct productName for terraform products', () => {
 	const apiPaths = getProductPaths(
-		'app/api/all-docs-paths/__fixtures__/terraform-test',
+		'app/api/all-docs-paths/[[...productSlugs]]/__fixtures__/terraform-test',
 		'terraform',
 	)
 
@@ -29,7 +29,7 @@ test('getProductPaths should determine correct productName for terraform product
 
 test('getProductPaths should have the default productName for all other products', () => {
 	const apiPaths = getProductPaths(
-		'app/api/all-docs-paths/__fixtures__/consul-test',
+		'app/api/all-docs-paths/[[...productSlugs]]/__fixtures__/consul-test',
 		'consul',
 	)
 
