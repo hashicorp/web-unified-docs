@@ -174,7 +174,7 @@ test('should handle directory not found (ENOENT error)', async () => {
 	const result = await searchNavDataFiles(product, fullPath)
 	expect(result).toStrictEqual([])
 	expect(consoleLogSpy).toHaveBeenCalledWith(
-		'Directory not found: /Users/aaron.vanderlip/projects/web-unified-docs/content/nonexistent',
+		expect.stringContaining('Directory not found'),
 	)
 	consoleLogSpy.mockRestore()
 })
