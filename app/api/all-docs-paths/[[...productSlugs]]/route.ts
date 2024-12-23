@@ -1,12 +1,12 @@
 import { errorResultToString } from '@utils/result'
-import { getAllDocsPaths } from '@utils/allDocsPaths'
+import { getDocsPaths } from '@utils/allDocsPaths'
 
 export async function GET(
 	req: Request,
 	{ params }: { params: { productSlugs: string[] } },
 ) {
 	const productSlugs = params?.productSlugs ?? []
-	const docsPaths = await getAllDocsPaths(productSlugs)
+	const docsPaths = await getDocsPaths(productSlugs)
 
 	if (!docsPaths.ok) {
 		console.error(errorResultToString('API', docsPaths))
