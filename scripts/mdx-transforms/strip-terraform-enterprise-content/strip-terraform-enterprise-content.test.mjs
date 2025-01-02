@@ -72,25 +72,16 @@ describe('Strip terraform enterprise content', () => {
 	})
 
 	describe('transformStripTerraformEnterpriseContent', () => {
-		let transformContext
+		let version
 
 		beforeEach(() => {
-			transformContext = {
-				cwd: process.cwd(),
-				websiteDir: 'website',
-				contentDir: 'docs',
-				partialsDir: '',
-				version: 'v202207-1',
-				basePaths: ['enterprise', 'cloud-docs'],
-				docSet: ['enterprise'],
-				productSlug: 'terraform',
-			}
+			version = 'v202207-1'
 		})
 
 		describe('with properly formatted comments', () => {
 			it('strips terraform enterprise content', async () => {
-				transformContext.version = 'v202001-1'
-				const markdownSource = `# Heading
+				version = 'v202001-1'
+				const content = `# Heading
   
   Some Text
   
@@ -113,18 +104,18 @@ describe('Strip terraform enterprise content', () => {
   <!-- END: TFE:>v202205-1 -->`
 
 				const result =
-					await transformStripTerraformEnterpriseContent.transformer(
-						markdownSource,
-						transformContext,
-					)
+					await transformStripTerraformEnterpriseContent.transformer({
+						content,
+						version,
+					})
 
 				expect(result).to.include('# Heading')
 				expect(result).to.not.include('foo')
 			})
 
 			it('allows leading and trailing whitespace around comment tags', async () => {
-				transformContext.version = 'v202001-1'
-				const markdownSource = `# Heading
+				version = 'v202001-1'
+				const content = `# Heading
   
            <!-- BEGIN: TFE:>v202205-1 -->      
   foo
@@ -132,17 +123,17 @@ describe('Strip terraform enterprise content', () => {
   <!-- END: TFE:>v202205-1 -->`
 
 				const result =
-					await transformStripTerraformEnterpriseContent.transformer(
-						markdownSource,
-						transformContext,
-					)
+					await transformStripTerraformEnterpriseContent.transformer({
+						content,
+						version,
+					})
 
 				expect(result).to.include('# Heading')
 				expect(result).to.not.include('foo')
 			})
 
 			it('does not strip content when the TFE version satisfies the directive', async () => {
-				const markdownSource = `# Heading
+				const content = `# Heading
   
   <!-- BEGIN: TFE:>v202201-1 -->
   
@@ -157,10 +148,10 @@ describe('Strip terraform enterprise content', () => {
   <!-- END: TFE:>v900000-2 -->`
 
 				const result =
-					await transformStripTerraformEnterpriseContent.transformer(
-						markdownSource,
-						transformContext,
-					)
+					await transformStripTerraformEnterpriseContent.transformer({
+						content,
+						version,
+					})
 
 				expect(result).to.include('should not be removed')
 				expect(result).not.to.include('should be stripped')
@@ -168,8 +159,8 @@ describe('Strip terraform enterprise content', () => {
 		})
 
 		it('throws error on invalid product name', async () => {
-			transformContext.version = 'v202001-1'
-			const markdownSource = `# Heading
+			version = 'v202001-1'
+			const content = `# Heading
   
   Some Text
   
@@ -181,17 +172,17 @@ describe('Strip terraform enterprise content', () => {
   `
 
 			await expect(
-				transformStripTerraformEnterpriseContent.transformer(
-					markdownSource,
-					transformContext,
-				),
+				transformStripTerraformEnterpriseContent.transformer({
+					content,
+					version,
+				}),
 			).rejects.toThrowError(
 				'[strip-terraform-enterprise-content] Directive could not be parsed',
 			)
 		})
 		it('throws error on mismatching block names', async () => {
-			transformContext.version = 'v202001-1'
-			const markdownSource = `# Heading
+			version = 'v202001-1'
+			const content = `# Heading
   
   Some Text
   
@@ -203,18 +194,18 @@ describe('Strip terraform enterprise content', () => {
   `
 
 			await expect(
-				transformStripTerraformEnterpriseContent.transformer(
-					markdownSource,
-					transformContext,
-				),
+				transformStripTerraformEnterpriseContent.transformer({
+					content,
+					version,
+				}),
 			).rejects.toThrowError(
 				'[strip-terraform-enterprise-content] Mismatched block names',
 			)
 		})
 
 		it('throws error on invalid TFC directive', async () => {
-			transformContext.version = 'v202001-1'
-			const markdownSource = `# Heading
+			version = 'v202001-1'
+			const content = `# Heading
   
   Some Text
   
@@ -226,18 +217,18 @@ describe('Strip terraform enterprise content', () => {
   `
 
 			await expect(
-				transformStripTerraformEnterpriseContent.transformer(
-					markdownSource,
-					transformContext,
-				),
+				transformStripTerraformEnterpriseContent.transformer({
+					content,
+					version,
+				}),
 			).rejects.toThrowError(
 				'[strip-terraform-enterprise-content] TFC only supports [only] comparator',
 			)
 		})
 
 		it('errors on invalid TFE directive', async () => {
-			transformContext.version = 'v202001-1'
-			const markdownSource = `# Heading
+			version = 'v202001-1'
+			const content = `# Heading
   
   Some Text
   
@@ -249,18 +240,18 @@ describe('Strip terraform enterprise content', () => {
   `
 
 			await expect(
-				transformStripTerraformEnterpriseContent.transformer(
-					markdownSource,
-					transformContext,
-				),
+				transformStripTerraformEnterpriseContent.transformer({
+					content,
+					version,
+				}),
 			).rejects.toThrowError(
 				'[strip-terraform-enterprise-content] Directive could not be parsed',
 			)
 		})
 
 		it('errors on block nesting', async () => {
-			transformContext.version = 'v202001-1'
-			const markdownSource = `# Heading
+			version = 'v202001-1'
+			const content = `# Heading
   
   Some Text
   
@@ -274,18 +265,18 @@ describe('Strip terraform enterprise content', () => {
   `
 
 			await expect(
-				transformStripTerraformEnterpriseContent.transformer(
-					markdownSource,
-					transformContext,
-				),
+				transformStripTerraformEnterpriseContent.transformer({
+					content,
+					version,
+				}),
 			).rejects.toThrowError(
 				'[strip-terraform-enterprise-content] Unexpected BEGIN block: line 6',
 			)
 		})
 
 		it('allows comments containing inconsistent whitespace', async () => {
-			transformContext.version = 'v202001-1'
-			const markdownSource = `# Heading
+			version = 'v202001-1'
+			const content = `# Heading
   
   Some Text
   
@@ -297,8 +288,10 @@ describe('Strip terraform enterprise content', () => {
   `
 
 			const result = await transformStripTerraformEnterpriseContent.transformer(
-				markdownSource,
-				transformContext,
+				{
+					content,
+					version,
+				},
 			)
 
 			expect(result).to.include('Some Text')

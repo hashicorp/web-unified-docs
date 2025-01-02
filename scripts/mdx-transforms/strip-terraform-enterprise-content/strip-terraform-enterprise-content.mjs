@@ -18,19 +18,15 @@ export const END_RE = /^(\s+)?<!--\s+END:\s+(?<block>.*?)\s+-->(\s+)?$/
 export const DIRECTIVE_RE =
 	/^(?<product>TF[CE]):(?<comparator>only|[<>]=?)(v(?<version>[0-9]{6}-[0-9]+))?$/i
 
-/**
- * @type ({
- *    id: string,
- *    transformer: ( markdownSource: string, ctx: { version: string }) => Promise<string>
- * })
- */
 export const transformStripTerraformEnterpriseContent = {
 	id: 'strip-terraform-enterprise-content',
-	async transformer(markdownSource, ctx) {
-		// this is expected to be a full TFE version
-		// - v202205-1
-		const incomingVersion = ctx.version
-
+	/**
+	 * @param {object} data
+	 * @param {string} data.markdownSource String of newline seperated lines of text representing the markdown document to be parsed
+	 * @param {string} data.incomingVersion A full TFE version e.g `v202205-1`
+	 * @returns Promise<string>
+	 */
+	async transformer({ content: markdownSource, version: incomingVersion }) {
 		// get each line of our mdx content
 		const lines = markdownSource.split(/\r?\n/)
 
