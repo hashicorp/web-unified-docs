@@ -13,6 +13,7 @@ import {
 	rewriteInternalRedirectsPlugin,
 	loadRedirects,
 } from './rewrite-internal-redirects/rewrite-internal-redirects.mjs'
+import { transformStripTerraformEnterpriseContent } from './strip-terraform-enterprise-content/strip-terraform-enterprise-content.mjs'
 
 const CWD = process.cwd()
 const VERSION_METADATA_FILE = path.join(CWD, 'app/api/versionMetadata.json')
@@ -89,6 +90,7 @@ export async function applyFileMdxTransforms(entry, versionMetadata = {}) {
 				redirects,
 			})
 			.use(rewriteInternalLinksPlugin, { entry, versionMetadata })
+			.use(transformStripTerraformEnterpriseContent, { content, version })
 			.process(content)
 
 		const transformedContent = String(remarkResults)

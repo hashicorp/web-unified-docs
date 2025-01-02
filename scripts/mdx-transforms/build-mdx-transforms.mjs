@@ -18,6 +18,7 @@ import {
 	rewriteInternalRedirectsPlugin,
 	loadRedirects,
 } from './rewrite-internal-redirects/rewrite-internal-redirects.mjs'
+import { transformStripTerraformEnterpriseContent } from './strip-terraform-enterprise-content/strip-terraform-enterprise-content.mjs'
 
 /**
  * Given a target directory,
@@ -129,6 +130,7 @@ async function applyMdxTransforms(entry, versionMetadata = {}) {
 				redirects,
 			})
 			.use(rewriteInternalLinksPlugin, { entry, versionMetadata })
+			.use(transformStripTerraformEnterpriseContent, { content, version })
 			.process(content)
 
 		const transformedContent = String(remarkResults)
