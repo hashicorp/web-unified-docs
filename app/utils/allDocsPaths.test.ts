@@ -1,4 +1,4 @@
-import { expect, test } from 'vitest'
+import { expect, test, vi } from 'vitest'
 import { getDocsPaths } from './allDocsPaths'
 import docsPathsMock from '../../__fixtures__/docsPaths.json'
 
@@ -22,6 +22,12 @@ test('getDocsPaths should return filtered docs paths when a non-empty productSlu
 })
 
 test('getDocsPaths should return an error if there are no paths for a non-empty productSlugs array', async () => {
+	const mockConsole = vi.spyOn(console, 'error').mockImplementation(() => {})
+
 	const response = await getDocsPaths(['terraform'], {})
+	expect(mockConsole).toHaveBeenCalledOnce()
+	expect(mockConsole).toHaveBeenLastCalledWith(
+		'Product, terraform, not found in docs paths',
+	)
 	expect(response).toEqual({ ok: false, value: 'All docs paths not found' })
 })

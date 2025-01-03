@@ -3,7 +3,6 @@ import {
 	gatherAllDocsPaths,
 	getProductPaths,
 } from './gather-all-docs-paths.mjs'
-import versionMetadata from '../app/api/versionMetadata.json'
 import * as repoConfig from '../app/utils/productConfig.mjs'
 
 afterEach(() => {
@@ -12,9 +11,31 @@ afterEach(() => {
 
 // gatherAllDocsPaths tests
 
-test.only('gatherAllDocsPaths returns the paths', async () => {
+test('gatherAllDocsPaths returns the paths', async () => {
+	vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({
+		terraform: {
+			assetDir: 'public',
+			contentDir: 'docs',
+			dataDir: 'data',
+			productSlug: 'terraform',
+			semverCoerce: () => {},
+			versionedDocs: true,
+			websiteDir: 'website',
+		},
+	})
+	const versionMetadata = {
+		terraform: [
+			{ version: 'v1.9.x', releaseStage: 'stable', isLatest: true },
+			{ version: 'v1.8.x', releaseStage: 'stable', isLatest: false },
+		],
+	}
 	const result = await gatherAllDocsPaths(versionMetadata)
-	expect(result).toContain('terraform/enterprise/api-docs/account')
+
+	expect(result.terraform).toEqual(
+		expect.arrayContaining([
+			expect.objectContaining({ path: 'terraform/cli/auth' }),
+		]),
+	)
 })
 
 test('gatherAllDocsPaths throws an error if no version metadata is found for a product', async () => {
@@ -29,10 +50,10 @@ test('gatherAllDocsPaths throws an error if no version metadata is found for a p
 			websiteDir: 'website',
 		},
 	})
-	// const result = await gatherAllDocsPaths(versionMetadataMock)
-	expect(async () => {
-		return await gatherAllDocsPaths(versionMetadata)
-	}).toThrow()
+	const versionMetadata = {}
+	await expect(gatherAllDocsPaths(versionMetadata)).rejects.toThrow(
+		'No version metadata found for product',
+	)
 })
 
 // getProductPaths tests
