@@ -1,11 +1,9 @@
 import { errorResultToString } from '@utils/result'
 import { getDocsPaths } from '@utils/allDocsPaths'
 
-export async function GET(
-	req: Request,
-	{ params }: { params: { productSlugs: string[] } },
-) {
-	const productSlugs = params?.productSlugs ?? []
+export async function GET(req: Request) {
+	const url = new URL(req.url)
+	const productSlugs = url.searchParams.getAll('products') ?? []
 	const docsPaths = await getDocsPaths(productSlugs)
 
 	if (!docsPaths.ok) {

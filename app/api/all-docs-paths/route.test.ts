@@ -1,5 +1,5 @@
 import { expect, test, vi, afterEach } from 'vitest'
-import docsPathsMock from '../../../../__fixtures__/docsPaths.json'
+import docsPathsMock from '../../../__fixtures__/docsPaths.json'
 import { GET } from './route'
 import * as getDocsPaths from '@utils/allDocsPaths'
 
@@ -17,7 +17,24 @@ test('GET should return a 200 response for happy path', async () => {
 	}
 	const request = mockRequest(`http://localhost:8080/api/all-docs-paths`)
 
-	const response = await GET(request, { params: { productSlugs: undefined } })
+	const response = await GET(request)
+
+	expect(response.status).toBe(200)
+})
+
+test('GET should return a 200 response for happy path with products in the search params', async () => {
+	vi.spyOn(getDocsPaths, 'getDocsPaths').mockResolvedValueOnce({
+		ok: true,
+		value: docsPathsMock.terraform,
+	})
+	const mockRequest = (url: string) => {
+		return new Request(url)
+	}
+	const request = mockRequest(
+		`http://localhost:8080/api/all-docs-paths?products=terraform`,
+	)
+
+	const response = await GET(request)
 
 	expect(response.status).toBe(200)
 })
@@ -34,7 +51,7 @@ test('GET should return error if docsPaths are not found', async () => {
 		return new Request(url)
 	}
 	const request = mockRequest(`http://localhost:8080/api/all-docs-paths`)
-	const response = await GET(request, { params: { productSlugs: undefined } })
+	const response = await GET(request)
 
 	expect(mockConsole).toHaveBeenCalledOnce()
 	expect(mockConsole).toHaveBeenLastCalledWith(
