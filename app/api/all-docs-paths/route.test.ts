@@ -1,92 +1,77 @@
 import { expect, test, vi, afterEach } from 'vitest'
+import docsPathsMock from '../../../__fixtures__/docsPaths.json'
 import { GET } from './route'
-import { getProductPaths, getAllDocsPaths } from '@utils/allDocsPaths'
-import * as repoConfig from '@utils/productConfig.mjs'
+import * as getDocsPaths from '@utils/allDocsPaths'
 
 afterEach(() => {
 	vi.restoreAllMocks()
 })
 
-// getProductPaths tests
-
-test('getProductPaths should determine correct productName for hcp-docs', () => {
-	const apiPaths = getProductPaths(
-		'app/api/all-docs-paths/__fixtures__/hcp-docs-test',
-		'hcp',
-	)
-
-	expect(apiPaths[0].path).toBe('hcp/hcp-docs-test')
-})
-
-test('getProductPaths should determine correct productName for terraform products', () => {
-	const apiPaths = getProductPaths(
-		'app/api/all-docs-paths/__fixtures__/terraform-test',
-		'terraform',
-	)
-
-	expect(apiPaths[0].path).toBe('terraform/terraform-test')
-})
-
-test('getProductPaths should have the default productName for all other products', () => {
-	const apiPaths = getProductPaths(
-		'app/api/all-docs-paths/__fixtures__/consul-test',
-		'consul',
-	)
-
-	expect(apiPaths[0].path).toBe('consul/consul-test')
-})
-
-// getAllDocsPaths tests
-
-test.skip('getAllDocsPaths should have an ok status for happy path', async () => {
-	const result = await getAllDocsPaths()
-
-	expect(result.ok).toBe(true)
-})
-
-test('getAllDocsPaths should return an error if the product version is not found', async () => {
-	vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({
-		boundary: {
-			assetDir: 'public',
-			contentDir: 'content',
-			dataDir: 'data',
-			productSlug: 'boundary',
-			semverCoerce: () => {},
-			versionedDocs: true,
-			websiteDir: 'website',
-		},
+test('GET should return a 200 response with no products', async () => {
+	vi.spyOn(getDocsPaths, 'getDocsPaths').mockResolvedValueOnce({
+		ok: true,
+		value: Object.values(docsPathsMock).flat(),
 	})
-	const mockConsole = vi.spyOn(console, 'error').mockImplementation(() => {})
+	const mockRequest = (url: string) => {
+		return new Request(url)
+	}
+	const request = mockRequest(`http://localhost:8080/api/all-docs-paths`)
 
-	await getAllDocsPaths()
-	expect(mockConsole).toHaveBeenCalledOnce()
-	expect(mockConsole).toHaveBeenLastCalledWith(
-		'API Error: Product, boundary, not found in version metadata',
+	const response = await GET(request)
+
+	expect(response.status).toBe(200)
+})
+
+test('GET should return a 200 response for one product in the search params', async () => {
+	vi.spyOn(getDocsPaths, 'getDocsPaths').mockResolvedValueOnce({
+		ok: true,
+		value: docsPathsMock.terraform,
+	})
+	const mockRequest = (url: string) => {
+		return new Request(url)
+	}
+	const request = mockRequest(
+		`http://localhost:8080/api/all-docs-paths?products=terraform`,
 	)
+
+	const response = await GET(request)
+
+	expect(response.status).toBe(200)
 })
 
-test('getAllDocsPaths should return an error if there are no docs paths found', async () => {
-	vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({})
-	global.fetch = vi.fn()
+test('GET should return a 200 response for multiple products in the search params', async () => {
+	vi.spyOn(getDocsPaths, 'getDocsPaths').mockResolvedValueOnce({
+		ok: true,
+		value: [
+			...docsPathsMock.terraform,
+			...docsPathsMock['terraform-docs-common'],
+		],
+	})
+	const mockRequest = (url: string) => {
+		return new Request(url)
+	}
+	const request = mockRequest(
+		`http://localhost:8080/api/all-docs-paths?products=terraform&products=terraform-docs-common`,
+	)
 
-	const result = await getAllDocsPaths()
-	expect(result).toEqual({ ok: false, value: 'All docs paths not found' })
-})
-
-// GET tests
-
-test.skip('GET should return a 200 response for happy path', async () => {
-	const response = await GET()
+	const response = await GET(request)
 
 	expect(response.status).toBe(200)
 })
 
 test('GET should return error if docsPaths are not found', async () => {
-	vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({})
+	vi.spyOn(getDocsPaths, 'getDocsPaths').mockResolvedValueOnce({
+		ok: false,
+		value: 'All docs paths not found',
+	})
 	global.fetch = vi.fn()
 	const mockConsole = vi.spyOn(console, 'error').mockImplementation(() => {})
 
-	const response = await GET()
+	const mockRequest = (url: string) => {
+		return new Request(url)
+	}
+	const request = mockRequest(`http://localhost:8080/api/all-docs-paths`)
+	const response = await GET(request)
 
 	expect(mockConsole).toHaveBeenCalledOnce()
 	expect(mockConsole).toHaveBeenLastCalledWith(
