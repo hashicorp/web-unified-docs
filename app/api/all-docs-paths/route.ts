@@ -1,8 +1,10 @@
 import { errorResultToString } from '@utils/result'
-import { getAllDocsPaths } from '@utils/allDocsPaths'
+import { getDocsPaths } from '@utils/allDocsPaths'
 
-export async function GET() {
-	const docsPaths = await getAllDocsPaths()
+export async function GET(req: Request) {
+	const url = new URL(req.url)
+	const productSlugs = url.searchParams.getAll('products') ?? []
+	const docsPaths = await getDocsPaths(productSlugs)
 
 	if (!docsPaths.ok) {
 		console.error(errorResultToString('API', docsPaths))
