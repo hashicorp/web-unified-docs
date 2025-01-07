@@ -4,6 +4,7 @@ import { buildMdxTransforms } from './mdx-transforms/build-mdx-transforms.mjs'
 import { batchPromises } from './utils/batch-promises.mjs'
 import { listFiles } from './utils/list-files.mjs'
 import { gatherVersionMetadata } from './gather-version-metadata.mjs'
+import { gatherAllDocsPaths } from './gather-all-docs-paths.mjs'
 import { addVersionToNavData } from './add-version-to-nav-data.mjs'
 
 /**
@@ -14,6 +15,7 @@ const CWD = process.cwd()
 const CONTENT_DIR = path.join(CWD, 'content')
 const CONTENT_DIR_OUT = path.join(CWD, 'public', 'content')
 const VERSION_METADATA_FILE = path.join(CWD, 'app/api/versionMetadata.json')
+const DOCS_PATHS_FILE = path.join(CWD, 'app/api/docsPaths.json')
 
 /**
  * Define the prebuild script.
@@ -23,6 +25,11 @@ async function main() {
 	const versionMetadata = await gatherVersionMetadata(CONTENT_DIR)
 	const versionMetadataJson = JSON.stringify(versionMetadata, null, 2)
 	fs.writeFileSync(VERSION_METADATA_FILE, versionMetadataJson)
+
+	// Gather and write out all docs paths
+	const docsPaths = await gatherAllDocsPaths(versionMetadata)
+	const docsPathsJson = JSON.stringify(docsPaths, null, 2)
+	fs.writeFileSync(DOCS_PATHS_FILE, docsPathsJson)
 
 	// Apply MDX transforms, writing out transformed MDX files to `public`
 	await buildMdxTransforms(CONTENT_DIR, CONTENT_DIR_OUT, versionMetadata)

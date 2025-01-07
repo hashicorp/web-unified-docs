@@ -1,72 +1,34 @@
-import { errorResultToString, Ok, Err } from '@utils/result'
-import { getProductVersion } from '@utils/contentVersions'
-import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
-import fs from 'fs'
-import path from 'path'
+import { Ok, Err } from '@utils/result'
+import docsPaths from '@api/docsPaths.json'
 
-export function getProductPaths(directory: string, productSlug: string) {
-	const apiPaths = []
-
-	function traverseDirectory(currentPath: string, relativePath: string = '') {
-		const items = fs.readdirSync(currentPath)
-
-		items.forEach((item: string) => {
-			const itemPath = path.join(currentPath, item)
-			const itemRelativePath = path.join(relativePath, item)
-			const stat = fs.statSync(itemPath)
-
-			if (stat.isDirectory()) {
-				traverseDirectory(itemPath, itemRelativePath)
-			} else {
-				const itemName = item.split('.')[0]
-
-				if (itemName === 'index') {
-					apiPaths.push({
-						path: path.join(productSlug, relativePath),
-						created_at: stat.mtime,
-					})
-					return
-				}
-
-				apiPaths.push({
-					path: path.join(productSlug, relativePath, itemName),
-					created_at: stat.mtime,
-				})
-			}
-		})
-	}
-
-	traverseDirectory(directory)
-
-	return apiPaths
+type DocsPathsData = {
+	[productSlug: string]: { path: string; created_at: string }[]
 }
 
-export const getAllDocsPaths = async () => {
-	const allDocsData = Object.keys(PRODUCT_CONFIG)
+export const getDocsPaths = async (
+	productSlugs: string[],
+	docsPathsData: DocsPathsData = docsPaths,
+) => {
+	if (productSlugs.length === 0) {
+		const paths = Object.values(docsPathsData).flat()
+		if (paths !== undefined && paths.length > 0) {
+			return Ok(paths)
+		}
+		return Err('All docs paths not found')
+	}
+
+	const paths = productSlugs
 		.map((productSlug: string) => {
-			const latestProductVersion = getProductVersion(productSlug, 'latest')
-			if (!latestProductVersion.ok) {
-				console.error(errorResultToString('API', latestProductVersion))
-				return Err('Product version not found')
+			if (docsPathsData[productSlug]) {
+				return docsPathsData[productSlug]
 			}
-
-			const contentPath = path.join(
-				'./content',
-				productSlug,
-				latestProductVersion.value,
-				PRODUCT_CONFIG[productSlug].contentDir,
-			)
-			const allPaths = getProductPaths(
-				contentPath,
-				PRODUCT_CONFIG[productSlug].productSlug,
-			)
-
-			return allPaths
+			console.error(`Product, ${productSlug}, not found in docs paths`)
+			return []
 		})
 		.flat()
 
-	if (allDocsData !== undefined && allDocsData.length > 0) {
-		return Ok(allDocsData)
+	if (paths !== undefined && paths.length > 0) {
+		return Ok(paths)
 	}
 	return Err('All docs paths not found')
 }
