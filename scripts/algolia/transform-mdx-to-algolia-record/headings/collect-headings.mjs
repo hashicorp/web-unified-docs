@@ -2,27 +2,6 @@ import remark from 'remark'
 import visit from 'unist-util-visit'
 
 /**
- * Recursively concatenates the text content of a node's children, filtering out HTML elements.
- *
- * @param {Object} node - The parent node containing child nodes.
- * @param {Array} node.children - The child nodes to be processed.
- * @returns {string} The concatenated text content of the child nodes, with HTML elements removed.
- */
-function stringifyChildNodes(node) {
-	return node.children
-		.map((child) => {
-			if ('children' in child) {
-				return stringifyChildNodes(child)
-			} else if ('value' in child && child.type !== 'html') {
-				return child.value
-			}
-			return ''
-		})
-		.join('')
-		.trim()
-}
-
-/**
  * A transformer function that collects headings from a Markdown Abstract Syntax Tree (AST).
  *
  * @param {Object} options - The options object.
@@ -30,6 +9,23 @@ function stringifyChildNodes(node) {
  * @returns {Function} A transformer function that processes the Markdown AST.
  */
 const headingsCollector = ({ collector }) => {
+	/**
+	 * Recursively concatenates the text content of a node's children, filtering out HTML elements.
+	 */
+	function stringifyChildNodes(node) {
+		return node.children
+			.map((child) => {
+				if ('children' in child) {
+					return stringifyChildNodes(child)
+				} else if ('value' in child && child.type !== 'html') {
+					return child.value
+				}
+				return ''
+			})
+			.join('')
+			.trim()
+	}
+
 	return function transformer(tree) {
 		visit(tree, 'heading', (node) => {
 			if (node.depth <= 5) {
