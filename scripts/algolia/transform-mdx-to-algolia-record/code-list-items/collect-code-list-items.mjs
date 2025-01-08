@@ -10,6 +10,19 @@ import is from 'unist-util-is'
  * `collector` variable, which is required for the plugin to function.
  */
 const codeListItemCollector = ({ collector }) => {
+	/**
+	 * unist-util-is for `paragraph` nodes
+	 */
+	function isParagraph(node) {
+		return is(node, 'paragraph')
+	}
+
+	/**
+	 * unist-util-is for `inlineCode` nodes
+	 */
+	function isInlineCode(node) {
+		return is(node, 'inlineCode')
+	}
 	return function transformer(tree) {
 		visit(tree, 'listItem', (node) => {
 			// If the list node has no children, skip it
@@ -55,20 +68,4 @@ export async function collectCodeListItems(content) {
 		.then(() => {
 			return codeListItems
 		})
-}
-
-/**
- * unist-util-is for `paragraph` nodes,
- * with a type guard so we don't have to cast types.
- */
-function isParagraph(node) {
-	return is(node, 'paragraph')
-}
-
-/**
- * unist-util-is for `inlineCode` nodes,
- * with a type guard so we don't have to cast types.
- */
-function isInlineCode(node) {
-	return is(node, 'inlineCode')
 }
