@@ -2,26 +2,33 @@ import remark from 'remark'
 import visit from 'unist-util-visit'
 
 /**
- * Collect text from children nodes of a Parent node.
- * This will visit nodes recursively via "depth-first" strategy.
+ * Recursively concatenates the text content of a node's children, filtering out HTML elements.
+ *
+ * @param {Object} node - The parent node containing child nodes.
+ * @param {Array} node.children - The child nodes to be processed.
+ * @returns {string} The concatenated text content of the child nodes, with HTML elements removed.
  */
 function stringifyChildNodes(node) {
-	const text = node.children.reduce((acc, child) => {
-		if ('children' in child) {
-			acc += stringifyChildNodes(child)
-		} else if ('value' in child && child.type !== 'html') {
-			/**
-			 * filter out html in heading, e.g. ## Constructs <a name="Constructs" id="Constructs"></a>
-			 * should return 'Constructs,' not 'Constructs <a name="Constructs" id="Constructs"></a>'
-			 */
-			acc += child.value
-		}
-		return acc
-	}, '')
-
-	return text.trim()
+	return node.children
+		.map((child) => {
+			if ('children' in child) {
+				return stringifyChildNodes(child)
+			} else if ('value' in child && child.type !== 'html') {
+				return child.value
+			}
+			return ''
+		})
+		.join('')
+		.trim()
 }
 
+/**
+ * A transformer function that collects headings from a Markdown Abstract Syntax Tree (AST).
+ *
+ * @param {Object} options - The options object.
+ * @param {Array} options.collector - An array to collect the headings.
+ * @returns {Function} A transformer function that processes the Markdown AST.
+ */
 const headingsCollector = ({ collector }) => {
 	return function transformer(tree) {
 		visit(tree, 'heading', (node) => {
@@ -33,6 +40,12 @@ const headingsCollector = ({ collector }) => {
 	}
 }
 
+/**
+ * Collects headings from the given content using the remark plugin.
+ *
+ * @param {string} content - The content from which to collect headings.
+ * @returns {Promise<Array>} A promise that resolves to an array of collected headings.
+ */
 export async function collectHeadings(content) {
 	const headings = []
 
