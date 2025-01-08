@@ -58,7 +58,7 @@ this is not a heading
 		expect(result).toEqual(expectedHeadings)
 	})
 
-	test('should handle headings with html', async () => {
+	test('should include text from headings and exclude html nodes', async () => {
 		const content = `## Constructs <a name="Constructs" id="Constructs"></a>`
 		const expectedHeadings = ['Constructs']
 
