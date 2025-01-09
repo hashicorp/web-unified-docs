@@ -12,14 +12,15 @@ export async function GET(
 	// Grab the parameters we need to fetch content
 	const { productSlug, version, docsPath } = params
 
-	// Determine the content directory based on the "product" (actually repo) slug
-	const contentDir = PRODUCT_CONFIG[productSlug].contentDir
-	if (!contentDir) {
+	if (!Object.keys(PRODUCT_CONFIG).includes(productSlug)) {
 		console.error(
 			`API Error: Product, ${productSlug}, not found in contentDirMap`,
 		)
 		return new Response('Not found', { status: 404 })
 	}
+
+	// Determine the content directory based on the "product" (actually repo) slug
+	const { contentDir } = PRODUCT_CONFIG[productSlug]
 	const productVersionResult = getProductVersion(productSlug, version)
 	if (!productVersionResult.ok) {
 		console.error(errorResultToString('API', productVersionResult))
