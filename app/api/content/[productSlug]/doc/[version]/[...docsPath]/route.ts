@@ -27,8 +27,7 @@ export async function GET(
 		return new Response('Not found', { status: 404 })
 	}
 
-	const parsedVersion =
-		productVersionResult.ok === true ? productVersionResult.value : ''
+	const { value: parsedVersion } = productVersionResult
 
 	/**
 	 * NOTE: our `content.hashicorp.com` API accepts more complex "section"

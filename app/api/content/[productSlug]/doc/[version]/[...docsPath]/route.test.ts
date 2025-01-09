@@ -1,5 +1,6 @@
 import { expect, describe, it, vi, beforeEach } from 'vitest'
 import { GET } from './route'
+import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
 
 // Keep the mapped types up here, so that things don't become a mess of
 // TypeScript spaghetti
@@ -22,6 +23,19 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 			docsPath: [''],
 			productSlug: 'fake product',
 			version: '',
+		})
+
+		expect(response.status).toBe(404)
+		await expect(response.text()).resolves.toMatch(/not found/i)
+	})
+	it('returns a 404 for nonexistent versions', async () => {
+		const response = await mockRequest('', {
+			docsPath: [''],
+			// Real product name
+			productSlug: Object.keys(PRODUCT_CONFIG)[0],
+
+			// Some junk data for version
+			version: 'lorem ipsum dolor sit amet',
 		})
 
 		expect(response.status).toBe(404)
