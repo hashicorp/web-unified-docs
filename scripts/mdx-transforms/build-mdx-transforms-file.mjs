@@ -47,11 +47,11 @@ export async function buildFileMdxTransforms(filePath) {
 		version,
 		redirectsDir,
 	}
-
-	console.log(`🪄 Running MDX transform on ${filePath}...`)
-	const result = await applyFileMdxTransforms(entry, () => {
-		return fs.readFile(VERSION_METADATA_FILE)
-	})
+	const versionMetadata = fs.readFileSync(VERSION_METADATA_FILE, 'utf-8')
+	const serializedVersionMetadata = JSON.parse(versionMetadata)
+	console.log(`🪄 Running MDX transformar
+		 on ${filePath}...`)
+	const result = await applyFileMdxTransforms(entry, serializedVersionMetadata)
 	if (result.error) {
 		console.error(`❗ Encountered an error: ${result.error}`)
 	} else {
