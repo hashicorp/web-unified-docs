@@ -38,8 +38,7 @@ As a more specific commitment to parity, we will implement `GET` operations for 
   - Purpose: Returns version metadata on specific `.mdx` documents, which allows us to filter our versioned docs dropdowns to only show links to documents that actually exist in the associated versioned set of content.
   - Note: we'd ideally like to move this API route to `/api/content/<productSlug>/content-versions/doc/<...docsPath>`, for consistency with other API routes. We intend to adopt this new route after migration is complete. See [this GitHub comment](https://github.com/hashicorp/web-presence-experimental-docs/pull/9#discussion_r1695450448) for more context.
 
-> UPDATE [Jan 2025] > **We will now include this endpoint as part of our feature parity with the current Content API**.
-> The team decided to include this API endpoint as part of the 2024 Q3 and 2025 Q1 milestone planning. Google doc [here](https://docs.google.com/document/d/1CuHwobTJHKODZCUVfT5iRITK360eFBBBeASZr3tg67A/edit?usp=sharing)
+> UPDATE [Jan 2025] > **We will now include this endpoint as part of our feature parity with the current Content API**. This was decided in the 2024 Q3 and 2025 Q1 milestone planning. Google doc [here](https://docs.google.com/document/d/1CuHwobTJHKODZCUVfT5iRITK360eFBBBeASZr3tg67A/edit?usp=sharing)
 
 - [`/api/static_paths`](https://github.com/hashicorp/mktg-content-workflows/blob/01c3c1bd8c1be5d0d036835f90d191b2b1cca3a1/api/static_paths.ts)
   - Purpose: Returns a subset of documents to render at build time, prioritizing documents that are frequently viewed based on analytics
