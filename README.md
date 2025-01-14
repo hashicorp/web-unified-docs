@@ -1,6 +1,6 @@
-# Experimental Docs
+# Web Unified Docs 
 
-> **Please note**: 🚨 The `public` folder in this repository is served on the public internet, as this project is now [deployed through Vercel](https://vercel.com/hashicorp/web-presence-experimental-docs/deployments). Please exercise caution when testing content migration scripts, _especially_ when pushing your work up. For the majority of content source repositories, this presents very little risk, as the content source repositories themselves are already public.
+> **Please note**: 🚨 The `public` folder in this repository is served on the public internet, as this project is now [deployed through Vercel](https://vercel.com/hashicorp/web-unified-docs/deployments). Please exercise caution when testing content migration scripts, _especially_ when pushing your work up. For the majority of content source repositories, this presents very little risk, as the content source repositories themselves are already public.
 >
 > However, some content source repositories are _not_ public. Specifically:
 >
@@ -10,9 +10,47 @@
 >
 > For these repositories in particular, please take care to ensure that only the content that is already published through our `content.hashicorp.com` API is migrated into this repository.
 
-This repo is a work-in-progress experimental exploration of an approach the Web Presence team is considering to simplify and streamline the documentation process for our products. Put simply, this approach stores all the versioned docs in one branch of one repo, rather than many branches in many repos. We are in the process of validating the approach, and would appreciate any feedback before we move on to writing a formal RFC.
 
-## Advantages
+The project in this repository, `hashicorp/web-unified-docs`, aims to implement [[DEVDOT-023] Unified Product Documentation Repository](https://docs.google.com/document/d/1p8kOqySttvWUVfn7qiC4wGBR73LMBGMelwLt69pM3FQ/edit). The RFC for this project was intentionally light on implementation details, in order to foster consensus on the broad direction.
+
+The existing API (`content.hashicorp.com`) has endpoints that serve documentation content, the source code for which can be found in [hashicorp/mktg-content-workflows](https://github.com/hashicorp/mktg-content-workflows/blob/main/api/content.ts). The endpoints related to documentation content will be replaced with a new API as part of this project.
+
+
+
+## Local Development
+
+### Requirements:
+
+- [Node.js](https://nodejs.org/en) (version 20 or higher)
+- [Docker](https://www.docker.com/) and [Docker Compose](https://docs.docker.com/compose/) (for managing containers)
+
+### Terminology
+
+- `migration | migration-preview` - A preview of `hashicorp/dev-portal` where some routes fetch data from the existing content API and whilst only the routes that have been intentionally migrated use the new unified docs api ie this repo.
+- `unified-docs | unified-docs-preview` - A preview of `hashicorp/dev-portal` where it pulls all of its content from the new unified docs api ie this repo.
+
+### Quick Start
+
+To get a migration preview running, run `make` from the root of this repo. Once this command completes the following endpoints should be working:
+
+- http://localhost:3000 - A running instance of the current dev-portal frontend application that is configured to pull content from the local `public` direcotry.
+
+- http://localhost:8000 - An instance of the content API endpoint that serves content from the local `public` directory. Here is example of a request http://localhost:8080/api/content/terraform/doc/v1.1.x/cli that can be used to test this endpoint.
+
+To spin this down gracefully, run `make clean` in a separate terminal. If you wish to remove the local Docker images as well, you can specify `make clean CLEAN_OPTION=full`.
+
+### More Commands
+
+The `makefile` serves as a convenience tool to get a migration preview running. If you need more granular control a full list of the commands are available in the `package.json` file.
+To use these you will need to intentionally run `npm install` and `npm run prebuild` before anything else.
+
+Running test coverage `npm run coverage`
+
+
+
+## Background
+
+### Project Ratoinale 
 
 - Storing documentation in one branch of one repo dramatically simplifies the workflow for contributing documentation.
 - Publishing changes to multiple versions can be done in a single PR, as opposed to multiple PRs which is required by the current setup.
@@ -24,9 +62,9 @@ This repo is a work-in-progress experimental exploration of an approach the Web 
 - Removes the ability for docs to break the release workflow in product repos.
 - Enables us to support fully versioned deployment previews, whereas current previews are limited to the branch being modified.
 
-## Clone Time
+### Clone Time
 
-As of writing, cloning this repo takes about the same amount of time as cloning a single one of our larger repos. It can be reduced with features like [sparse checkout](https://github.blog/2020-01-17-bring-your-monorepo-down-to-size-with-sparse-checkout/).
+As of writing, cloning this repo takes about the same amount of time as cloning a single one of our larger repos. 
 
 ```
 $ time git clone https://github.com/hashicorp/web-presence-experimental-docs
@@ -50,25 +88,5 @@ For comparison:
 | terraform                      | 49                      |
 | vault                          | 46                      |
 
-## Local Development
 
-### Requirements:
-
-- [Node.js](https://nodejs.org/en) (version 20 or higher)
-- [Docker](https://www.docker.com/) and [Docker Compose](https://docs.docker.com/compose/) (for managing containers)
-
-### Terminology
-
-- `migration | migration-preview` - A preview of `hashicorp/dev-portal` where some routes fetch data from the existing content API and whilst only the routes that have been intentionally migrated use the new unified docs api ie this repo.
-- `unified-docs | unified-docs-preview` - A preview of `hashicorp/dev-portal` where it pulls all of its content from the new unified docs api ie this repo.
-
-### Quick Start
-
-To get a migration preview running, run `make` from the root of this repo.
-
-To spin this down gracefully, run `make clean` in a separate terminal. If you wish to remove the local Docker images as well, you can specify `make clean CLEAN_OPTION=full`.
-
-### More Commands
-
-The `makefile` serves as a convenience tool to get a migration preview running. If you need more granular control a full list of the commands are available in the `package.json` file.
-To use these you will need to intentionally run `npm install` and `npm run prebuild` before anything else.
+### [Architectural Decision Records](https://github.com/hashicorp/web-unified-docs/tree/main/docs/decisions)
