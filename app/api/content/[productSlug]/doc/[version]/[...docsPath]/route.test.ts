@@ -1,4 +1,4 @@
-import { expect, describe, it, vi, beforeEach } from 'vitest'
+import { expect, describe, it, vi, beforeEach, afterAll } from 'vitest'
 import { GET, GetParams } from './route'
 import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
 import { Err, Ok } from '@utils/result'
@@ -27,14 +27,18 @@ vi.mock(import('@utils/file'), async (importOriginal) => {
 declare type HttpGet = typeof GET
 describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 	let mockRequest: (path: string, params: GetParams) => ReturnType<HttpGet>
+	let consoleMock
 	beforeEach(() => {
 		mockRequest = (path: string, params: GetParams) => {
 			const url = new URL(`http://localhost:8000/api/content${path}`)
 			const req = new Request(url)
 			return GET(req, { params })
 		}
-		// eat error message
-		vi.spyOn(console, 'error').mockImplementation(() => {})
+		// spy on console.error so that we can examine it's calls
+		consoleMock = vi.spyOn(console, 'error').mockImplementation(() => {})
+	})
+	afterAll(() => {
+		consoleMock.mockReset()
 	})
 	it('returns a 404 for nonexistent products', async () => {
 		const response = await mockRequest('', {
@@ -44,6 +48,9 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 		})
 
 		expect(response.status).toBe(404)
+		expect(consoleMock).toHaveBeenCalledWith(
+			`API Error: Product, fake product, not found in contentDirMap`,
+		)
 		await expect(response.text()).resolves.toMatch(/not found/i)
 	})
 	it('returns a 404 for nonexistent versions', async () => {
@@ -61,6 +68,9 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 			version,
 		})
 
+		expect(consoleMock).toHaveBeenCalledWith(
+			`API Error: Product, ${productSlug}, has no "${version}" version`,
+		)
 		expect(response.status).toBe(404)
 		await expect(response.text()).resolves.toMatch(/not found/i)
 	})
@@ -85,6 +95,21 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 			version,
 		})
 
+		expect(consoleMock).toHaveBeenCalledWith(
+			`API Error: No content found at ${[
+				'content',
+				productSlug,
+				version,
+				'docs',
+				'.mdx',
+				'content',
+				productSlug,
+				version,
+				'docs',
+				'',
+				'index.mdx',
+			].join(',')}`,
+		)
 		expect(response.status).toBe(404)
 		await expect(response.text()).resolves.toMatch(/not found/i)
 	})
@@ -113,6 +138,10 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 			productSlug,
 			version,
 		})
+
+		expect(consoleMock).toHaveBeenCalledWith(
+			`API Error: Failed to parse Markdown front-matter`,
+		)
 		expect(response.status).toBe(404)
 		await expect(response.text()).resolves.toMatch(/not found/i)
 	})
