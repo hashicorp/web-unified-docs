@@ -1,16 +1,14 @@
 import { expect, describe, it, vi, beforeEach } from 'vitest'
-import { GET } from './route'
+import { GET, GetParams } from './route'
 import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
 
 // Keep the mapped types up here, so that things don't become a mess of
 // TypeScript spaghetti
 declare type HttpGet = typeof GET
-declare type HttpGetParams = Parameters<HttpGet>[1]['params']
-
 describe('GET /[productSlug]/[version]/[...docsPath]', () => {
-	let mockRequest: (path: string, params: HttpGetParams) => ReturnType<HttpGet>
+	let mockRequest: (path: string, params: GetParams) => ReturnType<HttpGet>
 	beforeEach(() => {
-		mockRequest = (path: string, params: HttpGetParams) => {
+		mockRequest = (path: string, params: GetParams) => {
 			const url = new URL(`http://localhost:8000/api/content${path}`)
 			const req = new Request(url)
 			return GET(req, { params })

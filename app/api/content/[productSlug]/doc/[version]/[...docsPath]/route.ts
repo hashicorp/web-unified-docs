@@ -3,12 +3,13 @@ import { getProductVersion } from '@utils/contentVersions'
 import { errorResultToString } from '@utils/result'
 import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
 
-export async function GET(
-	request: Request,
-	{
-		params,
-	}: { params: { productSlug: string; version: string; docsPath: string[] } },
-) {
+export type GetParams = {
+	productSlug: string
+	version: string
+	docsPath: string[]
+}
+
+export async function GET(request: Request, { params }: { params: GetParams }) {
 	// Grab the parameters we need to fetch content
 	const { productSlug, version, docsPath } = params
 
