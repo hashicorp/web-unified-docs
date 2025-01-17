@@ -1,14 +1,23 @@
 import { expect, describe, it, vi, beforeEach } from 'vitest'
 import { GET, GetParams } from './route'
 import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
-import { Err } from '@utils/result'
+import { Err, Ok } from '@utils/result'
 import { getProductVersion } from '@utils/contentVersions'
+import { readFile } from '@utils/file'
 
 vi.mock(import('@utils/contentVersions'), async (importOriginal) => {
 	const mod = await importOriginal() // type is inferred
 	return {
 		...mod,
 		getProductVersion: vi.fn(),
+	}
+})
+
+vi.mock(import('@utils/file'), async (importOriginal) => {
+	const mod = await importOriginal() // type is inferred
+	return {
+		...mod,
+		readFile: vi.fn(),
 	}
 })
 
@@ -45,6 +54,30 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 		vi.mocked(getProductVersion).mockReturnValue(
 			Err(`Product, ${productSlug}, has no "${version}" version`),
 		)
+		const response = await mockRequest('', {
+			docsPath: [''],
+			productSlug,
+			version,
+		})
+
+		expect(response.status).toBe(404)
+		await expect(response.text()).resolves.toMatch(/not found/i)
+	})
+	it('returns a 404 for missing content', async () => {
+		// Real product name
+		const productSlug = Object.keys(PRODUCT_CONFIG)[0]
+
+		// Some real(ish) data for version
+		const version = 'v20220610-01'
+
+		// Force the version(real-ish) to exist
+		vi.mocked(getProductVersion).mockReturnValue(Ok(version))
+
+		// Fake missing content on disk
+		vi.mocked(readFile).mockImplementation(async (filePath: string[]) => {
+			return Err(`Failed to read file at path: ${filePath.join('/')}`)
+		})
+
 		const response = await mockRequest('', {
 			docsPath: [''],
 			productSlug,
