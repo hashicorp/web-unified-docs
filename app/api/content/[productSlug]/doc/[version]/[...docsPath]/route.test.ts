@@ -145,4 +145,40 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 		expect(response.status).toBe(404)
 		await expect(response.text()).resolves.toMatch(/not found/i)
 	})
+	it('returns the markdown source of the requested docs', async () => {
+		// Real product name
+		const productSlug = Object.keys(PRODUCT_CONFIG)[0]
+
+		// Some real(ish) data for version
+		const version = 'v20220610-01'
+
+		const markdownSource = '# Hello World'
+
+		// Force the version(real-ish) to exist
+		vi.mocked(getProductVersion).mockReturnValue(Ok(version))
+
+		// Fake content returned from the filesystem
+		vi.mocked(readFile).mockImplementation(async () => {
+			return Ok(markdownSource)
+		})
+
+		// Mock markdown parser returning valid content
+		vi.mocked(parseMarkdownFrontMatter).mockImplementation(() => {
+			return Ok({ markdownSource, metadata: {} })
+		})
+
+		const response = await mockRequest('', {
+			docsPath: [''],
+			productSlug,
+			version,
+		})
+
+		expect(consoleMock).not.toHaveBeenCalled()
+		expect(response.status).toBe(200)
+		const { meta, result } = await response.json()
+		expect(meta.status_code).toBe(200)
+		expect(result.product).toBe(productSlug)
+		expect(result.version).toBe(version)
+		expect(result.markdownSource).toBe(markdownSource)
+	})
 })
