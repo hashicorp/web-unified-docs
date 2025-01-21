@@ -30,26 +30,7 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 
 	const { value: parsedVersion } = productVersionResult
 
-	/**
-	 * NOTE: our `content.hashicorp.com` API accepts more complex "section"
-	 * values. It seems this is mainly to handle Sentinel content, which is
-	 * organized differently than other products, as the content is in a
-	 * `sentinel` subdirectory. To ensure parity with the existing API,
-	 * we handle this here. In the future, post-migration, it probably makes
-	 * sense to try to standardize on `section` format, to avoid having
-	 * this special case.
-	 */
-	const rawDocsPath = docsPath.join('/')
-	let parsedDocsPath
-	if (productSlug === 'sentinel') {
-		if (rawDocsPath.startsWith('sentinel/intro')) {
-			parsedDocsPath = rawDocsPath
-		} else {
-			parsedDocsPath = rawDocsPath.replace(/^sentinel(\/?)/, 'sentinel/docs$1')
-		}
-	} else {
-		parsedDocsPath = rawDocsPath
-	}
+	const parsedDocsPath = docsPath.join('/')
 
 	/**
 	 * TODO: possible improvement: rename files instead of two requests. Which
@@ -114,12 +95,12 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 			status_text: 'OK',
 		},
 		result: {
-			fullPath: rawDocsPath,
+			fullPath: parsedDocsPath,
 			product: productSlug,
 			version: parsedVersion,
 			metadata,
 			subpath: 'docs', // TODO: I guess we could grab the first part of the rawDocsPath? Is there something I am missing here?
-			markdownSource: markdownSource,
+			markdownSource,
 			created_at: 'Fri Aug 13 2021 18:50:23 GMT+0000 (GMT)', // TODO: Currently we store this in dynamodb, but maybe we could just use the file system's/git's created date?
 			sha: '', // TODO: Do we really need this?
 		},
