@@ -22,11 +22,8 @@ vi.mock(import('@utils/file'), async (importOriginal) => {
 	}
 })
 
-// Keep the mapped types up here, so that things don't become a mess of
-// TypeScript spaghetti
-declare type HttpGet = typeof GET
 describe('GET /[productSlug]/[version]/[...docsPath]', () => {
-	let mockRequest: (path: string, params: GetParams) => ReturnType<HttpGet>
+	let mockRequest: (path: string, params: GetParams) => ReturnType<typeof GET>
 	let consoleMock
 	beforeEach(() => {
 		mockRequest = (path: string, params: GetParams) => {
