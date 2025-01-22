@@ -23,11 +23,16 @@ vi.mock(import('@utils/file'), async (importOriginal) => {
 })
 
 describe('GET /[productSlug]/[version]/[...docsPath]', () => {
-	let mockRequest: (path: string, params: GetParams) => ReturnType<typeof GET>
+	let mockRequest: (params: GetParams) => ReturnType<typeof GET>
 	let consoleMock
 	beforeEach(() => {
-		mockRequest = (path: string, params: GetParams) => {
-			const url = new URL(`http://localhost:8000/api/content${path}`)
+		mockRequest = (params: GetParams) => {
+			const { productSlug, version, docsPath } = params
+			// The URL doesn't actually matter in testing, but for completeness
+			// it's nice to have it match the real URL being used
+			const url = new URL(
+				`http://localhost:8000/api/content/${productSlug}/doc/${version}/${docsPath.join('/')}`,
+			)
 			const req = new Request(url)
 			return GET(req, { params })
 		}
@@ -38,7 +43,7 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 		consoleMock.mockReset()
 	})
 	it('returns a 404 for nonexistent products', async () => {
-		const response = await mockRequest('', {
+		const response = await mockRequest({
 			docsPath: [''],
 			productSlug: 'fake product',
 			version: '',
@@ -59,7 +64,7 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 		vi.mocked(getProductVersion).mockReturnValue(
 			Err(`Product, ${productSlug}, has no "${version}" version`),
 		)
-		const response = await mockRequest('', {
+		const response = await mockRequest({
 			docsPath: [''],
 			productSlug,
 			version,
@@ -86,7 +91,7 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 			return Err(`Failed to read file at path: ${filePath.join('/')}`)
 		})
 
-		const response = await mockRequest('', {
+		const response = await mockRequest({
 			docsPath: [''],
 			productSlug,
 			version,
@@ -130,7 +135,7 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 			return Err('Failed to parse Markdown front-matter')
 		})
 
-		const response = await mockRequest('', {
+		const response = await mockRequest({
 			docsPath: [''],
 			productSlug,
 			version,
@@ -164,7 +169,7 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 			return Ok({ markdownSource, metadata: {} })
 		})
 
-		const response = await mockRequest('', {
+		const response = await mockRequest({
 			docsPath: [''],
 			productSlug,
 			version,
