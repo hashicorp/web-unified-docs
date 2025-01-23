@@ -17,7 +17,11 @@ describe('GET /[productSlug]/version-metadata', () => {
 	let consoleMock
 	beforeEach(() => {
 		mockRequest = (product: GetParams['productSlug']) => {
-			const url = new URL('http://localhost:8000/api/content/version-metadata')
+			// The URL doesn't actually matter in testing, but for completeness
+			// it's nice to have it match the real URL being used
+			const url = new URL(
+				`http://localhost:8000/api/content/${product}/version-metadata`,
+			)
 			const req = new Request(url)
 			return GET(req, { params: { productSlug: product } })
 		}
