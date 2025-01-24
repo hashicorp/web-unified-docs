@@ -2,12 +2,31 @@ import { readFile, parseJson } from '@utils/file'
 import { getProductVersion } from '@utils/contentVersions'
 import { errorResultToString } from '@utils/result'
 
-export async function GET(
-	request: Request,
-	{
-		params,
-	}: { params: { productSlug: string; version: string; section: string[] } },
-) {
+/**
+ * Parameters expected by `GET` route handler
+ */
+export type GetParams = {
+	/**
+	 * The product that docs are being requested for
+	 * @example 'terraform'
+	 */
+	productSlug: string
+
+	/**
+	 * Can be a semver version
+	 * @example 'v.1.9.x'
+	 * or a dated version string for PTFE
+	 * @example 'v20220610-01'
+	 */
+	version: string
+
+	/**
+	 * An array of strings representing the path relative to `content/<productSlug>/nav-data/<version>/data`
+	 * @example ['cli']
+	 */
+	section: string[]
+}
+export async function GET(request: Request, { params }: { params: GetParams }) {
 	const { productSlug, version, section } = params
 	const productVersionResult = getProductVersion(productSlug, version)
 	if (!productVersionResult.ok) {
