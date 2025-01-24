@@ -34,36 +34,16 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 		return new Response('Not found', { status: 404 })
 	}
 
-	const parsedVersion =
-		productVersionResult.ok === true ? productVersionResult.value : ''
+	const { value: parsedVersion } = productVersionResult
 
-	/**
-	 * NOTE: our `content.hashicorp.com` API accepts more complex "section"
-	 * values. It seems this is mainly to handle Sentinel content, which is
-	 * organized differently than other products, as the content is in a
-	 * `sentinel` subdirectory. To ensure parity with the existing API,
-	 * we handle this here. In the future, post-migration, it probably makes
-	 * sense to try to standardize on `section` format, to avoid having
-	 * this special case.
-	 */
-	const rawSection = section.join('/')
-	let parsedSection
-	if (productSlug === 'sentinel') {
-		if (rawSection === 'sentinel') {
-			parsedSection = 'docs'
-		} else {
-			parsedSection = rawSection.replace(/^sentinel\//, '')
-		}
-	} else {
-		parsedSection = rawSection
-	}
+	const sectionPath = section.join('/')
 
 	const readFileResult = await readFile([
 		'content',
 		productSlug,
 		parsedVersion,
 		'data',
-		`${parsedSection}-nav-data.json`,
+		`${sectionPath}-nav-data.json`,
 	])
 
 	if (!readFileResult.ok) {
