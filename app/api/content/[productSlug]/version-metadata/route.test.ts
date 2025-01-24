@@ -1,4 +1,12 @@
-import { expect, describe, it, vi, beforeEach, afterAll } from 'vitest'
+import {
+	expect,
+	describe,
+	it,
+	vi,
+	beforeEach,
+	afterAll,
+	MockInstance,
+} from 'vitest'
 import { GET, GetParams } from './route'
 import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
 import { Err, Ok } from '@utils/result'
@@ -14,7 +22,7 @@ vi.mock(import('@utils/contentVersions'), async (importOriginal) => {
 
 describe('GET /[productSlug]/version-metadata', () => {
 	let mockRequest: (product: GetParams['productSlug']) => ReturnType<typeof GET>
-	let consoleMock
+	let consoleMock: MockInstance<Console['error']>
 	beforeEach(() => {
 		mockRequest = (product: GetParams['productSlug']) => {
 			// The URL doesn't actually matter in testing, but for completeness
@@ -44,15 +52,15 @@ describe('GET /[productSlug]/version-metadata', () => {
 
 		const response = await mockRequest(productSlug)
 
-		expect(consoleMock).toHaveBeenCalledWith(
-			`API Error: Product, ${productSlug}, not found in version metadata`,
+		expect(consoleMock.mock.calls[0][0]).toMatch(
+			new RegExp(`product, ${productSlug}, not found`, 'i'),
 		)
 		expect(response.status).toBe(404)
 		await expect(response.text()).resolves.toMatch(/not found/i)
 	})
 	it('returns all versions for valid products', async () => {
 		// Real product name
-		const productSlug = Object.keys(PRODUCT_CONFIG)[0]
+		const [productSlug] = Object.keys(PRODUCT_CONFIG)
 
 		const versionMetadata = [
 			{

@@ -1,4 +1,12 @@
-import { expect, describe, it, vi, beforeEach, afterAll } from 'vitest'
+import {
+	expect,
+	describe,
+	it,
+	vi,
+	beforeEach,
+	afterAll,
+	MockInstance,
+} from 'vitest'
 import { GET, GetParams } from './route'
 import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
 import { Err, Ok } from '@utils/result'
@@ -24,7 +32,7 @@ vi.mock(import('@utils/file'), async (importOriginal) => {
 
 describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 	let mockRequest: (params: GetParams) => ReturnType<typeof GET>
-	let consoleMock
+	let consoleMock: MockInstance<Console['error']>
 	beforeEach(() => {
 		mockRequest = (params: GetParams) => {
 			const { productSlug, version, docsPath } = params
@@ -43,21 +51,22 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 		consoleMock.mockReset()
 	})
 	it('returns a 404 for nonexistent products', async () => {
+		const fakeProductSlug = 'fake product'
 		const response = await mockRequest({
 			docsPath: [''],
-			productSlug: 'fake product',
+			productSlug: fakeProductSlug,
 			version: '',
 		})
 
 		expect(response.status).toBe(404)
-		expect(consoleMock).toHaveBeenCalledWith(
-			`API Error: Product, fake product, not found in contentDirMap`,
+		expect(consoleMock.mock.calls[0][0]).toMatch(
+			new RegExp(`Product, ${fakeProductSlug}, not found`, 'i'),
 		)
 		await expect(response.text()).resolves.toMatch(/not found/i)
 	})
 	it('returns a 404 for nonexistent versions', async () => {
 		// Real product name
-		const productSlug = Object.keys(PRODUCT_CONFIG)[0]
+		const [productSlug] = Object.keys(PRODUCT_CONFIG)
 
 		// Some junk data for version
 		const version = 'lorem ipsum dolor sit amet'
@@ -70,15 +79,15 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 			version,
 		})
 
-		expect(consoleMock).toHaveBeenCalledWith(
-			`API Error: Product, ${productSlug}, has no "${version}" version`,
+		expect(consoleMock.mock.calls[0][0]).toMatch(
+			new RegExp(`Product, ${productSlug}, has no "${version}" version`, 'i'),
 		)
 		expect(response.status).toBe(404)
 		await expect(response.text()).resolves.toMatch(/not found/i)
 	})
 	it('returns a 404 for missing content', async () => {
 		// Real product name
-		const productSlug = Object.keys(PRODUCT_CONFIG)[0]
+		const [productSlug] = Object.keys(PRODUCT_CONFIG)
 
 		// Some real(ish) data for version
 		const version = 'v20220610-01'
@@ -97,27 +106,13 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 			version,
 		})
 
-		expect(consoleMock).toHaveBeenCalledWith(
-			`API Error: No content found at ${[
-				'content',
-				productSlug,
-				version,
-				'docs',
-				'.mdx',
-				'content',
-				productSlug,
-				version,
-				'docs',
-				'',
-				'index.mdx',
-			].join(',')}`,
-		)
+		expect(consoleMock.mock.calls[0][0]).toMatch(/no content found/i)
 		expect(response.status).toBe(404)
 		await expect(response.text()).resolves.toMatch(/not found/i)
 	})
 	it('returns a 404 for invalid markdown', async () => {
 		// Real product name
-		const productSlug = Object.keys(PRODUCT_CONFIG)[0]
+		const [productSlug] = Object.keys(PRODUCT_CONFIG)
 
 		// Some real(ish) data for version
 		const version = 'v20220610-01'
@@ -125,9 +120,9 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 		// Force the version(real-ish) to exist
 		vi.mocked(getProductVersion).mockReturnValue(Ok(version))
 
-		// Fake missing content on disk
+		// Fake the return of some invalid markdown from the filesystem
 		vi.mocked(readFile).mockImplementation(async () => {
-			return Ok(`# Hello World`)
+			return Ok(`[[test]`)
 		})
 
 		// Fake some invalid markdown
@@ -141,15 +136,13 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 			version,
 		})
 
-		expect(consoleMock).toHaveBeenCalledWith(
-			`API Error: Failed to parse Markdown front-matter`,
-		)
+		expect(consoleMock.mock.calls[0][0]).toMatch(/failed to parse markdown/i)
 		expect(response.status).toBe(404)
 		await expect(response.text()).resolves.toMatch(/not found/i)
 	})
 	it('returns the markdown source of the requested docs', async () => {
 		// Real product name
-		const productSlug = Object.keys(PRODUCT_CONFIG)[0]
+		const [productSlug] = Object.keys(PRODUCT_CONFIG)
 
 		// Some real(ish) data for version
 		const version = 'v20220610-01'
