@@ -1,4 +1,4 @@
-import { getRepoNameFromFilePath } from './get-repo-dir-from-file-path.mjs'
+import { getProductDirectoryFromFilePath } from '../product-directory/index.mjs'
 
 /**
  * Extracts the repo name from the file path,
@@ -10,7 +10,7 @@ import { getRepoNameFromFilePath } from './get-repo-dir-from-file-path.mjs'
  * @throws {Error} If the product slug is not found for the given repository directory.
  */
 export function getProductSlugFromFilePath(filePath, productConfig) {
-	const repoDir = getRepoNameFromFilePath(filePath)
+	const repoDir = getProductDirectoryFromFilePath(filePath)
 	const isValidProduct = productConfig[repoDir]
 
 	if (!isValidProduct) {
