@@ -10,6 +10,7 @@ import { PRODUCT_CONFIG } from '../../../app/utils/productConfig.mjs'
  *
  * @param {Object} entry - The entry object containing file path information.
  * @param {Object} versionMetadata - Metadata containing version information for the product
+ * @type VersionMetadata = Record<string, { version: string, releaseStage: "stable", isLatest: boolean }[]>
  * used to determine the latest version.
  *
  * @returns {Function} A transformer function that rewrites internal links in the document tree.
