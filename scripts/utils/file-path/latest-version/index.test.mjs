@@ -85,6 +85,7 @@ describe('getLatestVersion', () => {
 	})
 
 	test('should throw an error if version metadata is empty', () => {
+		getProductDirectoryFromFilePath.mockReturnValue('terraform-plugin-mux')
 		const filePath =
 			'content/terraform-plugin-mux/v0.13.5/docs/plugin/mux/index.mdx'
 		expect(() => {
@@ -93,7 +94,8 @@ describe('getLatestVersion', () => {
 	})
 
 	test('should throw an error if product directory does not match any products in version metadata', () => {
-		const filePath = 'content/unknown-product/v0.13.5/docs/plugin/mux/index.mdx'
+		getProductDirectoryFromFilePath.mockReturnValue('unknown-product')
+		const filePath = 'content/unknown-product/v0.13.5/random/docs/path'
 		expect(() => {
 			getLatestVersion(filePath, versionMetadata)
 		}).toThrow(
