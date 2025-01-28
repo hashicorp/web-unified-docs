@@ -17,10 +17,10 @@ export function isLatestVersion(filePath, versionMetadata) {
 	}
 
 	// get repo name from the file path
-	const repoDir = getProductDirectoryFromFilePath(filePath)
+	const productDir = getProductDirectoryFromFilePath(filePath)
 
-	// use repoDir to get version metadata
-	const productVersions = versionMetadata[repoDir]
+	// use productDir to get version metadata
+	const productVersions = versionMetadata[productDir]
 
 	// if repo dir exists, and is an empty array (aka versionless docs)
 	if (Array.isArray(productVersions) && productVersions.length === 0) {
@@ -35,27 +35,42 @@ export function isLatestVersion(filePath, versionMetadata) {
 }
 
 /**
- * Retrieves the latest version from the file path using the provided version metadata.
+ * Retrieves the latest version for the product extracted from the file path using the version metadata.
  *
  * @param {string} filePath - The file path from which to extract the product directory.
  * @param {Object} versionMetadata - An object containing version information for various repositories.
  * @throws {Error} Throws an error if the file path is empty or if the version metadata is not provided.
- * @returns {string} The latest version of the repository extracted from the file path.
+ * @returns {string|null} The latest version of the product if found, otherwise null.
  */
-export function getLatestVersionFromFilePath(filePath, versionMetadata) {
+export function getLatestVersion(filePath, versionMetadata) {
 	if (!filePath.length) {
 		throw new Error('File path is empty')
 	} else if (!versionMetadata) {
 		throw new Error('Version metadata is empty')
 	}
 
-	// get repo name from the file path
-	const repoDir = getProductDirectoryFromFilePath(filePath)
+	// get product directory from the file path
+	const productDir = getProductDirectoryFromFilePath(filePath)
 
-	// use repoDir to get latest version from version metadata
-	const latestVersion = versionMetadata[repoDir].find((version) => {
-		return version.isLatest
-	}).version
+	// check if product matches any version metadata
+	const productMetadata = versionMetadata[productDir]
 
-	return latestVersion
+	if (!productMetadata) {
+		throw new Error(
+			'Product directory does not match any products in version metadata',
+		)
+	}
+
+	const hasVersions = productMetadata.some((version) => {
+		return version.version
+	})
+
+	if (hasVersions) {
+		return versionMetadata[productDir].find((version) => {
+			return version.isLatest
+		}).version
+	} else {
+		// return null for versionless docs
+		return null
+	}
 }
