@@ -6,6 +6,7 @@ import { getVersionFromFilePath } from '../version/index.mjs'
  *
  * @param {string} filePath - The file path to check, e.g. content/terraform-plugin-testing/v1.6.x/docs/plugin/testing/index.mdx
  * @param {Object} versionMetadata - The metadata containing version information for different product directories
+ * @type VersionMetadata = Record<string, { version: string, releaseStage: "stable", isLatest: boolean }[]>
  * @throws {Error} If the file path is empty or version metadata is not provided.
  * @returns {boolean} True if the file path corresponds to the latest version, false otherwise.
  */
@@ -39,6 +40,7 @@ export function isLatestVersion(filePath, versionMetadata) {
  *
  * @param {string} filePath - The file path from which to extract the product directory.
  * @param {Object} versionMetadata - An object containing version information for various repositories.
+ * @type VersionMetadata = Record<string, { version: string, releaseStage: "stable", isLatest: boolean }[]>
  * @throws {Error} Throws an error if the file path is empty or if the version metadata is not provided.
  * @returns {string|null} The latest version of the product if found, otherwise null.
  */
