@@ -11,7 +11,7 @@ import { GET, GetParams } from './route'
 import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
 import { Err, Ok } from '@utils/result'
 import { getProductVersion } from '@utils/contentVersions'
-import { readFile, parseMarkdownFrontMatter } from '@utils/file'
+import { readFile, parseJson } from '@utils/file'
 
 vi.mock(import('@utils/contentVersions'), async (importOriginal) => {
 	const mod = await importOriginal() // type is inferred
@@ -26,20 +26,20 @@ vi.mock(import('@utils/file'), async (importOriginal) => {
 	return {
 		...mod,
 		readFile: vi.fn(),
-		parseMarkdownFrontMatter: vi.fn(),
+		parseJson: vi.fn(),
 	}
 })
 
-describe('GET /[productSlug]/[version]/[...docsPath]', () => {
+describe('GET /[productSlug]/[version]/[...section]', () => {
 	let mockRequest: (params: GetParams) => ReturnType<typeof GET>
 	let consoleMock: MockInstance<Console['error']>
 	beforeEach(() => {
 		mockRequest = (params: GetParams) => {
-			const { productSlug, version, docsPath } = params
+			const { productSlug, version, section } = params
 			// The URL doesn't actually matter in testing, but for completeness
 			// it's nice to have it match the real URL being used
 			const url = new URL(
-				`http://localhost:8000/api/content/${productSlug}/doc/${version}/${docsPath.join('/')}`,
+				`http://localhost:8000/api/content/${productSlug}/nav-data/${version}/${section.join('/')}`,
 			)
 			const req = new Request(url)
 			return GET(req, { params })
@@ -51,16 +51,19 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 		consoleMock.mockReset()
 	})
 	it('returns a 404 for nonexistent products', async () => {
-		const fakeProductSlug = 'fake product'
+		const productSlug = 'fake product'
+		vi.mocked(getProductVersion).mockReturnValue(
+			Err(`Product, fake product, not found in contentDirMap`),
+		)
 		const response = await mockRequest({
-			docsPath: [''],
-			productSlug: fakeProductSlug,
+			productSlug,
 			version: '',
+			section: [''],
 		})
 
 		expect(response.status).toBe(404)
 		expect(consoleMock.mock.calls[0][0]).toMatch(
-			new RegExp(`Product, ${fakeProductSlug}, not found`, 'i'),
+			new RegExp(`product, ${productSlug}, not found`, 'i'),
 		)
 		await expect(response.text()).resolves.toMatch(/not found/i)
 	})
@@ -74,13 +77,13 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 			Err(`Product, ${productSlug}, has no "${version}" version`),
 		)
 		const response = await mockRequest({
-			docsPath: [''],
 			productSlug,
 			version,
+			section: [''],
 		})
 
 		expect(consoleMock.mock.calls[0][0]).toMatch(
-			new RegExp(`Product, ${productSlug}, has no "${version}" version`, 'i'),
+			new RegExp(`product, ${productSlug}, has no "${version}"`, 'i'),
 		)
 		expect(response.status).toBe(404)
 		await expect(response.text()).resolves.toMatch(/not found/i)
@@ -101,42 +104,46 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 		})
 
 		const response = await mockRequest({
-			docsPath: [''],
 			productSlug,
 			version,
+			section: [''],
 		})
 
-		expect(consoleMock.mock.calls[0][0]).toMatch(/no content found/i)
+		expect(consoleMock.mock.calls[0][0]).toMatch(/failed to read file/i)
 		expect(response.status).toBe(404)
 		await expect(response.text()).resolves.toMatch(/not found/i)
 	})
-	it('returns a 404 for invalid markdown', async () => {
+	it('returns a 404 for invalid JSON', async () => {
 		// Real product name
 		const [productSlug] = Object.keys(PRODUCT_CONFIG)
 
 		// Some real(ish) data for version
 		const version = 'v20220610-01'
 
+		const invalidJson = '{ a: 1234'
+
 		// Force the version(real-ish) to exist
 		vi.mocked(getProductVersion).mockReturnValue(Ok(version))
 
-		// Fake the return of some invalid markdown from the filesystem
+		// Fake some data returned from disk
 		vi.mocked(readFile).mockImplementation(async () => {
-			return Ok(`[[test]`)
+			return Ok(invalidJson)
 		})
 
 		// Fake some invalid markdown
-		vi.mocked(parseMarkdownFrontMatter).mockImplementation(() => {
-			return Err('Failed to parse Markdown front-matter')
+		vi.mocked(parseJson).mockImplementation(() => {
+			return Err(
+				"Failed to parse JSON: SyntaxError: Expected property name or '}' in JSON at position 2\"",
+			)
 		})
 
 		const response = await mockRequest({
-			docsPath: [''],
 			productSlug,
 			version,
+			section: [''],
 		})
 
-		expect(consoleMock.mock.calls[0][0]).toMatch(/failed to parse markdown/i)
+		expect(consoleMock.mock.calls[0][0]).toMatch(/SyntaxError/i)
 		expect(response.status).toBe(404)
 		await expect(response.text()).resolves.toMatch(/not found/i)
 	})
@@ -145,35 +152,41 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 		const [productSlug] = Object.keys(PRODUCT_CONFIG)
 
 		// Some real(ish) data for version
-		const version = 'v20220610-01'
+		const version = 'v1.9.x'
 
-		const markdownSource = '# Hello World'
+		// A snippet of the section nav data from content/terraform/v1.9.x/intro-nav-data.json
+		const sectionData = [
+			{ heading: 'Introduction to Terraform' },
+			{ title: 'What is Terraform?', path: '' },
+			{ title: 'Use Cases', path: 'use-cases' },
+		]
 
 		// Force the version(real-ish) to exist
 		vi.mocked(getProductVersion).mockReturnValue(Ok(version))
 
 		// Fake content returned from the filesystem
 		vi.mocked(readFile).mockImplementation(async () => {
-			return Ok(markdownSource)
+			return Ok(JSON.stringify(sectionData))
 		})
 
-		// Mock markdown parser returning valid content
-		vi.mocked(parseMarkdownFrontMatter).mockImplementation(() => {
-			return Ok({ markdownSource, metadata: {} })
+		// Force `parseJson()` to return our test data
+		vi.mocked(parseJson).mockImplementation(() => {
+			return Ok(sectionData)
 		})
 
 		const response = await mockRequest({
-			docsPath: [''],
 			productSlug,
 			version,
+			section: ['intro'],
 		})
 
 		expect(consoleMock).not.toHaveBeenCalled()
 		expect(response.status).toBe(200)
-		const { meta, result } = await response.json()
-		expect(meta.status_code).toBe(200)
-		expect(result.product).toBe(productSlug)
-		expect(result.version).toBe(version)
-		expect(result.markdownSource).toBe(markdownSource)
+		const { result } = await response.json()
+		expect(result).toEqual({ navData: sectionData })
+		// A little fuzzy, but just make sure that our response (roughly)
+		// contains the data we're expecting to see - which in this case would
+		// be a heading for "Introduction to Terraform"
+		expect(result.navData[0].heading).toMatch(/introduction to terraform/i)
 	})
 })
