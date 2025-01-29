@@ -300,7 +300,7 @@ function migrateRepoContentAtRef(
 	 * TODO: investigate why `terraform-cdk` doesn't seem to have an asset
 	 * directory. Maybe intentional, in which case this conditional is fine.
 	 */
-	if (typeof repoConfig.assetsDir === 'string') {
+	if (typeof repoConfig.assetDir === 'string') {
 		const assetsSrc = path.join(websiteDirPath, repoConfig.assetDir)
 		const assetsDest = path.join(
 			outputDirs.assets,
