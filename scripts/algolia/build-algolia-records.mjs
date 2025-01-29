@@ -1,66 +1,68 @@
-import fs from 'fs'
 import path from 'path'
 import grayMatter from 'gray-matter'
 import { createAlgoliaRecordObject } from './transform-mdx-to-algolia-record/create-records.mjs'
 import { listFiles } from '../utils/list-files.mjs'
 import { batchPromises } from '../utils/batch-promises.mjs'
-import { isLatestVersion } from '../utils/file-path/latest-version/index.mjs'
-import { readdir } from 'node:fs/promises'
-// import { isLatestVersion } from './file-path/latest-version/index.mjs'
+import { getLatestVersion } from '../utils/file-path/latest-version/index.mjs'
+import { readdir, readFile, writeFile } from 'node:fs/promises'
 
-async function listLatestDirectories(dir, versionMetadata) {
-	// Gather all directories from public/content
+async function getLatestProductVersionDirectories(dir, versionMetadata) {
+	// Gather all sub-directories from the specified directory
 	const directories = await readdir(dir, { withFileTypes: true })
 
-	// Iterate over productDir, and return the list of latest version directories
+	// Iterate over product directories and return the list of latest version directories
 	const productDirectories = await Promise.all(
 		directories.map(async (directory) => {
-			const filePath = path.join(dir, directory.name).toString()
-			const resolvedDirs = await readdir(filePath, { withFileTypes: true })
-			return resolvedDirs.map((dirEnt) => {
-				return path.join(filePath, dirEnt.name)
-			})
+			const directoryPath = path.join(dir, directory.name)
+			const latestProductVersion = getLatestVersion(
+				directoryPath,
+				versionMetadata,
+			)
+			// latestProductVersion will return null for versionless product
+			if (latestProductVersion == null) {
+				return directoryPath
+			} else {
+				return path.join(directoryPath, latestProductVersion)
+			}
 		}),
 	)
-
-	const latestDirectories = productDirectories.flat().filter((dirPath) => {
-		return isLatestVersion(dirPath, versionMetadata)
-	})
-
-	return latestDirectories
+	return productDirectories
 }
 
 export async function buildAlgoliaRecords(targetDir, versionMetadata) {
-	console.time()
-	// get latest product directories
-	const latestDirectories = await listLatestDirectories(
-		targetDir,
-		versionMetadata,
-	)
-	console.log({ latestDirectories })
-	// Walk the directory to get a list of all files
-	const allFiles = await listFiles(latestDirectories)
+	// get latest product directories, returns array
+	const latestProductVersionDirectories =
+		await getLatestProductVersionDirectories(targetDir, versionMetadata)
 
-	// Filter for `.mdx` files and check file is in latest version dir
-	const mdxFiles = allFiles.filter((filePath) => {
-		return (
-			// Exclude internal HashiCorp ed edng docs named _template
-			!filePath.includes('_template') &&
-			path.extname(filePath) === '.mdx' &&
-			isLatestVersion(filePath, versionMetadata)
-		)
+	const allFilesPromises = latestProductVersionDirectories.map((dir) => {
+		return listFiles(dir)
 	})
-	console.timeEnd()
+
+	const mdxFiles = (await Promise.all(allFilesPromises))
+		.flat()
+		.filter((filePath) => {
+			return (
+				path.extname(filePath) === '.mdx' && !filePath.includes('_template')
+			)
+		})
+
+	// Filter for .mdx files
+	// const mdxFiles = allFiles.filter(
+	// 	(filePath) => path.extname(filePath) === '.mdx',
+	// )
+
 	console.log(
 		`🪄 Converting ${mdxFiles.length} files to JSON for the Algolia search index...`,
 	)
-	const batchSize = 16
+	const batchSize = 32
 
 	const results = await batchPromises(
 		mdxFiles,
 		async (entry) => {
 			try {
-				const fileString = fs.readFileSync(entry)
+				const fileString = await readFile(entry).then((mdx) => {
+					return mdx
+				})
 				// get mdx content and frontmatter
 				const { data, content } = grayMatter(fileString)
 				return createAlgoliaRecordObject(content, data, entry)
@@ -78,7 +80,8 @@ export async function buildAlgoliaRecords(targetDir, versionMetadata) {
 
 	const stringifiedResults = JSON.stringify(results, null, 2)
 	try {
-		fs.writeFileSync(ALGOLIA_RECORDS_JSON_PATH, stringifiedResults)
+		// fs.writeFileSync(ALGOLIA_RECORDS_JSON_PATH, stringifiedResults)
+		writeFile(ALGOLIA_RECORDS_JSON_PATH, stringifiedResults)
 	} catch (error) {
 		throw new Error(error)
 	}
