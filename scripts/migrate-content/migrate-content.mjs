@@ -303,10 +303,10 @@ function migrateRepoContentAtRef(
 	if (typeof repoConfig.assetDir === 'string') {
 		const assetsSrc = path.join(websiteDirPath, repoConfig.assetDir)
 		const assetsDest = path.join(
-			outputDirs.assets,
+			outputDirs.content,
 			repoSlug,
 			targetRef.versionString,
-			repoConfig.assetDir.replace('public', ''),
+			'img',
 		)
 		dirsToCopy.push({ src: assetsSrc, dest: assetsDest })
 	}
