@@ -14,6 +14,7 @@ import { addVersionToNavData } from './add-version-to-nav-data.mjs'
 const CWD = process.cwd()
 const CONTENT_DIR = path.join(CWD, 'content')
 const CONTENT_DIR_OUT = path.join(CWD, 'public', 'content')
+const CONTENT_DIR_OUT_ASSETS = path.join(CWD, 'public', 'assets')
 const VERSION_METADATA_FILE = path.join(CWD, 'app/api/versionMetadata.json')
 const DOCS_PATHS_FILE = path.join(CWD, 'app/api/docsPaths.json')
 
@@ -34,11 +35,14 @@ async function main() {
 	// Apply MDX transforms, writing out transformed MDX files to `public`
 	await buildMdxTransforms(CONTENT_DIR, CONTENT_DIR_OUT, versionMetadata)
 
-	// Copy all `*-nav-data.json` files from `content` to `public/content`, using execSync
+	// Copy all `*-nav-data.json` files from `content` to `public/content`
 	await copyNavDataFiles(CONTENT_DIR, CONTENT_DIR_OUT, versionMetadata)
 
-	// Copy all `redirects.jsonc` files from `content` to `public/content`, using execSync
+	// Copy all `redirects.jsonc` files from `content` to `public/content
 	await copyRedirectFiles(CONTENT_DIR, CONTENT_DIR_OUT)
+
+	// Copy all asset files from `content` to `public/assets`
+	await copyAssetFiles(CONTENT_DIR, CONTENT_DIR_OUT_ASSETS)
 }
 
 /**
@@ -52,7 +56,10 @@ async function copyNavDataFiles(sourceDir, destDir, versionMetadata = {}) {
 		return f.endsWith('-nav-data.json')
 	})
 
+	console.log(`\nCopying NavData from ${navDataFiles.length} files...`)
+
 	await batchPromises(
+		'NavData',
 		navDataFiles,
 		async (filePath) => {
 			const relativePath = path.relative(sourceDir, filePath)
@@ -75,8 +82,41 @@ async function copyRedirectFiles(sourceDir, destDir) {
 		return f.endsWith('redirects.jsonc')
 	})
 
+	console.log(`\nCopying Redirects from ${redirectFiles.length} files...`)
+
 	await batchPromises(
+		'Redirects',
 		redirectFiles,
+		async (filePath) => {
+			const relativePath = path.relative(sourceDir, filePath)
+			const destPath = path.join(destDir, relativePath)
+			const parentDir = path.dirname(destPath)
+			if (!fs.existsSync(parentDir)) {
+				fs.mkdirSync(parentDir, { recursive: true })
+			}
+			fs.copyFileSync(filePath, destPath)
+		},
+		16,
+	)
+}
+
+function isFileAnImage(file) {
+	const fileExtension = path.extname(file).toLowerCase()
+
+	const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.svg']
+	return imageExtensions.includes(fileExtension)
+}
+
+async function copyAssetFiles(sourceDir, destDir) {
+	const assetFiles = (await listFiles(sourceDir)).filter((f) => {
+		return isFileAnImage(f)
+	})
+
+	console.log(`\nCopying Assets from ${assetFiles.length} files...`)
+
+	await batchPromises(
+		'Assets',
+		assetFiles,
 		async (filePath) => {
 			const relativePath = path.relative(sourceDir, filePath)
 			const destPath = path.join(destDir, relativePath)
