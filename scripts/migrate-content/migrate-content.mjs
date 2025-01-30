@@ -255,13 +255,14 @@ async function migrateContent(targetRepos, ghCloneDir, outputDirs, options) {
 
 				successes.push({
 					repoSlug,
-					targetRefVersionString: targetRef.versionString,
+					versionString: targetRef.versionString,
 				})
 			} catch (error) {
 				console.error(`🔴 Failed to extract content from "${repoSlug}"`, error)
 				failures.push({
 					repoSlug,
-					targetRef: targetRef,
+					versionString: targetRef.versionString,
+					hash: targetRef.hash,
 					error: error.stack,
 				})
 			}
