@@ -11,6 +11,7 @@ import semver from 'semver'
  *
  * @param {string} filePath - The path to the JSON file containing navigation data.
  * @param {Object} versionMetadata - An object containing version metadata for different products.
+ * @type VersionMetadata = Record<string, { version: string, releaseStage: "stable", isLatest: boolean }[]>
  * @throws {Error} Throws an error if the file path is not provided.
  * @returns {Promise<void>} A promise that resolves when the file has been successfully updated.
  */
