@@ -23,16 +23,21 @@ describe('batchPostRecords', () => {
 		)
 
 		process.env.ALGOLIA_API_KEY = 'fake_api_key'
+		process.env.ALGOLIA_APP_ID = 'TEST_ID'
+		process.env.ALGOLIA_INDEX_NAME = 'test_index'
 
 		await batchPostRecords(mockFile)
 
-		expect(algoliasearch).toHaveBeenCalledWith('YY0FFNI7MF', 'fake_api_key')
-		expect(mockAlgoliaClient.initIndex).toHaveBeenCalledWith('spike_UDR')
+		expect(algoliasearch).toHaveBeenCalledWith('TEST_ID', 'fake_api_key')
+		expect(mockAlgoliaClient.initIndex).toHaveBeenCalledWith('test_index')
 		expect(
 			mockAlgoliaClient.initIndex().replaceAllObjects,
 		).toHaveBeenCalledWith(JSON.parse(fs.readFileSync(mockFile, 'utf-8')), {
 			safe: true,
 		})
+		expect(
+			mockAlgoliaClient.initIndex().replaceAllObjects,
+		).toHaveBeenCalledOnce()
 	})
 
 	it('should throw an error if posting records fails', async () => {
@@ -50,6 +55,8 @@ describe('batchPostRecords', () => {
 		)
 
 		process.env.ALGOLIA_API_KEY = 'fake_api_key'
+		process.env.ALGOLIA_APP_ID = 'TEST_ID'
+		process.env.ALGOLIA_INDEX_NAME = 'test_index'
 
 		try {
 			await batchPostRecords(mockFile)
