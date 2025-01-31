@@ -48,6 +48,7 @@ export async function buildAlgoliaRecords(targetDir, versionMetadata) {
 		`🪄 Converting ${mdxFiles.length} files to JSON for the Algolia search index...`,
 	)
 	const results = await batchPromises(
+		'Algolia Records',
 		mdxFiles,
 		async (entry) => {
 			try {
