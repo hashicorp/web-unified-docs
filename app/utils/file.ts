@@ -1,7 +1,7 @@
 import grayMatter from 'gray-matter'
 import { parse as jsoncParse } from 'jsonc-parser'
 
-import { Err, Ok } from './result'
+import { Err, Ok, Result } from './result'
 
 const SELF_URL = process.env.VERCEL_URL
 	? `https://${process.env.VERCEL_URL}`
@@ -9,14 +9,9 @@ const SELF_URL = process.env.VERCEL_URL
 
 /**
  * NOTE: we currently read files by fetching them from the `public` folder
- * via the Vercel CDN. We intend to explore being able to read from the
- * filesystem directly rather than reading files through the Vercel CDN.
+ * via the Vercel CDN.
  *
- * Vercel has some reference on bundling files into Vercel Functions
- * which may be relevant:
- *
- * https://vercel.com/guides/how-can-i-use-files-in-serverless-functions
- */
+ **/
 export const readFile = async (filePath: string[]) => {
 	try {
 		const res = await fetch(`${SELF_URL}/${filePath.join('/')}`, {
@@ -32,6 +27,37 @@ export const readFile = async (filePath: string[]) => {
 		return Ok(text)
 	} catch {
 		return Err(`Failed to read file at path: ${filePath.join('/')}`)
+	}
+}
+
+export const getAssetData = async (
+	filePath: string[],
+): Promise<
+	Result<
+		{
+			buffer: Buffer
+			contentType: string
+		},
+		string
+	>
+> => {
+	try {
+		const res = await fetch(`${SELF_URL}/${filePath.join('/')}`, {
+			cache: 'no-cache',
+		})
+
+		if (!res.ok) {
+			return Err(`Failed to read asset at path: ${filePath.join('/')}`)
+		}
+
+		const buffer = await res.arrayBuffer()
+
+		return Ok({
+			buffer: Buffer.from(buffer),
+			contentType: res.headers.get('Content-Type'),
+		})
+	} catch {
+		return Err(`Failed to read asset at path: ${filePath.join('/')}`)
 	}
 }
 

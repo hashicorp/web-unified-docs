@@ -5,12 +5,18 @@
  * Execute the asynchronous function on each item in the array, working
  * in parallel batches of the specified size, and return the results once done.
  *
+ * @param {string} batchName
  * @param {unknown[]} arrayToBatch
  * @param {function} asyncMapFn
  * @param {number} batchSize
  * @returns {Promise<unknown[]>}
  */
-export async function batchPromises(arrayToBatch, asyncMapFn, batchSize) {
+export async function batchPromises(
+	batchName,
+	arrayToBatch,
+	asyncMapFn,
+	batchSize,
+) {
 	let batches = []
 	for (let i = 0, j = arrayToBatch.length; i <= j - 1; i += batchSize) {
 		batches.push(arrayToBatch.slice(i, i + batchSize))
@@ -25,7 +31,9 @@ export async function batchPromises(arrayToBatch, asyncMapFn, batchSize) {
 		if (n % tenPercBatchLen === 0 || n === batches.length - 1) {
 			let batchesDone = Math.min(batchSize * (n + 1), arrayToBatch.length)
 
-			console.log(`${batchesDone} / ${arrayToBatch.length} completed...`)
+			console.log(
+				`${batchName} ${batchesDone} / ${arrayToBatch.length} completed...`,
+			)
 		}
 
 		results = results.concat(batchResults)

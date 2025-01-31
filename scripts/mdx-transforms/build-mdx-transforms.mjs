@@ -73,9 +73,10 @@ export async function buildMdxTransforms(
 	/**
 	 * Apply MDX transforms to each file entry, in batches
 	 */
-	console.log(`🪄 Running MDX transforms on ${mdxFileEntries.length} files...`)
+	console.log(`Running MDX transforms on ${mdxFileEntries.length} files...`)
 	const batchSize = 16
 	const results = await batchPromises(
+		'MDX transforms',
 		mdxFileEntries,
 		(entry) => {
 			return applyMdxTransforms(entry, versionMetadata)
