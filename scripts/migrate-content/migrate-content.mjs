@@ -174,6 +174,9 @@ migrateContent(
  * @return {void}
  */
 async function migrateContent(targetRepos, ghCloneDir, outputDirs, options) {
+	const failures = []
+	const successes = []
+
 	// Ensure the temporary directory exists, this is where repos will be cloned.
 	if (!fs.existsSync(ghCloneDir)) {
 		fs.mkdirSync(ghCloneDir, { recursive: true })
@@ -237,21 +240,48 @@ async function migrateContent(targetRepos, ghCloneDir, outputDirs, options) {
 		)
 		for (let i = targetReleaseRefs.length - 1; i >= 0; i--) {
 			const targetRef = targetReleaseRefs[i]
-			migrateRepoContentAtRef(
-				repoSlug,
-				cloneDir,
-				targetRef,
-				repoConfig,
-				outputDirs,
-			)
-			console.log(
-				`🟢 Finished extracting "${repoSlug}" content from "${targetRef.ref}".`,
-			)
+
+			try {
+				migrateRepoContentAtRef(
+					repoSlug,
+					cloneDir,
+					targetRef,
+					repoConfig,
+					outputDirs,
+				)
+				console.log(
+					`🟢 Successfully extracted "${repoSlug}" content from "${targetRef.ref}".`,
+				)
+
+				successes.push({
+					repoSlug,
+					versionString: targetRef.versionString,
+				})
+			} catch (error) {
+				console.error(`🔴 Failed to extract content from "${repoSlug}"`, error)
+				failures.push({
+					repoSlug,
+					versionString: targetRef.versionString,
+					hash: targetRef.hash,
+					error: error.stack,
+				})
+			}
+
+			console.log(`🟢 Finished migrating content from "${repoSlug}".`)
 		}
-		console.log(`🟢 Finished migrating content from "${repoSlug}".`)
 	}
-	// Log out that we're done with all repos
-	console.log(`✅ Finished migrating all target repos and versions.`)
+
+	console.log('\n')
+	if (failures.length === 0) {
+		console.log(`✅ Finished migrating all target repos and versions.`)
+	} else {
+		console.log(`🟢 Successfully extracted content for the following:`)
+		console.log(JSON.stringify(successes, null, 2))
+		console.log('\n')
+		console.log(`🔴 Failed to migrate content for the following:`)
+		// .replace because JSON.stringify is escaping newlines which makes them not print in the console correctly
+		console.log(JSON.stringify(failures, null, 2).replace(/\\n/g, '\n'))
+	}
 }
 
 /**
@@ -279,9 +309,10 @@ function migrateRepoContentAtRef(
 	/**
 	 * `git checkout` out the hash corresponding to this release ref
 	 */
+	console.log('\n')
 	console.log(`🥡 Checking out ref "${targetRef.ref}" (${targetRef.hash})...`)
 	execSync(`git restore . && git clean -f`, { cwd: cloneDir })
-	execSync(`git checkout ${targetRef.hash}`, {
+	execSync(`git -c advice.detachedHead=false checkout ${targetRef.hash}`, {
 		stdio: 'inherit',
 		cwd: cloneDir,
 	})
@@ -300,16 +331,34 @@ function migrateRepoContentAtRef(
 	 * TODO: investigate why `terraform-cdk` doesn't seem to have an asset
 	 * directory. Maybe intentional, in which case this conditional is fine.
 	 */
-	if (typeof repoConfig.assetsDir === 'string') {
+	if (typeof repoConfig.assetDir === 'string') {
 		const assetsSrc = path.join(websiteDirPath, repoConfig.assetDir)
 		const assetsDest = path.join(
-			outputDirs.assets,
+			outputDirs.content,
 			repoSlug,
 			targetRef.versionString,
-			repoConfig.assetDir.replace('public', ''),
+			'img',
 		)
-		dirsToCopy.push({ src: assetsSrc, dest: assetsDest })
+
+		if (fs.existsSync(assetsSrc)) {
+			dirsToCopy.push({ src: assetsSrc, dest: assetsDest })
+		}
+	} else if (Array.isArray(repoConfig.assetDir)) {
+		for (const assetDir of repoConfig.assetDir) {
+			const assetsSrc = path.join(websiteDirPath, assetDir)
+			const assetsDest = path.join(
+				outputDirs.content,
+				repoSlug,
+				targetRef.versionString,
+				'img',
+			)
+
+			if (fs.existsSync(assetsSrc)) {
+				dirsToCopy.push({ src: assetsSrc, dest: assetsDest })
+			}
+		}
 	}
+
 	// We expect all content source repos to have content and data directories
 	const contentSrc = path.join(websiteDirPath, repoConfig.contentDir)
 	const contentDest = path.join(
