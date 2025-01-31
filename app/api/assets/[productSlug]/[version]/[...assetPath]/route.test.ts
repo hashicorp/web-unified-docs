@@ -3,7 +3,7 @@ import { GET } from './route'
 
 import * as utilsFileModule from '@utils/file'
 
-test("Return 404 if `product` DOESN'T exist", async () => {
+test("Return 404 if `product` doesn't exist", async () => {
 	const mockRequest = (url: string) => {
 		return new Request(url)
 	}
