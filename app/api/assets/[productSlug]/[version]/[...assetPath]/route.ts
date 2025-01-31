@@ -10,7 +10,7 @@ export type GetParams = {
 	productSlug: string
 
 	/**
-	 * Can be a semver version (i.e: `v10.0.1`) or a ptfe dated version (i.e: `v20220610-01`)
+	 * Can be a semver version (i.e: `v10.0.x`) or a ptfe version (i.e: `v202206-01`)
 	 */
 	version: string
 
