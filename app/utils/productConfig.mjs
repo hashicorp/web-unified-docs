@@ -270,7 +270,7 @@ export const PRODUCT_CONFIG = {
 		 * directory structure that needs to be accounted for. Need to confirm.
 		 * See note at top of this document on `pages` directories for details.
 		 */
-		assetDir: 'img',
+		assetDir: ['img', 'public'],
 		basePaths: ['cloud-docs/agents'],
 		contentDir: 'docs',
 		dataDir: 'data',

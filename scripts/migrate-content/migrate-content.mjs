@@ -331,16 +331,34 @@ function migrateRepoContentAtRef(
 	 * TODO: investigate why `terraform-cdk` doesn't seem to have an asset
 	 * directory. Maybe intentional, in which case this conditional is fine.
 	 */
-	if (typeof repoConfig.assetsDir === 'string') {
+	if (typeof repoConfig.assetDir === 'string') {
 		const assetsSrc = path.join(websiteDirPath, repoConfig.assetDir)
 		const assetsDest = path.join(
-			outputDirs.assets,
+			outputDirs.content,
 			repoSlug,
 			targetRef.versionString,
-			repoConfig.assetDir.replace('public', ''),
+			'img',
 		)
-		dirsToCopy.push({ src: assetsSrc, dest: assetsDest })
+
+		if (fs.existsSync(assetsSrc)) {
+			dirsToCopy.push({ src: assetsSrc, dest: assetsDest })
+		}
+	} else if (Array.isArray(repoConfig.assetDir)) {
+		for (const assetDir of repoConfig.assetDir) {
+			const assetsSrc = path.join(websiteDirPath, assetDir)
+			const assetsDest = path.join(
+				outputDirs.content,
+				repoSlug,
+				targetRef.versionString,
+				'img',
+			)
+
+			if (fs.existsSync(assetsSrc)) {
+				dirsToCopy.push({ src: assetsSrc, dest: assetsDest })
+			}
+		}
 	}
+
 	// We expect all content source repos to have content and data directories
 	const contentSrc = path.join(websiteDirPath, repoConfig.contentDir)
 	const contentDest = path.join(
