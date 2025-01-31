@@ -15,7 +15,7 @@ export type GetParams = {
 	version: string
 
 	/**
-	 * Full path to the location of docs on the filesystem relative to `content/`
+	 * Full path to the asset in the production build, i.e. `terraform/v1.9.x/img/docs/plan-comments.png`
 	 */
 	assetPath: string[]
 }
