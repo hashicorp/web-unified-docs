@@ -64,9 +64,8 @@ export async function buildAlgoliaRecords(targetDir, versionMetadata) {
 
 	const ALGOLIA_RECORDS_JSON_PATH = path.join(
 		process.cwd(),
-		'algoliaRecords.json',
+		'scripts/algolia/batch-post-records/algoliaRecords.json',
 	)
-
 	const stringifiedResults = JSON.stringify(results, null, 2)
 	try {
 		writeFile(ALGOLIA_RECORDS_JSON_PATH, stringifiedResults)
