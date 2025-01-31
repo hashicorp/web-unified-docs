@@ -35,7 +35,7 @@ export const getAssetData = async (
 ): Promise<
 	Result<
 		{
-			buffer: any
+			buffer: Buffer
 			contentType: string
 		},
 		string
