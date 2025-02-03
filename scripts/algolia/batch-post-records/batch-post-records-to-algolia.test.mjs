@@ -6,6 +6,8 @@ import fs from 'fs'
 
 vi.mock('algoliasearch')
 
+const mockFile = path.join(process.cwd(), '__fixtures__/algoliaRecords.json')
+
 describe('batchPostRecords', () => {
 	afterEach(() => {
 		vi.resetAllMocks()
@@ -17,10 +19,6 @@ describe('batchPostRecords', () => {
 			}),
 		}
 		algoliasearch.mockReturnValue(mockAlgoliaClient)
-		const mockFile = path.join(
-			process.cwd(),
-			'scripts/algolia/batch-post-records/mockAlgoliaRecords.json',
-		)
 
 		process.env.ALGOLIA_API_KEY = 'fake_api_key'
 		process.env.ALGOLIA_APP_ID = 'TEST_ID'
@@ -32,7 +30,7 @@ describe('batchPostRecords', () => {
 		expect(mockAlgoliaClient.initIndex).toHaveBeenCalledWith('test_index')
 		expect(
 			mockAlgoliaClient.initIndex().replaceAllObjects,
-		).toHaveBeenCalledWith(JSON.parse(fs.readFileSync(mockFile, 'utf-8')), {
+		).toHaveBeenCalledWith(JSON.parse(fs.readFileSync(mockFile)), {
 			safe: true,
 		})
 		expect(
@@ -49,10 +47,6 @@ describe('batchPostRecords', () => {
 			}),
 		}
 		algoliasearch.mockReturnValue(mockAlgoliaClient)
-		const mockFile = path.join(
-			process.cwd(),
-			'scripts/algolia/batch-post-records/mockAlgoliaRecords.json',
-		)
 
 		process.env.ALGOLIA_API_KEY = 'fake_api_key'
 		process.env.ALGOLIA_APP_ID = 'TEST_ID'
