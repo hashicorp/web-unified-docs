@@ -14,14 +14,7 @@ afterEach(() => {
 	vol.reset()
 })
 
-beforeEach(() => {
-	vol.fromJSON({
-		'/content/terraform/v1.19.x/test.mdx': mdxContent,
-		[path.join(process.cwd(), '/app/api/versionMetadata.json')]:
-			JSON.stringify(versionMetadata),
-	})
-})
-
+const transformedOutPath = '/content/terraform/v1.19.x/test.mdx'
 const mdxContent = `
 # Hello World
 
@@ -30,7 +23,13 @@ export const ComplexComponent = () => <div>Hello to the world</div>
 </ComplexComponent />
 `
 
-const transformedOutPath = '/content/terraform/v1.19.x/test.mdx'
+beforeEach(() => {
+	vol.fromJSON({
+		'/content/terraform/v1.19.x/test.mdx': mdxContent,
+		[path.join(process.cwd(), '/app/api/versionMetadata.json')]:
+			JSON.stringify(versionMetadata),
+	})
+})
 
 test('test buildfileMdxTransforms', async () => {
 	await buildFileMdxTransforms('/content/terraform/v1.19.x/test.mdx')
