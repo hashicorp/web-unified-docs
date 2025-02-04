@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
+import fs from 'fs'
 import path from 'path'
 
 // Third-party
@@ -29,12 +29,6 @@ export async function buildFileMdxTransforms(filePath) {
 	const outputDir = 'public/content'
 
 	const relativePath = path.relative(targetDir, filePath)
-	if (!existsSync(relativePath)) {
-		console.error(
-			`❗ Encountered an error: Unable to read nonexistent file: ${relativePath}`,
-		)
-		return
-	}
 	const [repoSlug, version, contentDir] = relativePath.split('/')
 	const partialsDir = path.join(
 		targetDir,
@@ -53,7 +47,7 @@ export async function buildFileMdxTransforms(filePath) {
 		version,
 		redirectsDir,
 	}
-	const versionMetadata = readFileSync(VERSION_METADATA_FILE, 'utf-8')
+	const versionMetadata = fs.readFileSync(VERSION_METADATA_FILE, 'utf-8')
 	const serializedVersionMetadata = JSON.parse(versionMetadata)
 	console.log(`🪄 Running MDX transform on ${filePath}...`)
 	const result = await applyFileMdxTransforms(entry, serializedVersionMetadata)
@@ -82,7 +76,7 @@ export async function applyFileMdxTransforms(entry, versionMetadata = {}) {
 		const { filePath, partialsDir, outPath, version, redirectsDir } = entry
 		const redirects = await loadRedirects(version, redirectsDir)
 
-		const fileString = readFileSync(filePath, 'utf8')
+		const fileString = fs.readFileSync(filePath, 'utf8')
 
 		const { data, content } = grayMatter(fileString)
 
@@ -102,11 +96,11 @@ export async function applyFileMdxTransforms(entry, versionMetadata = {}) {
 		// Ensure the parent directory for the output file path exists
 		const outDir = path.dirname(outPath)
 
-		if (!existsSync(outDir)) {
-			mkdirSync(outDir, { recursive: true })
+		if (!fs.existsSync(outDir)) {
+			fs.mkdirSync(outDir, { recursive: true })
 		}
 		// Write out the file
-		writeFileSync(outPath, transformedFileString)
+		fs.writeFileSync(outPath, transformedFileString)
 		return { error: null }
 	} catch (e) {
 		return { error: String(e).split('\n')[0] }
