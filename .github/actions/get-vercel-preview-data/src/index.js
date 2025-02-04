@@ -45,7 +45,7 @@ const processDeploymentData = (deploymentData) => {
 }
 
 if (DEPLOYMENT_TYPE === 'url' || DEPLOYMENT_TYPE === 'check') {
-	core.info(`Fetching Vercel data for deployment url ${DEVELOPMENT_URL}...`)
+	core.info(`Fetching Vercel data for deployment url ${DEVELOPMENT_URL}`)
 
 	let deploymentUrl = DEVELOPMENT_URL
 	if (DEVELOPMENT_URL.startsWith('https://')) {

@@ -31614,7 +31614,7 @@ const processDeploymentData = (deploymentData) => {
 }
 
 if (DEPLOYMENT_TYPE === 'url' || DEPLOYMENT_TYPE === 'check') {
-	_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(`Fetching Vercel data for deployment url ${DEVELOPMENT_URL}...`)
+	_actions_core__WEBPACK_IMPORTED_MODULE_0__.info(`Fetching Vercel data for deployment url ${DEVELOPMENT_URL}`)
 
 	let deploymentUrl = DEVELOPMENT_URL
 	if (DEVELOPMENT_URL.startsWith('https://')) {
