@@ -64,7 +64,24 @@ test('should return 200 and empty array if no content exists for the query param
 
 test('should return 200 and array of strings on valid params', async () => {
 	vol.fromJSON({
-		'/Users/ruben.nic/projects/web-unified-docs/content/terraform-cdk/v0.20.x/data/cd-ktf-nav-data.json':
+		[`${process.cwd()}/content/terraform-cdk/v0.19.x/data/cd-ktf-nav-data.json`]:
+			JSON.stringify([
+				{
+					title: 'API Reference',
+					routes: [
+						{
+							title: 'Go',
+							routes: [
+								{
+									title: 'Overview',
+									path: 'api-reference/go',
+								},
+							],
+						},
+					],
+				},
+			]),
+		[`${process.cwd()}/content/terraform-cdk/v0.20.x/data/cd-ktf-nav-data.json`]:
 			JSON.stringify([
 				{
 					title: 'API Reference',
@@ -81,7 +98,7 @@ test('should return 200 and array of strings on valid params', async () => {
 					],
 				},
 			]),
-		'/Users/ruben.nic/projects/web-unified-docs/content/terraform-cdk/v0.21.x/data/cd-ktf-nav-data.json':
+		[`${process.cwd()}/content/terraform-cdk/v0.21.x/data/cd-ktf-nav-data.json`]:
 			JSON.stringify([
 				{
 					title: 'API Reference',
