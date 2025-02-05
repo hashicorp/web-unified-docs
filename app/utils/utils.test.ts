@@ -57,32 +57,22 @@ test('getProductVersion should return correct version for existing version', () 
 })
 
 test('getProductVersion should return latest version', () => {
-	const expected = {
-		ok: true,
-		value: 'v1.9.x',
-	}
+	const product = 'terraform'
+	const [expected] = versionMetadata[product]
 
-	const result = getProductVersion('terraform', 'latest')
-	expect(result).toStrictEqual(expected)
+	const { value } = getProductVersion(product, 'latest')
+	expect(value).toStrictEqual(expected.version)
 })
 
 test('getProductVersionMetadata should return metadata for existing product', () => {
+	const product = 'terraform'
+
 	const expected = {
 		ok: true,
-		value: [
-			{ version: 'v1.9.x', releaseStage: 'stable', isLatest: true },
-			{ version: 'v1.8.x', releaseStage: 'stable', isLatest: false },
-			{ version: 'v1.7.x', releaseStage: 'stable', isLatest: false },
-			{ version: 'v1.6.x', releaseStage: 'stable', isLatest: false },
-			{ version: 'v1.5.x', releaseStage: 'stable', isLatest: false },
-			{ version: 'v1.4.x', releaseStage: 'stable', isLatest: false },
-			{ version: 'v1.3.x', releaseStage: 'stable', isLatest: false },
-			{ version: 'v1.2.x', releaseStage: 'stable', isLatest: false },
-			{ version: 'v1.1.x', releaseStage: 'stable', isLatest: false },
-		],
+		value: versionMetadata[product],
 	}
 
-	const result = getProductVersionMetadata('terraform')
+	const result = getProductVersionMetadata(product)
 	expect(result).toStrictEqual(expected)
 })
 
