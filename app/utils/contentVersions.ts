@@ -2,12 +2,20 @@ import { Ok, Err } from '@utils/result'
 import fs from 'fs'
 import { join } from 'path'
 
+type ProductVersionMetadata = {
+	version: string
+	isLatest: boolean
+	releaseStage: string
+}
+
+type VersionMetadataMap = Record<string, ProductVersionMetadata[]>
+
 export const getProductVersion = (productSlug: string, version: string) => {
 	const VERSION_METADATA_FILE = join(
 		process.cwd(),
 		'app/api/versionMetadata.json',
 	)
-	const versionMetadata = JSON.parse(
+	const versionMetadata: VersionMetadataMap = JSON.parse(
 		fs.readFileSync(VERSION_METADATA_FILE, 'utf8'),
 	)
 	const productVersionMetadata = versionMetadata[productSlug]
@@ -19,9 +27,11 @@ export const getProductVersion = (productSlug: string, version: string) => {
 	let parsedVersion
 	if (version === 'latest') {
 		// Grab the latest version of the product
-		const foundVersion = productVersionMetadata.find((v) => {
-			return v.isLatest
-		})
+		const foundVersion = productVersionMetadata.find(
+			(v: ProductVersionMetadata) => {
+				return v.isLatest
+			},
+		)
 
 		if (!foundVersion) {
 			parsedVersion = '' // Set to an empty string if no latest version is found, as in the case for versionless docs such as terraform-docs-common
@@ -31,7 +41,7 @@ export const getProductVersion = (productSlug: string, version: string) => {
 	} else {
 		// Ensure the requested version is valid
 		if (
-			!productVersionMetadata.find((v) => {
+			!productVersionMetadata.find((v: ProductVersionMetadata) => {
 				return v.version === version
 			})
 		) {
