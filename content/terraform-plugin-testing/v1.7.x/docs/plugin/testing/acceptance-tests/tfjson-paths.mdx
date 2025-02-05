@@ -1,0 +1,690 @@
+---
+page_title: 'Plugin Development - Acceptance Testing: Terraform JSON Paths'
+description: >-
+    How to implement attribute paths in the testing module.
+    Attribute paths represent the location of an attribute within Terraform JSON data.
+---
+
+# Terraform JSON Paths
+
+An exact location within Terraform JSON data is referred to as a Terraform JSON or tfjson path.
+
+## Usage
+
+Example uses in the testing module include:
+
+- The `ExpectUnknownValue()` and `ExpectSensitiveValue()` [built-in plan checks](/terraform/plugin/testing/acceptance-tests/plan-checks#built-in-plan-checks) for specifying an attribute to make the check assertion against.
+
+## Concepts
+
+Terraform JSON Paths are designed around the underlying Go types corresponding to the Terraform JSON implementation of a schema and schema-based data. The [terraform-json](https://pkg.go.dev/github.com/hashicorp/terraform-json) library serves as the de-facto documentation for Terraform JSON data. Paths are always absolute and start from the root, or top level, of a JSON object.
+
+Given the tree structure of JSON objects, descriptions of paths and their steps borrow certain hierarchy terminology such as parent and child. A parent path describes a path without one or more of the final steps of a given path, or put differently, a partial path closer to the root of the object. A child path describes a path with one or more additional steps beyond a given path, or put differently, a path containing the given path but further from the root of the object.
+
+## Building Paths
+
+The `terraform-plugin-testing` module implementation for tfjson paths is in the [`tfjsonpath` package](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-testing/tfjsonpath), with the [`tfjsonpath.Path` type](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-testing/tfjsonpath#Path) being the main provider developer interaction point. Call the [`tfjsonpath.New()` function](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-testing/tfjsonpath#New) with a property name at the root of the object to begin a path.
+
+Given the following JSON object
+
+```json
+{
+   "first_name": "John",
+   "last_name": "Doe",
+   "age": 18,
+   "street_address": "123 Terraform Dr.",
+   "phone_numbers": [
+      { "mobile": "111-111-1111" },
+      { "home": "222-222-2222" }
+   ]
+}
+```
+
+The call to `tfjsonpath.New()` which matches the location of `first_name` string value is:
+
+```go
+tfjsonpath.New("first_name")
+```
+
+Once a `tfjsonpath.Path` is started, it supports a builder pattern, which allows for chaining method calls to construct a full path.
+
+The path which matches the location of the string value `"222-222-222"` is:
+
+```go
+tfjsonpath.New("phone_numbers").AtSliceIndex(1).AtMapKey("home")
+```
+
+The most common usage of `tfjsonpath.Path` is to specify an attribute within Terraform JSON data. When used in this way, the root of the JSON object is the same as the root of a schema.
+The follow sections show how to build attribute paths for [primitive attributes](#building-attribute-paths), [aggregate attributes](#building-aggregate-type-attribute-paths), [nested attributes](#building-nested-attribute-paths), and [blocks](#building-block-paths).
+
+### Building Attribute Paths
+
+The following table shows the different [`tfjsonpath.Path` type](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-testing/tfjsonpath#Path) methods associated with building paths for attribute implementations. Attribute types that cannot be traversed further are shown with N/A (not applicable).
+
+| Framework Attribute Type  | SDKv2 Attribute Type | Child Path Method |
+|---------------------------|----------------------|-------------------|
+| `schema.BoolAttribute`    | `schema.TypeBool`    | N/A               |
+| `schema.Float64Attribute` | `schema.TypeFloat`   | N/A               |
+| `schema.Int64Attribute`   | `schema.TypeInt`     | N/A               |
+| `schema.ListAttribute`    | `schema.TypeList`    | `AtSliceIndex()`  |
+| `schema.MapAttribute`     | `schema.TypeMap`     | `AtMapKey()`      |
+| `schema.NumberAttribute`  | N/A                  | N/A               |
+| `schema.ObjectAttribute`  | N/A                  | `AtMapKey()`      |
+| `schema.SetAttribute`     | `schema.TypeSet`     | `AtSliceIndex()`  |
+| `schema.StringAttribute`  | `schema.TypeString`  | N/A               |
+
+
+Given this example schema with a root attribute named `example_root_attribute`:
+
+```go
+//Terraform Plugin Framework
+schema.Schema{
+	Attributes: map[string]schema.Attribute{
+		"example_root_attribute": schema.StringAttribute{
+			Required: true,
+		},
+	},
+}
+
+//Terraform Plugin SDKv2
+Schema: map[string]*schema.Schema{
+    "example_root_attribute": {
+        Type:     schema.TypeString,
+        Required: true,
+    },
+},
+```
+
+And the following Terraform JSON object representation of the state:
+```json
+{
+    "example_root_attribute": "example-value"
+}
+```
+
+The call to `tfjsonpath.New()` which matches the location of `example_root_attribute` string value is:
+
+```go
+tfjsonpath.New("example_root_attribute")
+```
+
+For blocks, the beginning of a path is similarly defined.
+
+Given this example schema with a root block named `example_root_block`:
+
+```go
+//Terraform Plugin Framework
+schema.Schema{
+	Blocks: map[string]schema.Block{
+		"example_root_block": schema.ListNestedBlock{
+			NestedObject: schema.NestedBlockObject{/* ... */},
+		},
+	},
+}
+
+//Terraform Plugin SDKv2
+Schema: map[string]*schema.Schema{
+    "example_root_block": {
+        Type:     schema.TypeList,
+        Elem: &schema.Resource{
+            Schema: map[string]*schema.Schema{/* ... */},
+        },
+    },
+},
+```
+
+And the following Terraform JSON object representation of the state:
+```json
+{
+    "example_root_block": [
+        {}
+    ]
+}
+```
+
+The call to `tfjsonpath.New()` which matches the location of `example_root_block` slice value is:
+
+```go
+tfjsonpath.New("example_root_block")
+```
+
+### Building Aggregate Type Attribute Paths
+
+Given following schema example:
+
+```go
+//Terraform Plugin Framework
+schema.Schema{
+	Attributes: map[string]schema.Attribute{
+		"root_map_attribute": schema.MapAttribute{
+			ElementType: types.StringType,
+			Required: true,
+		},
+		"root_list_attribute": schema.ListAttribute{
+			ElementType: types.StringType,
+			Required: true,
+		},
+		"root_set_attribute": schema.SetAttribute{
+			ElementType: types.StringType,
+			Required: true,
+		},
+	},
+}
+
+//Terraform Plugin SDKv2
+Schema: map[string]*schema.Schema{
+    "root_map_attribute": {
+        Type: schema.TypeMap,
+        Elem: &schema.Schema{
+            Type: schema.TypeString,
+        },
+        Required: true,
+    },
+	"root_list_attribute": {
+        Type: schema.TypeList,
+        Elem: &schema.Schema{
+            Type: schema.TypeString,
+        },
+        Required: true,
+    },
+    "root_set_attribute": {
+        Type: schema.TypeSet,
+        Elem: &schema.Schema{
+            Type: schema.TypeString,
+        },
+        Required: true,
+    },
+},
+```
+
+And the following Terraform JSON object representation of the state:
+```json
+{
+    "root_map_attribute": {
+        "example-key": "map-value"
+    },
+    "root_list_attribute": [
+        "list-value1",
+        "list-value2"
+    ],
+    "root_set_attribute": [
+        "set-value1",
+        "set-value2"
+    ]
+}
+```
+
+The path which matches the string value associated with the map key `example-key` of the `root_map_attribute` attribute is:
+
+```go
+tfjsonpath.New("root_map_attribute").AtMapKey("example-key")
+```
+
+The path which matches the string value `list-value1` in the `root_list_attribute` attribute is:
+
+```go
+tfjsonpath.New("root_list_attribute").AtSliceIndex(0)
+```
+
+The path which matches the string value `set-value2` in the `root_set_attribute` attribute is:
+
+```go
+tfjsonpath.New("root_set_attribute").AtSliceIndex(1)
+```
+
+Note that because Sets are unordered in Terraform, the ordering of Set elements in the Terraform JSON data is not guaranteed to be the same as the ordering in the configuration.
+
+### Building Nested Attribute Paths
+
+The following table shows the different [`tfjsonpath.Path` type](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-testing/tfjsonpath#Path) methods associated with building paths for nested attributes.
+
+| Nested Attribute Type          | Child Path Method(s)        |
+|--------------------------------|-----------------------------|
+| `schema.ListNestedAttribute`   | `AtSliceIndex().AtMapKey()` |
+| `schema.MapNestedAttribute`    | `AtMapKey().AtMapKey()`     |
+| `schema.SetNestedAttribute`    | `AtSliceIndex().AtMapKey()` |
+| `schema.SingleNestedAttribute` | `AtMapKey()`                |
+
+Nested attributes eventually follow the same path rules as attributes at child paths, which follow the methods shown in the [Building Attribute Paths section](#building-attribute-paths).
+
+#### Building List Nested Attributes Paths
+
+An attribute that implements `schema.ListNestedAttribute` conceptually is a slice containing a map with attribute names as keys.
+
+Given the following schema example:
+
+```go
+schema.Schema{
+	Attributes: map[string]schema.Attribute{
+		"root_list_attribute": schema.ListNestedAttribute{
+			NestedObject: schema.NestedAttributeObject{
+				Attributes: map[string]schema.Attribute{
+					"nested_string_attribute": schema.StringAttribute{
+						Required: true,
+					},
+				},
+			},
+			Required: true,
+		},
+	},
+}
+```
+
+And the following Terraform JSON object representation of the state:
+```json
+{
+    "root_list_attribute": [
+        {
+          "nested_string_attribute": "value"
+        }
+    ]
+}
+```
+
+The path which matches the slice associated with the `root_list_attribute` attribute is:
+
+```go
+tfjsonpath.New("root_list_attribute")
+```
+
+The path which matches the first map in the slice associated with the `root_list_attribute` attribute is:
+
+```go
+tfjsonpath.New("root_list_attribute").AtSliceIndex(0)
+```
+
+The path which matches the `nested_string_attribute` map key in the first map in the slice associated with `root_list_attribute` attribute is:
+
+```go
+tfjsonpath.New("root_list_attribute").AtSliceIndex(0).AtMapKey("nested_string_attribute")
+```
+
+#### Building Map Nested Attributes Paths
+
+An attribute that implements `schema.MapNestedAttribute` conceptually is a map containing values of maps with attribute names as keys.
+
+Given the following schema example:
+
+```go
+schema.Schema{
+	Attributes: map[string]schema.Attribute{
+		"root_map_attribute": schema.MapNestedAttribute{
+			NestedObject: schema.NestedAttributeObject{
+				Attributes: map[string]schema.Attribute{
+					"nested_string_attribute": schema.StringAttribute{
+						Required: true,
+					},
+				},
+			},
+			Required: true,
+		},
+	},
+}
+```
+
+And the following Terraform JSON object representation of the state:
+```json
+{
+    "root_map_attribute": {
+        "example-key" : {
+          "nested_string_attribute": "value"
+        }
+    }
+}
+```
+
+The path which matches the map associated with the `root_map_attribute` attribute is:
+
+```go
+tfjsonpath.New("root_map_attribute")
+```
+
+The path which matches the `"example-key"` object in the map associated with the `root_map_attribute` attribute is:
+
+```go
+tfjsonpath.New("root_map_attribute").AtMapKey("example-key")
+```
+
+The path which matches the `nested_string_attribute` string value in a `"example-key"` object in the map associated with `root_map_attribute` attribute is:
+
+```go
+tfjsonpath.New("root_map_attribute").AtMapKey("example-key").AtMapKey("nested_string_attribute")
+```
+
+#### Building Set Nested Attributes Paths
+
+An attribute that implements `schema.SetNestedAttribute` conceptually is a slice containing maps with attribute names as keys.
+
+Given the following schema example:
+
+```go
+schema.Schema{
+	Attributes: map[string]schema.Attribute{
+		"root_set_attribute": schema.SetNestedAttribute{
+			NestedObject: schema.NestedAttributeObject{
+				Attributes: map[string]schema.Attribute{
+					"nested_string_attribute": schema.StringAttribute{
+						Required: true,
+					},
+				},
+			},
+			Required: true,
+		},
+	},
+}
+```
+
+And the following Terraform JSON object representation of the state:
+```json
+{
+    "root_set_attribute": [
+        {
+          "nested_string_attribute": "value"
+        }
+    ]
+}
+```
+
+The path which matches the set associated with the `root_set_attribute` attribute is:
+
+```go
+tfjsonpath.New("root_set_attribute")
+```
+
+The path which matches the first map in the slice associated with the `root_set_attribute` attribute is:
+
+```go
+tfjsonpath.New("root_set_attribute").AtSliceIndex(0)
+```
+
+Note that because Sets are unordered in Terraform, the ordering of Set elements in the Terraform JSON data is not guaranteed to be the same as the ordering in the configuration.
+
+The path which matches the `nested_string_attribute` map key in the first map in the slice associated with `root_set_attribute` attribute is:
+
+```go
+tfjsonpath.New("root_set_attribute").AtSliceIndex(0).AtMapKey("nested_string_attribute")
+```
+
+#### Building Single Nested Attributes Paths
+
+An attribute that implements `schema.SingleNestedAttribute` conceptually is a map with attribute names as keys.
+
+Given the following schema example:
+
+```go
+schema.Schema{
+	Attributes: map[string]schema.Attribute{
+		"root_grouped_attributes": schema.SingleNestedAttribute{
+			Attributes: map[string]schema.Attribute{
+				"nested_string_attribute": schema.StringAttribute{
+					Required: true,
+				},
+			},
+			Required: true,
+		},
+	},
+}
+```
+
+And the following Terraform JSON object representation of the state:
+```json
+{
+    "root_grouped_attributes": {
+      "nested_string_attribute": "value"
+    }
+}
+```
+
+The path which matches the map associated with the `root_grouped_attributes` attribute is:
+
+```go
+tfjsonpath.New("root_grouped_attributes")
+```
+
+The path which matches the `nested_string_attribute` string value in the map associated with the `root_grouped_attributes` attribute is:
+
+```go
+tfjsonpath.New("root_grouped_attributes").AtMapKey("nested_string_attribute")
+```
+
+### Building Block Paths
+
+The following table shows the different [`tfjsonpath.Path` type](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-testing/tfjsonpath#Path) methods associated with building paths for blocks.
+
+| Block Type          | Child Path Method(s)        |
+|---------------------|-----------------------------|
+| `ListNestedBlock`   | `AtSliceIndex().AtMapKey()` |
+| `SetNestedBlock`    | `AtSliceIndex().AtMapKey()` |
+| `SingleNestedBlock` | `AtMapKey()`                |
+
+Blocks can implement nested blocks. Paths can continue to be built using the associated method with each level of the block type.
+
+Blocks eventually follow the same path rules as attributes at child paths, which follow the methods shown in the [Building Attribute Paths section](#building-attribute-paths). Blocks cannot contain nested attributes.
+
+#### Building List Block Paths
+
+A `ListNestedBlock` conceptually is a slice containing maps with attribute or block names as keys.
+
+Given following schema example:
+
+```go
+//Terraform Plugin Framework
+schema.Schema{
+	Blocks: map[string]schema.Block{
+		"root_list_block": schema.ListNestedBlock{
+			NestedObject: schema.NestedBlockObject{
+				Attributes: map[string]schema.Attribute{
+					"block_string_attribute": schema.StringAttribute{
+						Required: true,
+					},
+				},
+				Blocks: map[string]schema.Block{
+                    "nested_list_block": schema.ListNestedBlock{
+                        NestedObject: schema.NestedBlockObject{
+                            Attributes: map[string]schema.Attribute{
+                                "nested_block_string_attribute": schema.StringAttribute{
+                                    Required: true,
+                                },
+                            },
+                        },
+                    },
+                },
+			},
+		},
+	},
+}
+
+//Terraform Plugin SDKv2
+Schema: map[string]*schema.Schema{
+    "root_list_block": {
+        Type:     schema.TypeList,
+        Elem: &schema.Resource{
+            Schema: map[string]*schema.Schema{
+                "block_string_attribute": {
+                    Type:     schema.TypeString,
+                    Required: true,
+                },
+                "nested_list_block": {
+                    Type: schema.TypeList,
+                    Elem: &schema.Resource{
+                        Schema: map[string]*schema.Schema{
+                            "nested_block_string_attribute": {
+                                Type: schema.TypeString,
+                                Required: true,
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+},
+```
+
+And the following Terraform JSON object representation of the state:
+```json
+{
+    "root_list_block": [
+      {
+        "block_string_attribute": "value1",
+        "nested_list_block": [
+            {"nested_block_string_attribute":  "value2"}
+        ]
+      }
+    ]
+}
+```
+
+The path which matches the slice associated with the `root_list_block` block is:
+
+```go
+tfjsonpath.New("root_list_block")
+```
+
+The path which matches the first map in the slice associated with the `root_list_block` block is:
+
+```go
+tfjsonpath.New("root_list_block").AtSliceIndex(0)
+```
+
+The path which matches the `block_string_attribute` string value in the first map in the slice associated with `root_list_block` block is:
+
+```go
+tfjsonpath.New("root_list_block").AtSliceIndex(0).AtMapKey("block_string_attribute")
+```
+
+The path which matches the `nested_list_block` slice in the first object in the slice associated with `root_list_block` block is:
+
+```go
+tfjsonpath.New("root_list_block").AtSliceIndex(0).AtMapKey("nested_list_block")
+```
+
+The path which matches the `nested_block_string_attribute` string value in the first map in the slice associated with the `nested_list_block` slice in the first map in the slice associated with `root_list_block` block is:
+
+```go
+tfjsonpath.New("root_list_block").AtSliceIndex(0).AtMapKey("nested_list_block").AtSliceIndex(0).AtMapKey("nested_block_string_attribute")
+```
+
+#### Building Set Block Paths
+
+A `SetNestedBlock` conceptually is a slice containing maps with attribute or block names as keys.
+
+Given following schema example:
+
+```go
+//Terraform Plugin Framework
+schema.Schema{
+	Blocks: map[string]schema.Block{
+		"root_set_block": schema.SetNestedBlock{
+			NestedObject: schema.NestedBlockObject{
+				Attributes: map[string]schema.Attribute{
+					"block_string_attribute": schema.StringAttribute{
+						Optional: true,
+					},
+				},
+			},
+		},
+	},
+}
+
+//Terraform Plugin SDKv2
+Schema: map[string]*schema.Schema{
+    "root_set_block": {
+        Type:     schema.TypeSet,
+        Elem: &schema.Resource{
+            Schema: map[string]*schema.Schema{
+                "block_string_attribute": {
+                    Type:     schema.TypeString,
+                    Optional: true,
+                },
+            },
+        },
+    },
+},
+```
+
+And the following Terraform JSON object representation of the state:
+```json
+{
+    "root_set_block": [
+      {
+        "block_string_attribute": "value1"
+      }
+    ]
+}
+```
+
+The path which matches the slice associated with the `root_set_block` block is:
+
+```go
+tfjsonpath.New("root_set_block")
+```
+
+
+The path which matches the first map in the slice associated with the `root_set_block` block is:
+
+```go
+tfjsonpath.New("root_set_block").AtSliceIndex(0)
+```
+
+Note that because sets are unordered in Terraform, the ordering of set elements in the Terraform JSON data is not guaranteed to be the same as the ordering in the configuration.
+
+The path which matches the `block_string_attribute` string value in the first map in the slice associated with `root_set_block` block is:
+
+```go
+tfjsonpath.New("root_set_block").AtSliceIndex(0).AtMapKey("block_string_attribute")
+````
+
+#### Building Single Block Paths
+
+A `SingleNestedBlock` conceptually is a map with attribute or block names as keys.
+
+Given following schema example:
+
+```go
+//Terraform Plugin Framework
+schema.Schema{
+	Blocks: map[string]schema.Block{
+		"root_single_block": schema.SingleNestedBlock{
+			Attributes: map[string]schema.Attribute{
+				"block_string_attribute": schema.StringAttribute{
+					Required: true,
+				},
+			},
+			Blocks: map[string]schema.Block{
+				"nested_single_block": schema.SingleNestedBlock{
+					Attributes: map[string]schema.Attribute{
+						"nested_block_string_attribute": schema.StringAttribute{
+							Required: true,
+						},
+					},
+				},
+			},
+		},
+	},
+}
+```
+
+The path which matches the map associated with the `root_single_block` block is:
+
+```go
+tfjsonpath.New("root_single_block")
+```
+
+The path which matches the `block_string_attribute` string value in the map associated with `root_single_block` block is:
+
+```go
+tfjsonpath.New("root_single_block").AtMapKey("block_string_attribute")
+```
+
+The path which matches the `nested_single_block` map in the map associated with `root_single_block` block is:
+
+```go
+tfjsonpath.New("root_single_block").AtMapKey("nested_single_block")
+```
+
+The path which matches the `nested_block_string_attribute` string value in the map associated with the `nested_single_block` in the map associated with `root_single_block` block is:
+
+```go
+tfjsonpath.New("root_single_block").AtMapKey("nested_single_block").AtMapKey("nested_block_string_attribute")
+```
