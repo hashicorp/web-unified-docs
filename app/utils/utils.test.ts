@@ -12,13 +12,13 @@ import fs from 'node:fs'
 vi.mock('node:fs')
 vi.mock('node:fs/promises')
 
-vi.mock('@api/version-metadata', () => {
-	return versionMetadata
-})
-
 beforeEach(() => {
 	// Reset the state of in-memory fs
 	vol.reset()
+	vol.fromJSON({
+		[`${process.cwd()}/app/api/versionMetadata.json`]:
+			JSON.stringify(versionMetadata),
+	})
 })
 
 afterEach(() => {

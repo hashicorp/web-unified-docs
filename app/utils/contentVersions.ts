@@ -1,8 +1,15 @@
-import versionMetadata from '@api/versionMetadata.json'
-
 import { Ok, Err } from '@utils/result'
+import fs from 'fs'
+import { join } from 'path'
 
 export const getProductVersion = (productSlug: string, version: string) => {
+	const VERSION_METADATA_FILE = join(
+		process.cwd(),
+		'app/api/versionMetadata.json',
+	)
+	const versionMetadata = JSON.parse(
+		fs.readFileSync(VERSION_METADATA_FILE, 'utf8'),
+	)
 	const productVersionMetadata = versionMetadata[productSlug]
 
 	if (!productVersionMetadata) {
@@ -38,6 +45,14 @@ export const getProductVersion = (productSlug: string, version: string) => {
 }
 
 export const getProductVersionMetadata = (productSlug: string) => {
+	const VERSION_METADATA_FILE = join(
+		process.cwd(),
+		'app/api/versionMetadata.json',
+	)
+	const versionMetadata = JSON.parse(
+		fs.readFileSync(VERSION_METADATA_FILE, 'utf8'),
+	)
+
 	if (versionMetadata[productSlug]) {
 		return Ok(versionMetadata[productSlug])
 	}
