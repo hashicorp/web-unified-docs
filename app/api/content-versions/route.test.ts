@@ -1,6 +1,7 @@
 import { expect, test, vi, beforeEach, afterEach } from 'vitest'
 import { GET } from './route'
 
+import * as searchNavDataFilesModule from '@utils/searchNavDataFiles'
 import { vol } from 'memfs'
 
 // Mock fs module
@@ -63,58 +64,63 @@ test('should return 200 and empty array if no content exists for the query param
 })
 
 test('should return 200 and array of strings on valid params', async () => {
+	// by default, searchNavDataFiles's basePath is process.cwd(). Which will not work in tests, so we need to mock it to '/'
+	vi.spyOn(
+		searchNavDataFilesModule,
+		'searchNavDataFiles',
+	).mockImplementationOnce((product: string, fullPath: string) => {
+		return searchNavDataFilesModule.searchNavDataFiles(product, fullPath, '/')
+	})
+
 	vol.fromJSON({
-		[`${process.cwd()}/content/terraform-cdk/v0.19.x/data/cd-ktf-nav-data.json`]:
-			JSON.stringify([
-				{
-					title: 'API Reference',
-					routes: [
-						{
-							title: 'Go',
-							routes: [
-								{
-									title: 'Overview',
-									path: 'api-reference/go',
-								},
-							],
-						},
-					],
-				},
-			]),
-		[`${process.cwd()}/content/terraform-cdk/v0.20.x/data/cd-ktf-nav-data.json`]:
-			JSON.stringify([
-				{
-					title: 'API Reference',
-					routes: [
-						{
-							title: 'Python',
-							routes: [
-								{
-									title: 'Overview',
-									path: 'api-reference/python',
-								},
-							],
-						},
-					],
-				},
-			]),
-		[`${process.cwd()}/content/terraform-cdk/v0.21.x/data/cd-ktf-nav-data.json`]:
-			JSON.stringify([
-				{
-					title: 'API Reference',
-					routes: [
-						{
-							title: 'Python',
-							routes: [
-								{
-									title: 'Overview',
-									path: 'api-reference/python',
-								},
-							],
-						},
-					],
-				},
-			]),
+		'/content/terraform-cdk/v0.19.x/data/cd-ktf-nav-data.json': JSON.stringify([
+			{
+				title: 'API Reference',
+				routes: [
+					{
+						title: 'Go',
+						routes: [
+							{
+								title: 'Overview',
+								path: 'api-reference/go',
+							},
+						],
+					},
+				],
+			},
+		]),
+		'/content/terraform-cdk/v0.20.x/data/cd-ktf-nav-data.json': JSON.stringify([
+			{
+				title: 'API Reference',
+				routes: [
+					{
+						title: 'Python',
+						routes: [
+							{
+								title: 'Overview',
+								path: 'api-reference/python',
+							},
+						],
+					},
+				],
+			},
+		]),
+		'/content/terraform-cdk/v0.21.x/data/cd-ktf-nav-data.json': JSON.stringify([
+			{
+				title: 'API Reference',
+				routes: [
+					{
+						title: 'Python',
+						routes: [
+							{
+								title: 'Overview',
+								path: 'api-reference/python',
+							},
+						],
+					},
+				],
+			},
+		]),
 	})
 
 	const mockedResponse = {
