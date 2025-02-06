@@ -18,6 +18,7 @@ import {
 	rewriteInternalRedirectsPlugin,
 	loadRedirects,
 } from './rewrite-internal-redirects/rewrite-internal-redirects.mjs'
+import { transformStripTerraformEnterpriseContent } from './strip-terraform-enterprise-content.mjs/strip-terraform-enterprise-content.mjs'
 
 /**
  * Given a target directory,
@@ -130,10 +131,15 @@ async function applyMdxTransforms(entry, versionMetadata = {}) {
 				redirects,
 			})
 			.use(rewriteInternalLinksPlugin, { entry, versionMetadata })
+			// .use(transformStripTerraformEnterpriseContent)
 			.process(content)
 
 		const transformedContent = String(remarkResults)
-		const transformedFileString = grayMatter.stringify(transformedContent, data)
+		const test = transformStripTerraformEnterpriseContent(
+			transformedContent,
+			filePath,
+		)
+		const transformedFileString = grayMatter.stringify(test, data)
 		// Ensure the parent directory for the output file path exists
 		const outDir = path.dirname(outPath)
 		if (!fs.existsSync(outDir)) {
