@@ -126,20 +126,16 @@ async function applyMdxTransforms(entry, versionMetadata = {}) {
 		const remarkResults = await remark()
 			.use(remarkMdx)
 			.use(remarkIncludePartialsPlugin, { partialsDir, filePath })
+			.use(transformStripTerraformEnterpriseContent, { filePath })
 			.use(paragraphCustomAlertsPlugin)
 			.use(rewriteInternalRedirectsPlugin, {
 				redirects,
 			})
 			.use(rewriteInternalLinksPlugin, { entry, versionMetadata })
-			// .use(transformStripTerraformEnterpriseContent)
 			.process(content)
 
 		const transformedContent = String(remarkResults)
-		const test = transformStripTerraformEnterpriseContent(
-			transformedContent,
-			filePath,
-		)
-		const transformedFileString = grayMatter.stringify(test, data)
+		const transformedFileString = grayMatter.stringify(transformedContent, data)
 		// Ensure the parent directory for the output file path exists
 		const outDir = path.dirname(outPath)
 		if (!fs.existsSync(outDir)) {
