@@ -88,13 +88,13 @@ export function transformStripTerraformEnterpriseContent({ filePath }) {
 						// If we reach and end with an un-matching block name, throw an error
 						if (endMatch.groups.block !== block) {
 							const errMsg =
-								`Mismatched block names: Block opens with "${block}", and closes with "${endMatch[1]}".` +
+								`Mismatched block names: Block opens with "${block}", and closes with "${endMatch.groups.block}".` +
 								`\n` +
 								`Please make sure opening and closing block names are matching. Blocks cannot be nested.` +
 								`\n` +
-								`- Open:  ${latestMatch.start + 1}: ${block}` +
+								`- Open:  ${latestMatch.start}: ${block}` +
 								`\n` +
-								`- Close: ${nodeIndex}: ${endMatch[1]}` +
+								`- Close: ${nodeIndex}: ${endMatch.groups.block}` +
 								`\n`
 							console.error(errMsg)
 							throw new StripTerraformEnterpriseContentError(
