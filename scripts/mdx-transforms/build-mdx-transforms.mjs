@@ -18,7 +18,7 @@ import {
 	rewriteInternalRedirectsPlugin,
 	loadRedirects,
 } from './rewrite-internal-redirects/rewrite-internal-redirects.mjs'
-import { transformStripTerraformEnterpriseContent } from './strip-terraform-enterprise-content.mjs/strip-terraform-enterprise-content.mjs'
+import { transformStripTerraformEnterpriseContent } from './strip-terraform-enterprise-content/strip-terraform-enterprise-content.mjs'
 
 /**
  * Given a target directory,
