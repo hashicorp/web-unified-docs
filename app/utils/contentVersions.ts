@@ -2,8 +2,12 @@ import versionMetadata from '@api/versionMetadata.json'
 
 import { Ok, Err } from '@utils/result'
 
-export const getProductVersion = (productSlug: string, version: string) => {
-	const productVersionMetadata = versionMetadata[productSlug]
+export const getProductVersion = (
+	productSlug: string,
+	version: string,
+	versionMetaData: typeof versionMetadata = versionMetadata,
+) => {
+	const productVersionMetadata = versionMetaData[productSlug]
 
 	if (!productVersionMetadata) {
 		return Err(`Product, ${productSlug}, not found in version metadata`)
@@ -37,9 +41,12 @@ export const getProductVersion = (productSlug: string, version: string) => {
 	return Ok(parsedVersion)
 }
 
-export const getProductVersionMetadata = (productSlug: string) => {
-	if (versionMetadata[productSlug]) {
-		return Ok(versionMetadata[productSlug])
+export const getProductVersionMetadata = (
+	productSlug: string,
+	versionMetaData: typeof versionMetadata = versionMetadata,
+) => {
+	if (versionMetaData[productSlug]) {
+		return Ok(versionMetaData[productSlug])
 	}
 
 	return Err(`Product, ${productSlug}, not found in version metadata`)
