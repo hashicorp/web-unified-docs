@@ -17,6 +17,7 @@ afterEach(() => {
 beforeEach(() => {
 	vol.fromJSON({
 		'/content/terraform/v1.19.x/test.mdx': mdxContent,
+		'app/api/versionMetadata.json': JSON.stringify(versionMetadata),
 	})
 })
 
