@@ -62,7 +62,7 @@ test('getProductVersion should return latest version', () => {
 		value: 'v1.9.x',
 	}
 
-	const result = getProductVersion('terraform', 'latest')
+	const result = getProductVersion('terraform', 'latest', versionMetadata)
 	expect(result).toStrictEqual(expected)
 })
 
@@ -82,7 +82,7 @@ test('getProductVersionMetadata should return metadata for existing product', ()
 		],
 	}
 
-	const result = getProductVersionMetadata('terraform')
+	const result = getProductVersionMetadata('terraform', versionMetadata)
 	expect(result).toStrictEqual(expected)
 })
 
