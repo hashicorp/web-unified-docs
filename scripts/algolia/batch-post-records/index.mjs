@@ -6,4 +6,6 @@ const ALGOLIA_RECORDS_FILE = path.join(
 	'scripts/algolia/batch-post-records/algoliaRecords.json',
 )
 
-batchPostRecords(ALGOLIA_RECORDS_FILE)
+if (!process.env.IS_DOCKER) {
+	batchPostRecords(ALGOLIA_RECORDS_FILE)
+}
