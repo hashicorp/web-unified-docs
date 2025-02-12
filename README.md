@@ -1,4 +1,4 @@
-# Web Unified Docs 
+# Web Unified Docs
 
 > **Please note**: 🚨 The `public` folder in this repository is served on the public internet, as this project is now [deployed through Vercel](https://vercel.com/hashicorp/web-unified-docs/deployments). Please exercise caution when testing content migration scripts, _especially_ when pushing your work up. For the majority of content source repositories, this presents very little risk, as the content source repositories themselves are already public.
 >
@@ -10,12 +10,9 @@
 >
 > For these repositories in particular, please take care to ensure that only the content that is already published through our `content.hashicorp.com` API is migrated into this repository.
 
-
 The project in this repository, `hashicorp/web-unified-docs`, aims to implement [[DEVDOT-023] Unified Product Documentation Repository](https://docs.google.com/document/d/1p8kOqySttvWUVfn7qiC4wGBR73LMBGMelwLt69pM3FQ/edit). The RFC for this project was intentionally light on implementation details, in order to foster consensus on the broad direction.
 
 The existing API (`content.hashicorp.com`) has endpoints that serve documentation content, the source code for which can be found in [hashicorp/mktg-content-workflows](https://github.com/hashicorp/mktg-content-workflows/blob/main/api/content.ts). The endpoints related to documentation content will be replaced with a new API as part of this project.
-
-
 
 ## Local Development
 
@@ -34,12 +31,11 @@ There are a few things you need to set up before you can begin developing in thi
 
 2. Run `vercel link`
 
-   This command will prompt you to connect your local copy of repo to [the Vercel `web-unified-docs` project]([https://vercel.com/hashicorp/dev-portal](https://vercel.com/hashicorp/web-unified-docs)). The command creates a `.vercel` directory with a JSON file that contains the information that links to the Vercel project.
+   This command will prompt you to connect your local copy of repo to [the Vercel `web-unified-docs` project](<[https://vercel.com/hashicorp/dev-portal](https://vercel.com/hashicorp/web-unified-docs)>). The command creates a `.vercel` directory with a JSON file that contains the information that links to the Vercel project.
 
-3. Run `vercel env pull .env.local`
+3. Run `vercel env pull .env`
 
-   This command will pull the development environment variables from the linked Vercel project and write them to a new file called `.env.local`.
-
+   This command will pull the development environment variables from the linked Vercel project and write them to a new `.env` file.
 
 ### Terminology
 
@@ -63,11 +59,9 @@ To use these you will need to intentionally run `npm install` and `npm run prebu
 
 Running test coverage `npm run coverage`
 
-
-
 ## Background
 
-### Project Ratoinale 
+### Project Ratoinale
 
 - Storing documentation in one branch of one repo dramatically simplifies the workflow for contributing documentation.
 - Publishing changes to multiple versions can be done in a single PR, as opposed to multiple PRs which is required by the current setup.
@@ -81,7 +75,7 @@ Running test coverage `npm run coverage`
 
 ### Clone Time
 
-As of writing, cloning this repo takes about the same amount of time as cloning a single one of our larger repos. 
+As of writing, cloning this repo takes about the same amount of time as cloning a single one of our larger repos.
 
 ```
 $ time git clone https://github.com/hashicorp/web-presence-experimental-docs
@@ -104,6 +98,5 @@ For comparison:
 | consul                         | 80                      |
 | terraform                      | 49                      |
 | vault                          | 46                      |
-
 
 ### [Architectural Decision Records](https://github.com/hashicorp/web-unified-docs/tree/main/docs/decisions)
