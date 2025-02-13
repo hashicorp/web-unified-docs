@@ -24,7 +24,6 @@ export async function GET(request: Request) {
 	 * reformat fullPath to searchable file path
 	 * e.g. doc#cdktf/api-reference/python/classes -> api-reference/python/classes
 	 */
-	// todo: use product config to filter out the default file path - split by # and then use product config to filter out path
 	const splitPath = fullPath.split('#')
 	const basePath = PRODUCT_CONFIG[product].basePaths?.find(
 		(basePath: string) => {
