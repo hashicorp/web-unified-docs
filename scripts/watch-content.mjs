@@ -1,6 +1,8 @@
 import fs from 'fs'
 import path from 'path'
 import { buildFileMdxTransforms } from './mdx-transforms/build-mdx-transforms-file.mjs'
+import { copyNavDataFile } from './utils/copy-nav-data-file.mjs'
+import { gatherVersionMetadata } from './gather-version-metadata.mjs'
 
 const contentDir = path.resolve('content')
 
@@ -70,6 +72,20 @@ fs.watch(contentDir, { recursive: true }, async (eventType, filename) => {
 			} catch (error) {
 				console.error(`Error processing file ${filePath}:`, error)
 			}
+		}
+	} else if (filename.includes('nav-data.json')) {
+		const filePath = path.join(contentDir, filename)
+		console.log(`Nav data file changed: ${filePath}`)
+		const versionMetadata = await gatherVersionMetadata(contentDir)
+
+		try {
+			await copyNavDataFile(filePath, versionMetadata)
+
+			await fetch(`${process.env.DEV_PORTAL_URL}/api/refresh`, {
+				method: 'POST',
+			})
+		} catch (error) {
+			console.error(`Error processing file ${filePath}:`, error)
 		}
 	}
 })
