@@ -48,7 +48,7 @@ test('should return 400 if `fullPath` query parameter is missing', async () => {
 	)
 })
 
-test('should return 200 and empty array if no content exists for the query params', async () => {
+test('should return 404 if the product is invalid', async () => {
 	vol.fromJSON({})
 
 	const mockRequest = (url: string) => {
@@ -58,9 +58,9 @@ test('should return 200 and empty array if no content exists for the query param
 		'http://localhost:8080/api/content-versions?product=nonexistent&fullPath=doc#docs/internals',
 	)
 	const response = await GET(request)
-	expect(response.status).toBe(200)
-	const json = await response.json()
-	expect(json).toEqual({ versions: [] })
+	expect(response.status).toBe(404)
+	const text = await response.text()
+	expect(text).toBe('Not found')
 })
 
 test('should return 200 and array of strings on valid params', async () => {
