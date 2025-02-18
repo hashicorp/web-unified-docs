@@ -20,6 +20,11 @@ export async function GET(request: Request) {
 			{ status: 400 },
 		)
 	}
+
+	if (!Object.keys(PRODUCT_CONFIG).includes(product)) {
+		console.error(`API Error: Product, ${product}, not found in contentDirMap`)
+		return new Response('Not found', { status: 404 })
+	}
 	/**
 	 * reformat fullPath to searchable file path
 	 * e.g. doc#cdktf/api-reference/python/classes -> api-reference/python/classes
