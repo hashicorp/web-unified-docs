@@ -1,4 +1,5 @@
 import { searchNavDataFiles } from '../../utils/searchNavDataFiles'
+import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
 
 export async function GET(request: Request) {
 	const url = new URL(request.url)
@@ -23,8 +24,16 @@ export async function GET(request: Request) {
 	 * reformat fullPath to searchable file path
 	 * e.g. doc#cdktf/api-reference/python/classes -> api-reference/python/classes
 	 */
-	const splitPath = fullPath.split('/')
-	const fileNameQuery = splitPath.slice(1).join('/')
+	const splitPath = fullPath.split('#')
+	const basePath = PRODUCT_CONFIG[product].basePaths?.find(
+		(basePath: string) => {
+			return splitPath[1].startsWith(`${basePath}`)
+		},
+	)
+	let fileNameQuery = splitPath[1].replace(basePath, '')
+	if (fileNameQuery.startsWith('/')) {
+		fileNameQuery = fileNameQuery.slice(1)
+	}
 	const versions = await searchNavDataFiles(product, fileNameQuery)
 	/**
 	 * return either A) versions array or B) an empty array (if no content matches the query params)
