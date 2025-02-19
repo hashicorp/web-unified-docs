@@ -2,6 +2,8 @@ import { readFile, parseMarkdownFrontMatter } from '@utils/file'
 import { getProductVersion } from '@utils/contentVersions'
 import { errorResultToString } from '@utils/result'
 import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
+import { statSync } from 'fs'
+import { join } from 'path'
 
 /**
  * Parameters expected by `GET` route handler
@@ -79,12 +81,16 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 		],
 	]
 
-	let foundContent
+	let foundContent, githubFile, createdAt
 	for (const loc of possibleContentLocations) {
 		const readFileResult = await readFile(loc)
 
 		if (readFileResult.ok) {
 			foundContent = readFileResult.value
+			githubFile = loc.join('/')
+			const fullPath = join(process.cwd(), githubFile)
+			const stats = statSync(fullPath)
+			createdAt = stats.birthtime.toISOString()
 			break
 		}
 	}
@@ -115,8 +121,9 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 			metadata,
 			subpath: 'docs', // TODO: I guess we could grab the first part of the rawDocsPath? Is there something I am missing here?
 			markdownSource,
-			created_at: 'Fri Aug 13 2021 18:50:23 GMT+0000 (GMT)', // TODO: Currently we store this in dynamodb, but maybe we could just use the file system's/git's created date?
+			created_at: createdAt,
 			sha: '', // TODO: Do we really need this?
+			githubFile,
 		},
 	})
 }
