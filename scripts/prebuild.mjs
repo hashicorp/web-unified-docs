@@ -36,9 +36,8 @@ async function main() {
 	// Apply MDX transforms, writing out transformed MDX files to `public`
 	await buildMdxTransforms(CONTENT_DIR, CONTENT_DIR_OUT, versionMetadata)
 
-
 	await buildAlgoliaRecords(CONTENT_DIR_OUT, versionMetadata)
-  
+
 	// Copy all `*-nav-data.json` files from `content` to `public/content`, using execSync
 	await copyNavDataFiles(CONTENT_DIR, CONTENT_DIR_OUT, versionMetadata)
 

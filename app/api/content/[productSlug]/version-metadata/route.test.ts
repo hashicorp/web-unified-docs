@@ -12,7 +12,7 @@ import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
 import { Err, Ok } from '@utils/result'
 import { getProductVersionMetadata } from '@utils/contentVersions'
 
-vi.mock(import('@utils/contentVersions'), async (importOriginal) => {
+vi.mock(import('@utils/contentVersions'), async (importOriginal: any) => {
 	const mod = await importOriginal()
 	return {
 		...mod,

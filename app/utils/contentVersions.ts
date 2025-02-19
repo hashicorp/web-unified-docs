@@ -1,11 +1,18 @@
 import versionMetadata from '@api/versionMetadata.json'
-
 import { Ok, Err } from '@utils/result'
+
+type ProductVersionMetadata = {
+	version: string
+	isLatest: boolean
+	releaseStage: string
+}
+
+type VersionMetadataMap = Record<string, ProductVersionMetadata[]>
 
 export const getProductVersion = (
 	productSlug: string,
 	version: string,
-	versionMetaData: typeof versionMetadata = versionMetadata,
+	versionMetaData: VersionMetadataMap = versionMetadata,
 ) => {
 	const productVersionMetadata = versionMetaData[productSlug]
 
@@ -16,9 +23,11 @@ export const getProductVersion = (
 	let parsedVersion
 	if (version === 'latest') {
 		// Grab the latest version of the product
-		const foundVersion = productVersionMetadata.find((v) => {
-			return v.isLatest
-		})
+		const foundVersion = productVersionMetadata.find(
+			(v: ProductVersionMetadata) => {
+				return v.isLatest
+			},
+		)
 
 		if (!foundVersion) {
 			parsedVersion = '' // Set to an empty string if no latest version is found, as in the case for versionless docs such as terraform-docs-common
@@ -28,7 +37,7 @@ export const getProductVersion = (
 	} else {
 		// Ensure the requested version is valid
 		if (
-			!productVersionMetadata.find((v) => {
+			!productVersionMetadata.find((v: ProductVersionMetadata) => {
 				return v.version === version
 			})
 		) {
@@ -43,7 +52,7 @@ export const getProductVersion = (
 
 export const getProductVersionMetadata = (
 	productSlug: string,
-	versionMetaData: typeof versionMetadata = versionMetadata,
+	versionMetaData: VersionMetadataMap = versionMetadata,
 ) => {
 	if (versionMetaData[productSlug]) {
 		return Ok(versionMetaData[productSlug])

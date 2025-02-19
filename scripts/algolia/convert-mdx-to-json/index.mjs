@@ -17,6 +17,7 @@ export async function getLatestProductVersionDirectories(dir, versionMetadata) {
 	if (!Array.isArray(directories)) {
 		return []
 	}
+
 	// Iterate over product directories and return the list of latest version directories
 	const productDirectories = await Promise.all(
 		directories.map(async (directory) => {
