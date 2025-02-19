@@ -204,7 +204,7 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 		expect(result.markdownSource).toBe(markdownSource)
 		expect(result.githubFile).toBe(expectedPath.join('/'))
 		expect(result.created_at).toBe(mockDate.toISOString())
-
+		expect(result.lastModified).toBe(mockDate.toISOString())
 		// Verify statSync was called with the correct full path
 		expect(statSync).toHaveBeenCalledWith(
 			join(process.cwd(), expectedPath.join('/')),

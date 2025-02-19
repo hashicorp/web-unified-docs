@@ -81,7 +81,7 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 		],
 	]
 
-	let foundContent, githubFile, createdAt
+	let foundContent, githubFile, createdAt, lastModified
 	for (const loc of possibleContentLocations) {
 		const readFileResult = await readFile(loc)
 
@@ -91,6 +91,7 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 			const fullPath = join(process.cwd(), githubFile)
 			const stats = statSync(fullPath)
 			createdAt = stats.birthtime.toISOString()
+			lastModified = stats.mtime.toISOString()
 			break
 		}
 	}
@@ -122,6 +123,7 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 			subpath: 'docs', // TODO: I guess we could grab the first part of the rawDocsPath? Is there something I am missing here?
 			markdownSource,
 			created_at: createdAt,
+			lastModified,
 			sha: '', // TODO: Do we really need this?
 			githubFile,
 		},
