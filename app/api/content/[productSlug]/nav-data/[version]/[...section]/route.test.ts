@@ -13,16 +13,16 @@ import { Err, Ok } from '@utils/result'
 import { getProductVersion } from '@utils/contentVersions'
 import { readFile, parseJson } from '@utils/file'
 
-vi.mock(import('@utils/contentVersions'), async (importOriginal) => {
-	const mod = await importOriginal() // type is inferred
+vi.mock(import('@utils/contentVersions'), async (importOriginal: any) => {
+	const mod = await importOriginal()
 	return {
 		...mod,
 		getProductVersion: vi.fn(),
 	}
 })
 
-vi.mock(import('@utils/file'), async (importOriginal) => {
-	const mod = await importOriginal() // type is inferred
+vi.mock(import('@utils/file'), async (importOriginal: any) => {
+	const mod = await importOriginal()
 	return {
 		...mod,
 		readFile: vi.fn(),
