@@ -87,7 +87,7 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 		if (readFileResult.ok) {
 			foundContent = readFileResult.value
 			githubFile = loc.join('/')
-			const stats = statSync(githubFile)
+			const stats = statSync(process.cwd() + '/' + githubFile)
 			createdAt = stats.birthtime.toISOString()
 			lastModified = stats.mtime.toISOString()
 			break
