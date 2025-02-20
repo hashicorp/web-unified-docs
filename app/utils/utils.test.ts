@@ -1,20 +1,15 @@
 import { expect, test, vi, afterEach, beforeEach } from 'vitest'
-import { vol } from 'memfs'
+import { fs, vol } from 'memfs'
 import {
 	getProductVersionMetadata,
 	getProductVersion,
 } from '@utils/contentVersions'
 import { searchNavDataFiles } from './searchNavDataFiles'
 import versionMetadata from '../../__fixtures__/versionMetadata.json'
-import fs from 'node:fs'
 
 // Mock fs module
 vi.mock('node:fs')
 vi.mock('node:fs/promises')
-
-vi.mock('@api/version-metadata', () => {
-	return versionMetadata
-})
 
 beforeEach(() => {
 	// Reset the state of in-memory fs
@@ -32,7 +27,7 @@ test('getProductVersion should return error for non-existent product', () => {
 		value: 'Product, noproduct, not found in version metadata',
 	}
 
-	const result = getProductVersion('noproduct', 'v1.19.x')
+	const result = getProductVersion('noproduct', 'v1.19.x', versionMetadata)
 	expect(result).toStrictEqual(expected)
 })
 
@@ -42,7 +37,7 @@ test('getProductVersion should return error for non-existent version', () => {
 		value: 'Product, terraform, has no "v1.19.x" version',
 	}
 
-	const result = getProductVersion('terraform', 'v1.19.x')
+	const result = getProductVersion('terraform', 'v1.19.x', versionMetadata)
 	expect(result).toStrictEqual(expected)
 })
 
@@ -52,7 +47,7 @@ test('getProductVersion should return correct version for existing version', () 
 		value: 'v1.5.x',
 	}
 
-	const result = getProductVersion('terraform', 'v1.5.x')
+	const result = getProductVersion('terraform', 'v1.5.x', versionMetadata)
 	expect(result).toStrictEqual(expected)
 })
 
@@ -102,7 +97,7 @@ test('getProductVersion should return error for empty version', () => {
 		value: 'Product, terraform, has no "" version',
 	}
 
-	const result = getProductVersion('terraform', '')
+	const result = getProductVersion('terraform', '', versionMetadata)
 	expect(result).toStrictEqual(expected)
 })
 
@@ -112,7 +107,7 @@ test('getProductVersion should return error for null version', () => {
 		value: 'Product, terraform, has no "null" version',
 	}
 
-	const result = getProductVersion('terraform', null)
+	const result = getProductVersion('terraform', null, versionMetadata)
 	expect(result).toStrictEqual(expected)
 })
 
@@ -122,7 +117,7 @@ test('getProductVersion should return error for undefined version', () => {
 		value: 'Product, terraform, has no "undefined" version',
 	}
 
-	const result = getProductVersion('terraform', 'undefined')
+	const result = getProductVersion('terraform', 'undefined', versionMetadata)
 	expect(result).toStrictEqual(expected)
 })
 
