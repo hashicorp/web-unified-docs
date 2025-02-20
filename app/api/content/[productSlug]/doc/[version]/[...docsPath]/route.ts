@@ -2,8 +2,8 @@ import { readFile, parseMarkdownFrontMatter } from '@utils/file'
 import { getProductVersion } from '@utils/contentVersions'
 import { errorResultToString } from '@utils/result'
 import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
-import { statSync } from 'fs'
-import path from 'path'
+// import { statSync } from 'fs'
+// import path from 'path'
 
 /**
  * Parameters expected by `GET` route handler
@@ -88,10 +88,10 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 		if (readFileResult.ok) {
 			foundContent = readFileResult.value
 			githubFile = loc.join('/')
-			const fullPath = path.resolve(githubFile)
-			const stats = statSync(fullPath)
-			createdAt = stats.birthtime.toISOString()
-			lastModified = stats.mtime.toISOString()
+			// const fullPath = path.resolve(githubFile)
+			// const stats = statSync(fullPath)
+			// createdAt = stats.birthtime.toISOString()
+			// lastModified = stats.mtime.toISOString()
 			break
 		}
 	}
