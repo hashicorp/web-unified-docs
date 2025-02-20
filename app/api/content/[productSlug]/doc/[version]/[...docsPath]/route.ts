@@ -2,7 +2,7 @@ import { readFile, parseMarkdownFrontMatter } from '@utils/file'
 import { getProductVersion } from '@utils/contentVersions'
 import { errorResultToString } from '@utils/result'
 import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
-import { statSync } from 'fs'
+import fs from 'fs'
 import { join } from 'path'
 
 /**
@@ -89,7 +89,7 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 			foundContent = readFileResult.value
 			githubFile = loc.join('/')
 			const fullPath = join(process.cwd(), githubFile)
-			const stats = statSync(fullPath)
+			const stats = await fs.promises.stat(fullPath)
 			createdAt = stats.birthtime.toISOString()
 			lastModified = stats.mtime.toISOString()
 			break
