@@ -1,6 +1,41 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { transformRewriteInternalLinks } from './add-version-to-internal-links.mjs'
-import versionMetadata from '../../../__fixtures__/versionMetadata.json'
+import versionMetadata from '__fixtures__/versionMetadata.json'
+
+// Mock PRODUCT_CONFIG
+vi.mock('../../../app/utils/productConfig.mjs', () => {
+	return {
+		PRODUCT_CONFIG: {
+			terraform: {
+				basePaths: ['cli', 'internals', 'intro', 'language'],
+			},
+			'ptfe-releases': {
+				basePaths: ['enterprise'],
+			},
+			'terraform-cdk': {
+				basePaths: ['cdktf'],
+			},
+			'terraform-docs-agents': {
+				basePaths: ['cloud-docs/agents'],
+			},
+			'terraform-plugin-framework': {
+				basePaths: ['plugin/framework'],
+			},
+			'terraform-plugin-log': {
+				basePaths: ['plugin/log'],
+			},
+			'terraform-plugin-mux': {
+				basePaths: ['plugin/mux'],
+			},
+			'terraform-plugin-sdk': {
+				basePaths: ['plugin/sdkv2'],
+			},
+			'terraform-plugin-testing': {
+				basePaths: ['plugin/testing'],
+			},
+		},
+	}
+})
 
 describe('transformRewriteInternalLinks', () => {
 	it('should not rewrite internal links for paths other than the basePaths', async () => {
