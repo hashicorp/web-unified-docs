@@ -56,14 +56,16 @@ export function getProductPaths(directory, productSlug) {
 				if (itemName === 'index') {
 					apiPaths.push({
 						path: path.join(productSlug, relativePath),
-						created_at: stat.mtime,
+						created_at: stat.ctime,
+						last_modified: stat.mtime,
 					})
 					return
 				}
 
 				apiPaths.push({
 					path: path.join(productSlug, relativePath, itemName),
-					created_at: stat.mtime,
+					created_at: stat.ctime,
+					last_modified: stat.mtime,
 				})
 			}
 		})

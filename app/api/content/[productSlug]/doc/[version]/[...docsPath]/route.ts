@@ -2,8 +2,7 @@ import { readFile, parseMarkdownFrontMatter } from '@utils/file'
 import { getProductVersion } from '@utils/contentVersions'
 import { errorResultToString } from '@utils/result'
 import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
-import { lstatSync } from 'fs'
-import { join } from 'path'
+import docsPaths from '@api/docsPaths.json'
 
 /**
  * Parameters expected by `GET` route handler
@@ -88,10 +87,18 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 		if (readFileResult.ok) {
 			foundContent = readFileResult.value
 			githubFile = loc.join('/')
-			const fullPath = join(process.cwd(), githubFile)
-			const stats = lstatSync(fullPath)
-			createdAt = stats.birthtime.toISOString()
-			lastModified = stats.mtime.toISOString()
+			const productDocsPaths = docsPaths[productSlug]
+			if (productDocsPaths) {
+				const matchingPath = productDocsPaths.find(
+					({ path }: { path: string }) => {
+						return path.endsWith(parsedDocsPath)
+					},
+				)
+				if (matchingPath) {
+					createdAt = matchingPath.created_at
+					lastModified = matchingPath.last_modified
+				}
+			}
 			break
 		}
 	}
