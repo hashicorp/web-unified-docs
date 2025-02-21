@@ -1,6 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { PRODUCT_CONFIG } from '../app/utils/productConfig.mjs'
+import { execSync } from 'child_process'
 
 export async function gatherAllVersionsDocsPaths(versionMetadata) {
 	const allDocsPaths = {}
@@ -53,21 +54,27 @@ export function getProductPaths(directory, productSlug) {
 			if (stat.isDirectory()) {
 				traverseDirectory(itemPath, itemRelativePath)
 			} else {
+				const created_at = execSync(
+					`git log --format=%aI -1 --reverse ${itemPath}`,
+				).toString()
+				const last_modified = execSync(
+					`git log --format=%aI -1 ${itemPath}`,
+				).toString()
 				const itemName = item.split('.')[0]
 
 				if (itemName === 'index') {
 					apiPaths.push({
 						path: path.join(productSlug, relativePath),
-						created_at: stat.ctime,
-						last_modified: stat.mtime,
+						created_at,
+						last_modified,
 					})
 					return
 				}
 
 				apiPaths.push({
 					path: path.join(productSlug, relativePath, itemName),
-					created_at: stat.ctime,
-					last_modified: stat.mtime,
+					created_at: created_at,
+					last_modified: last_modified,
 				})
 			}
 		})
