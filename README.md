@@ -39,11 +39,6 @@ There are a few things you need to set up before you can begin developing in thi
 
    This command will pull the development environment variables from the linked Vercel project and write them to a new `.env` file.
 
-### Terminology
-
-- `migration | migration-preview` - A preview of `hashicorp/dev-portal` that uses both APIs - the existing content API for most routes, and the new unified docs API (this repo) just for the routes we have migrated so far.
-- `unified-docs | unified-docs-preview` - A preview of `hashicorp/dev-portal` that pulls all of its content from the new unified docs API (this repo).
-
 ### Quick start
 
 To get a migration preview running, run `make` from the root of this repo. The `make` command starts the `unified-docs` Docker profile that spins up a local instance of `experimental-docs-api` and `dev-portal`.
