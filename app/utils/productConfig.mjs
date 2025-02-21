@@ -150,41 +150,41 @@ export const PRODUCT_CONFIG = {
 	//  versionedDocs: true,
 	// 	websiteDir: 'website',
 	// },
-	'ptfe-releases': {
-		/**
-		 * ✅ Initial migration attempt: SEEMS TO WORK
-		 *
-		 * TODO: handle `terraform-docs-common` and the `copy-docs` workflow.
-		 * In our current system, this copies a subset of `cloud-docs` into
-		 * `ptfe-releases`. We need to retain some form of this workflow
-		 * in our new setup, both during migration, and as a script that can
-		 * be run in the future to sync `cloud-docs` content
-		 * from `terraform-docs-common` into `ptfe-releases`.
-		 *
-		 * For more details see this gist:
-		 * https://gist.github.com/zchsh/73c36d4248880cb1a66216b2b00f89ed
-		 */
-		assetDir: 'img',
-		basePaths: ['enterprise'],
-		contentDir: 'docs',
-		dataDir: 'data',
-		productSlug: 'terraform',
-		/**
-		 * Note: we need to sort versions for various reasons. Nearly all
-		 * our documentation is semver-versioned. PTFE is not. Rather than
-		 * implement custom sorting from the ground up, we can coerce PTFE
-		 * date-based versions into semver, purely for the purpose of sorting.
-		 */
-		semverCoerce: (versionString) => {
-			const versionRegex = /v(\d\d\d\d)(\d\d)-([\d]+)/
-			const versionParts = versionRegex.exec(versionString)
-			const [year, date, patch] = versionParts.slice(1)
-			const semverString = `v${year}.${parseInt(date)}.${patch}`
-			return semver.coerce(semverString)
-		},
-		versionedDocs: true,
-		websiteDir: 'website',
-	},
+	// 'ptfe-releases': {
+	// 	/**
+	// 	 * ✅ Initial migration attempt: SEEMS TO WORK
+	// 	 *
+	// 	 * TODO: handle `terraform-docs-common` and the `copy-docs` workflow.
+	// 	 * In our current system, this copies a subset of `cloud-docs` into
+	// 	 * `ptfe-releases`. We need to retain some form of this workflow
+	// 	 * in our new setup, both during migration, and as a script that can
+	// 	 * be run in the future to sync `cloud-docs` content
+	// 	 * from `terraform-docs-common` into `ptfe-releases`.
+	// 	 *
+	// 	 * For more details see this gist:
+	// 	 * https://gist.github.com/zchsh/73c36d4248880cb1a66216b2b00f89ed
+	// 	 */
+	// 	assetDir: 'img',
+	// 	basePaths: ['enterprise'],
+	// 	contentDir: 'docs',
+	// 	dataDir: 'data',
+	// 	productSlug: 'terraform',
+	// 	/**
+	// 	 * Note: we need to sort versions for various reasons. Nearly all
+	// 	 * our documentation is semver-versioned. PTFE is not. Rather than
+	// 	 * implement custom sorting from the ground up, we can coerce PTFE
+	// 	 * date-based versions into semver, purely for the purpose of sorting.
+	// 	 */
+	// 	semverCoerce: (versionString) => {
+	// 		const versionRegex = /v(\d\d\d\d)(\d\d)-([\d]+)/
+	// 		const versionParts = versionRegex.exec(versionString)
+	// 		const [year, date, patch] = versionParts.slice(1)
+	// 		const semverString = `v${year}.${parseInt(date)}.${patch}`
+	// 		return semver.coerce(semverString)
+	// 	},
+	// 	versionedDocs: true,
+	// 	websiteDir: 'website',
+	// },
 	// sentinel: {
 	// 	/**
 	// 	 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
@@ -212,95 +212,95 @@ export const PRODUCT_CONFIG = {
 	//  versionedDocs: true,
 	// 	websiteDir: 'website',
 	// },
-	terraform: {
-		/**
-		 * ✅ Initial migration attempt: SEEMS TO WORK
-		 *
-		 * TODO: determine how to handle non-"stable" releases. For example,
-		 * `terraform` has `v1.10.x` releases that currently have the version
-		 * number `v1.10.0-alpha20240814`, the `releaseStage` `alpha`. This
-		 * will need to be accounted for in our new content API.
-		 *
-		 * TODO: `display` version for `v1.1.x` is "v1.1 and earlier". Ref:
-		 * https://content.hashicorp.com/api/content/terraform/version-metadata?partial=true
-		 * How should we handle this in our unified docs repo setup?
-		 * Maybe another data point in favour of some kind of
-		 * `_version-metadata.json` file at the top level of each versioned
-		 * content directory? Eg we'd write out a file to:
-		 * - content/${repoSlug}/${version}/_version-metadata.json
-		 * This file would have _some_ of the metadata we already have here:
-		 * https://content.hashicorp.com/api/content/terraform/version-metadata?partial=true
-		 * and would be collected via our `gather-version-metadata` script.
-		 */
-		assetDir: 'img',
-		basePaths: ['cli', 'internals', 'intro', 'language'],
-		contentDir: 'docs',
-		dataDir: 'data',
-		productSlug: 'terraform',
-		semverCoerce: semver.coerce,
-		versionedDocs: true,
-		websiteDir: 'website',
-	},
-	'terraform-cdk': {
-		/**
-		 * ✅ Initial migration attempt: SEEMS TO WORK
-		 *
-		 * TODO: `terraform-cdk` doesn't seem to have an asset directory.
-		 * Need to confirm this is true across ALL versions... if not,
-		 * need to figure out a workaround to only copy it in some versions,
-		 * without silently ignoring missing assets directories in other contexts.
-		 * Maybe like a `versionsWithoutAssets` array or something?
-		 */
-		assetDir: '',
-		basePaths: ['cdktf'],
-		contentDir: 'docs',
-		dataDir: 'data',
-		productSlug: 'terraform',
-		semverCoerce: semver.coerce,
-		versionedDocs: true,
-		websiteDir: 'website',
-	},
-	'terraform-docs-agents': {
-		/**
-		 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
-		 *
-		 * Fails for v1.5.x (and likely earlier) with error:
-		 * `terraform-docs-agents/website/img: No such file or directory`
-		 * This likely indicates that older versions of docs have a different
-		 * directory structure that needs to be accounted for. Need to confirm.
-		 * See note at top of this document on `pages` directories for details.
-		 */
-		assetDir: ['img', 'public'],
-		basePaths: ['cloud-docs/agents'],
-		contentDir: 'docs',
-		dataDir: 'data',
-		productSlug: 'terraform',
-		semverCoerce: semver.coerce,
-		versionedDocs: true,
-		websiteDir: 'website',
-	},
-	'terraform-docs-common': {
-		/**
-		 * ✅ Initial migration attempt: SEEMS TO WORK
-		 *
-		 * Maybe worth noting: versioned docs is not enabled for `terraform-docs-common`.
-		 * `branchForLatest` is set to `main`. We treat the single version
-		 * as `v0.0.x` in our version metadata in the current content API:
-		 * https://content.hashicorp.com/api/content/terraform-docs-common/version-metadata?partial=true
-		 */
-		/**
-		 * TODO: `terraform-docs-common` has _both_ an `img` folder, _and_ a
-		 * `public` folder. Need to investigate how these are used, and whether
-		 * we need to move both over (eg assetDirs could be an array?)
-		 */
-		assetDir: 'img',
-		contentDir: 'docs',
-		dataDir: 'data',
-		productSlug: 'terraform',
-		semverCoerce: semver.coerce,
-		versionedDocs: false,
-		websiteDir: 'website',
-	},
+	// terraform: {
+	// 	/**
+	// 	 * ✅ Initial migration attempt: SEEMS TO WORK
+	// 	 *
+	// 	 * TODO: determine how to handle non-"stable" releases. For example,
+	// 	 * `terraform` has `v1.10.x` releases that currently have the version
+	// 	 * number `v1.10.0-alpha20240814`, the `releaseStage` `alpha`. This
+	// 	 * will need to be accounted for in our new content API.
+	// 	 *
+	// 	 * TODO: `display` version for `v1.1.x` is "v1.1 and earlier". Ref:
+	// 	 * https://content.hashicorp.com/api/content/terraform/version-metadata?partial=true
+	// 	 * How should we handle this in our unified docs repo setup?
+	// 	 * Maybe another data point in favour of some kind of
+	// 	 * `_version-metadata.json` file at the top level of each versioned
+	// 	 * content directory? Eg we'd write out a file to:
+	// 	 * - content/${repoSlug}/${version}/_version-metadata.json
+	// 	 * This file would have _some_ of the metadata we already have here:
+	// 	 * https://content.hashicorp.com/api/content/terraform/version-metadata?partial=true
+	// 	 * and would be collected via our `gather-version-metadata` script.
+	// 	 */
+	// 	assetDir: 'img',
+	// 	basePaths: ['cli', 'internals', 'intro', 'language'],
+	// 	contentDir: 'docs',
+	// 	dataDir: 'data',
+	// 	productSlug: 'terraform',
+	// 	semverCoerce: semver.coerce,
+	// 	versionedDocs: true,
+	// 	websiteDir: 'website',
+	// },
+	// 'terraform-cdk': {
+	// 	/**
+	// 	 * ✅ Initial migration attempt: SEEMS TO WORK
+	// 	 *
+	// 	 * TODO: `terraform-cdk` doesn't seem to have an asset directory.
+	// 	 * Need to confirm this is true across ALL versions... if not,
+	// 	 * need to figure out a workaround to only copy it in some versions,
+	// 	 * without silently ignoring missing assets directories in other contexts.
+	// 	 * Maybe like a `versionsWithoutAssets` array or something?
+	// 	 */
+	// 	assetDir: '',
+	// 	basePaths: ['cdktf'],
+	// 	contentDir: 'docs',
+	// 	dataDir: 'data',
+	// 	productSlug: 'terraform',
+	// 	semverCoerce: semver.coerce,
+	// 	versionedDocs: true,
+	// 	websiteDir: 'website',
+	// },
+	// 'terraform-docs-agents': {
+	// 	/**
+	// 	 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
+	// 	 *
+	// 	 * Fails for v1.5.x (and likely earlier) with error:
+	// 	 * `terraform-docs-agents/website/img: No such file or directory`
+	// 	 * This likely indicates that older versions of docs have a different
+	// 	 * directory structure that needs to be accounted for. Need to confirm.
+	// 	 * See note at top of this document on `pages` directories for details.
+	// 	 */
+	// 	assetDir: ['img', 'public/img'],
+	// 	basePaths: ['cloud-docs/agents'],
+	// 	contentDir: 'docs',
+	// 	dataDir: 'data',
+	// 	productSlug: 'terraform',
+	// 	semverCoerce: semver.coerce,
+	// 	versionedDocs: true,
+	// 	websiteDir: 'website',
+	// },
+	// 'terraform-docs-common': {
+	// 	/**
+	// 	 * ✅ Initial migration attempt: SEEMS TO WORK
+	// 	 *
+	// 	 * Maybe worth noting: versioned docs is not enabled for `terraform-docs-common`.
+	// 	 * `branchForLatest` is set to `main`. We treat the single version
+	// 	 * as `v0.0.x` in our version metadata in the current content API:
+	// 	 * https://content.hashicorp.com/api/content/terraform-docs-common/version-metadata?partial=true
+	// 	 */
+	// 	/**
+	// 	 * TODO: `terraform-docs-common` has _both_ an `img` folder, _and_ a
+	// 	 * `public` folder. Need to investigate how these are used, and whether
+	// 	 * we need to move both over (eg assetDirs could be an array?)
+	// 	 */
+	// 	assetDir: 'img',
+	// 	contentDir: 'docs',
+	// 	dataDir: 'data',
+	// 	productSlug: 'terraform',
+	// 	semverCoerce: semver.coerce,
+	// 	versionedDocs: false,
+	// 	websiteDir: 'website',
+	// },
 	'terraform-plugin-framework': {
 		/**
 		 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions

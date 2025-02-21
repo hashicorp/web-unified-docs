@@ -5,7 +5,16 @@ import pluginReact from 'eslint-plugin-react'
 import noBarrelFiles from 'eslint-plugin-no-barrel-files'
 
 export default [
-	{ ignores: ['.next', '**/dist'] },
+	{
+		ignores: [
+			'.next',
+			'**/dist',
+			'eslint.config.mjs',
+			'content',
+			'public',
+			'vitest.config.mjs',
+		],
+	},
 	{ files: ['**/*.{js,mjs,cjs,ts,jsx,tsx}'] },
 	{ languageOptions: { globals: globals.node } },
 	pluginJs.configs.recommended,

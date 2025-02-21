@@ -12,17 +12,25 @@ import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
 import { Err, Ok } from '@utils/result'
 import { getProductVersion } from '@utils/contentVersions'
 import { readFile, parseMarkdownFrontMatter } from '@utils/file'
+import { statSync } from 'fs'
+import { join } from 'path'
 
-vi.mock(import('@utils/contentVersions'), async (importOriginal) => {
-	const mod = await importOriginal() // type is inferred
+vi.mock('fs', () => {
+	return {
+		statSync: vi.fn(),
+	}
+})
+
+vi.mock(import('@utils/contentVersions'), async (importOriginal: any) => {
+	const mod = await importOriginal()
 	return {
 		...mod,
 		getProductVersion: vi.fn(),
 	}
 })
 
-vi.mock(import('@utils/file'), async (importOriginal) => {
-	const mod = await importOriginal() // type is inferred
+vi.mock(import('@utils/file'), async (importOriginal: any) => {
+	const mod = await importOriginal()
 	return {
 		...mod,
 		readFile: vi.fn(),
@@ -116,9 +124,15 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 
 		// Some real(ish) data for version
 		const version = 'v20220610-01'
+		const mockDate = new Date('2024-01-01T00:00:00.000Z')
 
 		// Force the version(real-ish) to exist
 		vi.mocked(getProductVersion).mockReturnValue(Ok(version))
+
+		// Mock statSync to return a fixed date
+		vi.mocked(statSync).mockReturnValue({
+			birthtime: mockDate,
+		} as any)
 
 		// Fake the return of some invalid markdown from the filesystem
 		vi.mocked(readFile).mockImplementation(async () => {
@@ -148,9 +162,22 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 		const version = 'v20220610-01'
 
 		const markdownSource = '# Hello World'
+		const mockDate = new Date('2024-01-01T00:00:00.000Z')
+		const expectedPath = [
+			'content',
+			productSlug,
+			version,
+			PRODUCT_CONFIG[productSlug].contentDir,
+			'index.mdx',
+		]
 
 		// Force the version(real-ish) to exist
 		vi.mocked(getProductVersion).mockReturnValue(Ok(version))
+
+		// Mock statSync to return a fixed date
+		vi.mocked(statSync).mockReturnValue({
+			birthtime: mockDate,
+		} as any)
 
 		// Fake content returned from the filesystem
 		vi.mocked(readFile).mockImplementation(async () => {
@@ -163,7 +190,7 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 		})
 
 		const response = await mockRequest({
-			docsPath: [''],
+			docsPath: ['index'],
 			productSlug,
 			version,
 		})
@@ -175,5 +202,56 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 		expect(result.product).toBe(productSlug)
 		expect(result.version).toBe(version)
 		expect(result.markdownSource).toBe(markdownSource)
+		expect(result.githubFile).toBe(expectedPath.join('/'))
+		expect(result.created_at).toBe(mockDate.toISOString())
+		expect(result.lastModified).toBe(mockDate.toISOString())
+		// Verify statSync was called with the correct full path
+		expect(statSync).toHaveBeenCalledWith(
+			join(process.cwd(), expectedPath.join('/')),
+		)
+	})
+	it('checks both possible content locations for githubFile path', async () => {
+		const [productSlug] = Object.keys(PRODUCT_CONFIG)
+		const version = 'v20220610-01'
+		const markdownSource = '# Hello World'
+		const mockDate = new Date('2024-01-01T00:00:00.000Z')
+
+		vi.mocked(getProductVersion).mockReturnValue(Ok(version))
+		vi.mocked(statSync).mockReturnValue({
+			birthtime: mockDate,
+		} as any)
+
+		// First attempt fails, second succeeds (testing index.mdx path)
+		vi.mocked(readFile)
+			.mockImplementationOnce(async () => {
+				return Err('File not found')
+			})
+			.mockImplementationOnce(async () => {
+				return Ok(markdownSource)
+			})
+
+		vi.mocked(parseMarkdownFrontMatter).mockReturnValue(
+			Ok({ markdownSource, metadata: {} }),
+		)
+
+		const response = await mockRequest({
+			docsPath: ['docs', 'example'],
+			productSlug,
+			version,
+		})
+
+		const { result } = await response.json()
+		const expectedPath = [
+			'content',
+			productSlug,
+			version,
+			PRODUCT_CONFIG[productSlug].contentDir,
+			'docs',
+			'example',
+			'index.mdx',
+		]
+
+		// Verify the githubFile path is correct
+		expect(result.githubFile).toBe(expectedPath.join('/'))
 	})
 })
