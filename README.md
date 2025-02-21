@@ -12,16 +12,18 @@
 
 The project in this repository, `hashicorp/web-unified-docs`, aims to implement [[DEVDOT-023] Unified Product Documentation Repository](https://docs.google.com/document/d/1p8kOqySttvWUVfn7qiC4wGBR73LMBGMelwLt69pM3FQ/edit). The RFC for this project was intentionally light on implementation details, in order to foster consensus on the broad direction.
 
-The existing API (`content.hashicorp.com`) has endpoints that serve documentation content, the source code for which can be found in [hashicorp/mktg-content-workflows](https://github.com/hashicorp/mktg-content-workflows/blob/main/api/content.ts). The endpoints related to documentation content will be replaced with a new API as part of this project.
+The existing API (`content.hashicorp.com`) has endpoints that serve documentation content. You can find the source code in [hashicorp/mktg-content-workflows](https://github.com/hashicorp/mktg-content-workflows/blob/main/api/content.ts). 
 
-## Local Development
+The goal of the unified docs API is to host all of HashiCorp's product documentation. The unified docs API will eventually replace the existing content API.
 
-### Requirements:
+## Local development
+
+### Requirements
 
 - [Node.js](https://nodejs.org/en) (version 20 or higher)
 - [Docker](https://www.docker.com/) and [Docker Compose](https://docs.docker.com/compose/) (for managing containers)
 
-### Setting Up Environment Variables
+### Set up environment variables
 
 There are a few things you need to set up before you can begin developing in this repository.
 
@@ -39,29 +41,55 @@ There are a few things you need to set up before you can begin developing in thi
 
 ### Terminology
 
-- `migration | migration-preview` - A preview of `hashicorp/dev-portal` where some routes fetch data from the existing content API and whilst only the routes that have been intentionally migrated use the new unified docs api ie this repo.
-- `unified-docs | unified-docs-preview` - A preview of `hashicorp/dev-portal` where it pulls all of its content from the new unified docs api ie this repo.
+- `migration | migration-preview` - A preview of `hashicorp/dev-portal` that uses both APIs - the existing content API for most routes, and the new unified docs API (this repo) just for the routes we have migrated so far.
+- `unified-docs | unified-docs-preview` - A preview of `hashicorp/dev-portal` that pulls all of its content from the new unified docs API (this repo).
 
-### Quick Start
+### Quick start
 
-To get a migration preview running, run `make` from the root of this repo. Once this command completes the following endpoints should be working:
+To get a migration preview running, run `make` from the root of this repo. The `make` command starts the `unified-docs` Docker profile that spins up a local instance of `experimental-docs-api` and `dev-portal`.
 
-- http://localhost:3000 - A running instance of the current dev-portal frontend application that is configured to pull content from the local `public` direcotry.
+Once this command completes, you can access the following endpoints:
 
-- http://localhost:8000 - An instance of the content API endpoint that serves content from the local `public` directory. Here is example of a request http://localhost:8080/api/content/terraform/doc/v1.1.x/cli that can be used to test this endpoint.
+- http://localhost:3000 - An instance of the `dev-portal` container configured to pull from the experimental docs API (this repo). This image depends on the unified docs API (`experimental-docs-api`).
 
-To spin this down gracefully, run `make clean` in a separate terminal. If you wish to remove the local Docker images as well, you can specify `make clean CLEAN_OPTION=full`.
+- http://localhost:8080 - An instance of the unified docs API container (this repo - `experimental-docs-api`) that serves content from the `content` directory. On startup, this container processes the content and assets in `/content` into `public/assets` and `public/content`. In addition, the container also generates `app/api/docsPaths.json` and `app/api/versionMetadata.json` from the contents within `/content`. 
+   
+   Use the following example to test this endpoint: http://localhost:8080/api/content/terraform-plugin-framework/doc/latest/plugin/framework
 
-### More Commands
+> [!NOTE]  
+> The unified docs API container takes time to process the content and assets. You must wait for both the `experimental-docs-api` and `dev-portal` containers to complete before you can successfully test content in the `dev-portal` preview environment (`localhost:3000`). Visit http://localhost:8080/api/all-docs-paths to verify the `experimental-docs-api` container is complete.
 
-The `makefile` serves as a convenience tool to get a migration preview running. If you need more granular control a full list of the commands are available in the `package.json` file.
-To use these you will need to intentionally run `npm install` and `npm run prebuild` before anything else.
+To spin this down gracefully, run `make clean` in a separate terminal. 
 
-Running test coverage `npm run coverage`
+If you wish to remove the local Docker images as well, run `make clean CLEAN_OPTION=full`.
+
+### More commands
+
+The `makefile` serves as a convenience tool start the local preview. If you need more granular control, the `package.json` file contains a full list of available commands.
+
+To use these, you will need to intentionally run `npm install` and `npm run prebuild` before anything else.
+
+Use `npm run coverage` to run coverage tests.
+
+### Preview environments for unified-docs and dev-portal
+
+Unified docs API serves as one of the content APIs for `dev-portal` (frontend application for DevDot). As a result, when implementing new features, you may need to modify both the backend (this repo) and the frontend (`dev-portal`).
+
+If you are working on a ticket that requires changes to both the unified docs API and `dev-portal`, please set [custom environment variables for your branch](https://vercel.com/hashicorp/dev-portal/settings/environment-variables) in Vercel to simplify testing instructions.
+
+For example, in Vercel, for your `dev-portal` branch, you can set the following environment variables:
+
+| Environment variable | Value                  |
+| -------------------- | ---------------------- |
+| `HASHI_ENV`          | `unified-docs-sandbox` |
+| `UNIFIED_DOCS_API`   | `<UDR-Preview-URL>`    |
+
+Vercel will use these values to create deploy previews.
+
 
 ## Background
 
-### Project Ratoinale
+### Project Rationale
 
 - Storing documentation in one branch of one repo dramatically simplifies the workflow for contributing documentation.
 - Publishing changes to multiple versions can be done in a single PR, as opposed to multiple PRs which is required by the current setup.
