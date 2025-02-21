@@ -9,7 +9,7 @@ export async function gatherAllVersionsDocsPaths(versionMetadata) {
 	// Iterate over each product directory, adding to `allDocsPaths`
 	for (const product of allProducts) {
 		// Initialize the product array
-		allDocsPaths[product] = []
+		allDocsPaths[product] = {}
 
 		// Get the latest product version for the path
 		if (!versionMetadata[product]) {
@@ -18,6 +18,7 @@ export async function gatherAllVersionsDocsPaths(versionMetadata) {
 		const allVersions = versionMetadata[product]
 
 		for (const version of allVersions) {
+			allDocsPaths[product][version?.version ?? ''] = []
 			const contentPath = path.join(
 				'./content',
 				product,
@@ -31,7 +32,7 @@ export async function gatherAllVersionsDocsPaths(versionMetadata) {
 				PRODUCT_CONFIG[product].productSlug,
 			)
 
-			allDocsPaths[product].push({ [version?.version ?? '']: [...allPaths] })
+			allDocsPaths[product][version?.version ?? ''].push(...allPaths)
 		}
 	}
 	// Return the paths

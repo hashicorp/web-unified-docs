@@ -87,12 +87,9 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 		if (readFileResult.ok) {
 			foundContent = readFileResult.value
 			githubFile = loc.join('/')
-			const productDocsPaths = docsPathsAllVersions[productSlug]
+			const productDocsPaths = docsPathsAllVersions[productSlug][parsedVersion]
 			if (productDocsPaths) {
-				const versionPaths = productDocsPaths.find((entry) => {
-					return Object.keys(entry)[0] === parsedVersion
-				})
-				const matchingPath = versionPaths[parsedVersion].find(
+				const matchingPath = productDocsPaths.find(
 					({ path }: { path: string }) => {
 						return path.endsWith(parsedDocsPath)
 					},
