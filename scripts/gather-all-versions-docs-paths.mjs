@@ -2,7 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import { PRODUCT_CONFIG } from '../app/utils/productConfig.mjs'
 
-export async function gatherAllDocsPaths(versionMetadata) {
+export async function gatherAllVersionsDocsPaths(versionMetadata) {
 	const allDocsPaths = {}
 	const allProducts = Object.keys(PRODUCT_CONFIG)
 
@@ -15,23 +15,24 @@ export async function gatherAllDocsPaths(versionMetadata) {
 		if (!versionMetadata[product]) {
 			throw new Error(`No version metadata found for product: ${product}`)
 		}
-		const latestProductVersion = versionMetadata[product].find((version) => {
-			return version.isLatest
-		})
-		const contentPath = path.join(
-			'./content',
-			product,
-			latestProductVersion?.version ?? '',
-			PRODUCT_CONFIG[product].contentDir,
-		)
+		const allVersions = versionMetadata[product]
 
-		// Get all paths for the product
-		const allPaths = getProductPaths(
-			contentPath,
-			PRODUCT_CONFIG[product].productSlug,
-		)
+		for (const version of allVersions) {
+			const contentPath = path.join(
+				'./content',
+				product,
+				version?.version ?? '',
+				PRODUCT_CONFIG[product].contentDir,
+			)
 
-		allDocsPaths[product].push(...allPaths)
+			// Get all paths for the product
+			const allPaths = getProductPaths(
+				contentPath,
+				PRODUCT_CONFIG[product].productSlug,
+			)
+
+			allDocsPaths[product].push({ [version?.version ?? '']: [...allPaths] })
+		}
 	}
 	// Return the paths
 	return allDocsPaths
@@ -56,14 +57,16 @@ export function getProductPaths(directory, productSlug) {
 				if (itemName === 'index') {
 					apiPaths.push({
 						path: path.join(productSlug, relativePath),
-						created_at: stat.mtime,
+						created_at: stat.ctime,
+						last_modified: stat.mtime,
 					})
 					return
 				}
 
 				apiPaths.push({
 					path: path.join(productSlug, relativePath, itemName),
-					created_at: stat.mtime,
+					created_at: stat.ctime,
+					last_modified: stat.mtime,
 				})
 			}
 		})
