@@ -16,6 +16,70 @@ The existing API (`content.hashicorp.com`) has endpoints that serve documentatio
 
 The goal of the unified docs API is to host all of HashiCorp's product documentation. The unified docs API will eventually replace the existing content API.
 
+## Architecture
+
+The following diagram illustrates the relationships between the unified docs API (this repo), `dev-portal`, and the existing content API:
+
+```mermaid
+graph LR
+    subgraph "Content sources (non-migrated)"
+        BDY[boundary]
+        CSL[consul]
+        HCP[hcp-docs]
+        NMD[nomad]
+        PKR[packer]
+        PTF[ptfe-releases]
+        SNT[sentinel]
+        TF[terraform]
+        TFC[terraform-cdk]
+        TFA[terraform-docs-agents]
+        TFD[terraform-docs-common]
+        VGT[vagrant]
+        VLT[vault]
+        WPT[waypoint]
+        
+        CURALL["/content or /website"]
+        BDY & CSL & HCP & NMD & PKR & PTF & SNT & TF & TFC & TFA & TFD & VGT & VLT & WPT --> CURALL
+    end
+
+    subgraph "Migrated content repo"
+        TPF[terraform-plugin-framework]
+        TPL[terraform-plugin-log]
+        TPM[terraform-plugin-mux]
+        TPS[terraform-plugin-sdk]
+        TPT[terraform-plugin-testing]
+
+        MIGALL["/content"]
+        TPF & TPL & TPM & TPS & TPT --> MIGALL
+    end
+
+    subgraph "APIs"
+        CP[Content API<br>content.hashicorp.com]
+        UDR[Unified Docs Repository<br>web-unified-docs]
+    end
+
+    subgraph "Frontend"
+        DP[Dev Portal<br>dev-portal]
+    end
+
+    %% BDY & CSL & HCP & NMD & PKR & PTF & SNT & TF & TFC & TFA & TFD & VGT & VLT & WPT --> CP
+    %% TPF & TPL & TPM & TPS & TPT --> UDR
+
+    CURALL -->|Current content flow| CP
+    MIGALL -->|Migrated content| UDR
+
+    CP -->|Serves most content| DP
+    UDR -->|Serves unified/content content| DP
+
+    class TPF,TPL,TPM,TPS,TPT,BDY,CSL,HCP,NMD,PKR,PTF,SNT,TF,TFC,TFA,TFD,VGT,VLT,WPT productRepo
+```
+
+The diagram shows:
+
+- The content API — the existing system that sources product documentation content from product repositories
+- The unified docs API — the new system that sources product documentation from this repo's `/content` directory. The migrated repos will use a directory approach to versioning (rather than the historic branch and tag strategy)
+- The Dev Portal — the frontend that serves the main DevDot interface. Dev Portal sources its content from both the existing content API and unified docs API.
+
 ## Local development
 
 ### Requirements
