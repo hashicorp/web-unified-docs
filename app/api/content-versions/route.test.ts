@@ -8,6 +8,23 @@ import { vol } from 'memfs'
 vi.mock('node:fs')
 vi.mock('node:fs/promises')
 
+// Mock PRODUCT_CONFIG
+vi.mock('@utils/productConfig.mjs', () => {
+	return {
+		PRODUCT_CONFIG: {
+			'terraform-cdk': {
+				assetDir: '',
+				basePaths: ['cdktf'],
+				contentDir: 'docs',
+				dataDir: 'data',
+				productSlug: 'terraform',
+				versionedDocs: true,
+				websiteDir: 'website',
+			},
+		},
+	}
+})
+
 beforeEach(() => {
 	// Reset the state of in-memory fs
 	vol.reset()
