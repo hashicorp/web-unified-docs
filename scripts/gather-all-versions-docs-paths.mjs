@@ -13,6 +13,9 @@ export async function gatherAllVersionsDocsPaths(versionMetadata) {
 	const allProducts = Object.keys(PRODUCT_CONFIG)
 
 	// Iterate over each product directory, adding to `allDocsPaths`
+	console.log(
+		`🪄 Gathering file information for ${allProducts.length} products...`,
+	)
 	for (const product of allProducts) {
 		// Initialize the product array
 		allDocsPaths[product] = {}
@@ -22,6 +25,8 @@ export async function gatherAllVersionsDocsPaths(versionMetadata) {
 			throw new Error(`No version metadata found for product: ${product}`)
 		}
 		const allVersions = versionMetadata[product]
+
+		console.log(`Gathering file information for ${product}...`)
 
 		for (const version of allVersions) {
 			allDocsPaths[product][version?.version ?? ''] = []
@@ -41,6 +46,10 @@ export async function gatherAllVersionsDocsPaths(versionMetadata) {
 			allDocsPaths[product][version?.version ?? ''].push(...allPaths)
 		}
 	}
+
+	console.log(
+		`✅ Gathered file information for ${allProducts.length} products\n`,
+	)
 	// Return the paths
 	return allDocsPaths
 }
@@ -91,7 +100,7 @@ export async function getProductPaths(directory, productSlug) {
 			// remove the "\n" from the end of the output
 			apiPath.created_at = created_at.stdout.slice(0, -1)
 		},
-		16,
+		{ loggingEnabled: false },
 	)
 
 	return apiPaths

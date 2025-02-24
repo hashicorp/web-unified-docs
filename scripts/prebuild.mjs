@@ -70,23 +70,18 @@ async function copyNavDataFiles(sourceDir, destDir, versionMetadata = {}) {
 
 	console.log(`\nCopying NavData from ${navDataFiles.length} files...`)
 
-	await batchPromises(
-		'NavData',
-		navDataFiles,
-		async (filePath) => {
-			const relativePath = path.relative(sourceDir, filePath)
-			const destPath = path.join(destDir, relativePath)
-			const parentDir = path.dirname(destPath)
-			if (!fs.existsSync(parentDir)) {
-				fs.mkdirSync(parentDir, { recursive: true })
-			}
-			fs.copyFileSync(filePath, destPath)
+	await batchPromises('NavData', navDataFiles, async (filePath) => {
+		const relativePath = path.relative(sourceDir, filePath)
+		const destPath = path.join(destDir, relativePath)
+		const parentDir = path.dirname(destPath)
+		if (!fs.existsSync(parentDir)) {
+			fs.mkdirSync(parentDir, { recursive: true })
+		}
+		fs.copyFileSync(filePath, destPath)
 
-			// add version to nav data paths/hrefs
-			await addVersionToNavData(destPath, versionMetadata)
-		},
-		16,
-	)
+		// add version to nav data paths/hrefs
+		await addVersionToNavData(destPath, versionMetadata)
+	})
 }
 
 async function copyRedirectFiles(sourceDir, destDir) {
@@ -96,20 +91,15 @@ async function copyRedirectFiles(sourceDir, destDir) {
 
 	console.log(`\nCopying Redirects from ${redirectFiles.length} files...`)
 
-	await batchPromises(
-		'Redirects',
-		redirectFiles,
-		async (filePath) => {
-			const relativePath = path.relative(sourceDir, filePath)
-			const destPath = path.join(destDir, relativePath)
-			const parentDir = path.dirname(destPath)
-			if (!fs.existsSync(parentDir)) {
-				fs.mkdirSync(parentDir, { recursive: true })
-			}
-			fs.copyFileSync(filePath, destPath)
-		},
-		16,
-	)
+	await batchPromises('Redirects', redirectFiles, async (filePath) => {
+		const relativePath = path.relative(sourceDir, filePath)
+		const destPath = path.join(destDir, relativePath)
+		const parentDir = path.dirname(destPath)
+		if (!fs.existsSync(parentDir)) {
+			fs.mkdirSync(parentDir, { recursive: true })
+		}
+		fs.copyFileSync(filePath, destPath)
+	})
 }
 
 function isFileAnImage(file) {
@@ -126,20 +116,15 @@ async function copyAssetFiles(sourceDir, destDir) {
 
 	console.log(`\nCopying Assets from ${assetFiles.length} files...`)
 
-	await batchPromises(
-		'Assets',
-		assetFiles,
-		async (filePath) => {
-			const relativePath = path.relative(sourceDir, filePath)
-			const destPath = path.join(destDir, relativePath)
-			const parentDir = path.dirname(destPath)
-			if (!fs.existsSync(parentDir)) {
-				fs.mkdirSync(parentDir, { recursive: true })
-			}
-			fs.copyFileSync(filePath, destPath)
-		},
-		16,
-	)
+	await batchPromises('Assets', assetFiles, async (filePath) => {
+		const relativePath = path.relative(sourceDir, filePath)
+		const destPath = path.join(destDir, relativePath)
+		const parentDir = path.dirname(destPath)
+		if (!fs.existsSync(parentDir)) {
+			fs.mkdirSync(parentDir, { recursive: true })
+		}
+		fs.copyFileSync(filePath, destPath)
+	})
 }
 
 /**

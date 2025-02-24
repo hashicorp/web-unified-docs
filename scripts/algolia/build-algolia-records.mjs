@@ -59,7 +59,7 @@ export async function buildAlgoliaRecords(targetDir, versionMetadata) {
 				throw new Error(err)
 			}
 		},
-		64,
+		{ batchSize: 64 },
 	)
 
 	const ALGOLIA_RECORDS_JSON_PATH = path.join(
