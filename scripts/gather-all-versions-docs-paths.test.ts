@@ -69,7 +69,5 @@ test('getProductPaths should return product baths', async () => {
 		'terraform',
 	)
 
-	console.log('### apiPaths', apiPaths)
-
 	expect(apiPaths[0].path).toBe('terraform/terraform-test')
 })

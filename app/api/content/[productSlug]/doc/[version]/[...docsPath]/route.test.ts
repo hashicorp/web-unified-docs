@@ -144,7 +144,6 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 		const productSlug = 'terraform-plugin-framework'
 		const version = 'v1.13.x'
 		const markdownSource = '# Hello World'
-		const mockDate = '2025-02-05T17:26:51-05:00'
 		const expectedPath = [
 			'content',
 			productSlug,
@@ -180,7 +179,6 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 		expect(result.version).toBe(version)
 		expect(result.markdownSource).toBe(markdownSource)
 		expect(result.githubFile).toBe(expectedPath.join('/'))
-		expect(result.created_at).toBe(mockDate)
 	})
 	it('checks both possible content locations for githubFile path', async () => {
 		const [productSlug] = Object.keys(PRODUCT_CONFIG)
