@@ -1,0 +1,75 @@
+import { expect, test, vi, afterEach } from 'vitest'
+import {
+	gatherAllVersionsDocsPaths,
+	getProductPaths,
+} from './gather-all-versions-docs-paths.mjs'
+import * as repoConfig from '../app/utils/productConfig.mjs'
+
+afterEach(() => {
+	vi.restoreAllMocks()
+})
+
+// gatherAllVersionsDocsPaths tests
+
+test('gatherAllDocsPaths returns the paths', async () => {
+	vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({
+		'terraform-plugin-framework': {
+			assetDir: 'img',
+			basePaths: ['plugin/framework'],
+			contentDir: 'docs',
+			dataDir: 'data',
+			productSlug: 'terraform',
+			semverCoerce: () => {},
+			versionedDocs: true,
+			websiteDir: 'website',
+		},
+	})
+	const versionMetadata = {
+		'terraform-plugin-framework': [
+			{ version: 'v1.13.x', releaseStage: 'stable', isLatest: true },
+			{ version: 'v1.12.x', releaseStage: 'stable', isLatest: false },
+		],
+	}
+	const result = await gatherAllVersionsDocsPaths(versionMetadata)
+
+	expect(result['terraform-plugin-framework']).toEqual(
+		expect.objectContaining({
+			'v1.13.x': expect.arrayContaining([
+				expect.objectContaining({
+					path: 'terraform/plugin/framework/acctests',
+				}),
+			]),
+		}),
+	)
+})
+
+test('gatherAllDocsPaths throws an error if no version metadata is found for a product', async () => {
+	vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({
+		test: {
+			assetDir: 'public',
+			contentDir: 'content',
+			dataDir: 'data',
+			productSlug: 'test',
+			semverCoerce: () => {},
+			versionedDocs: true,
+			websiteDir: 'website',
+		},
+	})
+	const versionMetadata = {}
+	await expect(gatherAllVersionsDocsPaths(versionMetadata)).rejects.toThrow(
+		'No version metadata found for product',
+	)
+})
+
+// getProductPaths tests
+
+test('getProductPaths should return product baths', async () => {
+	const apiPaths = await getProductPaths(
+		'app/api/all-docs-paths/__fixtures__/terraform-test',
+		'terraform',
+	)
+
+	console.log('### apiPaths', apiPaths)
+
+	expect(apiPaths[0].path).toBe('terraform/terraform-test')
+})
