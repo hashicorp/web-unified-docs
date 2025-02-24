@@ -1,34 +1,90 @@
-import { expect, test, vi, afterEach } from 'vitest'
+import { expect, test, vi } from 'vitest'
+import { vol } from 'memfs'
 import {
 	gatherAllDocsPaths,
 	getProductPaths,
 } from './gather-all-docs-paths.mjs'
-import * as repoConfig from '../app/utils/productConfig.mjs'
+import versionMetadata from '__fixtures__/versionMetadata.json'
 
-afterEach(() => {
-	vi.restoreAllMocks()
+vi.mock('fs', async () => {
+	const memfs = await vi.importActual('memfs')
+	return { default: memfs.fs }
+})
+
+vol.fromNestedJSON({
+	'content/terraform/v1.9.x/docs/cli': {
+		'auth.mdx': '#Test',
+	},
+	'content/ptfe-releases/v202410-1/docs': {},
+	'content/terraform-cdk/v0.20.x/docs': {},
+	'content/terraform-docs-agents/v1.14.x/docs': {},
+	'content/terraform-docs-common/docs': {},
+	'content/terraform-plugin-framework/v1.5.x/docs': {},
+	'content/terraform-plugin-log/v0.9.x/docs': {},
+	'content/terraform-plugin-mux/v0.14.x/docs': {},
+	'content/terraform-plugin-sdk/v2.32.x/docs': {},
+	'content/terraform-plugin-testing/v1.6.x/docs': {},
+	'app/api/all-docs-paths/hcp-docs-test': {
+		'hcp-docs-test.mdx': `#HCP docs test document`,
+	},
+	'app/api/all-docs-paths/terraform-test': {
+		'terraform-test.mdx': `#Terraform docs test document`,
+	},
+	'app/api/all-docs-paths/consul-test': {
+		'consul-test.mdx': `#Consul docs test document`,
+	},
+})
+
+vi.mock('../app/utils/productConfig.mjs', () => {
+	return {
+		PRODUCT_CONFIG: {
+			'ptfe-releases': {
+				contentDir: 'docs',
+				productSlug: 'terraform',
+			},
+			terraform: {
+				contentDir: 'docs',
+				productSlug: 'terraform',
+			},
+			'terraform-cdk': {
+				contentDir: 'docs',
+				productSlug: 'terraform',
+			},
+			'terraform-docs-agents': {
+				contentDir: 'docs',
+				productSlug: 'terraform',
+			},
+			'terraform-docs-common': {
+				contentDir: 'docs',
+				productSlug: 'terraform',
+			},
+			'terraform-plugin-framework': {
+				contentDir: 'docs',
+				productSlug: 'terraform',
+			},
+			'terraform-plugin-log': {
+				contentDir: 'docs',
+				productSlug: 'terraform',
+			},
+			'terraform-plugin-mux': {
+				contentDir: 'docs',
+				productSlug: 'terraform',
+			},
+			'terraform-plugin-sdk': {
+				contentDir: 'docs',
+				productSlug: 'terraform',
+			},
+			'terraform-plugin-testing': {
+				contentDir: 'docs',
+				productSlug: 'terraform',
+			},
+		},
+	}
 })
 
 // gatherAllDocsPaths tests
 
 test('gatherAllDocsPaths returns the paths', async () => {
-	vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({
-		terraform: {
-			assetDir: 'public',
-			contentDir: 'docs',
-			dataDir: 'data',
-			productSlug: 'terraform',
-			semverCoerce: () => {},
-			versionedDocs: true,
-			websiteDir: 'website',
-		},
-	})
-	const versionMetadata = {
-		terraform: [
-			{ version: 'v1.9.x', releaseStage: 'stable', isLatest: true },
-			{ version: 'v1.8.x', releaseStage: 'stable', isLatest: false },
-		],
-	}
 	const result = await gatherAllDocsPaths(versionMetadata)
 
 	expect(result.terraform).toEqual(
@@ -39,19 +95,7 @@ test('gatherAllDocsPaths returns the paths', async () => {
 })
 
 test('gatherAllDocsPaths throws an error if no version metadata is found for a product', async () => {
-	vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({
-		test: {
-			assetDir: 'public',
-			contentDir: 'content',
-			dataDir: 'data',
-			productSlug: 'test',
-			semverCoerce: () => {},
-			versionedDocs: true,
-			websiteDir: 'website',
-		},
-	})
-	const versionMetadata = {}
-	await expect(gatherAllDocsPaths(versionMetadata)).rejects.toThrow(
+	await expect(gatherAllDocsPaths('nonexistent-product')).rejects.toThrow(
 		'No version metadata found for product',
 	)
 })
@@ -60,7 +104,7 @@ test('gatherAllDocsPaths throws an error if no version metadata is found for a p
 
 test('getProductPaths should determine correct productName for hcp-docs', () => {
 	const apiPaths = getProductPaths(
-		'app/api/all-docs-paths/__fixtures__/hcp-docs-test',
+		'app/api/all-docs-paths/hcp-docs-test',
 		'hcp',
 	)
 
@@ -69,7 +113,7 @@ test('getProductPaths should determine correct productName for hcp-docs', () => 
 
 test('getProductPaths should determine correct productName for terraform products', () => {
 	const apiPaths = getProductPaths(
-		'app/api/all-docs-paths/__fixtures__/terraform-test',
+		'app/api/all-docs-paths/terraform-test',
 		'terraform',
 	)
 
@@ -78,7 +122,7 @@ test('getProductPaths should determine correct productName for terraform product
 
 test('getProductPaths should have the default productName for all other products', () => {
 	const apiPaths = getProductPaths(
-		'app/api/all-docs-paths/__fixtures__/consul-test',
+		'app/api/all-docs-paths/consul-test',
 		'consul',
 	)
 
