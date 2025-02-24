@@ -1,7 +1,12 @@
 import fs from 'fs'
 import path from 'path'
 import { PRODUCT_CONFIG } from '../app/utils/productConfig.mjs'
-import { execSync } from 'child_process'
+import { exec } from 'child_process'
+import { promisify } from 'util'
+
+import { batchPromises } from './utils/batch-promises.mjs'
+
+const execAsync = promisify(exec)
 
 export async function gatherAllVersionsDocsPaths(versionMetadata) {
 	const allDocsPaths = {}
@@ -28,7 +33,7 @@ export async function gatherAllVersionsDocsPaths(versionMetadata) {
 			)
 
 			// Get all paths for the product
-			const allPaths = getProductPaths(
+			const allPaths = await getProductPaths(
 				contentPath,
 				PRODUCT_CONFIG[product].productSlug,
 			)
@@ -40,7 +45,7 @@ export async function gatherAllVersionsDocsPaths(versionMetadata) {
 	return allDocsPaths
 }
 
-export function getProductPaths(directory, productSlug) {
+export async function getProductPaths(directory, productSlug) {
 	const apiPaths = []
 
 	function traverseDirectory(currentPath, relativePath = '') {
@@ -54,33 +59,40 @@ export function getProductPaths(directory, productSlug) {
 			if (stat.isDirectory()) {
 				traverseDirectory(itemPath, itemRelativePath)
 			} else {
-				const created_at = execSync(
-					`git log --format=%aI -1 --reverse ${itemPath}`,
-				).toString()
-				const last_modified = execSync(
-					`git log --format=%aI -1 ${itemPath}`,
-				).toString()
 				const itemName = item.split('.')[0]
 
 				if (itemName === 'index') {
 					apiPaths.push({
 						path: path.join(productSlug, relativePath),
-						created_at,
-						last_modified,
+						itemPath,
 					})
 					return
 				}
 
 				apiPaths.push({
 					path: path.join(productSlug, relativePath, itemName),
-					created_at: created_at,
-					last_modified: last_modified,
+					itemPath,
 				})
 			}
 		})
 	}
 
 	traverseDirectory(directory)
+
+	await batchPromises(
+		`Creating change history for files in ${directory}`,
+		apiPaths,
+		async (apiPath) => {
+			const created_at = await execAsync(
+				// `git rev-list --format=%cI --max-count=1 main ${apiPath.itemPath}`,
+				`git log --format=%cI --max-count=1 ${apiPath.itemPath}`,
+			)
+
+			// remove the "\n" from the end of the output
+			apiPath.created_at = created_at.stdout.slice(0, -1)
+		},
+		16,
+	)
 
 	return apiPaths
 }
