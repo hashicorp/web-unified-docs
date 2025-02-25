@@ -93,7 +93,6 @@ export async function getProductPaths(directory, productSlug) {
 		apiPaths,
 		async (apiPath) => {
 			const created_at = await execAsync(
-				// `git rev-list --format=%cI --max-count=1 main ${apiPath.itemPath}`,
 				`git log --format=%cI --max-count=1 ${apiPath.itemPath}`,
 			)
 

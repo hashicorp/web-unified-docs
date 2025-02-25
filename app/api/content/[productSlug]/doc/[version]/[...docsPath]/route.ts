@@ -96,6 +96,10 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 				)
 				if (matchingPath) {
 					createdAt = matchingPath.created_at
+				} else {
+					console.warn(
+						`File metadata could not be found for file ${githubFile}`,
+					)
 				}
 			}
 			break
