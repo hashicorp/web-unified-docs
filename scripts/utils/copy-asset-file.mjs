@@ -1,11 +1,10 @@
 import fs from 'fs'
 import path from 'path'
 
-const CWD = process.cwd()
-const CONTENT_DIR = path.join(CWD, 'content')
-const ASSET_DIR_OUT = path.join(CWD, 'public', 'assets')
-
 export function copyAssetFile(filePath) {
+	const CWD = process.cwd()
+	const CONTENT_DIR = path.join(CWD, 'content')
+	const ASSET_DIR_OUT = path.join(CWD, 'public', 'assets')
 	console.log(`\nCopying Assets from ${filePath}...`)
 
 	const relativePath = path.relative(CONTENT_DIR, filePath)
