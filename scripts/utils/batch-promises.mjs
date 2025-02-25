@@ -15,7 +15,10 @@ export async function batchPromises(
 	batchName,
 	arrayToBatch,
 	asyncMapFn,
-	batchSize,
+	{ batchSize = 16, loggingEnabled = true } = {
+		batchSize: 16,
+		loggingEnabled: true,
+	},
 ) {
 	let batches = []
 	for (let i = 0, j = arrayToBatch.length; i <= j - 1; i += batchSize) {
@@ -31,9 +34,11 @@ export async function batchPromises(
 		if (n % tenPercBatchLen === 0 || n === batches.length - 1) {
 			let batchesDone = Math.min(batchSize * (n + 1), arrayToBatch.length)
 
-			console.log(
-				`${batchName} ${batchesDone} / ${arrayToBatch.length} completed...`,
-			)
+			if (loggingEnabled) {
+				console.log(
+					`${batchName} ${batchesDone} / ${arrayToBatch.length} completed...`,
+				)
+			}
 		}
 
 		results = results.concat(batchResults)

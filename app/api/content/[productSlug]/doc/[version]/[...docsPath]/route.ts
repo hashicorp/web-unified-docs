@@ -2,8 +2,7 @@ import { readFile, parseMarkdownFrontMatter } from '@utils/file'
 import { getProductVersion } from '@utils/contentVersions'
 import { errorResultToString } from '@utils/result'
 import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
-import { statSync } from 'fs'
-import { join } from 'path'
+import docsPathsAllVersions from '@api/docsPathsAllVersions.json'
 
 /**
  * Parameters expected by `GET` route handler
@@ -81,17 +80,28 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 		],
 	]
 
-	let foundContent, githubFile, createdAt, lastModified
+	let foundContent, githubFile, createdAt
 	for (const loc of possibleContentLocations) {
 		const readFileResult = await readFile(loc)
 
 		if (readFileResult.ok) {
 			foundContent = readFileResult.value
 			githubFile = loc.join('/')
-			const fullPath = join(process.cwd(), githubFile)
-			const stats = statSync(fullPath)
-			createdAt = stats.birthtime.toISOString()
-			lastModified = stats.mtime.toISOString()
+			const productDocsPaths = docsPathsAllVersions[productSlug][parsedVersion]
+			if (productDocsPaths) {
+				const matchingPath = productDocsPaths.find(
+					({ path }: { path: string }) => {
+						return path.endsWith(parsedDocsPath)
+					},
+				)
+				if (matchingPath) {
+					createdAt = matchingPath.created_at
+				} else {
+					console.warn(
+						`File metadata could not be found for file ${githubFile}`,
+					)
+				}
+			}
 			break
 		}
 	}
@@ -123,7 +133,6 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 			subpath: 'docs', // TODO: I guess we could grab the first part of the rawDocsPath? Is there something I am missing here?
 			markdownSource,
 			created_at: createdAt,
-			lastModified,
 			sha: '', // TODO: Do we really need this?
 			githubFile,
 		},

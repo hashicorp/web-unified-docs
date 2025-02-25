@@ -5,6 +5,7 @@ import { batchPromises } from './utils/batch-promises.mjs'
 import { listFiles } from './utils/list-files.mjs'
 import { gatherVersionMetadata } from './gather-version-metadata.mjs'
 import { gatherAllDocsPaths } from './gather-all-docs-paths.mjs'
+import { gatherAllVersionsDocsPaths } from './gather-all-versions-docs-paths.mjs'
 import { addVersionToNavData } from './add-version-to-nav-data.mjs'
 import { buildAlgoliaRecords } from './algolia/build-algolia-records.mjs'
 
@@ -18,6 +19,10 @@ const CONTENT_DIR_OUT = path.join(CWD, 'public', 'content')
 const CONTENT_DIR_OUT_ASSETS = path.join(CWD, 'public', 'assets')
 const VERSION_METADATA_FILE = path.join(CWD, 'app/api/versionMetadata.json')
 const DOCS_PATHS_FILE = path.join(CWD, 'app/api/docsPaths.json')
+const DOCS_PATHS_ALL_VERSIONS_FILE = path.join(
+	CWD,
+	'app/api/docsPathsAllVersions.json',
+)
 
 /**
  * Define the prebuild script.
@@ -32,6 +37,10 @@ async function main() {
 	const docsPaths = await gatherAllDocsPaths(versionMetadata)
 	const docsPathsJson = JSON.stringify(docsPaths, null, 2)
 	fs.writeFileSync(DOCS_PATHS_FILE, docsPathsJson)
+
+	const docsPathsAllVersions = await gatherAllVersionsDocsPaths(versionMetadata)
+	const docsPathsAllVersionsJson = JSON.stringify(docsPathsAllVersions, null, 2)
+	fs.writeFileSync(DOCS_PATHS_ALL_VERSIONS_FILE, docsPathsAllVersionsJson)
 
 	// Apply MDX transforms, writing out transformed MDX files to `public`
 	await buildMdxTransforms(CONTENT_DIR, CONTENT_DIR_OUT, versionMetadata)
@@ -61,23 +70,18 @@ async function copyNavDataFiles(sourceDir, destDir, versionMetadata = {}) {
 
 	console.log(`\nCopying NavData from ${navDataFiles.length} files...`)
 
-	await batchPromises(
-		'NavData',
-		navDataFiles,
-		async (filePath) => {
-			const relativePath = path.relative(sourceDir, filePath)
-			const destPath = path.join(destDir, relativePath)
-			const parentDir = path.dirname(destPath)
-			if (!fs.existsSync(parentDir)) {
-				fs.mkdirSync(parentDir, { recursive: true })
-			}
-			fs.copyFileSync(filePath, destPath)
+	await batchPromises('NavData', navDataFiles, async (filePath) => {
+		const relativePath = path.relative(sourceDir, filePath)
+		const destPath = path.join(destDir, relativePath)
+		const parentDir = path.dirname(destPath)
+		if (!fs.existsSync(parentDir)) {
+			fs.mkdirSync(parentDir, { recursive: true })
+		}
+		fs.copyFileSync(filePath, destPath)
 
-			// add version to nav data paths/hrefs
-			await addVersionToNavData(destPath, versionMetadata)
-		},
-		16,
-	)
+		// add version to nav data paths/hrefs
+		await addVersionToNavData(destPath, versionMetadata)
+	})
 }
 
 async function copyRedirectFiles(sourceDir, destDir) {
@@ -87,20 +91,15 @@ async function copyRedirectFiles(sourceDir, destDir) {
 
 	console.log(`\nCopying Redirects from ${redirectFiles.length} files...`)
 
-	await batchPromises(
-		'Redirects',
-		redirectFiles,
-		async (filePath) => {
-			const relativePath = path.relative(sourceDir, filePath)
-			const destPath = path.join(destDir, relativePath)
-			const parentDir = path.dirname(destPath)
-			if (!fs.existsSync(parentDir)) {
-				fs.mkdirSync(parentDir, { recursive: true })
-			}
-			fs.copyFileSync(filePath, destPath)
-		},
-		16,
-	)
+	await batchPromises('Redirects', redirectFiles, async (filePath) => {
+		const relativePath = path.relative(sourceDir, filePath)
+		const destPath = path.join(destDir, relativePath)
+		const parentDir = path.dirname(destPath)
+		if (!fs.existsSync(parentDir)) {
+			fs.mkdirSync(parentDir, { recursive: true })
+		}
+		fs.copyFileSync(filePath, destPath)
+	})
 }
 
 function isFileAnImage(file) {
@@ -117,20 +116,15 @@ async function copyAssetFiles(sourceDir, destDir) {
 
 	console.log(`\nCopying Assets from ${assetFiles.length} files...`)
 
-	await batchPromises(
-		'Assets',
-		assetFiles,
-		async (filePath) => {
-			const relativePath = path.relative(sourceDir, filePath)
-			const destPath = path.join(destDir, relativePath)
-			const parentDir = path.dirname(destPath)
-			if (!fs.existsSync(parentDir)) {
-				fs.mkdirSync(parentDir, { recursive: true })
-			}
-			fs.copyFileSync(filePath, destPath)
-		},
-		16,
-	)
+	await batchPromises('Assets', assetFiles, async (filePath) => {
+		const relativePath = path.relative(sourceDir, filePath)
+		const destPath = path.join(destDir, relativePath)
+		const parentDir = path.dirname(destPath)
+		if (!fs.existsSync(parentDir)) {
+			fs.mkdirSync(parentDir, { recursive: true })
+		}
+		fs.copyFileSync(filePath, destPath)
+	})
 }
 
 /**
