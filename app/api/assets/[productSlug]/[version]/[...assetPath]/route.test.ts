@@ -1,11 +1,10 @@
-import { test, expect, vi } from 'vitest'
+import { expect, test, vi } from 'vitest'
 import { GET } from './route'
 import { getAssetData } from '@utils/file'
 import { getProductVersion } from '@utils/contentVersions'
 
 vi.mock('@utils/file')
 vi.mock('@utils/contentVersions')
-// vi.mock('@utils/result')
 vi.mock('@utils/productConfig.mjs', () => {
 	return {
 		PRODUCT_CONFIG: {
