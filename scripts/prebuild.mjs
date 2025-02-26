@@ -102,7 +102,7 @@ async function copyRedirectFiles(sourceDir, destDir) {
 	})
 }
 
-function isFileAnImage(file) {
+export function isFileAnImage(file) {
 	const fileExtension = path.extname(file).toLowerCase()
 
 	const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.svg']
