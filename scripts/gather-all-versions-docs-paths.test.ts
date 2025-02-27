@@ -1,8 +1,5 @@
 import { expect, test, vi, afterEach } from 'vitest'
-import {
-	gatherAllVersionsDocsPaths,
-	getProductPaths,
-} from './gather-all-versions-docs-paths.mjs'
+import { gatherAllVersionsDocsPaths } from './gather-all-versions-docs-paths.mjs'
 import * as repoConfig from '../app/utils/productConfig.mjs'
 
 afterEach(() => {
@@ -59,15 +56,4 @@ test('gatherAllDocsPaths throws an error if no version metadata is found for a p
 	await expect(gatherAllVersionsDocsPaths(versionMetadata)).rejects.toThrow(
 		'No version metadata found for product',
 	)
-})
-
-// getProductPaths tests
-
-test('getProductPaths should return product baths', async () => {
-	const apiPaths = await getProductPaths(
-		'app/api/all-docs-paths/__fixtures__/terraform-test',
-		'terraform',
-	)
-
-	expect(apiPaths[0].path).toBe('terraform/terraform-test')
 })
