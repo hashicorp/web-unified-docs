@@ -1,6 +1,4 @@
-import { Result } from '@utils/result'
-import fs from 'node:fs'
-import path from 'node:path'
+import docsPathsAllVersions from '@api/docsPathsAllVersions.json'
 
 /**
  * Searches for navigation data files within a specified product directory and its subdirectories.
@@ -14,63 +12,27 @@ import path from 'node:path'
  *
  * @throws Will throw an error if there is an issue reading directories or files
  */
-export async function searchNavDataFiles(
+export function searchNavDataFiles(
 	product: string,
 	fullPath: string,
-	baseDir: string = process.cwd(),
-): Promise<string[]> {
+	docsPathsData: typeof docsPathsAllVersions = docsPathsAllVersions,
+): string[] {
 	const versions: string[] = []
-	const productDir = path.join(baseDir, 'content', product)
+	const docsPathsForProduct = docsPathsData[product]
 
-	async function searchDirectory(
-		directory: string,
-	): Promise<Result<string[], Error>> {
-		let files
-		try {
-			files = await fs.promises.readdir(directory, { withFileTypes: true })
-		} catch (err) {
-			if (err.code === 'ENOENT') {
-				console.error(`Directory not found: ${directory}`)
-				return
-			}
-			throw err
-		}
-
-		for (const file of files) {
-			const fullPathToFile = path.join(directory, file.name)
-
-			if (file.isDirectory()) {
-				// Only search in directories that match the pattern <version>/data
-				const versionDataPattern = new RegExp(
-					`^v\\d+\\.\\d+\\.x$|v[0-9]{6}-\\d+`,
-					'i',
-				)
-				if (versionDataPattern.test(file.name)) {
-					const dataDir = path.join(directory, file.name, 'data')
-
-					await searchDirectory(dataDir)
-				}
-			} else if (file.isFile() && file.name.endsWith('nav-data.json')) {
-				try {
-					const data = await fs.promises.readFile(fullPathToFile, 'utf-8')
-					const jsonData = JSON.stringify(data)
-					if (jsonData.includes(fullPath)) {
-						const versionMatch = fullPathToFile.match(
-							/\/content\/[^/]+\/([^/]+)\/data\//,
-						)
-						if (versionMatch) {
-							versions.push(versionMatch[1])
-						}
-					}
-				} catch {
-					console.error(
-						`An error occurred while searching for the file ${fullPathToFile}`,
-					)
-				}
-			}
-		}
+	if (!docsPathsForProduct) {
+		console.error(`Product, ${product}, not found in docs paths`)
+		return []
 	}
 
-	await searchDirectory(productDir)
+	const docsVersions = Object.keys(docsPathsForProduct)
+	docsVersions.forEach((version: string) => {
+		const versionPaths = docsPathsForProduct[version]
+		const jsonData = JSON.stringify(versionPaths)
+		if (jsonData.includes(fullPath)) {
+			versions.push(version)
+		}
+	})
+
 	return versions
 }

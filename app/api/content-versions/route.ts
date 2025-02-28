@@ -39,7 +39,7 @@ export async function GET(request: Request) {
 	if (fileNameQuery.startsWith('/')) {
 		fileNameQuery = fileNameQuery.slice(1)
 	}
-	const versions = await searchNavDataFiles(product, fileNameQuery)
+	const versions = searchNavDataFiles(product, fileNameQuery)
 	/**
 	 * return either A) versions array or B) an empty array (if no content matches the query params)
 	 * this matches the current Content API behaviour
