@@ -12,7 +12,7 @@ export const getDocsPaths = async (
 
 			if (!latestProductVersion.ok) {
 				console.error(errorResultToString('API', latestProductVersion))
-				return new Response('Not found', { status: 404 })
+				return []
 			}
 
 			if (docsPathsData[productSlug]) {
