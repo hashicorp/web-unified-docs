@@ -80,9 +80,9 @@ test('should return 404 if the product is invalid', async () => {
 })
 
 test('should return 200 and array of strings on valid params', async () => {
-	vi.mock('@utils/searchNavDataFiles.ts', () => {
+	vi.mock('@utils/findDocVersions.ts', () => {
 		return {
-			searchNavDataFiles: () => {
+			findDocVersions: () => {
 				return ['v0.20.x', 'v0.21.x']
 			},
 		}

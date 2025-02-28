@@ -1,18 +1,16 @@
 import docsPathsAllVersions from '@api/docsPathsAllVersions.json'
 
 /**
- * Searches for navigation data files within a specified product directory and its subdirectories.
- * It looks for directories matching the pattern `<version>/data` and files named `nav-data.json`.
- * If the content of `nav-data.json` includes the specified `fullPath`, the version is added to the result.
+ * Finds the versions in which a document exists for a certain product. It uses the
+ * `docsPathsAllVersions` json data to search for the versions. If the json content
+ * includes the specified `fullPath`, the version is added to the result.
  *
  * @param product - The name of the product whose directories are to be searched.
- * @param fullPath - The path to be searched for within the `nav-data.json` files.
- * @param baseDir - The base directory to start the search from. Defaults to process.cwd().
- * @returns A promise that resolves to an array of version strings where the `fullPath` was found.
- *
- * @throws Will throw an error if there is an issue reading directories or files
+ * @param fullPath - The path to be searched for within the `docsPathsAllVersions.json` file.
+ * @param docsPathsData - The json data that is used to search for the versions. Defaults to `docsPathsAllVersions.json`.
+ * @returns An array of version strings where the `fullPath` was found.
  */
-export function searchNavDataFiles(
+export function findDocVersions(
 	product: string,
 	fullPath: string,
 	docsPathsData: typeof docsPathsAllVersions = docsPathsAllVersions,

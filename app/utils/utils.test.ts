@@ -4,7 +4,7 @@ import {
 	getProductVersionMetadata,
 	getProductVersion,
 } from '@utils/contentVersions'
-import { searchNavDataFiles } from './searchNavDataFiles'
+import { findDocVersions } from './findDocVersions'
 import versionMetadata from '../../__fixtures__/versionMetadata.json'
 import docsPathsMock from '../../__fixtures__/docsPathsAllVersionsMock.json'
 
@@ -128,7 +128,7 @@ test('getProductVersionMetadata should return empty array for product with no ve
 	expect(result).toStrictEqual(expected)
 })
 
-test('should return versions where the fullPath is found in nav-data.json', async () => {
+test('should return versions where the fullPath is found in docsPathsAllVersions.json', async () => {
 	const product = 'terraform-plugin-testing'
 	const fullPath = 'acceptance-tests/plan-checks/custom'
 	const expected = [
@@ -140,7 +140,7 @@ test('should return versions where the fullPath is found in nav-data.json', asyn
 		'v1.6.x',
 	]
 
-	const result = searchNavDataFiles(product, fullPath, docsPathsMock)
+	const result = findDocVersions(product, fullPath, docsPathsMock)
 	expect(result).toStrictEqual(expected)
 })
 
@@ -149,7 +149,7 @@ test('should handle directory not found (ENOENT error)', async () => {
 	const product = 'nonexistent'
 	const fullPath = '/some/path'
 
-	const result = searchNavDataFiles(product, fullPath, docsPathsMock)
+	const result = findDocVersions(product, fullPath, docsPathsMock)
 	expect(result).toStrictEqual([])
 	expect(consoleLogSpy).toHaveBeenCalledWith(
 		expect.stringContaining('Product, nonexistent, not found in docs paths'),
