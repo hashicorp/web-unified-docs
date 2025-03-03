@@ -1,3 +1,8 @@
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: BUSL-1.1
+ */
+
 import { describe, test, expect } from 'vitest'
 import { getVersionFromFilePath } from '../version/index.mjs'
 

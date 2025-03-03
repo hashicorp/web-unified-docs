@@ -1,3 +1,8 @@
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: BUSL-1.1
+ */
+
 import versionMetadata from '@api/versionMetadata.json'
 import { Ok, Err } from '@utils/result'
 

@@ -1,3 +1,8 @@
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: BUSL-1.1
+ */
+
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { batchPostRecords } from './batch-post-records-to-algolia.mjs'
 import algoliasearch from 'algoliasearch'

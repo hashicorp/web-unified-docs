@@ -1,3 +1,8 @@
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: BUSL-1.1
+ */
+
 import path from 'path'
 import { readdir } from 'node:fs/promises'
 import { getLatestVersion } from '../../utils/file-path/latest-version/index.mjs'

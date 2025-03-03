@@ -1,3 +1,8 @@
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: BUSL-1.1
+ */
+
 import { describe, it, expect, vi } from 'vitest'
 import { transformStripTerraformEnterpriseContent } from './strip-terraform-enterprise-content.mjs'
 import remark from 'remark'

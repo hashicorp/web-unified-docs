@@ -1,3 +1,8 @@
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: BUSL-1.1
+ */
+
 import { getProductVersionMetadata } from '@utils/contentVersions'
 import { errorResultToString } from '@utils/result'
 

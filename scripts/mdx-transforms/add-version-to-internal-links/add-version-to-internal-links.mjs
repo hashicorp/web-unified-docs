@@ -1,3 +1,8 @@
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: BUSL-1.1
+ */
+
 import remark from 'remark'
 import remarkMdx from 'remark-mdx'
 import flatMap from 'unist-util-flatmap'
