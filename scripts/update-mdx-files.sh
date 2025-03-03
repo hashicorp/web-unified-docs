@@ -1,4 +1,6 @@
 #!/bin/bash
+# Copyright (c) HashiCorp, Inc.
+# SPDX-License-Identifier: BUSL-1.1
 
 # Check if a path was provided
 if [ -z "$1" ]; then
