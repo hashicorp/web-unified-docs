@@ -1,3 +1,8 @@
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: BUSL-1.1
+ */
+
 import { expect, test, vi, afterEach } from 'vitest'
 import docsPathsMock from '../../../__fixtures__/docsPathsAllVersionsMock.json'
 import { GET } from './route'

@@ -1,3 +1,8 @@
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: BUSL-1.1
+ */
+
 import { beforeEach, expect, it, vi } from 'vitest'
 import { vol } from 'memfs'
 import { gatherVersionMetadata } from './gather-version-metadata.mjs'

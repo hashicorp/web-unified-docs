@@ -1,3 +1,8 @@
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: BUSL-1.1
+ */
+
 import grayMatter from 'gray-matter'
 import { parse as jsoncParse } from 'jsonc-parser'
 

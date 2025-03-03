@@ -1,3 +1,8 @@
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: BUSL-1.1
+ */
+
 import { describe, test, expect, vi } from 'vitest'
 import path from 'path'
 import { readdir } from 'node:fs/promises'

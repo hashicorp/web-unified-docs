@@ -1,3 +1,8 @@
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: BUSL-1.1
+ */
+
 import { errorResultToString } from '@utils/result'
 import { getDocsPaths } from '@utils/allDocsPaths'
 import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'

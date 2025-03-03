@@ -1,3 +1,8 @@
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: BUSL-1.1
+ */
+
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { copyAssetFile } from './copy-asset-file.mjs'
 import fs from 'fs'

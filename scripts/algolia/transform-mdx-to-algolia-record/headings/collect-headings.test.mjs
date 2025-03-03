@@ -1,3 +1,8 @@
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: BUSL-1.1
+ */
+
 import { describe, test, expect } from 'vitest'
 import { collectHeadings } from './collect-headings.mjs'
 

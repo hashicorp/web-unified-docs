@@ -1,3 +1,8 @@
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: BUSL-1.1
+ */
+
 import { describe, it, expect, vi } from 'vitest'
 import { transformRewriteInternalLinks } from './add-version-to-internal-links.mjs'
 import versionMetadata from '__fixtures__/versionMetadata.json'

@@ -1,3 +1,8 @@
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: BUSL-1.1
+ */
+
 import { findDocVersions } from '../../utils/findDocVersions'
 import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
 
