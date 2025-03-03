@@ -1,3 +1,8 @@
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: BUSL-1.1
+ */
+
 import visit from 'unist-util-visit'
 
 // this is a courtesy wrapper to prepend [strip-terraform-enterprise-content]

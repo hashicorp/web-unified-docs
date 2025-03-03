@@ -1,3 +1,8 @@
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: BUSL-1.1
+ */
+
 import { expect, test, vi, beforeEach, afterEach } from 'vitest'
 import { GET } from './route'
 

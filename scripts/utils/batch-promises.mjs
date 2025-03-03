@@ -1,4 +1,9 @@
 /**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: BUSL-1.1
+ */
+
+/**
  * Given an array of items, an asynchronous function to apply to each item
  * as part of a `.map()` call, and a batch size,
  *

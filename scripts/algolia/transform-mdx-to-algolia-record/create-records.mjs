@@ -1,3 +1,8 @@
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: BUSL-1.1
+ */
+
 import { PRODUCT_CONFIG } from '../../../app/utils/productConfig.mjs'
 import { collectHeadings } from './headings/collect-headings.mjs'
 import { collectCodeListItems } from './code-list-items/collect-code-list-items.mjs'

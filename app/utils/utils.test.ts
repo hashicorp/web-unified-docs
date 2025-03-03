@@ -1,3 +1,8 @@
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: BUSL-1.1
+ */
+
 import { expect, test, vi, afterEach, beforeEach } from 'vitest'
 import { vol } from 'memfs'
 import {

@@ -1,3 +1,8 @@
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: BUSL-1.1
+ */
+
 import { Ok, Err, errorResultToString } from '@utils/result'
 import docsPathsAllVersions from '@api/docsPathsAllVersions.json'
 import { getProductVersion } from './contentVersions'

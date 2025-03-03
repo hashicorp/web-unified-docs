@@ -1,3 +1,8 @@
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: BUSL-1.1
+ */
+
 import fs from 'node:fs/promises'
 import { PRODUCT_CONFIG } from '../app/utils/productConfig.mjs'
 import semver from 'semver'
