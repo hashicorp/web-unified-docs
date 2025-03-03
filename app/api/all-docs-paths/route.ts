@@ -1,10 +1,13 @@
 import { errorResultToString } from '@utils/result'
 import { getDocsPaths } from '@utils/allDocsPaths'
+import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
 
 export async function GET(req: Request) {
 	const url = new URL(req.url)
-	const productSlugs = url.searchParams.getAll('products') ?? []
-	const docsPaths = await getDocsPaths(productSlugs)
+	const productSlugs = url.searchParams.getAll('products')
+	const docsPaths = await getDocsPaths(
+		productSlugs.length === 0 ? Object.keys(PRODUCT_CONFIG) : productSlugs,
+	)
 
 	if (!docsPaths.ok) {
 		console.error(errorResultToString('API', docsPaths))

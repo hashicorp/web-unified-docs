@@ -4,7 +4,6 @@ import { buildMdxTransforms } from './mdx-transforms/build-mdx-transforms.mjs'
 import { batchPromises } from './utils/batch-promises.mjs'
 import { listFiles } from './utils/list-files.mjs'
 import { gatherVersionMetadata } from './gather-version-metadata.mjs'
-import { gatherAllDocsPaths } from './gather-all-docs-paths.mjs'
 import { gatherAllVersionsDocsPaths } from './gather-all-versions-docs-paths.mjs'
 import { addVersionToNavData } from './add-version-to-nav-data.mjs'
 import { buildAlgoliaRecords } from './algolia/build-algolia-records.mjs'
@@ -18,7 +17,6 @@ const CONTENT_DIR = path.join(CWD, 'content')
 const CONTENT_DIR_OUT = path.join(CWD, 'public', 'content')
 const CONTENT_DIR_OUT_ASSETS = path.join(CWD, 'public', 'assets')
 const VERSION_METADATA_FILE = path.join(CWD, 'app/api/versionMetadata.json')
-const DOCS_PATHS_FILE = path.join(CWD, 'app/api/docsPaths.json')
 const DOCS_PATHS_ALL_VERSIONS_FILE = path.join(
 	CWD,
 	'app/api/docsPathsAllVersions.json',
@@ -32,11 +30,6 @@ async function main() {
 	const versionMetadata = await gatherVersionMetadata(CONTENT_DIR)
 	const versionMetadataJson = JSON.stringify(versionMetadata, null, 2)
 	fs.writeFileSync(VERSION_METADATA_FILE, versionMetadataJson)
-
-	// Gather and write out all docs paths
-	const docsPaths = await gatherAllDocsPaths(versionMetadata)
-	const docsPathsJson = JSON.stringify(docsPaths, null, 2)
-	fs.writeFileSync(DOCS_PATHS_FILE, docsPathsJson)
 
 	const docsPathsAllVersions = await gatherAllVersionsDocsPaths(versionMetadata)
 	const docsPathsAllVersionsJson = JSON.stringify(docsPathsAllVersions, null, 2)
