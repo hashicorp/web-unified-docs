@@ -24,7 +24,7 @@ test('getDocsPaths should return filtered docs paths when a non-empty productSlu
 		docsPathsMock,
 	)
 	const mockValue = Object.values(
-		docsPathsMock['terraform-plugin-framework']['v1.13.x'],
+		docsPathsMock['terraform-plugin-framework']['v1.14.x'],
 	).flat()
 	expect(response).toEqual({ ok: true, value: mockValue })
 })
