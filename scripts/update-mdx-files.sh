@@ -20,7 +20,7 @@ NOTIFICATION_FILE=$(mktemp)
 cat > "$NOTIFICATION_FILE" << 'EOF'
 
 > [!IMPORTANT]  
-> **Documentation Update:** Product documentation previously located in `/website` has moved to the `hashicorp/web-unified-docs` repository, where all product documentation is now centralized. Please make contributions directly to `web-unified-docs`, since changes to `/website` in this repository will not appear on [developer.hashicorp.com](https://developer.hashicorp.com)
+> **Documentation Update:** Product documentation previously located in `/website` has moved to the `hashicorp/web-unified-docs` repository, where all product documentation is now centralized. Please make contributions directly to `web-unified-docs`, since changes to `/website` in this repository will not appear on developer.hashicorp.com.
 EOF
 
 # Counters for statistics
