@@ -3,8 +3,10 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-/** Add your relevant code here for the issue to reproduce */
+import { redirect } from 'next/navigation'
+
+// Redirect to the web-unified-docs repository
 // eslint-disable-next-line no-restricted-exports
 export default function Home() {
-	return null
+	redirect('https://github.com/hashicorp/web-unified-docs')
 }
