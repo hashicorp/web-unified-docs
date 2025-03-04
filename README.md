@@ -187,3 +187,31 @@ For comparison:
 | vault                          | 46                      |
 
 ### [Architectural Decision Records](https://github.com/hashicorp/web-unified-docs/tree/main/docs/decisions)
+
+
+## Update product repo documentation
+
+This script helps with product documentation migration to the web-unified-docs repository. When migrating documentation:
+
+1. The `web-unified-docs` repository becomes the source of truth
+2. Original documentation may remain temporarily as a fallback
+3. Users should be directed to make future changes in `web-unified-docs` only
+
+This script automatically adds a prominent notice to all MDX files in the original location, informing contributors where to make future changes.
+
+```
+./scripts/update-mdx-files.sh ~/Desktop/hashicorp/terraform-plugin-framework/website/docs
+```
+
+Example output:
+
+```
+Progress:
+
+Files processed: 135
+Files updated: 135
+Files with no frontmatter: 0
+Files with errors: 0
+
+Completed! All MDX files have been processed.
+```

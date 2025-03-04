@@ -1,3 +1,8 @@
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: BUSL-1.1
+ */
+
 import path from 'path'
 import grayMatter from 'gray-matter'
 import { createAlgoliaRecordObject } from './transform-mdx-to-algolia-record/create-records.mjs'
@@ -59,7 +64,7 @@ export async function buildAlgoliaRecords(targetDir, versionMetadata) {
 				throw new Error(err)
 			}
 		},
-		64,
+		{ batchSize: 64 },
 	)
 
 	const ALGOLIA_RECORDS_JSON_PATH = path.join(

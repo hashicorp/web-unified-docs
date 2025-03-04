@@ -1,3 +1,8 @@
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: BUSL-1.1
+ */
+
 import fs from 'fs'
 import path from 'path'
 
@@ -75,14 +80,12 @@ export async function buildMdxTransforms(
 	 * Apply MDX transforms to each file entry, in batches
 	 */
 	console.log(`Running MDX transforms on ${mdxFileEntries.length} files...`)
-	const batchSize = 16
 	const results = await batchPromises(
 		'MDX transforms',
 		mdxFileEntries,
 		(entry) => {
 			return applyMdxTransforms(entry, versionMetadata)
 		},
-		batchSize,
 	)
 	// Log out any errors encountered
 	const errors = results

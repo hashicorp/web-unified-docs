@@ -1,12 +1,33 @@
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: BUSL-1.1
+ */
+
 import { expect, test, vi, beforeEach, afterEach } from 'vitest'
 import { GET } from './route'
 
-import * as searchNavDataFilesModule from '@utils/searchNavDataFiles'
 import { vol } from 'memfs'
 
 // Mock fs module
 vi.mock('node:fs')
 vi.mock('node:fs/promises')
+
+// Mock PRODUCT_CONFIG
+vi.mock('@utils/productConfig.mjs', () => {
+	return {
+		PRODUCT_CONFIG: {
+			'terraform-cdk': {
+				assetDir: '',
+				basePaths: ['cdktf'],
+				contentDir: 'docs',
+				dataDir: 'data',
+				productSlug: 'terraform',
+				versionedDocs: true,
+				websiteDir: 'website',
+			},
+		},
+	}
+})
 
 beforeEach(() => {
 	// Reset the state of in-memory fs
@@ -64,65 +85,13 @@ test('should return 404 if the product is invalid', async () => {
 })
 
 test('should return 200 and array of strings on valid params', async () => {
-	// by default, searchNavDataFiles's basePath is process.cwd(). Which will not work in tests, so we need to mock it to '/'
-	vi.spyOn(
-		searchNavDataFilesModule,
-		'searchNavDataFiles',
-	).mockImplementationOnce((product: string, fullPath: string) => {
-		return searchNavDataFilesModule.searchNavDataFiles(product, fullPath, '/')
+	vi.mock('@utils/findDocVersions.ts', () => {
+		return {
+			findDocVersions: () => {
+				return ['v0.20.x', 'v0.21.x']
+			},
+		}
 	})
-
-	vol.fromJSON({
-		'/content/terraform-cdk/v0.19.x/data/cd-ktf-nav-data.json': JSON.stringify([
-			{
-				title: 'API Reference',
-				routes: [
-					{
-						title: 'Go',
-						routes: [
-							{
-								title: 'Overview',
-								path: 'api-reference/go',
-							},
-						],
-					},
-				],
-			},
-		]),
-		'/content/terraform-cdk/v0.20.x/data/cd-ktf-nav-data.json': JSON.stringify([
-			{
-				title: 'API Reference',
-				routes: [
-					{
-						title: 'Python',
-						routes: [
-							{
-								title: 'Overview',
-								path: 'api-reference/python',
-							},
-						],
-					},
-				],
-			},
-		]),
-		'/content/terraform-cdk/v0.21.x/data/cd-ktf-nav-data.json': JSON.stringify([
-			{
-				title: 'API Reference',
-				routes: [
-					{
-						title: 'Python',
-						routes: [
-							{
-								title: 'Overview',
-								path: 'api-reference/python',
-							},
-						],
-					},
-				],
-			},
-		]),
-	})
-
 	const mockedResponse = {
 		versions: ['v0.20.x', 'v0.21.x'],
 	}

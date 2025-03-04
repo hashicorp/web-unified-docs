@@ -1,3 +1,8 @@
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: BUSL-1.1
+ */
+
 import { batchPostRecords } from './batch-post-records-to-algolia.mjs'
 import path from 'path'
 

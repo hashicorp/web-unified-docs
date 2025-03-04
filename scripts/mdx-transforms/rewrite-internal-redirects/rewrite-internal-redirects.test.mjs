@@ -1,3 +1,8 @@
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: BUSL-1.1
+ */
+
 import fs from 'fs'
 import path from 'path'
 import { describe, expect, test } from 'vitest'

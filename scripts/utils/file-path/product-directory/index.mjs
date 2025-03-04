@@ -1,4 +1,9 @@
 /**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: BUSL-1.1
+ */
+
+/**
  * Extracts the repository name from a given file path.
  *
  * @param {string} filePath - The file path from which to extract the repository/product directory name.

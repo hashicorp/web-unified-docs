@@ -1,3 +1,8 @@
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: BUSL-1.1
+ */
+
 // Define the base URL for the existing content API
 const CONTENT_API_BASE_URL = 'https://content.hashicorp.com'
 
