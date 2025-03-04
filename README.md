@@ -1,18 +1,8 @@
 # Web Unified Docs
 
-> **Please note**: 🚨 The `public` folder in this repository is served on the public internet, as this project is now [deployed through Vercel](https://vercel.com/hashicorp/web-unified-docs/deployments). Please exercise caution when testing content migration scripts, _especially_ when pushing your work up. For the majority of content source repositories, this presents very little risk, as the content source repositories themselves are already public.
->
-> However, some content source repositories are _not_ public. Specifically:
->
-> - [hcp-docs](https://github.com/hashicorp/hcp-docs)
-> - [ptfe-releases](https://github.com/hashicorp/ptfe-releases)
-> - [sentinel](https://github.com/hashicorp/sentinel)
->
-> For these repositories in particular, please take care to ensure that only the content that is already published through our `content.hashicorp.com` API is migrated into this repository.
-
 The project in this repository, `hashicorp/web-unified-docs`, aims to implement [[DEVDOT-023] Unified Product Documentation Repository](https://docs.google.com/document/d/1p8kOqySttvWUVfn7qiC4wGBR73LMBGMelwLt69pM3FQ/edit). The RFC for this project was intentionally light on implementation details, in order to foster consensus on the broad direction.
 
-The existing API (`content.hashicorp.com`) has endpoints that serve documentation content. You can find the source code in [hashicorp/mktg-content-workflows](https://github.com/hashicorp/mktg-content-workflows/blob/main/api/content.ts). 
+The existing API (`content.hashicorp.com`) has endpoints that serve documentation content. You can find the source code in [hashicorp/mktg-content-workflows](https://github.com/hashicorp/mktg-content-workflows/blob/main/api/content.ts).
 
 The goal of the unified docs API is to host all of HashiCorp's product documentation. The unified docs API will eventually replace the existing content API.
 
@@ -37,7 +27,7 @@ graph LR
         VGT[vagrant]
         VLT[vault]
         WPT[waypoint]
-        
+
         CURALL["/content or /website"]
         BDY & CSL & HCP & NMD & PKR & PTF & SNT & TF & TFC & TFA & TFD & VGT & VLT & WPT --> CURALL
     end
@@ -111,14 +101,14 @@ Once this command completes, you can access the following endpoints:
 
 - http://localhost:3000 - An instance of the `dev-portal` container configured to pull from the experimental docs API (this repo). This image depends on the unified docs API (`unified-devdot-api`).
 
-- http://localhost:8080 - An instance of the unified docs API container (this repo - `unified-devdot-api`) that serves content from the `content` directory. On startup, this container processes the content and assets in `/content` into `public/assets` and `public/content`. In addition, the container also generates `app/api/docsPaths.json` and `app/api/versionMetadata.json` from the contents within `/content`. 
-   
+- http://localhost:8080 - An instance of the unified docs API container (this repo - `unified-devdot-api`) that serves content from the `content` directory. On startup, this container processes the content and assets in `/content` into `public/assets` and `public/content`. In addition, the container also generates `app/api/docsPaths.json` and `app/api/versionMetadata.json` from the contents within `/content`.
+
    Use the following example to test this endpoint: http://localhost:8080/api/content/terraform-plugin-framework/doc/latest/plugin/framework
 
-> [!NOTE]  
+> [!NOTE]
 > The unified docs API container takes time to process the content and assets. You must wait for both the `unified-devdot-api` and `dev-portal` containers to complete before you can successfully test content in the `dev-portal` preview environment (`localhost:3000`). Visit http://localhost:8080/api/all-docs-paths to verify the `unified-devdot-api` container is complete.
 
-To spin this down gracefully, run `make clean` in a separate terminal. 
+To spin this down gracefully, run `make clean` in a separate terminal.
 
 If you wish to remove the local Docker images as well, run `make clean CLEAN_OPTION=full`.
 
@@ -159,32 +149,6 @@ Vercel will use these values to create deploy previews.
 - Adding new features like content conformance (basically linting for docs) can be done for the entire codebase at once.
 - Removes the ability for docs to break the release workflow in product repos.
 - Enables us to support fully versioned deployment previews, whereas current previews are limited to the branch being modified.
-
-### Clone Time
-
-As of writing, cloning this repo takes about the same amount of time as cloning a single one of our larger repos.
-
-```
-$ time git clone https://github.com/hashicorp/web-presence-experimental-docs
-Cloning into 'web-presence-experimental-docs'...
-remote: Enumerating objects: 31111, done.
-remote: Counting objects: 100% (2598/2598), done.
-remote: Compressing objects: 100% (2448/2448), done.
-remote: Total 31111 (delta 112), reused 2431 (delta 86), pack-reused 28513
-Receiving objects: 100% (31111/31111), 248.19 MiB | 5.93 MiB/s, done.
-Resolving deltas: 100% (16052/16052), done.
-Updating files: 100% (43670/43670), done.
-git clone https://github.com/hashicorp/web-presence-experimental-docs  4.41s user 2.36s system 15% cpu 44.755 total
-```
-
-For comparison:
-
-| Repo                           | Time to clone (seconds) |
-| ------------------------------ | ----------------------- |
-| web-presence-experimental-docs | 44                      |
-| consul                         | 80                      |
-| terraform                      | 49                      |
-| vault                          | 46                      |
 
 ### [Architectural Decision Records](https://github.com/hashicorp/web-unified-docs/tree/main/docs/decisions)
 
