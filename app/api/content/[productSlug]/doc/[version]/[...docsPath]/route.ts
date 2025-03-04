@@ -112,7 +112,14 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 	}
 
 	if (!foundContent) {
-		console.error(`API Error: No content found at ${possibleContentLocations}`)
+		const locationsString = possibleContentLocations.map(
+			(location: string[]) => {
+				return `* ${location.join('/')}`
+			},
+		)
+		console.error(
+			`API Error: No content found for ${request.url}\n\nChecked for content at: \n${locationsString.join('\n')}`,
+		)
 		return new Response('Not found', { status: 404 })
 	}
 
