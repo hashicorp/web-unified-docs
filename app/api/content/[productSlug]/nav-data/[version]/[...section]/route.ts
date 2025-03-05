@@ -34,6 +34,7 @@ export type GetParams = {
 export async function GET(request: Request, { params }: { params: GetParams }) {
 	const { productSlug, version, section } = params
 	const productVersionResult = getProductVersion(productSlug, version)
+
 	if (!productVersionResult.ok) {
 		console.error(errorResultToString('API', productVersionResult))
 		return new Response('Not found', { status: 404 })
