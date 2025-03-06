@@ -2,24 +2,32 @@ name: Build dev-portal Preview for PR
 run-name: 'Build dev-portal preview for PR ${{ github.event.pull_request.title }} (#${{ github.event.pull_request.number }})'
 
 on:
-  pull_request: {}
+  pull_request:
+    paths:
+      - 'content/**'
+      - 'app/**'
+      - 'scripts/**'
+      - '!scripts/**/*.test.ts'
+      - '!scripts/**/*.test.mjs'
+      - '!app/**/*.test.ts'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  deploy-dev-portal-preview:
-    name: Deploy Dev Portal Preview
+  deploy-unified-docs-api-preview:
+    if: github.repository == 'hashicorp/web-unified-docs'
+    name: Deploy Unified Docs API Preview
     runs-on: ubuntu-latest
+    outputs:
+      preview_url: ${{ steps.unified_docs_preview_url.outputs.preview_url }}
+      preview_url_to_fetch_deployment: ${{ steps.unified_docs_preview_url.outputs.preview_url_to_fetch_deployment }}
+      inspector_url: ${{ steps.unified_docs_inspector_url.outputs.inspector_url }}
+      created_utc: ${{ steps.unified_docs_preview_url.outputs.created_utc }}
     steps:
-      - name: Extract branch name
-        shell: bash
-        run: echo "branch=${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}}" >> $GITHUB_OUTPUT
-        id: extract_branch
-
       - name: Initial comment on PR
-        uses: marocchino/sticky-pull-request-comment@331f8f5b4215f0445d3c07b4967662a32a2d3e31 # v2.9.0
+        uses: marocchino/sticky-pull-request-comment@52423e01640425a022ef5fd42c6fb5f633a02728 # v2.9.1
         with:
           header: preview-notice
           message: |
@@ -32,24 +40,101 @@ jobs:
       - name: Checkout hashicorp/web-unified-docs
         uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
 
-      - name: Get Unified Docs Vercel Data
-        uses: ./.github/actions/get-vercel-preview-data
-        id: unified_docs_preview_url
+      - name: Setup Node.js
+        uses: actions/setup-node@1d0ff469b7ec7b3cb9d8673fde0c81c44821de2a # v4.2.0
         with:
-          deployment_type: 'id'
-          project_id: ${{ secrets.VERCEL_UNIFIED_DOCS_PROJECT_ID }}
-          team_id: ${{ secrets.VERCEL_TEAM_ID }}
-          vercel_token: ${{ secrets.VERCEL_TOKEN }}
-          github_sha: ${{ github.event.pull_request.head.sha }} # the SHA of last commit on the PR branch
+          node-version: 20
 
+      - name: Use cache
+        uses: actions/cache@d4323d4df104b026a6aa633fdb11d772146be0bf # v4.2.2
+        with:
+          path: |
+            ~/.npm
+            ${{ github.workspace }}/.next/cache
+          # Generate a new cache whenever packages or source files change.
+          key: ${{ runner.os }}-nextjs-${{ hashFiles('**/package-lock.json') }}-${{ hashFiles('**/*.js', '**/*.mjs', '**/*.ts', '**/*.tsx', '**/*.mdx', '**/*.json') }}
+          # If source files changed but packages didn't, rebuild from a prior cache.
+          restore-keys: |
+            ${{ runner.os }}-nextjs-${{ hashFiles('**/package-lock.json') }}-
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Pull Vercel Environment Information
+        run: vercel pull --yes --environment=preview --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Build Project Artifacts
+        run: vercel build --target=preview --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Deploy Project Artifacts and Set GitHub Outputs
+        id: unified_docs_preview_url
+        # save preview url from deployment and save copy of the preview url w/o https to fetch the deployment via Vercel REST API in next step
+        run: |
+          preview_url=$(vercel deploy --prebuilt --target=preview --token=${{ secrets.VERCEL_TOKEN }})
+          echo "preview_url=$preview_url" >> $GITHUB_OUTPUT
+
+          created_utc=$(date -u)
+          echo "created_utc=$created_utc" >> $GITHUB_OUTPUT
+
+          preview_url_to_fetch_deployment=$(echo "$preview_url" | sed 's/^https:\/\///')
+          echo "preview_url_to_fetch_deployment=$preview_url_to_fetch_deployment" >> $GITHUB_OUTPUT
+
+
+          echo "deployment url is $preview_url"
+          echo "deployment url for REST API request is $preview_url_to_fetch_deployment"
+          echo "created at is $created_utc"
+      # as of March 2025, the Vercel CLI does not return the inspect URL in the output of the vercel deploy command, which is needed for the PR comment
+      # we need to fetch the deployment info via the Vercel REST API using the preview_url_to_fetch_deployment output from the last step and parse the inspect URL from it (inspectorUrl prop name)
+      - name: Vercel REST API Request to Fetch Inspect URL and Set GitHub Output
+        id: unified_docs_inspector_url
+        run: |
+          response=$(curl -sS -G "https://api.vercel.com/v13/deployments/${{ steps.unified_docs_preview_url.outputs.preview_url_to_fetch_deployment }}" \
+            -H "Authorization: Bearer ${{ secrets.VERCEL_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d "teamId=${{ secrets.VERCEL_TEAM_ID }}")
+
+          inspector_url=$(echo "$response" | jq -r ".inspectorUrl")
+          echo "inspector_url=$inspector_url" >> $GITHUB_OUTPUT
+
+          echo "Inspect URL is $inspector_url"
+
+      - name: Update Comment with Unified Docs API Data
+        uses: marocchino/sticky-pull-request-comment@52423e01640425a022ef5fd42c6fb5f633a02728 # v2.9.1
+        with:
+          header: preview-notice
+          message: |
+            ## Vercel Previews Deployed
+            | Name | Status | Preview | Updated (UTC) |
+            | :--- | :--- | :--- | :--- |
+            | Dev Portal | 🔄 Building ([Inspect](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})) | --- | --- |
+            | Unified Docs API | ✅ Ready ([Inspect](${{ steps.unified_docs_inspector_url.outputs.inspector_url }} )) | [Visit Preview](${{ steps.unified_docs_preview_url.outputs.preview_url }}) | ${{ steps.unified_docs_preview_url.outputs.created_utc }} |
+
+  deploy-dev-portal-preview:
+    name: Deploy Dev Portal Preview
+    if: github.repository == 'hashicorp/web-unified-docs'
+    runs-on: ubuntu-latest
+    needs: [deploy-unified-docs-api-preview]
+    steps:
       - name: Checkout hashicorp/dev-portal (Frontend)
         uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
         with:
           repository: hashicorp/dev-portal
           path: ./unified-docs-frontend-preview
 
+      - name: Use cache
+        uses: actions/cache@d4323d4df104b026a6aa633fdb11d772146be0bf # v4.2.2
+        with:
+          path: |
+            ~/.npm
+            ${{ github.workspace }}/.next/cache
+          # Generate a new cache whenever packages or source files change.
+          key: ${{ runner.os }}-nextjs-${{ hashFiles('**/package-lock.json') }}-${{ hashFiles('**/*.js', '**/*.jsx', '**/*.ts', '**/*.tsx', '**/*.mdx') }}
+          # If source files changed but packages didn't, rebuild from a prior cache.
+          restore-keys: |
+            ${{ runner.os }}-nextjs-${{ hashFiles('**/package-lock.json') }}-
+
       - name: Setup Node.js
-        uses: actions/setup-node@0a44ba7841725637a19e28fa30b79a866c81b0a6 # v4.0.4
+        uses: actions/setup-node@1d0ff469b7ec7b3cb9d8673fde0c81c44821de2a # v4.2.0
         with:
           node-version: '18'
           cache: 'npm'
@@ -61,67 +146,81 @@ jobs:
       - run: vercel pull --yes --environment=preview --scope=hashicorp --token=${{ secrets.VERCEL_TOKEN }}
         working-directory: unified-docs-frontend-preview
 
-      - name: Wait for Unified Docs API to be ready
-        uses: ./.github/actions/get-vercel-preview-data
-        id: check_unified_docs_preview_url
-        with:
-          deployment_type: 'check'
-          deployment_url: ${{ steps.unified_docs_preview_url.outputs.preview_url }}
-          team_id: ${{ secrets.VERCEL_TEAM_ID }}
-          vercel_token: ${{ secrets.VERCEL_TOKEN }}
-          num_of_checks: 3
-          mins_between_checks: 5
-
-      - name: Update comment with preview URL with Unified Docs API data
-        uses: marocchino/sticky-pull-request-comment@331f8f5b4215f0445d3c07b4967662a32a2d3e31 # v2.9.0
-        with:
-          header: preview-notice
-          message: |
-            ## Vercel Previews Deployed
-            | Name | Status | Preview | Updated (UTC) |
-            | :--- | :----- | :------ | :------------ |
-            | Dev Portal | 🔄 Building ([Inspect](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})) | --- | --- |
-            | Unified Docs API | ✅ Ready ([Inspect](${{ steps.unified_docs_preview_url.outputs.inspector_url }})) | [Visit Preview](${{ steps.unified_docs_preview_url.outputs.preview_url }}) | ${{ steps.unified_docs_preview_url.outputs.created_utc }} |
+      # - name: Build Project Artifacts
+      #   working-directory: unified-docs-frontend-preview
+      #   run: vercel build --target=preview --token=${{ secrets.VERCEL_TOKEN }}
 
       - name: inject env vars
         run: |
           cd unified-docs-frontend-preview
           echo "HASHI_ENV=unified-docs-sandbox" >> .env
-          echo "UNIFIED_DOCS_API=${{ steps.unified_docs_preview_url.outputs.preview_url }}" >> .env
+          echo "UNIFIED_DOCS_API=${{ needs.deploy-unified-docs-api-preview.outputs.preview_url }}" >> .env
           echo "IS_CONTENT_PREVIEW=true" >> .env
 
       - name: Build dev-portal
-        uses: nick-fields/retry@7152eba30c6575329ac0576536151aca5a72780e # v3.0.0
-        with:
-          timeout_minutes: 10
-          max_attempts: 2
-          command: |
-            cd unified-docs-frontend-preview
-            vercel build --token=${{ secrets.VERCEL_TOKEN }}
+        shell: bash
+        run: |
+          cd unified-docs-frontend-preview
+          vercel build --token=${{ secrets.VERCEL_TOKEN }}
 
       - name: Deploy dev-portal preview
         id: deploy_dev_portal_preview
         run: |
-          DEV_PORTAL_PREVIEW_URL=$(vercel deploy --prebuilt --archive=tgz --scope=hashicorp --token=${{ secrets.VERCEL_TOKEN }})
-          echo "DEV_PORTAL_PREVIEW_URL=$DEV_PORTAL_PREVIEW_URL" >> $GITHUB_OUTPUT
+          preview_url=$(vercel deploy --prebuilt --archive=tgz --scope=hashicorp --token=${{ secrets.VERCEL_TOKEN }})
+          echo "preview_url=$preview_url" >> $GITHUB_OUTPUT
+
+          created_utc=$(date -u)
+          echo "created_utc=$created_utc" >> $GITHUB_OUTPUT
+
+          preview_url_to_fetch_deployment=$(echo "$preview_url" | sed 's/^https:\/\///')
+          echo "preview_url_to_fetch_deployment=$preview_url_to_fetch_deployment" >> $GITHUB_OUTPUT
+
+
+          echo "deployment url is $preview_url"
+          echo "deployment url for REST API request is $preview_url_to_fetch_deployment"
+          echo "created at is $created_utc"
         working-directory: unified-docs-frontend-preview
 
-      - name: Get Dev Portal Vercel Data
-        uses: ./.github/actions/get-vercel-preview-data
-        id: dev_portal_vercel_data
-        with:
-          deployment_type: 'url'
-          deployment_url: ${{ steps.deploy_dev_portal_preview.outputs.DEV_PORTAL_PREVIEW_URL }}
-          team_id: ${{ secrets.VERCEL_TEAM_ID }}
-          vercel_token: ${{ secrets.VERCEL_TOKEN }}
+      # - name: Deploy Project Artifacts and Set GitHub Outputs
+      #   id: deploy_dev_portal_preview
+      #   working-directory: unified-docs-frontend-preview
+      #   # save preview url from deployment and save copy of the preview url w/o https to fetch the deployment via Vercel REST API in next step
+      #   run: |
+      #     preview_url=$(vercel deploy --prebuilt --archive=tgz --scope=hashicorp --token=${{ secrets.VERCEL_TOKEN }})
 
-      - name: Update comment with preview URL with all data
-        uses: marocchino/sticky-pull-request-comment@331f8f5b4215f0445d3c07b4967662a32a2d3e31 # v2.9.0
+      #     echo "created_utc=$created_utc" >> $GITHUB_OUTPUT
+
+      #     preview_url_to_fetch_deployment=$(echo "$preview_url" | sed 's/^https:\/\///')
+
+      #     echo "preview_url_to_fetch_deployment=$preview_url_to_fetch_deployment" >> $GITHUB_OUTPUT
+
+      #     echo "preview_url=$preview_url" >> $GITHUB_OUTPUT
+
+      #     echo "deployment url is $preview_url"
+      #     echo "deployment url for REST API request is $preview_url_to_fetch_deployment"
+      #     echo "created at is $created_utc"
+
+      # as of March 2025, the Vercel CLI does not return the inspect URL in the output of the vercel deploy command, which is needed for the PR comment
+      # we need to fetch the deployment info via the Vercel REST API using the preview_url_to_fetch_deployment output from the last step and parse the inspect URL from it (inspectorUrl prop name)
+      - name: Vercel REST API Request to Fetch Inspect URL and Set GitHub Output
+        id: dev_portal_inspector_url
+        run: |
+          response=$(curl -sS -G "https://api.vercel.com/v13/deployments/${{ steps.deploy_dev_portal_preview.outputs.preview_url_to_fetch_deployment }}" \
+            -H "Authorization: Bearer ${{ secrets.VERCEL_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d "teamId=${{ secrets.VERCEL_TEAM_ID }}")
+          inspector_url=$(echo "$response" | jq -r ".inspectorUrl")
+          echo "inspector_url=$inspector_url" >> $GITHUB_OUTPUT
+
+          echo "Inspect URL is $inspector_url"
+
+      - name: Update PR Comment with Dev Portal Data
+        uses: marocchino/sticky-pull-request-comment@52423e01640425a022ef5fd42c6fb5f633a02728 # v2.9.1
         with:
           header: preview-notice
           message: |
-            ## Vercel Previews Deployed
+            #### Vercel Previews Deployed
             | Name | Status | Preview | Updated (UTC) |
-            | :--- | :----- | :------ | :------------ |
-            | Dev Portal | ✅ Ready ([Inspect](${{ steps.dev_portal_vercel_data.outputs.inspector_url }})) | [Visit Preview](${{ steps.deploy_dev_portal_preview.outputs.DEV_PORTAL_PREVIEW_URL }}) | ${{ steps.dev_portal_vercel_data.outputs.created_utc }} |
-            | Unified Docs API | ✅ Ready ([Inspect](${{ steps.unified_docs_preview_url.outputs.inspector_url }})) | [Visit Preview](${{ steps.unified_docs_preview_url.outputs.preview_url }}) | ${{ steps.unified_docs_preview_url.outputs.created_utc }} |
+            | :--- | :--- | :--- | :--- |
+            | Dev Portal | ✅ Ready ([Inspect](${{ steps.dev_portal_inspector_url.outputs.inspector_url }})) | [Visit Preview](${{ steps.deploy_dev_portal_preview.outputs.preview_url }}) | ${{ steps.deploy_dev_portal_preview.outputs.created_utc }} |
+            | Unified Docs API | ✅ Ready ([Inspect](${{ needs.deploy-unified-docs-api-preview.outputs.inspector_url }} )) | [Visit Preview](${{ needs.deploy-unified-docs-api-preview.outputs.preview_url }}) | ${{ needs.deploy-unified-docs-api-preview.outputs.created_utc }} |
