@@ -1,8 +1,3 @@
-/**
- * Copyright (c) HashiCorp, Inc.
- * SPDX-License-Identifier: BUSL-1.1
- */
-
 /******/ (() => { // webpackBootstrap
 /******/ 	var __webpack_modules__ = ({
 
@@ -31572,6 +31567,11 @@ __nccwpck_require__.r(__webpack_exports__);
 /* harmony import */ var _actions_core__WEBPACK_IMPORTED_MODULE_0___default = /*#__PURE__*/__nccwpck_require__.n(_actions_core__WEBPACK_IMPORTED_MODULE_0__);
 /* harmony import */ var node_fetch__WEBPACK_IMPORTED_MODULE_1__ = __nccwpck_require__(6705);
 /* harmony import */ var node_fetch__WEBPACK_IMPORTED_MODULE_1___default = /*#__PURE__*/__nccwpck_require__.n(node_fetch__WEBPACK_IMPORTED_MODULE_1__);
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: BUSL-1.1
+ */
+
 
 
 
@@ -31711,6 +31711,7 @@ if (DEPLOYMENT_TYPE === 'url' || DEPLOYMENT_TYPE === 'check') {
 		.then((data) => {
 			if (data.deployments && data.deployments.length > 0) {
 				// Double check if the deployment is for the current sha
+				console.log('### data.deployments', data.deployments)
 				const deploymentData = data.deployments.find((deployment) => {
 					return deployment.meta.githubCommitSha === GITHUB_SHA
 				})
