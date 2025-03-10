@@ -27,9 +27,12 @@ export function getUrlFromFilePath(
 	const version = getVersionFromFilePath(filePath)
 	const isValidProduct = productConfig[repoDir]
 
+	console.log('### product info', filePath, repoDir, version, isValidProduct)
+
 	if (!isValidProduct) {
 		throw new Error(`Product not found for ${repoDir}`)
 	} else {
+		console.log('### allDocsPaths', allDocsPaths[repoDir][version])
 		return allDocsPaths[repoDir][version].find((path) => {
 			return filePath.endsWith(path.itemPath)
 		}).path
