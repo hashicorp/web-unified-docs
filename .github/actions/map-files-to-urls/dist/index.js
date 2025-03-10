@@ -30098,34 +30098,6 @@ module.exports = parseParams
 /******/ 	}
 /******/ 	
 /************************************************************************/
-/******/ 	/* webpack/runtime/define property getters */
-/******/ 	(() => {
-/******/ 		// define getter functions for harmony exports
-/******/ 		__nccwpck_require__.d = (exports, definition) => {
-/******/ 			for(var key in definition) {
-/******/ 				if(__nccwpck_require__.o(definition, key) && !__nccwpck_require__.o(exports, key)) {
-/******/ 					Object.defineProperty(exports, key, { enumerable: true, get: definition[key] });
-/******/ 				}
-/******/ 			}
-/******/ 		};
-/******/ 	})();
-/******/ 	
-/******/ 	/* webpack/runtime/hasOwnProperty shorthand */
-/******/ 	(() => {
-/******/ 		__nccwpck_require__.o = (obj, prop) => (Object.prototype.hasOwnProperty.call(obj, prop))
-/******/ 	})();
-/******/ 	
-/******/ 	/* webpack/runtime/make namespace object */
-/******/ 	(() => {
-/******/ 		// define __esModule on exports
-/******/ 		__nccwpck_require__.r = (exports) => {
-/******/ 			if(typeof Symbol !== 'undefined' && Symbol.toStringTag) {
-/******/ 				Object.defineProperty(exports, Symbol.toStringTag, { value: 'Module' });
-/******/ 			}
-/******/ 			Object.defineProperty(exports, '__esModule', { value: true });
-/******/ 		};
-/******/ 	})();
-/******/ 	
 /******/ 	/* webpack/runtime/compat */
 /******/ 	
 /******/ 	if (typeof __nccwpck_require__ !== 'undefined') __nccwpck_require__.ab = __dirname + "/";
@@ -30135,13 +30107,6 @@ var __webpack_exports__ = {};
 // This entry need to be wrapped in an IIFE because it need to be in strict mode.
 (() => {
 "use strict";
-// ESM COMPAT FLAG
-__nccwpck_require__.r(__webpack_exports__);
-
-// EXPORTS
-__nccwpck_require__.d(__webpack_exports__, {
-  getAllPaths: () => (/* binding */ getAllPaths)
-});
 
 ;// CONCATENATED MODULE: ../../../scripts/utils/file-path/product-directory/index.mjs
 /**
@@ -30717,21 +30682,19 @@ var core = __nccwpck_require__(7484);
 
 const FILE_PATHS = core.getInput('files', { required: true })
 
-const getAllPaths = () => {
-	console.log('### file paths', FILE_PATHS)
-	const pathsArray = FILE_PATHS.split(',')
-	console.log('### pathsArray', pathsArray)
-	const result = pathsArray.map((filePath) => {
-		try {
-			const url = getUrlFromFilePath(filePath)
-			core.info(`URL for ${filePath}: ${url}`)
-		} catch (error) {
-			core.error(error)
-		}
-	})
-	console.log('### result', result)
-	core.setOutput('paths', result)
-}
+console.log('### file paths', FILE_PATHS)
+const pathsArray = FILE_PATHS.split(',')
+console.log('### pathsArray', pathsArray)
+const result = pathsArray.map((filePath) => {
+	try {
+		const url = getUrlFromFilePath(filePath)
+		core.info(`URL for ${filePath}: ${url}`)
+	} catch (error) {
+		core.error(error)
+	}
+})
+console.log('### result', result)
+core.setOutput('paths', result)
 
 })();
 
