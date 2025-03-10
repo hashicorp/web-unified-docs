@@ -30718,7 +30718,9 @@ var core = __nccwpck_require__(7484);
 const FILE_PATHS = core.getInput('files', { required: true })
 
 const getAllPaths = () => {
+    console.log('### file paths', FILE_PATHS)
 	const pathsArray = FILE_PATHS.split(',')
+    console.log('### pathsArray', pathsArray)
 	const result = pathsArray.map((filePath) => {
 		try {
 			const url = getUrlFromFilePath(filePath)
@@ -30727,6 +30729,7 @@ const getAllPaths = () => {
 			core.error(error)
 		}
 	})
+    console.log('### result', result)
 	core.setOutput('paths', result)
 }
 
