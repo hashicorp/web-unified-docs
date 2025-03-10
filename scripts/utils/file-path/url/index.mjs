@@ -4,7 +4,7 @@
  */
 
 import { getProductDirectoryFromFilePath } from '../product-directory/index.mjs'
-import allDocsPathsJson from '../../../../app/api/all-docs-paths.json'
+import allDocsPathsJson from '../../../../app/api/docsPathsAllVersions.json'
 import { getVersionFromFilePath } from '../version/index.mjs'
 import { PRODUCT_CONFIG } from '../../../../app/api/product-config.js'
 
