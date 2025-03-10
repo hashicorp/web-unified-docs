@@ -6,7 +6,7 @@
 import { getProductDirectoryFromFilePath } from '../product-directory/index.mjs'
 import allDocsPathsJson from '../../../../app/api/docsPathsAllVersions.json'
 import { getVersionFromFilePath } from '../version/index.mjs'
-import { PRODUCT_CONFIG } from '../../../../app/api/productConfig.mjs'
+import { PRODUCT_CONFIG } from '../../../../app/utils/productConfig.mjs'
 
 /**
  * Extracts the repo name from the file path,
