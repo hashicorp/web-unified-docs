@@ -15,6 +15,7 @@ const result = pathsArray.map((filePath) => {
 	try {
 		const url = getUrlFromFilePath(filePath)
 		core.info(`URL for ${filePath}: ${url}`)
+		return url
 	} catch (error) {
 		core.error(error)
 	}
