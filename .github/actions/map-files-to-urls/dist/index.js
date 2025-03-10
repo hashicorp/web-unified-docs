@@ -30287,17 +30287,18 @@ var core = __nccwpck_require__(7484);
 const FILE_PATHS = core.getInput('files', { required: true })
 
 const getAllPaths = () => {
-    const pathsArray = FILE_PATHS.split(',')
-    const result = pathsArray.map((filePath) => {
-        try {
-            const url = getUrlFromFilePath(filePath)
-            core.info(`URL for ${filePath}: ${url}`)
-        } catch (error) {
-            core.error(error)
-        }
-    })
-    core.setOutput('paths', result)
+	const pathsArray = FILE_PATHS.split(',')
+	const result = pathsArray.map((filePath) => {
+		try {
+			const url = getUrlFromFilePath(filePath)
+			core.info(`URL for ${filePath}: ${url}`)
+		} catch (error) {
+			core.error(error)
+		}
+	})
+	core.setOutput('paths', result)
 }
+
 })();
 
 module.exports = __webpack_exports__;
