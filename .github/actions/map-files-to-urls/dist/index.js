@@ -30684,7 +30684,7 @@ var core = __nccwpck_require__(7484);
 
 const FILE_PATHS = core.getInput('files', { required: true })
 
-const pathsArray = FILE_PATHS.split(',')
+const pathsArray = FILE_PATHS.split(' ')
 const result = pathsArray.map((filePath) => {
 	try {
 		const url = getUrlFromFilePath(filePath)
