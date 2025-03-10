@@ -8,9 +8,7 @@ import * as core from '@actions/core'
 
 const FILE_PATHS = core.getInput('files', { required: true })
 
-console.log('### file paths', FILE_PATHS)
 const pathsArray = FILE_PATHS.split(',')
-console.log('### pathsArray', pathsArray)
 const result = pathsArray.map((filePath) => {
 	try {
 		const url = getUrlFromFilePath(filePath)
@@ -20,5 +18,4 @@ const result = pathsArray.map((filePath) => {
 		core.error(error)
 	}
 })
-console.log('### result', result)
 core.setOutput('paths', result)

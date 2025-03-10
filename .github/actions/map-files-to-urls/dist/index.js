@@ -1,3 +1,8 @@
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: BUSL-1.1
+ */
+
 /******/ (() => { // webpackBootstrap
 /******/ 	var __webpack_modules__ = ({
 
@@ -30657,12 +30662,9 @@ function getUrlFromFilePath(
 	const version = getVersionFromFilePath(filePath)
 	const isValidProduct = productConfig[repoDir]
 
-	console.log('### product info', filePath, repoDir, version, isValidProduct)
-
 	if (!isValidProduct) {
 		throw new Error(`Product not found for ${repoDir}`)
 	} else {
-		console.log('### allDocsPaths', allDocsPaths[repoDir][version])
 		return allDocsPaths[repoDir][version].find((path) => {
 			return filePath.endsWith(path.itemPath)
 		}).path
@@ -30682,19 +30684,16 @@ var core = __nccwpck_require__(7484);
 
 const FILE_PATHS = core.getInput('files', { required: true })
 
-console.log('### file paths', FILE_PATHS)
 const pathsArray = FILE_PATHS.split(',')
-console.log('### pathsArray', pathsArray)
 const result = pathsArray.map((filePath) => {
 	try {
 		const url = getUrlFromFilePath(filePath)
 		core.info(`URL for ${filePath}: ${url}`)
-        return url
+		return url
 	} catch (error) {
 		core.error(error)
 	}
 })
-console.log('### result', result)
 core.setOutput('paths', result)
 
 })();
