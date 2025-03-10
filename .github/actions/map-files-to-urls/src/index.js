@@ -1,3 +1,8 @@
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: BUSL-1.1
+ */
+
 import { getUrlFromFilePath } from '../../../../scripts/utils/file-path/url/index.mjs'
 import * as core from '@actions/core'
 
