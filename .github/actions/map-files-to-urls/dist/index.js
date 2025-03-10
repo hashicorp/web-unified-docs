@@ -28197,10 +28197,10 @@ module.exports = validRange
 
 /***/ }),
 
-/***/ 6653:
+/***/ 6723:
 /***/ ((module) => {
 
-module.exports = eval("require")("../../../../app/api/product-config.js");
+module.exports = eval("require")("../../../../app/api/productConfig.mjs");
 
 
 /***/ }),
@@ -30157,10 +30157,6 @@ __nccwpck_require__.d(__webpack_exports__, {
 });
 
 ;// CONCATENATED MODULE: ../../../scripts/utils/file-path/product-directory/index.mjs
-/**
- * Copyright (c) HashiCorp, Inc.
- * SPDX-License-Identifier: BUSL-1.1
- */
 
 /**
  * Extracts the repository name from a given file path.
@@ -30229,8 +30225,8 @@ function getVersionFromFilePath(filePath) {
 	}
 }
 
-// EXTERNAL MODULE: ./node_modules/@vercel/ncc/dist/ncc/@@notfound.js?../../../../app/api/product-config.js
-var product_config = __nccwpck_require__(6653);
+// EXTERNAL MODULE: ./node_modules/@vercel/ncc/dist/ncc/@@notfound.js?../../../../app/api/productConfig.mjs
+var api_productConfig = __nccwpck_require__(6723);
 ;// CONCATENATED MODULE: ../../../scripts/utils/file-path/url/index.mjs
 /**
  * Copyright (c) HashiCorp, Inc.
@@ -30255,7 +30251,7 @@ var product_config = __nccwpck_require__(6653);
 function getUrlFromFilePath(
 	filePath,
 	allDocsPaths = docsPathsAllVersions_namespaceObject,
-	productConfig = product_config.PRODUCT_CONFIG,
+	productConfig = api_productConfig.PRODUCT_CONFIG,
 ) {
 	const repoDir = getProductDirectoryFromFilePath(filePath)
 	const version = getVersionFromFilePath(filePath)
@@ -30273,6 +30269,12 @@ function getUrlFromFilePath(
 // EXTERNAL MODULE: ./node_modules/@actions/core/lib/core.js
 var core = __nccwpck_require__(7484);
 ;// CONCATENATED MODULE: ./src/index.js
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: BUSL-1.1
+ */
+
+
 
 
 const FILE_PATHS = core.getInput('files', { required: true })
