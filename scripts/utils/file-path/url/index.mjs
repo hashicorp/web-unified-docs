@@ -6,6 +6,7 @@
 import { getProductDirectoryFromFilePath } from '../product-directory/index.mjs'
 import { getVersionFromFilePath } from '../version/index.mjs'
 import { PRODUCT_CONFIG } from '../../../../app/utils/productConfig.mjs'
+import allDocsPathsJson from '../../../../app/api/docsPathsAllVersions.json'
 
 /**
  * Extracts the repo name from the file path,
@@ -19,7 +20,7 @@ import { PRODUCT_CONFIG } from '../../../../app/utils/productConfig.mjs'
  */
 export function getUrlFromFilePath(
 	filePath,
-	allDocsPaths,
+	allDocsPaths = allDocsPathsJson,
 	productConfig = PRODUCT_CONFIG,
 ) {
 	const repoDir = getProductDirectoryFromFilePath(filePath)
