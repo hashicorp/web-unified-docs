@@ -19,5 +19,5 @@ function main(filePaths) {
 			console.error(error)
 		}
 	})
-	return result
+	console.log(result)
 }
