@@ -11,16 +11,13 @@ const filePaths = process.argv.slice(2)
 main(filePaths)
 
 function main(filePaths) {
-	console.log('### filePaths', filePaths)
 	const result = filePaths.map((filePath) => {
 		try {
 			const url = getUrlFromFilePath(filePath)
-			console.log('### url', url)
 			return url
 		} catch (error) {
 			console.error(error)
 		}
 	})
-	console.log('### result', result)
 	return result
 }
