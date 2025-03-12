@@ -19,7 +19,6 @@ function main(filePaths) {
 			console.error(error)
 		}
 	})
-	// console.log(JSON.stringify(result))
 
 	process.stdout.write(JSON.stringify(result))
 }
