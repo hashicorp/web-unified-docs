@@ -4,6 +4,7 @@
  */
 
 import { getUrlFromFilePath } from './utils/file-path/url/index.mjs'
+import allDocsPathsJson from '../app/api/docsPathsAllVersions.json' with { type: 'json' }
 
 const filePaths = process.argv.slice(2)
 
@@ -13,7 +14,7 @@ main(filePaths)
 function main(filePaths) {
 	const result = filePaths.map((filePath) => {
 		try {
-			return getUrlFromFilePath(filePath)
+			return getUrlFromFilePath(filePath, allDocsPathsJson)
 		} catch (error) {
 			console.error(error)
 		}
