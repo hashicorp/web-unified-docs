@@ -13,8 +13,7 @@ main(filePaths)
 function main(filePaths) {
 	const result = filePaths.map((filePath) => {
 		try {
-			const url = getUrlFromFilePath(filePath)
-			return url
+			return getUrlFromFilePath(filePath)
 		} catch (error) {
 			console.error(error)
 		}
