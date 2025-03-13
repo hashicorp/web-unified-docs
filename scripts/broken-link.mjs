@@ -9,7 +9,6 @@
  */
 
 import { execSync } from 'child_process';
-import path from 'path';
 
 // Get command line arguments (skip the first two which are node and script path)
 const args = process.argv.slice(2);
