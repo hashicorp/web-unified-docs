@@ -4,7 +4,7 @@
  */
 
 import { batchPostRecords } from './batch-post-records-to-algolia.mjs'
-import path from 'path'
+import path from 'node:path'
 
 const ALGOLIA_RECORDS_FILE = path.join(
 	process.cwd(),
