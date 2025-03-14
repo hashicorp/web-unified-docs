@@ -27,7 +27,7 @@ export async function batchPostRecords(searchObjectsFile) {
 			},
 		})
 		console.log(
-			`✅ Completed saving objects to the ${process.env.ALGOLIA_INDEX_NAME} Algolia index.`,
+			`✅ Adding ${searchObjects.length} records to the ${process.env.ALGOLIA_INDEX_NAME} Algolia index.`,
 		)
 	} catch (e) {
 		throw new Error(`Failed to save objects: ${e}`)
