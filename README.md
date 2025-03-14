@@ -179,3 +179,27 @@ Files with errors: 0
 
 Completed! All MDX files have been processed.
 ```
+
+## Run broken link checker locally
+
+Every week, the [`broken-link-check`](https://github.com/hashicorp/web-unified-docs/blob/main/.github/workflows/broken-link-check.yml) generates a broken link report for all the content in this repo. In addition, whenever contributors create a PR that touches the `content` repo, the broken link checker will also run on changed files.
+
+You can also run the broken link checker locally. The following commands will launch a lychee Docker container to check the content directories you specify.
+
+Run the broken link checker on all content.
+
+```
+npm run broken-link
+```
+
+Check a specific directory within content.
+
+```
+npm run broken-link terraform-plugin-framework
+```
+
+Check multiple directories.
+
+```
+npm run broken-link terraform-plugin-framework-log terraform-plugin-mux
+```
