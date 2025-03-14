@@ -55,13 +55,16 @@ export async function createAlgoliaRecordObject(
 	const codeListItems = await collectCodeListItems(markdownFile)
 
 	return {
-		objectID,
-		page_title: frontmatter.page_title,
-		type: 'docs',
-		products: [productSlug],
-		description: frontmatter.description ?? '',
-		headings,
-		codeListItems,
-		_tags: [directory],
+		action: 'addObject',
+		body: {
+			objectID,
+			page_title: frontmatter.page_title,
+			type: 'docs',
+			products: [productSlug],
+			description: frontmatter.description ?? '',
+			headings,
+			codeListItems,
+			_tags: [directory, 'web-unified-docs'],
+		},
 	}
 }
