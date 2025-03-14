@@ -18,7 +18,7 @@ export async function batchPostRecords(searchObjectsFile) {
 	// add the UDR records to algolia index prod_DEVDOT_omni
 	try {
 		console.log(
-			`🚧 Saving ${searchObjects.length} objects to the ${process.env.ALGOLIA_INDEX_NAME} Algolia index...`,
+			`🚧 Adding ${searchObjects.length} records to the ${process.env.ALGOLIA_INDEX_NAME} Algolia index...`,
 		)
 		await client.batch({
 			indexName: process.env.ALGOLIA_INDEX_NAME,
