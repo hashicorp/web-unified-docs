@@ -1,0 +1,271 @@
+---
+page_title: 'Plugin Development - Acceptance Testing: Ephemeral Resources'
+description: >-
+    Guidance on how to test ephemeral resources and data.
+---
+
+<Highlight>
+
+Ephemeral resource support is in technical preview and offered without compatibility promises until Terraform 1.10 is generally available.
+
+</Highlight>
+
+# Ephemeral Resources
+
+[Ephemeral Resources](/terraform/language/v1.10.x/resources/ephemeral) are an abstraction that allows Terraform to reference external data, similar to [data sources](/terraform/language/data-sources), without persisting that data to plan or state artifacts. The `terraform-plugin-testing` module exclusively uses Terraform plan and state artifacts for it's assertion-based test checks, like [plan checks](/terraform/plugin/testing/acceptance-tests/plan-checks) or [state checks](/terraform/plugin/testing/acceptance-tests/state-checks), which means that ephemeral resource data cannot be asserted using these methods alone.
+
+The following is a test for a hypothetical `examplecloud_secret` ephemeral resource which is referenced by a provider configuration that has a single managed resource. For this test to pass, the ephemeral `examplecloud_secret` resource must return valid data, specifically a kerberos `username`, `password`, and `realm`, which are used to configure the `dns` provider and create a DNS record via the `dns_a_record_set` managed resource.
+
+```go
+func TestExampleCloudSecret_DnsKerberos(t *testing.T) {
+  resource.UnitTest(t, resource.TestCase{
+    // Ephemeral resources are only available in 1.10 and later
+    TerraformVersionChecks: []tfversion.TerraformVersionCheck{
+      tfversion.SkipBelow(tfversion.Version1_10_0),
+    },
+    ExternalProviders: map[string]resource.ExternalProvider{
+      "dns": {
+        Source: "hashicorp/dns",
+      },
+    },
+    ProtoV5ProviderFactories: map[string]func() (tfprotov5.ProviderServer, error){
+      "examplecloud": providerserver.NewProtocol5WithError(New()),
+    },
+    Steps: []resource.TestStep{
+      {
+        Config: `
+        # Retrieves a secret containing user kerberos configuration
+        ephemeral "examplecloud_secret" "krb" {
+          name = "example_kerberos_user"
+        }
+
+        # Ephemeral data can be referenced in provider configuration
+        provider "dns" {
+          update {
+            server = "ns.example.com"
+            gssapi {
+              realm    = ephemeral.examplecloud_secret.krb.secret_data.realm
+              username = ephemeral.examplecloud_secret.krb.secret_data.username
+              password = ephemeral.examplecloud_secret.krb.secret_data.password
+            }
+          }
+        }
+
+        # If we can create this DNS record successfully, then the ephemeral resource returned valid data.
+        resource "dns_a_record_set" "record_set" {
+          zone = "example.com."
+          addresses = [
+            "192.168.0.1",
+            "192.168.0.2",
+            "192.168.0.3",
+          ]
+        }
+        `,
+      },
+    },
+  })
+}
+```
+
+See the Terraform [ephemeral documentation](http://localhost:3000/terraform/language/v1.10.x/resources/ephemeral#referencing-ephemeral-resources) for more details on where ephemeral data can be referenced in configurations.
+
+## Testing ephemeral data with `echo` provider
+
+Test assertions on [result data](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/ephemeral#OpenResponse.Result) returned by an ephemeral resource during [`Open`](/terraform/plugin/framework/ephemeral-resources/open) can be arranged using the `echoprovider` package.
+
+This package contains a [Protocol V6 Terraform Provider](/terraform/plugin/terraform-plugin-protocol#protocol-version-6) named `echo`, with a single managed resource also named `echo`. Using the `echo` provider configuration and an instance of the managed resource, ephemeral data can be "echoed" from the provider configuration into Terraform state, where it can be referenced in test assertions with [state checks](/terraform/plugin/testing/acceptance-tests/state-checks). For example:
+
+```terraform
+ephemeral "examplecloud_secret" "krb" {
+  name = "example_kerberos_user"
+}
+
+provider "echo" {
+  # Provide the ephemeral data we want to run test assertions against
+  data = ephemeral.examplecloud_secret.krb.secret_data
+}
+
+# The ephemeral data will be echoed into state
+resource "echo" "test_krb" {}
+```
+
+<Highlight>
+
+This provider is designed specifically to be used as a utility for acceptance testing ephemeral data and is only available via the `terraform-plugin-testing` Go module.
+
+</Highlight>
+
+### Using `echo` provider in acceptance tests
+
+First, we include the `echo` provider using the [`echoprovider.NewProviderServer`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-testing/echoprovider#NewProviderServer) function in the `(TestCase).ProtoV6ProviderFactories` property:
+
+```go
+import (
+  // .. other imports
+
+  "github.com/hashicorp/terraform-plugin-testing/echoprovider"
+)
+
+func TestExampleCloudSecret(t *testing.T) {
+  resource.UnitTest(t, resource.TestCase{
+    // Ephemeral resources are only available in 1.10 and later
+    TerraformVersionChecks: []tfversion.TerraformVersionCheck{
+      tfversion.SkipBelow(tfversion.Version1_10_0),
+    },
+    // Include the provider we want to test: `examplecloud`
+    ProtoV5ProviderFactories: map[string]func() (tfprotov5.ProviderServer, error){
+      "examplecloud": providerserver.NewProtocol5WithError(New()),
+    },
+    // Include `echo` as a v6 provider from `terraform-plugin-testing`
+    ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+      "echo": echoprovider.NewProviderServer(),
+    },
+    Steps: []resource.TestStep{
+      // .. test step configurations can now use the `echo` and `examplecloud` providers
+    },
+  })
+}
+```
+
+After including both providers, our test step `Config` references the ephemeral data from `examplecloud_secret` in the `echo` provider configuration `data` attribute:
+
+```go
+func TestExampleCloudSecret(t *testing.T) {
+  resource.UnitTest(t, resource.TestCase{
+    // .. test case setup
+
+    Steps: []resource.TestStep{
+      {
+        Config: `
+        ephemeral "examplecloud_secret" "krb" {
+          name = "example_kerberos_user"
+        }
+
+        provider "echo" {
+          data = ephemeral.examplecloud_secret.krb.secret_data
+        }
+
+        resource "echo" "test_krb" {}
+        `,
+      },
+    },
+  })
+}
+```
+
+The `echo.test_krb` managed resource has a single computed `data` attribute, which will contain the provider configuration `data` results. This data is then used in assertions with the [state check](/terraform/plugin/testing/acceptance-tests/state-checks) functionality:
+
+```go
+func TestExampleCloudSecret(t *testing.T) {
+  resource.UnitTest(t, resource.TestCase{
+    // .. test case setup
+
+    Steps: []resource.TestStep{
+      {
+        Config: `
+        ephemeral "examplecloud_secret" "krb" {
+          name = "example_kerberos_user"
+        }
+
+        provider "echo" {
+          data = ephemeral.examplecloud_secret.krb.secret_data
+        }
+
+        resource "echo" "test_krb" {}
+        `,
+        ConfigStateChecks: []statecheck.StateCheck{
+          statecheck.ExpectKnownValue("echo.test_krb", tfjsonpath.New("data").AtMapKey("realm"), knownvalue.StringExact("EXAMPLE.COM")),
+          statecheck.ExpectKnownValue("echo.test_krb", tfjsonpath.New("data").AtMapKey("username"), knownvalue.StringExact("john-doe")),
+          statecheck.ExpectKnownValue("echo.test_krb", tfjsonpath.New("data").AtMapKey("password"), knownvalue.StringRegexp(regexp.MustCompile(`^.{12}$`))),
+        },
+      },
+    },
+  })
+}
+```
+
+`data` is a `dynamic` attribute, so whatever [type](/terraform/language/expressions/types) you pass in will be directly reflected in the managed resource `data` attribute. In the config above, we reference an object (`secret_data`) from the ephemeral resource instance, so the resulting type of `echo.test_krb.data` is also an `object`.
+
+You can also reference the entire ephemeral resource instance for assertions, rather than specific attributes:
+
+```go
+func TestExampleCloudSecret(t *testing.T) {
+  resource.UnitTest(t, resource.TestCase{
+    // .. test case setup
+
+    Steps: []resource.TestStep{
+      {
+        Config: `
+        ephemeral "examplecloud_secret" "krb" {
+          name = "example_kerberos_user"
+        }
+
+        provider "echo" {
+          data = ephemeral.examplecloud_secret.krb
+        }
+
+        resource "echo" "test_krb" {}
+        `,
+        ConfigStateChecks: []statecheck.StateCheck{
+          statecheck.ExpectKnownValue("echo.test_krb", tfjsonpath.New("data").AtMapKey("name"), knownvalue.StringExact("example_kerberos_user")),
+        },
+      },
+    },
+  })
+}
+```
+
+### Caveats with `echo` provider
+
+Since data produced by an ephemeral resource is allowed to change between plan/apply operations, the `echo` resource has special handling to allow this data to be used in the `terraform-plugin-testing` Go module without producing confusing error messages:
+
+* During plan, if the `echo` resource is being created, the `data` attribute will always be marked as unknown.
+* During plan, if the `echo` resource already exists and is not being destroyed, prior state will always be fully preserved regardless of changes to the provider configuration. This essentially means an instance of the `echo` resource is immutable.
+* During refresh, the prior state of the `echo` resource is always returned, regardless of changes to the provider configuration.
+
+Due to this special handling, if multiple test steps are required for testing data, provider developers should create new instances of `echo` for each new test step, for example:
+
+```go
+func TestExampleCloudSecret(t *testing.T) {
+  resource.UnitTest(t, resource.TestCase{
+    // .. test case setup
+
+    Steps: []resource.TestStep{
+      {
+        Config: `
+        ephemeral "examplecloud_secret" "krb" {
+          name = "user_one"
+        }
+
+        provider "echo" {
+          data = ephemeral.examplecloud_secret.krb
+        }
+
+        # First test object -> 1
+        resource "echo" "test_krb_one" {}
+        `,
+        ConfigStateChecks: []statecheck.StateCheck{
+          statecheck.ExpectKnownValue("echo.test_krb_one", tfjsonpath.New("data").AtMapKey("name"), knownvalue.StringExact("user_one")),
+        },
+      },
+      {
+        Config: `
+        ephemeral "examplecloud_secret" "krb" {
+          name = "user_two"
+        }
+
+        provider "echo" {
+          data = ephemeral.examplecloud_secret.krb
+        }
+
+        # New test object -> 2
+        resource "echo" "test_krb_two" {}
+        `,
+        ConfigStateChecks: []statecheck.StateCheck{
+          statecheck.ExpectKnownValue("echo.test_krb_two", tfjsonpath.New("data").AtMapKey("name"), knownvalue.StringExact("user_two")),
+        },
+      },
+    },
+  })
+}
+```
