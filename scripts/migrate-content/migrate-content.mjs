@@ -245,6 +245,9 @@ async function migrateContent(targetRepos, ghCloneDir, outputDirs, options) {
 		)
 		for (let i = targetReleaseRefs.length - 1; i >= 0; i--) {
 			const targetRef = targetReleaseRefs[i]
+			const versionString = repoConfig.versionedDocs
+				? targetRef.versionString
+				: ''
 
 			try {
 				migrateRepoContentAtRef(
@@ -260,13 +263,13 @@ async function migrateContent(targetRepos, ghCloneDir, outputDirs, options) {
 
 				successes.push({
 					repoSlug,
-					versionString: targetRef.versionString,
+					versionString,
 				})
 			} catch (error) {
 				console.error(`🔴 Failed to extract content from "${repoSlug}"`, error)
 				failures.push({
 					repoSlug,
-					versionString: targetRef.versionString,
+					versionString,
 					hash: targetRef.hash,
 					error: error.stack,
 				})
@@ -336,14 +339,10 @@ function migrateRepoContentAtRef(
 	 * TODO: investigate why `terraform-cdk` doesn't seem to have an asset
 	 * directory. Maybe intentional, in which case this conditional is fine.
 	 */
+	const version = repoConfig.versionedDocs ? targetRef.versionString : ''
 	if (typeof repoConfig.assetDir === 'string') {
 		const assetsSrc = path.join(websiteDirPath, repoConfig.assetDir)
-		const assetsDest = path.join(
-			outputDirs.content,
-			repoSlug,
-			targetRef.versionString,
-			'img',
-		)
+		const assetsDest = path.join(outputDirs.content, repoSlug, version, 'img')
 
 		if (fs.existsSync(assetsSrc)) {
 			dirsToCopy.push({ src: assetsSrc, dest: assetsDest })
@@ -351,12 +350,7 @@ function migrateRepoContentAtRef(
 	} else if (Array.isArray(repoConfig.assetDir)) {
 		for (const assetDir of repoConfig.assetDir) {
 			const assetsSrc = path.join(websiteDirPath, assetDir)
-			const assetsDest = path.join(
-				outputDirs.content,
-				repoSlug,
-				targetRef.versionString,
-				'img',
-			)
+			const assetsDest = path.join(outputDirs.content, repoSlug, version, 'img')
 
 			if (fs.existsSync(assetsSrc)) {
 				dirsToCopy.push({ src: assetsSrc, dest: assetsDest })
@@ -369,14 +363,14 @@ function migrateRepoContentAtRef(
 	const contentDest = path.join(
 		outputDirs.content,
 		repoSlug,
-		targetRef.versionString,
+		version,
 		repoConfig.contentDir,
 	)
 	const dataSrc = path.join(websiteDirPath, repoConfig.dataDir)
 	const dataDest = path.join(
 		outputDirs.content,
 		repoSlug,
-		targetRef.versionString,
+		version,
 		repoConfig.dataDir,
 	)
 
@@ -388,7 +382,7 @@ function migrateRepoContentAtRef(
 			const redirectsDest = path.join(
 				outputDirs.content,
 				repoSlug,
-				targetRef.versionString,
+				version,
 				'redirects.jsonc',
 			)
 			dirsToCopy.push({ src: redirectsSrcJsonc, dest: redirectsDest })
