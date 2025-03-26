@@ -5,7 +5,7 @@
 
 import { Command } from 'commander'
 import { diffLinesUnified } from 'jest-diff'
-import { PRODUCT_CONFIG as contentDirMap } from '../app/utils/productConfig.mjs'
+import { PRODUCT_CONFIG as contentDirMap } from '../../app/utils/productConfig.mjs'
 import stripAnsi from 'strip-ansi'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -16,7 +16,7 @@ const __dirname = path.dirname(__filename) // get the name of the directory
 
 const versionMetadataPath = path.resolve(
 	__dirname,
-	'../app/api/versionMetadata.json',
+	'../../app/api/versionMetadata.json',
 )
 const versionMetadata = JSON.parse(
 	fs.readFileSync(versionMetadataPath, 'utf-8'),
@@ -24,7 +24,7 @@ const versionMetadata = JSON.parse(
 
 const docsPathsAllVersionsPaths = path.resolve(
 	__dirname,
-	'../app/api/docsPathsAllVersions.json',
+	'../../app/api/docsPathsAllVersions.json',
 )
 const apiPaths = JSON.parse(fs.readFileSync(docsPathsAllVersionsPaths, 'utf-8'))
 
@@ -45,7 +45,7 @@ program
 			return key.trim()
 		})
 	})
-	.option('-s, --save-output', 'Save output', true)
+	.option('-s, --save-output', 'Save output', false)
 
 program.parse(process.argv)
 const options = program.opts()
