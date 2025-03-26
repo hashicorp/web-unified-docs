@@ -24,7 +24,7 @@ npm run compare-api-responses -- -n localhost:8080 -o https://content.hashicorp.
 
 ### Example output:
 
-```bash
+```diff
 @@ -2,11 +2,4 @@
     {
 -     "created_at": "2025-03-18T19:47:18.641Z",
