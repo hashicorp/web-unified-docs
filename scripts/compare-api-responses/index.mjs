@@ -31,8 +31,16 @@ const apiPaths = JSON.parse(fs.readFileSync(docsPathsAllVersionsPaths, 'utf-8'))
 const program = new Command()
 
 program
-	.option('-n, --new-api-url <url>', 'New API URL')
-	.option('-o, --old-api-url <url>', 'Old API URL')
+	.option(
+		'-n, --new-api-url <url>',
+		'New API URL',
+		'https://web-unified-docs-hashicorp.vercel.app',
+	)
+	.option(
+		'-o, --old-api-url <url>',
+		'Old API URL',
+		'https://content.hashicorp.com',
+	)
 	.option('-v, --version <version>', 'Version')
 	.option('-p, --product <product>', 'Product')
 	.option(
