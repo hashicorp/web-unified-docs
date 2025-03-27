@@ -12,7 +12,7 @@ This script is a utility for comparing API responses between two endpoints, typi
 -p, --product <product>: The product name to compare.
 -a, --api <api>: The API type to compare. Options: content, nav-data, version-metadata, content-versions. Default: version-metadata.
 -r, --drop-keys <keys>: Comma-separated list of keys to exclude from the comparison.
--s, --save-output: Save the comparison output to a file. Disabled by default.
+-s, --save-output: Save the comparison output to a file. Off by default.
 
 ### Example
 
