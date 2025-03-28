@@ -9,6 +9,12 @@ import { GET } from './route'
 import * as utilsFileModule from '@utils/file'
 import * as utilsContentVersionsModule from '@utils/contentVersions'
 
+vi.mock('@api/versionMetadata.json', () => {
+	return {
+		default: {},
+	}
+})
+
 const jsoncFixtureBefore = `
 [
   // Test comment
@@ -21,7 +27,7 @@ const jsoncFixtureBefore = `
 
 const jsoncFixtureAfter = `[{"from":"/docs/cli","to":"/docs/terraform-docs-common/cli"}]`
 
-test("Return 404 if `product` DOESN'T exist", async () => {
+test('Return 404 if `product` does not exist', async () => {
 	const mockRequest = (url: string) => {
 		return new Request(url)
 	}
