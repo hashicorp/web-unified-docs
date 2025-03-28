@@ -12,6 +12,18 @@ afterEach(() => {
 	vi.restoreAllMocks()
 })
 
+vi.mock('@api/versionMetadata.json', () => {
+	return {
+		default: {},
+	}
+})
+
+vi.mock('@api/docsPathsAllVersions.json', () => {
+	return {
+		default: {},
+	}
+})
+
 test('GET should return a 200 response with no products', async () => {
 	vi.spyOn(getDocsPaths, 'getDocsPaths').mockResolvedValueOnce({
 		ok: true,
