@@ -17,6 +17,18 @@ vi.mock(import('@utils/contentVersions'), async (importOriginal: any) => {
 	}
 })
 
+vi.mock('@api/versionMetadata.json', () => {
+	return {
+		default: {},
+	}
+})
+
+vi.mock('@api/docsPathsAllVersions.json', () => {
+	return {
+		default: {},
+	}
+})
+
 test('getDocsPaths should return an error for an empty productSlugs array', async () => {
 	const response = await getDocsPaths([], docsPathsMock)
 	expect(response).toEqual({ ok: false, value: 'All docs paths not found' })
