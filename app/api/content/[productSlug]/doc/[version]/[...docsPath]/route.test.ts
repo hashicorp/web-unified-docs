@@ -35,25 +35,29 @@ vi.mock(import('@utils/file'), async (importOriginal: any) => {
 	}
 })
 
+// Mock the versionMetadata json import in the route file
 vi.mock('@api/versionMetadata.json', () => {
 	return {
 		default: {},
 	}
 })
 
+// Mock the docsPathsAllVersions json import in the route file
 vi.mock('@api/docsPathsAllVersions.json', () => {
 	return {
 		default: {
 			'terraform-plugin-framework': {},
+			'ptfe-releases': {},
 		},
 	}
 })
 
+// Mock the product config import in the route file
 vi.mock('@utils/productConfig.mjs', () => {
 	return {
 		PRODUCT_CONFIG: {
-			terraform: { contentDir: 'docs' },
-			vault: { contentDir: 'docs' },
+			'ptfe-releases': { contentDir: 'docs' },
+			'terraform-plugin-framework': { contentDir: 'docs' },
 		},
 	}
 })
@@ -94,7 +98,7 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 		await expect(response.text()).resolves.toMatch(/not found/i)
 	})
 
-	it.only('returns a 404 for nonexistent versions', async () => {
+	it('returns a 404 for non-existent versions', async () => {
 		// Real product name
 		const [productSlug] = Object.keys(PRODUCT_CONFIG)
 
