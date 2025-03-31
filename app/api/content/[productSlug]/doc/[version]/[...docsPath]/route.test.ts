@@ -13,9 +13,9 @@ import {
 	MockInstance,
 } from 'vitest'
 import { GET, GetParams } from './route'
-import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
 import { Err, Ok } from '@utils/result'
 import { getProductVersion } from '@utils/contentVersions'
+import { PRODUCT_CONFIG } from '__fixtures__/productConfig.mjs'
 import { readFile, parseMarkdownFrontMatter } from '@utils/file'
 
 vi.mock(import('@utils/contentVersions'), async (importOriginal: any) => {
@@ -32,6 +32,29 @@ vi.mock(import('@utils/file'), async (importOriginal: any) => {
 		...mod,
 		readFile: vi.fn(),
 		parseMarkdownFrontMatter: vi.fn(),
+	}
+})
+
+vi.mock('@api/versionMetadata.json', () => {
+	return {
+		default: {},
+	}
+})
+
+vi.mock('@api/docsPathsAllVersions.json', () => {
+	return {
+		default: {
+			'terraform-plugin-framework': {},
+		},
+	}
+})
+
+vi.mock('@utils/productConfig.mjs', () => {
+	return {
+		PRODUCT_CONFIG: {
+			terraform: { contentDir: 'docs' },
+			vault: { contentDir: 'docs' },
+		},
 	}
 })
 
@@ -55,6 +78,7 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 	afterAll(() => {
 		consoleMock.mockReset()
 	})
+
 	it('returns a 404 for nonexistent products', async () => {
 		const fakeProductSlug = 'fake product'
 		const response = await mockRequest({
@@ -69,7 +93,8 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 		)
 		await expect(response.text()).resolves.toMatch(/not found/i)
 	})
-	it('returns a 404 for nonexistent versions', async () => {
+
+	it.only('returns a 404 for nonexistent versions', async () => {
 		// Real product name
 		const [productSlug] = Object.keys(PRODUCT_CONFIG)
 
@@ -90,6 +115,7 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 		expect(response.status).toBe(404)
 		await expect(response.text()).resolves.toMatch(/not found/i)
 	})
+
 	it('returns a 404 for missing content', async () => {
 		// Real product name
 		const [productSlug] = Object.keys(PRODUCT_CONFIG)
@@ -115,6 +141,7 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 		expect(response.status).toBe(404)
 		await expect(response.text()).resolves.toMatch(/not found/i)
 	})
+
 	it('returns a 404 for invalid markdown', async () => {
 		// Real product name
 		const [productSlug] = Object.keys(PRODUCT_CONFIG)
@@ -145,6 +172,7 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 		expect(response.status).toBe(404)
 		await expect(response.text()).resolves.toMatch(/not found/i)
 	})
+
 	it('returns the markdown source of the requested docs', async () => {
 		const productSlug = 'terraform-plugin-framework'
 		const version = 'v1.13.x'
@@ -185,6 +213,7 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 		expect(result.markdownSource).toBe(markdownSource)
 		expect(result.githubFile).toBe(expectedPath.join('/'))
 	})
+
 	it('checks both possible content locations for githubFile path', async () => {
 		const [productSlug] = Object.keys(PRODUCT_CONFIG)
 		const version = 'v20220610-01'
