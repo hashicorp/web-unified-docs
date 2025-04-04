@@ -48,7 +48,7 @@ program
 		'API type: "content", "nav-data", "version-metadata", or "content-versions"',
 		'version-metadata',
 	)
-	.option('-r, --drop-keys <keys>', 'Result keys to drop', (value) => {
+	.option('-d, --drop-keys <keys>', 'Result keys to drop', (value) => {
 		return value.split(',').map((key) => {
 			return key.trim()
 		})
