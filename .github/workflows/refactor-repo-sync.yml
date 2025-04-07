@@ -1,0 +1,97 @@
+name: Repo Sync
+
+# **What it does**: HashiCorp Docs has two repositories: hashicorp/web-unified-docs (public) and hashicorp/web-unified-docs-internal (private).
+# This GitHub Actions workflow keeps the `main` branch of those two repos in sync.
+# **Why we have it**: To keep the open-source repository up-to-date
+# while still having an internal repository for sensitive work.
+# **Who does it impact**: Open-source.
+
+on:
+  # workflow_dispatch:
+  # schedule:
+  #   - cron: '0 */2 * * *' # Runs every 2 hours
+  push:
+    branches:
+      - 'heat/chore/refactor-compare-logic'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  repo-sync:
+    if: github.repository == 'hashicorp/web-unified-docs-internal' || github.repository == 'hashicorp/web-unified-docs'
+    name: Repo Sync
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2 2024-10-28
+
+      - name: Sync repo to branch
+        uses: repo-sync/github-sync@3832fe8e2be32372e1b3970bbae8e7079edeec88 # v2.3.0 2023-07-13
+        with:
+          source_repo: https://${{ secrets.CI_GITHUB_TOKEN }}@github.com/hashicorp/${{ github.repository == 'hashicorp/web-unified-docs-internal' && 'web-unified-docs' || 'web-unified-docs-internal' }}.git
+          source_branch: main
+          destination_branch: repo-sync
+          github_token: ${{ secrets.CI_GITHUB_TOKEN }}
+
+      - name: Ship pull request
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1 2023-11-20
+        with:
+          github-token: ${{ secrets.CI_GITHUB_TOKEN }}
+          result-encoding: string
+          script: |
+            const { owner, repo } = context.repo
+            const head = 'hashicorp:repo-sync'
+            const base = 'main'
+
+            async function closePullRequest(prNumber) {
+              console.log('Closing pull request', prNumber)
+              await github.rest.pulls.update({
+                owner,
+                repo,
+                pull_number: prNumber,
+                state: 'closed'
+              })
+              // Error loud here, so no try/catch
+              console.log('Closed pull request', prNumber)
+            }
+
+            console.log('Closing any existing pull requests')
+            const { data: existingPulls } = await github.rest.pulls.list({ owner, repo, head, base })
+            if (existingPulls.length) {
+              console.log('Found existing pull requests', existingPulls.map(pull => pull.number))
+              for (const pull of existingPulls) {
+                await closePullRequest(pull.number)
+              }
+              console.log('Closed existing pull requests')
+            }
+
+            console.log('Comparing file changes between branches')
+            const { data: sourceBranchFiles } = await github.rest.repos.getContent({
+              owner,
+              repo,
+              path: '',
+              ref: head,
+            })
+
+            const { data: destinationBranchFiles } = await github.rest.repos.getContent({
+              owner,
+              repo,
+              path: '',
+              ref: base,
+            })
+
+            const sourceFiles = sourceBranchFiles.map(file => file.path)
+            const destinationFiles = destinationBranchFiles.map(file => file.path)
+
+            const changedFiles = sourceFiles.filter(file => !destinationFiles.includes(file))
+            console.log(`Files changed between ${head} and ${base}:`, changedFiles)
+
+            if (!changedFiles.length) {
+              console.log('No files changed, bailing')
+              exit 0
+            }
+
+            console.log('Creating a new pull request')
+            #
