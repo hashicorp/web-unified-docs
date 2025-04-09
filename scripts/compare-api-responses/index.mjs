@@ -124,10 +124,6 @@ async function fetchApiTypeVersionAndNav(options, product, versionMetadata) {
 
 const testsPassed = []
 const testsFailed = []
-const diffOptions = {
-	contextLines: 1,
-	expand: false,
-}
 for (const [product, versions] of Object.entries(versionMetadata)) {
 	if (options.product && options.product !== product) {
 		continue
@@ -141,6 +137,11 @@ for (const [product, versions] of Object.entries(versionMetadata)) {
 		if (options.api === 'version-metadata' || options.api === 'nav-data') {
 			const { newApiDataStrings, oldApiDataStrings, newApiURL } =
 				await fetchApiTypeVersionAndNav(options, product, versionMetadata)
+
+			const diffOptions = {
+				contextLines: 1,
+				expand: false,
+			}
 
 			const difference = diffLinesUnified(
 				oldApiDataStrings,
@@ -256,14 +257,20 @@ for (const [product, versions] of Object.entries(versionMetadata)) {
 				newApiResponse = await fetch(newApiURL)
 				oldApiResponse = await fetch(oldApiURL)
 
-				if (!newApiResponse.ok || !oldApiResponse.ok) {
+				if (!newApiResponse.ok) {
 					console.log(
-						`Error fetching API URL:\n${newApiURL}\n${newApiResponse.statusText}`,
+						`Error fetching API response:\n${newApiURL}\n${newApiResponse.statusText}`,
+					)
+					continue
+				}
+				if (!oldApiResponse.ok) {
+					console.log(
+						`Error fetching API response:\n${oldApiURL}\n${oldApiResponse.statusText}`,
 					)
 					continue
 				}
 			} catch (error) {
-				console.log(`Error fetching API URL:\n${newApiURL}\n${error}`)
+				console.log(`Error fetching API response\n${error}`)
 				continue
 			}
 
@@ -272,20 +279,17 @@ for (const [product, versions] of Object.entries(versionMetadata)) {
 				newApiData = await newApiResponse.json()
 				oldApiData = await oldApiResponse.json()
 			} catch (error) {
-				console.log(`Error decoding JSON for URL:\n${newApiURL}\n${error}`)
+				console.log(`Error decoding JSON\n${error}`)
 				continue
 			}
 
-			const newApiDataStrings = JSON.stringify(
-				sortObjectByKeys(newApiData.versions),
-			)
-			const oldApiDataStrings = JSON.stringify(
-				sortObjectByKeys(oldApiData.versions),
-			)
+			// sort the versions to normalize the responses because the APIs return content versions in different orders
+			const newSortedVersions = newApiData.versions.sort()
+			const oldSortedVersions = oldApiData.versions.sort()
 
-			const difference = diff(oldApiDataStrings, newApiDataStrings, diffOptions)
+			const difference = diff(newSortedVersions, oldSortedVersions)
 
-			const outputString = `Testing API URL:\n${newApiURL}\n${difference}`
+			const outputString = `Testing API URL\n${difference}`
 			console.log(outputString)
 
 			if (difference.includes('Compared values have no visual difference.')) {
