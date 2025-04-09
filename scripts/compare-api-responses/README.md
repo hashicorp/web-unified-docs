@@ -11,7 +11,7 @@ This script is a utility for comparing API responses between two endpoints, typi
 -v, --version <version>: The version of the product to compare.
 -p, --product <product>: The product name to compare.
 -a, --api <api>: The API type to compare. Options: content, nav-data, version-metadata, content-versions. Default: version-metadata.
--r, --drop-keys <keys>: Comma-separated list of keys to exclude from the comparison.
+-d, --drop-keys <keys>: Comma-separated list of keys to exclude from the comparison.
 -s, --save-output: Save the comparison output to a file. Off by default.
 
 ### Example
@@ -50,4 +50,36 @@ npm run compare-api-responses -- -n localhost:8080 -o https://content.hashicorp.
 -     "sk": "version-metadata/v1.20.x",
       "version": "v1.20.x"
       ...
+```
+
+To compare content-versions for a specific document between APIs:
+
+Note: the `version`, `product` and `drop-keys` arguments are not included for content-versions as the response only has 1 key (`versions`). Product and version are included in the document path.
+
+```bash
+npm run compare-api-responses -- -n http://localhost:8080/api/content-versions\?product=terraform-plugin-framework&fullPath=doc#plugin/framework/functions/returns/string -o https://content.hashicorp.com/api/content-versions\?product=terraform-plugin-framework&fullPath=doc#plugin/framework/functions/returns/string -a content-versions
+```
+
+### Example outputs
+
+#### API responses do not match
+
+```bash
+- Expected
++ Received
+
+- {"versions":["v1.10.x","v1.11.x","v1.12.x","v1.13.x","v1.14.x","v1.5.x","v1.6.x","v1.7.x","v1.8.x","v1.9.x"]}
++ {"versions":["v1.14.x","v1.13.x","v1.12.x","v1.11.x","v1.10.x","v1.9.x","v1.8.x","v1.7.x","v1.6.x","v1.5.x"]}
+- Expected
++ Received
+
+- {"versions":["v1.10.x","v1.11.x","v1.12.x","v1.13.x","v1.14.x","v1.5.x","v1.6.x","v1.7.x","v1.8.x","v1.9.x"]}
++ {"versions":["v1.14.x","v1.13.x","v1.12.x","v1.11.x","v1.10.x","v1.9.x","v1.8.x","v1.7.x","v1.6.x","v1.5.x"]}
+```
+
+#### API responses match
+
+```bash
+Compared values have no visual difference.
+✅ No visual difference found.
 ```
