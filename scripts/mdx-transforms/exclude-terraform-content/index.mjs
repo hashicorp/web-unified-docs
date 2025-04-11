@@ -7,22 +7,25 @@ import visit from 'unist-util-visit'
 
 // this is a courtesy wrapper to prepend [strip-terraform-enterprise-content]
 // to error messages
-class StripTerraformEnterpriseContentError extends Error {
+class ExcludeTerraformContentError extends Error {
 	constructor(message, markdownSource) {
 		super(
 			`[strip-terraform-enterprise-content] ${message}` +
 				`\n- ${markdownSource}` +
 				`\n- ${markdownSource}`,
 		)
-		this.name = 'StripTerraformEnterpriseContentError'
+		this.name = 'ExcludeTerraformContentError'
 	}
 }
 
 export const BEGIN_RE = /^(\s+)?<!--\s+BEGIN:\s+(?<block>.*?)\s+-->(\s+)?$/
 export const END_RE = /^(\s+)?<!--\s+END:\s+(?<block>.*?)\s+-->(\s+)?$/
-export const DIRECTIVE_RE = /TFC:only/i
+// export const DIRECTIVE_RE = /TFC:only/i
+// ...existing code...
 
-export function transformStripTerraformEnterpriseContent({ filePath }) {
+export const DIRECTIVE_RE = /TFC:only|TFEnterprise:only/i
+
+export function transformExcludeTerraformContent({ filePath }) {
 	return function transformer(tree) {
 		if (filePath.includes('ptfe-releases')) {
 			// accumulate the content exclusion blocks
@@ -41,7 +44,7 @@ export function transformStripTerraformEnterpriseContent({ filePath }) {
 					// throw if an END block is matched first
 					const endMatch = nodeValue.match(END_RE)
 					if (endMatch) {
-						throw new StripTerraformEnterpriseContentError(
+						throw new ExcludeTerraformContentError(
 							`Unexpected END block: line ${nodeIndex}`,
 							tree,
 						)
@@ -53,7 +56,7 @@ export function transformStripTerraformEnterpriseContent({ filePath }) {
 						matching = true
 
 						if (!beginMatch.groups?.block) {
-							throw new StripTerraformEnterpriseContentError(
+							throw new ExcludeTerraformContentError(
 								'No block could be parsed from BEGIN comment',
 								tree,
 							)
@@ -73,7 +76,7 @@ export function transformStripTerraformEnterpriseContent({ filePath }) {
 					// throw if a BEGIN block is matched again
 					const beginMatch = nodeValue.match(BEGIN_RE)
 					if (beginMatch) {
-						throw new StripTerraformEnterpriseContentError(
+						throw new ExcludeTerraformContentError(
 							`Unexpected BEGIN block: line ${nodeIndex}`,
 							tree,
 						)
@@ -84,13 +87,13 @@ export function transformStripTerraformEnterpriseContent({ filePath }) {
 						const latestMatch = matches[matches.length - 1]
 
 						if (!endMatch.groups?.block) {
-							throw new StripTerraformEnterpriseContentError(
+							throw new ExcludeTerraformContentError(
 								'No block could be parsed from END comment',
 								tree,
 							)
 						}
 
-						// If we reach and end with an un-matching block name, throw an error
+						// If we reach an end with an un-matching block name, throw an error
 						if (endMatch.groups.block !== block) {
 							const errMsg =
 								`Mismatched block names: Block opens with "${block}", and closes with "${endMatch.groups.block}".` +
@@ -102,7 +105,7 @@ export function transformStripTerraformEnterpriseContent({ filePath }) {
 								`- Close: ${nodeIndex}: ${endMatch.groups.block}` +
 								`\n`
 							console.error(errMsg)
-							throw new StripTerraformEnterpriseContentError(
+							throw new ExcludeTerraformContentError(
 								'Mismatched block names',
 								tree,
 							)
@@ -122,13 +125,19 @@ export function transformStripTerraformEnterpriseContent({ filePath }) {
 				const directive = flag.match(DIRECTIVE_RE)
 
 				if (!directive) {
-					throw new StripTerraformEnterpriseContentError(
+					throw new ExcludeTerraformContentError(
 						'Directive could not be parsed',
 						tree,
 					)
 				}
 
-				if (directive[0].includes('TFC:only')) {
+				// Exclude content based on the directive
+				if (
+					(directive[0].toLowerCase() === 'tfc:only' &&
+						!filePath.includes('terraform')) ||
+					(directive[0].toLowerCase() === 'tfenterprise:only' &&
+						filePath.includes('terraform'))
+				) {
 					tree.children = tree.children.filter((node) => {
 						return (
 							!node.position ||
