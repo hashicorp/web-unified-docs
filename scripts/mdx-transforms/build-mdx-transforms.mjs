@@ -23,7 +23,7 @@ import {
 	rewriteInternalRedirectsPlugin,
 	loadRedirects,
 } from './rewrite-internal-redirects/rewrite-internal-redirects.mjs'
-import { transformStripTerraformEnterpriseContent } from './strip-terraform-enterprise-content/strip-terraform-enterprise-content.mjs'
+import { transformExcludeTerraformContent } from './strip-terraform-enterprise-content/strip-terraform-enterprise-content.mjs'
 
 /**
  * Given a target directory,
@@ -129,7 +129,7 @@ async function applyMdxTransforms(entry, versionMetadata = {}) {
 		const remarkResults = await remark()
 			.use(remarkMdx)
 			.use(remarkIncludePartialsPlugin, { partialsDir, filePath })
-			.use(transformStripTerraformEnterpriseContent, { filePath })
+			.use(transformExcludeTerraformContent, { filePath })
 			.use(paragraphCustomAlertsPlugin)
 			.use(rewriteInternalRedirectsPlugin, {
 				redirects,

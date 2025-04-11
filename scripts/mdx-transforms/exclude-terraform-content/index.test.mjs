@@ -4,11 +4,21 @@
  */
 
 import { describe, it, expect, vi } from 'vitest'
-import { transformStripTerraformEnterpriseContent } from './strip-terraform-enterprise-content.mjs'
+import { transformExcludeTerraformContent } from './index.mjs'
 import remark from 'remark'
 import remarkMdx from 'remark-mdx'
 
-describe('transformStripTerraformEnterpriseContent', () => {
+const runTransform = async (markdown, filePath) => {
+	const processor = await remark()
+		.use(remarkMdx)
+		.use(transformExcludeTerraformContent, {
+			filePath,
+		})
+		.process(markdown)
+	return processor.contents
+}
+
+describe('transformExcludeTerraformContent', () => {
 	it('should remove content within TFC:only blocks', async () => {
 		const markdown = `
 <!-- BEGIN: TFC:only -->
@@ -18,7 +28,7 @@ This content should stay.
 `
 		const result = await remark()
 			.use(remarkMdx)
-			.use(transformStripTerraformEnterpriseContent, {
+			.use(transformExcludeTerraformContent, {
 				filePath: 'ptfe-releases/some-file.md',
 			})
 			.process(markdown)
@@ -36,7 +46,7 @@ This content should be removed.
 		await expect(async () => {
 			return await remark()
 				.use(remarkMdx)
-				.use(transformStripTerraformEnterpriseContent, {
+				.use(transformExcludeTerraformContent, {
 					filePath: 'ptfe-releases/some-file.md',
 				})
 				.process(markdown)
@@ -51,7 +61,7 @@ This content should be removed.
 		await expect(async () => {
 			return await remark()
 				.use(remarkMdx)
-				.use(transformStripTerraformEnterpriseContent, {
+				.use(transformExcludeTerraformContent, {
 					filePath: 'ptfe-releases/some-file.md',
 				})
 				.process(markdown)
@@ -66,7 +76,7 @@ This content should be removed.
 		await expect(async () => {
 			return await remark()
 				.use(remarkMdx)
-				.use(transformStripTerraformEnterpriseContent, {
+				.use(transformExcludeTerraformContent, {
 					filePath: 'ptfe-releases/some-file.md',
 				})
 				.process(markdown)
@@ -82,7 +92,7 @@ This content should be removed.
 		await expect(async () => {
 			return await remark()
 				.use(remarkMdx)
-				.use(transformStripTerraformEnterpriseContent, {
+				.use(transformExcludeTerraformContent, {
 					filePath: 'ptfe-releases/some-file.md',
 				})
 				.process(markdown)
@@ -98,7 +108,7 @@ This content should be removed.
 		await expect(async () => {
 			return await remark()
 				.use(remarkMdx)
-				.use(transformStripTerraformEnterpriseContent, {
+				.use(transformExcludeTerraformContent, {
 					filePath: 'ptfe-releases/some-file.md',
 				})
 				.process(markdown)
@@ -114,10 +124,80 @@ This content should be removed.
 		await expect(async () => {
 			return await remark()
 				.use(remarkMdx)
-				.use(transformStripTerraformEnterpriseContent, {
+				.use(transformExcludeTerraformContent, {
 					filePath: 'ptfe-releases/some-file.md',
 				})
 				.process(markdown)
 		}).rejects.toThrow('Directive could not be parsed')
+	})
+
+	it('should not remove TFEnterprise:only content for ptfe-releases product', async () => {
+		const markdown = `
+<!-- BEGIN: TFEnterprise:only -->
+This content should not be removed.
+<!-- END: TFEnterprise:only -->
+This content should stay.
+`
+
+		const filePath = 'ptfe-releases/some-file.md'
+		const expected = `
+This content should not be removed.
+This content should stay.
+`
+
+		const result = await runTransform(markdown, filePath)
+		console.log({ result })
+		expect(result.trim()).toBe(expected.trim())
+	})
+
+	it('should remove TFEnterprise:only content for terraform product', async () => {
+		const markdown = `
+<!-- BEGIN: TFEnterprise:only -->
+This content should be removed.
+<!-- END: TFEnterprise:only -->
+This content should stay.
+`
+
+		const filePath = 'terraform/some-file.md'
+		const expected = `
+This content should stay.
+`
+
+		const result = await runTransform(markdown, filePath)
+		expect(result.trim()).toBe(expected.trim())
+	})
+
+	it('should remove TFEnterprise:only content for terraform-cdk product', async () => {
+		const markdown = `
+<!-- BEGIN: TFEnterprise:only -->
+This content should be removed.
+<!-- END: TFEnterprise:only -->
+This content should stay.
+`
+
+		const filePath = 'terraform-cdk/some-file.md'
+		const expected = `
+This content should stay.
+`
+
+		const result = await runTransform(markdown, filePath)
+		expect(result.trim()).toBe(expected.trim())
+	})
+
+	it('should remove TFEnterprise:only content for terraform-cloud-docs product', async () => {
+		const markdown = `
+<!-- BEGIN: TFEnterprise:only -->
+This content should be removed.
+<!-- END: TFEnterprise:only -->
+This content should stay.
+`
+
+		const filePath = 'terraform-cloud-docs/some-file.md'
+		const expected = `
+This content should stay.
+`
+
+		const result = await runTransform(markdown, filePath)
+		expect(result.trim()).toBe(expected.trim())
 	})
 })
