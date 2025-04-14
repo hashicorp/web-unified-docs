@@ -4,7 +4,7 @@
  */
 
 import { Command } from 'commander'
-import { diffLinesUnified } from 'jest-diff'
+import { diffLinesUnified, diff } from 'jest-diff'
 import { PRODUCT_CONFIG as contentDirMap } from '../../app/utils/productConfig.mjs'
 import stripAnsi from 'strip-ansi'
 import fs from 'node:fs'
@@ -48,7 +48,7 @@ program
 		'API type: "content", "nav-data", "version-metadata", or "content-versions"',
 		'version-metadata',
 	)
-	.option('-r, --drop-keys <keys>', 'Result keys to drop', (value) => {
+	.option('-d, --drop-keys <keys>', 'Result keys to drop', (value) => {
 		return value.split(',').map((key) => {
 			return key.trim()
 		})
@@ -248,6 +248,59 @@ for (const [product, versions] of Object.entries(versionMetadata)) {
 
 				saveTestOutputIfSelected(outputString, newApiURL)
 			}
+		} else if (options.api === 'content-versions') {
+			const newApiURL = new URL(options.newApiUrl)
+			const oldApiURL = new URL(options.oldApiUrl)
+
+			let newApiResponse, oldApiResponse
+			try {
+				newApiResponse = await fetch(newApiURL)
+				oldApiResponse = await fetch(oldApiURL)
+
+				if (!newApiResponse.ok) {
+					console.log(
+						`Error fetching API response:\n${newApiURL}\n${newApiResponse.statusText}`,
+					)
+					continue
+				}
+				if (!oldApiResponse.ok) {
+					console.log(
+						`Error fetching API response:\n${oldApiURL}\n${oldApiResponse.statusText}`,
+					)
+					continue
+				}
+			} catch (error) {
+				console.log(`Error fetching API response\n${error}`)
+				continue
+			}
+
+			let newApiData, oldApiData
+			try {
+				newApiData = await newApiResponse.json()
+				oldApiData = await oldApiResponse.json()
+			} catch (error) {
+				console.log(`Error decoding JSON\n${error}`)
+				continue
+			}
+
+			// sort the versions to normalize the responses because the APIs return content versions in different orders
+			const newSortedVersions = newApiData.versions.sort()
+			const oldSortedVersions = oldApiData.versions.sort()
+
+			const difference = diff(newSortedVersions, oldSortedVersions)
+
+			const outputString = `Testing API URL\n${difference}`
+			console.log(outputString)
+
+			if (difference.includes('Compared values have no visual difference.')) {
+				testsPassed.push(newApiURL)
+				console.log('✅ No visual difference found.\n')
+			} else {
+				testsFailed.push(newApiURL)
+				console.log(`${difference}\n`)
+			}
+
+			saveTestOutputIfSelected(outputString, newApiURL)
 		}
 
 		break
