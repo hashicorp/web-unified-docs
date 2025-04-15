@@ -18,6 +18,7 @@ const contentDirMap: Record<string, string> = {
 	terraform: 'docs',
 	'terraform-cdk': 'docs',
 	'terraform-docs-agents': 'docs',
+	'terraform-docs-common': 'docs',
 	'terraform-plugin-framework': 'docs',
 	'terraform-plugin-log': 'docs',
 	'terraform-plugin-mux': 'docs',
