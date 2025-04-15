@@ -3,24 +3,30 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-import { expect, test, vi, afterEach, beforeEach } from 'vitest'
-import { vol } from 'memfs'
+import { expect, test, vi, afterEach } from 'vitest'
 import {
 	getProductVersionMetadata,
 	getProductVersion,
 } from '@utils/contentVersions'
 import { findDocVersions } from './findDocVersions'
-import versionMetadata from '../../__fixtures__/versionMetadata.json'
-import docsPathsMock from '../../__fixtures__/docsPathsAllVersionsMock.json'
-
-beforeEach(() => {
-	// Reset the state of in-memory fs
-	vol.reset()
-})
+import versionMetadata from '__fixtures__/versionMetadata.json'
+import docsPathsMock from '__fixtures__/docsPathsAllVersionsMock.json'
 
 afterEach(() => {
 	// Reset all mocks after each test
 	vi.resetAllMocks()
+})
+
+vi.mock('@api/versionMetadata.json', () => {
+	return {
+		default: '',
+	}
+})
+
+vi.mock('@api/docsPathsAllVersions.json', () => {
+	return {
+		default: {},
+	}
 })
 
 test('getProductVersion should return error for non-existent product', () => {
