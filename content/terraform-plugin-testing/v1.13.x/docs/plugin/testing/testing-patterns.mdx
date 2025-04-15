@@ -19,6 +19,7 @@ Terraform Resources, but other testing best practices may be added later.
 - [Built-in Patterns](#built-in-patterns)
 - [Basic test to verify attributes](#basic-test-to-verify-attributes)
 - [Update test verify configuration changes](#update-test-verify-configuration-changes)
+- [Import mode: verify that import and create produce the same state](#import-mode-verify-that-import-and-create-produce-the-same-state)
 - [Expecting errors or non-empty plans](#expecting-errors-or-non-empty-plans)
 - [Regression tests](#regression-tests)
 
@@ -197,6 +198,66 @@ resource "example_widget" "foo" {
 It's common for resources to just have the above update test, as it is a
 superset of the basic test. So long as the basics are covered, combining the two
 tests is sufficient as opposed to having two separate tests.
+
+[Back to top](#table-of-contents)
+
+## Import mode: verify that import and create produce the same state
+
+To exercise a provider's import behaviors, the test author adds a test step in import mode.
+`ImportState: true` indicates an import mode test step.
+Below is an example test, copied and modified from the basic test. Here we
+preserve the `TestStep` from the basic test, but we add an additional
+`TestStep`, changing the configuration and rechecking the values, with a
+different configuration function `testAccExampleResourceUpdated` and state check
+implementation `stateCheckExampleWidgetValuesUpdated` for verifying the values.
+
+```go
+func TestAccExampleWidget_update(t *testing.T) {
+	var widget example.Widget
+	rName := acctest.RandStringFromCharSet(10, acctest.CharSetAlphaNum)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:     func() { testAccPreCheck(t) },
+		Providers:    testAccProviders,
+		CheckDestroy: testAccCheckExampleResourceDestroy,
+		Steps: []resource.TestStep{
+			{
+				// Test Step 1: config mode
+				Config: testAccExampleResource(rName),
+				ConfigStateChecks: []statecheck.StateCheck{
+					stateCheckExampleResourceExists("example_widget.foo", &widget),
+					stateCheckExampleWidgetValues(widget, rName),
+					statecheck.ExpectKnownValue("example_widget.foo", tfjsonpath.New("active"), knownvalue.Bool(true)),
+					statecheck.ExpectKnownValue("example_widget.foo", tfjsonpath.New("name"), knownvalue.StringExact(rName)),
+				},
+			},
+			{
+				// Test Step 2: config mode
+				Config: testAccExampleResourceUpdated(rName),
+				ConfigStateChecks: []statecheck.StateCheck{
+					stateCheckExampleResourceExists("example_widget.foo", &widget),
+					stateCheckExampleWidgetValuesUpdated(widget, rName),
+					statecheck.ExpectKnownValue("example_widget.foo", tfjsonpath.New("active"), knownvalue.Bool(false)),
+					statecheck.ExpectKnownValue("example_widget.foo", tfjsonpath.New("name"), knownvalue.StringExact(rName)),
+				},
+			},
+			{
+				// Test Step 3: import mode
+				ImportState: true,
+				ImportStateKind: resource.ImportBlockWithID,
+				ResourceName: "example_widget.foo",
+			},
+		},
+	})
+}
+
+In this example, "Test Step 3" is a very concise import mode test step because it does not need a completely different Terraform configration. It simply reuses artifacts from its surrounding `TestCase`, in a "convention over configuration" style. As a detailed example:
+
+* After "Test Step 2" has run, the test case has two useful artifacts: (1) a Terraform configuration and (2) a statefile. These two artifacts act as inputs to "Test Step 3."
+* "Test Step 3" uses the Terraform configuration input as a base configuration for verifying import behavior. The test step generates a new Terraform configuration: the base configuration plus a generated `import` block.
+  * This is a testing convenience; the test author can override this via their choice of `step.Config`, `step.ConfigFile`, or `step.configDirectory`
+* "Test Step 3" generates a plan from this Terraform configuration. It uses the statefile input as a "known good" reference for this generated planplanned state values
+  * In other words, The statefile acts as a "golden file" reference. In import mode, the planned values are expected to match the state values in the "golden file" and the test will report an error if the values do not match.
 
 [Back to top](#table-of-contents)
 
