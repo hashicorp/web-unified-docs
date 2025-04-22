@@ -23,7 +23,7 @@ import {
 	rewriteInternalRedirectsPlugin,
 	loadRedirects,
 } from './rewrite-internal-redirects/rewrite-internal-redirects.mjs'
-import { transformExcludeTerraformContent } from './strip-terraform-enterprise-content/strip-terraform-enterprise-content.mjs'
+import { transformExcludeTerraformContent } from './exclude-terraform-content/index.mjs'
 
 /**
  * Given a target directory,
