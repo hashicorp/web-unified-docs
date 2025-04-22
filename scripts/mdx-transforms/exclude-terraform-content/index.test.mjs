@@ -105,13 +105,13 @@ This content should be removed.
 This content should be removed.
 <!-- END: TFC:only -->
 <!-- BEGIN: TFEnterprise:only -->
-This content should not be removed.
+This content should NOT be removed.
 <!-- END: TFEnterprise:only -->
 This content should stay.`
 
 		const expected = `<!-- BEGIN: TFEnterprise:only -->
 
-This content should not be removed.
+This content should NOT be removed.
 
 <!-- END: TFEnterprise:only -->
 
@@ -181,7 +181,7 @@ This content should stay.
 	it('should leave TFC:only content for terraform-docs-common', async () => {
 		const markdown = `
 <!-- BEGIN: TFC:only -->
-This content should not be removed.
+This content should NOT be removed.
 <!-- END: TFC:only -->
 This content should stay.
 `
@@ -190,7 +190,7 @@ This content should stay.
 		const expected = `
 <!-- BEGIN: TFC:only -->
 
-This content should not be removed.
+This content should NOT be removed.
 
 <!-- END: TFC:only -->
 
