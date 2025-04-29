@@ -246,16 +246,16 @@ export const PRODUCT_CONFIG = {
 	// 	versionedDocs: true,
 	// 	websiteDir: 'website',
 	// },
-	// 'terraform-cdk': {
-	// 	assetDir: '',
-	// 	basePaths: ['cdktf'],
-	// 	contentDir: 'docs',
-	// 	dataDir: 'data',
-	// 	productSlug: 'terraform',
-	// 	semverCoerce: semver.coerce,
-	// 	versionedDocs: true,
-	// 	websiteDir: 'website',
-	// },
+	'terraform-cdk': {
+		assetDir: '',
+		basePaths: ['cdktf'],
+		contentDir: 'docs',
+		dataDir: 'data',
+		productSlug: 'terraform',
+		semverCoerce: semver.coerce,
+		versionedDocs: true,
+		websiteDir: 'website',
+	},
 	'terraform-docs-agents': {
 		/**
 		 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions

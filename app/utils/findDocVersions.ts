@@ -31,10 +31,16 @@ export function findDocVersions(
 	const docsVersions = Object.keys(docsPathsForProduct)
 	docsVersions.forEach((version: string) => {
 		const versionPaths = docsPathsForProduct[version]
-		const jsonData = JSON.stringify(versionPaths)
-		if (jsonData.includes(fullPath)) {
-			versions.push(version)
-		}
+		versionPaths.forEach(
+			(versionInfo: { path: string; itemPath: string; created_at: string }) => {
+				if (
+					versionInfo.path.endsWith(fullPath) &&
+					!versions.includes(version)
+				) {
+					versions.push(version)
+				}
+			},
+		)
 	})
 
 	return versions
