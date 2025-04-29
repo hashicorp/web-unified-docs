@@ -25,6 +25,12 @@ vi.mock(import('@utils/contentVersions'), async (importOriginal: any) => {
 	}
 })
 
+vi.mock('@api/versionMetadata.json', () => {
+	return {
+		default: {},
+	}
+})
+
 describe('GET /[productSlug]/version-metadata', () => {
 	let mockRequest: (product: GetParams['productSlug']) => ReturnType<typeof GET>
 	let consoleMock: MockInstance<Console['error']>

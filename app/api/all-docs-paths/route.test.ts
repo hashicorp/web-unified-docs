@@ -4,12 +4,24 @@
  */
 
 import { expect, test, vi, afterEach } from 'vitest'
-import docsPathsMock from '../../../__fixtures__/docsPathsAllVersionsMock.json'
+import docsPathsMock from '__fixtures__/docsPathsAllVersionsMock.json'
 import { GET } from './route'
 import * as getDocsPaths from '@utils/allDocsPaths'
 
 afterEach(() => {
 	vi.restoreAllMocks()
+})
+
+vi.mock('@api/versionMetadata.json', () => {
+	return {
+		default: {},
+	}
+})
+
+vi.mock('@api/docsPathsAllVersions.json', () => {
+	return {
+		default: {},
+	}
 })
 
 test('GET should return a 200 response with no products', async () => {

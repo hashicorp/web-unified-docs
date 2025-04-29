@@ -18,6 +18,10 @@ vi.mock('@utils/productConfig.mjs', () => {
 	}
 })
 
+vi.mock('@api/versionMetadata.json', () => {
+	return {}
+})
+
 test("Return 404 if `product` doesn't exist", async () => {
 	const mockRequest = (url: string) => {
 		return new Request(url)

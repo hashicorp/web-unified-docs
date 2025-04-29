@@ -12,6 +12,12 @@ const SELF_URL = process.env.VERCEL_URL
 	? `https://${process.env.VERCEL_URL}`
 	: `http://localhost:${process.env.UNIFIED_DOCS_PORT}`
 
+const headers = process.env.VERCEL_URL
+	? new Headers({
+			'x-vercel-protection-bypass': process.env.VERCEL_AUTOMATION_BYPASS_SECRET,
+		})
+	: new Headers()
+
 /**
  * NOTE: we currently read files by fetching them from the `public` folder
  * via the Vercel CDN.
@@ -21,6 +27,7 @@ export const readFile = async (filePath: string[]) => {
 	try {
 		const res = await fetch(`${SELF_URL}/${filePath.join('/')}`, {
 			cache: 'no-cache',
+			headers,
 		})
 
 		if (!res.ok) {
@@ -49,6 +56,7 @@ export const getAssetData = async (
 	try {
 		const res = await fetch(`${SELF_URL}/${filePath.join('/')}`, {
 			cache: 'no-cache',
+			headers,
 		})
 
 		if (!res.ok) {

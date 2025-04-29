@@ -35,6 +35,13 @@ vi.mock(import('@utils/file'), async (importOriginal: any) => {
 	}
 })
 
+// Mock the versionMetadata json import in the route file
+vi.mock('@api/versionMetadata.json', () => {
+	return {
+		default: {},
+	}
+})
+
 describe('GET /[productSlug]/[version]/[...section]', () => {
 	let mockRequest: (params: GetParams) => ReturnType<typeof GET>
 	let consoleMock: MockInstance<Console['error']>
@@ -55,7 +62,8 @@ describe('GET /[productSlug]/[version]/[...section]', () => {
 	afterAll(() => {
 		consoleMock.mockReset()
 	})
-	it('returns a 404 for nonexistent products', async () => {
+
+	it('returns a 404 for non-existent products', async () => {
 		const productSlug = 'fake product'
 		vi.mocked(getProductVersion).mockReturnValue(
 			Err(`Product, fake product, not found in contentDirMap`),
@@ -72,7 +80,8 @@ describe('GET /[productSlug]/[version]/[...section]', () => {
 		)
 		await expect(response.text()).resolves.toMatch(/not found/i)
 	})
-	it('returns a 404 for nonexistent versions', async () => {
+
+	it('returns a 404 for non-existent versions', async () => {
 		// Real product name
 		const [productSlug] = Object.keys(PRODUCT_CONFIG)
 
@@ -93,6 +102,7 @@ describe('GET /[productSlug]/[version]/[...section]', () => {
 		expect(response.status).toBe(404)
 		await expect(response.text()).resolves.toMatch(/not found/i)
 	})
+
 	it('returns a 404 for missing content', async () => {
 		// Real product name
 		const [productSlug] = Object.keys(PRODUCT_CONFIG)
@@ -118,6 +128,7 @@ describe('GET /[productSlug]/[version]/[...section]', () => {
 		expect(response.status).toBe(404)
 		await expect(response.text()).resolves.toMatch(/not found/i)
 	})
+
 	it('returns a 404 for invalid JSON', async () => {
 		// Real product name
 		const [productSlug] = Object.keys(PRODUCT_CONFIG)
@@ -152,6 +163,7 @@ describe('GET /[productSlug]/[version]/[...section]', () => {
 		expect(response.status).toBe(404)
 		await expect(response.text()).resolves.toMatch(/not found/i)
 	})
+
 	it('returns the markdown source of the requested docs', async () => {
 		// Real product name
 		const [productSlug] = Object.keys(PRODUCT_CONFIG)

@@ -247,15 +247,6 @@ export const PRODUCT_CONFIG = {
 	// 	websiteDir: 'website',
 	// },
 	// 'terraform-cdk': {
-	// 	/**
-	// 	 * ✅ Initial migration attempt: SEEMS TO WORK
-	// 	 *
-	// 	 * TODO: `terraform-cdk` doesn't seem to have an asset directory.
-	// 	 * Need to confirm this is true across ALL versions... if not,
-	// 	 * need to figure out a workaround to only copy it in some versions,
-	// 	 * without silently ignoring missing assets directories in other contexts.
-	// 	 * Maybe like a `versionsWithoutAssets` array or something?
-	// 	 */
 	// 	assetDir: '',
 	// 	basePaths: ['cdktf'],
 	// 	contentDir: 'docs',
@@ -265,25 +256,25 @@ export const PRODUCT_CONFIG = {
 	// 	versionedDocs: true,
 	// 	websiteDir: 'website',
 	// },
-	// 'terraform-docs-agents': {
-	// 	/**
-	// 	 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
-	// 	 *
-	// 	 * Fails for v1.5.x (and likely earlier) with error:
-	// 	 * `terraform-docs-agents/website/img: No such file or directory`
-	// 	 * This likely indicates that older versions of docs have a different
-	// 	 * directory structure that needs to be accounted for. Need to confirm.
-	// 	 * See note at top of this document on `pages` directories for details.
-	// 	 */
-	// 	assetDir: ['img', 'public/img'],
-	// 	basePaths: ['cloud-docs/agents'],
-	// 	contentDir: 'docs',
-	// 	dataDir: 'data',
-	// 	productSlug: 'terraform',
-	// 	semverCoerce: semver.coerce,
-	// 	versionedDocs: true,
-	// 	websiteDir: 'website',
-	// },
+	'terraform-docs-agents': {
+		/**
+		 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
+		 *
+		 * Fails for v1.5.x (and likely earlier) with error:
+		 * `terraform-docs-agents/website/img: No such file or directory`
+		 * This likely indicates that older versions of docs have a different
+		 * directory structure that needs to be accounted for. Need to confirm.
+		 * See note at top of this document on `pages` directories for details.
+		 */
+		assetDir: ['img', 'public/img', 'img/docs'],
+		basePaths: ['cloud-docs/agents'],
+		contentDir: 'docs',
+		dataDir: 'data',
+		productSlug: 'terraform',
+		semverCoerce: semver.coerce,
+		versionedDocs: true,
+		websiteDir: 'website',
+	},
 	// 'terraform-docs-common': {
 	// 	/**
 	// 	 * ✅ Initial migration attempt: SEEMS TO WORK

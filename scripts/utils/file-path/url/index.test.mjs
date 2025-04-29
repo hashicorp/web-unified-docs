@@ -7,8 +7,8 @@ import { describe, it, expect, vi } from 'vitest'
 import { getUrlFromFilePath } from './index.mjs'
 import { getProductDirectoryFromFilePath } from '../product-directory/index.mjs'
 import { getVersionFromFilePath } from '../version/index.mjs'
-import { PRODUCT_CONFIG } from '../../../../__fixtures__/productConfig.mjs'
-import allDocsPathsJsonMock from '../../../../__fixtures__/docsPathsAllVersionsMock.json'
+import { PRODUCT_CONFIG } from '__fixtures__/productConfig.mjs'
+import allDocsPathsJsonMock from '__fixtures__/docsPathsAllVersionsMock.json'
 
 vi.mock('../product-directory/index.mjs', () => {
 	return {

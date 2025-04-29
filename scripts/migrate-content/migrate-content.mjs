@@ -290,6 +290,7 @@ async function migrateContent(targetRepos, ghCloneDir, outputDirs, options) {
 		// .replace because JSON.stringify is escaping newlines which makes them not print in the console correctly
 		console.log(JSON.stringify(failures, null, 2).replace(/\\n/g, '\n'))
 	}
+	return
 }
 
 /**
@@ -340,7 +341,7 @@ function migrateRepoContentAtRef(
 	 * directory. Maybe intentional, in which case this conditional is fine.
 	 */
 	const version = repoConfig.versionedDocs ? targetRef.versionString : ''
-	if (typeof repoConfig.assetDir === 'string') {
+	if (typeof repoConfig.assetDir === 'string' && repoConfig.assetDir.length) {
 		const assetsSrc = path.join(websiteDirPath, repoConfig.assetDir)
 		const assetsDest = path.join(outputDirs.content, repoSlug, version, 'img')
 

@@ -7,7 +7,7 @@ import { describe, test, expect, vi } from 'vitest'
 import { isLatestVersion, getLatestVersion } from './index.mjs'
 import { getProductDirectoryFromFilePath } from '../product-directory/index.mjs'
 import { getVersionFromFilePath } from '../version/index.mjs'
-import versionMetadata from '../../../../__fixtures__/versionMetadata.json'
+import versionMetadata from '__fixtures__/versionMetadata.json'
 
 vi.mock('../product-directory/index.mjs', () => {
 	return {

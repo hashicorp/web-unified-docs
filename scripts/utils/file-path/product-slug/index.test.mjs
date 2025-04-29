@@ -6,7 +6,7 @@
 import { describe, test, expect, vi } from 'vitest'
 import { getProductSlugFromFilePath } from './index.mjs'
 import { getProductDirectoryFromFilePath } from '../product-directory/index.mjs'
-import { PRODUCT_CONFIG } from '../../../../__fixtures__/productConfig.mjs'
+import { PRODUCT_CONFIG } from '__fixtures__/productConfig.mjs'
 
 vi.mock('../product-directory/index.mjs', () => {
 	return {
