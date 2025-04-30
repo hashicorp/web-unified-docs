@@ -47,8 +47,10 @@ title="TFE Release ${VERSION}"
 if [[ $DEV == 'true' ]]; then
   cat pr_body.md
 else
-   gh pr create \
-      --body="$(cat pr_body.md)" \
-      --title="$title" \
-      --draft
+  pr_url="$(gh pr create \
+    --body='$(cat pr_body.md)' \
+    --title='$title' \
+    --draft)"
+
+  echo pr_url
 fi
