@@ -17,7 +17,7 @@ if [ -z "$input" ] || [ ! -f "$input" ]; then
 fi
 
 filename="$(basename "$input")"
-output="${filename%.*}.json"
+output="./scripts/ptfe-releases/${filename%.*}.json"
 if [ -f "$output" ];  then
   echo "Output file \`${output}\` already exists"
   exit 1

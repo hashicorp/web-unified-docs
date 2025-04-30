@@ -18,13 +18,13 @@ done
 
 # Convert repos.yaml to repos.json
 cd "$RELEASES_DIR"
-./scripts/ptfe-releases/lib/yaml-to-json.sh ptfe-releases-repos.yaml
+./scripts/ptfe-releases/lib/yaml-to-json.sh ./scripts/ptfe-releases/ptfe-releases-repos.yaml
 
 # List all the services that we need to handle.
 # This logic reads the full GitHub repository names from repos.json.
 declare -a services=()
 services="$(
-    jq -r '.services | to_entries[] | "\(.value)"' < ptfe-releases-repos.json
+    jq -r '.services | to_entries[] | "\(.value)"' < ./scripts/ptfe-releases/ptfe-releases-repos.json
 )"
 
 ## Uncomment when running through workflow dispatch
