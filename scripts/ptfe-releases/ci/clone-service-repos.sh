@@ -27,13 +27,12 @@ services="$(
     jq -r '.services | to_entries[] | "\(.value)"' < ./scripts/ptfe-releases/ptfe-releases-repos.json
 )"
 
-## Uncomment when running through workflow dispatch
 # I don't care about this advice, I'm a script.
-# git config --global advice.detachedHead false
-# git config --global credential.helper store
-# git config --global user.email "team-rel-eng@hashicorp.com"
-# git config --global user.name "tfe-release-bot"
-# gh auth setup-git
+git config --global advice.detachedHead false
+git config --global credential.helper store
+git config --global user.email "team-rel-eng@hashicorp.com"
+git config --global user.name "tfe-release-bot"
+gh auth setup-git
 
 # For each repository, clone it, then checkout to release branch.
 echo "Cloning Service Repositories..."

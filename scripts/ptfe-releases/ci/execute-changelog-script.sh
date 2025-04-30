@@ -42,8 +42,8 @@ if [[ $DEV == "true" ]]; then
   exit 0
 else
   # Commit the files as the tfe-release-bot user.
-  # git config --global user.email "team-rel-eng@hashicorp.com"
-  # git config --global user.name "tfe-release-bot"
+  git config --global user.email "team-rel-eng@hashicorp.com"
+  git config --global user.name "tfe-release-bot"
 
   git checkout -b "docs-tfe-releases/${VERSION}"
 
