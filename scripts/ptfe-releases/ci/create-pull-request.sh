@@ -48,8 +48,8 @@ if [[ $DEV == 'true' ]]; then
   cat pr_body.md
 else
   pr_url="$(gh pr create \
-    --body='$(cat pr_body.md)' \
-    --title='$title' \
+    --body="$(cat pr_body.md)" \
+    --title="$title" \
     --draft)"
 
   echo $pr_url
