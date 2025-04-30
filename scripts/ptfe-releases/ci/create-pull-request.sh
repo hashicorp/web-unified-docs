@@ -52,5 +52,5 @@ else
     --title='$title' \
     --draft)"
 
-  echo pr_url
+  echo $pr_url
 fi
