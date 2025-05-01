@@ -16,7 +16,7 @@ for tool in "${req_tools[@]}"; do
 done
 
 # VERSION, RELEASE_BRANCH, LAST_RELEASE_TAG are input environment variables
-RELEASE_FILE="content/tfe-releases/releases/${VERSION}.md"
+RELEASE_FILE="content/terraform-enterprise/releases/${VERSION}.md"
 export RELEASE_FILE
 
 # Grab the contributors for this release.
