@@ -8,7 +8,7 @@ require_relative 'get_github_prs'
 # Make sure we know what repos we are looking at
 #
 
-$repos = YAML.load File.read("scripts/ptfe-releases/app_repos.yaml")
+$repos = YAML.load File.read("scripts/tfe-releases/app_repos.yaml")
 
 #
 # Make sure we know what releases we are comparing

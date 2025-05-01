@@ -16,11 +16,11 @@ for tool in "${req_tools[@]}"; do
 done
 
 # VERSION, RELEASE_BRANCH, LAST_RELEASE_TAG are input environment variables
-RELEASE_FILE="content/ptfe-releases/releases/${VERSION}.md"
+RELEASE_FILE="content/tfe-releases/releases/${VERSION}.md"
 export RELEASE_FILE
 
 # Grab the contributors for this release.
-contributors="$(bundle exec ./scripts/ptfe-releases/contributors.rb)"
+contributors="$(bundle exec ./scripts/tfe-releases/contributors.rb)"
 
 # "Escape" the contributors result to be safe to as a sed replacement string.
 # In short, this replaces sed special characters like &/\ with backslash escaped

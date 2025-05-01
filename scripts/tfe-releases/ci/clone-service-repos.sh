@@ -18,13 +18,13 @@ done
 
 # Convert repos.yaml to repos.json
 cd "$RELEASES_DIR"
-./scripts/ptfe-releases/lib/yaml-to-json.sh ./scripts/ptfe-releases/ptfe-releases-repos.yaml
+./scripts/tfe-releases/lib/yaml-to-json.sh ./scripts/tfe-releases/tfe-releases-repos.yaml
 
 # List all the services that we need to handle.
 # This logic reads the full GitHub repository names from repos.json.
 declare -a services=()
 services="$(
-    jq -r '.services | to_entries[] | "\(.value)"' < ./scripts/ptfe-releases/ptfe-releases-repos.json
+    jq -r '.services | to_entries[] | "\(.value)"' < ./scripts/tfe-releases/tfe-releases-repos.json
 )"
 
 # I don't care about this advice, I'm a script.

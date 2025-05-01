@@ -28,17 +28,17 @@ sed -E \
   -e "s|<\!--\s*RELEASE_SHORT_TMPL.*-->|${VERSION}|" \
   -e "s|<\!--\s*RELEASE_BRANCH_TMPL.*-->|${RELEASE_BRANCH}|" \
   -e "s|<\!--\s*DEADLINE_DATE_TMPL.*-->|${deadline_date}|" \
-  content/ptfe-releases/releases/_template.md >> "content/ptfe-releases/releases/${VERSION}.md"
-echo "File content/ptfe-releases/releases/${VERSION}.md created."
+  content/tfe-releases/releases/_template.md >> "content/tfe-releases/releases/${VERSION}.md"
+echo "File content/tfe-releases/releases/${VERSION}.md created."
 
 # Execute script.
 echo "Executing the changelog script..."
-bundle exec ./scripts/ptfe-releases/changelog.rb --verbose >> "content/ptfe-releases/releases/${VERSION}.md"
+bundle exec ./scripts/tfe-releases/changelog.rb --verbose >> "content/tfe-releases/releases/${VERSION}.md"
 echo "Finished executing the changelog script..."
 
 if [[ $DEV == "true" ]]; then
   echo "The DEV flag is set, cat'ing changelog and exiting."
-  cat content/ptfe-releases/releases/"${VERSION}.md"
+  cat content/tfe-releases/releases/"${VERSION}.md"
   exit 0
 else
   # Commit the files as the tfe-release-bot user.
