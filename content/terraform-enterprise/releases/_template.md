@@ -1,7 +1,7 @@
 # Terraform Enterprise <!-- RELEASE_SHORT_TMPL (e.g. vYYYYMM-X) -->
 
 - **App Deadline Date:** <!-- DEADLINE_DATE_TMPL (e.g. Wednesday, December 8, 2021) -->
-- **Release Branch:** <!-- RELEASE_BRANCH_TMPL (e.g. ptfe-releases/v202112) -->
+- **Release Branch:** <!-- RELEASE_BRANCH_TMPL (e.g. tfe-releases/v202112) -->
 - **Release Slack Channel:** #proj-tfe-releases
 
 ## Contributor Sign Off
