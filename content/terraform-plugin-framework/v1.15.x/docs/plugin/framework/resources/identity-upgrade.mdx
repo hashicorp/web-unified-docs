@@ -1,0 +1,289 @@
+---
+page_title: Identity upgrade
+description: >-
+  Learn how to implement upgrading identity data when provider schema changes from
+  one version of your Terraform framework provider to another.
+---
+
+# Identity upgrade
+
+A resource identity schema is a data object that is stored alongside the resource instance state to refer to at most one remote object. Any identity data that does not conform to the resource identity schema will generate errors or may not be persisted properly. When the provider advertises a newer identity schema version, Terraform will call back to the provider to attempt to upgrade from the saved schema version to the one advertised. This operation is performed prior to planning, but with a configured provider.
+
+## Identity Upgrade Process
+
+1. When generating a plan, Terraform CLI will request the current resource identity schema, which contains a version.
+1. If Terraform CLI detects that an existing identity with its saved version does not match the current version, Terraform CLI will request a identity upgrade from the provider with the prior identity version and expecting the identity to match the current version.
+1. The framework will check the resource to see if it defines identity upgrade support:
+    * If no identity upgrade support is defined, an error diagnostic is returned.
+    * If identity upgrade support is defined, but not for the requested prior identity version, an error diagnostic is returned.
+    * If identity upgrade support is defined and has an implementation for the requested prior identity version, the provider defined implementation is executed.
+
+## Implementing Identity Upgrade Support
+
+Ensure the identityschema.Schema field for the [`resource.Resource`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/resource#Resource) is greater than `0`, then implement the `resource.ResourceWithIdentityUpgrade` interface for the [`resource.Resource`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/resource#Resource). Conventionally the version is incremented by `1` for each identity upgrade.
+
+This example shows a `Resource` with the necessary `IdentityUpgrade` method to implement the `ResourceWithIdentityUpgrade` interface:
+
+```go
+// Other Resource methods are omitted in this example
+var _ resource.Resource = &ThingResource{}
+var _ resource.ResourceWithUpgradeIdentity = &ThingResource{}
+
+type ThingResource struct{/* ... */}
+
+func (r *ThingResource) Identity(_ context.Context, _ resource.IdentityRequest, resp *resource.IdentityResponse) {
+    resp.Identity = schema.Identity{
+        // ... other fields ...
+
+        // This example conventionally declares that the resource has prior
+        // identity versions of 0 and 1, while the current version is 2.
+        Version: 2,
+    }
+}
+
+func (r *ThingResource) UpgradeIdentity(ctx context.Context) map[int64]resource.IdentityUpgrader {
+    return map[int64]resource.IdentityUpgrader{
+        // Identity upgrade implementation from 0 (prior identity version) to 2 (Identity.Version)
+        0: {
+            // Optionally, the PriorIdentity field can be defined.
+            IdentityUpgrader: func(ctx context.Context, req resource.UpgradeResourceIdentityRequest, resp *resource.UpgradeResourceIdentityResponse) { /* ... */ },
+        },
+        // Identity upgrade implementation from 1 (prior identity version) to 2 (Identity.Version)
+        1: {
+            // Optionally, the PriorIdentity field can be defined.
+            IdentityUpgrader: func(ctx context.Context, req resource.UpgradeResourceIdentityRequest, resp *resource.UpgradeResourceIdentityResponse) { /* ... */ },
+        },
+    }
+}
+```
+
+Each `resource.IdentityUpgrader` implementation is expected to wholly upgrade the resource identity from the prior version to the current version. The framework does not iterate through intermediate version implementations as incrementing versions by 1 is only conventional and not required.
+
+All identity data must be populated in the [`resource.UpgradeResourceIdentityResponse`. The framework does not copy any prior identity data from the `resource.UpgradeResourceIdentityRequest`.
+
+There are two approaches to implementing the provider logic for identity upgrades in `IdentityUpgrader`. The recommended approach is defining the prior schema matching the resource identity, which allows for prior identity access similar to other parts of the framework. The second, more advanced, approach is accessing the prior resource identity using lower level data handlers.
+
+### IdentityUpgrader With PriorIdentity
+
+Implement the `IdentityUpgrader` type `PriorIdentity` field to enable the framework to populate the `resource.UpgradeResourceIdentityRequest` type `Identity` field for the provider defined identity upgrade logic. Access the request `Identity` using methods such as `Get()` or `GetAttribute()`. Write the `resource.UpgradeResourceIdentityResponse` type `Identity` field using methods such as `Set()` or `SetAttribute()`.
+
+This example shows a resource that changes the type for two attributes, using the `PriorIdentity` approach:
+
+```go
+// Other Resource methods are omitted in this example
+var _ resource.Resource = &ThingResource{}
+var _ resource.ResourceWithUpgradeIdentity = &ThingResource{}
+
+type ThingResource struct{/* ... */}
+
+type ThingResourceModelV0 struct {
+    Id                string `tfsdk:"id"`
+    OptionalForImportAttribute *bool  `tfsdk:"optional_for_import_attribute"`
+    RequiredForImportAttribute bool   `tfsdk:"required_for_import_attribute"`
+}
+
+type ThingResourceModelV1 struct {
+    Id                string  `tfsdk:"id"`
+    OptionalForImportAttribute *string `tfsdk:"optional_for_import_attribute"`
+    RequiredForImportAttribute string  `tfsdk:"required_for_import_attribute"`
+}
+
+func (r *ThingResource) Identity(_ context.Context, _ resource.IdentityRequest, resp *resource.IdentityResponse) {
+    resp.Identity = schema.Identity{
+        Attributes: map[string]schema.Attribute{
+            "id": schema.StringAttribute{
+            },
+            "optional_for_import_attribute": schema.StringAttribute{
+                // As compared to prior schema.BoolAttribute below
+                OptionalForImport: true,
+            },
+            "required_for_import_attribute": schema.StringAttribute{
+                // As compared to prior schema.BoolAttribute below
+                RequiredForImport: true,
+            },
+        },
+        // The resource has a prior identity version of 0, which had the attribute
+        // types of types.BoolType as shown below.
+        Version: 1,
+    }
+}
+
+func (r *ThingResource) UpgradeIdentity(ctx context.Context) map[int64]resource.IdentityUpgrader {
+    return map[int64]resource.IdentityUpgrader{
+        // Identity upgrade implementation from 0 (prior identity version) to 1 (Identity.Version)
+        0: {
+            PriorIdentity: &schema.Identity{
+                Attributes: map[string]schema.Attribute{
+                    "id": schema.StringAttribute{
+                    },
+                    "optional_for_import_attribute": schema.BoolAttribute{
+                        // As compared to current schema.StringAttribute above
+                        OptionalForImport: true,
+                    },
+                    "required_for_import_attribute": schema.BoolAttribute{
+                        // As compared to current schema.StringAttribute above
+                        RequiredForImport: true,
+                    },
+                },
+            },
+            IdentityUpgrader: func(ctx context.Context, req resource.UpgradeResourceIdentityRequest, resp *resource.UpgradeResourceIdentityResponse) {
+                var priorIdentityData ThingResourceModelV0
+
+                resp.Diagnostics.Append(req.Identity.Get(ctx, &priorIdentityData)...)
+
+                if resp.Diagnostics.HasError() {
+                    return
+                }
+
+                upgradedIdentityData := ThingResourceModelV1{
+                    Id:                priorIdentityData.Id,
+                    RequiredForImportAttribute: fmt.Sprintf("%t", priorIdentityData.RequiredForImportAttribute),
+                }
+
+                if priorIdentityData.OptionalForImportAttribute != nil {
+                    v := fmt.Sprintf("%t", *priorIdentityData.OptionalForImportAttribute)
+                    upgradedIdentityData.OptionalForImportAttribute = &v
+                }
+
+                resp.Diagnostics.Append(resp.Identity.Set(ctx, upgradedIdentityData)...)
+            },
+        },
+    }
+}
+```
+
+### IdentityUpgrader Without PriorIdentity
+
+Read prior identity data from the `resource.UpgradeResourceIdentityRequest` type `RawState` field. Write the `resource.UpgradeResourceIdentityResponse` type `Identity` field using methods such as `Set()` or `SetAttribute()`, or for more advanced use cases, write the `resource.UpgradeResourceIdentityResponse` type `DynamicValue` field.
+
+This example shows a resource that changes the type for two attributes, using the `RawState` approach for the request and `DynamicValue` approach for the response:
+
+```go
+// Other Resource methods are omitted in this example
+var _ resource.Resource = &ThingResource{}
+var _ resource.ResourceWithUpgradeIdentity = &ThingResource{}
+
+var ThingResourceTftypesDataV0 = tftypes.Object{
+    AttributeTypes: map[string]tftypes.Type{
+        "id":                 tftypes.String,
+        "optional_for_import_attribute": tftypes.Bool,
+        "required_for_import_attribute": tftypes.Bool,
+    },
+}
+
+var ThingResourceTftypesDataV1 = tftypes.Object{
+    AttributeTypes: map[string]tftypes.Type{
+        "id":                 tftypes.String,
+        "optional_for_import_attribute": tftypes.String,
+        "required_for_import_attribute": tftypes.String,
+    },
+}
+
+type ThingResource struct{/* ... */}
+
+func (r *ThingResource) Identity(_ context.Context, _ resource.IdentityRequest, resp *resource.IdentityResponse) {
+    resp.Identity = schema.Identity{
+        Attributes: map[string]schema.Attribute{
+            "id": schema.StringAttribute{
+            },
+            "optional_for_import_attribute": schema.StringAttribute{
+                // As compared to prior schema.BoolAttribute below
+                OptionalForImport: true,
+            },
+            "required_for_import_attribute": schema.StringAttribute{
+                // As compared to prior schema.BoolAttribute below
+                RequiredForImport: true,
+            },
+        },
+        // The resource has a prior identity version of 0, which had the attribute
+        // types of types.BoolType as shown below.
+        Version: 1,
+    }
+}
+
+func (r *ThingResource) UpgradeIdentity(ctx context.Context) map[int64]resource.IdentityUpgrader {
+    return map[int64]resource.IdentityUpgrader{
+        // Identity upgrade implementation from 0 (prior identity version) to 1 (Identity.Version)
+        0: {
+            IdentityUpgrader: func(ctx context.Context, req resource.UpgradeResourceIdentityRequest, resp *resource.UpgradeResourceIdentityResponse) {
+                // Refer also to the RawState type JSON field which can be used
+                // with json.Unmarshal()
+                rawStateValue, err := req.RawState.Unmarshal(ThingResourceTftypesDataV0)
+
+                if err != nil {
+                    resp.Diagnostics.AddError(
+                        "Unable to Unmarshal Prior Identity",
+                        err.Error(),
+                    )
+                    return
+                }
+
+                var rawState map[string]tftypes.Value
+
+                if err := rawStateValue.As(&rawState); err != nil {
+                    resp.Diagnostics.AddError(
+                        "Unable to Convert Prior Identity",
+                        err.Error(),
+                    )
+                    return
+                }
+
+                var optionalForImportAttributeString *string
+
+                if !rawState["optional_for_import_attribute"].IsNull() {
+                    var optionalForImportAttribute bool
+
+                    if err := rawState["optional_for_import_attribute"].As(&optionalForImportAttribute); err != nil {
+                        resp.Diagnostics.AddAttributeError(
+                            path.Root("optional_for_import_attribute"),
+                            "Unable to Convert Prior Identity",
+                            err.Error(),
+                        )
+                        return
+                    }
+
+                    v := fmt.Sprintf("%t", optionalForImportAttribute)
+                    optionalForImportAttributeString = &v
+                }
+
+                var requiredForImportAttribute bool
+
+                if err := rawState["required_for_import_attribute"].As(&requiredForImportAttribute); err != nil {
+                    resp.Diagnostics.AddAttributeError(
+                        path.Root("required_for_import_attribute"),
+                        "Unable to Convert Prior Identity",
+                        err.Error(),
+                    )
+                    return
+                }
+
+                dynamicValue, err := tfprotov6.NewDynamicValue(
+                    ThingResourceTftypesDataV1,
+                    tftypes.NewValue(ThingResourceTftypesDataV1, map[string]tftypes.Value{
+                        "id":                 rawState["id"],
+                        "optional_for_import_attribute": tftypes.NewValue(tftypes.String, optionalForImportAttributeString),
+                        "required_for_import_attribute": tftypes.NewValue(tftypes.String, fmt.Sprintf("%t", requiredForImportAttribute)),
+                    }),
+                )
+
+                if err != nil {
+                    resp.Diagnostics.AddError(
+                        "Unable to Convert Upgraded Identity",
+                        err.Error(),
+                    )
+                    return
+                }
+
+                resp.DynamicValue = &dynamicValue
+            },
+        },
+    }
+}
+```
+
+## Caveats
+
+Note these caveats when implementing the `UpgradeIdentity` method:
+
+* An error is returned if the response identity contains unknown values. Set all attributes to either null or known values in the response.
+* Any response errors will cause Terraform to keep the prior resource identity.
