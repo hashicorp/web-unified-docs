@@ -90,38 +90,6 @@ function saveTestOutputIfSelected(outputString, newApiURL) {
 	}
 }
 
-async function fetchApiTypeVersionAndNav(options, product, versionMetadata) {
-	let newApiURL
-	let oldApiURL
-
-	if (options.api === 'version-metadata') {
-		newApiURL = `${options.newApiUrl}/api/content/${product}/version-metadata`
-		oldApiURL = `${options.oldApiUrl}/api/content/${product}/version-metadata?partial=true`
-	} else if (options.api === 'nav-data') {
-		newApiURL = `${options.newApiUrl}/api/content/${product}/nav-data/${versionMetadata.version}`
-		oldApiURL = `${options.oldApiUrl}/api/content/${product}/nav-data/${versionMetadata.version}`
-	}
-
-	const newApiResponse = await fetch(newApiURL)
-	const oldApiResponse = await fetch(oldApiURL)
-
-	const newApiData = await newApiResponse.json()
-	const oldApiData = await oldApiResponse.json()
-
-	const newApiDataStrings = JSON.stringify(
-		sortObjectByKeys(newApiData.result),
-		null,
-		2,
-	).split('\n')
-	const oldApiDataStrings = JSON.stringify(
-		sortObjectByKeys(oldApiData.result),
-		null,
-		2,
-	).split('\n')
-
-	return { newApiDataStrings, oldApiDataStrings, newApiURL }
-}
-
 const testsPassed = []
 const testsFailed = []
 const totalTests = []
@@ -135,9 +103,26 @@ for (const [product, versions] of Object.entries(versionMetadata)) {
 			continue
 		}
 
-		if (options.api === 'version-metadata' || options.api === 'nav-data') {
-			const { newApiDataStrings, oldApiDataStrings, newApiURL } =
-				await fetchApiTypeVersionAndNav(options, product, versionMetadata)
+		if (options.api === 'version-metadata') {
+			const newApiURL = `${options.newApiUrl}/api/content/${product}/version-metadata`
+			const oldApiURL = `${options.oldApiUrl}/api/content/${product}/version-metadata?partial=true`
+
+			const newApiResponse = await fetch(newApiURL)
+			const oldApiResponse = await fetch(oldApiURL)
+
+			const newApiData = await newApiResponse.json()
+			const oldApiData = await oldApiResponse.json()
+
+			const newApiDataStrings = JSON.stringify(
+				sortObjectByKeys(newApiData.result),
+				null,
+				2,
+			).split('\n')
+			const oldApiDataStrings = JSON.stringify(
+				sortObjectByKeys(oldApiData.result),
+				null,
+				2,
+			).split('\n')
 
 			const diffOptions = {
 				contextLines: 1,
@@ -155,6 +140,39 @@ for (const [product, versions] of Object.entries(versionMetadata)) {
 
 			saveTestOutputIfSelected(outputString, newApiURL)
 			break
+		} else if (options.api === 'nav-data') {
+			const newApiURL = `${options.newApiUrl}/api/content/${product}/nav-data/${versionMetadata.version}/${contentDirMap[product].navDataPath}`
+			const oldApiURL = `${options.oldApiUrl}/api/content/${product}/nav-data/${versionMetadata.version}/${contentDirMap[product].navDataPath}`
+
+			const newApiResponse = await fetch(newApiURL)
+			const oldApiResponse = await fetch(oldApiURL)
+
+			const newApiData = await newApiResponse.json()
+			const oldApiData = await oldApiResponse.json()
+
+			const newDataToCompare = newApiData.result?.navData
+			const oldDataToCompare = oldApiData.result?.navData
+
+			const diffOptions = {
+				contextLines: 1,
+				expand: false,
+			}
+
+			const difference = diff(oldDataToCompare, newDataToCompare, diffOptions)
+
+			const outputString = `Testing API URL:\n${newApiURL}\n${difference}`
+			console.log(outputString)
+
+			if (difference.includes('Compared values have no visual difference.')) {
+				testsPassed.push(newApiURL)
+				console.log('✅ No visual difference found.\n')
+			} else {
+				testsFailed.push(newApiURL)
+				console.log(`${difference}\n`)
+			}
+
+			totalTests.push(newApiURL)
+			saveTestOutputIfSelected(outputString, newApiURL)
 		} else if (options.api === 'content') {
 			const productContentDir = contentDirMap[product].contentDir
 			const isVersionedProduct = contentDirMap[product].versionedDocs
@@ -252,64 +270,68 @@ for (const [product, versions] of Object.entries(versionMetadata)) {
 				totalTests.push(newApiURL)
 				saveTestOutputIfSelected(outputString, newApiURL)
 			}
-		} else if (options.api === 'content-versions') {
-			const newApiURL = new URL(options.newApiUrl)
-			const oldApiURL = new URL(options.oldApiUrl)
-
-			let newApiResponse, oldApiResponse
-			try {
-				newApiResponse = await fetch(newApiURL)
-				oldApiResponse = await fetch(oldApiURL)
-
-				if (!newApiResponse.ok) {
-					console.log(
-						`Error fetching API response:\n${newApiURL}\n${newApiResponse.statusText}`,
-					)
-					continue
-				}
-				if (!oldApiResponse.ok) {
-					console.log(
-						`Error fetching API response:\n${oldApiURL}\n${oldApiResponse.statusText}`,
-					)
-					continue
-				}
-			} catch (error) {
-				console.log(`Error fetching API response\n${error}`)
-				continue
-			}
-
-			let newApiData, oldApiData
-			try {
-				newApiData = await newApiResponse.json()
-				oldApiData = await oldApiResponse.json()
-			} catch (error) {
-				console.log(`Error decoding JSON\n${error}`)
-				continue
-			}
-
-			// sort the versions to normalize the responses because the APIs return content versions in different orders
-			const newSortedVersions = newApiData.versions.sort()
-			const oldSortedVersions = oldApiData.versions.sort()
-
-			const difference = diff(newSortedVersions, oldSortedVersions)
-
-			const outputString = `Testing API URL\n${difference}`
-			console.log(outputString)
-
-			if (difference.includes('Compared values have no visual difference.')) {
-				testsPassed.push(newApiURL)
-				console.log('✅ No visual difference found.\n')
-			} else {
-				testsFailed.push(newApiURL)
-				console.log(`${difference}\n`)
-			}
-
-			saveTestOutputIfSelected(outputString, newApiURL)
 		}
 	}
 }
 
-if (options.api === 'content') {
+if (options.api === 'content-versions') {
+	const newApiURL = new URL(options.newApiUrl)
+	const oldApiURL = new URL(options.oldApiUrl)
+
+	let newApiResponse, oldApiResponse
+	try {
+		newApiResponse = await fetch(newApiURL)
+		oldApiResponse = await fetch(oldApiURL)
+
+		if (!newApiResponse.ok) {
+			console.log(
+				`Error fetching API response:\n${newApiURL}\n${newApiResponse.statusText}`,
+			)
+		}
+		if (!oldApiResponse.ok) {
+			console.log(
+				`Error fetching API response:\n${oldApiURL}\n${oldApiResponse.statusText}`,
+			)
+		}
+	} catch (error) {
+		console.log(`Error fetching API response\n${error}`)
+	}
+
+	let newApiData, oldApiData
+	try {
+		newApiData = await newApiResponse.json()
+		oldApiData = await oldApiResponse.json()
+	} catch (error) {
+		console.log(`Error decoding JSON\n${error}`)
+	}
+
+	// sort the versions to normalize the responses because the APIs return content versions in different orders
+	const newSortedVersions = newApiData.versions.sort()
+	const oldSortedVersions = oldApiData.versions.sort()
+
+	const difference = diff(newSortedVersions, oldSortedVersions)
+
+
+	const outputString = `Testing API URL\n${difference}`
+	console.log(outputString)
+
+	if (difference.includes('Compared values have no visual difference.')) {
+		testsPassed.push(newApiURL)
+		console.log('✅ No visual difference found.\n')
+	} else {
+		testsFailed.push(newApiURL)
+		console.log(`${difference}\n`)
+	}
+
+	totalTests.push(newApiURL)
+	saveTestOutputIfSelected(outputString, newApiURL)
+}
+
+if (
+	options.api === 'content' ||
+	options.api === 'nav-data' ||
+	options.api === 'content-versions'
+) {
 	console.log(
 		`Tests passed: ${testsPassed.length} of ${options.numOfTests ?? totalTests.length} ${
 			testsPassed.length === (options.numOfTests ?? totalTests.length)
