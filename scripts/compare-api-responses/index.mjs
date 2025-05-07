@@ -205,6 +205,7 @@ for (const [product, versions] of Object.entries(versionMetadata)) {
 				apiPaths[product][versionMetadata.version]
 
 			for (const pathObject of apiPathsForProductAndVersion) {
+				// Take product out of the path so the doc can be found
 				const pathWithoutBasePaths = pathObject.path.replace(
 					`${contentDirMap[product].productSlug}/`,
 					'',
@@ -241,6 +242,13 @@ for (const [product, versions] of Object.entries(versionMetadata)) {
 					continue
 				}
 
+				if (options.dropKeys) {
+					options.dropKeys.forEach((key) => {
+						delete newApiData.result[key]
+						delete oldApiData.result[key]
+					})
+				}
+
 				const newDataToCompare = {
 					markdownSource: newApiData.result?.markdownSource,
 					metadata: newApiData.result?.metadata,
@@ -260,10 +268,10 @@ for (const [product, versions] of Object.entries(versionMetadata)) {
 				console.log(outputString)
 
 				if (difference.includes('Compared values have no visual difference.')) {
-					testsPassed.push(pathObject.path)
+					testsPassed.push(newApiURL)
 					console.log('✅ No visual difference found.\n')
 				} else {
-					testsFailed.push(pathObject.path)
+					testsFailed.push(newApiURL)
 					console.log(`${difference}\n`)
 				}
 
@@ -310,7 +318,6 @@ if (options.api === 'content-versions') {
 	const oldSortedVersions = oldApiData.versions.sort()
 
 	const difference = diff(newSortedVersions, oldSortedVersions)
-
 
 	const outputString = `Testing API URL\n${difference}`
 	console.log(outputString)
