@@ -124,6 +124,7 @@ async function fetchApiTypeVersionAndNav(options, product, versionMetadata) {
 
 const testsPassed = []
 const testsFailed = []
+const totalTests = []
 for (const [product, versions] of Object.entries(versionMetadata)) {
 	if (options.product && options.product !== product) {
 		continue
@@ -182,9 +183,16 @@ for (const [product, versions] of Object.entries(versionMetadata)) {
 				}
 			}
 
-			for (let i = 0; i < randomIndexes.length; i++) {
-				const randomIndex = randomIndexes[i]
-				const apiURL = `/api/content/${product}/doc/${versionMetadata.version}/${apiPaths[randomIndex]}`
+			const apiPathsForProductAndVersion =
+				apiPaths[product][versionMetadata.version]
+
+			// Turn this for loop into a for loop over all the paths in the apiPaths array
+			for (const pathObject of apiPathsForProductAndVersion) {
+				const pathWithoutBasePaths = pathObject.path.replace(
+					`${contentDirMap[product].productSlug}/`,
+					'',
+				)
+				const apiURL = `/api/content/${product}/doc/${versionMetadata.version}/${pathWithoutBasePaths}`
 
 				const oldApiURL = `${options.oldApiUrl}${apiURL}`
 				const newApiURL = `${options.newApiUrl}${apiURL}`
@@ -216,6 +224,21 @@ for (const [product, versions] of Object.entries(versionMetadata)) {
 					continue
 				}
 
+				const relevantDataNew = {
+					markdownSource: newApiData.result?.markdownSource,
+					metadata: newApiData.result?.metadata,
+				}
+				const relevantDataOld = {
+					markdownSource: oldApiData.result?.markdownSource,
+					metadata: oldApiData.result?.metadata,
+				}
+
+				const keysToRemove = ['created_at', 'sha', 'lastModified', 'githubFile']
+				keysToRemove.forEach((key) => {
+					delete newApiData.result[key]
+					delete oldApiData.result[key]
+				})
+
 				if (options.dropKeys) {
 					options.dropKeys.forEach((key) => {
 						delete newApiData.result[key]
@@ -223,29 +246,24 @@ for (const [product, versions] of Object.entries(versionMetadata)) {
 					})
 				}
 
-				let diffFunc
-				let newApiDataStrings
-				let oldApiDataStrings
-
-				const difference = diffFunc(oldApiDataStrings, newApiDataStrings, {
+				const difference = diff(relevantDataOld, relevantDataNew, {
 					contextLines: 1,
 					expand: false,
 				})
 
-				const outputString = `Test ${i + 1} of ${
-					randomIndexes.length
-				}; Testing API URL:\n${apiURL}`
+				const outputString = `Testing API URL:\n${newApiURL}\n${difference}`
 
 				console.log(outputString)
 
 				if (difference.includes('Compared values have no visual difference.')) {
-					testsPassed.push(i + 1)
+					testsPassed.push(pathObject.path)
 					console.log('✅ No visual difference found.\n')
 				} else {
-					testsFailed.push(i + 1)
+					testsFailed.push(pathObject.path)
 					console.log(`${difference}\n`)
 				}
 
+				totalTests.push(newApiURL)
 				saveTestOutputIfSelected(outputString, newApiURL)
 			}
 		} else if (options.api === 'content-versions') {
@@ -303,16 +321,18 @@ for (const [product, versions] of Object.entries(versionMetadata)) {
 			saveTestOutputIfSelected(outputString, newApiURL)
 		}
 
-		break
+		// break
 	}
 
-	break
+	// break
 }
 
 if (options.api === 'content') {
 	console.log(
-		`Tests passed: ${testsPassed.length} of ${options.numOfTests} ${
-			testsPassed.length === options.numOfTests ? '🎉' : ''
+		`Tests passed: ${testsPassed.length} of ${options.numOfTests ?? totalTests.length} ${
+			testsPassed.length === (options.numOfTests ?? totalTests.length)
+				? '🎉'
+				: ''
 		}`,
 	)
 }
