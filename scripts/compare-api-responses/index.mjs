@@ -186,7 +186,6 @@ for (const [product, versions] of Object.entries(versionMetadata)) {
 			const apiPathsForProductAndVersion =
 				apiPaths[product][versionMetadata.version]
 
-			// Turn this for loop into a for loop over all the paths in the apiPaths array
 			for (const pathObject of apiPathsForProductAndVersion) {
 				const pathWithoutBasePaths = pathObject.path.replace(
 					`${contentDirMap[product].productSlug}/`,
@@ -224,29 +223,16 @@ for (const [product, versions] of Object.entries(versionMetadata)) {
 					continue
 				}
 
-				const relevantDataNew = {
+				const newDataToCompare = {
 					markdownSource: newApiData.result?.markdownSource,
 					metadata: newApiData.result?.metadata,
 				}
-				const relevantDataOld = {
+				const oldDataToCompare = {
 					markdownSource: oldApiData.result?.markdownSource,
 					metadata: oldApiData.result?.metadata,
 				}
 
-				const keysToRemove = ['created_at', 'sha', 'lastModified', 'githubFile']
-				keysToRemove.forEach((key) => {
-					delete newApiData.result[key]
-					delete oldApiData.result[key]
-				})
-
-				if (options.dropKeys) {
-					options.dropKeys.forEach((key) => {
-						delete newApiData.result[key]
-						delete oldApiData.result[key]
-					})
-				}
-
-				const difference = diff(relevantDataOld, relevantDataNew, {
+				const difference = diff(oldDataToCompare, newDataToCompare, {
 					contextLines: 1,
 					expand: false,
 				})
@@ -320,11 +306,7 @@ for (const [product, versions] of Object.entries(versionMetadata)) {
 
 			saveTestOutputIfSelected(outputString, newApiURL)
 		}
-
-		// break
 	}
-
-	// break
 }
 
 if (options.api === 'content') {
