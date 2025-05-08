@@ -201,9 +201,16 @@ for (const [product, versions] of Object.entries(versionMetadata)) {
 				}
 			}
 
-			for (let i = 0; i < randomIndexes.length; i++) {
-				const randomIndex = randomIndexes[i]
-				const apiURL = `/api/content/${product}/doc/${versionMetadata.version}/${apiPaths[randomIndex]}`
+			const apiPathsForProductAndVersion =
+				apiPaths[product][versionMetadata.version]
+
+			for (const pathObject of apiPathsForProductAndVersion) {
+				// Take product out of the path so the doc can be found
+				const pathWithoutBasePaths = pathObject.path.replace(
+					`${contentDirMap[product].productSlug}/`,
+					'',
+				)
+				const apiURL = `/api/content/${product}/doc/${versionMetadata.version}/${pathWithoutBasePaths}`
 
 				const oldApiURL = `${options.oldApiUrl}${apiURL}`
 				const newApiURL = `${options.newApiUrl}${apiURL}`
@@ -242,30 +249,33 @@ for (const [product, versions] of Object.entries(versionMetadata)) {
 					})
 				}
 
-				let diffFunc
-				let newApiDataStrings
-				let oldApiDataStrings
+				const newDataToCompare = {
+					markdownSource: newApiData.result?.markdownSource,
+					metadata: newApiData.result?.metadata,
+				}
+				const oldDataToCompare = {
+					markdownSource: oldApiData.result?.markdownSource,
+					metadata: oldApiData.result?.metadata,
+				}
 
-				const difference = diffFunc(oldApiDataStrings, newApiDataStrings, {
+				const difference = diff(oldDataToCompare, newDataToCompare, {
 					contextLines: 1,
 					expand: false,
 				})
 
-				const outputString = `Test ${i + 1} of ${
-					randomIndexes.length
-				}; Testing API URL:\n${apiURL}`
+				const outputString = `Testing API URL:\n${newApiURL}\n${difference}`
 
 				console.log(outputString)
 
 				if (difference.includes('Compared values have no visual difference.')) {
-					testsPassed.push(i + 1)
+					testsPassed.push(newApiURL)
 					console.log('✅ No visual difference found.\n')
 				} else {
-					testsFailed.push(i + 1)
+					testsFailed.push(newApiURL)
 					console.log(`${difference}\n`)
 				}
 
-				totalTests.push(i + 1)
+				totalTests.push(newApiURL)
 				saveTestOutputIfSelected(outputString, newApiURL)
 			}
 		}
