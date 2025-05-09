@@ -1,0 +1,853 @@
+---
+page_title: Workflow example
+description: >-
+  Use Terraform provider code generation tools to create a Terraform provider
+  based on the Petstore OpenAPI specification.
+---
+
+# Workflow example
+
+<Note>
+Code Generation is currently in tech preview.
+</Note>
+
+This demo shows how to use the [Code Generation](/terraform/plugin/code-generation) tools to create a new [Plugin Framework](/terraform/plugin/framework) Terraform provider and implement a resource/data source with the [Petstore OpenAPI spec](https://petstore3.swagger.io/).
+
+## Prerequisites
+Install the following to work with the example below:
+- [Go 1.21+](https://go.dev/doc/install)
+	- The shell commands (`go install .`) and tests in this demo rely on the `GOBIN` folder. The default location for this is `$GOPATH/bin`. See the official [Go docs](https://go.dev/ref/mod#go-install) for more info.
+- [Terraform 1.5+](/terraform/downloads)
+- [Framework Code Generator](/terraform/plugin/code-generation/framework-generator#installation)
+- [OpenAPI Provider Spec Generator](/terraform/plugin/code-generation/openapi-generator#installation)
+
+## Create a Petstore Provider
+
+### Setup Working Directory
+
+Start by creating a working directory for this new provider:
+```shell-session
+mkdir terraform-provider-petstore
+```
+```shell-session
+cd terraform-provider-petstore
+```
+
+Next, initialize a new Go module, create a `main.go` file, and create a folder for the provider code:
+```shell-session
+go mod init terraform-provider-petstore
+```
+```shell-session
+touch main.go
+```
+```shell-session
+mkdir -p internal/provider
+```
+
+### Scaffold the Petstore Provider
+
+Use the Framework Code Generator [`scaffold`](/terraform/plugin/code-generation/framework-generator#scaffold-command) command to scaffold a provider named `petstore`:
+```shell-session
+tfplugingen-framework scaffold provider \
+  --name petstore \
+  --output-dir ./internal/provider
+```
+
+The `scaffold` command will create a new file at `/internal/provider/provider.go`. That scaffolded file contains an exported `New()` function that returns an empty Plugin Framework [provider](/terraform/plugin/framework/providers). Later steps in this example will update this file to add a resource and data source.
+
+Copy the following code into the `main.go` file created during [setup](#setup-working-directory) to hookup the empty Petstore provider to a [provider server](/terraform/plugin/framework/provider-servers):
+```go
+package main
+
+import (
+	"context"
+	"log"
+
+	"terraform-provider-petstore/internal/provider"
+
+	"github.com/hashicorp/terraform-plugin-framework/providerserver"
+)
+
+func main() {
+	opts := providerserver.ServeOpts{
+		Address: "hashicorp.com/edu/petstore",
+	}
+
+	err := providerserver.Serve(context.Background(), provider.New(), opts)
+	if err != nil {
+		log.Fatal(err.Error())
+	}
+}
+```
+
+Now that the provider code is initialized, install the Go module's dependencies and build the provider to the local `GOBIN` folder with the following commands:
+```shell-session
+go mod tidy
+```
+```shell-session
+go install .
+```
+
+### Setup Terraform for Testing
+
+Example tests of the provider built in this demo utilize real Terraform configuration. Doing this requires [setting up a `.terraformrc` file](/terraform/plugin/debugging#terraform-cli-development-overrides) to inform the Terraform CLI where to find the locally built Petstore provider. This examples uses `hashicorp.com/edu/petstore` as the address/source name of the provider.
+
+The shell commands provided use `go install .`,  which will place the Petstore provider binary in the `GOBIN` folder.
+
+Here is an example of what the `.terraformrc` file will look like after being updated:
+
+```hcl
+provider_installation {
+
+  dev_overrides {
+	# Example GOBIN path, will need to be replaced with your own GOBIN path. Default is $GOPATH/bin
+    "hashicorp.com/edu/petstore" = "/home/example/go/bin"
+  }
+
+  # For all other providers, install them directly from their origin provider
+  # registries as normal. If you omit this, Terraform will _only_ use
+  # the dev_overrides block, and so no other providers will be available.
+  direct {}
+}
+```
+
+To verify the initialized Petstore provider and `.terraformrc` setup, create a `main.tf` file with the following:
+```shell-session
+touch main.tf
+```
+```hcl
+terraform {
+  required_providers {
+    petstore = {
+      source = "hashicorp.com/edu/petstore"
+    }
+  }
+}
+
+provider "petstore" {}
+```
+
+And run `terraform plan`:
+```shell-session
+ $ terraform plan    
+╷
+│ Warning: Provider development overrides are in effect
+│ 
+│ The following provider development overrides are set in the CLI configuration:
+│  - hashicorp.com/edu/petstore in <PATH>
+│ 
+│ The behavior may therefore not match any released version of the provider and applying changes may cause the state to become incompatible
+│ with published releases.
+╵
+
+No changes. Your infrastructure matches the configuration.
+
+Terraform has compared your real infrastructure against your configuration and found no differences, so no changes are needed.
+```
+
+## Create a Pet Resource from OpenAPI
+
+### Scaffold a New Resource
+
+Start by [scaffolding](/terraform/plugin/code-generation/framework-generator#scaffold-command) a new resource named `pet`:
+
+```shell-session
+tfplugingen-framework scaffold resource \
+  --name pet \
+  --output-dir ./internal/provider
+```
+
+This command will create a new file at `/internal/provider/pet_resource.go`. This scaffolded file contains an exported `NewPetResource()` function that returns an empty Plugin Framework resource. This resource contains a scaffold implementation of the [Resource interface](/terraform/plugin/framework/resources), along with an empty schema and data model that will be replaced with generated code from the next step.
+
+After creating this file, your folder will look like:
+```
+.
+├── internal/
+│   └── provider/
+│       ├── pet_resource.go
+│       └── provider.go
+├── go.mod
+├── go.sum
+├── main.go
+└── main.tf
+```
+
+Add this new resource to the Petstore provider by updating the `Resources` method in the `/internal/provider/provider.go` file to the following:
+
+```go
+func (p *petstoreProvider) Resources(ctx context.Context) []func() resource.Resource {
+	return []func() resource.Resource{
+		NewPetResource,
+	}
+}
+```
+
+### Generate Pet Schema from OpenAPI spec
+
+The [schema](/terraform/plugin/framework/handling-data/schemas) and [data models](/terraform/plugin/framework/handling-data/accessing-values) of the Pet resource can be generated using an OpenAPI specification.
+
+Start by downloading the [Petstore specification](https://petstore3.swagger.io/api/v3/openapi.json):
+
+```shell-session
+curl https://petstore3.swagger.io/api/v3/openapi.json --output openapi.json
+```
+
+Next, create a [generator config](/terraform/plugin/code-generation/openapi-generator#generator-config) file with the following:
+
+```shell-session
+touch generator_config.yml
+```
+```yaml
+provider:
+  name: petstore
+resources:
+  pet:
+    create:
+      path: /pet
+      method: POST
+    read:
+      path: /pet/{petId}
+      method: GET
+    schema:
+      attributes:
+        aliases:
+          petId: id
+```
+
+This config defines the locations of the API CRUD methods that make up the `pet` resource, as well as the provider name. These paths can be found in the OpenAPI spec that was downloaded. The config also aliases the `petId` parameter to combine it with the `id` attribute in the request/response body of the OpenAPI spec definitions.
+
+Now, run the OpenAPI spec [`generate`](/terraform/plugin/code-generation/openapi-generator#generate) command:
+```shell-session
+tfplugingen-openapi generate \
+  --config ./generator_config.yml \
+  --output ./provider-code-spec.json \
+  ./openapi.json
+```
+
+This will output a new `provider-code-spec.json` file, which is a [Provider Code Specification](/terraform/plugin/code-generation/specification) that can be used to generate Terraform provider code.
+
+Use this provider code spec as input to run the Framework Code [`generate`](/terraform/plugin/code-generation/framework-generator#generate-command) command:
+
+```shell-session
+tfplugingen-framework generate resources \
+  --input ./provider-code-spec.json \
+  --output ./internal 
+```
+
+This will create a new Go package at `/internal/resource_pet` with exported Go types and methods that can be used for the `pet` resource's schema definition and data handling.
+
+### Using the Generated Pet Resource Code
+
+Start by deleting the contents of the scaffolded `/internal/provider/pet_resource.go` file, and copy/paste all of the following code into it:
+
+```go
+package provider
+
+import (
+	"context"
+	"terraform-provider-petstore/internal/resource_pet"
+
+	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/types"
+)
+
+var _ resource.Resource = (*petResource)(nil)
+
+func NewPetResource() resource.Resource {
+	return &petResource{}
+}
+
+type petResource struct{}
+
+func (r *petResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_pet"
+}
+
+func (r *petResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
+	resp.Schema = resource_pet.PetResourceSchema(ctx)
+}
+
+func (r *petResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	var data resource_pet.PetModel
+
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	resp.Diagnostics.Append(callPetAPI(ctx, &data)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+}
+
+func (r *petResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	var data resource_pet.PetModel
+
+	resp.Diagnostics.Append(req.State.Get(ctx, &data)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+}
+
+func (r *petResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	var data resource_pet.PetModel
+
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	resp.Diagnostics.Append(callPetAPI(ctx, &data)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+}
+
+func (r *petResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+	var data resource_pet.PetModel
+
+	resp.Diagnostics.Append(req.State.Get(ctx, &data)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+}
+
+// Typically this method would contain logic that makes an HTTP call to a remote API, and then stores
+// computed results back to the data model. For example purposes, this function just sets all unknown
+// Pet values to null to avoid data consistency errors.
+func callPetAPI(ctx context.Context, pet *resource_pet.PetModel) diag.Diagnostics {
+	if pet.Id.IsUnknown() {
+		pet.Id = types.Int64Null()
+	}
+
+	if pet.Status.IsUnknown() {
+		pet.Status = types.StringNull()
+	}
+
+	if pet.Tags.IsUnknown() {
+		pet.Tags = types.ListNull(resource_pet.TagsValue{}.Type(ctx))
+	} else if !pet.Tags.IsNull() {
+		var tags []resource_pet.TagsValue
+		diags := pet.Tags.ElementsAs(ctx, &tags, false)
+		if diags.HasError() {
+			return diags
+		}
+
+		for i := range tags {
+			if tags[i].Id.IsUnknown() {
+				tags[i].Id = types.Int64Null()
+			}
+
+			if tags[i].Name.IsUnknown() {
+				tags[i].Name = types.StringNull()
+			}
+		}
+
+		pet.Tags, diags = types.ListValueFrom(ctx, resource_pet.TagsValue{}.Type(ctx), tags)
+		if diags.HasError() {
+			return diags
+		}
+	}
+
+	if pet.Category.IsUnknown() {
+		pet.Category = resource_pet.NewCategoryValueNull()
+	} else if !pet.Category.IsNull() {
+		if pet.Category.Id.IsUnknown() {
+			pet.Category.Id = types.Int64Null()
+		}
+
+		if pet.Category.Name.IsUnknown() {
+			pet.Category.Name = types.StringNull()
+		}
+	}
+
+	return nil
+}
+```
+
+Before running tests with Terraform configuration, let's start by evaluating different snippets of the above code.
+
+#### Pet Schema
+
+```go
+// --snip--
+
+func (r *petResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
+	resp.Schema = resource_pet.PetResourceSchema(ctx)
+}
+
+// --snip--
+```
+
+Here the scaffolded [schema](/terraform/plugin/framework/handling-data/schemas) of the `pet` resource has been replaced with the generated schema from the `resource_pet` package.
+
+#### Pet Data Model
+
+```go
+// --snip--
+
+func (r *petResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	var data resource_pet.PetModel
+
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	resp.Diagnostics.Append(callPetAPI(ctx, &data)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+}
+
+// --snip--
+```
+
+Here the scaffolded [data model](/terraform/plugin/framework/handling-data/accessing-values) in the CRUD functions has been replaced with the generated data model from the `resource_pet` package. The `callPetAPI` function has been added to `Update` and `Create` methods, which is a sample reference on how this Pet data model could be interacted with.
+
+Notice that the generated data model `resource_pet.PetModel` utilizes [custom types](/terraform/plugin/framework/handling-data/types/custom) for nested attributes (`tags` and `category`).
+
+### Test the Pet Resource
+
+Now that the generated Pet schema is integrated into the scaffolded resource, build and install the provider for testing:
+
+```shell-session
+go mod tidy
+```
+```shell-session
+go install .
+```
+
+First, create a `pet` resource by adding the following Terraform config to our existing `main.tf` and running `terraform apply -auto-approve`:
+
+```hcl
+resource "petstore_pet" "clifford" {
+  id   = 12345
+  name = "Clifford the Big Red Dog"
+  photo_urls = [
+    "https://example.com/pet.jpg"
+  ]
+}
+```
+
+```shell-session
+ $ terraform apply -auto-approve
+
+Terraform used the selected providers to generate the following execution plan. Resource actions are indicated with the following symbols:
+  + create
+
+Terraform will perform the following actions:
+
+  # petstore_pet.clifford will be created
+  + resource "petstore_pet" "clifford" {
+      + category   = (known after apply)
+      + id         = 12345
+      + name       = "Clifford the Big Red Dog"
+      + photo_urls = [
+          + "https://example.com/pet.jpg",
+        ]
+      + status     = (known after apply)
+      + tags       = (known after apply)
+    }
+
+Plan: 1 to add, 0 to change, 0 to destroy.
+petstore_pet.clifford: Creating...
+petstore_pet.clifford: Creation complete after 0s [name=Clifford the Big Red Dog]
+
+Apply complete! Resources: 1 added, 0 changed, 0 destroyed.
+```
+
+Test the validation that was generated from the OpenAPI Specification for the `status` attribute (an `enum` string), by adjusting the `petstore_pet.clifford` resource to the following and running `terraform validate`:
+
+```hcl
+resource "petstore_pet" "clifford" {
+  id   = 12345
+  name = "Clifford the Big Red Dog"
+  photo_urls = [
+    "https://example.com/pet.jpg"
+  ]
+  status = "bought"
+}
+```
+
+```shell-session
+ $ terraform validate           
+
+╷
+│ Error: Invalid Attribute Value Match
+│ 
+│   with petstore_pet.clifford,
+│   on main.tf line 17, in resource "petstore_pet" "clifford":
+│   17:   status = "bought"
+│ 
+│ Attribute status value must be one of: ["available" "pending" "sold"], got: "bought"
+```
+
+And finally, add all of the optional fields that are defined in the `/internal/resource_pet/pet_resource_gen.go` schema and run `terraform apply -auto-approve`:
+
+```hcl
+resource "petstore_pet" "clifford" {
+  id   = 12345
+  name = "Clifford the Big Red Dog"
+  photo_urls = [
+    "https://example.com/pet.jpg"
+  ]
+  status = "available"
+  category = {
+    id   = 1
+    name = "dog"
+  }
+  tags = [
+    { id = 1, name = "red" },
+    { id = 2, name = "vizsla" }
+  ]
+}
+```
+
+```shell-session
+ $ terraform apply -auto-approve
+
+petstore_pet.clifford: Refreshing state... [name=Clifford the Big Red Dog]
+
+Terraform used the selected providers to generate the following execution plan. Resource actions are indicated with the following symbols:
+  ~ update in-place
+
+Terraform will perform the following actions:
+
+  # petstore_pet.clifford will be updated in-place
+  ~ resource "petstore_pet" "clifford" {
+      + category   = {
+          + id   = 1
+          + name = "dog"
+        }
+        id         = 12345
+        name       = "Clifford the Big Red Dog"
+      + status     = "available"
+      + tags       = [
+          + {
+              + id   = 1
+              + name = "red"
+            },
+          + {
+              + id   = 2
+              + name = "vizsla"
+            },
+        ]
+        # (1 unchanged attribute hidden)
+    }
+
+Plan: 0 to add, 1 to change, 0 to destroy.
+petstore_pet.clifford: Modifying... [name=Clifford the Big Red Dog]
+petstore_pet.clifford: Modifications complete after 0s [name=Clifford the Big Red Dog]
+
+Apply complete! Resources: 0 added, 1 changed, 0 destroyed.
+```
+
+
+## Create an Order Data Source from OpenAPI
+
+### Scaffold a New Data Source
+
+Start by [scaffolding](/terraform/plugin/code-generation/framework-generator#scaffold-command) a new data source named `order`:
+
+```shell-session
+tfplugingen-framework scaffold data-source \
+  --name order \
+  --output-dir ./internal/provider
+```
+
+This command will create a new file at `/internal/provider/order_data_source.go`. This scaffolded file contains an exported `NewOrderDataSource()` function that returns an empty Plugin Framework data source. This data source contains a scaffold implementation of the [Data Source interface](/terraform/plugin/framework/data-sources), along with an empty schema and data model that will be replaced with generated code from the next step.
+
+If you followed the previous [Pet resource](#create-a-pet-resource-from-openapi) section, after creating this file your folder will look like:
+```
+.
+├── internal/
+│   ├── provider/
+│   │   ├── order_data_source.go
+│   │   ├── pet_resource.go
+│   │   └── provider.go
+│   └── resource_pet/
+│       └── pet_resource_gen.go
+├── generator_config.yml
+├── go.mod
+├── go.sum
+├── main.go
+├── main.tf
+├── openapi.json
+└── provider-code-spec.json
+```
+
+Add this new data source to the Petstore provider by updating the `DataSources` method in the `/internal/provider/provider.go` file to the following:
+
+```go
+func (p *petstoreProvider) DataSources(ctx context.Context) []func() datasource.DataSource {
+	return []func() datasource.DataSource{
+		NewOrderDataSource,
+	}
+}
+```
+
+### Generate Order Schema from OpenAPI spec
+
+The [schema](/terraform/plugin/framework/handling-data/schemas) and [data models](/terraform/plugin/framework/handling-data/accessing-values) of the Order data source can be generated using an OpenAPI specification.
+
+Update the [generator config](/terraform/plugin/code-generation/openapi-generator#generator-config) file from the previous example, with the following content:
+
+```yaml
+provider:
+  name: petstore
+resources:
+  pet:
+    create:
+      path: /pet
+      method: POST
+    read:
+      path: /pet/{petId}
+      method: GET
+    schema:
+      attributes:
+        aliases:
+          petId: id
+# New section!
+data_sources:
+  order:
+    read:
+      path: /store/order/{orderId}
+      method: GET
+    schema:
+      attributes:
+        aliases:
+          orderId: id
+```
+
+Similar to the [`pet` resource example](#generate-pet-schema-from-openapi-spec), this config defines the locations of the API Read method that the `order` data source uses. The config also aliases the `orderId` parameter to combine it with the `id` attribute in the response body of the OpenAPI spec definition.
+
+Now, run the OpenAPI spec [`generate`](/terraform/plugin/code-generation/openapi-generator#generate) and Framework Code [`generate`](/terraform/plugin/code-generation/framework-generator#generate-command) commands again:
+```shell-session
+tfplugingen-openapi generate \
+  --config ./generator_config.yml \
+  --output ./provider-code-spec.json \
+  ./openapi.json
+```
+```shell-session
+tfplugingen-framework generate data-sources \
+  --input ./provider-code-spec.json \
+  --output ./internal 
+```
+
+This will create a new Go package at `/internal/datasource_order` with exported Go types and methods that can be used for the `order` data source's schema definition and data handling.
+
+### Using the Generated Order Data Source Code
+
+Start by deleting the contents of the scaffolded `/internal/provider/order_data_source.go` file, and copy/paste all of the following code into it:
+
+```go
+package provider
+
+import (
+	"context"
+	"terraform-provider-petstore/internal/datasource_order"
+
+	"github.com/hashicorp/terraform-plugin-framework/datasource"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/types"
+)
+
+var _ datasource.DataSource = (*orderDataSource)(nil)
+
+func NewOrderDataSource() datasource.DataSource {
+	return &orderDataSource{}
+}
+
+type orderDataSource struct{}
+
+func (d *orderDataSource) Metadata(ctx context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_order"
+}
+
+func (d *orderDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+	resp.Schema = datasource_order.OrderDataSourceSchema(ctx)
+}
+
+func (d *orderDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
+	var data datasource_order.OrderModel
+
+	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	resp.Diagnostics.Append(callOrderAPI(ctx, &data)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+}
+
+// Typically this method would contain logic that makes an HTTP call to a remote API, and then stores
+// computed results back to the data model. For example purposes, this function just sets computed Order
+// values to mock values to avoid data consistency errors.
+func callOrderAPI(ctx context.Context, order *datasource_order.OrderModel) diag.Diagnostics {
+	order.PetId = types.Int64Value(1)
+	order.Quantity = types.Int64Value(10)
+	order.Status = types.StringValue("delivered")
+	order.ShipDate = types.StringValue("2023-07-25T23:43:16Z")
+	order.Complete = types.BoolValue(true)
+
+	return nil
+}
+```
+
+Before running tests with Terraform configuration, let's again evaluate different snippets of the above code.
+
+#### Order Schema
+
+```go
+// --snip--
+
+func (d *orderDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+	resp.Schema = datasource_order.OrderDataSourceSchema(ctx)
+}
+
+// --snip--
+```
+
+Here the scaffolded [schema](/terraform/plugin/framework/handling-data/schemas) of the `order` data source has been replaced with the generated schema from the `datasource_order` package.
+
+#### Order Data Model
+
+```go
+// --snip--
+
+func (d *orderDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
+	var data datasource_order.OrderModel
+
+	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	resp.Diagnostics.Append(callOrderAPI(ctx, &data)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+}
+
+// --snip--
+```
+
+Here the scaffolded [data model](/terraform/plugin/framework/handling-data/accessing-values) in the `Read` function has been replaced with the generated data model from the `datasource_order` package. The `callOrderAPI` function has been added, which is a sample reference on how this Order data model could be interacted with.
+
+### Test the Order Data Source
+
+Now that the generated Order schema is integrated into the scaffolded data source, build and install the provider for testing:
+
+```shell-session
+go mod tidy
+```
+```shell-session
+go install .
+```
+
+
+First, create an `order` data source by adding the following Terraform config to our existing `main.tf` and run `terraform apply -auto-approve`:
+
+```hcl
+data "petstore_order" "first_order" {
+  id = 1
+}
+
+output "first_order" {
+  value = data.petstore_order.first_order
+}
+```
+
+```shell-session
+ $ terraform apply -auto-approve
+
+data.petstore_order.first_order: Reading...
+petstore_pet.clifford: Refreshing state... [name=Clifford the Big Red Dog]
+data.petstore_order.first_order: Read complete after 0s
+
+Changes to Outputs:
+  + first_order = {
+      + complete  = true
+      + id        = 1
+      + pet_id    = 1
+      + quantity  = 10
+      + ship_date = "2023-07-25T23:43:16Z"
+      + status    = "delivered"
+    }
+
+You can apply this plan to save these new output values to the Terraform state, without changing any real infrastructure.
+
+Apply complete! Resources: 0 added, 0 changed, 0 destroyed.
+
+Outputs:
+
+first_order = {
+  "complete" = true
+  "id" = 1
+  "pet_id" = 1
+  "quantity" = 10
+  "ship_date" = "2023-07-25T23:43:16Z"
+  "status" = "delivered"
+}
+```
+
+As the `order` data source's only configurable attribute is a required `id`, test this validation by removing `id` from the `data.petstore_order.first_order` config and running `terraform validate`:
+
+```hcl
+data "petstore_order" "first_order" {}
+
+
+output "first_order" {
+  value = data.petstore_order.first_order
+}
+```
+
+```shell-session
+ $ terraform validate           
+
+╷
+│ Error: Missing required argument
+│ 
+│   on main.tf line 28, in data "petstore_order" "first_order":
+│   28: data "petstore_order" "first_order" {}
+│ 
+│ The argument "id" is required, but no definition was found.
+```
+
+After finishing both the Pet resource and Order data source examples above, your final folder will look like:
+```
+.
+├── internal/
+│   ├── datasource_order/
+│   │   └── order_data_source_gen.go
+│   ├── provider/
+│   │   ├── order_data_source.go
+│   │   ├── pet_resource.go
+│   │   └── provider.go
+│   └── resource_pet/
+│       └── pet_resource_gen.go
+├── generator_config.yml
+├── go.mod
+├── go.sum
+├── main.go
+├── main.tf
+├── openapi.json
+└── provider-code-spec.json
+```
