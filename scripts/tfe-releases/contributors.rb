@@ -1,4 +1,7 @@
 #!/usr/bin/env ruby
+# Copyright (c) HashiCorp, Inc.
+# SPDX-License-Identifier: BUSL-1.1
+
 
 release = ENV["RELEASE_FILE"]
 raise "Missing path to `releases/vYYYYMM-X.md`. Please set RELEASE in your environment." unless release
