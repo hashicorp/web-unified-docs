@@ -1,0 +1,146 @@
+---
+page_title: Terraform Cloud Kubernetes Operator v2 Migration Guide
+description: >-
+  Upgrade the Terraform Cloud Kubernetes Operator from version 1 to version 2.
+tfc_only: false
+---
+
+# Terraform Cloud Kubernetes Operator v2 Migration Guide
+
+~> **Compatibility warning**: Terraform Enterprise only supports version 2 of the Terraform Cloud Kubernetes Operator. If you use Terraform Enterprise, [refer to this tutorial](/terraform/tutorials/kubernetes/kubernetes-operator-v2) for installation guidance. 
+
+To upgrade the Terraform Cloud Kubernetes Operator from version 1 to version 2, there is a one-time process that you need to complete. This process will upgrade the operator to the newest version and migrate your custom resources. 
+
+## Prerequisites
+
+The migration process requires the following tools to be installed locally:
+
+- [kubectl](https://kubernetes.io/docs/tasks/tools/#kubectl)
+- [Helm](https://helm.sh/docs/intro/install/)
+
+## Prepare for the upgrade
+
+Configure an environment variable named `RELEASE_NAMESPACE` with the value of the namespace that the Helm chart is installed in.
+
+```shell-session
+$ export RELEASE_NAMESPACE=<NAMESPACE>
+```
+
+Next, create an environment variable named `RELEASE_NAME` with the value of the name that you gave your installation for the Helm chart.
+
+```shell-session
+$ export RELEASE_NAME=<INSTALLATION_NAME>
+```
+
+Before you migrate to Terraform Cloud Kubernetes Operator v2, you must first update v1 of the operator to the latest version, including the custom resource definitions.
+
+```shell-session
+$ helm upgrade --namespace ${RELEASE_NAMESPACE} ${RELEASE_NAME} hashicorp/terraform
+```
+
+Next, backup the workspace resources.
+
+```shell-session
+$ kubectl get workspace --all-namespaces -o yaml > backup_tfc_operator_v1.yaml
+```
+
+Finally, we suggest that you set the `applyMethod` of each Terraform Cloud workspace to `manual`. In version 2 of the Terraform Cloud Kubernetes Operator this is the default value, however explicitly configuring it with the value provides extra protection from unintended automatic applies during the upgrade process. Run the following command for each Workspace resource.
+
+```shell-session
+kubectl patch workspace <WORKSPACE_NAME> --type=merge --patch '{"spec": {"applyMethod": "manual"}}'
+```
+## Upgrade the operator
+
+Clone the Terraform [Cloud Kubernetes Operator repository](https://github.com/hashicorp/terraform-cloud-operator).
+
+```shell-session
+$ git clone https://github.com/hashicorp/terraform-cloud-operator.git
+```
+
+Change to the migration directory.
+
+```shell-session
+$ cd terraform-cloud-operator/docs/migration/crds
+```
+
+View the changes that **patch A** will apply to the workspace CRD.
+
+```shell-session
+$ kubectl diff -f workspaces_patch_a.yaml
+```
+
+Patch the workspace CRD with **patch A**. This patch adds `app.terraform.io/v1alpha2` support, but excludes `.status.runStatus` because it has a different format in `app.terraform.io/v1alpha1` and causes JSON unmarshalling issues.
+
+```shell-session
+$ kubectl patch crd workspaces.app.terraform.io --patch-file workspaces_patch_a.yaml
+```
+
+Install the Operator v2 Helm chart with the `helm install` command. Be sure to set the `operator.watchedNamespaces` value to the list of namespaces your Workspace resources are deployed to. If this value is not provided, the operator will watch all namespaces in the Kubernetes cluster.
+
+```shell-session
+$ helm install \
+  ${RELEASE_NAME} hashicorp/terraform-cloud-operator \
+  --version 2.0.0-beta7 \
+  --namespace ${RELEASE_NAMESPACE} \
+  --set operator.syncPeriod=10m \
+  --set 'operator.watchedNamespaces={white,blue,red}' \
+  --set controllers.agentPool.workers=5 \
+  --set controllers.module.workers=5 \
+  --set controllers.workspace.workers=5
+```
+
+Next, create a Kubernetes secret to store the TFC API token following the [Usage Guide](https://github.com/hashicorp/terraform-cloud-operator/blob/main/docs/usage.md#prerequisites). The API token can be copied from the Kubernetes secret that you created for v1 of the operator. By default, this is named `terraformrc`. Use the `kubectl get secret` command to get the API token.
+
+```shell-session
+$ kubectl --namespace ${RELEASE_NAMESPACE} get secret terraformrc -o json | jq '.data.credentials' | tr -d '"' | base64 -d
+```
+
+If v2 of the operator pod fails to start, ensure that each `workspace` object has the `spec.token` value set. To do this, patch each `workspace` object using following command for each Workspace resource.
+
+```shell-session
+$ kubectl patch workspace <WORKSPACE_NAME> --type=merge --patch '{"spec": {"terraformVersion": "1.4.6", "token": {"secretKeyRef": {"key": "token", "name": "tfc-operator"}}}}'
+```
+
+Review the logs and verify that there are no error messages reported. The logs will report when the operator begins and finishes reconciling each workspace.
+
+```shell-session
+$ kubectl logs -f <POD_NAME>
+INFO	Workspace Controller	{"workspace": {"name":"<WORKSPACE_NAME>","namespace":"<NAMESPACE>"}, "msg": "new reconciliation event"}
+##...
+INFO	Workspace Controller	{"workspace": {"name":"<WORKSPACE_NAME>","namespace":"<NAMESPACE>"}, "msg": "successfully reconciled workspace"}
+```
+
+View the changes that **patch B** will apply to the workspace CRD:
+
+```shell-session
+$ kubectl diff -f workspaces_patch_b.yaml
+```
+
+Patch workspace CRD with **patch B**. This patch adds `.status.runStatus` support that was excluded in Patch A.
+
+```shell-session
+$ kubectl patch crd workspaces.app.terraform.io --patch-file workspaces_patch_b.yaml
+```
+
+The v2 operator will fail to proceed if a custom resource has the v1 finalizer `finalizer.workspace.app.terraform.io`. If you encounter an error, check the logs for more information.
+
+```shell-session
+$ kubectl logs -f <POD_NAME>
+```
+
+Specifically, look for an error message such as the following.
+
+```
+ERROR	Migration	{"workspace": "default/<WORKSPACE_NAME>", "msg": "spec contains old finalizer finalizer.workspace.app.terraform.io"}
+```
+The `finalizer` exists to provide greater control over the migration process. Verify the custom resource, and when you’re ready to migrate it, use the `kubectl patch` command to update the `finalizer` value.
+
+```shell-session
+$ kubectl patch workspace migration --type=merge --patch '{"metadata": {"finalizers": ["workspace.app.terraform.io/finalizer"]}}'
+```
+
+Finally, review the operator logs once more and verify there are no error messages reported.
+
+```shell-session
+$ kubectl logs -f <POD_NAME>
+```

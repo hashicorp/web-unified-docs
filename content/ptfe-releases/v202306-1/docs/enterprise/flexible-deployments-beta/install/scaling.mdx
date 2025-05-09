@@ -1,0 +1,147 @@
+---
+page_title: Kubernetes Scaling - Installation - Flexible Deployment Options Beta - Terraform Enterprise
+description: >-
+  Scaling information for Terraform Enterprise Flexibile Deployment Options
+  (FDO) on Kubernetes.
+---
+
+<Note title="Beta Documentation">
+  This documentation supports the Beta release of Terraform Enterprise Flexible Deployment Options. The information here does not apply to other generally available releases of Terraform Enterprise. 
+<br/>
+
+  If you want to participate in the beta program, get in touch with your HashiCorp account team. For beta support, visit our [Support page](/terraform/enterprise/flexible-deployments-beta/admin/support) or [submit a request directly](https://support.hashicorp.com).
+</Note>
+
+# Scaling guide for Kubernetes runtime
+
+This document describes how to scale Terraform Enterprise Flexible Deployment Option with kubernetes runtime. Following prerequisites should be considered before scaling TFE:
+
+ - `operational_mode` should be set to `active-active`
+ - External Redis for multiple active application pods
+ - PostgreSQL Database (Multi-AZ)
+ - Object Storage
+
+## Kubernetes cluster worker node requirements
+
+The hardware requirements for nodes with the worker role mostly depend on your workloads. The minimum to run the Kubernetes node components is 1 CPU (core) and 1GB of memory. Many environments also have enabled cluster autoscaling, where the number of nodes in the cluster is scaled in response to resource needs. The worker node should have enough capacity for TFE deployments.
+
+## Terraform Enterprise pod requirements
+
+### Hardware sizing for TFE pod
+
+The minimum size would be appropriate for most initial production deployments, or for development/testing environments.
+
+|  CPU    | Memory   |
+| ------- | ---------|
+| 2 core  | 3 GB RAM |
+
+[Requests and limits](https://github.com/hashicorp/terraform-enterprise-helm/blob/aa0110f2e27943353ad2e792bf5f053b18b29079/values.yaml#LL28C1-L28C11) are the mechanisms used to control resources such as CPU and memory in kubernetes deployment. Requests are what the container is guaranteed to get. Limits, on the other hand, make sure a container never goes above a certain value. The container is only allowed to go up to the limit, and then it is restricted.
+
+All of the scaling tests were conducted with minimum memory of 2.5GB and .75 vCPU and scaled up to maximum of 7.5GB and 4 vCPU.
+
+None of the terraform-enterprise pods were killed during the soak test. This means that we never hit the limit with resources.
+
+```YAML
+resources:
+   requests:
+     memory: "2500Mi"
+     cpu: "750m"
+   limits:
+     memory: "7500Mi"
+     cpu: "4000m"
+```
+
+## Sizing for PostgreSQL
+
+The PostgreSQL Database should be sized according to the anticipated scale of the TFE deployment. A minimum of 16GB memory and 4 vCPU is recommended for most installations.
+
+This sizing is the same as the ones used for TFE-Replicated installations.
+
+| Type    |  CPU   | Memory    | Storage |
+| ------- | -------|-----------|---------|
+| Minimum | 4 core | 16 GB RAM | 50 GB   |
+| Scaling | 8 core | 32 GB RAM | 50 GB   |
+
+## Sizing for Redis cache
+
+All the scaling tests were conducted with Redis Cache of minimum 6GB with Multi-AZ enabled and Automated Failover. This sizing is the same as the ones used for TFE-Replicated installations.
+
+## How to scale terraform-enterprise pods
+
+To handle increased computational workload requirements of your organization you can scale TFE horizontally by increasing the number of terraform-enterprise pods. Of course, this sort of scaling assumes that there are resources available in your cluster to consume. Sometimes, you actually need to scale up the cluster itself.
+
+When TFE is deployed on to the kubernetes cluster, a deployment object is created and it manages the TFE pods through a ReplicaSet that is automatically created when you create a deployment. 
+
+The replicas field in the spec section of [deployment.yaml](https://github.com/hashicorp/terraform-enterprise-helm/blob/aa0110f2e27943353ad2e792bf5f053b18b29079/templates/deployment.yaml#LL13C39-L13C39) controls the desired number of TFE pods. When you create the TFE deployment object, kubernetes creates this many pods from the pod template and keeps the number of pods until you delete the deployment.
+
+```YAML
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: terraform-enterprise
+  labels:
+    app: terraform-enterprise
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: terraform-enterprise
+  template:
+    metadata:
+      annotations:
+    {{- if .Values.pod.annotations }}
+    {{ toYaml .Values.pod.annotations | indent 8 }}
+    {{ end }}
+      labels:
+        app: terraform-enterprise
+```
+Please note that this is different from the [Horizontal Pod Autoscaler (HPA)](https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/) where the number of pods needed is based on metrics set by you and applies to the creation or deletion of pods based on threshold sets.
+
+TFE on kubernetes runtime can be scaled up to a maximum of 5 number of pods with a concurrency level of 50. The default concurrency is set at 10.  Learn more about concurreny by following [capacity and performance](https://developer.hashicorp.com/terraform/enterprise/system-overview/capacity).
+
+## Troubleshooting Helm timeout
+
+Under certain circumstances, when creating a Deployment, The pods may error. You can start troubleshooting by inspecting the deployment with *kubectl describe*. The Deployment’s conditions gives more information about the status of *ReplicaSet* being created: 
+```bash
+$ kubectl describe deployment -n namespace
+…
+Conditions:
+  Type           Status  Reason
+  ----           ------  ------
+  Available      True    MinimumReplicasAvailable
+  Progressing    True    NewReplicaSetAvailable
+OldReplicaSets:  <none>
+NewReplicaSet:   terraform-enterprise-57df9d98f4 (10/10 replicas created)
+Events:          <none>
+```
+Alternatively, you can examine the ReplicaSet and its events to troubleshoot further.
+```bash
+$ kubectl describe rs -n namespace
+…
+  Type    Reason            Age                   From                   Message
+  ----    ------            ----                  ----                   -------
+  Normal  SuccessfulCreate  36m                   replicaset-controller  Created pod: terraform-enterprise-57df9d98f4-mmbqv
+  Normal  SuccessfulCreate  35m                   replicaset-controller  Created pod: terraform-enterprise-57df9d98f4-rrrcn
+  Normal  SuccessfulCreate  35m                   replicaset-controller  Created pod: terraform-enterprise-57df9d98f4-h86fl
+  Normal  SuccessfulCreate  13m                   replicaset-controller  Created pod: terraform-enterprise-57df9d98f4-xqgmp
+  Normal  SuccessfulCreate  12m                   replicaset-controller  Created pod: terraform-enterprise-57df9d98f4-tswt2
+  Normal  SuccessfulCreate  12m                   replicaset-controller  Created pod: terraform-enterprise-57df9d98f4-x9ql6
+  Normal  SuccessfulCreate  11m                   replicaset-controller  Created pod: terraform-enterprise-57df9d98f4-f5nhq
+  Normal  SuccessfulCreate  11m                   replicaset-controller  Created pod: terraform-enterprise-57df9d98f4-z962b
+  Normal  SuccessfulCreate  11m                   replicaset-controller  Created pod: terraform-enterprise-57df9d98f4-2hz9r
+  Normal  SuccessfulCreate  10m                   replicaset-controller  Created pod: terraform-enterprise-57df9d98f4-vpz9x
+  Normal  SuccessfulCreate  10m                   replicaset-controller  Created pod: terraform-enterprise-57df9d98f4-lwwdv
+  Normal  SuccessfulCreate  9m44s                 replicaset-controller  Created pod: terraform-enterprise-57df9d98f4-zvq4q
+  Normal  SuccessfulCreate  9m19s (x2 over 5d4h)  replicaset-controller  (combined from similar events): Created pod: terraform-enterprise-57df9d98f4-cdnmq
+…
+```
+If the pod is in failed status, you can further inspect pod logs by *kubectl exec* to get a shell to a running pod. Furthermore troubleshooting can be done by inspecting the application logs located at */var/log/terraform-enterprise*.
+```bash
+$ kubectl get po --all-namespaces
+$ kubectl exec -it  terraform-enterprise-xxxxxxxx -n namespace -- /bin/bash
+...              
+NAMESPACE               NAME                                              READY   STATUS    RESTARTS   AGE
+public-active-active    terraform-enterprise-6ccccbc47f-84lbn             0/1     Running   0          3m23s
+public-active-active    terraform-enterprise-6ccccbc47f-8zb9b             1/1     Running   0          3m23s
+...
+```

@@ -156,41 +156,41 @@ export const PRODUCT_CONFIG = {
 	//  versionedDocs: true,
 	// 	websiteDir: 'website',
 	// },
-	// 'ptfe-releases': {
-	// 	/**
-	// 	 * ✅ Initial migration attempt: SEEMS TO WORK
-	// 	 *
-	// 	 * TODO: handle `terraform-docs-common` and the `copy-docs` workflow.
-	// 	 * In our current system, this copies a subset of `cloud-docs` into
-	// 	 * `ptfe-releases`. We need to retain some form of this workflow
-	// 	 * in our new setup, both during migration, and as a script that can
-	// 	 * be run in the future to sync `cloud-docs` content
-	// 	 * from `terraform-docs-common` into `ptfe-releases`.
-	// 	 *
-	// 	 * For more details see this gist:
-	// 	 * https://gist.github.com/zchsh/73c36d4248880cb1a66216b2b00f89ed
-	// 	 */
-	// 	assetDir: 'img',
-	// 	basePaths: ['enterprise'],
-	// 	contentDir: 'docs',
-	// 	dataDir: 'data',
-	// 	productSlug: 'terraform',
-	// 	/**
-	// 	 * Note: we need to sort versions for various reasons. Nearly all
-	// 	 * our documentation is semver-versioned. PTFE is not. Rather than
-	// 	 * implement custom sorting from the ground up, we can coerce PTFE
-	// 	 * date-based versions into semver, purely for the purpose of sorting.
-	// 	 */
-	// 	semverCoerce: (versionString) => {
-	// 		const versionRegex = /v(\d\d\d\d)(\d\d)-([\d]+)/
-	// 		const versionParts = versionRegex.exec(versionString)
-	// 		const [year, date, patch] = versionParts.slice(1)
-	// 		const semverString = `v${year}.${parseInt(date)}.${patch}`
-	// 		return semver.coerce(semverString)
-	// 	},
-	// 	versionedDocs: true,
-	// 	websiteDir: 'website',
-	// },
+	'ptfe-releases': {
+		/**
+		 * ✅ Initial migration attempt: SEEMS TO WORK
+		 *
+		 * TODO: handle `terraform-docs-common` and the `copy-docs` workflow.
+		 * In our current system, this copies a subset of `cloud-docs` into
+		 * `ptfe-releases`. We need to retain some form of this workflow
+		 * in our new setup, both during migration, and as a script that can
+		 * be run in the future to sync `cloud-docs` content
+		 * from `terraform-docs-common` into `ptfe-releases`.
+		 *
+		 * For more details see this gist:
+		 * https://gist.github.com/zchsh/73c36d4248880cb1a66216b2b00f89ed
+		 */
+		assetDir: 'img',
+		basePaths: ['enterprise'],
+		contentDir: 'docs',
+		dataDir: 'data',
+		productSlug: 'terraform',
+		/**
+		 * Note: we need to sort versions for various reasons. Nearly all
+		 * our documentation is semver-versioned. PTFE is not. Rather than
+		 * implement custom sorting from the ground up, we can coerce PTFE
+		 * date-based versions into semver, purely for the purpose of sorting.
+		 */
+		semverCoerce: (versionString) => {
+			const versionRegex = /v(\d\d\d\d)(\d\d)-([\d]+)/
+			const versionParts = versionRegex.exec(versionString)
+			const [year, date, patch] = versionParts.slice(1)
+			const semverString = `v${year}.${parseInt(date)}.${patch}`
+			return semver.coerce(semverString)
+		},
+		versionedDocs: true,
+		websiteDir: 'website',
+	},
 	// sentinel: {
 	// 	/**
 	// 	 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
