@@ -14,5 +14,8 @@ project {
     ".next/**",
     ".husky/**",
     "next-env.d.ts",
+    "Gemfile",
+    "scripts/tfe-releases/tfe-releases-repos.yaml",
+    "scripts/tfe-releases/app_repos.yaml",
   ]
 }
