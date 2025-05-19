@@ -156,41 +156,41 @@ export const PRODUCT_CONFIG = {
 	//  versionedDocs: true,
 	// 	websiteDir: 'website',
 	// },
-	// 'ptfe-releases': {
-	// 	/**
-	// 	 * ✅ Initial migration attempt: SEEMS TO WORK
-	// 	 *
-	// 	 * TODO: handle `terraform-docs-common` and the `copy-docs` workflow.
-	// 	 * In our current system, this copies a subset of `cloud-docs` into
-	// 	 * `ptfe-releases`. We need to retain some form of this workflow
-	// 	 * in our new setup, both during migration, and as a script that can
-	// 	 * be run in the future to sync `cloud-docs` content
-	// 	 * from `terraform-docs-common` into `ptfe-releases`.
-	// 	 *
-	// 	 * For more details see this gist:
-	// 	 * https://gist.github.com/zchsh/73c36d4248880cb1a66216b2b00f89ed
-	// 	 */
-	// 	assetDir: 'img',
-	// 	basePaths: ['enterprise'],
-	// 	contentDir: 'docs',
-	// 	dataDir: 'data',
-	// 	productSlug: 'terraform',
-	// 	/**
-	// 	 * Note: we need to sort versions for various reasons. Nearly all
-	// 	 * our documentation is semver-versioned. PTFE is not. Rather than
-	// 	 * implement custom sorting from the ground up, we can coerce PTFE
-	// 	 * date-based versions into semver, purely for the purpose of sorting.
-	// 	 */
-	// 	semverCoerce: (versionString) => {
-	// 		const versionRegex = /v(\d\d\d\d)(\d\d)-([\d]+)/
-	// 		const versionParts = versionRegex.exec(versionString)
-	// 		const [year, date, patch] = versionParts.slice(1)
-	// 		const semverString = `v${year}.${parseInt(date)}.${patch}`
-	// 		return semver.coerce(semverString)
-	// 	},
-	// 	versionedDocs: true,
-	// 	websiteDir: 'website',
-	// },
+	'ptfe-releases': {
+		/**
+		 * ✅ Initial migration attempt: SEEMS TO WORK
+		 *
+		 * TODO: handle `terraform-docs-common` and the `copy-docs` workflow.
+		 * In our current system, this copies a subset of `cloud-docs` into
+		 * `ptfe-releases`. We need to retain some form of this workflow
+		 * in our new setup, both during migration, and as a script that can
+		 * be run in the future to sync `cloud-docs` content
+		 * from `terraform-docs-common` into `ptfe-releases`.
+		 *
+		 * For more details see this gist:
+		 * https://gist.github.com/zchsh/73c36d4248880cb1a66216b2b00f89ed
+		 */
+		assetDir: 'img',
+		basePaths: ['enterprise'],
+		contentDir: 'docs',
+		dataDir: 'data',
+		productSlug: 'terraform',
+		/**
+		 * Note: we need to sort versions for various reasons. Nearly all
+		 * our documentation is semver-versioned. PTFE is not. Rather than
+		 * implement custom sorting from the ground up, we can coerce PTFE
+		 * date-based versions into semver, purely for the purpose of sorting.
+		 */
+		semverCoerce: (versionString) => {
+			const versionRegex = /v(\d\d\d\d)(\d\d)-([\d]+)/
+			const versionParts = versionRegex.exec(versionString)
+			const [year, date, patch] = versionParts.slice(1)
+			const semverString = `v${year}.${parseInt(date)}.${patch}`
+			return semver.coerce(semverString)
+		},
+		versionedDocs: true,
+		websiteDir: 'website',
+	},
 	// sentinel: {
 	// 	/**
 	// 	 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
@@ -278,28 +278,28 @@ export const PRODUCT_CONFIG = {
 		versionedDocs: true,
 		websiteDir: 'website',
 	},
-	// 'terraform-docs-common': {
-	// 	/**
-	// 	 * ✅ Initial migration attempt: SEEMS TO WORK
-	// 	 *
-	// 	 * Maybe worth noting: versioned docs is not enabled for `terraform-docs-common`.
-	// 	 * `branchForLatest` is set to `main`. We treat the single version
-	// 	 * as `v0.0.x` in our version metadata in the current content API:
-	// 	 * https://content.hashicorp.com/api/content/terraform-docs-common/version-metadata?partial=true
-	// 	 */
-	// 	/**
-	// 	 * TODO: `terraform-docs-common` has _both_ an `img` folder, _and_ a
-	// 	 * `public` folder. Need to investigate how these are used, and whether
-	// 	 * we need to move both over (eg assetDirs could be an array?)
-	// 	 */
-	// 	assetDir: 'img',
-	// 	contentDir: 'docs',
-	// 	dataDir: 'data',
-	// 	productSlug: 'terraform',
-	// 	semverCoerce: semver.coerce,
-	// 	versionedDocs: false,
-	// 	websiteDir: 'website',
-	// },
+	'terraform-docs-common': {
+		/**
+		 * ✅ Initial migration attempt: SEEMS TO WORK
+		 *
+		 * Maybe worth noting: versioned docs is not enabled for `terraform-docs-common`.
+		 * `branchForLatest` is set to `main`. We treat the single version
+		 * as `v0.0.x` in our version metadata in the current content API:
+		 * https://content.hashicorp.com/api/content/terraform-docs-common/version-metadata?partial=true
+		 */
+		/**
+		 * TODO: `terraform-docs-common` has _both_ an `img` folder, _and_ a
+		 * `public` folder. Need to investigate how these are used, and whether
+		 * we need to move both over (eg assetDirs could be an array?)
+		 */
+		assetDir: 'img',
+		contentDir: 'docs',
+		dataDir: 'data',
+		productSlug: 'terraform',
+		semverCoerce: semver.coerce,
+		versionedDocs: false,
+		websiteDir: 'website',
+	},
 	'terraform-plugin-framework': {
 		/**
 		 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
