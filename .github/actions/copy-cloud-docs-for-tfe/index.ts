@@ -5,14 +5,14 @@ import { main } from './main'
 async function action() {
   // These are absolute paths, like:
   // /home/runner/work/mktg-content-workflows/mktg-content-workflows/${source_repo}
-  const sourceRepo = core.getInput('source_repo')
-  const targetRepo = core.getInput('target_repo')
+  const sourceDir = core.getInput('source_dir')
+  const targetDir = core.getInput('target_dir')
 
   // $GITHUB_WORKSPACE: /home/runner/work/mktg-content-workflows/mktg-content-workflows
-  core.notice(`sourceRepo: ${sourceRepo}`)
-  core.notice(`targetRepo: ${targetRepo}`)
+  core.notice(`sourceDir: ${sourceDir}`)
+  core.notice(`targetDir: ${targetDir}`)
 
-  await main(sourceRepo, targetRepo)
+  await main(sourceDir, targetDir)
 }
 
 action()

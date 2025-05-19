@@ -1,11 +1,13 @@
+// @ts-nocheck
+
 // stdlib
 import * as fs from 'fs'
 import * as path from 'path'
 import * as assert from 'assert'
 
 // for creating custom remark plugin
-import is from 'unist-util-is' // Use 4.1.0; 5+ is ESM
-import visit from 'unist-util-visit'
+import { is } from 'unist-util-is' // Use 4.1.0; 5+ is ESM
+import { visit } from 'unist-util-visit'
 import type { Node } from 'unist'
 import type { Image } from 'mdast'
 import type { Plugin } from 'unified'

@@ -1,6 +1,8 @@
+// @ts-nocheck
+
 // for creating custom remark plugin
-import is from 'unist-util-is' // Use 4.1.0; 5+ is ESM
-import visit from 'unist-util-visit'
+import { is } from 'unist-util-is' // Use 4.1.0; 5+ is ESM
+import { visit } from 'unist-util-visit'
 import type { Node } from 'unist'
 import type { Link, Definition } from 'mdast'
 import type { Plugin } from 'unified'

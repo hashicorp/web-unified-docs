@@ -9,12 +9,11 @@ import walk from 'klaw-sync'
 import matter from 'gray-matter'
 
 // mdx processing
-import remark from 'remark'
+import { remark } from 'remark'
 
-// @ts-expect-error - remark-mdx@1.6.22 has no types
 import remarkMdx from 'remark-mdx'
 
-import { logger } from '~shared/logger'
+import * as core from '@actions/core'
 
 // plugins
 import { remarkGetImages } from './remark-get-images-plugin'
@@ -47,22 +46,22 @@ const SUB_PATH_MAPPINGS: {
  * This function will also prune the target directory
  * of any files that are not in the source directory.
  *
- * @param sourceRepo An absolute path to a GitHub repository on disk
- * @param targetRepo An absolute path to a GitHub repository on disk
+ * @param sourceDir An absolute path to a GitHub repository on disk
+ * @param targetDir An absolute path to a GitHub repository on disk
  */
 export async function main(
-  sourceRepo: string,
-  targetRepo: string
+  sourceDir: string,
+  targetDir: string
 ): Promise<void> {
-  const sourceRepoContentDir = path.join(sourceRepo, 'website/docs')
+  const sourceRepoContentDir = path.join(sourceDir, 'website/docs')
   // this gets prepended to img references like /img/docs/... so that we can resolve the assets on disk
-  const sourceRepoPublicDir = path.join(sourceRepo, 'website')
+  const sourceRepoPublicDir = path.join(sourceDir, 'website')
 
-  const targetRepoContentDir = path.join(targetRepo, 'website/docs')
+  const targetRepoContentDir = path.join(targetDir, 'website/docs')
   // this gets prepended to img reference **bases** (aka filename.extension only)
-  const targetRepoImageDir = path.join(targetRepo, 'website/img/docs')
+  const targetRepoImageDir = path.join(targetDir, 'website/img/docs')
   const targetRepoLastSyncFile = path.join(
-    targetRepo,
+    targetDir,
     'website/last-cloud-docs-sync.txt'
   )
 
@@ -94,7 +93,7 @@ export async function main(
     data = transformObject(data, [
       // inject `source` frontmatter property
       function injectSource(d) {
-        d.source = path.basename(sourceRepo)
+        d.source = path.basename(sourceDir)
         return d
       },
       // replace cloud instances with enterprise
@@ -169,7 +168,7 @@ export async function main(
       fs.copyFileSync(item.path, destAbsolutePath)
 
       // accumulate copied files
-      const relativePath = path.relative(targetRepo, destAbsolutePath)
+      const relativePath = path.relative(targetDir, destAbsolutePath)
       copiedTargetRepoRelativePaths.push(relativePath)
     }
   }
@@ -183,17 +182,17 @@ export async function main(
     fs.copyFileSync(src, target)
 
     // accumulate copied files
-    const relativePath = path.relative(targetRepo, target)
+    const relativePath = path.relative(targetDir, target)
     copiedTargetRepoRelativePaths.push(relativePath)
   }
 
   // Read or Create and Read `last-cloud-docs-sync.txt`
   if (!fs.existsSync(targetRepoLastSyncFile)) {
-    logger.info('Creating `${targetRepoLastSyncFile}`')
+    core.info('Creating `${targetRepoLastSyncFile}`')
     fs.writeFileSync(targetRepoLastSyncFile, '', 'utf8')
   }
 
-  logger.info('Reading `${targetRepoLastSyncFile}`')
+  core.info('Reading `${targetRepoLastSyncFile}`')
   // Any filename that is in this list, that was not just sync'd is considered stale; Prune.
   // Then save over `last-cloud-docs-sync.txt`
   const lastSync = fs
@@ -210,18 +209,18 @@ export async function main(
       return !copiedTargetRepoRelativePaths.includes(relativePath)
     })
     .forEach((relativePath) => {
-      const file = path.join(targetRepo, relativePath)
+      const file = path.join(targetDir, relativePath)
       // set force to true to ignore errors;
       // This happens when a file is deleted from the source repo.
-      logger.info(`Deleting stale file: ${file}...`)
+      core.info(`Deleting stale file: ${file}...`)
       fs.rmSync(file, { force: true })
-      logger.info(`Deleted stale file: ${file}`)
+      core.info(`Deleted stale file: ${file}`)
 
       recursiveRmEmptyParentDirs(file)
     })
 
   // clear file
-  logger.info('Clearing `${targetRepoLastSyncFile}`')
+  core.info('Clearing `${targetRepoLastSyncFile}`')
   fs.truncateSync(targetRepoLastSyncFile, 0)
 
   const stream = fs.createWriteStream(targetRepoLastSyncFile, { flags: 'a' })
@@ -238,7 +237,7 @@ export async function main(
 // This is a helper for pruning empty dirs for tests;
 // Git ignores empty dirs entirely but an in-memory filesystem doesn't.
 const recursiveRmEmptyParentDirs = (file: string) => {
-  logger.info(`Deleting empty parent dirs for ${file}...`)
+  core.info(`Deleting empty parent dirs for ${file}...`)
   const dir = path.dirname(file)
 
   if (fs.existsSync(dir)) {
@@ -246,7 +245,7 @@ const recursiveRmEmptyParentDirs = (file: string) => {
     if (files.length === 0) {
       // @ts-expect-error force is there but not typed correctly
       fs.rmdirSync(dir, { force: true, recursive: true })
-      logger.info(`Deleted empty parent dirs for ${file}`)
+      core.info(`Deleted empty parent dirs for ${file}`)
 
       recursiveRmEmptyParentDirs(path.dirname(dir))
     }
