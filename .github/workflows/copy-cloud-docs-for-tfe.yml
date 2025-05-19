@@ -1,0 +1,118 @@
+name: Copy cloud Docs For TFE
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'This simulates an origin branch. Ex: docs-tfe-releases/v123456-1; ptfe-releases/v123456-1'
+        required: true
+
+env:
+  release_branch: ${{ inputs.branch }}
+
+jobs:
+  copy-docs:
+    name: Copy Docs
+    runs-on: ubuntu-latest
+    steps:
+      # TODO: `exit 1` here short circuits the whole workflow, which we want, but results in
+      # an unnecessary `failure` status, which we don't want.
+      - name: Validate branch name
+        # ✅ docs-tfe-releases/v000011-1
+        # ✅ ptfe-releases/v000011-1
+        # ❌ ptfe-releases/v000011-2
+        # ❌ ptfe-releases/v000011-
+        # ❌ ptfe-releases/v000011
+        run: |
+          if [[ ${{ env.release_branch }} =~ ^(docs-tfe-releases|ptfe-releases)/v[0-9]{6}-1$ ]]
+          then
+            echo "::notice::Branch is valid — ${{ env.release_branch }}"
+          else
+            echo "::warning::Branch is invalid — ${{ env.release_branch }}"
+            exit 1
+          fi
+
+      - name: Set workspace & ref_name on env
+        run: |
+          echo "workspace=$GITHUB_WORKSPACE" >> $GITHUB_ENV
+          echo "ref_name=$GITHUB_REF_NAME"   >> $GITHUB_ENV
+
+      - name: Get series (YYYYMM) number from branch name
+        run: |
+          series=$(echo ${{ env.release_branch }} \
+            | awk -F '/' '{print $2}' \
+            | awk -F '-' '{print $1} {print $2}' \
+            | head -n 1)
+          echo "SERIES=$series" >> $GITHUB_ENV
+      - name: Get release (X) number from branch name
+        run: |
+          release=$(echo ${{ env.release_branch }} \
+            | awk -F '/' '{print $2}' \
+            | awk -F '-' '{print $1} {print $2}' \
+            | tail -n 1)
+          echo "RELEASE=$release" >> $GITHUB_ENV
+
+      - name: Series/Release Summary
+        run: |
+          echo "# Summary"                                                                            >> $GITHUB_STEP_SUMMARY
+          echo "**Workflow ref**: ${{env.ref_name}}"                                                  >> $GITHUB_STEP_SUMMARY
+          echo ""                                                                                     >> $GITHUB_STEP_SUMMARY
+          echo "Triggered by branch creation (or manual workflow):"                                   >> $GITHUB_STEP_SUMMARY
+          echo "- ${{github.server_url}}/hashicorp/${{env.target_repo}}/tree/${{env.release_branch}}" >> $GITHUB_STEP_SUMMARY
+          echo ""                                                                                     >> $GITHUB_STEP_SUMMARY
+          echo "**Series**: ${{env.SERIES}}"                                                          >> $GITHUB_STEP_SUMMARY
+          echo "**Release**: ${{env.RELEASE}}"                                                        >> $GITHUB_STEP_SUMMARY
+          echo ""                                                                                     >> $GITHUB_STEP_SUMMARY
+          echo "---"                                                                                  >> $GITHUB_STEP_SUMMARY
+
+      - # This repository holds workflow logic
+        name: Checkout repository
+        uses: actions/checkout@0ad4b8fadaa221de15dcec353f45205ec38ea70b # v4.1.4
+        with:
+          ref: ${{env.release_branch}}
+
+      # - # Run our composite action
+      #   name: Copy files
+      #   uses: ./github/actions/copy-cloud-docs-for-tfe
+      #   with:
+      #     source_repo: ${{ env.workspace }}/${{ env.source_repo }}
+      #     target_repo: ${{ env.workspace }}/${{ env.target_repo }}
+
+      - name: Open PR in Target Repo
+        env:
+          branch_name: docs/${{env.SERIES}}-${{env.RELEASE}}
+          pr_body: |
+            # Automated Docs PR
+
+            **TFE Series**: ${{ env.SERIES }}
+            **TFE Release**: ${{ env.RELEASE }}
+
+            This copies over `cloud-docs` from:
+            - ${{github.server_url}}/${{github.repository}}/tree/${{env.release_branch}}
+
+            This PR was created via:
+            - ${{github.server_url}}/${{github.repository}}/actions/runs/${{github.run_id}}
+
+            Triggered by creation of branch:
+            - ${{github.server_url}}/${{github.repository}}/tree/${{env.release_branch}}
+
+            ### Reviewers
+
+            > **Note**: The `digital-content-events` GH App currently does not have permissions to request PR reviews from teams.
+
+            - [ ] @hashicorp/ptfe-review
+            - [ ] @hashicorp/web-platform
+        run: |
+          git config --global user.email "team-rel-eng@hashicorp.com"
+          git config --global user.name "tfe-release-bot"
+          git checkout -b ${{env.branch_name}}
+          git add .
+          git commit -m "Automated Docs PR" --no-verify
+          git push origin HEAD
+          gh pr create \
+            --body="${{env.pr_body}}" \
+            --title="Automated Docs PR" \
+            --draft \
+            --head ${{env.branch_name}} \
+            --base main
+          url=$(gh pr view --json url --jq '.url')
+          echo "**Automated PR URL**: ${url}" >> $GITHUB_STEP_SUMMARY
