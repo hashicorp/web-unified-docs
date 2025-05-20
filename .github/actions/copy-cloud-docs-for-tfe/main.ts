@@ -40,7 +40,7 @@ const SUB_PATH_MAPPINGS: {
 const filterFunc = (item: walk.Item) => {
 	// if the item matches a IGNORE_PATTERNS expression, exclude it
 	if (
-		IGNORE_PATTERNS.some((pattern) => {
+		IGNORE_PATTERNS.some((pattern: RegExp) => {
 			return pattern.test(item.path)
 		})
 	) {
@@ -69,7 +69,7 @@ const transformObject = <T = Record<string, any>>(
 ): T => {
 	let result = data
 
-	plugins.forEach((fn) => {
+	plugins.forEach((fn: (data: T) => T) => {
 		result = fn(result)
 	})
 
@@ -96,7 +96,7 @@ export async function main(
 ): Promise<void> {
 	const newTFEVersionDir = path.join('./content/ptfe-releases', newTFEVersion)
 
-		// Create a new folder for the new TFE version
+	// Create a new folder for the new TFE version
 	// if (fs.existsSync(targetDir)) {
 	// 	throw new Error(`Directory already exists: ${targetDir}`)
 	// }
@@ -108,7 +108,6 @@ export async function main(
 
 	const newTFEVersionContentDir = path.join(newTFEVersionDir, 'docs')
 	const newTFEVersionImageDir = path.join(newTFEVersionDir, 'img/docs')
-
 
 	// Read version metadata and get the latest version of ptfe-releases
 	// const versionMetadataPath = path.resolve('app/api/versionMetadata.json')
@@ -139,7 +138,7 @@ export async function main(
 	for (const item of items) {
 		// ignore some files
 		if (
-			IGNORE_LIST.some((ignore) => {
+			IGNORE_LIST.some((ignore: string) => {
 				return item.path.endsWith(ignore)
 			})
 		) {
@@ -154,12 +153,12 @@ export async function main(
 
 		data = transformObject(data, [
 			// inject `source` frontmatter property
-			function injectSource(d) {
+			function injectSource(d: { [key: string]: any }) {
 				d.source = path.basename(HCPsourceDir)
 				return d
 			},
 			// replace cloud instances with enterprise
-			function replaceCloudWithEnterprise(d) {
+			function replaceCloudWithEnterprise(d: { [key: string]: any }) {
 				// Some docs do not have all frontmatter properties. Make sure
 				// we do not assign `undefined` (which is invalid) in YAML
 				if (d.page_title) {
@@ -189,7 +188,9 @@ export async function main(
 
 		const vfile = await remark()
 			.use(remarkMdx)
+			// @ts-expect-error remark is being passed in through the pipeline
 			.use(remarkGetImages, HCPsourceDir, imageSrcSet)
+			// @ts-expect-error remark is being passed in through the pipeline
 			.use(remarkTransformCloudDocsLinks)
 			.process(content)
 
@@ -222,7 +223,7 @@ export async function main(
 		for (const item of items) {
 			// ignore some files
 			if (
-				IGNORE_LIST.some((ignore) => {
+				IGNORE_LIST.some((ignore: string) => {
 					return item.path.endsWith(ignore)
 				})
 			) {

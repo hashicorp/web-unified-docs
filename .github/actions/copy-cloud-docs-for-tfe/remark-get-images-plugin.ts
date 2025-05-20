@@ -1,4 +1,6 @@
+/* eslint-disable */
 // @ts-nocheck
+// TODO: fix types
 
 // stdlib
 import * as fs from 'fs'
@@ -13,18 +15,18 @@ import type { Image } from 'mdast'
 import type { Plugin } from 'unified'
 
 export const remarkGetImages: Plugin<[string, Set<string>]> = (
-  HCPsourceDir,
-  imageSrcSet
+	HCPsourceDir,
+	imageSrcSet,
 ) => {
-  const test = (node: Node): node is Image => {
-    return is<Image>(node, 'image')
-  }
+	const test = (node: Node): node is Image => {
+		return is<Image>(node, 'image')
+	}
 
-  return function (tree) {
-    visit<Image>(tree, test, (node) => {
-      const src = path.join(HCPsourceDir, node.url)
-      assert.ok(fs.existsSync(src), '[getImagesPlugin] image not found: ' + src)
-      imageSrcSet.add(src)
-    })
-  }
+	return function (tree) {
+		visit<Image>(tree, test, (node) => {
+			const src = path.join(HCPsourceDir, node.url)
+			assert.ok(fs.existsSync(src), '[getImagesPlugin] image not found: ' + src)
+			imageSrcSet.add(src)
+		})
+	}
 }
