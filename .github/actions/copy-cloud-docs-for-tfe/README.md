@@ -1,6 +1,6 @@
 # `copy-cloud-docs-for-tfe`
 
-This composite action is consumed by the `copy-docs.yml` workflow, which is triggered 
+This composite action is consumed by the `copy-docs.yml` workflow, which is triggered
 at the time of the Terraform Enterprise team's **APP_DEADLINE** event.
 
 Roughly, it behaves as depicted in this diagram:
@@ -34,7 +34,7 @@ description: >-
 
 ### HTML Comments
 
-Specially formatted HTML comments can be used in matching pairs 
+Specially formatted HTML comments can be used in matching pairs
 to omit multiple **lines** of text from the copy process.
 
 > **Warning**: This only works with MDX v1.
