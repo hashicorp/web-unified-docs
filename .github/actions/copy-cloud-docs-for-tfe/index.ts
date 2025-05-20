@@ -3,16 +3,10 @@ import * as core from '@actions/core'
 import { main } from './main'
 
 async function action() {
-  // These are absolute paths, like:
-  // /home/runner/work/mktg-content-workflows/mktg-content-workflows/${source_repo}
-  const sourceDir = core.getInput('source_dir')
-  const targetDir = core.getInput('target_dir')
+  // const newTFEVersion = core.getInput('new_TFE_version')
+  const newTFEVersion = 'v000011-1'
 
-  // $GITHUB_WORKSPACE: /home/runner/work/mktg-content-workflows/mktg-content-workflows
-  core.notice(`sourceDir: ${sourceDir}`)
-  core.notice(`targetDir: ${targetDir}`)
-
-  await main(sourceDir, targetDir)
+  await main(newTFEVersion)
 }
 
 action()

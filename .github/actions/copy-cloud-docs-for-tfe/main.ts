@@ -9,7 +9,7 @@ import walk from 'klaw-sync'
 import matter from 'gray-matter'
 
 // mdx processing
-import { remark } from 'remark'
+import remark from 'remark'
 
 import remarkMdx from 'remark-mdx'
 
@@ -87,24 +87,47 @@ const transformObject = <T = Record<string, any>>(
  * This function will also prune the target directory
  * of any files that are not in the source directory.
  *
- * @param sourceDir An absolute path to a GitHub repository on disk
- * @param targetDir An absolute path to a GitHub repository on disk
+ * @param newTFEVersion An absolute path to a GitHub repository on disk
  */
 export async function main(
-	sourceDir: string,
-	targetDir: string,
+	// sourceDir: string,
+	// targetDir: string,
+	newTFEVersion: string,
 ): Promise<void> {
-	const sourceRepoContentDir = path.join(sourceDir, 'docs')
-	const sourceRepoPublicDir = path.join(sourceDir, 'img/docs')
+	const newTFEVersionDir = path.join('./content/ptfe-releases', newTFEVersion)
 
-	const targetRepoContentDir = path.join(targetDir, 'docs')
-	const targetRepoImageDir = path.join(targetDir, 'img')
+		// Create a new folder for the new TFE version
+	// if (fs.existsSync(targetDir)) {
+	// 	throw new Error(`Directory already exists: ${targetDir}`)
+	// }
+	// fs.mkdirSync(targetDir, { recursive: true })
+
+	const HCPsourceDir = './content/terraform-docs-common'
+
+	const HCPContentDir = path.join(HCPsourceDir, 'docs')
+
+	const newTFEVersionContentDir = path.join(newTFEVersionDir, 'docs')
+	const newTFEVersionImageDir = path.join(newTFEVersionDir, 'img/docs')
+
+
+	// Read version metadata and get the latest version of ptfe-releases
+	// const versionMetadataPath = path.resolve('app/api/versionMetadata.json')
+	// const versionMetadata = JSON.parse(fs.readFileSync(versionMetadataPath, 'utf8'))
+
+	// const ptfeReleases = versionMetadata['ptfe-releases']
+	// if (!ptfeReleases || ptfeReleases.length === 0) {
+	// 	throw new Error('No ptfe-releases found in versionMetadata.json')
+	// }
+
+	// const latestPtfeRelease = ptfeReleases[0]
+
+	// Actually don't think I need this
 
 	// traverse source docs and accumulate mdx files for a given set of "subPaths"
 	let items: ReadonlyArray<walk.Item> = []
 
 	for (const { source: subPath } of SUB_PATH_MAPPINGS) {
-		const src = path.join(sourceRepoContentDir, subPath)
+		const src = path.join(HCPContentDir, subPath)
 		const docItems = walk(src, {
 			nodir: true,
 			filter: filterFunc,
@@ -132,7 +155,7 @@ export async function main(
 		data = transformObject(data, [
 			// inject `source` frontmatter property
 			function injectSource(d) {
-				d.source = path.basename(sourceDir)
+				d.source = path.basename(HCPsourceDir)
 				return d
 			},
 			// replace cloud instances with enterprise
@@ -166,8 +189,8 @@ export async function main(
 
 		const vfile = await remark()
 			.use(remarkMdx)
-			.use(remarkGetImages, sourceRepoPublicDir, imageSrcSet)
-			.use(remarkTransformCloudDocsLinks) // transforms link
+			.use(remarkGetImages, HCPsourceDir, imageSrcSet)
+			.use(remarkTransformCloudDocsLinks)
 			.process(content)
 
 		// replace \-> with ->
@@ -188,8 +211,8 @@ export async function main(
 	//     /{target}/enterprise/dir/some-docs.mdx
 	// ---------------------------------------------
 	for (const { source, target } of SUB_PATH_MAPPINGS) {
-		const src = path.join(sourceRepoContentDir, source)
-		const dest = path.join(targetRepoContentDir, target)
+		const src = path.join(HCPContentDir, source)
+		const dest = path.join(newTFEVersionContentDir, target)
 
 		const items = walk(src, {
 			nodir: true,
@@ -211,7 +234,7 @@ export async function main(
 			fs.copyFileSync(item.path, destAbsolutePath)
 
 			// accumulate copied files
-			const relativePath = path.relative(targetDir, destAbsolutePath)
+			const relativePath = path.relative(newTFEVersionDir, destAbsolutePath)
 			copiedTargetRepoRelativePaths.push(relativePath)
 		}
 	}
@@ -219,13 +242,13 @@ export async function main(
 	// Copy images
 	for (const src of Array.from(imageSrcSet)) {
 		const basename = path.basename(src)
-		const target = path.join(targetRepoImageDir, basename)
+		const target = path.join(newTFEVersionImageDir, basename)
 
-		fs.mkdirSync(targetRepoImageDir, { recursive: true })
+		fs.mkdirSync(newTFEVersionImageDir, { recursive: true })
 		fs.copyFileSync(src, target)
 
 		// accumulate copied files
-		const relativePath = path.relative(targetDir, target)
+		const relativePath = path.relative(newTFEVersionDir, target)
 		copiedTargetRepoRelativePaths.push(relativePath)
 	}
 }

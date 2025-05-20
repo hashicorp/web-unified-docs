@@ -13,7 +13,7 @@ import type { Image } from 'mdast'
 import type { Plugin } from 'unified'
 
 export const remarkGetImages: Plugin<[string, Set<string>]> = (
-  sourceRepoPublicDir,
+  HCPsourceDir,
   imageSrcSet
 ) => {
   const test = (node: Node): node is Image => {
@@ -22,7 +22,7 @@ export const remarkGetImages: Plugin<[string, Set<string>]> = (
 
   return function (tree) {
     visit<Image>(tree, test, (node) => {
-      const src = path.join(sourceRepoPublicDir, node.url)
+      const src = path.join(HCPsourceDir, node.url)
       assert.ok(fs.existsSync(src), '[getImagesPlugin] image not found: ' + src)
       imageSrcSet.add(src)
     })
