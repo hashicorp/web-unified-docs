@@ -18,6 +18,7 @@ export default [
 			'content',
 			'public',
 			'vitest.config.mjs',
+			'.github/actions/copy-cloud-docs-for-tfe/out/index.js',
 		],
 	},
 	{ files: ['**/*.{js,mjs,cjs,ts,jsx,tsx}'] },
