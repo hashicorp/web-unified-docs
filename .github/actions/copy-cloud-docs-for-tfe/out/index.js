@@ -114336,7 +114336,7 @@ newTFEVersion) {
     // 	throw new Error(`Directory already exists: ${targetDir}`)
     // }
     // fs.mkdirSync(targetDir, { recursive: true })
-    const HCPsourceDir = './test/content/terraform-docs-common';
+    const HCPsourceDir = './testing/content/terraform-docs-common';
     // const HCPsourceDir = './content/terraform-docs-common'
     const HCPContentDir = external_path_.join(HCPsourceDir, 'docs');
     const newTFEVersionContentDir = external_path_.join(newTFEVersionDir, 'docs');

@@ -102,7 +102,7 @@ export async function main(
 	// }
 	// fs.mkdirSync(targetDir, { recursive: true })
 
-	const HCPsourceDir = './test/content/terraform-docs-common'
+	const HCPsourceDir = './testing/content/terraform-docs-common'
 	// const HCPsourceDir = './content/terraform-docs-common'
 
 	const HCPContentDir = path.join(HCPsourceDir, 'docs')
