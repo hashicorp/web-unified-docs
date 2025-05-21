@@ -94,7 +94,10 @@ export async function main(
 	// targetDir: string,
 	newTFEVersion: string,
 ): Promise<void> {
-	const newTFEVersionDir = path.join('./content/ptfe-releases', newTFEVersion)
+	const newTFEVersionDir = path.join(
+		'./new-pr/content/ptfe-releases',
+		newTFEVersion,
+	)
 
 	// Create a new folder for the new TFE version
 	// if (fs.existsSync(targetDir)) {
