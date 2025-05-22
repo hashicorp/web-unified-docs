@@ -130395,7 +130395,10 @@ Please specify the "importAttributesKeyword" generator option, whose value can b
 		const imageSrcSet = new Set()
 		// List of MDX files to exclude from being copied
 		const IGNORE_LIST = ['cloud-docs/index.mdx']
-		const IGNORE_PATTERNS = [/cloud-docs\/agents/i]
+		const IGNORE_PATTERNS = [
+			/cloud-docs\/agents/i,
+			/cloud-docs\/architectural-details/i,
+		]
 		const SUB_PATH_MAPPINGS = [
 			{
 				source: 'cloud-docs',
@@ -130474,15 +130477,31 @@ Please specify the "importAttributesKeyword" generator option, whose value can b
 				newTFEVersionDir,
 				'img/docs',
 			)
-			// Read version metadata and get the latest version of ptfe-releases
+			// //Read version metadata and get the latest version of ptfe-releases
 			// const versionMetadataPath = path.resolve('app/api/versionMetadata.json')
-			// const versionMetadata = JSON.parse(fs.readFileSync(versionMetadataPath, 'utf8'))
-			// const ptfeReleases = versionMetadata['ptfe-releases']
-			// if (!ptfeReleases || ptfeReleases.length === 0) {
+			// const versionMetadata = JSON.parse(
+			// 	fs.readFileSync(versionMetadataPath, 'utf8'),
+			// )
+			// const ptfeReleasesMetadata = versionMetadata['ptfe-releases']
+			// if (!ptfeReleasesMetadata || ptfeReleasesMetadata.length === 0) {
 			// 	throw new Error('No ptfe-releases found in versionMetadata.json')
 			// }
-			// const latestPtfeRelease = ptfeReleases[0]
-			// Actually don't think I need this
+			// const latestPtfeRelease = ptfeReleasesMetadata.find((release: any) => {
+			// 	return release.isLatest
+			// })?.version
+			// // Copy the /data directory from the latest ptfe-release to the new version directory
+			// const latestReleaseDir = path.join('./new-pr/content/ptfe-releases', latestPtfeRelease)
+			// const latestReleaseDataDir = path.join(latestReleaseDir, 'data')
+			// const newTFEVersionDataDir = path.join(newTFEVersionDir, 'data')
+			// if (fs.existsSync(latestReleaseDataDir)) {
+			// 	fs.mkdirSync(newTFEVersionDataDir, { recursive: true })
+			// 	const dataFiles = fs.readdirSync(latestReleaseDataDir)
+			// 	for (const file of dataFiles) {
+			// 		const srcFile = path.join(latestReleaseDataDir, file)
+			// 		const destFile = path.join(newTFEVersionDataDir, file)
+			// 		fs.copyFileSync(srcFile, destFile)
+			// 	}
+			// }
 			// traverse source docs and accumulate mdx files for a given set of "subPaths"
 			let items = []
 			for (const { source: subPath } of SUB_PATH_MAPPINGS) {
