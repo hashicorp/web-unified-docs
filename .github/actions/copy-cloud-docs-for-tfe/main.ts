@@ -98,7 +98,9 @@ export async function main(
 	const prType = newTFEVersion ? PR_TYPE.NewVersion : PR_TYPE.Diff
 
 	//Read version metadata and get the latest version of ptfe-releases
-	const versionMetadataPath = path.resolve('app/api/versionMetadata.json')
+	const versionMetadataPath = path.resolve(
+		'./workflow/app/api/versionMetadata.json',
+	)
 	const versionMetadata = JSON.parse(
 		fs.readFileSync(versionMetadataPath, 'utf8'),
 	)
