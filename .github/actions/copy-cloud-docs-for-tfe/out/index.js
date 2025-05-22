@@ -130382,16 +130382,10 @@ Please specify the "importAttributesKeyword" generator option, whose value can b
 			}
 		} // CONCATENATED MODULE: ./main.ts
 
-		// stdlib
-
-		// fs traversal
-
-		// initial processing
-
-		// mdx processing
-
-		// plugins
-
+		const PR_TYPE = {
+			NewVersion: 'NewVersion',
+			Diff: 'Diff',
+		}
 		const imageSrcSet = new Set()
 		// List of MDX files to exclude from being copied
 		const IGNORE_LIST = ['cloud-docs/index.mdx']
@@ -130452,23 +130446,38 @@ Please specify the "importAttributesKeyword" generator option, whose value can b
 		 *
 		 * @param newTFEVersion An absolute path to a GitHub repository on disk
 		 */
-		async function main(
-			// sourceDir: string,
-			// targetDir: string,
-			newTFEVersion,
-		) {
-			const newTFEVersionDir = external_path_.join(
-				'./new-pr/content/ptfe-releases',
-				newTFEVersion,
+		async function main(sourcePath, targetPath, newTFEVersion) {
+			const prType = newTFEVersion ? PR_TYPE.NewVersion : PR_TYPE.Diff
+			//Read version metadata and get the latest version of ptfe-releases
+			const versionMetadataPath = external_path_.resolve(
+				'app/api/versionMetadata.json',
 			)
-			// Create a new folder for the new TFE version
-			// if (fs.existsSync(targetDir)) {
-			// 	throw new Error(`Directory already exists: ${targetDir}`)
-			// }
-			// fs.mkdirSync(targetDir, { recursive: true })
-			const HCPsourceDir = './testing/content/terraform-docs-common'
-			// const HCPsourceDir = './content/terraform-docs-common'
+			const versionMetadata = JSON.parse(
+				external_fs_.readFileSync(versionMetadataPath, 'utf8'),
+			)
+			const ptfeReleasesMetadata = versionMetadata['ptfe-releases']
+			if (!ptfeReleasesMetadata || ptfeReleasesMetadata.length === 0) {
+				throw new Error('No ptfe-releases found in versionMetadata.json')
+			}
+			const currentPtfeRelease = ptfeReleasesMetadata.find((release) => {
+				return release.isLatest
+			})?.version
+			if (!currentPtfeRelease) {
+				throw new Error('No latest ptfe-releases found in versionMetadata.json')
+			}
+			core.info(
+				`Latest ptfe-releases version found in versionMetadata.json: ${currentPtfeRelease}`,
+			)
+			const HCPsourceDir = external_path_.join(
+				sourcePath,
+				'content/terraform-docs-common',
+			)
 			const HCPContentDir = external_path_.join(HCPsourceDir, 'docs')
+			const newTFEVersionDir = external_path_.join(
+				targetPath,
+				'content/ptfe-releases',
+				prType === PR_TYPE.NewVersion ? newTFEVersion : currentPtfeRelease,
+			)
 			const newTFEVersionContentDir = external_path_.join(
 				newTFEVersionDir,
 				'docs',
@@ -130477,31 +130486,21 @@ Please specify the "importAttributesKeyword" generator option, whose value can b
 				newTFEVersionDir,
 				'img/docs',
 			)
-			// //Read version metadata and get the latest version of ptfe-releases
-			// const versionMetadataPath = path.resolve('app/api/versionMetadata.json')
-			// const versionMetadata = JSON.parse(
-			// 	fs.readFileSync(versionMetadataPath, 'utf8'),
-			// )
-			// const ptfeReleasesMetadata = versionMetadata['ptfe-releases']
-			// if (!ptfeReleasesMetadata || ptfeReleasesMetadata.length === 0) {
-			// 	throw new Error('No ptfe-releases found in versionMetadata.json')
-			// }
-			// const latestPtfeRelease = ptfeReleasesMetadata.find((release: any) => {
-			// 	return release.isLatest
-			// })?.version
-			// // Copy the /data directory from the latest ptfe-release to the new version directory
-			// const latestReleaseDir = path.join('./new-pr/content/ptfe-releases', latestPtfeRelease)
-			// const latestReleaseDataDir = path.join(latestReleaseDir, 'data')
-			// const newTFEVersionDataDir = path.join(newTFEVersionDir, 'data')
-			// if (fs.existsSync(latestReleaseDataDir)) {
-			// 	fs.mkdirSync(newTFEVersionDataDir, { recursive: true })
-			// 	const dataFiles = fs.readdirSync(latestReleaseDataDir)
-			// 	for (const file of dataFiles) {
-			// 		const srcFile = path.join(latestReleaseDataDir, file)
-			// 		const destFile = path.join(newTFEVersionDataDir, file)
-			// 		fs.copyFileSync(srcFile, destFile)
-			// 	}
-			// }
+			// If this is a new version, we need to copy the current ptfe-release
+			// files to the new version's directory.
+			// This is to ensure that we have the all of the images and nav-data
+			if (prType === PR_TYPE.NewVersion) {
+				core.info(`Creating new version directory: ${newTFEVersionDir}`)
+				external_fs_.mkdirSync(newTFEVersionDir, { recursive: true })
+				const prevTFEVersionDir = external_path_.join(
+					targetPath,
+					'content/ptfe-releases',
+					currentPtfeRelease,
+				)
+				external_fs_.cpSync(prevTFEVersionDir, newTFEVersionDir, {
+					recursive: true,
+				})
+			}
 			// traverse source docs and accumulate mdx files for a given set of "subPaths"
 			let items = []
 			for (const { source: subPath } of SUB_PATH_MAPPINGS) {
@@ -130575,8 +130574,6 @@ Please specify the "importAttributesKeyword" generator option, whose value can b
 				)
 				external_fs_.writeFileSync(item.path, contents)
 			}
-			// keep track of the files that were copied in the target repo
-			const copiedTargetRepoRelativePaths = []
 			// Copy an entire directory
 			// ---------------------------------------------
 			//     /{source}/cloud-docs/dir/some-doc.mdx
@@ -130604,12 +130601,6 @@ Please specify the "importAttributesKeyword" generator option, whose value can b
 						recursive: true,
 					})
 					external_fs_.copyFileSync(item.path, destAbsolutePath)
-					// accumulate copied files
-					const relativePath = external_path_.relative(
-						newTFEVersionDir,
-						destAbsolutePath,
-					)
-					copiedTargetRepoRelativePaths.push(relativePath)
 				}
 			}
 			// Copy images
@@ -130618,16 +130609,15 @@ Please specify the "importAttributesKeyword" generator option, whose value can b
 				const target = external_path_.join(newTFEVersionImageDir, basename)
 				external_fs_.mkdirSync(newTFEVersionImageDir, { recursive: true })
 				external_fs_.copyFileSync(src, target)
-				// accumulate copied files
-				const relativePath = external_path_.relative(newTFEVersionDir, target)
-				copiedTargetRepoRelativePaths.push(relativePath)
 			}
 		} // CONCATENATED MODULE: ./index.ts
 
 		async function action() {
+			const sourcePath = core.getInput('source_path')
+			const targetPath = core.getInput('target_path')
 			const newTFEVersion = core.getInput('new_TFE_version')
 			// const newTFEVersion = 'v000011-1'
-			await main(newTFEVersion)
+			await main(sourcePath, targetPath, newTFEVersion)
 		}
 		action()
 	})()

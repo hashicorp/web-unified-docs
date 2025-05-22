@@ -1,21 +1,19 @@
-// stdlib
 import * as fs from 'fs'
 import * as path from 'path'
 
-// fs traversal
+import * as core from '@actions/core'
 import walk from 'klaw-sync'
-
-// initial processing
 import matter from 'gray-matter'
-
-// mdx processing
 import remark from 'remark'
-
 import remarkMdx from 'remark-mdx'
 
-// plugins
 import { remarkGetImages } from './remark-get-images-plugin'
 import { remarkTransformCloudDocsLinks } from './remark-transfrom-cloud-docs-links'
+
+const PR_TYPE = {
+	NewVersion: 'NewVersion',
+	Diff: 'Diff',
+} as const
 
 const imageSrcSet = new Set<string>()
 
@@ -93,58 +91,62 @@ const transformObject = <T = Record<string, any>>(
  * @param newTFEVersion An absolute path to a GitHub repository on disk
  */
 export async function main(
-	// sourceDir: string,
-	// targetDir: string,
-	newTFEVersion: string,
+	sourcePath: string,
+	targetPath: string,
+	newTFEVersion?: string,
 ): Promise<void> {
-	const newTFEVersionDir = path.join(
-		'./new-pr/content/ptfe-releases',
-		newTFEVersion,
+	const prType = newTFEVersion ? PR_TYPE.NewVersion : PR_TYPE.Diff
+
+	//Read version metadata and get the latest version of ptfe-releases
+	const versionMetadataPath = path.resolve('app/api/versionMetadata.json')
+	const versionMetadata = JSON.parse(
+		fs.readFileSync(versionMetadataPath, 'utf8'),
 	)
 
-	// Create a new folder for the new TFE version
-	// if (fs.existsSync(targetDir)) {
-	// 	throw new Error(`Directory already exists: ${targetDir}`)
-	// }
-	// fs.mkdirSync(targetDir, { recursive: true })
+	const ptfeReleasesMetadata = versionMetadata['ptfe-releases']
+	if (!ptfeReleasesMetadata || ptfeReleasesMetadata.length === 0) {
+		throw new Error('No ptfe-releases found in versionMetadata.json')
+	}
 
-	const HCPsourceDir = './testing/content/terraform-docs-common'
-	// const HCPsourceDir = './content/terraform-docs-common'
+	const currentPtfeRelease = ptfeReleasesMetadata.find((release: any) => {
+		return release.isLatest
+	})?.version
 
+	if (!currentPtfeRelease) {
+		throw new Error('No latest ptfe-releases found in versionMetadata.json')
+	}
+
+	core.info(
+		`Latest ptfe-releases version found in versionMetadata.json: ${currentPtfeRelease}`,
+	)
+
+	const HCPsourceDir = path.join(sourcePath, 'content/terraform-docs-common')
 	const HCPContentDir = path.join(HCPsourceDir, 'docs')
+
+	const newTFEVersionDir = path.join(
+		targetPath,
+		'content/ptfe-releases',
+		prType === PR_TYPE.NewVersion ? newTFEVersion : currentPtfeRelease,
+	)
 
 	const newTFEVersionContentDir = path.join(newTFEVersionDir, 'docs')
 	const newTFEVersionImageDir = path.join(newTFEVersionDir, 'img/docs')
 
-	// //Read version metadata and get the latest version of ptfe-releases
-	// const versionMetadataPath = path.resolve('app/api/versionMetadata.json')
-	// const versionMetadata = JSON.parse(
-	// 	fs.readFileSync(versionMetadataPath, 'utf8'),
-	// )
+	// If this is a new version, we need to copy the current ptfe-release
+	// files to the new version's directory.
+	// This is to ensure that we have the all of the images and nav-data
+	if (prType === PR_TYPE.NewVersion) {
+		core.info(`Creating new version directory: ${newTFEVersionDir}`)
+		fs.mkdirSync(newTFEVersionDir, { recursive: true })
 
-	// const ptfeReleasesMetadata = versionMetadata['ptfe-releases']
-	// if (!ptfeReleasesMetadata || ptfeReleasesMetadata.length === 0) {
-	// 	throw new Error('No ptfe-releases found in versionMetadata.json')
-	// }
+		const prevTFEVersionDir = path.join(
+			targetPath,
+			'content/ptfe-releases',
+			currentPtfeRelease,
+		)
 
-	// const latestPtfeRelease = ptfeReleasesMetadata.find((release: any) => {
-	// 	return release.isLatest
-	// })?.version
-
-	// // Copy the /data directory from the latest ptfe-release to the new version directory
-	// const latestReleaseDir = path.join('./new-pr/content/ptfe-releases', latestPtfeRelease)
-	// const latestReleaseDataDir = path.join(latestReleaseDir, 'data')
-	// const newTFEVersionDataDir = path.join(newTFEVersionDir, 'data')
-
-	// if (fs.existsSync(latestReleaseDataDir)) {
-	// 	fs.mkdirSync(newTFEVersionDataDir, { recursive: true })
-	// 	const dataFiles = fs.readdirSync(latestReleaseDataDir)
-	// 	for (const file of dataFiles) {
-	// 		const srcFile = path.join(latestReleaseDataDir, file)
-	// 		const destFile = path.join(newTFEVersionDataDir, file)
-	// 		fs.copyFileSync(srcFile, destFile)
-	// 	}
-	// }
+		fs.cpSync(prevTFEVersionDir, newTFEVersionDir, { recursive: true })
+	}
 
 	// traverse source docs and accumulate mdx files for a given set of "subPaths"
 	let items: ReadonlyArray<walk.Item> = []
@@ -226,9 +228,6 @@ export async function main(
 		fs.writeFileSync(item.path, contents)
 	}
 
-	// keep track of the files that were copied in the target repo
-	const copiedTargetRepoRelativePaths: string[] = []
-
 	// Copy an entire directory
 	// ---------------------------------------------
 	//     /{source}/cloud-docs/dir/some-doc.mdx
@@ -257,10 +256,6 @@ export async function main(
 			const destAbsolutePath = item.path.replace(src, dest)
 			fs.mkdirSync(path.dirname(destAbsolutePath), { recursive: true })
 			fs.copyFileSync(item.path, destAbsolutePath)
-
-			// accumulate copied files
-			const relativePath = path.relative(newTFEVersionDir, destAbsolutePath)
-			copiedTargetRepoRelativePaths.push(relativePath)
 		}
 	}
 
@@ -271,9 +266,5 @@ export async function main(
 
 		fs.mkdirSync(newTFEVersionImageDir, { recursive: true })
 		fs.copyFileSync(src, target)
-
-		// accumulate copied files
-		const relativePath = path.relative(newTFEVersionDir, target)
-		copiedTargetRepoRelativePaths.push(relativePath)
 	}
 }
