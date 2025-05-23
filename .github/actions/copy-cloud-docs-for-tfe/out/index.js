@@ -1,3 +1,8 @@
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: BUSL-1.1
+ */
+
 /******/ ;(() => {
 	// webpackBootstrap
 	/******/ var __webpack_modules__ = {
@@ -22165,9 +22170,9 @@ If you want to leave it as-is, add ${syntaxPluginInfo} to the 'plugins' section 
 
 			function isHexCode(c) {
 				return (
-					(0x30 /* 0 */ <= c && c <= 0x39 /* 9 */) ||
-					(0x41 /* A */ <= c && c <= 0x46 /* F */) ||
-					(0x61 /* a */ <= c && c <= 0x66 /* f */)
+					(0x30 /* 0 */ <= c && c <= 0x39) /* 9 */ ||
+					(0x41 /* A */ <= c && c <= 0x46) /* F */ ||
+					(0x61 /* a */ <= c && c <= 0x66) /* f */
 				)
 			}
 
@@ -129251,7 +129256,8 @@ Please specify the "importAttributesKeyword" generator option, whose value can b
 	})()
 	/******/
 	/******/ /* webpack/runtime/define property getters */
-	/******/ ;(() => {
+	/******/
+	;(() => {
 		/******/ // define getter functions for harmony exports
 		/******/ __nccwpck_require__.d = (exports, definition) => {
 			/******/ for (var key in definition) {
@@ -129273,14 +129279,16 @@ Please specify the "importAttributesKeyword" generator option, whose value can b
 	})()
 	/******/
 	/******/ /* webpack/runtime/hasOwnProperty shorthand */
-	/******/ ;(() => {
+	/******/
+	;(() => {
 		/******/ __nccwpck_require__.o = (obj, prop) =>
 			Object.prototype.hasOwnProperty.call(obj, prop)
 		/******/
 	})()
 	/******/
 	/******/ /* webpack/runtime/node module decorator */
-	/******/ ;(() => {
+	/******/
+	;(() => {
 		/******/ __nccwpck_require__.nmd = (module) => {
 			/******/ module.paths = []
 			/******/ if (!module.children) module.children = []
