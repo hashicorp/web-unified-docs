@@ -33,7 +33,12 @@ export type GetParams = {
 }
 export async function GET(request: Request, { params }: { params: GetParams }) {
 	const { productSlug, version, section } = params
-	const productVersionResult = getProductVersion(productSlug, version)
+	let product = productSlug
+	if (product === 'ptfe-releases') {
+		product = 'terraform-enterprise'
+	}
+
+	const productVersionResult = getProductVersion(product, version)
 	if (!productVersionResult.ok) {
 		console.error(errorResultToString('API', productVersionResult))
 		return new Response('Not found', { status: 404 })
@@ -45,7 +50,7 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 
 	const readFileResult = await readFile([
 		'content',
-		productSlug,
+		product,
 		parsedVersion,
 		'data',
 		`${sectionPath}-nav-data.json`,
