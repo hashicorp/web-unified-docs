@@ -26,7 +26,7 @@ describe('getLatestProductVersionDirectories', () => {
 				},
 			},
 			{
-				name: 'ptfe-releases',
+				name: 'terraform-enterprise',
 				path: 'public/content',
 				isDirectory: () => {
 					return true
@@ -40,7 +40,7 @@ describe('getLatestProductVersionDirectories', () => {
 		)
 		expect(result).toEqual([
 			path.join('public/content', 'terraform-plugin-mux', 'v0.14.x'),
-			path.join('public/content', 'ptfe-releases', 'v202410-1'),
+			path.join('public/content', 'terraform-enterprise', 'v202410-1'),
 		])
 	})
 

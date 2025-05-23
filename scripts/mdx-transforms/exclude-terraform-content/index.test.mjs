@@ -18,7 +18,7 @@ const runTransform = async (markdown, filePath) => {
 	return processor.contents
 }
 
-const ptfeFilePath = 'ptfe-releases/some-file.md'
+const ptfeFilePath = 'terraform-enterprise/some-file.md'
 
 describe('transformExcludeTerraformContent', () => {
 	it('should remove content within TFC:only blocks', async () => {
@@ -99,7 +99,7 @@ This content should be removed.
 		}).rejects.toThrow('Directive could not be parsed')
 	})
 
-	it('should remove TFC:only content and leave TFEnterprise:only content for ptfe-releases', async () => {
+	it('should remove TFC:only content and leave TFEnterprise:only content for terraform-enterprise', async () => {
 		const markdown = `
 <!-- BEGIN: TFC:only -->
 This content should be removed.

@@ -14,9 +14,9 @@ describe('getProductDirectoryFromFilePath', () => {
 
 	test('should return the repository name from a valid file path', () => {
 		const filePath =
-			'web-unified-docs/content/ptfe-releases/v202410-1/docs/enterprise/cost-estimation/aws.mdx'
+			'web-unified-docs/content/terraform-enterprise/v202410-1/docs/enterprise/cost-estimation/aws.mdx'
 		const result = getProductDirectoryFromFilePath(filePath)
-		expect(result).toBe('ptfe-releases')
+		expect(result).toBe('terraform-enterprise')
 	})
 
 	test('should return the correct repository name when there is no version', () => {

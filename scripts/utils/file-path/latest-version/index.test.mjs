@@ -46,36 +46,36 @@ describe('isLatestVersion', () => {
 	})
 
 	test('should return true if file path version exists in version metadata and is the latest version', () => {
-		getProductDirectoryFromFilePath.mockReturnValue('ptfe-releases')
+		getProductDirectoryFromFilePath.mockReturnValue('terraform-enterprise')
 		getVersionFromFilePath.mockReturnValue('v202410-1')
 
 		expect(
 			isLatestVersion(
-				'content/ptfe-releases/v202410-1/docs/enterprise/cost-estimation/gcp.mdx',
+				'content/terraform-enterprise/v202410-1/docs/enterprise/cost-estimation/gcp.mdx',
 				versionMetadata,
 			),
 		).toBe(true)
 	})
 
 	test('should return false if file path version exists in version metadata but is not the latest version', () => {
-		getProductDirectoryFromFilePath.mockReturnValue('ptfe-releases')
+		getProductDirectoryFromFilePath.mockReturnValue('terraform-enterprise')
 		getVersionFromFilePath.mockReturnValue('v202409-1')
 
 		expect(
 			isLatestVersion(
-				'content/ptfe-releases/v202409-1/docs/enterprise/cost-estimation/gcp.mdx',
+				'content/terraform-enterprise/v202409-1/docs/enterprise/cost-estimation/gcp.mdx',
 				versionMetadata,
 			),
 		).toBe(false)
 	})
 
 	test('should return false if file path version does not exist in version metadata', () => {
-		getProductDirectoryFromFilePath.mockReturnValue('ptfe-releases')
+		getProductDirectoryFromFilePath.mockReturnValue('terraform-enterprise')
 		getVersionFromFilePath.mockReturnValue('v202509-1')
 
 		expect(
 			isLatestVersion(
-				'content/ptfe-releases/v202509-1/docs/enterprise/cost-estimation/gcp.mdx',
+				'content/terraform-enterprise/v202509-1/docs/enterprise/cost-estimation/gcp.mdx',
 				versionMetadata,
 			),
 		).toBe(false)

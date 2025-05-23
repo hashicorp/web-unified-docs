@@ -32,17 +32,19 @@ export type GetParams = {
 export async function GET(request: Request, { params }: { params: GetParams }) {
 	// Grab the parameters we need to fetch content
 	const { productSlug, version, docsPath } = params
+	let product = productSlug
+	if (product === 'ptfe-releases') {
+		product = 'terraform-enterprise'
+	}
 
-	if (!Object.keys(PRODUCT_CONFIG).includes(productSlug)) {
-		console.error(
-			`API Error: Product, ${productSlug}, not found in contentDirMap`,
-		)
+	if (!Object.keys(PRODUCT_CONFIG).includes(product)) {
+		console.error(`API Error: Product, ${product}, not found in contentDirMap`)
 		return new Response('Not found', { status: 404 })
 	}
 
 	// Determine the content directory based on the "product" (actually repo) slug
-	const { contentDir } = PRODUCT_CONFIG[productSlug]
-	const productVersionResult = getProductVersion(productSlug, version)
+	const { contentDir } = PRODUCT_CONFIG[product]
+	const productVersionResult = getProductVersion(product, version)
 	if (!productVersionResult.ok) {
 		console.error(errorResultToString('API', productVersionResult))
 		return new Response('Not found', { status: 404 })
@@ -68,16 +70,10 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 	 * one of the two locations below.
 	 */
 	const possibleContentLocations = [
+		[`content`, product, parsedVersion, contentDir, `${parsedDocsPath}.mdx`],
 		[
 			`content`,
-			productSlug,
-			parsedVersion,
-			contentDir,
-			`${parsedDocsPath}.mdx`,
-		],
-		[
-			`content`,
-			productSlug,
+			product,
 			parsedVersion,
 			contentDir,
 			parsedDocsPath,
@@ -92,7 +88,7 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 		if (readFileResult.ok) {
 			foundContent = readFileResult.value
 			githubFile = loc.join('/')
-			const productDocsPaths = docsPathsAllVersions[productSlug][parsedVersion]
+			const productDocsPaths = docsPathsAllVersions[product][parsedVersion]
 			if (productDocsPaths) {
 				const matchingPath = productDocsPaths.find(
 					({ path }: { path: string }) => {
@@ -139,7 +135,7 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 		},
 		result: {
 			fullPath: parsedDocsPath,
-			product: productSlug,
+			product: product,
 			version: parsedVersion,
 			metadata,
 			subpath: 'docs', // TODO: I guess we could grab the first part of the rawDocsPath? Is there something I am missing here?

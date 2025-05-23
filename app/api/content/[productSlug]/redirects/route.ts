@@ -13,7 +13,7 @@ const contentDirMap: Record<string, string> = {
 	'hcp-docs': 'content',
 	nomad: 'content',
 	packer: 'content',
-	'ptfe-releases': 'docs',
+	'terraform-enterprise': 'docs',
 	sentinel: 'content',
 	terraform: 'docs',
 	'terraform-cdk': 'docs',
@@ -33,20 +33,22 @@ export async function GET(
 	request: Request,
 	{ params }: { params: { productSlug: string } },
 ) {
-	const { productSlug } = params
+	let product = params.productSlug
 
-	if (!contentDirMap[productSlug]) {
-		console.error(
-			`API Error: Product, ${productSlug}, not found in contentDirMap`,
-		)
+	if (product === 'ptfe-releases') {
+		product = 'terraform-enterprise'
+	}
+
+	if (!contentDirMap[product]) {
+		console.error(`API Error: Product, ${product}, not found in contentDirMap`)
 
 		return new Response('Not found', { status: 404 })
 	}
 
 	// TODO: Move this to a better check once our repoConfig file is done
 	let filePath = []
-	if (productSlug !== 'terraform-docs-common') {
-		const productVersionResult = getProductVersion(productSlug, 'latest')
+	if (product !== 'terraform-docs-common') {
+		const productVersionResult = getProductVersion(product, 'latest')
 
 		if (!productVersionResult.ok) {
 			console.error(errorResultToString('API', productVersionResult))
@@ -55,12 +57,12 @@ export async function GET(
 
 		filePath = [
 			'content',
-			productSlug,
+			product,
 			productVersionResult.value,
 			'redirects.jsonc',
 		]
 	} else {
-		filePath = ['content', productSlug, 'redirects.jsonc']
+		filePath = ['content', product, 'redirects.jsonc']
 	}
 
 	const readFileResult = await readFile(filePath)
@@ -71,7 +73,7 @@ export async function GET(
 	const redirects = parseJsonc(readFileResult.value)
 	if (!redirects.ok) {
 		console.error(
-			`API Error: Product, ${productSlug}, redirects.jsonc could not be parsed`,
+			`API Error: Product, ${product}, redirects.jsonc could not be parsed`,
 		)
 
 		return new Response('Server error', { status: 500 })

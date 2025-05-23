@@ -150,7 +150,7 @@ export const PRODUCT_CONFIG = {
 	//  versionedDocs: true,
 	// 	websiteDir: 'website',
 	// },
-	'ptfe-releases': {
+	'terraform-enterprise': {
 		/**
 		 * ✅ Initial migration attempt: SEEMS TO WORK
 		 *
