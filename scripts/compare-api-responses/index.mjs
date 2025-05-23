@@ -45,7 +45,7 @@ program
 	.option('-p, --product <product>', 'Product')
 	.option(
 		'-a, --api <api>',
-		'API type: "content", "nav-data", "version-metadata", or "content-versions"',
+		'API type: "content", "nav-data", "version-metadata", "content-versions", or "all-docs-paths"',
 		'version-metadata',
 	)
 	.option('-d, --drop-keys <keys>', 'Result keys to drop', (value) => {
@@ -331,6 +331,104 @@ if (options.api === 'content-versions') {
 	}
 
 	totalTests.push(newApiURL)
+	saveTestOutputIfSelected(outputString, newApiURL)
+}
+
+if (options.api === 'all-docs-paths') {
+	const allProducts = [
+		'boundary',
+		'consul',
+		'hcp-docs',
+		'nomad',
+		'packer',
+		'ptfe-releases',
+		'sentinel',
+		'terraform',
+		'terraform-cdk',
+		'terraform-docs-agents',
+		'terraform-docs-common',
+		'terraform-plugin-framework',
+		'terraform-plugin-log',
+		'terraform-plugin-mux',
+		'terraform-plugin-sdk',
+		'terraform-plugin-testing',
+		'vagrant',
+		'vault',
+		'waypoint',
+	]
+	let newApiURL
+	let oldApiURL
+	if (options.product) {
+		newApiURL = `${options.newApiUrl}/api/all-docs-paths?products=${options.product}`
+
+		const contentAPIFilter = allProducts.map((repo) => {
+			if (repo !== options.product) {
+				return `filterOut=${repo}`
+			}
+		})
+		const contentAPIFilterString = contentAPIFilter.join('&')
+
+		oldApiURL = `${options.oldApiUrl}/api/all-docs-paths?${contentAPIFilterString}`
+	} else {
+		newApiURL = `${options.newApiUrl}/api/all-docs-paths`
+		oldApiURL = `${options.oldApiUrl}/api/all-docs-paths`
+	}
+
+	let newApiResponse, oldApiResponse
+	try {
+		newApiResponse = await fetch(newApiURL)
+		oldApiResponse = await fetch(oldApiURL)
+
+		if (!newApiResponse.ok) {
+			console.log(
+				`Error fetching API response:\n${newApiURL}\n${newApiResponse.statusText}`,
+			)
+		}
+		if (!oldApiResponse.ok) {
+			console.log(
+				`Error fetching API response:\n${oldApiURL}\n${oldApiResponse.statusText}`,
+			)
+		}
+	} catch (error) {
+		console.log(`Error fetching API response\n${error}`)
+	}
+
+	let newApiData, oldApiData
+	try {
+		newApiData = await newApiResponse.json()
+		oldApiData = await oldApiResponse.json()
+	} catch (error) {
+		console.log(`Error decoding JSON\n${error}`)
+	}
+
+	// Filter out just the paths to compare and sort them alphabetically
+	const newDataToCompare = newApiData.result
+		.map((item) => {
+			return item.path
+		})
+		.sort()
+	const oldDataToCompare = oldApiData.result
+		.map((item) => {
+			return item.path
+		})
+		.sort()
+
+	const diffOptions = {
+		contextLines: 1,
+		expand: false,
+	}
+
+	const difference = diff(oldDataToCompare, newDataToCompare, diffOptions)
+
+	const outputString = `Testing API URL:\n${newApiURL}`
+	console.log(outputString)
+
+	if (difference.includes('Compared values have no visual difference.')) {
+		console.log('✅ No visual difference found.\n')
+	} else {
+		console.log(`${difference}\n`)
+	}
+
 	saveTestOutputIfSelected(outputString, newApiURL)
 }
 
