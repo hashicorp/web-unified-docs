@@ -46,36 +46,36 @@ describe('isLatestVersion', () => {
 	})
 
 	test('should return true if file path version exists in version metadata and is the latest version', () => {
-		getProductDirectoryFromFilePath.mockReturnValue('ptfe-releases')
+		getProductDirectoryFromFilePath.mockReturnValue('terraform-enterprise')
 		getVersionFromFilePath.mockReturnValue('v202410-1')
 
 		expect(
 			isLatestVersion(
-				'content/ptfe-releases/v202410-1/docs/enterprise/cost-estimation/gcp.mdx',
+				'content/terraform-enterprise/v202410-1/docs/enterprise/cost-estimation/gcp.mdx',
 				versionMetadata,
 			),
 		).toBe(true)
 	})
 
 	test('should return false if file path version exists in version metadata but is not the latest version', () => {
-		getProductDirectoryFromFilePath.mockReturnValue('ptfe-releases')
+		getProductDirectoryFromFilePath.mockReturnValue('terraform-enterprise')
 		getVersionFromFilePath.mockReturnValue('v202409-1')
 
 		expect(
 			isLatestVersion(
-				'content/ptfe-releases/v202409-1/docs/enterprise/cost-estimation/gcp.mdx',
+				'content/terraform-enterprise/v202409-1/docs/enterprise/cost-estimation/gcp.mdx',
 				versionMetadata,
 			),
 		).toBe(false)
 	})
 
 	test('should return false if file path version does not exist in version metadata', () => {
-		getProductDirectoryFromFilePath.mockReturnValue('ptfe-releases')
+		getProductDirectoryFromFilePath.mockReturnValue('terraform-enterprise')
 		getVersionFromFilePath.mockReturnValue('v202509-1')
 
 		expect(
 			isLatestVersion(
-				'content/ptfe-releases/v202509-1/docs/enterprise/cost-estimation/gcp.mdx',
+				'content/terraform-enterprise/v202509-1/docs/enterprise/cost-estimation/gcp.mdx',
 				versionMetadata,
 			),
 		).toBe(false)
@@ -99,12 +99,14 @@ describe('getLatestVersion', () => {
 	})
 
 	test('should throw an error if product directory does not match any products in version metadata', () => {
-		getProductDirectoryFromFilePath.mockReturnValue('unknown-product')
-		const filePath = 'content/unknown-product/v0.13.5/random/docs/path'
+		const unknownProduct = 'unknown-product'
+		getProductDirectoryFromFilePath.mockReturnValue(unknownProduct)
+		const filePath = `content/${unknownProduct}/v0.13.5/random/docs/path`
+
 		expect(() => {
 			getLatestVersion(filePath, versionMetadata)
 		}).toThrow(
-			'Product directory does not match any products in version metadata',
+			`Product directory ${unknownProduct} does not match any products in version metadata`,
 		)
 	})
 

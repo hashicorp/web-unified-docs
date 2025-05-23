@@ -101,7 +101,7 @@ test('Return 200 and parse the jsonc into json if valid for VERSIONED product', 
 		return { ok: true, value: 'v202410-1' }
 	})
 
-	const productSlug = 'ptfe-releases'
+	const productSlug = 'terraform-enterprise'
 	const request = mockRequest(
 		`http://localhost:8080/api/content/${productSlug}/redirects`,
 	)

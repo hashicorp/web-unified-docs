@@ -13,7 +13,7 @@ const contentDirMap: Record<string, string> = {
 	'hcp-docs': 'content',
 	nomad: 'content',
 	packer: 'content',
-	'ptfe-releases': 'docs',
+	'terraform-enterprise': 'docs',
 	sentinel: 'content',
 	terraform: 'docs',
 	'terraform-cdk': 'docs',

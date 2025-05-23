@@ -19,7 +19,7 @@ beforeEach(() => {
 
 it('walk a directory of products and return a JSON representation of valid versions', async () => {
 	const expected = {
-		'ptfe-releases': [
+		'terraform-enterprise': [
 			{ version: 'v202401-2', releaseStage: 'stable', isLatest: true },
 			{ version: 'v202401-1', releaseStage: 'stable', isLatest: false },
 		],
@@ -32,8 +32,8 @@ it('walk a directory of products and return a JSON representation of valid versi
 		{
 			'./terraform/v1.19.x/': null,
 			'./terraform/v1.18.x/': null,
-			'./ptfe-releases/v202401-1/': null,
-			'./ptfe-releases/v202401-2/': null,
+			'./terraform-enterprise/v202401-1/': null,
+			'./terraform-enterprise/v202401-2/': null,
 		},
 		// default cwd
 		'/content',

@@ -29,7 +29,7 @@ describe('getVersionFromFilePath', () => {
 
 	test('should return the correct version for a Terraform Enterprise version in the file path', () => {
 		const filePath =
-			'content/ptfe-releases/v202410-1/docs/enterprise/some-doc.mdx'
+			'content/terraform-enterprise/v202410-1/docs/enterprise/some-doc.mdx'
 		const version = getVersionFromFilePath(filePath)
 		expect(version).toBe('v202410-1')
 	})

@@ -64,7 +64,7 @@ export function getLatestVersion(filePath, versionMetadata) {
 
 	if (!productMetadata) {
 		throw new Error(
-			'Product directory does not match any products in version metadata',
+			`Product directory ${productDir} does not match any products in version metadata`,
 		)
 	}
 

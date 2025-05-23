@@ -130,7 +130,7 @@ export function transformExcludeTerraformContent({ filePath }) {
 				(directive[0].includes('TFC:only') &&
 					!filePath.includes('terraform-docs-common')) ||
 				(directive[0].includes('TFEnterprise:only') &&
-					!filePath.includes('ptfe-releases'))
+					!filePath.includes('terraform-enterprise'))
 			) {
 				tree.children = tree.children.filter((node) => {
 					return (
