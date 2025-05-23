@@ -14,7 +14,7 @@ vi.mock('../../../app/utils/productConfig.mjs', () => {
 			terraform: {
 				basePaths: ['cli', 'internals', 'intro', 'language'],
 			},
-			'ptfe-releases': {
+			'terraform-enterprise': {
 				basePaths: ['enterprise'],
 			},
 			'terraform-cdk': {
@@ -106,10 +106,10 @@ describe('transformRewriteInternalLinks', () => {
 		expect(result).toBe(expectedOutput)
 	})
 
-	it('should rewrite internal links for ptfe-releases', async () => {
+	it('should rewrite internal links for terraform-enterprise', async () => {
 		const content = `[Link to enterprise](/enterprise/some-page)`
 		const entry = {
-			filePath: 'content/ptfe-releases/v202201/docs/some-file.mdx',
+			filePath: 'content/terraform-enterprise/v202201/docs/some-file.mdx',
 		}
 		const expectedOutput =
 			'[Link to enterprise](/enterprise/v202201/some-page)\n'
