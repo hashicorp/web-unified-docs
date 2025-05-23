@@ -36,6 +36,11 @@ async function main() {
 	const versionMetadataJson = JSON.stringify(versionMetadata, null, 2)
 	fs.writeFileSync(VERSION_METADATA_FILE, versionMetadataJson)
 
+	if (process.argv.includes('--only-version-metadata')) {
+		console.log('Only generating version metadata, skipping other steps.')
+		return
+	}
+
 	const docsPathsAllVersions = await gatherAllVersionsDocsPaths(versionMetadata)
 	const docsPathsAllVersionsJson = JSON.stringify(docsPathsAllVersions, null, 2)
 	fs.writeFileSync(DOCS_PATHS_ALL_VERSIONS_FILE, docsPathsAllVersionsJson)
