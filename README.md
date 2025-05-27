@@ -18,7 +18,6 @@ graph LR
         HCP[hcp-docs]
         NMD[nomad]
         PKR[packer]
-        TFE[terraform-enterprise]
         SNT[sentinel]
         TF[terraform]
         TFC[terraform-cdk]
@@ -29,7 +28,7 @@ graph LR
         WPT[waypoint]
 
         CURALL["/content or /website"]
-        BDY & CSL & HCP & NMD & PKR & TFE & SNT & TF & TFC & TFA & TFD & VGT & VLT & WPT --> CURALL
+        BDY & CSL & HCP & NMD & PKR & SNT & TF & TFC & TFA & TFD & VGT & VLT & WPT --> CURALL
     end
 
     subgraph "Migrated content repo"
@@ -38,9 +37,10 @@ graph LR
         TPM[terraform-plugin-mux]
         TPS[terraform-plugin-sdk]
         TPT[terraform-plugin-testing]
+        TFE[terraform-enterprise]
 
         MIGALL["/content"]
-        TPF & TPL & TPM & TPS & TPT --> MIGALL
+        TPF & TPL & TPM & TPS & TPT & TFE --> MIGALL
     end
 
     subgraph "APIs"
