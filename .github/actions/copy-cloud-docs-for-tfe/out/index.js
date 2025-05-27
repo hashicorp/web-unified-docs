@@ -130465,7 +130465,7 @@ Please specify the "importAttributesKeyword" generator option, whose value can b
 			const prType = newTFEVersion ? PR_TYPE.NewVersion : PR_TYPE.Diff
 			//Read version metadata and get the latest version of terraform-enterprise
 			const versionMetadataPath = external_path_.resolve(
-				'./workflow/app/api/versionMetadata.json',
+				'./release/app/api/versionMetadata.json',
 			)
 			const versionMetadata = JSON.parse(
 				external_fs_.readFileSync(versionMetadataPath, 'utf8'),
