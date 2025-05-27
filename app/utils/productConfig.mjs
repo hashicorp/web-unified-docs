@@ -162,10 +162,10 @@ export const PRODUCT_CONFIG = {
 		 *
 		 * TODO: handle `terraform-docs-common` and the `copy-docs` workflow.
 		 * In our current system, this copies a subset of `cloud-docs` into
-		 * `ptfe-releases`. We need to retain some form of this workflow
+		 * `terraform-enterprise`. We need to retain some form of this workflow
 		 * in our new setup, both during migration, and as a script that can
 		 * be run in the future to sync `cloud-docs` content
-		 * from `terraform-docs-common` into `ptfe-releases`.
+		 * from `terraform-docs-common` into `terraform-enterprise`.
 		 *
 		 * For more details see this gist:
 		 * https://gist.github.com/zchsh/73c36d4248880cb1a66216b2b00f89ed

@@ -62,7 +62,7 @@ export async function getTargetReleaseRefs({
  * but definitely needs to be accounted for.
  *
  * @param {string} contentSourceRepo A string representing the name of a
- * content source repository. For example, `boundary`, `ptfe-releases`, etc.
+ * content source repository. For example, `boundary`, `terraform-enterprise`, etc.
  * @param {Function} semverCoerce A function that coerces a version string into
  * a semver version object. Nearly all repos use semver versioning, so this is
  * typically `semver.coerce`. However, exceptions may exist, such as for

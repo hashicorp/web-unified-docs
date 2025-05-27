@@ -18,7 +18,7 @@ graph LR
         HCP[hcp-docs]
         NMD[nomad]
         PKR[packer]
-        PTF[ptfe-releases]
+        TFE[terraform-enterprise]
         SNT[sentinel]
         TF[terraform]
         TFC[terraform-cdk]
@@ -29,7 +29,7 @@ graph LR
         WPT[waypoint]
 
         CURALL["/content or /website"]
-        BDY & CSL & HCP & NMD & PKR & PTF & SNT & TF & TFC & TFA & TFD & VGT & VLT & WPT --> CURALL
+        BDY & CSL & HCP & NMD & PKR & TFE & SNT & TF & TFC & TFA & TFD & VGT & VLT & WPT --> CURALL
     end
 
     subgraph "Migrated content repo"

@@ -7,7 +7,7 @@
  * Extracts the repository name from a given file path.
  *
  * @param {string} filePath - The file path from which to extract the repository/product directory name.
- * e.g. 'content/ptfe-releases` will return ptfe-releases.
+ * e.g. 'content/terraform-enterprise` will return terraform-enterprise.
  * This is different from the product slug found in the product config.
  * @returns {string|null} The repository name if found, otherwise null.
  */

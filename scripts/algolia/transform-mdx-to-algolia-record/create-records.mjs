@@ -35,14 +35,14 @@ export async function createAlgoliaRecordObject(
 
 	/**
 	 * extracts file path from docs directory and removes .mdx extension
-	 * filePath: 'public/content/ptfe-releases/v202410-1/docs/enterprise/application-administration/github-app-integration.mdx'
+	 * filePath: 'public/content/terraform-enterprise/v202410-1/docs/enterprise/application-administration/github-app-integration.mdx'
 	 * docsPath: 'enterprise/application-administration/github-app-integration'
 	 */
 	const docPath = filePath.split('/docs/')[1].replace('.mdx', '')
 	/**
 	 * extracts directory name from the file path
-	 * filePath: 'public/content/ptfe-releases/v202410-1/docs/enterprise/application-administration/github-app-integration.mdx'
-	 * directory: 'ptfe-releases'
+	 * filePath: 'public/content/terraform-enterprise/v202410-1/docs/enterprise/application-administration/github-app-integration.mdx'
+	 * directory: 'terraform-enterprise'
 	 */
 	const directory = getProductDirectoryFromFilePath(filePath)
 	/**
