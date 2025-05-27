@@ -1,14 +1,7 @@
 # `copy-cloud-docs-for-tfe`
 
 This composite action is consumed by the `copy-docs.yml` workflow, which is triggered
-at the time of the Terraform Enterprise team's **APP_DEADLINE** event.
-
-Roughly, it behaves as depicted in this diagram:
-
-```mermaid
-graph LR
-    A[terraform-docs-common] -->|copy `/cloud-docs/*` contents<br/>alongside `/enterprise/*` contents| B[ptfe-releases]
-```
+at the time of the Terraform Enterprise team's `Create TFE Release Notes` workflow.
 
 ## Overview
 
