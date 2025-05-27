@@ -1,8 +1,3 @@
-/**
- * Copyright (c) HashiCorp, Inc.
- * SPDX-License-Identifier: BUSL-1.1
- */
-
 /******/ ;(() => {
 	// webpackBootstrap
 	/******/ var __webpack_modules__ = {
@@ -22170,9 +22165,9 @@ If you want to leave it as-is, add ${syntaxPluginInfo} to the 'plugins' section 
 
 			function isHexCode(c) {
 				return (
-					(0x30 /* 0 */ <= c && c <= 0x39) /* 9 */ ||
-					(0x41 /* A */ <= c && c <= 0x46) /* F */ ||
-					(0x61 /* a */ <= c && c <= 0x66) /* f */
+					(0x30 /* 0 */ <= c && c <= 0x39 /* 9 */) ||
+					(0x41 /* A */ <= c && c <= 0x46 /* F */) ||
+					(0x61 /* a */ <= c && c <= 0x66 /* f */)
 				)
 			}
 
@@ -129256,8 +129251,7 @@ Please specify the "importAttributesKeyword" generator option, whose value can b
 	})()
 	/******/
 	/******/ /* webpack/runtime/define property getters */
-	/******/
-	;(() => {
+	/******/ ;(() => {
 		/******/ // define getter functions for harmony exports
 		/******/ __nccwpck_require__.d = (exports, definition) => {
 			/******/ for (var key in definition) {
@@ -129279,16 +129273,14 @@ Please specify the "importAttributesKeyword" generator option, whose value can b
 	})()
 	/******/
 	/******/ /* webpack/runtime/hasOwnProperty shorthand */
-	/******/
-	;(() => {
+	/******/ ;(() => {
 		/******/ __nccwpck_require__.o = (obj, prop) =>
 			Object.prototype.hasOwnProperty.call(obj, prop)
 		/******/
 	})()
 	/******/
 	/******/ /* webpack/runtime/node module decorator */
-	/******/
-	;(() => {
+	/******/ ;(() => {
 		/******/ __nccwpck_require__.nmd = (module) => {
 			/******/ module.paths = []
 			/******/ if (!module.children) module.children = []
@@ -130342,6 +130334,10 @@ Please specify the "importAttributesKeyword" generator option, whose value can b
 			}
 		} // CONCATENATED MODULE: ./remark-get-images-plugin.ts
 
+		/**
+		 * Copyright (c) HashiCorp, Inc.
+		 * SPDX-License-Identifier: BUSL-1.1
+		 */
 		/* eslint-disable */
 		// @ts-nocheck
 		// TODO: fix types
@@ -130366,6 +130362,10 @@ Please specify the "importAttributesKeyword" generator option, whose value can b
 			}
 		} // CONCATENATED MODULE: ./remark-transfrom-cloud-docs-links.ts
 
+		/**
+		 * Copyright (c) HashiCorp, Inc.
+		 * SPDX-License-Identifier: BUSL-1.1
+		 */
 		/* eslint-disable */
 		// @ts-nocheck
 		// TODO: fix types
@@ -130389,6 +130389,11 @@ Please specify the "importAttributesKeyword" generator option, whose value can b
 				})
 			}
 		} // CONCATENATED MODULE: ./main.ts
+
+		/**
+		 * Copyright (c) HashiCorp, Inc.
+		 * SPDX-License-Identifier: BUSL-1.1
+		 */
 
 		const PR_TYPE = {
 			NewVersion: 'NewVersion',
@@ -130452,13 +130457,15 @@ Please specify the "importAttributesKeyword" generator option, whose value can b
 		 * This function will also prune the target directory
 		 * of any files that are not in the source directory.
 		 *
-		 * @param newTFEVersion An absolute path to a GitHub repository on disk
+		 * @param sourcePath {string} The directory content should be copied _from_
+		 * @param targetPath {string} The directory content should be copied _to_
+		 * @param {string} newTFEVersion An absolute path to a GitHub repository on disk
 		 */
 		async function main(sourcePath, targetPath, newTFEVersion) {
 			const prType = newTFEVersion ? PR_TYPE.NewVersion : PR_TYPE.Diff
 			//Read version metadata and get the latest version of ptfe-releases
 			const versionMetadataPath = external_path_.resolve(
-				'./workflow/app/api/versionMetadata.json',
+				'./release/app/api/versionMetadata.json',
 			)
 			const versionMetadata = JSON.parse(
 				external_fs_.readFileSync(versionMetadataPath, 'utf8'),
@@ -130620,11 +130627,15 @@ Please specify the "importAttributesKeyword" generator option, whose value can b
 			}
 		} // CONCATENATED MODULE: ./index.ts
 
+		/**
+		 * Copyright (c) HashiCorp, Inc.
+		 * SPDX-License-Identifier: BUSL-1.1
+		 */
+
 		async function action() {
 			const sourcePath = core.getInput('source_path')
 			const targetPath = core.getInput('target_path')
 			const newTFEVersion = core.getInput('new_TFE_version')
-			// const newTFEVersion = 'v000011-1'
 			await main(sourcePath, targetPath, newTFEVersion)
 		}
 		action()

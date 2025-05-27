@@ -106,7 +106,7 @@ export async function main(
 
 	//Read version metadata and get the latest version of ptfe-releases
 	const versionMetadataPath = path.resolve(
-		'./workflow/app/api/versionMetadata.json',
+		'./release/app/api/versionMetadata.json',
 	)
 	const versionMetadata = JSON.parse(
 		fs.readFileSync(versionMetadataPath, 'utf8'),
