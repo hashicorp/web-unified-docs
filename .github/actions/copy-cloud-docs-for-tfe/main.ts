@@ -93,7 +93,9 @@ const transformObject = <T = Record<string, any>>(
  * This function will also prune the target directory
  * of any files that are not in the source directory.
  *
- * @param newTFEVersion An absolute path to a GitHub repository on disk
+ * @param sourcePath {string} The directory content should be copied _from_
+ * @param targetPath {string} The directory content should be copied _to_
+ * @param {string} newTFEVersion An absolute path to a GitHub repository on disk
  */
 export async function main(
 	sourcePath: string,
