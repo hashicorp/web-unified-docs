@@ -341,7 +341,7 @@ if (options.api === 'all-docs-paths') {
 		'hcp-docs',
 		'nomad',
 		'packer',
-		'ptfe-releases',
+		'terraform-enterprise',
 		'sentinel',
 		'terraform',
 		'terraform-cdk',

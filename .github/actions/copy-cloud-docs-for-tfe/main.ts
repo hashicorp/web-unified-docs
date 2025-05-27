@@ -104,7 +104,7 @@ export async function main(
 ): Promise<void> {
 	const prType = newTFEVersion ? PR_TYPE.NewVersion : PR_TYPE.Diff
 
-	//Read version metadata and get the latest version of ptfe-releases
+	//Read version metadata and get the latest version of terraform-enterprise
 	const versionMetadataPath = path.resolve(
 		'./workflow/app/api/versionMetadata.json',
 	)
@@ -112,21 +112,23 @@ export async function main(
 		fs.readFileSync(versionMetadataPath, 'utf8'),
 	)
 
-	const ptfeReleasesMetadata = versionMetadata['ptfe-releases']
-	if (!ptfeReleasesMetadata || ptfeReleasesMetadata.length === 0) {
-		throw new Error('No ptfe-releases found in versionMetadata.json')
+	const tfeMetadata = versionMetadata['terraform-enterprise']
+	if (!tfeMetadata || tfeMetadata.length === 0) {
+		throw new Error('No terraform-enterprise found in versionMetadata.json')
 	}
 
-	const currentPtfeRelease = ptfeReleasesMetadata.find((release: any) => {
+	const currentTfeRelease = tfeMetadata.find((release: any) => {
 		return release.isLatest
 	})?.version
 
-	if (!currentPtfeRelease) {
-		throw new Error('No latest ptfe-releases found in versionMetadata.json')
+	if (!currentTfeRelease) {
+		throw new Error(
+			'No latest terraform-enterprise found in versionMetadata.json',
+		)
 	}
 
 	core.info(
-		`Latest ptfe-releases version found in versionMetadata.json: ${currentPtfeRelease}`,
+		`Latest terraform-enterprise version found in versionMetadata.json: ${currentTfeRelease}`,
 	)
 
 	const HCPsourceDir = path.join(sourcePath, 'content/terraform-docs-common')
@@ -134,8 +136,8 @@ export async function main(
 
 	const newTFEVersionDir = path.join(
 		targetPath,
-		'content/ptfe-releases',
-		prType === PR_TYPE.NewVersion ? newTFEVersion : currentPtfeRelease,
+		'content/terraform-enterprise',
+		prType === PR_TYPE.NewVersion ? newTFEVersion : currentTfeRelease,
 	)
 
 	const newTFEVersionContentDir = path.join(newTFEVersionDir, 'docs')
@@ -150,8 +152,8 @@ export async function main(
 
 		const prevTFEVersionDir = path.join(
 			targetPath,
-			'content/ptfe-releases',
-			currentPtfeRelease,
+			'content/terraform-enterprise',
+			currentTfeRelease,
 		)
 
 		fs.cpSync(prevTFEVersionDir, newTFEVersionDir, { recursive: true })
