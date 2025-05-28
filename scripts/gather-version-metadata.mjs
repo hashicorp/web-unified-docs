@@ -8,6 +8,8 @@ import path from 'path'
 // Third-party
 import semver from 'semver'
 
+import { PRODUCT_CONFIG } from '../app/utils/productConfig.mjs'
+
 /**
  * Given a content directory, and a JSON output file, build version metadata
  * based on the content directory structure, and return it.
@@ -31,6 +33,21 @@ export async function gatherVersionMetadata(contentDir) {
 	for (const product of products) {
 		// Initialize the product array
 		versionMetadata[product] = []
+
+		/**
+		 * If the product is not versioned, we add a single entry for the
+		 * "v0.0.x" version, which is a placeholder for non-versioned products.
+		 * This is useful for products that do not have versioned documentation,
+		 * such as the HashiCorp Cloud Platform.
+		 */
+		if (PRODUCT_CONFIG[product].versionedDocs === false) {
+			versionMetadata[product].push({
+				version: 'v0.0.x',
+				releaseStage: 'stable',
+				isLatest: true,
+			})
+		}
+
 		/**
 		 * We expect the product directory to contain a directory for each version.
 		 * We expect that either:
