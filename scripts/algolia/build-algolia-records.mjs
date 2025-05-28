@@ -19,9 +19,6 @@ import { getLatestProductVersionDirectories } from './convert-mdx-to-json/index.
  * @returns {Promise<string[]>} A promise that resolves to an array of MDX file paths.
  */
 async function getAllMdxFiles(targetDir, versionMetadata) {
-
-	console.log(versionMetadata)
-
 	// get latest product directories, returns array
 	const latestProductVersionDirectories =
 		await getLatestProductVersionDirectories(targetDir, versionMetadata)
