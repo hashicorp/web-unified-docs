@@ -29,6 +29,14 @@ vi.mock('@api/docsPathsAllVersions.json', () => {
 	}
 })
 
+vi.mock('@utils/productConfig.mjs', () => {
+	return {
+		PRODUCT_CONFIG: {
+			terraform: { contentDir: 'docs', versionedDocs: true },
+		},
+	}
+})
+
 test('getProductVersion should return error for non-existent product', () => {
 	const expected = {
 		ok: false,
