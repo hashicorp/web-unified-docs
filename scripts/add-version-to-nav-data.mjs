@@ -5,7 +5,6 @@
 
 import fs from 'node:fs/promises'
 import { PRODUCT_CONFIG } from '../app/utils/productConfig.mjs'
-import semver from 'semver'
 
 /**
  * Adds version information to navigation data in a JSON file.
@@ -36,7 +35,7 @@ export async function addVersionToNavData(filePath, versionMetadata) {
 		const [product, version] = relativePath.split('/')
 
 		// We are looking at a versionless doc
-		if (version !== 'v0.0.x') {
+		if (PRODUCT_CONFIG[product].versionedDocs === false) {
 			return
 		}
 
