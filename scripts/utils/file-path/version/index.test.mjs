@@ -34,10 +34,10 @@ describe('getVersionFromFilePath', () => {
 		expect(version).toBe('v202410-1')
 	})
 
-	test('should return null if the file path is for versionless docs', () => {
+	test('should return false if the file path is for versionless docs', () => {
 		const filePath =
 			'content/terraform-docs-common/docs/cloud-docs/cost-estimation/gcp.mdx'
 		const version = getVersionFromFilePath(filePath)
-		expect(version).toBeNull()
+		expect(version).toBe(false)
 	})
 })
