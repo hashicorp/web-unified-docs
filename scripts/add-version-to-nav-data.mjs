@@ -36,7 +36,7 @@ export async function addVersionToNavData(filePath, versionMetadata) {
 		const [product, version] = relativePath.split('/')
 
 		// We are looking at a versionless doc
-		if (!semver.valid(semver.coerce(version))) {
+		if (version !== 'v0.0.x') {
 			return
 		}
 

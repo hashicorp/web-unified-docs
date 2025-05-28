@@ -34,7 +34,7 @@ export const getProductVersion = (
 			},
 		)
 
-		if (!foundVersion) {
+		if (!foundVersion || foundVersion.version === 'v0.0.x') {
 			parsedVersion = '' // Set to an empty string if no latest version is found, as in the case for versionless docs such as terraform-docs-common
 		} else {
 			parsedVersion = foundVersion.version

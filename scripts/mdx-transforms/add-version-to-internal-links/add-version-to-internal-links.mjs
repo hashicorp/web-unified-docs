@@ -29,7 +29,7 @@ export const rewriteInternalLinksPlugin = ({ entry, versionMetadata }) => {
 	const [product, version] = relativePath.split('/')
 
 	// We are looking at a versionless doc
-	if (semver.valid(semver.coerce(version)) === null) {
+	if (version === 'v0.0.x') {
 		return
 	}
 

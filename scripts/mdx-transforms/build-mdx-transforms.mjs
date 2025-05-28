@@ -61,7 +61,7 @@ export async function buildMdxTransforms(
 		 * if versionless, version becomes the content dir
 		 * which will cause an error when trying resolve partials
 		 */
-		const verifiedVersion = semver.valid(semver.coerce(version)) ? version : ''
+		const verifiedVersion = version !== 'v0.0.x' ? version : ''
 		const verifiedContentDir = semver.valid(semver.coerce(version))
 			? contentDir
 			: version

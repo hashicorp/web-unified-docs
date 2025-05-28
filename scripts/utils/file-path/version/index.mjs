@@ -40,6 +40,6 @@ export function getVersionFromFilePath(filePath) {
 		 * e.g. terraform-docs-common
 		 */
 
-		return semver.valid(semver.coerce(version))
+		return version === 'v0.0.x'
 	}
 }

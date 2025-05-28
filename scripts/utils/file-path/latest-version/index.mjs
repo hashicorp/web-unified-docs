@@ -29,7 +29,7 @@ export function isLatestVersion(filePath, versionMetadata) {
 	const productVersions = versionMetadata[productDir]
 
 	// if repo dir exists, and is an empty array (aka versionless docs)
-	if (Array.isArray(productVersions) && productVersions.length === 0) {
+	if (Array.isArray(productVersions) && productVersions.length === 1 && productVersions[0].version === 'v0.0.x') {
 		return true
 	}
 	// check that the file path version exists in the version metadata and is the latest version
