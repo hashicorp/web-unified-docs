@@ -6,6 +6,7 @@
 import { Ok, Err, errorResultToString } from '@utils/result'
 import docsPathsAllVersions from '@api/docsPathsAllVersions.json'
 import { getProductVersion } from './contentVersions'
+import { PRODUCT_CONFIG } from './productConfig.mjs'
 
 export const getDocsPaths = async (
 	productSlugs: string[],
@@ -21,6 +22,9 @@ export const getDocsPaths = async (
 			}
 
 			if (docsPathsData[productSlug]) {
+				if (!PRODUCT_CONFIG[productSlug].versionedDocs) {
+					return docsPathsData[productSlug]['v0.0.x']
+				}
 				return docsPathsData[productSlug][latestProductVersion.value]
 			}
 			console.error(`Product, ${productSlug}, not found in docs paths`)

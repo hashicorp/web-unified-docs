@@ -13,30 +13,43 @@ vi.mock('../../../app/utils/productConfig.mjs', () => {
 		PRODUCT_CONFIG: {
 			terraform: {
 				basePaths: ['cli', 'internals', 'intro', 'language'],
+				versionedDocs: true,
 			},
 			'terraform-enterprise': {
 				basePaths: ['enterprise'],
+				versionedDocs: true,
 			},
 			'terraform-cdk': {
 				basePaths: ['cdktf'],
+				versionedDocs: true,
 			},
 			'terraform-docs-agents': {
 				basePaths: ['cloud-docs/agents'],
+				versionedDocs: true,
 			},
 			'terraform-plugin-framework': {
 				basePaths: ['plugin/framework'],
+				versionedDocs: true,
 			},
 			'terraform-plugin-log': {
 				basePaths: ['plugin/log'],
+				versionedDocs: true,
 			},
 			'terraform-plugin-mux': {
 				basePaths: ['plugin/mux'],
+				versionedDocs: true,
 			},
 			'terraform-plugin-sdk': {
 				basePaths: ['plugin/sdkv2'],
+				versionedDocs: true,
 			},
 			'terraform-plugin-testing': {
 				basePaths: ['plugin/testing'],
+				versionedDocs: true,
+			},
+			'terraform-docs-common': {
+				basePaths: [],
+				versionedDocs: false,
 			},
 		},
 	}

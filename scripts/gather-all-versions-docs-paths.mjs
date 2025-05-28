@@ -38,7 +38,7 @@ export async function gatherAllVersionsDocsPaths(versionMetadata) {
 			const contentPath = path.join(
 				'./content',
 				product,
-				version?.version ?? '',
+				PRODUCT_CONFIG[product].versionedDocs ? (version?.version ?? '') : '',
 				PRODUCT_CONFIG[product].contentDir,
 			)
 

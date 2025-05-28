@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-import semver from 'semver'
 /**
  * Extracts the version from a given file path.
  *
@@ -40,6 +39,6 @@ export function getVersionFromFilePath(filePath) {
 		 * e.g. terraform-docs-common
 		 */
 
-		return semver.valid(semver.coerce(version))
+		return version === 'v0.0.x'
 	}
 }

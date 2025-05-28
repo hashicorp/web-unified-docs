@@ -7,6 +7,15 @@ import { beforeEach, expect, it, vi } from 'vitest'
 import { vol } from 'memfs'
 import { gatherVersionMetadata } from './gather-version-metadata.mjs'
 
+vi.mock('../app/utils/productConfig.mjs', () => {
+	return {
+		PRODUCT_CONFIG: {
+			'terraform-enterprise': { contentDir: 'docs', versionedDocs: true },
+			terraform: { contentDir: 'docs', versionedDocs: true },
+		},
+	}
+})
+
 // tell vitest to use fs mock from __mocks__ folder
 // this can be done in a setup file if fs should always be mocked
 vi.mock('fs')

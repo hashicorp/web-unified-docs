@@ -56,8 +56,8 @@ vi.mock('@api/docsPathsAllVersions.json', () => {
 vi.mock('@utils/productConfig.mjs', () => {
 	return {
 		PRODUCT_CONFIG: {
-			'terraform-enterprise': { contentDir: 'docs' },
-			'terraform-plugin-framework': { contentDir: 'docs' },
+			'terraform-enterprise': { contentDir: 'docs', versionedDocs: true },
+			'terraform-plugin-framework': { contentDir: 'docs', versionedDocs: true },
 		},
 	}
 })

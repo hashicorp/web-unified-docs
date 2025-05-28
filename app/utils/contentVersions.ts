@@ -6,6 +6,8 @@
 import versionMetadata from '@api/versionMetadata.json'
 import { Ok, Err } from '@utils/result'
 
+import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
+
 type ProductVersionMetadata = {
 	version: string
 	isLatest: boolean
@@ -34,7 +36,7 @@ export const getProductVersion = (
 			},
 		)
 
-		if (!foundVersion) {
+		if (!PRODUCT_CONFIG[productSlug].versionedDocs) {
 			parsedVersion = '' // Set to an empty string if no latest version is found, as in the case for versionless docs such as terraform-docs-common
 		} else {
 			parsedVersion = foundVersion.version

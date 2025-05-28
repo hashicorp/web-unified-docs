@@ -140,7 +140,9 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 		result: {
 			fullPath: parsedDocsPath,
 			product: productSlug,
-			version: parsedVersion,
+			version: PRODUCT_CONFIG[productSlug].versionedDocs
+				? parsedVersion
+				: 'v0.0.x',
 			metadata,
 			subpath: 'docs', // TODO: I guess we could grab the first part of the rawDocsPath? Is there something I am missing here?
 			markdownSource,
