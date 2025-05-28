@@ -218,35 +218,35 @@ export const PRODUCT_CONFIG = {
 	//  versionedDocs: true,
 	// 	websiteDir: 'website',
 	// },
-	// terraform: {
-	// 	/**
-	// 	 * ✅ Initial migration attempt: SEEMS TO WORK
-	// 	 *
-	// 	 * TODO: determine how to handle non-"stable" releases. For example,
-	// 	 * `terraform` has `v1.10.x` releases that currently have the version
-	// 	 * number `v1.10.0-alpha20240814`, the `releaseStage` `alpha`. This
-	// 	 * will need to be accounted for in our new content API.
-	// 	 *
-	// 	 * TODO: `display` version for `v1.1.x` is "v1.1 and earlier". Ref:
-	// 	 * https://content.hashicorp.com/api/content/terraform/version-metadata?partial=true
-	// 	 * How should we handle this in our unified docs repo setup?
-	// 	 * Maybe another data point in favour of some kind of
-	// 	 * `_version-metadata.json` file at the top level of each versioned
-	// 	 * content directory? Eg we'd write out a file to:
-	// 	 * - content/${repoSlug}/${version}/_version-metadata.json
-	// 	 * This file would have _some_ of the metadata we already have here:
-	// 	 * https://content.hashicorp.com/api/content/terraform/version-metadata?partial=true
-	// 	 * and would be collected via our `gather-version-metadata` script.
-	// 	 */
-	// 	assetDir: 'img',
-	// 	basePaths: ['cli', 'internals', 'intro', 'language'],
-	// 	contentDir: 'docs',
-	// 	dataDir: 'data',
-	// 	productSlug: 'terraform',
-	// 	semverCoerce: semver.coerce,
-	// 	versionedDocs: true,
-	// 	websiteDir: 'website',
-	// },
+	terraform: {
+		/**
+		 * ✅ Initial migration attempt: SEEMS TO WORK
+		 *
+		 * TODO: determine how to handle non-"stable" releases. For example,
+		 * `terraform` has `v1.10.x` releases that currently have the version
+		 * number `v1.10.0-alpha20240814`, the `releaseStage` `alpha`. This
+		 * will need to be accounted for in our new content API.
+		 *
+		 * TODO: `display` version for `v1.1.x` is "v1.1 and earlier". Ref:
+		 * https://content.hashicorp.com/api/content/terraform/version-metadata?partial=true
+		 * How should we handle this in our unified docs repo setup?
+		 * Maybe another data point in favour of some kind of
+		 * `_version-metadata.json` file at the top level of each versioned
+		 * content directory? Eg we'd write out a file to:
+		 * - content/${repoSlug}/${version}/_version-metadata.json
+		 * This file would have _some_ of the metadata we already have here:
+		 * https://content.hashicorp.com/api/content/terraform/version-metadata?partial=true
+		 * and would be collected via our `gather-version-metadata` script.
+		 */
+		assetDir: 'img',
+		basePaths: ['cli', 'internals', 'intro', 'language'],
+		contentDir: 'docs',
+		dataDir: 'data',
+		productSlug: 'terraform',
+		semverCoerce: semver.coerce,
+		versionedDocs: true,
+		websiteDir: 'website',
+	},
 	'terraform-cdk': {
 		assetDir: '',
 		basePaths: ['cdktf'],
