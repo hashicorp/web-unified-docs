@@ -118,11 +118,11 @@ describe('getLatestVersion', () => {
 		expect(latestVersion).toBe('v0.14.x')
 	})
 
-	test('should return null if product does not have versions', () => {
+	test('should return v0.0.x for versionless docs', () => {
 		getProductDirectoryFromFilePath.mockReturnValue('terraform-docs-common')
 		const filePath =
 			'content/terraform-docs-common/docs/cloud-docs/cost-estimation/gcp.mdx'
 		const latestVersion = getLatestVersion(filePath, versionMetadata)
-		expect(latestVersion).toBeNull()
+		expect(latestVersion).toBe('v0.0.x')
 	})
 })
