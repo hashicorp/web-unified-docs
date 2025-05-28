@@ -32,7 +32,6 @@ export async function getLatestProductVersionDirectories(dir, versionMetadata) {
 				versionMetadata,
 			)
 
-			console.log('### latestProductVersion', latestProductVersion)
 			// getLatestVersion will return null for versionless products
 			// if directory is for versionless docs, return null
 			return latestProductVersion == 'v0.0.x'
