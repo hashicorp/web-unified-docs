@@ -31,9 +31,11 @@ export async function getLatestProductVersionDirectories(dir, versionMetadata) {
 				directoryPath,
 				versionMetadata,
 			)
+
+			console.log('### latestProductVersion', latestProductVersion)
 			// getLatestVersion will return null for versionless products
 			// if directory is for versionless docs, return null
-			return latestProductVersion == null
+			return latestProductVersion == 'v0.0.x'
 				? directoryPath
 				: path.join(directoryPath, latestProductVersion)
 		}),
