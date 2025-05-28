@@ -25,6 +25,8 @@ import {
 } from './rewrite-internal-redirects/rewrite-internal-redirects.mjs'
 import { transformExcludeTerraformContent } from './exclude-terraform-content/index.mjs'
 
+import { PRODUCT_CONFIG } from '../../app/utils/productConfig.mjs'
+
 /**
  * Given a target directory,
  * Apply MDX transforms to all `.mdx` files found in the directory and its
@@ -61,7 +63,9 @@ export async function buildMdxTransforms(
 		 * if versionless, version becomes the content dir
 		 * which will cause an error when trying resolve partials
 		 */
-		const verifiedVersion = version !== 'v0.0.x' ? version : ''
+		const verifiedVersion = PRODUCT_CONFIG[repoSlug].versionedDocs
+			? version
+			: ''
 		const verifiedContentDir = semver.valid(semver.coerce(version))
 			? contentDir
 			: version
