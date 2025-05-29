@@ -17,25 +17,18 @@ import { NextResponse } from 'next/server'
  * @return {NextResponse}
  */
 export function middleware({ url }) {
-	return NextResponse.rewrite(
-		new URL(url.replace('ptfe-releases', 'terraform-enterprise')),
-	)
+	if (url.includes('ptfe-releases')) {
+		return NextResponse.redirect(
+			url.replace('ptfe-releases', 'terraform-enterprise'),
+		)
+	}
 }
 
 export const config = {
 	matcher: [
 		'/api/content/ptfe-releases/:path*',
 		'/api/assets/ptfe-releases/:path*',
-		'/api/all-docs-paths/:path*',
-		// {
-		// 	source: '/api/all-docs-paths',
-		// 	has: [
-		//       {
-		//         type: 'query',
-		//         key: 'products',
-		//         value: 'ptfe-releases',
-		//       },
-		// 		]
-		// }
+		'/api/all-docs-paths',
+		'/api/content-versions',
 	],
 }
