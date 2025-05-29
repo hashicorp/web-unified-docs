@@ -23,5 +23,19 @@ export function middleware({ url }) {
 }
 
 export const config = {
-	matcher: '/api/content/ptfe-releases/:path*',
+	matcher: [
+		'/api/content/ptfe-releases/:path*',
+		'/api/assets/ptfe-releases/:path*',
+		'/api/all-docs-paths/:path*',
+		// {
+		// 	source: '/api/all-docs-paths',
+		// 	has: [
+		//       {
+		//         type: 'query',
+		//         key: 'products',
+		//         value: 'ptfe-releases',
+		//       },
+		// 		]
+		// }
+	],
 }
