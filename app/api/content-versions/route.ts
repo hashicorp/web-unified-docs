@@ -8,8 +8,12 @@ import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
 
 export async function GET(request: Request) {
 	const url = new URL(request.url)
-	const product = url.searchParams.get('product')
+	let product = url.searchParams.get('product')
 	const fullPath = url.searchParams.get('fullPath')
+
+	if (product === 'ptfe-releases') {
+		product = 'terraform-enterprise'
+	}
 
 	// If a `product` parameter has not been provided, return a 400
 	if (!product) {
