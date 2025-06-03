@@ -11,6 +11,11 @@ export async function GET(req: Request) {
 	const url = new URL(req.url)
 	const productSlugs = url.searchParams.getAll('products')
 
+	const index = productSlugs.indexOf('ptfe-releases')
+	if (index !== -1) {
+		productSlugs[index] = 'terraform-enterprise'
+	}
+
 	const docsPaths = await getDocsPaths(
 		productSlugs.length === 0 ? Object.keys(PRODUCT_CONFIG) : productSlugs,
 	)

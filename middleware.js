@@ -17,18 +17,14 @@ import { NextResponse } from 'next/server'
  * @return {NextResponse}
  */
 export function middleware({ url }) {
-	if (url.includes('ptfe-releases')) {
-		return NextResponse.redirect(
-			url.replace('ptfe-releases', 'terraform-enterprise'),
-		)
-	}
+	return NextResponse.rewrite(
+		new URL(url.replace('ptfe-releases', 'terraform-enterprise')),
+	)
 }
 
 export const config = {
 	matcher: [
 		'/api/content/ptfe-releases/:path*',
 		'/api/assets/ptfe-releases/:path*',
-		'/api/all-docs-paths',
-		'/api/content-versions',
 	],
 }
