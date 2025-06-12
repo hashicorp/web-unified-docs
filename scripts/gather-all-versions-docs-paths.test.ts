@@ -4,11 +4,19 @@
  */
 
 import { expect, test, vi, afterEach } from 'vitest'
-import { gatherAllVersionsDocsPaths } from './gather-all-versions-docs-paths.mjs'
+import {
+	gatherAllVersionsDocsPaths,
+	getProductPaths,
+} from './gather-all-versions-docs-paths.mjs'
 import * as repoConfig from '../app/utils/productConfig.mjs'
+import { vol } from 'memfs'
+import { EOL } from 'os'
+
+vi.mock('node:fs')
 
 afterEach(() => {
 	vi.restoreAllMocks()
+	vol.reset()
 })
 
 // gatherAllVersionsDocsPaths tests
@@ -61,4 +69,41 @@ test('gatherAllDocsPaths throws an error if no version metadata is found for a p
 	await expect(gatherAllVersionsDocsPaths(versionMetadata)).rejects.toThrow(
 		'No version metadata found for product',
 	)
+})
+
+test('getProductPaths parses file id from frontmatter if present', async () => {
+	const product = 'terraform-enterprise'
+	const documentId = '10db84d9-9775-4e1f-9b8d-9df21031a4a3'
+	const directory = `./content/${product}/v202505-1/docs/enterprise/api-docs`
+	vol.fromJSON({
+		[`${directory}/account.mdx`]: `---${EOL}id: ${documentId}${EOL}---`,
+	})
+	vi.mock('util', () => {
+		return {
+			promisify: vi.fn(() => {
+				return vi.fn(() => {
+					return {
+						// Happy Holidays! :) ....honestly just an arbitary date in the correct format
+						stdout: '2025-12-25T00:00:00-00:00',
+					}
+				})
+			}),
+		}
+	})
+	vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({
+		[product]: {
+			assetDir: 'img',
+			basePaths: ['enterprise'],
+			contentDir: 'docs',
+			dataDir: 'data',
+			productSlug: 'terraform',
+			semverCoerce: () => {},
+			versionedDocs: true,
+			websiteDir: 'website',
+			navDataPath: '',
+		},
+	})
+	const [{ id }] = await getProductPaths(directory, product)
+	expect(id).toBeDefined()
+	expect(id).toEqual(documentId)
 })

@@ -6,6 +6,7 @@
 import fs from 'fs'
 import path from 'path'
 import { PRODUCT_CONFIG } from '../app/utils/productConfig.mjs'
+import grayMatter from 'gray-matter'
 import { exec } from 'child_process'
 import { promisify } from 'util'
 
@@ -73,20 +74,20 @@ export async function getProductPaths(directory, productSlug) {
 			if (stat.isDirectory()) {
 				traverseDirectory(itemPath, itemRelativePath)
 			} else {
-				const itemName = item.split('.')[0]
-
-				if (itemName === 'index') {
-					apiPaths.push({
-						path: path.join(productSlug, relativePath),
-						itemPath,
-					})
-					return
-				}
-
-				apiPaths.push({
-					path: path.join(productSlug, relativePath, itemName),
+				const [itemName] = item.split('.')
+				const fileContents = fs.readFileSync(itemPath)
+				const { data } = grayMatter(fileContents)
+				let apiPath = {
+					path:
+						itemName === 'index'
+							? path.join(productSlug, relativePath)
+							: path.join(productSlug, relativePath, itemName),
 					itemPath,
-				})
+				}
+				if (data.id) {
+					apiPath.id = data.id
+				}
+				apiPaths.push(apiPath)
 			}
 		})
 	}
