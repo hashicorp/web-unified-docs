@@ -6,7 +6,6 @@
 import fs from 'fs'
 import path from 'path'
 import { PRODUCT_CONFIG } from '../app/utils/productConfig.mjs'
-import grayMatter from 'gray-matter'
 import { exec } from 'child_process'
 import { promisify } from 'util'
 
@@ -75,8 +74,6 @@ export async function getProductPaths(directory, productSlug) {
 				traverseDirectory(itemPath, itemRelativePath)
 			} else {
 				const [itemName] = item.split('.')
-				const fileContents = fs.readFileSync(itemPath)
-				const { data } = grayMatter(fileContents)
 				let apiPath = {
 					path:
 						itemName === 'index'
@@ -84,8 +81,15 @@ export async function getProductPaths(directory, productSlug) {
 							: path.join(productSlug, relativePath, itemName),
 					itemPath,
 				}
-				if (data.id) {
-					apiPath.id = data.id
+				const frontmatterMatch = fs
+					.readFileSync(itemPath, 'utf-8')
+					.match(/^---\n([\s\S]+?)\n---/m)
+				if (frontmatterMatch) {
+					const idMatch =
+						frontmatterMatch?.[1].match(/^id:\s*(.+)$/m)?.[1] || null
+					if (idMatch) {
+						apiPath.id = idMatch
+					}
 				}
 				apiPaths.push(apiPath)
 			}
@@ -101,7 +105,6 @@ export async function getProductPaths(directory, productSlug) {
 			const created_at = await execAsync(
 				`git log --format=%cI --max-count=1 ${apiPath.itemPath}`,
 			)
-
 			// remove the "\n" from the end of the output
 			apiPath.created_at = created_at.stdout.slice(0, -1)
 		},
