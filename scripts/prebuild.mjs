@@ -45,6 +45,11 @@ async function main() {
 	const docsPathsAllVersionsJson = JSON.stringify(docsPathsAllVersions, null, 2)
 	fs.writeFileSync(DOCS_PATHS_ALL_VERSIONS_FILE, docsPathsAllVersionsJson)
 
+	if (process.argv.includes('--all-docs-versions')) {
+		console.log('Only generating up to all docs steps, skipping other steps.')
+		return
+	}
+
 	// Apply MDX transforms, writing out transformed MDX files to `public`
 	await buildMdxTransforms(CONTENT_DIR, CONTENT_DIR_OUT, versionMetadata)
 

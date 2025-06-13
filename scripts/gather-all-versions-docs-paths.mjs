@@ -59,6 +59,17 @@ export async function gatherAllVersionsDocsPaths(versionMetadata) {
 	return allDocsPaths
 }
 
+const extractIdFromFrontmatter = (content) => {
+	const frontmatterMatch = content.match(/^---\n([\s\S]+?)\n---/m);
+	if (!frontmatterMatch) {
+		return '';
+	}
+
+	const frontmatter = frontmatterMatch[1];
+	const idMatch = frontmatter.match(/^uuidV4:\s*(.+)$/m);
+	return idMatch ? idMatch[1].trim() : null;
+};
+
 export async function getProductPaths(directory, productSlug) {
 	const apiPaths = []
 
@@ -75,10 +86,14 @@ export async function getProductPaths(directory, productSlug) {
 			} else {
 				const itemName = item.split('.')[0]
 
+				const content = fs.readFileSync(itemPath, 'utf8')
+				const id = extractIdFromFrontmatter(content)
+
 				if (itemName === 'index') {
 					apiPaths.push({
 						path: path.join(productSlug, relativePath),
 						itemPath,
+						id,
 					})
 					return
 				}
@@ -86,6 +101,7 @@ export async function getProductPaths(directory, productSlug) {
 				apiPaths.push({
 					path: path.join(productSlug, relativePath, itemName),
 					itemPath,
+					id,
 				})
 			}
 		})
@@ -97,12 +113,16 @@ export async function getProductPaths(directory, productSlug) {
 		`Creating change history for files in ${directory}`,
 		apiPaths,
 		async (apiPath) => {
-			const created_at = await execAsync(
-				`git log --format=%cI --max-count=1 ${apiPath.itemPath}`,
-			)
+			// TODO: We only care about a real value if it's a prod build
+			const created_at = "2025-05-29T11:04:37-04:00"
+			apiPath.created_at = created_at
+
+			// await execAsync(
+			// 	`git log --format=%cI --max-count=1 ${apiPath.itemPath}`,
+			// )
 
 			// remove the "\n" from the end of the output
-			apiPath.created_at = created_at.stdout.slice(0, -1)
+			// apiPath.created_at = created_at.stdout.slice(0, -1)
 		},
 		{ loggingEnabled: false },
 	)
