@@ -34,24 +34,22 @@ export async function GET(request: Request) {
 		return new Response('Not found', { status: 404 })
 	}
 
-	// Import the docsPathsAllVersions.json
-
 	// Get all versions for the given product
 	const productVersions = docsPathsAllVersions[product] || {}
 
 	// Find versions where the id exists in the docs
 	const versions = Object.entries(productVersions)
-		.filter(([version, docs]) => {
-			// docs is an array of doc objects with at least an 'id' and 'path'
-			return Array.isArray(docs) && docs.some((doc: any) => doc.id === id)
-		})
-		.map(([version, docs]) => {
+		.reduce((acc, [version, docs]: [string, any[]]) => {
 			const doc = (docs as any[]).find((doc) => doc.id === id)
-			return {
-				version,
-				path: doc?.path,
+			if (doc) {
+				acc.push({
+					version,
+					path: doc?.path,
+				})
 			}
-		})
+
+			return acc
+		}, [])
 
 	return Response.json({
 		versions,

@@ -67,7 +67,7 @@ const extractIdFromFrontmatter = (content) => {
 
 	const frontmatter = frontmatterMatch[1];
 	const idMatch = frontmatter.match(/^uuidV4:\s*(.+)$/m);
-	return idMatch ? idMatch[1].trim() : null;
+	return idMatch ? idMatch[1].trim() : '';
 };
 
 export async function getProductPaths(directory, productSlug) {
