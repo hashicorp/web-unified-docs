@@ -76,7 +76,7 @@ describe('Content versions API v2', () => {
 		expect(response.status).toBe(200)
 		await expect(response.json()).resolves.toEqual([
 			{ version: 'v1.21.x', path: 'consul/docs/use-case/service-discovery' },
-			{ version: '1.20.x', path: 'consul/docs/concepts/service-discovery' },
+			{ version: 'v1.20.x', path: 'consul/docs/concepts/service-discovery' },
 		])
 	})
 })
