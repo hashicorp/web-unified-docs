@@ -50,7 +50,10 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 
 	const { value: parsedVersion } = productVersionResult
 
-	const parsedDocsPath = docsPath.join('/')
+	let parsedDocsPath = docsPath.join('/')
+	if (parsedDocsPath.endsWith('.mdx')) {
+		parsedDocsPath = parsedDocsPath.slice(0, -4)
+	}
 
 	/**
 	 * TODO: possible improvement: rename files instead of two requests. Which

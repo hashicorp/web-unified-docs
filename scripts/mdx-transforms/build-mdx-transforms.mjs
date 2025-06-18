@@ -96,13 +96,13 @@ export async function buildMdxTransforms(
 		.filter((result) => {
 			return result.error !== null
 		})
-		.map(({ error }) => {
-			return error
+		.map(({ error, file }) => {
+			return { error, file }
 		})
 	if (errors.length > 0) {
 		console.error(`❗ Encountered ${errors.length} errors:`)
-		errors.forEach((error) => {
-			console.error(`❌ ${error}`)
+		errors.forEach(({ error, file }) => {
+			console.error(`❌ ${error} in file: ${file}`)
 		})
 	}
 	// Log out that the script has complete
@@ -132,8 +132,8 @@ async function applyMdxTransforms(entry, versionMetadata = {}) {
 
 		const remarkResults = await remark()
 			.use(remarkMdx)
-			.use(remarkIncludePartialsPlugin, { partialsDir, filePath })
 			.use(transformExcludeTerraformContent, { filePath })
+			.use(remarkIncludePartialsPlugin, { partialsDir, filePath })
 			.use(paragraphCustomAlertsPlugin)
 			.use(rewriteInternalRedirectsPlugin, {
 				redirects,
@@ -152,6 +152,6 @@ async function applyMdxTransforms(entry, versionMetadata = {}) {
 		fs.writeFileSync(outPath, transformedFileString)
 		return { error: null }
 	} catch (e) {
-		return { error: String(e).split('\n')[0] }
+		return { error: String(e).split('\n')[0], file: entry.filePath }
 	}
 }

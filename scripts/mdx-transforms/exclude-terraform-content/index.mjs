@@ -29,9 +29,13 @@ export function transformExcludeTerraformContent({ filePath }) {
 		let matching = false
 		let block = ''
 
-		visit(tree, 'jsx', (node) => {
+		visit(tree, (node) => {
 			const nodeValue = node.value
 			const nodeIndex = node.position?.end?.line
+
+			if (!nodeValue || !nodeIndex) {
+				return
+			}
 
 			if (!matching) {
 				// Wait for a BEGIN block to be matched
@@ -119,9 +123,10 @@ export function transformExcludeTerraformContent({ filePath }) {
 			const [flag] = block.split(/\s+/)
 			const directive = flag.match(DIRECTIVE_RE)
 
+			// TODO: line start and end do not take into account front matter, as it is just tree parsing and technically front matter is not part of the MDX tree
 			if (!directive) {
 				throw new ExcludeTerraformContentError(
-					'Directive could not be parsed',
+					`Directive block ${block} could not be parsed between lines ${start} and ${end}`,
 					tree,
 				)
 			}
@@ -132,13 +137,22 @@ export function transformExcludeTerraformContent({ filePath }) {
 				(directive[0].includes('TFEnterprise:only') &&
 					!filePath.includes('terraform-enterprise'))
 			) {
-				tree.children = tree.children.filter((node) => {
-					return (
-						!node.position ||
-						node.position.start.line < start ||
-						node.position.end.line > end
-					)
-				})
+				// If the directive is TFC:only or TFEnterprise:only, remove the lines in the range recursively
+				function removeNodesInRange(nodes) {
+					for (let i = nodes.length - 1; i >= 0; i--) {
+						const node = nodes[i]
+						if (
+							node.position &&
+							node.position.start.line >= start &&
+							node.position.end.line <= end
+						) {
+							nodes.splice(i, 1)
+						} else if (node.children && Array.isArray(node.children)) {
+							removeNodesInRange(node.children, node)
+						}
+					}
+				}
+				removeNodesInRange(tree.children, tree)
 			}
 		})
 

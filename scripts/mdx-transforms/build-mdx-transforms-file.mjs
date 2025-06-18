@@ -18,6 +18,7 @@ import {
 	rewriteInternalRedirectsPlugin,
 	loadRedirects,
 } from './rewrite-internal-redirects/rewrite-internal-redirects.mjs'
+import { transformExcludeTerraformContent } from './exclude-terraform-content/index.mjs'
 
 const CWD = process.cwd()
 const VERSION_METADATA_FILE = path.join(CWD, 'app/api/versionMetadata.json')
@@ -87,6 +88,7 @@ export async function applyFileMdxTransforms(entry, versionMetadata = {}) {
 
 		const remarkResults = await remark()
 			.use(remarkMdx)
+			.use(transformExcludeTerraformContent, { filePath })
 			.use(remarkIncludePartialsPlugin, { partialsDir, filePath })
 			.use(paragraphCustomAlertsPlugin)
 			.use(rewriteInternalRedirectsPlugin, {

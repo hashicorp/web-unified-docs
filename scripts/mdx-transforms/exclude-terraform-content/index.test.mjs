@@ -96,7 +96,9 @@ This content should be removed.
 
 		await expect(async () => {
 			return await runTransform(markdown, ptfeFilePath)
-		}).rejects.toThrow('Directive could not be parsed')
+		}).rejects.toThrow(
+			/Directive block TFE:only could not be parsed between lines 2 and 4/,
+		)
 	})
 
 	it('should remove TFC:only content and leave TFEnterprise:only content for terraform-enterprise', async () => {
@@ -130,6 +132,26 @@ This content should be removed.
 <!-- BEGIN: TFEnterprise:only -->
 This content should be removed.
 <!-- END: TFEnterprise:only -->
+This content should stay.
+`
+
+		const filePath = 'terraform/some-file.md'
+		const expected = `This content should stay.`
+
+		const result = await runTransform(markdown, filePath)
+
+		expect(result.trim()).toBe(expected.trim())
+	})
+
+	it('should remove NESTED TFEnterprise:only and TFC:only content for terraform product', async () => {
+		const markdown = `
+<!-- BEGIN: TFC:only -->
+This content should be removed.
+<!-- END: TFC:only -->
+	<!-- BEGIN: TFEnterprise:only name:revoke -->
+-   You can now revoke, and revert the revocation of, module versions. Learn more about [Managing module versions](/terraform/enterprise/api-docs/private-registry/manage-module-versions).
+		<!-- END: TFEnterprise:only name:revoke -->
+
 This content should stay.
 `
 
