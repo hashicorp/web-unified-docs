@@ -6,25 +6,12 @@
 import { readFile, parseJson } from '@utils/file'
 import { getProductVersion } from '@utils/contentVersions'
 import { errorResultToString } from '@utils/result'
+import { VersionedProduct } from '@api/types'
 
 /**
  * Parameters expected by `GET` route handler
  */
-export type GetParams = {
-	/**
-	 * The product that docs are being requested for
-	 * @example 'terraform'
-	 */
-	productSlug: string
-
-	/**
-	 * Can be a semver version
-	 * @example 'v.1.9.x'
-	 * or a dated version string for PTFE
-	 * @example 'v20220610-01'
-	 */
-	version: string
-
+export type GetParams = VersionedProduct & {
 	/**
 	 * An array of strings representing the path relative to `content/<productSlug>/nav-data/<version>/data`
 	 * @example ['cli']

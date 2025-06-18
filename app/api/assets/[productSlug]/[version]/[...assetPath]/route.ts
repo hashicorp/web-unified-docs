@@ -7,18 +7,9 @@ import { getAssetData } from '@utils/file'
 import { getProductVersion } from '@utils/contentVersions'
 import { errorResultToString } from '@utils/result'
 import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
+import { VersionedProduct } from '@api/types'
 
-export type GetParams = {
-	/**
-	 * The product that docs are being requested for (i.e "terraform")
-	 */
-	productSlug: string
-
-	/**
-	 * Can be a semver version (i.e: `v10.0.x`) or a ptfe version (i.e: `v202206-01`)
-	 */
-	version: string
-
+export type GetParams = VersionedProduct & {
 	/**
 	 * Full path to the asset in the production build, i.e. `terraform/v1.9.x/img/docs/plan-comments.png`
 	 */
