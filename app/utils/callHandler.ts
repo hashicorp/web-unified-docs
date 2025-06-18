@@ -24,8 +24,9 @@ export const callHandler = <
 	) => any
 		? P
 		: never,
+	path?: string,
 ) => {
-	const baseUrl = new URL('http://localhost:8080')
+	const baseUrl = new URL(`http://localhost:8080/api/${path ? path : ''}`)
 	const request = new Request(baseUrl)
 	return handler(request, { params })
 }
