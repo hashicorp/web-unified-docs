@@ -3,6 +3,11 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 import { readFile } from 'fs/promises'
+import {
+	DocPathMetadata,
+	DocPathRecord,
+	VersionDocumentGroup,
+} from '@api/types'
 
 /**
  * Parameters expected by `GET` route handler
@@ -23,22 +28,27 @@ export async function GET(_: Request, { params }: { params: GetParams }) {
 		'./app/api/docsPathsAllVersions.json',
 		'utf8',
 	)
-	const allDocsVersions = JSON.parse(fileContents)
 
-	const docVersions = Object.values(allDocsVersions).flatMap((versionGroup) => {
-		return Object.entries(versionGroup).flatMap(([version, files]) => {
-			return files
-				.map((file) => {
-					return { version, ...file }
-				})
-				.filter(({ id: documentId }) => {
-					return documentId === id
-				})
-				.map(({ version, path }) => {
-					return { version, path }
-				})
-		})
-	})
+	const allDocsVersions: DocPathMetadata = JSON.parse(fileContents)
+
+	const docVersions = Object.values(allDocsVersions).flatMap(
+		(versionGroup: VersionDocumentGroup) => {
+			return Object.entries(versionGroup).flatMap(
+				([version, files]: [string, DocPathRecord[]]) => {
+					return files
+						.map((file: DocPathRecord) => {
+							return { version, ...file }
+						})
+						.filter(({ id: documentId }: DocPathRecord) => {
+							return documentId === id
+						})
+						.map(({ version, path }: Record<string, string>) => {
+							return { version, path }
+						})
+				},
+			)
+		},
+	)
 	console.log(docVersions)
 	return Response.json(docVersions, { status: 200 })
 }
