@@ -1,4 +1,9 @@
 /**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: BUSL-1.1
+ */
+
+/**
  * A utility wrapper function to replace numerous variations of `mockRequest`
  * around the tests. This utility function accepts a Next.js request handler
  * and (using type inference) provides a type-safe way to call the handler in
