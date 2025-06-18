@@ -12,9 +12,7 @@ describe('Content versions API v2', () => {
 	let mockRequest: (params: GetParams) => ReturnType<typeof GET>
 	beforeEach(() => {
 		mockRequest = ({ id }: GetParams) => {
-			const url = new URL(
-				`http://localhost:8000/api/v2/content-versions?id=${id}`,
-			)
+			const url = new URL(`http://localhost:8000/api/v2/content-versions`)
 			const req = new Request(url)
 			return GET(req, { params: { id } })
 		}
@@ -72,8 +70,8 @@ describe('Content versions API v2', () => {
 		const response = await mockRequest({ id: consulDocumentId })
 		expect(response.status).toBe(200)
 		await expect(response.json()).resolves.toEqual([
-			['v1.21.x', 'consul/docs/use-case/service-discovery'],
-			['v1.20.x', 'consul/docs/concepts/service-discovery'],
+			{ version: 'v1.21.x', path: 'consul/docs/use-case/service-discovery' },
+			{ version: '1.20.x', path: 'consul/docs/concepts/service-discovery' },
 		])
 	})
 })

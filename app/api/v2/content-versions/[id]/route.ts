@@ -25,20 +25,20 @@ export async function GET(_: Request, { params }: { params: GetParams }) {
 	)
 	const allDocsVersions = JSON.parse(fileContents)
 
-	const docVersions = Object.values(allDocsVersions)
-		.flatMap((versionGroup) => {
-			return Object.entries(versionGroup).flatMap(([version, files]) => {
-				return files.map(({ id: documentId, path }) => {
-					return { version, documentId, path }
+	const docVersions = Object.values(allDocsVersions).flatMap((versionGroup) => {
+		return Object.entries(versionGroup).flatMap(([version, files]) => {
+			return files
+				.map((file) => {
+					return { version, ...file }
 				})
-			})
+				.filter(({ id: documentId }) => {
+					return documentId === id
+				})
+				.map(({ version, path }) => {
+					return { version, path }
+				})
 		})
-		.filter(({ documentId }) => {
-			return documentId === id
-		})
-		.map(({ version, path }) => {
-			return [version, path]
-		})
-
+	})
+	console.log(docVersions)
 	return Response.json(docVersions, { status: 200 })
 }
