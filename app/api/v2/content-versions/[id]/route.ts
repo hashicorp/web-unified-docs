@@ -49,6 +49,5 @@ export async function GET(_: Request, { params }: { params: GetParams }) {
 			)
 		},
 	)
-	console.log(docVersions)
 	return Response.json(docVersions, { status: 200 })
 }
