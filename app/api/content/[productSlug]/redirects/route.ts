@@ -29,10 +29,17 @@ const contentDirMap: Record<string, string> = {
 	waypoint: 'content',
 }
 
-export async function GET(
-	request: Request,
-	{ params }: { params: { productSlug: string } },
-) {
+/**
+ * Parameters expected by `GET` route handler
+ */
+export type GetParams = {
+	/**
+	 * The product that docs are being requested for
+	 * @example 'terraform'
+	 */
+	productSlug: string
+}
+export async function GET(request: Request, { params }: { params: GetParams }) {
 	const { productSlug } = params
 
 	if (!contentDirMap[productSlug]) {

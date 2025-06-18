@@ -12,10 +12,11 @@ import {
 	afterAll,
 	MockInstance,
 } from 'vitest'
-import { GET, GetParams } from './route'
+import { GET } from './route'
 import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
 import { Err, Ok } from '@utils/result'
 import { getProductVersionMetadata } from '@utils/contentVersions'
+import { callHandler } from '@utils/callHandler'
 
 vi.mock(import('@utils/contentVersions'), async (importOriginal: any) => {
 	const mod = await importOriginal()
@@ -32,18 +33,8 @@ vi.mock('@api/versionMetadata.json', () => {
 })
 
 describe('GET /[productSlug]/version-metadata', () => {
-	let mockRequest: (product: GetParams['productSlug']) => ReturnType<typeof GET>
 	let consoleMock: MockInstance<Console['error']>
 	beforeEach(() => {
-		mockRequest = (product: GetParams['productSlug']) => {
-			// The URL doesn't actually matter in testing, but for completeness
-			// it's nice to have it match the real URL being used
-			const url = new URL(
-				`http://localhost:8000/api/content/${product}/version-metadata`,
-			)
-			const req = new Request(url)
-			return GET(req, { params: { productSlug: product } })
-		}
 		// spy on console.error so that we can examine it's calls
 		consoleMock = vi.spyOn(console, 'error').mockImplementation(() => {})
 	})
@@ -61,7 +52,7 @@ describe('GET /[productSlug]/version-metadata', () => {
 			},
 		)
 
-		const response = await mockRequest(productSlug)
+		const response = await callHandler(GET, { productSlug })
 
 		expect(consoleMock.mock.calls[0][0]).toMatch(
 			new RegExp(`product, ${productSlug}, not found`, 'i'),
@@ -89,7 +80,7 @@ describe('GET /[productSlug]/version-metadata', () => {
 		// Fake the return value from getProductVersionMetadata
 		vi.mocked(getProductVersionMetadata).mockReturnValue(Ok(versionMetadata))
 
-		const response = await mockRequest(productSlug)
+		const response = await callHandler(GET, { productSlug })
 
 		expect(response.status).toBe(200)
 		const { result } = await response.json()
