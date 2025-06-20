@@ -7,6 +7,7 @@ import { expect, test, vi } from 'vitest'
 import { GET } from './route'
 import { getAssetData } from '@utils/file'
 import { getProductVersion } from '@utils/contentVersions'
+import { mockRequest } from '@utils/mockRequest'
 
 vi.mock('@utils/file')
 vi.mock('@utils/contentVersions')
@@ -23,21 +24,16 @@ vi.mock('@api/versionMetadata.json', () => {
 })
 
 test("Return 404 if `product` doesn't exist", async () => {
-	const mockRequest = (url: string) => {
-		return new Request(url)
-	}
-
 	// eat error message
 	vi.spyOn(console, 'error').mockImplementation(() => {})
 
 	const productSlug = 'fake product'
 	const version = 'v1.1.x'
 	const assetPath = ['test.png']
-	const request = mockRequest(
-		`http://localhost:8080/api/assets/${productSlug}/${version}/${assetPath.join('/')}`,
-	)
-	const response = await GET(request, {
-		params: { productSlug, version, assetPath },
+	const response = await mockRequest(GET, {
+		productSlug,
+		version,
+		assetPath,
 	})
 
 	expect(response.status).toBe(404)
@@ -46,22 +42,13 @@ test("Return 404 if `product` doesn't exist", async () => {
 })
 
 test("Return 404 if `version` doesn't exist for `productSlug`", async () => {
-	const mockRequest = (url: string) => {
-		return new Request(url)
-	}
-
 	const productSlug = 'terraform'
 	const version = 'fake_version'
 	const assetPath = ['test.png']
-	const request = mockRequest(
-		`http://localhost:8080/api/assets/${productSlug}/${version}/${assetPath.join('/')}`,
-	)
 
 	vi.mocked(getProductVersion).mockReturnValueOnce({ ok: false, value: '' })
 
-	const response = await GET(request, {
-		params: { productSlug, version, assetPath },
-	})
+	const response = await mockRequest(GET, { productSlug, version, assetPath })
 
 	expect(response.status).toBe(404)
 	const text = await response.text()
@@ -75,8 +62,6 @@ test('Return 200 and an image for a valid `product`, `version`, and `assetPath`'
 		assetPath: ['test.png'],
 	}
 
-	const request = new Request('http://localhost:8080')
-
 	const assetData: {
 		ok: true
 		value: { buffer: Buffer; contentType: string }
@@ -95,7 +80,7 @@ test('Return 200 and an image for a valid `product`, `version`, and `assetPath`'
 
 	vi.mocked(getAssetData).mockResolvedValueOnce(assetData)
 
-	const response = await GET(request, { params })
+	const response = await mockRequest(GET, params)
 
 	expect(response.status).toBe(200)
 	const buffer = Buffer.from(await response.arrayBuffer())
@@ -109,8 +94,6 @@ test('Return 200 and an image for the `version` being `latest` and the rest of t
 		assetPath: ['test.png'],
 	}
 
-	const request = new Request('http://localhost:8080')
-
 	const assetData: {
 		ok: true
 		value: { buffer: Buffer; contentType: string }
@@ -129,7 +112,7 @@ test('Return 200 and an image for the `version` being `latest` and the rest of t
 
 	vi.mocked(getAssetData).mockResolvedValueOnce(assetData)
 
-	const response = await GET(request, { params })
+	const response = await mockRequest(GET, params)
 
 	expect(response.status).toBe(200)
 	const buffer = Buffer.from(await response.arrayBuffer())
