@@ -5,7 +5,7 @@
 
 import { expect, test, vi, beforeEach, afterEach } from 'vitest'
 import { GET } from './route'
-import { callHandler } from '@utils/callHandler'
+import { mockRequest } from '@utils/mockRequest'
 
 import { vol } from 'memfs'
 
@@ -41,7 +41,7 @@ afterEach(() => {
 })
 
 test('should return 400 if `product` query parameter is missing', async () => {
-	const response = await callHandler(
+	const response = await mockRequest(
 		GET,
 		{},
 		'content-versions?fullPath=doc%23cdktf%2Fapi-reference%2Fpython',
@@ -54,7 +54,7 @@ test('should return 400 if `product` query parameter is missing', async () => {
 })
 
 test('should return 400 if `fullPath` query parameter is missing', async () => {
-	const response = await callHandler(GET, {}, 'content-versions?product=vault')
+	const response = await mockRequest(GET, {}, 'content-versions?product=vault')
 	expect(response.status).toBe(400)
 	const text = await response.text()
 	expect(text).toBe(
@@ -65,7 +65,7 @@ test('should return 400 if `fullPath` query parameter is missing', async () => {
 test('should return 404 if the product is invalid', async () => {
 	vol.fromJSON({})
 
-	const response = await callHandler(
+	const response = await mockRequest(
 		GET,
 		{},
 		'content-versions?product=nonexistent&fullPath=doc%23cdktf%2Fapi-reference%2Fpython',
@@ -86,7 +86,7 @@ test('should return 200 and array of strings on valid params', async () => {
 	const mockedResponse = {
 		versions: ['v0.20.x', 'v0.21.x'],
 	}
-	const response = await callHandler(
+	const response = await mockRequest(
 		GET,
 		{},
 		'content-versions?product=terraform-cdk&fullPath=doc%23cdktf%2Fapi-reference%2Fpython',

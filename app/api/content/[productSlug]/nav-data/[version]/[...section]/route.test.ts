@@ -17,7 +17,7 @@ import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
 import { Err, Ok } from '@utils/result'
 import { getProductVersion } from '@utils/contentVersions'
 import { readFile, parseJson } from '@utils/file'
-import { callHandler } from '@utils/callHandler'
+import { mockRequest } from '@utils/mockRequest'
 
 vi.mock(import('@utils/contentVersions'), async (importOriginal: any) => {
 	const mod = await importOriginal()
@@ -58,7 +58,7 @@ describe('GET /[productSlug]/[version]/[...section]', () => {
 		vi.mocked(getProductVersion).mockReturnValue(
 			Err(`Product, fake product, not found in contentDirMap`),
 		)
-		const response = await callHandler(GET, {
+		const response = await mockRequest(GET, {
 			productSlug,
 			version: '',
 			section: [''],
@@ -80,7 +80,7 @@ describe('GET /[productSlug]/[version]/[...section]', () => {
 		vi.mocked(getProductVersion).mockReturnValue(
 			Err(`Product, ${productSlug}, has no "${version}" version`),
 		)
-		const response = await callHandler(GET, {
+		const response = await mockRequest(GET, {
 			productSlug,
 			version,
 			section: [''],
@@ -108,7 +108,7 @@ describe('GET /[productSlug]/[version]/[...section]', () => {
 			return Err(`Failed to read file at path: ${filePath.join('/')}`)
 		})
 
-		const response = await callHandler(GET, {
+		const response = await mockRequest(GET, {
 			productSlug,
 			version,
 			section: [''],
@@ -143,7 +143,7 @@ describe('GET /[productSlug]/[version]/[...section]', () => {
 			)
 		})
 
-		const response = await callHandler(GET, {
+		const response = await mockRequest(GET, {
 			productSlug,
 			version,
 			section: [''],
@@ -181,7 +181,7 @@ describe('GET /[productSlug]/[version]/[...section]', () => {
 			return Ok(sectionData)
 		})
 
-		const response = await callHandler(GET, {
+		const response = await mockRequest(GET, {
 			productSlug,
 			version,
 			section: ['intro'],

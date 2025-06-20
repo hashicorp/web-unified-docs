@@ -16,7 +16,7 @@ import { GET } from './route'
 import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
 import { Err, Ok } from '@utils/result'
 import { getProductVersionMetadata } from '@utils/contentVersions'
-import { callHandler } from '@utils/callHandler'
+import { mockRequest } from '@utils/mockRequest'
 
 vi.mock(import('@utils/contentVersions'), async (importOriginal: any) => {
 	const mod = await importOriginal()
@@ -52,7 +52,7 @@ describe('GET /[productSlug]/version-metadata', () => {
 			},
 		)
 
-		const response = await callHandler(GET, { productSlug })
+		const response = await mockRequest(GET, { productSlug })
 
 		expect(consoleMock.mock.calls[0][0]).toMatch(
 			new RegExp(`product, ${productSlug}, not found`, 'i'),
@@ -80,7 +80,7 @@ describe('GET /[productSlug]/version-metadata', () => {
 		// Fake the return value from getProductVersionMetadata
 		vi.mocked(getProductVersionMetadata).mockReturnValue(Ok(versionMetadata))
 
-		const response = await callHandler(GET, { productSlug })
+		const response = await mockRequest(GET, { productSlug })
 
 		expect(response.status).toBe(200)
 		const { result } = await response.json()

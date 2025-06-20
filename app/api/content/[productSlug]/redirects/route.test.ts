@@ -8,7 +8,7 @@ import { GET } from './route'
 
 import * as utilsFileModule from '@utils/file'
 import * as utilsContentVersionsModule from '@utils/contentVersions'
-import { callHandler } from '@utils/callHandler'
+import { mockRequest } from '@utils/mockRequest'
 
 vi.mock('@api/versionMetadata.json', () => {
 	return {
@@ -33,7 +33,7 @@ test('Return 404 if `product` does not exist', async () => {
 	vi.spyOn(console, 'error').mockImplementation(() => {})
 
 	const productSlug = 'fake product'
-	const response = await callHandler(GET, { productSlug })
+	const response = await mockRequest(GET, { productSlug })
 
 	expect(response.status).toBe(404)
 	const text = await response.text()
@@ -42,7 +42,7 @@ test('Return 404 if `product` does not exist', async () => {
 
 test("Return 404 if not redirect DOESN'T exists for `latest` on `productSlug`", async () => {
 	const productSlug = 'terraform'
-	const response = await callHandler(GET, { productSlug })
+	const response = await mockRequest(GET, { productSlug })
 
 	expect(response.status).toBe(404)
 	const text = await response.text()
@@ -56,7 +56,7 @@ test('Return 200 and parse the jsonc into json if valid for UNVERSIONED product'
 	})
 
 	const productSlug = 'terraform-docs-common'
-	const response = await callHandler(GET, { productSlug })
+	const response = await mockRequest(GET, { productSlug })
 
 	expect(response.status).toBe(200)
 	const text = await response.text()
@@ -78,7 +78,7 @@ test('Return 200 and parse the jsonc into json if valid for VERSIONED product', 
 	})
 
 	const productSlug = 'terraform-enterprise'
-	const response = await callHandler(GET, { productSlug })
+	const response = await mockRequest(GET, { productSlug })
 
 	expect(response.status).toBe(200)
 	const text = await response.text()

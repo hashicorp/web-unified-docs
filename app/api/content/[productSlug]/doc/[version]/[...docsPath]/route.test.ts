@@ -17,7 +17,7 @@ import { Err, Ok } from '@utils/result'
 import { getProductVersion } from '@utils/contentVersions'
 import { PRODUCT_CONFIG } from '__fixtures__/productConfig.mjs'
 import { readFile, parseMarkdownFrontMatter } from '@utils/file'
-import { callHandler } from '@utils/callHandler'
+import { mockRequest } from '@utils/mockRequest'
 
 vi.mock(import('@utils/contentVersions'), async (importOriginal: any) => {
 	const mod = await importOriginal()
@@ -75,7 +75,7 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 
 	it('returns a 404 for nonexistent products', async () => {
 		const fakeProductSlug = 'fake product'
-		const response = await callHandler(GET, {
+		const response = await mockRequest(GET, {
 			docsPath: [''],
 			productSlug: fakeProductSlug,
 			version: '',
@@ -97,7 +97,7 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 		vi.mocked(getProductVersion).mockReturnValue(
 			Err(`Product, ${productSlug}, has no "${version}" version`),
 		)
-		const response = await callHandler(GET, {
+		const response = await mockRequest(GET, {
 			docsPath: [''],
 			productSlug,
 			version,
@@ -125,7 +125,7 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 			return Err(`Failed to read file at path: ${filePath.join('/')}`)
 		})
 
-		const response = await callHandler(GET, {
+		const response = await mockRequest(GET, {
 			docsPath: [''],
 			productSlug,
 			version,
@@ -156,7 +156,7 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 			return Err('Failed to parse Markdown front-matter')
 		})
 
-		const response = await callHandler(GET, {
+		const response = await mockRequest(GET, {
 			docsPath: [''],
 			productSlug,
 			version,
@@ -192,7 +192,7 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 			return Ok({ markdownSource, metadata: {} })
 		})
 
-		const response = await callHandler(GET, {
+		const response = await mockRequest(GET, {
 			docsPath: ['plugin', 'framework', 'internals', 'rpcs'],
 			productSlug,
 			version,
@@ -233,7 +233,7 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 			return Ok({ markdownSource, metadata: {} })
 		})
 
-		const response = await callHandler(GET, {
+		const response = await mockRequest(GET, {
 			docsPath: ['plugin', 'framework', 'internals', 'rpcs.mdx'],
 			productSlug,
 			version,
@@ -269,7 +269,7 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 			Ok({ markdownSource, metadata: {} }),
 		)
 
-		const response = await callHandler(GET, {
+		const response = await mockRequest(GET, {
 			docsPath: ['docs', 'example'],
 			productSlug,
 			version,

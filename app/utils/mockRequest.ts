@@ -13,13 +13,13 @@
  * ```ts
  *   import { GET } from './route.ts'
  *   // ...
- *   const response = await requestWrapper(GET, { product: 'terraform' })
+ *   const response = await mockApiCall(GET, { product: 'terraform' })
  *
  *   expect(response.status).toBe(200)
  *   // Other assertions...
  * ```
  */
-export const callHandler = <
+export const mockRequest = <
 	ApiHandler extends (request: Request, context: { params: any }) => any,
 >(
 	handler: ApiHandler,

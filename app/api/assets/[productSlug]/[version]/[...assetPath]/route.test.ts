@@ -7,7 +7,7 @@ import { expect, test, vi } from 'vitest'
 import { GET } from './route'
 import { getAssetData } from '@utils/file'
 import { getProductVersion } from '@utils/contentVersions'
-import { callHandler } from '@utils/callHandler'
+import { mockRequest } from '@utils/mockRequest'
 
 vi.mock('@utils/file')
 vi.mock('@utils/contentVersions')
@@ -30,7 +30,7 @@ test("Return 404 if `product` doesn't exist", async () => {
 	const productSlug = 'fake product'
 	const version = 'v1.1.x'
 	const assetPath = ['test.png']
-	const response = await callHandler(GET, {
+	const response = await mockRequest(GET, {
 		productSlug,
 		version,
 		assetPath,
@@ -48,7 +48,7 @@ test("Return 404 if `version` doesn't exist for `productSlug`", async () => {
 
 	vi.mocked(getProductVersion).mockReturnValueOnce({ ok: false, value: '' })
 
-	const response = await callHandler(GET, { productSlug, version, assetPath })
+	const response = await mockRequest(GET, { productSlug, version, assetPath })
 
 	expect(response.status).toBe(404)
 	const text = await response.text()
@@ -80,7 +80,7 @@ test('Return 200 and an image for a valid `product`, `version`, and `assetPath`'
 
 	vi.mocked(getAssetData).mockResolvedValueOnce(assetData)
 
-	const response = await callHandler(GET, params)
+	const response = await mockRequest(GET, params)
 
 	expect(response.status).toBe(200)
 	const buffer = Buffer.from(await response.arrayBuffer())
@@ -112,7 +112,7 @@ test('Return 200 and an image for the `version` being `latest` and the rest of t
 
 	vi.mocked(getAssetData).mockResolvedValueOnce(assetData)
 
-	const response = await callHandler(GET, params)
+	const response = await mockRequest(GET, params)
 
 	expect(response.status).toBe(200)
 	const buffer = Buffer.from(await response.arrayBuffer())
