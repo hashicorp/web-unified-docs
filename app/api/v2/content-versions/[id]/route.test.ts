@@ -3,9 +3,10 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-import { it, beforeEach, describe, expect, afterEach, vi } from 'vitest'
-import { GET, GetParams } from './route'
+import { it, describe, expect, afterEach, vi } from 'vitest'
+import { GET } from './route'
 import { fs, vol } from 'memfs'
+import { mockRequest } from '@utils/mockRequest'
 
 vi.mock('node:fs/promises', async () => {
 	const memfs: { fs: typeof fs } = await vi.importActual('memfs')
@@ -14,20 +15,12 @@ vi.mock('node:fs/promises', async () => {
 })
 
 describe('Content versions API v2', () => {
-	let mockRequest: (params: GetParams) => ReturnType<typeof GET>
-	beforeEach(() => {
-		mockRequest = ({ id }: GetParams) => {
-			const url = new URL(`http://localhost:8000/api/v2/content-versions`)
-			const req = new Request(url)
-			return GET(req, { params: { id } })
-		}
-	})
 	afterEach(() => {
 		vi.restoreAllMocks()
 		vol.reset()
 	})
 	it('throws a 400 error if document ID is missing', async () => {
-		const response = await mockRequest({})
+		const response = await mockRequest(GET, {})
 
 		expect(response.status).toBe(400)
 		await expect(response.text()).resolves.toMatch(/document ID is required/i)
@@ -72,7 +65,7 @@ describe('Content versions API v2', () => {
 			}),
 		})
 
-		const response = await mockRequest({ id: consulDocumentId })
+		const response = await mockRequest(GET, { id: consulDocumentId })
 		expect(response.status).toBe(200)
 		await expect(response.json()).resolves.toEqual([
 			{ version: 'v1.21.x', path: 'consul/docs/use-case/service-discovery' },
