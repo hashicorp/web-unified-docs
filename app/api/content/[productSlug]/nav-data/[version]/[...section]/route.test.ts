@@ -12,11 +12,12 @@ import {
 	afterAll,
 	MockInstance,
 } from 'vitest'
-import { GET, GetParams } from './route'
+import { GET } from './route'
 import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
 import { Err, Ok } from '@utils/result'
 import { getProductVersion } from '@utils/contentVersions'
 import { readFile, parseJson } from '@utils/file'
+import { mockRequest } from '@utils/mockRequest'
 
 vi.mock(import('@utils/contentVersions'), async (importOriginal: any) => {
 	const mod = await importOriginal()
@@ -43,19 +44,8 @@ vi.mock('@api/versionMetadata.json', () => {
 })
 
 describe('GET /[productSlug]/[version]/[...section]', () => {
-	let mockRequest: (params: GetParams) => ReturnType<typeof GET>
 	let consoleMock: MockInstance<Console['error']>
 	beforeEach(() => {
-		mockRequest = (params: GetParams) => {
-			const { productSlug, version, section } = params
-			// The URL doesn't actually matter in testing, but for completeness
-			// it's nice to have it match the real URL being used
-			const url = new URL(
-				`http://localhost:8000/api/content/${productSlug}/nav-data/${version}/${section.join('/')}`,
-			)
-			const req = new Request(url)
-			return GET(req, { params })
-		}
 		// spy on console.error so that we can examine it's calls
 		consoleMock = vi.spyOn(console, 'error').mockImplementation(() => {})
 	})
@@ -68,7 +58,7 @@ describe('GET /[productSlug]/[version]/[...section]', () => {
 		vi.mocked(getProductVersion).mockReturnValue(
 			Err(`Product, fake product, not found in contentDirMap`),
 		)
-		const response = await mockRequest({
+		const response = await mockRequest(GET, {
 			productSlug,
 			version: '',
 			section: [''],
@@ -90,7 +80,7 @@ describe('GET /[productSlug]/[version]/[...section]', () => {
 		vi.mocked(getProductVersion).mockReturnValue(
 			Err(`Product, ${productSlug}, has no "${version}" version`),
 		)
-		const response = await mockRequest({
+		const response = await mockRequest(GET, {
 			productSlug,
 			version,
 			section: [''],
@@ -118,7 +108,7 @@ describe('GET /[productSlug]/[version]/[...section]', () => {
 			return Err(`Failed to read file at path: ${filePath.join('/')}`)
 		})
 
-		const response = await mockRequest({
+		const response = await mockRequest(GET, {
 			productSlug,
 			version,
 			section: [''],
@@ -153,7 +143,7 @@ describe('GET /[productSlug]/[version]/[...section]', () => {
 			)
 		})
 
-		const response = await mockRequest({
+		const response = await mockRequest(GET, {
 			productSlug,
 			version,
 			section: [''],
@@ -191,7 +181,7 @@ describe('GET /[productSlug]/[version]/[...section]', () => {
 			return Ok(sectionData)
 		})
 
-		const response = await mockRequest({
+		const response = await mockRequest(GET, {
 			productSlug,
 			version,
 			section: ['intro'],

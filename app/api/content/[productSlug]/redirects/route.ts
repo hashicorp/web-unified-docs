@@ -6,6 +6,7 @@
 import { getProductVersion } from '@utils/contentVersions'
 import { readFile, parseJsonc } from '@utils/file'
 import { errorResultToString } from '@utils/result'
+import { ProductParam } from '@api/types'
 
 const contentDirMap: Record<string, string> = {
 	boundary: 'content',
@@ -29,10 +30,11 @@ const contentDirMap: Record<string, string> = {
 	waypoint: 'content',
 }
 
-export async function GET(
-	request: Request,
-	{ params }: { params: { productSlug: string } },
-) {
+/**
+ * Parameters expected by `GET` route handler
+ */
+export type GetParams = ProductParam
+export async function GET(request: Request, { params }: { params: GetParams }) {
 	const { productSlug } = params
 
 	if (!contentDirMap[productSlug]) {

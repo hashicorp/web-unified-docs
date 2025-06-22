@@ -8,21 +8,12 @@ import { getProductVersion } from '@utils/contentVersions'
 import { errorResultToString } from '@utils/result'
 import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
 import docsPathsAllVersions from '@api/docsPathsAllVersions.json'
+import { VersionedProduct } from '@api/types'
 
 /**
  * Parameters expected by `GET` route handler
  */
-export type GetParams = {
-	/**
-	 * The product that docs are being requested for (i.e "terraform")
-	 */
-	productSlug: string
-
-	/**
-	 * Can be a semver version (i.e: `v10.0.1`) or a ptfe dated version (i.e: `v20220610-01`)
-	 */
-	version: string
-
+export type GetParams = VersionedProduct & {
 	/**
 	 * Full path to the location of docs on the filesystem relative to `content/`
 	 */
