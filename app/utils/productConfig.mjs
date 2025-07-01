@@ -440,4 +440,14 @@ export const PRODUCT_CONFIG = {
 	//  versionedDocs: true,
 	// 	websiteDir: 'website',
 	// },
+	vault: {
+		assetDir: 'img',
+		contentDir: 'content',
+		basePaths: ['docs'],
+		dataDir: 'data',
+		productSlug: 'vault',
+		semverCoerce: semver.coerce,
+		versionedDocs: true,
+		websiteDir: 'website',
+	},
 }
