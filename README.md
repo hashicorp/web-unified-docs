@@ -203,3 +203,11 @@ Check multiple directories.
 ```
 npm run broken-link terraform-plugin-framework-log terraform-plugin-mux
 ```
+
+## Contributing to the content
+
+Follow the [style guide](content/style-guide/index.md) when making changes to documentation or tutorials. The [top 12 guidelines](content/style-guide/top-12.md) covers the most common use cases. 
+
+Work with your technical writer or education engineer when adding new content or for updates that may include structural changes to the information.   
+
+Adherence to the style guide and our writing principles ensures that our content is clear, concise, and consistent.
