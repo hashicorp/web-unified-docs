@@ -73,20 +73,25 @@ export async function getProductPaths(directory, productSlug) {
 			if (stat.isDirectory()) {
 				traverseDirectory(itemPath, itemRelativePath)
 			} else {
-				const itemName = item.split('.')[0]
-
-				if (itemName === 'index') {
-					apiPaths.push({
-						path: path.join(productSlug, relativePath),
-						itemPath,
-					})
-					return
-				}
-
-				apiPaths.push({
-					path: path.join(productSlug, relativePath, itemName),
+				const [itemName] = item.split('.')
+				let apiPath = {
+					path:
+						itemName === 'index'
+							? path.join(productSlug, relativePath)
+							: path.join(productSlug, relativePath, itemName),
 					itemPath,
-				})
+				}
+				const frontmatterMatch = fs
+					.readFileSync(itemPath, 'utf-8')
+					.match(/^---\n([\s\S]+?)\n---/m)
+				if (frontmatterMatch) {
+					const idMatch =
+						frontmatterMatch?.[1].match(/^id:\s*(.+)$/m)?.[1] || null
+					if (idMatch) {
+						apiPath.id = idMatch
+					}
+				}
+				apiPaths.push(apiPath)
 			}
 		})
 	}
@@ -100,7 +105,6 @@ export async function getProductPaths(directory, productSlug) {
 			const created_at = await execAsync(
 				`git log --format=%cI --max-count=1 ${apiPath.itemPath}`,
 			)
-
 			// remove the "\n" from the end of the output
 			apiPath.created_at = created_at.stdout.slice(0, -1)
 		},
