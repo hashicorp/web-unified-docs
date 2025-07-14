@@ -34,18 +34,21 @@ export async function gatherAllVersionsDocsPaths(versionMetadata) {
 		console.log(`Gathering file information for ${product}...`)
 
 		for (const metadata of allVersions) {
-			// If the product is not versioned, we set it's version to 'v0.0.x'
 			let versionPath = metadata.version
-			// let metadata
+			let versionName = metadata.version
+
+			// If the product is not versioned, we set it's version to 'v0.0.x' but keep the path empty
 			if (!PRODUCT_CONFIG[product].versionedDocs) {
+				versionName = 'v0.0.x'
 				versionPath = ''
 			}
 
 			if (metadata.releaseStage !== 'stable') {
 				versionPath = `${versionPath} (${metadata.releaseStage})`
+				versionName = versionPath
 			}
 
-			allDocsPaths[product][versionPath] = []
+			allDocsPaths[product][versionName] = []
 			const contentPath = path.join(
 				'./content',
 				product,
@@ -59,7 +62,7 @@ export async function gatherAllVersionsDocsPaths(versionMetadata) {
 				PRODUCT_CONFIG[product].productSlug,
 			)
 
-			allDocsPaths[product][versionPath].push(...allPaths)
+			allDocsPaths[product][versionName].push(...allPaths)
 		}
 	}
 

@@ -14,24 +14,37 @@ export const getDocsPaths = async (
 ) => {
 	const paths = productSlugs
 		.map((productSlug: string) => {
-			const latestProductVersion = getProductVersionMetadata(
+			const latestProductMetadata = getProductVersionMetadata(
 				productSlug,
 				'latest',
 			)
 
-			if (!latestProductVersion.ok) {
-				console.error(errorResultToString('API', latestProductVersion))
+			if (!latestProductMetadata.ok) {
+				console.error(errorResultToString('API', latestProductMetadata))
 				return []
 			}
 
-			if (docsPathsData[productSlug]) {
-				if (!PRODUCT_CONFIG[productSlug].versionedDocs) {
-					return docsPathsData[productSlug]['v0.0.x']
-				}
-				return docsPathsData[productSlug][latestProductVersion.value]
+			const { version, releaseStage } = latestProductMetadata.value
+
+			let parsedVersion
+			if (!PRODUCT_CONFIG[productSlug].versionedDocs) {
+				parsedVersion = 'v0.0.x'
+			} else if (releaseStage !== 'stable') {
+				parsedVersion = `${version} (${releaseStage})`
+			} else {
+				parsedVersion = version
 			}
-			console.error(`Product, ${productSlug}, not found in docs paths`)
-			return []
+
+			const docsPath = docsPathsData[productSlug][parsedVersion]
+
+			if (!docsPath) {
+				console.error(
+					`Product, ${productSlug}, version, ${parsedVersion}, not found in docs paths`,
+				)
+				return []
+			}
+
+			return docsPath
 		})
 		.flat()
 
