@@ -68,7 +68,11 @@ test('getProductVersion should return error for non-existent version', () => {
 test('getProductVersion should return correct version for existing version', () => {
 	const expected = {
 		ok: true,
-		value: 'v1.5.x',
+		value: {
+			version: 'v1.5.x',
+			releaseStage: 'stable',
+			isLatest: false,
+		},
 	}
 
 	const result = getProductVersionMetadata(
@@ -88,7 +92,7 @@ test('getProductVersion should return latest version', () => {
 		'latest',
 		versionMetadata,
 	)
-	expect(value).toStrictEqual(expected.version)
+	expect(value).toStrictEqual(expected)
 })
 
 test('getProductVersionMetadata should return metadata for existing product', () => {
