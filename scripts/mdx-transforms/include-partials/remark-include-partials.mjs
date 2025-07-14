@@ -3,10 +3,10 @@
  * SPDX-License-Identifier: MPL-2.0
  */
 
-import path from 'path'
+import path from 'node:path'
+import fs from 'node:fs'
 import remark from 'remark'
 import flatMap from 'unist-util-flatmap'
-import toVfile from 'to-vfile'
 
 /**
  * A remark plugin that allows including "partials" into other files.
@@ -59,7 +59,7 @@ export function remarkIncludePartialsPlugin({ partialsDir, filePath }) {
 			const includePath = path.join(partialsDir, includeMatch[1])
 			let includeContents
 			try {
-				includeContents = toVfile.readSync(includePath, 'utf8')
+				includeContents = fs.readFileSync(includePath, 'utf8')
 			} catch {
 				throw new Error(
 					`@include file not found. In "${filePath}", on line ${node.position.start.line}, column ${node.position.start.column}, please ensure the referenced file "${includePath}" exists.`,

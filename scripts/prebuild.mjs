@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-import fs from 'fs'
-import path from 'path'
+import fs from 'node:fs'
+import path from 'node:path'
 import { buildMdxTransforms } from './mdx-transforms/build-mdx-transforms.mjs'
 import { batchPromises } from './utils/batch-promises.mjs'
 import { listFiles } from './utils/list-files.mjs'
@@ -48,16 +48,16 @@ async function main() {
 	// Apply MDX transforms, writing out transformed MDX files to `public`
 	await buildMdxTransforms(CONTENT_DIR, CONTENT_DIR_OUT, versionMetadata)
 
-	await buildAlgoliaRecords(CONTENT_DIR_OUT, versionMetadata)
+	// await buildAlgoliaRecords(CONTENT_DIR_OUT, versionMetadata)
 
 	// Copy all `*-nav-data.json` files from `content` to `public/content`, using execSync
-	await copyNavDataFiles(CONTENT_DIR, CONTENT_DIR_OUT, versionMetadata)
+	// await copyNavDataFiles(CONTENT_DIR, CONTENT_DIR_OUT, versionMetadata)
 
 	// Copy all `redirects.jsonc` files from `content` to `public/content
-	await copyRedirectFiles(CONTENT_DIR, CONTENT_DIR_OUT)
+	// await copyRedirectFiles(CONTENT_DIR, CONTENT_DIR_OUT)
 
 	// Copy all asset files from `content` to `public/assets`
-	await copyAssetFiles(CONTENT_DIR, CONTENT_DIR_OUT_ASSETS)
+	// await copyAssetFiles(CONTENT_DIR, CONTENT_DIR_OUT_ASSETS)
 }
 
 /**

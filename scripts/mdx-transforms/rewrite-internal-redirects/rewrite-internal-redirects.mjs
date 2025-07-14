@@ -7,9 +7,9 @@ import remark from 'remark'
 import remarkMdx from 'remark-mdx'
 import flatMap from 'unist-util-flatmap'
 import is from 'unist-util-is'
-import path from 'path'
+import path from 'node:path'
 
-import { URL } from 'url'
+import { URL } from 'node:url'
 import * as pathToRegexp from 'path-to-regexp'
 
 /**
