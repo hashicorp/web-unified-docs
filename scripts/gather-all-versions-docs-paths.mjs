@@ -44,8 +44,8 @@ export async function gatherAllVersionsDocsPaths(versionMetadata) {
 			}
 
 			if (metadata.releaseStage !== 'stable') {
-				versionPath = `${versionPath} (${metadata.releaseStage})`
-				versionName = versionPath
+				versionPath = `${metadata.version} (${metadata.releaseStage})`
+				versionName = metadata.version
 			}
 
 			allDocsPaths[product][versionName] = []
