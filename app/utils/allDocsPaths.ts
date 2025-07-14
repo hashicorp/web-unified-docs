@@ -5,7 +5,7 @@
 
 import { Ok, Err, errorResultToString } from '@utils/result'
 import docsPathsAllVersions from '@api/docsPathsAllVersions.json'
-import { getProductVersion } from './contentVersions'
+import { getProductVersionMetadata } from './contentVersions'
 import { PRODUCT_CONFIG } from './productConfig.mjs'
 
 export const getDocsPaths = async (
@@ -14,7 +14,10 @@ export const getDocsPaths = async (
 ) => {
 	const paths = productSlugs
 		.map((productSlug: string) => {
-			const latestProductVersion = getProductVersion(productSlug, 'latest')
+			const latestProductVersion = getProductVersionMetadata(
+				productSlug,
+				'latest',
+			)
 
 			if (!latestProductVersion.ok) {
 				console.error(errorResultToString('API', latestProductVersion))

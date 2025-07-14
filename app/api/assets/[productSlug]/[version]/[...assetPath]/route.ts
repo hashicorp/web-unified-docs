@@ -4,7 +4,7 @@
  */
 
 import { getAssetData } from '@utils/file'
-import { getProductVersion } from '@utils/contentVersions'
+import { getProductVersionMetadata } from '@utils/contentVersions'
 import { errorResultToString } from '@utils/result'
 import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
 import { VersionedProduct } from '@api/types'
@@ -27,7 +27,7 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 		return new Response('Not found', { status: 404 })
 	}
 
-	const productVersionResult = getProductVersion(productSlug, version)
+	const productVersionResult = getProductVersionMetadata(productSlug, version)
 	if (!productVersionResult.ok) {
 		console.error(errorResultToString('API', productVersionResult))
 		return new Response('Not found', { status: 404 })

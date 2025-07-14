@@ -5,8 +5,8 @@
 
 import { expect, test, vi, afterEach } from 'vitest'
 import {
+	getProductMetadata,
 	getProductVersionMetadata,
-	getProductVersion,
 } from '@utils/contentVersions'
 import { findDocVersions } from './findDocVersions'
 import versionMetadata from '__fixtures__/versionMetadata.json'
@@ -43,7 +43,11 @@ test('getProductVersion should return error for non-existent product', () => {
 		value: 'Product, noproduct, not found in version metadata',
 	}
 
-	const result = getProductVersion('noproduct', 'v1.19.x', versionMetadata)
+	const result = getProductVersionMetadata(
+		'noproduct',
+		'v1.19.x',
+		versionMetadata,
+	)
 	expect(result).toStrictEqual(expected)
 })
 
@@ -53,7 +57,11 @@ test('getProductVersion should return error for non-existent version', () => {
 		value: 'Product, terraform, has no "v1.19.x" version',
 	}
 
-	const result = getProductVersion('terraform', 'v1.19.x', versionMetadata)
+	const result = getProductVersionMetadata(
+		'terraform',
+		'v1.19.x',
+		versionMetadata,
+	)
 	expect(result).toStrictEqual(expected)
 })
 
@@ -63,7 +71,11 @@ test('getProductVersion should return correct version for existing version', () 
 		value: 'v1.5.x',
 	}
 
-	const result = getProductVersion('terraform', 'v1.5.x', versionMetadata)
+	const result = getProductVersionMetadata(
+		'terraform',
+		'v1.5.x',
+		versionMetadata,
+	)
 	expect(result).toStrictEqual(expected)
 })
 
@@ -71,7 +83,11 @@ test('getProductVersion should return latest version', () => {
 	const product = 'terraform'
 	const [expected] = versionMetadata[product]
 
-	const { value } = getProductVersion(product, 'latest', versionMetadata)
+	const { value } = getProductVersionMetadata(
+		product,
+		'latest',
+		versionMetadata,
+	)
 	expect(value).toStrictEqual(expected.version)
 })
 
@@ -83,7 +99,7 @@ test('getProductVersionMetadata should return metadata for existing product', ()
 		value: versionMetadata[product],
 	}
 
-	const result = getProductVersionMetadata(product, versionMetadata)
+	const result = getProductMetadata(product, versionMetadata)
 	expect(result).toStrictEqual(expected)
 })
 
@@ -93,7 +109,7 @@ test('getProductVersionMetadata should return error for non-existent product', (
 		value: 'Product, noproduct, not found in version metadata',
 	}
 
-	const result = getProductVersionMetadata('noproduct')
+	const result = getProductMetadata('noproduct')
 	expect(result).toStrictEqual(expected)
 })
 
@@ -103,7 +119,7 @@ test('getProductVersionMetadata should return error for empty product name', () 
 		value: 'Product, , not found in version metadata',
 	}
 
-	const result = getProductVersionMetadata('')
+	const result = getProductMetadata('')
 	expect(result).toStrictEqual(expected)
 })
 
@@ -113,7 +129,7 @@ test('getProductVersion should return error for empty version', () => {
 		value: 'Product, terraform, has no "" version',
 	}
 
-	const result = getProductVersion('terraform', '', versionMetadata)
+	const result = getProductVersionMetadata('terraform', '', versionMetadata)
 	expect(result).toStrictEqual(expected)
 })
 
@@ -123,7 +139,7 @@ test('getProductVersion should return error for null version', () => {
 		value: 'Product, terraform, has no "null" version',
 	}
 
-	const result = getProductVersion('terraform', null, versionMetadata)
+	const result = getProductVersionMetadata('terraform', null, versionMetadata)
 	expect(result).toStrictEqual(expected)
 })
 
@@ -133,7 +149,11 @@ test('getProductVersion should return error for undefined version', () => {
 		value: 'Product, terraform, has no "undefined" version',
 	}
 
-	const result = getProductVersion('terraform', 'undefined', versionMetadata)
+	const result = getProductVersionMetadata(
+		'terraform',
+		'undefined',
+		versionMetadata,
+	)
 	expect(result).toStrictEqual(expected)
 })
 
@@ -143,7 +163,7 @@ test('getProductVersionMetadata should return empty array for product with no ve
 		value: 'Product, emptyproduct, not found in version metadata',
 	}
 
-	const result = getProductVersionMetadata('emptyproduct')
+	const result = getProductMetadata('emptyproduct')
 	expect(result).toStrictEqual(expected)
 })
 

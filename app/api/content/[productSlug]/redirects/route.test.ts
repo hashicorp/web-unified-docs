@@ -71,10 +71,10 @@ test('Return 200 and parse the jsonc into json if valid for VERSIONED product', 
 
 	const contentVersionsSpy = vi.spyOn(
 		utilsContentVersionsModule,
-		'getProductVersion',
+		'getProductVersionMetadata',
 	)
 	contentVersionsSpy.mockImplementation(() => {
-		return { ok: true, value: 'v202410-1' }
+		return { ok: true, value: { releaseStage: 'stable', version: 'v202410-1' } }
 	})
 
 	const productSlug = 'terraform-enterprise'

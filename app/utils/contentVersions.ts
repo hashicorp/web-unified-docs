@@ -8,7 +8,7 @@ import { Ok, Err } from '@utils/result'
 
 import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
 
-type ProductVersionMetadata = {
+export type ProductVersionMetadata = {
 	version: string
 	isLatest: boolean
 	releaseStage: string
@@ -16,7 +16,7 @@ type ProductVersionMetadata = {
 
 type VersionMetadataMap = Record<string, ProductVersionMetadata[]>
 
-export const getProductVersion = (
+export const getProductVersionMetadata = (
 	productSlug: string,
 	version: string,
 	versionMetaData: VersionMetadataMap = versionMetadata,
@@ -27,7 +27,7 @@ export const getProductVersion = (
 		return Err(`Product, ${productSlug}, not found in version metadata`)
 	}
 
-	let parsedVersion
+	let parsedVersion, releaseStage, isLatest
 	if (version === 'latest') {
 		// Grab the latest version of the product
 		const foundVersion = productVersionMetadata.find(
@@ -36,6 +36,8 @@ export const getProductVersion = (
 			},
 		)
 
+		releaseStage = foundVersion.releaseStage
+		isLatest = foundVersion.isLatest
 		if (!PRODUCT_CONFIG[productSlug].versionedDocs) {
 			parsedVersion = '' // Set to an empty string if no latest version is found, as in the case for versionless docs such as terraform-docs-common
 		} else {
@@ -43,21 +45,25 @@ export const getProductVersion = (
 		}
 	} else {
 		// Ensure the requested version is valid
-		if (
-			!productVersionMetadata.find((v: ProductVersionMetadata) => {
+		const foundVersion = productVersionMetadata.find(
+			(v: ProductVersionMetadata) => {
 				return v.version === version
-			})
-		) {
+			},
+		)
+
+		if (!foundVersion) {
 			return Err(`Product, ${productSlug}, has no "${version}" version`)
 		}
 
+		releaseStage = foundVersion.releaseStage
+		isLatest = foundVersion.isLatest
 		parsedVersion = version
 	}
 
-	return Ok(parsedVersion)
+	return Ok({ version: parsedVersion, releaseStage, isLatest })
 }
 
-export const getProductVersionMetadata = (
+export const getProductMetadata = (
 	productSlug: string,
 	versionMetaData: VersionMetadataMap = versionMetadata,
 ) => {
