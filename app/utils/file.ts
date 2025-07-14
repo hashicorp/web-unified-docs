@@ -28,32 +28,32 @@ export const findFileWithMetadata = async (
 	filePath: string[],
 	versionMetaData: ProductVersionMetadata,
 ) => {
-	// Create a new filePath with beta suffix if needed
-	const modifiedFilePath = [...filePath]
-	if (versionMetaData.releaseStage !== 'stable' && filePath[2]) {
-		modifiedFilePath[2] = `${filePath[2]} (${versionMetaData.releaseStage})`
-	}
+	const newFilePath = ifNeededAddReleaseStageToPath(
+		filePath,
+		versionMetaData.releaseStage,
+	)
 
 	try {
-		const res = await fetch(`${SELF_URL}/${modifiedFilePath.join('/')}`, {
+		const res = await fetch(`${SELF_URL}/${newFilePath.join('/')}`, {
 			cache: 'no-cache',
 			headers,
 		})
 
 		if (!res.ok) {
-			return Err(`Failed to read file at path: ${modifiedFilePath.join('/')}`)
+			return Err(`Failed to read file at path: ${newFilePath.join('/')}`)
 		}
 
 		const text = await res.text()
 
 		return Ok(text)
 	} catch {
-		return Err(`Failed to read file at path: ${modifiedFilePath.join('/')}`)
+		return Err(`Failed to read file at path: ${newFilePath.join('/')}`)
 	}
 }
 
 export const getAssetData = async (
 	filePath: string[],
+	versionMetaData: ProductVersionMetadata,
 ): Promise<
 	Result<
 		{
@@ -63,14 +63,19 @@ export const getAssetData = async (
 		string
 	>
 > => {
+	const newFilePath = ifNeededAddReleaseStageToPath(
+		filePath,
+		versionMetaData.releaseStage,
+	)
+
 	try {
-		const res = await fetch(`${SELF_URL}/${filePath.join('/')}`, {
+		const res = await fetch(`${SELF_URL}/${newFilePath.join('/')}`, {
 			cache: 'no-cache',
 			headers,
 		})
 
 		if (!res.ok) {
-			return Err(`Failed to read asset at path: ${filePath.join('/')}`)
+			return Err(`Failed to read asset at path: ${newFilePath.join('/')}`)
 		}
 
 		const buffer = await res.arrayBuffer()
@@ -80,7 +85,7 @@ export const getAssetData = async (
 			contentType: res.headers.get('Content-Type'),
 		})
 	} catch {
-		return Err(`Failed to read asset at path: ${filePath.join('/')}`)
+		return Err(`Failed to read asset at path: ${newFilePath.join('/')}`)
 	}
 }
 
@@ -119,9 +124,15 @@ export const parseMarkdownFrontMatter = (markdownString: string) => {
 	}
 }
 
-export const addBetaToPath = (filePath: string[], isBeta: boolean) => {
-	if (isBeta) {
-		filePath.splice(-1, 0, 'beta')
+// This assumes that the version is always third in the filePath
+function ifNeededAddReleaseStageToPath(
+	filePath: string[],
+	releaseStage: string,
+) {
+	const newFilePath = [...filePath]
+	if (releaseStage !== 'stable' && newFilePath[2]) {
+		newFilePath[2] = `${newFilePath[2]} (${releaseStage})`
 	}
-	return filePath
+
+	return newFilePath
 }
