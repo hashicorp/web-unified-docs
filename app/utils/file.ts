@@ -30,8 +30,8 @@ export const findFileWithMetadata = async (
 ) => {
 	// Create a new filePath with beta suffix if needed
 	const modifiedFilePath = [...filePath]
-	if (versionMetaData?.releaseStage === 'beta' && filePath[2]) {
-		modifiedFilePath[2] = `${filePath[2]} (beta)`
+	if (versionMetaData.releaseStage !== 'stable' && filePath[2]) {
+		modifiedFilePath[2] = `${filePath[2]} (${versionMetaData.releaseStage})`
 	}
 
 	try {

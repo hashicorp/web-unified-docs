@@ -10,6 +10,8 @@ import semver from 'semver'
 
 import { PRODUCT_CONFIG } from '../app/utils/productConfig.mjs'
 
+const acceptedReleaseStages = ['alpha', 'beta', 'rc']
+
 /**
  * Given a content directory, and a JSON output file, build version metadata
  * based on the content directory structure, and return it.
@@ -90,9 +92,24 @@ export async function gatherVersionMetadata(contentDir) {
 			let cleanVersion = version
 			let releaseStage = 'stable'
 
-			if (version.includes('(beta)')) {
-				releaseStage = 'beta'
-				cleanVersion = version.replace(/\(beta\)$/, '').trim()
+			if (version.includes('(') && version.includes(')')) {
+				const stage = version.match(/\(([^)]+)\)/)?.[1]
+				const spacesCount = version.split(' ').length - 1
+
+				if (spacesCount > 1) {
+					throw new Error(
+						`Invalid version format "${version}" for product "${product}". Release stage should be in parentheses with only one space separating it from the version, e.g., "1.0.0 (beta)".`,
+					)
+				}
+
+				if (stage && acceptedReleaseStages.includes(stage)) {
+					releaseStage = stage
+					cleanVersion = version.replace(` (${stage})`, '').trim()
+				} else {
+					throw new Error(
+						`Invalid release stage "${stage}" in version "${version}" for product "${product}". Accepted stages are: ${acceptedReleaseStages.join(', ')}.`,
+					)
+				}
 			}
 
 			if (releaseStage !== 'stable') {

@@ -72,7 +72,7 @@ it('Support beta releases', async () => {
 	expect(result).toStrictEqual(expected)
 })
 
-it('Support beta releases - test 2', async () => {
+it("Support beta releases - make sure order doesn't change stable release", async () => {
 	const expected = {
 		'terraform-enterprise': [
 			{ version: 'v202401-2', releaseStage: 'beta', isLatest: false },
@@ -89,4 +89,51 @@ it('Support beta releases - test 2', async () => {
 
 	const result = await gatherVersionMetadata('/content')
 	expect(result).toStrictEqual(expected)
+})
+
+it('Support beta releases - support release candidate (rc)', async () => {
+	const expected = {
+		'terraform-enterprise': [
+			{ version: 'v202401-2', releaseStage: 'rc', isLatest: false },
+			{ version: 'v202401-1', releaseStage: 'stable', isLatest: true },
+		],
+	}
+	vol.fromJSON(
+		{
+			'./terraform-enterprise/v202401-2 (rc)/': null,
+			'./terraform-enterprise/v202401-1/': null,
+		},
+		'/content',
+	)
+
+	const result = await gatherVersionMetadata('/content')
+	expect(result).toStrictEqual(expected)
+})
+
+it('Support beta releases - throw error for invalid stage', async ({
+	expect,
+}) => {
+	vol.fromJSON(
+		{
+			'./terraform-enterprise/v202401-2 (test)/': null,
+			'./terraform-enterprise/v202401-1/': null,
+		},
+		'/content',
+	)
+
+	await expect(gatherVersionMetadata('/content')).rejects.toThrowError()
+})
+
+it('Support beta releases - throw error for too many spaces in stage', async ({
+	expect,
+}) => {
+	vol.fromJSON(
+		{
+			'./terraform-enterprise/v202401-2  (beta)/': null,
+			'./terraform-enterprise/v202401-1/': null,
+		},
+		'/content',
+	)
+
+	await expect(gatherVersionMetadata('/content')).rejects.toThrowError()
 })
