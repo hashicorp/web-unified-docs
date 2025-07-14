@@ -83,21 +83,27 @@ export async function gatherVersionMetadata(contentDir) {
 		/**
 		 * Iterate over the version entries, augmenting them with version metadata,
 		 * and adding them to the `versionMetadata` object.
-		 *
-		 * TODO: implement meaningful releaseStage and isLatest.
-		 * Maybe like a `_version-metadata.json` in each version directory?
-		 * To populate that data initially, might make sense to fetch from the
-		 * existing `content.hashicorp.com` API. To maintain the version metadata
-		 * going forward, will definitely want to collaborate with content authors
-		 * to find a good workflow. Manual MIGHT actually be OK, since events that
-		 * change version metadata are relatively infrequent?
 		 */
+		let latestVersionIndex = 0
 		for (const [idx, version] of versions.entries()) {
-			// TODO: Placeholder `releaseStage` to make it work, needs more thought
-			const releaseStage = 'stable'
-			// TODO: Placeholder `isLatest` to make it work, needs more thought
-			const isLatest = idx === 0
-			versionMetadata[product].push({ version, releaseStage, isLatest })
+			// Check if version contains beta and adjust accordingly
+			let cleanVersion = version
+			let releaseStage = 'stable'
+
+			if (version.includes('(beta)')) {
+				releaseStage = 'beta'
+				cleanVersion = version.replace(/\(beta\)$/, '').trim()
+			}
+
+			if (releaseStage !== 'stable') {
+				latestVersionIndex++
+			}
+
+			versionMetadata[product].push({
+				version: cleanVersion,
+				releaseStage,
+				isLatest: idx === latestVersionIndex,
+			})
 		}
 	}
 	// Return the version metadata

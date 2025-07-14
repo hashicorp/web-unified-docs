@@ -51,3 +51,42 @@ it('walk a directory of products and return a JSON representation of valid versi
 	const result = await gatherVersionMetadata('/content')
 	expect(result).toStrictEqual(expected)
 })
+
+it('Support beta releases', async () => {
+	const expected = {
+		'terraform-enterprise': [
+			{ version: 'v202401-2', releaseStage: 'beta', isLatest: false },
+			{ version: 'v202401-1', releaseStage: 'stable', isLatest: true },
+		],
+	}
+	vol.fromJSON(
+		{
+			'./terraform-enterprise/v202401-1/': null,
+			'./terraform-enterprise/v202401-2 (beta)/': null,
+		},
+		// default cwd
+		'/content',
+	)
+
+	const result = await gatherVersionMetadata('/content')
+	expect(result).toStrictEqual(expected)
+})
+
+it('Support beta releases - test 2', async () => {
+	const expected = {
+		'terraform-enterprise': [
+			{ version: 'v202401-2', releaseStage: 'beta', isLatest: false },
+			{ version: 'v202401-1', releaseStage: 'stable', isLatest: true },
+		],
+	}
+	vol.fromJSON(
+		{
+			'./terraform-enterprise/v202401-2 (beta)/': null,
+			'./terraform-enterprise/v202401-1/': null,
+		},
+		'/content',
+	)
+
+	const result = await gatherVersionMetadata('/content')
+	expect(result).toStrictEqual(expected)
+})
