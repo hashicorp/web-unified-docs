@@ -33,12 +33,23 @@ export async function gatherAllVersionsDocsPaths(versionMetadata) {
 
 		console.log(`Gathering file information for ${product}...`)
 
-		for (const version of allVersions) {
-			allDocsPaths[product][version?.version ?? ''] = []
+		for (const metadata of allVersions) {
+			// If the product is not versioned, we set it's version to 'v0.0.x'
+			let versionPath = metadata.version
+			// let metadata
+			if (!PRODUCT_CONFIG[product].versionedDocs) {
+				versionPath = ''
+			}
+
+			if (metadata.releaseStage !== 'stable') {
+				versionPath = `${versionPath} (${metadata.releaseStage})`
+			}
+
+			allDocsPaths[product][versionPath] = []
 			const contentPath = path.join(
 				'./content',
 				product,
-				PRODUCT_CONFIG[product].versionedDocs ? (version?.version ?? '') : '',
+				versionPath,
 				PRODUCT_CONFIG[product].contentDir,
 			)
 
@@ -48,7 +59,7 @@ export async function gatherAllVersionsDocsPaths(versionMetadata) {
 				PRODUCT_CONFIG[product].productSlug,
 			)
 
-			allDocsPaths[product][version?.version ?? ''].push(...allPaths)
+			allDocsPaths[product][versionPath].push(...allPaths)
 		}
 	}
 
@@ -98,7 +109,7 @@ export async function getProductPaths(directory, productSlug) {
 		apiPaths,
 		async (apiPath) => {
 			const created_at = await execAsync(
-				`git log --format=%cI --max-count=1 ${apiPath.itemPath}`,
+				`git log --format=%cI --max-count=1 "${apiPath.itemPath}"`,
 			)
 
 			// remove the "\n" from the end of the output
