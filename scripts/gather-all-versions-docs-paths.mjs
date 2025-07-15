@@ -104,15 +104,16 @@ export async function getProductPaths(directory, productSlug) {
 			}
 		})
 	}
-
 	traverseDirectory(directory)
 
 	await batchPromises(
 		`Creating change history for files in ${directory}`,
 		apiPaths,
 		async (apiPath) => {
+			// Normalize path separators for cross-platform compatibility
+			const normalizedPath = apiPath.itemPath.replace(/\\/g, '/')
 			const created_at = await execAsync(
-				`git log --format=%cI --max-count=1 "${apiPath.itemPath}"`,
+				`git log --format=%cI --max-count=1 -- "${normalizedPath}"`,
 			)
 
 			// remove the "\n" from the end of the output
