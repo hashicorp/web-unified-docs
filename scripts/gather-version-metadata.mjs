@@ -66,14 +66,15 @@ export async function gatherVersionMetadata(contentDir) {
 
 		// Sort versions by semver if possible, otherwise sort alphabetically
 		const isAllSemver = rawVersions.every((v) => {
-			return semver.valid(normalizeGenericPatchVersion(v))
+			return semver.valid(normalizeVersion(v))
 		})
 
 		const versions = rawVersions
 			.sort((a, b) => {
-				const [aVersion, bVersion] = [a, b].map(normalizeGenericPatchVersion)
+				const [aVersion, bVersion] = [a, b].map(normalizeVersion)
+
 				if (isAllSemver) {
-					// Sort semver
+					// Sort by semver
 					return semver.compare(aVersion, bVersion)
 				} else {
 					// Sort alphabetically
@@ -82,6 +83,7 @@ export async function gatherVersionMetadata(contentDir) {
 			})
 			// Reverse the array after sorting, so the latest version is first
 			.reverse()
+
 		/**
 		 * Iterate over the version entries, augmenting them with version metadata,
 		 * and adding them to the `versionMetadata` object.
@@ -128,12 +130,14 @@ export async function gatherVersionMetadata(contentDir) {
 }
 
 /**
- * Given a version string, which _may_ end in a generic patch `.x` suffix,
- * Return a normalized version string with any trailing `.x` replaced with `.0`.
+ * Normalizes a version string by replacing trailing `.x` with `.0` and removing any release stage in parentheses.
+ * This allows generic patch versions to be processed by semver.
  *
- * @param {string} version
- * @returns {string}
+ * @param {string} version - The version string to normalize
+ * @returns {string} The normalized version string
  */
-function normalizeGenericPatchVersion(version) {
-	return version.replace(/\.x$/, '.0')
+function normalizeVersion(version) {
+	return version
+		.replace(/\s*\([^)]+\)/, '') // Remove any release stage in parentheses
+		.replace(/\.x$/, '.0') // Replace trailing `.x` with `.0`
 }
