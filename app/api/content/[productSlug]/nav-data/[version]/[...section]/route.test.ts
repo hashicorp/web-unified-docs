@@ -16,7 +16,7 @@ import { GET } from './route'
 import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
 import { Err, Ok } from '@utils/result'
 import { getProductVersionMetadata } from '@utils/contentVersions'
-import { readFile, parseJson } from '@utils/file'
+import { findFileWithMetadata, parseJson } from '@utils/file'
 import { mockRequest } from '@utils/mockRequest'
 
 vi.mock(import('@utils/contentVersions'), async (importOriginal: any) => {
@@ -31,7 +31,7 @@ vi.mock(import('@utils/file'), async (importOriginal: any) => {
 	const mod = await importOriginal()
 	return {
 		...mod,
-		readFile: vi.fn(),
+		findFileWithMetadata: vi.fn(),
 		parseJson: vi.fn(),
 	}
 })
@@ -97,20 +97,25 @@ describe('GET /[productSlug]/[version]/[...section]', () => {
 		// Real product name
 		const [productSlug] = Object.keys(PRODUCT_CONFIG)
 
-		// Some real(ish) data for version
-		const version = 'v20220610-01'
+		const metadata = {
+			version: 'v20220610-01',
+			isLatest: false,
+			releaseStage: 'stable',
+		}
 
 		// Force the version(real-ish) to exist
-		vi.mocked(getProductVersionMetadata).mockReturnValue(Ok(version))
+		vi.mocked(getProductVersionMetadata).mockReturnValue(Ok(metadata))
 
 		// Fake missing content on disk
-		vi.mocked(readFile).mockImplementation(async (filePath: string[]) => {
-			return Err(`Failed to read file at path: ${filePath.join('/')}`)
-		})
+		vi.mocked(findFileWithMetadata).mockImplementation(
+			async (filePath: string[]) => {
+				return Err(`Failed to read file at path: ${filePath.join('/')}`)
+			},
+		)
 
 		const response = await mockRequest(GET, {
 			productSlug,
-			version,
+			version: metadata.version,
 			section: [''],
 		})
 
@@ -123,16 +128,19 @@ describe('GET /[productSlug]/[version]/[...section]', () => {
 		// Real product name
 		const [productSlug] = Object.keys(PRODUCT_CONFIG)
 
-		// Some real(ish) data for version
-		const version = 'v20220610-01'
+		const metadata = {
+			version: 'v20220610-01',
+			isLatest: false,
+			releaseStage: 'stable',
+		}
 
 		const invalidJson = '{ a: 1234'
 
 		// Force the version(real-ish) to exist
-		vi.mocked(getProductVersionMetadata).mockReturnValue(Ok(version))
+		vi.mocked(getProductVersionMetadata).mockReturnValue(Ok(metadata))
 
 		// Fake some data returned from disk
-		vi.mocked(readFile).mockImplementation(async () => {
+		vi.mocked(findFileWithMetadata).mockImplementation(async () => {
 			return Ok(invalidJson)
 		})
 
@@ -145,7 +153,7 @@ describe('GET /[productSlug]/[version]/[...section]', () => {
 
 		const response = await mockRequest(GET, {
 			productSlug,
-			version,
+			version: metadata.version,
 			section: [''],
 		})
 
@@ -158,8 +166,11 @@ describe('GET /[productSlug]/[version]/[...section]', () => {
 		// Real product name
 		const [productSlug] = Object.keys(PRODUCT_CONFIG)
 
-		// Some real(ish) data for version
-		const version = 'v1.9.x'
+		const metadata = {
+			version: 'v1.9.x',
+			isLatest: false,
+			releaseStage: 'stable',
+		}
 
 		// A snippet of the section nav data from content/terraform/v1.9.x/intro-nav-data.json
 		const sectionData = [
@@ -169,10 +180,10 @@ describe('GET /[productSlug]/[version]/[...section]', () => {
 		]
 
 		// Force the version(real-ish) to exist
-		vi.mocked(getProductVersionMetadata).mockReturnValue(Ok(version))
+		vi.mocked(getProductVersionMetadata).mockReturnValue(Ok(metadata))
 
 		// Fake content returned from the filesystem
-		vi.mocked(readFile).mockImplementation(async () => {
+		vi.mocked(findFileWithMetadata).mockImplementation(async () => {
 			return Ok(JSON.stringify(sectionData))
 		})
 
@@ -183,7 +194,7 @@ describe('GET /[productSlug]/[version]/[...section]', () => {
 
 		const response = await mockRequest(GET, {
 			productSlug,
-			version,
+			version: metadata.version,
 			section: ['intro'],
 		})
 

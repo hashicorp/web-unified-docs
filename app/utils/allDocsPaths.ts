@@ -35,11 +35,11 @@ export const getDocsPaths = async (
 				parsedVersion = version
 			}
 
-			const docsPath = docsPathsData[productSlug][parsedVersion]
+			const docsPath = docsPathsData[productSlug]?.[parsedVersion]
 
 			if (!docsPath) {
 				console.error(
-					`Product, ${productSlug}, version, ${parsedVersion}, not found in docs paths`,
+					`Product, ${productSlug}, version ${parsedVersion}, not found in docs paths`,
 				)
 				return []
 			}
