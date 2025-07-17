@@ -104,6 +104,8 @@ export async function buildMdxTransforms(
 		errors.forEach(({ error, file }) => {
 			console.error(`❌ ${error} in file: ${file}`)
 		})
+		console.error('Build failed due to errors in MDX transforms.')
+		process.exit(1)
 	}
 	// Log out that the script has complete
 	console.log(`✅ Applied MDX transforms to ${mdxFileEntries.length} files.`)
