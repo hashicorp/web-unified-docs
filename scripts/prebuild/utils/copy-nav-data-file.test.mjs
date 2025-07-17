@@ -4,8 +4,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import fs from 'fs'
-import path from 'path'
+import fs from 'node:fs'
+import path from 'node:path'
 import { copyNavDataFile } from './copy-nav-data-file.mjs'
 import { addVersionToNavData } from '../add-version-to-nav-data.mjs'
 

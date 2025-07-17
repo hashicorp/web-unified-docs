@@ -5,8 +5,8 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { copyAssetFile } from './copy-asset-file.mjs'
-import fs from 'fs'
-import path from 'path'
+import fs from 'node:fs'
+import path from 'node:path'
 
 describe('copyAssetFile', () => {
 	beforeEach(() => {

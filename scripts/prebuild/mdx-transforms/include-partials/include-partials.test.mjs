@@ -3,10 +3,10 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-import fs from 'fs'
+import fs from 'node:fs'
 import { describe, expect, test } from 'vitest'
 
-import path from 'path'
+import path from 'node:path'
 // Third-party
 import grayMatter from 'gray-matter'
 // Local
