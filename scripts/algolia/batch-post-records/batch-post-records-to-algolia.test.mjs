@@ -7,7 +7,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { batchPostRecords } from './batch-post-records-to-algolia.mjs'
 import { algoliasearch } from 'algoliasearch'
 import algoliaRecords from '__fixtures__/algoliaRecords.json'
-import path from 'path'
+import path from 'node:path'
 import { fs, vol } from 'memfs'
 
 vi.mock('algoliasearch')
