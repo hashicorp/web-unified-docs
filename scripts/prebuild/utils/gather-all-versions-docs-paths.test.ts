@@ -4,7 +4,7 @@
  */
 
 import { expect, test, vi, afterEach } from 'vitest'
-import { gatherAllVersionsDocsPaths } from './gather-all-versions-docs-paths.mjs'
+import { gatherAllVersionsDocsPaths } from './utils/gather-all-versions-docs-paths.mjs/index.js'
 import * as repoConfig from '../app/utils/productConfig.mjs'
 
 afterEach(() => {

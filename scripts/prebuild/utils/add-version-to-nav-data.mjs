@@ -4,7 +4,7 @@
  */
 
 import fs from 'node:fs/promises'
-import { PRODUCT_CONFIG } from '../app/utils/productConfig.mjs'
+import { PRODUCT_CONFIG } from '../../app/utils/productConfig.mjs'
 
 /**
  * Adds version information to navigation data in a JSON file.

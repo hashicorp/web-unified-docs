@@ -5,11 +5,11 @@
 
 import fs from 'fs'
 import path from 'path'
-import { PRODUCT_CONFIG } from '../app/utils/productConfig.mjs'
+import { PRODUCT_CONFIG } from '../../app/utils/productConfig.mjs'
 import { exec } from 'child_process'
 import { promisify } from 'util'
 
-import { batchPromises } from './utils/batch-promises.mjs'
+import { batchPromises } from './batch-promises.mjs'
 
 const execAsync = promisify(exec)
 
