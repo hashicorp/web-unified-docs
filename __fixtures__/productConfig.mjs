@@ -241,6 +241,16 @@ export const PRODUCT_CONFIG = {
 		versionedDocs: true,
 		websiteDir: 'website',
 	},
+	'terraform-migrate': {
+		assetDir: 'img',
+		basePaths: ['migrate'],
+		contentDir: 'docs',
+		dataDir: 'data',
+		productSlug: 'terraform',
+		semverCoerce: semver.coerce,
+		versionedDocs: true,
+		websiteDir: 'website',
+	},
 	'terraform-cdk': {
 		/**
 		 * ✅ Initial migration attempt: SEEMS TO WORK
