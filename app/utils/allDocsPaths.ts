@@ -6,7 +6,7 @@
 import { Ok, Err, errorResultToString } from '@utils/result'
 import docsPathsAllVersions from '@api/docsPathsAllVersions.json'
 import { getProductVersionMetadata } from './contentVersions'
-import { PRODUCT_CONFIG } from './productConfig.mjs'
+import { PRODUCT_CONFIG } from '@productConfig.mjs'
 
 export const getDocsPaths = async (
 	productSlugs: string[],

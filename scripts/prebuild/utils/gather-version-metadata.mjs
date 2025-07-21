@@ -8,7 +8,7 @@ import path from 'node:path'
 // Third-party
 import semver from 'semver'
 
-import { PRODUCT_CONFIG } from '../app/utils/productConfig.mjs'
+import { PRODUCT_CONFIG } from '../../../productConfig.mjs'
 
 const acceptedReleaseStages = ['alpha', 'beta', 'rc']
 

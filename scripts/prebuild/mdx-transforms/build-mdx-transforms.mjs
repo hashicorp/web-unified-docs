@@ -25,7 +25,7 @@ import {
 } from './rewrite-internal-redirects/rewrite-internal-redirects.mjs'
 import { transformExcludeTerraformContent } from './exclude-terraform-content/index.mjs'
 
-import { PRODUCT_CONFIG } from '../../app/utils/productConfig.mjs'
+import { PRODUCT_CONFIG } from '../../../productConfig.mjs'
 
 /**
  * Given a target directory,

@@ -5,13 +5,13 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { buildMdxTransforms } from '../mdx-transforms/build-mdx-transforms.mjs'
-import { gatherVersionMetadata } from '../gather-version-metadata.mjs'
-import { gatherAllVersionsDocsPaths } from '../utils/gather-all-versions-docs-paths.mjs'
+import { buildMdxTransforms } from './mdx-transforms/build-mdx-transforms.mjs'
+import { gatherVersionMetadata } from './utils/gather-version-metadata.mjs'
+import { gatherAllVersionsDocsPaths } from './utils/gather-all-versions-docs-paths.mjs'
 import { buildAlgoliaRecords } from '../algolia/build-algolia-records.mjs'
-import { copyNavDataFiles } from '../utils/copy-nav-data-files.mjs'
-import { copyRedirectFiles } from '../utils/copy-redirect-files.mjs'
-import { copyAssetFiles } from '../utils/copy-asset-files.mjs'
+import { copyNavDataFiles } from './utils/copy-nav-data-files.mjs'
+import { copyRedirectFiles } from './utils/copy-redirect-files.mjs'
+import { copyAssetFiles } from './utils/copy-asset-files.mjs'
 
 /**
  * We expect the current working directory to be the project root.

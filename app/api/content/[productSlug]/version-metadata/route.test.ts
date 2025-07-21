@@ -13,7 +13,7 @@ import {
 	MockInstance,
 } from 'vitest'
 import { GET } from './route'
-import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
+import { PRODUCT_CONFIG } from '@productConfig.mjs'
 import { Err, Ok } from '@utils/result'
 import { getProductMetadata } from '@utils/contentVersions'
 import { mockRequest } from '@utils/mockRequest'

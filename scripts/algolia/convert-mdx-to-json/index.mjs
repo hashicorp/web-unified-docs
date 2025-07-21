@@ -5,7 +5,7 @@
 
 import path from 'node:path'
 import { readdir } from 'node:fs/promises'
-import { getLatestVersion } from '../../utils/file-path/latest-version/index.mjs'
+import { getLatestVersion } from '../../prebuild/utils/file-path/latest-version/index.mjs'
 
 /**
  * Retrieves the latest version directories for products within a specified directory.
