@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: BUSL-1.1
+ */
 
 import { execSync } from 'node:child_process'
 import { platform, arch } from 'node:os'
@@ -10,15 +14,15 @@ import {
 	writeFileSync,
 	chmodSync,
 	readFileSync,
-	unlinkSync
-} from 'node:fs';
-import { gunzipSync } from 'node:zlib';
+	unlinkSync,
+} from 'node:fs'
+import { gunzipSync } from 'node:zlib'
 
 function unGzip(filename) {
-	const compressedFile = `${filename}.gz`;
-	const compressedData = readFileSync(compressedFile);
-	const decompressedData = gunzipSync(compressedData);
-	writeFileSync(filename, decompressedData);
+	const compressedFile = `${filename}.gz`
+	const compressedData = readFileSync(compressedFile)
+	const decompressedData = gunzipSync(compressedData)
+	writeFileSync(filename, decompressedData)
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -51,9 +55,7 @@ async function runPrebuild() {
 		console.log('Running default node prebuild...')
 	}
 
-	if (
-		binaryExists
-	) {
+	if (binaryExists) {
 		try {
 			if (existsSync(filename)) {
 				unlinkSync(filename)
@@ -62,7 +64,9 @@ async function runPrebuild() {
 			unGzip(filename)
 			chmodSync(filename, 0o755) // Ensure the binary is executable
 		} catch (error) {
-			console.error(`Error during gzip operation: ${error.message}.\n\nFalling back to default node prebuild...`)
+			console.error(
+				`Error during gzip operation: ${error.message}.\n\nFalling back to default node prebuild...`,
+			)
 
 			filename = `node ${path.join(__dirname, 'prebuild.mjs')}`
 		}
