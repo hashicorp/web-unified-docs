@@ -110,14 +110,22 @@ export async function getProductPaths(directory, productSlug) {
 		`Creating change history for files in ${directory}`,
 		apiPaths,
 		async (apiPath) => {
-			// Normalize path separators for cross-platform compatibility
-			const normalizedPath = apiPath.itemPath.replace(/\\/g, '/')
-			const created_at = await execAsync(
-				`git log --format=%cI --max-count=1 -- "${normalizedPath}"`,
-			)
+			// We use `git log` to get the last commit date for the file, but because
+			// it is expensive, we only do it in production. Everything we use a default date of '2025-06-03T18:02:21+
+			// TODO: Store this data in frontmatter of each file instead
+			let createdAt = '2025-06-03T18:02:21+00:00'
+			if (process.env.VERCEL_ENV === 'production') {
+				// Normalize path separators for cross-platform compatibility
+				const normalizedPath = apiPath.itemPath.replace(/\\/g, '/')
+				const gitLogTime = await execAsync(
+					`git log --format=%cI --max-count=1 -- "${normalizedPath}"`,
+				)
 
-			// remove the "\n" from the end of the output
-			apiPath.created_at = created_at.stdout.slice(0, -1)
+				// remove the "\n" from the end of the output
+				createdAt = gitLogTime.stdout.slice(0, -1)
+			}
+
+			apiPath.created_at = createdAt
 		},
 		{ loggingEnabled: false },
 	)
