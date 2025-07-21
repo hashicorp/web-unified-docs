@@ -6,7 +6,7 @@
 import versionMetadata from '@api/versionMetadata.json'
 import { Ok, Err } from '@utils/result'
 
-import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
+import { PRODUCT_CONFIG } from '@productConfig.mjs'
 
 export type ProductVersionMetadata = {
 	version: string

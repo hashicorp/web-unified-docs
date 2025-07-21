@@ -7,7 +7,7 @@ import { getProductVersionMetadata } from '@utils/contentVersions'
 import { findFileWithMetadata, parseJsonc } from '@utils/file'
 import { errorResultToString } from '@utils/result'
 import { ProductParam } from '@api/types'
-import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
+import { PRODUCT_CONFIG } from '@productConfig.mjs'
 
 /**
  * Parameters expected by `GET` route handler

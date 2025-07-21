@@ -11,7 +11,4 @@ const ALGOLIA_RECORDS_FILE = path.join(
 	'scripts/algolia/batch-post-records/algoliaRecords.json',
 )
 
-// only run in CI env
-if (process.env.CI) {
-	batchPostRecords(ALGOLIA_RECORDS_FILE)
-}
+batchPostRecords(ALGOLIA_RECORDS_FILE)
