@@ -6,92 +6,11 @@ The existing API (`content.hashicorp.com`) has endpoints that serve documentatio
 
 The goal of the unified docs API is to host all of HashiCorp's product documentation. The unified docs API will eventually replace the existing content API.
 
-## Architecture
-
-The following diagram illustrates the relationships between the unified docs API (this repo), `dev-portal`, and the existing content API:
-
-```mermaid
-graph LR
-    subgraph "Content sources (non-migrated)"
-        BDY[boundary]
-        CSL[consul]
-        HCP[hcp-docs]
-        NMD[nomad]
-        PKR[packer]
-        SNT[sentinel]
-        TF[terraform]
-        TFC[terraform-cdk]
-        TFA[terraform-docs-agents]
-        TFD[terraform-docs-common]
-        VGT[vagrant]
-        VLT[vault]
-        WPT[waypoint]
-
-        CURALL["/content or /website"]
-        BDY & CSL & HCP & NMD & PKR & SNT & TF & TFC & TFA & TFD & VGT & VLT & WPT --> CURALL
-    end
-
-    subgraph "Migrated content repo"
-        TPF[terraform-plugin-framework]
-        TPL[terraform-plugin-log]
-        TPM[terraform-plugin-mux]
-        TPS[terraform-plugin-sdk]
-        TPT[terraform-plugin-testing]
-        TFE[terraform-enterprise]
-
-        MIGALL["/content"]
-        TPF & TPL & TPM & TPS & TPT & TFE --> MIGALL
-    end
-
-    subgraph "APIs"
-        CP[Content API<br>content.hashicorp.com]
-        UDR[Unified Docs Repository<br>web-unified-docs]
-    end
-
-    subgraph "Frontend"
-        DP[Dev Portal<br>dev-portal]
-    end
-
-    %% BDY & CSL & HCP & NMD & PKR & PTF & SNT & TF & TFC & TFA & TFD & VGT & VLT & WPT --> CP
-    %% TPF & TPL & TPM & TPS & TPT --> UDR
-
-    CURALL -->|Current content flow| CP
-    MIGALL -->|Migrated content| UDR
-
-    CP -->|Serves most content| DP
-    UDR -->|Serves unified/content content| DP
-
-    class TPF,TPL,TPM,TPS,TPT,BDY,CSL,HCP,NMD,PKR,PTF,SNT,TF,TFC,TFA,TFD,VGT,VLT,WPT productRepo
-```
-
-The diagram shows:
-
-- The content API — the existing system that sources product documentation content from product repositories
-- The unified docs API — the new system that sources product documentation from this repo's `/content` directory. The migrated repos will use a directory approach to versioning (rather than the historic branch and tag strategy)
-- The Dev Portal — the frontend that serves the main DevDot interface. Dev Portal sources its content from both the existing content API and unified docs API.
-
 ## Local development
 
 ### Requirements
 
-- [Node.js](https://nodejs.org/en) (version 20 or higher)
 - [Docker](https://www.docker.com/) and [Docker Compose](https://docs.docker.com/compose/) (for managing containers)
-
-### Set up environment variables
-
-There are a few things you need to set up before you can begin developing in this repository.
-
-1. [Install the Vercel CLI](https://vercel.com/cli)
-
-   The CLI is needed for the next 2 steps.
-
-2. Run `vercel link`
-
-   This command will prompt you to connect your local copy of repo to [the Vercel `web-unified-docs` project](<[https://vercel.com/hashicorp/dev-portal](https://vercel.com/hashicorp/web-unified-docs)>). The command creates a `.vercel` directory with a JSON file that contains the information that links to the Vercel project.
-
-3. Run `vercel env pull .env`
-
-   This command will pull the development environment variables from the linked Vercel project and write them to a new `.env` file.
 
 ### Quick start
 
@@ -135,6 +54,9 @@ For example, in Vercel, for your `dev-portal` branch, you can set the following 
 
 Vercel will use these values to create deploy previews.
 
+### API development
+
+Reach out to team #team-web-presence if you need to do local API development
 
 ## Background
 
@@ -206,8 +128,72 @@ npm run broken-link terraform-plugin-framework-log terraform-plugin-mux
 
 ## Contributing to the content
 
-Follow the [style guide](docs/style-guide/index.md) when making changes to documentation or tutorials. The [top 12 guidelines](docs/style-guide/top-12.md) covers the most common use cases. 
+Follow the [style guide](docs/style-guide/index.md) when making changes to documentation or tutorials. The [top 12 guidelines](docs/style-guide/top-12.md) covers the most common use cases.
 
-Work with your technical writer or education engineer when adding new content or for updates that may include structural changes to the information.   
+Work with your technical writer or education engineer when adding new content or for updates that may include structural changes to the information.
 
 Adherence to the style guide and our writing principles ensures that our content is clear, concise, and consistent.
+
+## Architecture
+
+The following diagram illustrates the relationships between the unified docs API (this repo), `dev-portal`, and the existing content API:
+
+```mermaid
+graph LR
+    subgraph "Content sources (non-migrated)"
+        BDY[boundary]
+        CSL[consul]
+        HCP[hcp-docs]
+        NMD[nomad]
+        PKR[packer]
+        SNT[sentinel]
+        TF[terraform]
+        TFC[terraform-cdk]
+        TFA[terraform-docs-agents]
+        TFD[terraform-docs-common]
+        VGT[vagrant]
+        VLT[vault]
+        WPT[waypoint]
+
+        CURALL["/content or /website"]
+        BDY & CSL & HCP & NMD & PKR & SNT & TF & TFC & TFA & TFD & VGT & VLT & WPT --> CURALL
+    end
+
+    subgraph "Migrated content repo"
+        TPF[terraform-plugin-framework]
+        TPL[terraform-plugin-log]
+        TPM[terraform-plugin-mux]
+        TPS[terraform-plugin-sdk]
+        TPT[terraform-plugin-testing]
+        TFE[terraform-enterprise]
+
+        MIGALL["/content"]
+        TPF & TPL & TPM & TPS & TPT & TFE --> MIGALL
+    end
+
+    subgraph "APIs"
+        CP[Content API<br>content.hashicorp.com]
+        UDR[Unified Docs Repository<br>web-unified-docs]
+    end
+
+    subgraph "Frontend"
+        DP[Dev Portal<br>dev-portal]
+    end
+
+    %% BDY & CSL & HCP & NMD & PKR & PTF & SNT & TF & TFC & TFA & TFD & VGT & VLT & WPT --> CP
+    %% TPF & TPL & TPM & TPS & TPT --> UDR
+
+    CURALL -->|Current content flow| CP
+    MIGALL -->|Migrated content| UDR
+
+    CP -->|Serves most content| DP
+    UDR -->|Serves unified/content content| DP
+
+    class TPF,TPL,TPM,TPS,TPT,BDY,CSL,HCP,NMD,PKR,PTF,SNT,TF,TFC,TFA,TFD,VGT,VLT,WPT productRepo
+```
+
+The diagram shows:
+
+- The content API — the existing system that sources product documentation content from product repositories
+- The unified docs API — the new system that sources product documentation from this repo's `/content` directory. The migrated repos will use a directory approach to versioning (rather than the historic branch and tag strategy)
+- The Dev Portal — the frontend that serves the main DevDot interface. Dev Portal sources its content from both the existing content API and unified docs API.
