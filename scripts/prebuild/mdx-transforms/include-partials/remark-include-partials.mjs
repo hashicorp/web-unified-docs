@@ -83,10 +83,10 @@ export function remarkIncludePartialsPlugin({ partialsDir, filePath }) {
 				return processor.runSync(ast, includeContents).children
 			} else {
 				// Trim any leading or trailing whitespace in the file
-				includeContents.contents = includeContents.contents.trim()
+				const trimmedContents = includeContents.trim()
 				const includeLang = path.extname(includePath).slice(1)
 				// Return the file contents wrapped inside a "code" node
-				return [{ type: 'code', lang: includeLang, value: includeContents }]
+				return [{ type: 'code', lang: includeLang, value: trimmedContents }]
 			}
 		})
 	}
