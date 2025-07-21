@@ -14,7 +14,7 @@ import { transformParagraphCustomAlerts } from './paragraph-custom-alert.mjs'
 describe('Transform Paragraph Custom Alerts', () => {
 	const fixtureDir = path.join(
 		process.cwd(),
-		'scripts/mdx-transforms/paragraph-custom-alert/__fixtures__/basic',
+		'scripts/prebuild/mdx-transforms/paragraph-custom-alert/__fixtures__/basic',
 	)
 
 	test('should transform alerts', async () => {

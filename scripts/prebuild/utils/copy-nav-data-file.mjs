@@ -6,7 +6,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 
-import { addVersionToNavData } from '../add-version-to-nav-data.mjs'
+import { addVersionToNavData } from './add-version-to-nav-data.mjs'
 
 const CWD = process.cwd()
 const CONTENT_DIR = path.join(CWD, 'content')

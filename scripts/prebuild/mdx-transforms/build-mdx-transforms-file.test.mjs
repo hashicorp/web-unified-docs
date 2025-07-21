@@ -10,7 +10,7 @@ import {
 	applyFileMdxTransforms,
 } from './build-mdx-transforms-file.mjs'
 import versionMetadata from '__fixtures__/versionMetadata.json'
-import * as repoConfig from '../../app/utils/productConfig.mjs'
+import * as repoConfig from '../../../productConfig.mjs'
 
 vi.mock('fs')
 

@@ -4,8 +4,8 @@
  */
 
 import { expect, test, vi, afterEach } from 'vitest'
-import { gatherAllVersionsDocsPaths } from './utils/gather-all-versions-docs-paths.mjs/index.js'
-import * as repoConfig from '../app/utils/productConfig.mjs'
+import { gatherAllVersionsDocsPaths } from './gather-all-versions-docs-paths.mjs'
+import * as repoConfig from '../../../productConfig.mjs'
 
 afterEach(() => {
 	vi.restoreAllMocks()

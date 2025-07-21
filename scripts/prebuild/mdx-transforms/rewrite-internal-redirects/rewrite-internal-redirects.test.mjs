@@ -14,7 +14,7 @@ import { transformRewriteInternalRedirects } from './rewrite-internal-redirects.
 describe('Transform Rewrite Internal Links', () => {
 	const fixtureDir = path.join(
 		process.cwd(),
-		'scripts/mdx-transforms/rewrite-internal-redirects/__fixtures__',
+		'scripts/prebuild/mdx-transforms/rewrite-internal-redirects/__fixtures__',
 	)
 
 	test('should transform links that need to be redirected', async () => {

@@ -15,7 +15,7 @@ import { includePartials } from './include-partials.mjs'
 describe('Include Partials', () => {
 	const fixtureDir = path.join(
 		process.cwd(),
-		'scripts/mdx-transforms/include-partials/__fixtures__/basic',
+		'scripts/prebuild/mdx-transforms/include-partials/__fixtures__/basic',
 	)
 
 	const partialsDir = path.join(fixtureDir, 'partials')
