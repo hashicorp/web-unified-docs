@@ -16,11 +16,25 @@ const execAsync = promisify(exec)
 export async function gatherAllVersionsDocsPaths(versionMetadata) {
 	const allDocsPaths = {}
 	const allProducts = Object.keys(PRODUCT_CONFIG)
+	const getRealFileChangedMetadata =
+		process.env.VERCEL_ENV === 'production' ||
+		process.argv.includes('--use-real-file-changed-metadata')
 
 	// Iterate over each product directory, adding to `allDocsPaths`
 	console.log(
 		`🪄 Gathering file information for ${allProducts.length} products...`,
 	)
+
+	if (getRealFileChangedMetadata) {
+		console.log(
+			'\n ℹ️ Using REAL created_at dates for file metadata. This may take a while...\n',
+		)
+	} else {
+		console.log(
+			"\n ℹ️ Using DEBUG created_at date of 2025-06-03T18:02:21+00:00 for file metadata.\nIf you want to use the real created_at dates, run with '--use-real-file-changed-metadata' or in production.\n",
+		)
+	}
+
 	for (const product of allProducts) {
 		// Initialize the product array
 		allDocsPaths[product] = {}
@@ -60,6 +74,7 @@ export async function gatherAllVersionsDocsPaths(versionMetadata) {
 			const allPaths = await getProductPaths(
 				contentPath,
 				PRODUCT_CONFIG[product].productSlug,
+				getRealFileChangedMetadata,
 			)
 
 			allDocsPaths[product][versionName].push(...allPaths)
@@ -73,7 +88,11 @@ export async function gatherAllVersionsDocsPaths(versionMetadata) {
 	return allDocsPaths
 }
 
-export async function getProductPaths(directory, productSlug) {
+export async function getProductPaths(
+	directory,
+	productSlug,
+	getRealFileChangedMetadata,
+) {
 	const apiPaths = []
 
 	function traverseDirectory(currentPath, relativePath = '') {
@@ -110,14 +129,23 @@ export async function getProductPaths(directory, productSlug) {
 		`Creating change history for files in ${directory}`,
 		apiPaths,
 		async (apiPath) => {
-			// Normalize path separators for cross-platform compatibility
-			const normalizedPath = apiPath.itemPath.replace(/\\/g, '/')
-			const created_at = await execAsync(
-				`git log --format=%cI --max-count=1 -- "${normalizedPath}"`,
-			)
+			// We use `git log` to get the last commit date for the file, but because
+			// it is expensive, we only do it in production. Everything we use a default date of '2025-06-03T18:02:21+
+			let createdAt = '2025-06-03T18:02:21+00:00'
 
-			// remove the "\n" from the end of the output
-			apiPath.created_at = created_at.stdout.slice(0, -1)
+			// TODO: Store this data in frontmatter of each file instead
+			if (getRealFileChangedMetadata) {
+				// Normalize path separators for cross-platform compatibility
+				const normalizedPath = apiPath.itemPath.replace(/\\/g, '/')
+				const gitLogTime = await execAsync(
+					`git log --format=%cI --max-count=1 -- "${normalizedPath}"`,
+				)
+
+				// remove the "\n" from the end of the output
+				createdAt = gitLogTime.stdout.slice(0, -1)
+			}
+
+			apiPath.created_at = createdAt
 		},
 		{ loggingEnabled: false },
 	)
