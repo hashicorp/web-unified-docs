@@ -28,7 +28,7 @@ const DOCS_PATHS_ALL_VERSIONS_FILE = path.join(
 )
 
 const getCommandLineArgs = () => {
-	return process.argv.slice(2).reduce(
+	const args = process.argv.slice(2).reduce(
 		(args, arg) => {
 			if (arg === '--only-build-version-metadata') {
 				args.onlyVersionMetadata = true
@@ -46,6 +46,13 @@ const getCommandLineArgs = () => {
 			getRealFileChangedMetadata: false,
 		},
 	)
+
+	// Set getRealFileChangedMetadata to true in production
+	if (process.env.VERCEL_ENV === 'production') {
+		args.getRealFileChangedMetadata = true
+	}
+
+	return args
 }
 
 /**
