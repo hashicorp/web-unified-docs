@@ -99,12 +99,15 @@ export const parseJson = (jsonString: string) => {
 
 export const parseJsonc = (jsonString: string) => {
 	try {
+		// console.log(`Parsing JSONC: ${jsonString}`)
+
 		const parserError = []
 		const json = jsoncParse(jsonString, parserError, {
 			allowTrailingComma: true,
 		})
 
 		if (parserError.length > 0) {
+			console.log(`JSONC parse errors: ${JSON.stringify(parserError, null, 2)}`)
 			return Err(`Failed to parse JSONC: ${parserError}`)
 		}
 
