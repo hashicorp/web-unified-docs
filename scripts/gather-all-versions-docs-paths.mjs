@@ -125,27 +125,29 @@ export async function getProductPaths(
 	}
 	traverseDirectory(directory)
 
+	// We use `git log` to get the last commit date for the file, but because
+	// it is expensive, we only do it in production. Everything we use a default date of '2025-06-03T18:02:21+
+	if (!getRealFileChangedMetadata) {
+		apiPaths.forEach((apiPath) => {
+			// We use a default date of '2025-06-03T18:02:21+00:00' for the created_at field
+			apiPath.created_at = '2025-06-03T18:02:21+00:00'
+		})
+
+		return apiPaths
+	}
+
 	await batchPromises(
 		`Creating change history for files in ${directory}`,
 		apiPaths,
 		async (apiPath) => {
-			// We use `git log` to get the last commit date for the file, but because
-			// it is expensive, we only do it in production. Everything we use a default date of '2025-06-03T18:02:21+
-			let createdAt = '2025-06-03T18:02:21+00:00'
-
 			// TODO: Store this data in frontmatter of each file instead
-			if (getRealFileChangedMetadata) {
-				// Normalize path separators for cross-platform compatibility
-				const normalizedPath = apiPath.itemPath.replace(/\\/g, '/')
-				const gitLogTime = await execAsync(
-					`git log --format=%cI --max-count=1 -- "${normalizedPath}"`,
-				)
+			// Normalize path separators for cross-platform compatibility
+			const normalizedPath = apiPath.itemPath.replace(/\\/g, '/')
+			const gitLogTime = await execAsync(
+				`git log --format=%cI --max-count=1 -- "${normalizedPath}"`,
+			)
 
-				// remove the "\n" from the end of the output
-				createdAt = gitLogTime.stdout.slice(0, -1)
-			}
-
-			apiPath.created_at = createdAt
+			apiPath.created_at = gitLogTime.stdout.slice(0, -1)
 		},
 		{ loggingEnabled: false },
 	)
