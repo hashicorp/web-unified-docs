@@ -13,12 +13,12 @@ import { batchPromises } from './utils/batch-promises.mjs'
 
 const execAsync = promisify(exec)
 
-export async function gatherAllVersionsDocsPaths(versionMetadata) {
+export async function gatherAllVersionsDocsPaths(
+	versionMetadata,
+	getRealFileChangedMetadata,
+) {
 	const allDocsPaths = {}
 	const allProducts = Object.keys(PRODUCT_CONFIG)
-	const getRealFileChangedMetadata =
-		process.env.VERCEL_ENV === 'production' ||
-		process.argv.includes('--use-real-file-changed-metadata')
 
 	// Iterate over each product directory, adding to `allDocsPaths`
 	console.log(
@@ -27,11 +27,11 @@ export async function gatherAllVersionsDocsPaths(versionMetadata) {
 
 	if (getRealFileChangedMetadata) {
 		console.log(
-			'\n ℹ️ Using REAL created_at dates for file metadata. This may take a while...\n',
+			'\nℹ️ Using REAL created_at dates for file metadata. This may take a while...\n',
 		)
 	} else {
 		console.log(
-			"\n ℹ️ Using DEBUG created_at date of 2025-06-03T18:02:21+00:00 for file metadata.\nIf you want to use the real created_at dates, run with '--use-real-file-changed-metadata' or in production.\n",
+			"\nℹ️ Using DEBUG created_at date of 2025-06-03T18:02:21+00:00 for file metadata.\nIf you want to use the real created_at dates, run with '--use-real-file-changed-metadata'.\ne.g. `npm run prebuild -- --use-real-file-changed-metadata`\n",
 		)
 	}
 

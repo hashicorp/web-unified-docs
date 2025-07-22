@@ -27,28 +27,64 @@ const DOCS_PATHS_ALL_VERSIONS_FILE = path.join(
 	'app/api/docsPathsAllVersions.json',
 )
 
+const getCommandLineArgs = () => {
+	return process.argv.slice(2).reduce(
+		(args, arg) => {
+			if (arg === '--only-build-version-metadata') {
+				args.onlyVersionMetadata = true
+			} else if (arg === '--build-algolia-index') {
+				args.buildAlgoliaIndex = true
+			} else if (arg === '--get-real-file-changed-metadata') {
+				args.getRealFileChangedMetadata = true
+			}
+
+			return args
+		},
+		{
+			onlyBuildVersionMetadata: false,
+			buildAlgoliaIndex: false,
+			getRealFileChangedMetadata: false,
+		},
+	)
+}
+
 /**
  * Define the prebuild script.
  */
 async function main() {
+	const args = getCommandLineArgs()
+
+	console.log(
+		`Running prebuild script with args: ${JSON.stringify(args, null, 2)}\n`,
+	)
+
 	// Gather and write out version metadata
 	const versionMetadata = await gatherVersionMetadata(CONTENT_DIR)
 	const versionMetadataJson = JSON.stringify(versionMetadata, null, 2)
 	fs.writeFileSync(VERSION_METADATA_FILE, versionMetadataJson)
 
-	if (process.argv.includes('--only-version-metadata')) {
+	if (args.onlyVersionMetadata) {
 		console.log('Only generating version metadata, skipping other steps.')
 		return
 	}
 
-	const docsPathsAllVersions = await gatherAllVersionsDocsPaths(versionMetadata)
+	const docsPathsAllVersions = await gatherAllVersionsDocsPaths(
+		versionMetadata,
+		args.getRealFileChangedMetadata,
+	)
 	const docsPathsAllVersionsJson = JSON.stringify(docsPathsAllVersions, null, 2)
 	fs.writeFileSync(DOCS_PATHS_ALL_VERSIONS_FILE, docsPathsAllVersionsJson)
 
 	// Apply MDX transforms, writing out transformed MDX files to `public`
 	await buildMdxTransforms(CONTENT_DIR, CONTENT_DIR_OUT, versionMetadata)
 
-	await buildAlgoliaRecords(CONTENT_DIR_OUT, versionMetadata)
+	if (args.buildAlgoliaIndex) {
+		await buildAlgoliaRecords(CONTENT_DIR_OUT, versionMetadata)
+	} else {
+		console.log(
+			'Skipping Algolia records build. Use --build-algolia-index to enable.',
+		)
+	}
 
 	// Copy all `*-nav-data.json` files from `content` to `public/content`, using execSync
 	await copyNavDataFiles(CONTENT_DIR, CONTENT_DIR_OUT, versionMetadata)
