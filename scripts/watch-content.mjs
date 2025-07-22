@@ -9,7 +9,7 @@ import { buildFileMdxTransforms } from './mdx-transforms/build-mdx-transforms-fi
 import { copyNavDataFile } from './utils/copy-nav-data-file.mjs'
 import { copyAssetFile } from './utils/copy-asset-file.mjs'
 import { gatherVersionMetadata } from './gather-version-metadata.mjs'
-import { isFileAnImage } from './prebuild.mjs'
+import { isFileAnImage } from './utils/isFileAnImage.mjs'
 
 const contentDir = path.resolve('content')
 
