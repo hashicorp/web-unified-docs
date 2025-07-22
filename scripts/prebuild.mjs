@@ -11,7 +11,7 @@ import { gatherAllVersionsDocsPaths } from './gather-all-versions-docs-paths.mjs
 import { buildAlgoliaRecords } from './algolia/build-algolia-records.mjs'
 import { copyNavDataFiles } from './utils/copy-nav-data-files.mjs'
 import { copyRedirectFiles } from './utils/copy-redirect-files.mjs'
-import { copyAssetFiles } from './utils/copy-asset-files.mjs'
+import { copyAllAssetFiles } from './utils/copy-asset-files.mjs'
 
 /**
  * We expect the current working directory to be the project root.
@@ -82,7 +82,7 @@ async function main() {
 		await buildAlgoliaRecords(CONTENT_DIR_OUT, versionMetadata)
 	} else {
 		console.log(
-			'Skipping Algolia records build. Use --build-algolia-index to enable.',
+			'\nSkipping Algolia records build. Use --build-algolia-index to enable.',
 		)
 	}
 
@@ -93,7 +93,7 @@ async function main() {
 	await copyRedirectFiles(CONTENT_DIR, CONTENT_DIR_OUT)
 
 	// Copy all asset files from `content` to `public/assets`
-	await copyAssetFiles(CONTENT_DIR, CONTENT_DIR_OUT_ASSETS)
+	await copyAllAssetFiles(CONTENT_DIR, CONTENT_DIR_OUT_ASSETS)
 }
 
 /**

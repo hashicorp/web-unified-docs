@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { copyAssetFile } from './copy-asset-file.mjs'
+import { copySingleAssetFile } from './copy-asset-files.mjs'
 import fs from 'fs'
 import path from 'path'
 
@@ -28,7 +28,7 @@ describe('copyAssetFile', () => {
 			return parentDir
 		})
 
-		copyAssetFile(filePath)
+		copySingleAssetFile(filePath)
 
 		expect(fs.copyFileSync).toHaveBeenCalledWith(filePath, destPath)
 		expect(fs.mkdirSync).toHaveBeenCalledWith(parentDir, { recursive: true })
@@ -41,7 +41,7 @@ describe('copyAssetFile', () => {
 		vi.spyOn(fs, 'existsSync').mockReturnValue(true)
 		vi.spyOn(fs, 'mkdirSync')
 
-		copyAssetFile(filePath)
+		copySingleAssetFile(filePath)
 
 		expect(fs.copyFileSync).toHaveBeenCalledWith(filePath, destPath)
 		expect(fs.mkdirSync).not.toHaveBeenCalledWith()

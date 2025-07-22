@@ -7,7 +7,7 @@ import fs from 'fs'
 import path from 'path'
 import { batchPromises } from './batch-promises.mjs'
 import { listFiles } from './list-files.mjs'
-import { addVersionToNavData } from './add-version-to-nav-data.mjs'
+import { addVersionToNavData } from '../add-version-to-nav-data.mjs'
 
 /**
  * Copy all *-nav-data.json files from the source to the destination directory.
