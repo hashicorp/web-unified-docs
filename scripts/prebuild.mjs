@@ -100,7 +100,11 @@ async function main() {
 	await copyRedirectFiles(CONTENT_DIR, CONTENT_DIR_OUT)
 
 	// Copy all asset files from `content` to `public/assets`
-	await copyAllAssetFiles(CONTENT_DIR, CONTENT_DIR_OUT_ASSETS)
+	await copyAllAssetFiles(
+		CONTENT_DIR,
+		CONTENT_DIR_OUT_ASSETS,
+		versionMetadata
+	)
 }
 
 /**
