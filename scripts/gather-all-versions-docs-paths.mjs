@@ -13,7 +13,10 @@ import { batchPromises } from './utils/batch-promises.mjs'
 
 const execAsync = promisify(exec)
 
-export async function gatherAllVersionsDocsPaths(versionMetadata) {
+export async function gatherAllVersionsDocsPaths(
+	versionMetadata,
+	getRealFileChangedMetadata,
+) {
 	const allDocsPaths = {}
 	const allProducts = Object.keys(PRODUCT_CONFIG)
 
@@ -21,6 +24,17 @@ export async function gatherAllVersionsDocsPaths(versionMetadata) {
 	console.log(
 		`🪄 Gathering file information for ${allProducts.length} products...`,
 	)
+
+	if (getRealFileChangedMetadata) {
+		console.log(
+			'\nℹ️ Using REAL created_at dates for file metadata. This may take a while...\n',
+		)
+	} else {
+		console.log(
+			"\nℹ️ Using DEBUG created_at date of 2025-06-03T18:02:21+00:00 for file metadata.\nIf you want to use the real created_at dates, run with '--use-real-file-changed-metadata'.\ne.g. `npm run prebuild -- --use-real-file-changed-metadata`\n",
+		)
+	}
+
 	for (const product of allProducts) {
 		// Initialize the product array
 		allDocsPaths[product] = {}
@@ -33,12 +47,26 @@ export async function gatherAllVersionsDocsPaths(versionMetadata) {
 
 		console.log(`Gathering file information for ${product}...`)
 
-		for (const version of allVersions) {
-			allDocsPaths[product][version?.version ?? ''] = []
+		for (const metadata of allVersions) {
+			let versionPath = metadata.version
+			let versionName = metadata.version
+
+			// If the product is not versioned, we set it's version to 'v0.0.x' but keep the path empty
+			if (!PRODUCT_CONFIG[product].versionedDocs) {
+				versionName = 'v0.0.x'
+				versionPath = ''
+			}
+
+			if (metadata.releaseStage !== 'stable') {
+				versionPath = `${metadata.version} (${metadata.releaseStage})`
+				versionName = metadata.version
+			}
+
+			allDocsPaths[product][versionName] = []
 			const contentPath = path.join(
 				'./content',
 				product,
-				PRODUCT_CONFIG[product].versionedDocs ? (version?.version ?? '') : '',
+				versionPath,
 				PRODUCT_CONFIG[product].contentDir,
 			)
 
@@ -46,9 +74,10 @@ export async function gatherAllVersionsDocsPaths(versionMetadata) {
 			const allPaths = await getProductPaths(
 				contentPath,
 				PRODUCT_CONFIG[product].productSlug,
+				getRealFileChangedMetadata,
 			)
 
-			allDocsPaths[product][version?.version ?? ''].push(...allPaths)
+			allDocsPaths[product][versionName].push(...allPaths)
 		}
 	}
 
@@ -59,7 +88,11 @@ export async function gatherAllVersionsDocsPaths(versionMetadata) {
 	return allDocsPaths
 }
 
-export async function getProductPaths(directory, productSlug) {
+export async function getProductPaths(
+	directory,
+	productSlug,
+	getRealFileChangedMetadata,
+) {
 	const apiPaths = []
 
 	function traverseDirectory(currentPath, relativePath = '') {
@@ -90,19 +123,31 @@ export async function getProductPaths(directory, productSlug) {
 			}
 		})
 	}
-
 	traverseDirectory(directory)
+
+	// We use `git log` to get the last commit date for the file, but because
+	// it is expensive, we only do it in production. Everything we use a default date of '2025-06-03T18:02:21+
+	if (!getRealFileChangedMetadata) {
+		apiPaths.forEach((apiPath) => {
+			// We use a default date of '2025-06-03T18:02:21+00:00' for the created_at field
+			apiPath.created_at = '2025-06-03T18:02:21+00:00'
+		})
+
+		return apiPaths
+	}
 
 	await batchPromises(
 		`Creating change history for files in ${directory}`,
 		apiPaths,
 		async (apiPath) => {
-			const created_at = await execAsync(
-				`git log --format=%cI --max-count=1 ${apiPath.itemPath}`,
+			// TODO: Store this data in frontmatter of each file instead
+			// Normalize path separators for cross-platform compatibility
+			const normalizedPath = apiPath.itemPath.replace(/\\/g, '/')
+			const gitLogTime = await execAsync(
+				`git log --format=%cI --max-count=1 -- "${normalizedPath}"`,
 			)
 
-			// remove the "\n" from the end of the output
-			apiPath.created_at = created_at.stdout.slice(0, -1)
+			apiPath.created_at = gitLogTime.stdout.slice(0, -1)
 		},
 		{ loggingEnabled: false },
 	)
