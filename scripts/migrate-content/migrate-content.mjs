@@ -420,7 +420,6 @@ function convertToJsonc(websiteDirPath, redirectsSrc) {
 		.replaceAll('has:', '"has":')
 		.replaceAll('type:', '"type":')
 		.replaceAll(';', '')
-		.replaceAll("'", '"')
 
 	const redirectsJsoncPath = path.join(websiteDirPath, 'redirects.jsonc')
 	try {

@@ -15,14 +15,14 @@ import {
 import { GET } from './route'
 import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
 import { Err, Ok } from '@utils/result'
-import { getProductMetadata } from '@utils/contentVersions'
+import { getProductVersionMetadata } from '@utils/contentVersions'
 import { mockRequest } from '@utils/mockRequest'
 
 vi.mock(import('@utils/contentVersions'), async (importOriginal: any) => {
 	const mod = await importOriginal()
 	return {
 		...mod,
-		getProductMetadata: vi.fn(),
+		getProductVersionMetadata: vi.fn(),
 	}
 })
 
@@ -46,7 +46,7 @@ describe('GET /[productSlug]/version-metadata', () => {
 		const productSlug = 'invalid-product-name'
 
 		// Simulate an error from getProductversionMetadata
-		vi.mocked(getProductMetadata).mockImplementationOnce(
+		vi.mocked(getProductVersionMetadata).mockImplementationOnce(
 			(productName: string) => {
 				return Err(`Product, ${productName}, not found in version metadata`)
 			},
@@ -78,7 +78,7 @@ describe('GET /[productSlug]/version-metadata', () => {
 		]
 
 		// Fake the return value from getProductVersionMetadata
-		vi.mocked(getProductMetadata).mockReturnValue(Ok(versionMetadata))
+		vi.mocked(getProductVersionMetadata).mockReturnValue(Ok(versionMetadata))
 
 		const response = await mockRequest(GET, { productSlug })
 

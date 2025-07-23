@@ -7,9 +7,9 @@ import fs from 'fs'
 import path from 'path'
 import { buildFileMdxTransforms } from './mdx-transforms/build-mdx-transforms-file.mjs'
 import { copyNavDataFile } from './utils/copy-nav-data-file.mjs'
-import { copySingleAssetFile } from './utils/copy-asset-files.mjs'
+import { copyAssetFile } from './utils/copy-asset-file.mjs'
 import { gatherVersionMetadata } from './gather-version-metadata.mjs'
-import { isFileAnImage } from './utils/copy-asset-files.mjs'
+import { isFileAnImage } from './prebuild.mjs'
 
 const contentDir = path.resolve('content')
 
@@ -98,7 +98,7 @@ fs.watch(contentDir, { recursive: true }, async (eventType, filename) => {
 		const filePath = path.join(contentDir, filename)
 		console.log(`Asset file changed: ${filePath}`, eventType)
 		try {
-			copySingleAssetFile(filePath)
+			copyAssetFile(filePath)
 
 			await fetch(`${process.env.DEV_PORTAL_URL}/api/refresh`, {
 				method: 'POST',

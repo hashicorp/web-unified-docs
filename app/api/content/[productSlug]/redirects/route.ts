@@ -3,11 +3,32 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-import { getProductVersionMetadata } from '@utils/contentVersions'
-import { findFileWithMetadata, parseJsonc } from '@utils/file'
+import { getProductVersion } from '@utils/contentVersions'
+import { readFile, parseJsonc } from '@utils/file'
 import { errorResultToString } from '@utils/result'
 import { ProductParam } from '@api/types'
-import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
+
+const contentDirMap: Record<string, string> = {
+	boundary: 'content',
+	consul: 'content',
+	'hcp-docs': 'content',
+	nomad: 'content',
+	packer: 'content',
+	'terraform-enterprise': 'docs',
+	sentinel: 'content',
+	terraform: 'docs',
+	'terraform-cdk': 'docs',
+	'terraform-docs-agents': 'docs',
+	'terraform-docs-common': 'docs',
+	'terraform-plugin-framework': 'docs',
+	'terraform-plugin-log': 'docs',
+	'terraform-plugin-mux': 'docs',
+	'terraform-plugin-sdk': 'docs',
+	'terraform-plugin-testing': 'docs',
+	vagrant: 'content',
+	vault: 'content',
+	waypoint: 'content',
+}
 
 /**
  * Parameters expected by `GET` route handler
@@ -16,30 +37,35 @@ export type GetParams = ProductParam
 export async function GET(request: Request, { params }: { params: GetParams }) {
 	const { productSlug } = params
 
-	if (!Object.keys(PRODUCT_CONFIG).includes(productSlug)) {
+	if (!contentDirMap[productSlug]) {
 		console.error(
 			`API Error: Product, ${productSlug}, not found in contentDirMap`,
 		)
+
 		return new Response('Not found', { status: 404 })
 	}
 
-	const productVersionResult = getProductVersionMetadata(productSlug, 'latest')
+	// TODO: Move this to a better check once our repoConfig file is done
+	let filePath = []
+	if (productSlug !== 'terraform-docs-common') {
+		const productVersionResult = getProductVersion(productSlug, 'latest')
 
-	if (!productVersionResult.ok) {
-		console.error(errorResultToString('API', productVersionResult))
-		return new Response('Not found', { status: 404 })
+		if (!productVersionResult.ok) {
+			console.error(errorResultToString('API', productVersionResult))
+			return new Response('Not found', { status: 404 })
+		}
+
+		filePath = [
+			'content',
+			productSlug,
+			productVersionResult.value,
+			'redirects.jsonc',
+		]
+	} else {
+		filePath = ['content', productSlug, 'redirects.jsonc']
 	}
 
-	const { value: versionMetadata } = productVersionResult
-
-	const filePath = [
-		'content',
-		productSlug,
-		versionMetadata.version,
-		'redirects.jsonc',
-	]
-
-	const readFileResult = await findFileWithMetadata(filePath, versionMetadata)
+	const readFileResult = await readFile(filePath)
 	if (!readFileResult.ok) {
 		return new Response('Not found', { status: 404 })
 	}

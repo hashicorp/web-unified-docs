@@ -14,16 +14,16 @@ import {
 } from 'vitest'
 import { GET } from './route'
 import { Err, Ok } from '@utils/result'
-import { getProductVersionMetadata } from '@utils/contentVersions'
+import { getProductVersion } from '@utils/contentVersions'
 import { PRODUCT_CONFIG } from '__fixtures__/productConfig.mjs'
-import { parseMarkdownFrontMatter, findFileWithMetadata } from '@utils/file'
+import { readFile, parseMarkdownFrontMatter } from '@utils/file'
 import { mockRequest } from '@utils/mockRequest'
 
 vi.mock(import('@utils/contentVersions'), async (importOriginal: any) => {
 	const mod = await importOriginal()
 	return {
 		...mod,
-		getProductVersionMetadata: vi.fn(),
+		getProductVersion: vi.fn(),
 	}
 })
 
@@ -33,7 +33,6 @@ vi.mock(import('@utils/file'), async (importOriginal: any) => {
 		...mod,
 		readFile: vi.fn(),
 		parseMarkdownFrontMatter: vi.fn(),
-		findFileWithMetadata: vi.fn(),
 	}
 })
 
@@ -95,7 +94,7 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 
 		// Some junk data for version
 		const version = 'lorem ipsum dolor sit amet'
-		vi.mocked(getProductVersionMetadata).mockReturnValue(
+		vi.mocked(getProductVersion).mockReturnValue(
 			Err(`Product, ${productSlug}, has no "${version}" version`),
 		)
 		const response = await mockRequest(GET, {
@@ -116,24 +115,20 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 		const [productSlug] = Object.keys(PRODUCT_CONFIG)
 
 		// Some real(ish) data for version
-		const metadata = {
-			version: 'v20220610-01',
-			isLatest: false,
-			releaseStage: 'stable',
-		}
+		const version = 'v20220610-01'
 
 		// Force the version(real-ish) to exist
-		vi.mocked(getProductVersionMetadata).mockReturnValue(Ok(metadata))
+		vi.mocked(getProductVersion).mockReturnValue(Ok(version))
 
 		// Fake missing content on disk
-		vi.mocked(findFileWithMetadata).mockReturnValue(
-			Promise.resolve(Err(`Failed to find file at path`)),
-		)
+		vi.mocked(readFile).mockImplementation(async (filePath: string[]) => {
+			return Err(`Failed to read file at path: ${filePath.join('/')}`)
+		})
 
 		const response = await mockRequest(GET, {
 			docsPath: [''],
 			productSlug,
-			version: metadata.version,
+			version,
 		})
 
 		expect(consoleMock.mock.calls[0][0]).toMatch(/no content found/i)
@@ -146,19 +141,15 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 		const [productSlug] = Object.keys(PRODUCT_CONFIG)
 
 		// Some real(ish) data for version
-		const metadata = {
-			version: 'v20220610-01',
-			isLatest: false,
-			releaseStage: 'stable',
-		}
+		const version = 'v20220610-01'
 
 		// Force the version(real-ish) to exist
-		vi.mocked(getProductVersionMetadata).mockReturnValue(Ok(metadata))
+		vi.mocked(getProductVersion).mockReturnValue(Ok(version))
 
 		// Fake the return of some invalid markdown from the filesystem
-		vi.mocked(findFileWithMetadata).mockReturnValue(
-			Promise.resolve(Ok(`[[test]`)),
-		)
+		vi.mocked(readFile).mockImplementation(async () => {
+			return Ok(`[[test]`)
+		})
 
 		// Fake some invalid markdown
 		vi.mocked(parseMarkdownFrontMatter).mockImplementation(() => {
@@ -168,7 +159,7 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 		const response = await mockRequest(GET, {
 			docsPath: [''],
 			productSlug,
-			version: metadata.version,
+			version,
 		})
 
 		expect(consoleMock.mock.calls[0][0]).toMatch(/failed to parse markdown/i)
@@ -178,27 +169,23 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 
 	it('returns the markdown source of the requested docs', async () => {
 		const productSlug = 'terraform-plugin-framework'
-		const metadata = {
-			version: 'v1.13.x',
-			isLatest: false,
-			releaseStage: 'stable',
-		}
+		const version = 'v1.13.x'
 		const markdownSource = '# Hello World'
 		const expectedPath = [
 			'content',
 			productSlug,
-			metadata.version,
+			version,
 			PRODUCT_CONFIG[productSlug].contentDir,
 			'plugin/framework/internals/rpcs.mdx',
 		]
 
 		// Force the version(real-ish) to exist
-		vi.mocked(getProductVersionMetadata).mockReturnValue(Ok(metadata))
+		vi.mocked(getProductVersion).mockReturnValue(Ok(version))
 
 		// Fake content returned from the filesystem
-		vi.mocked(findFileWithMetadata).mockReturnValue(
-			Promise.resolve(Ok(markdownSource)),
-		)
+		vi.mocked(readFile).mockImplementation(async () => {
+			return Ok(markdownSource)
+		})
 
 		// Mock markdown parser returning valid content
 		vi.mocked(parseMarkdownFrontMatter).mockImplementation(() => {
@@ -208,7 +195,7 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 		const response = await mockRequest(GET, {
 			docsPath: ['plugin', 'framework', 'internals', 'rpcs'],
 			productSlug,
-			version: metadata.version,
+			version,
 		})
 
 		expect(consoleMock).not.toHaveBeenCalled()
@@ -216,34 +203,30 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 		const { meta, result } = await response.json()
 		expect(meta.status_code).toBe(200)
 		expect(result.product).toBe(productSlug)
-		expect(result.version).toBe(metadata.version)
+		expect(result.version).toBe(version)
 		expect(result.markdownSource).toBe(markdownSource)
 		expect(result.githubFile).toBe(expectedPath.join('/'))
 	})
 
 	it('returns the markdown source of the requested docs, even if includes .mdx', async () => {
 		const productSlug = 'terraform-plugin-framework'
-		const metadata = {
-			version: 'v1.13.x',
-			isLatest: false,
-			releaseStage: 'stable',
-		}
+		const version = 'v1.13.x'
 		const markdownSource = '# Hello World'
 		const expectedPath = [
 			'content',
 			productSlug,
-			metadata.version,
+			version,
 			PRODUCT_CONFIG[productSlug].contentDir,
 			'plugin/framework/internals/rpcs.mdx',
 		]
 
 		// Force the version(real-ish) to exist
-		vi.mocked(getProductVersionMetadata).mockReturnValue(Ok(metadata))
+		vi.mocked(getProductVersion).mockReturnValue(Ok(version))
 
 		// Fake content returned from the filesystem
-		vi.mocked(findFileWithMetadata).mockReturnValue(
-			Promise.resolve(Ok(markdownSource)),
-		)
+		vi.mocked(readFile).mockImplementation(async () => {
+			return Ok(markdownSource)
+		})
 
 		// Mock markdown parser returning valid content
 		vi.mocked(parseMarkdownFrontMatter).mockImplementation(() => {
@@ -253,7 +236,7 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 		const response = await mockRequest(GET, {
 			docsPath: ['plugin', 'framework', 'internals', 'rpcs.mdx'],
 			productSlug,
-			version: metadata.version,
+			version,
 		})
 
 		expect(consoleMock).not.toHaveBeenCalled()
@@ -261,26 +244,26 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 		const { meta, result } = await response.json()
 		expect(meta.status_code).toBe(200)
 		expect(result.product).toBe(productSlug)
-		expect(result.version).toBe(metadata.version)
+		expect(result.version).toBe(version)
 		expect(result.markdownSource).toBe(markdownSource)
 		expect(result.githubFile).toBe(expectedPath.join('/'))
 	})
 
 	it('checks both possible content locations for githubFile path', async () => {
 		const [productSlug] = Object.keys(PRODUCT_CONFIG)
-		const metadata = {
-			version: 'v20220610-01',
-			isLatest: false,
-			releaseStage: 'stable',
-		}
+		const version = 'v20220610-01'
 		const markdownSource = '# Hello World'
 
-		vi.mocked(getProductVersionMetadata).mockReturnValue(Ok(metadata))
+		vi.mocked(getProductVersion).mockReturnValue(Ok(version))
 
 		// First attempt fails, second succeeds (testing index.mdx path)
-		vi.mocked(findFileWithMetadata)
-			.mockReturnValueOnce(Promise.resolve(Err('File not found')))
-			.mockReturnValueOnce(Promise.resolve(Ok(markdownSource)))
+		vi.mocked(readFile)
+			.mockImplementationOnce(async () => {
+				return Err('File not found')
+			})
+			.mockImplementationOnce(async () => {
+				return Ok(markdownSource)
+			})
 
 		vi.mocked(parseMarkdownFrontMatter).mockReturnValue(
 			Ok({ markdownSource, metadata: {} }),
@@ -289,14 +272,14 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 		const response = await mockRequest(GET, {
 			docsPath: ['docs', 'example'],
 			productSlug,
-			version: metadata.version,
+			version,
 		})
 
 		const { result } = await response.json()
 		const expectedPath = [
 			'content',
 			productSlug,
-			metadata.version,
+			version,
 			PRODUCT_CONFIG[productSlug].contentDir,
 			'docs',
 			'example',

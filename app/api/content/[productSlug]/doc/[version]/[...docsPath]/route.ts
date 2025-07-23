@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-import { findFileWithMetadata, parseMarkdownFrontMatter } from '@utils/file'
-import { getProductVersionMetadata } from '@utils/contentVersions'
+import { readFile, parseMarkdownFrontMatter } from '@utils/file'
+import { getProductVersion } from '@utils/contentVersions'
 import { errorResultToString } from '@utils/result'
 import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
 import docsPathsAllVersions from '@api/docsPathsAllVersions.json'
@@ -33,13 +33,13 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 
 	// Determine the content directory based on the "product" (actually repo) slug
 	const { contentDir } = PRODUCT_CONFIG[productSlug]
-	const productVersionResult = getProductVersionMetadata(productSlug, version)
+	const productVersionResult = getProductVersion(productSlug, version)
 	if (!productVersionResult.ok) {
 		console.error(errorResultToString('API', productVersionResult))
 		return new Response('Not found', { status: 404 })
 	}
 
-	const { value: versionMetadata } = productVersionResult
+	const { value: parsedVersion } = productVersionResult
 
 	let parsedDocsPath = docsPath.join('/')
 	if (parsedDocsPath.endsWith('.mdx')) {
@@ -65,14 +65,14 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 		[
 			`content`,
 			productSlug,
-			versionMetadata.version,
+			parsedVersion,
 			contentDir,
 			`${parsedDocsPath}.mdx`,
 		],
 		[
 			`content`,
 			productSlug,
-			versionMetadata.version,
+			parsedVersion,
 			contentDir,
 			parsedDocsPath,
 			`index.mdx`,
@@ -81,13 +81,12 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 
 	let foundContent, githubFile, createdAt
 	for (const loc of possibleContentLocations) {
-		const readFileResult = await findFileWithMetadata(loc, versionMetadata)
+		const readFileResult = await readFile(loc)
 
 		if (readFileResult.ok) {
 			foundContent = readFileResult.value
 			githubFile = loc.join('/')
-			const productDocsPaths =
-				docsPathsAllVersions[productSlug][versionMetadata.version]
+			const productDocsPaths = docsPathsAllVersions[productSlug][parsedVersion]
 			if (productDocsPaths) {
 				const matchingPath = productDocsPaths.find(
 					({ path }: { path: string }) => {
@@ -136,7 +135,7 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 			fullPath: parsedDocsPath,
 			product: productSlug,
 			version: PRODUCT_CONFIG[productSlug].versionedDocs
-				? versionMetadata.version
+				? parsedVersion
 				: 'v0.0.x',
 			metadata,
 			subpath: 'docs', // TODO: I guess we could grab the first part of the rawDocsPath? Is there something I am missing here?

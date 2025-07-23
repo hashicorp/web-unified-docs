@@ -5,8 +5,8 @@
 
 import { expect, test, vi, afterEach } from 'vitest'
 import {
-	getProductMetadata,
 	getProductVersionMetadata,
+	getProductVersion,
 } from '@utils/contentVersions'
 import { findDocVersions } from './findDocVersions'
 import versionMetadata from '__fixtures__/versionMetadata.json'
@@ -43,11 +43,7 @@ test('getProductVersion should return error for non-existent product', () => {
 		value: 'Product, noproduct, not found in version metadata',
 	}
 
-	const result = getProductVersionMetadata(
-		'noproduct',
-		'v1.19.x',
-		versionMetadata,
-	)
+	const result = getProductVersion('noproduct', 'v1.19.x', versionMetadata)
 	expect(result).toStrictEqual(expected)
 })
 
@@ -57,29 +53,17 @@ test('getProductVersion should return error for non-existent version', () => {
 		value: 'Product, terraform, has no "v1.19.x" version',
 	}
 
-	const result = getProductVersionMetadata(
-		'terraform',
-		'v1.19.x',
-		versionMetadata,
-	)
+	const result = getProductVersion('terraform', 'v1.19.x', versionMetadata)
 	expect(result).toStrictEqual(expected)
 })
 
 test('getProductVersion should return correct version for existing version', () => {
 	const expected = {
 		ok: true,
-		value: {
-			version: 'v1.5.x',
-			releaseStage: 'stable',
-			isLatest: false,
-		},
+		value: 'v1.5.x',
 	}
 
-	const result = getProductVersionMetadata(
-		'terraform',
-		'v1.5.x',
-		versionMetadata,
-	)
+	const result = getProductVersion('terraform', 'v1.5.x', versionMetadata)
 	expect(result).toStrictEqual(expected)
 })
 
@@ -87,12 +71,8 @@ test('getProductVersion should return latest version', () => {
 	const product = 'terraform'
 	const [expected] = versionMetadata[product]
 
-	const { value } = getProductVersionMetadata(
-		product,
-		'latest',
-		versionMetadata,
-	)
-	expect(value).toStrictEqual(expected)
+	const { value } = getProductVersion(product, 'latest', versionMetadata)
+	expect(value).toStrictEqual(expected.version)
 })
 
 test('getProductVersionMetadata should return metadata for existing product', () => {
@@ -103,7 +83,7 @@ test('getProductVersionMetadata should return metadata for existing product', ()
 		value: versionMetadata[product],
 	}
 
-	const result = getProductMetadata(product, versionMetadata)
+	const result = getProductVersionMetadata(product, versionMetadata)
 	expect(result).toStrictEqual(expected)
 })
 
@@ -113,7 +93,7 @@ test('getProductVersionMetadata should return error for non-existent product', (
 		value: 'Product, noproduct, not found in version metadata',
 	}
 
-	const result = getProductMetadata('noproduct')
+	const result = getProductVersionMetadata('noproduct')
 	expect(result).toStrictEqual(expected)
 })
 
@@ -123,7 +103,7 @@ test('getProductVersionMetadata should return error for empty product name', () 
 		value: 'Product, , not found in version metadata',
 	}
 
-	const result = getProductMetadata('')
+	const result = getProductVersionMetadata('')
 	expect(result).toStrictEqual(expected)
 })
 
@@ -133,7 +113,7 @@ test('getProductVersion should return error for empty version', () => {
 		value: 'Product, terraform, has no "" version',
 	}
 
-	const result = getProductVersionMetadata('terraform', '', versionMetadata)
+	const result = getProductVersion('terraform', '', versionMetadata)
 	expect(result).toStrictEqual(expected)
 })
 
@@ -143,7 +123,7 @@ test('getProductVersion should return error for null version', () => {
 		value: 'Product, terraform, has no "null" version',
 	}
 
-	const result = getProductVersionMetadata('terraform', null, versionMetadata)
+	const result = getProductVersion('terraform', null, versionMetadata)
 	expect(result).toStrictEqual(expected)
 })
 
@@ -153,11 +133,7 @@ test('getProductVersion should return error for undefined version', () => {
 		value: 'Product, terraform, has no "undefined" version',
 	}
 
-	const result = getProductVersionMetadata(
-		'terraform',
-		'undefined',
-		versionMetadata,
-	)
+	const result = getProductVersion('terraform', 'undefined', versionMetadata)
 	expect(result).toStrictEqual(expected)
 })
 
@@ -167,7 +143,7 @@ test('getProductVersionMetadata should return empty array for product with no ve
 		value: 'Product, emptyproduct, not found in version metadata',
 	}
 
-	const result = getProductMetadata('emptyproduct')
+	const result = getProductVersionMetadata('emptyproduct')
 	expect(result).toStrictEqual(expected)
 })
 

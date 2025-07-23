@@ -53,9 +53,7 @@ else
   pr_url="$(gh pr create \
     --body="$(cat pr_body.md)" \
     --title="$title" \
-    --base="${RELEASE_BRANCH_NAME}" \
     --draft)"
-
 
   echo $pr_url
 fi

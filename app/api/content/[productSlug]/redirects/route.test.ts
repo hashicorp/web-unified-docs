@@ -12,15 +12,7 @@ import { mockRequest } from '@utils/mockRequest'
 
 vi.mock('@api/versionMetadata.json', () => {
 	return {
-		default: {
-			'terraform-docs-common': [
-				{
-					version: 'v0.0.x',
-					releaseStage: 'stable',
-					isLatest: true,
-				},
-			],
-		},
+		default: {},
 	}
 })
 
@@ -58,7 +50,7 @@ test("Return 404 if not redirect DOESN'T exists for `latest` on `productSlug`", 
 })
 
 test('Return 200 and parse the jsonc into json if valid for UNVERSIONED product', async () => {
-	const readFileSpy = vi.spyOn(utilsFileModule, 'findFileWithMetadata')
+	const readFileSpy = vi.spyOn(utilsFileModule, 'readFile')
 	readFileSpy.mockImplementation(() => {
 		return Promise.resolve({ ok: true, value: jsoncFixtureBefore })
 	})
@@ -72,20 +64,17 @@ test('Return 200 and parse the jsonc into json if valid for UNVERSIONED product'
 })
 
 test('Return 200 and parse the jsonc into json if valid for VERSIONED product', async () => {
-	const readFileSpy = vi.spyOn(utilsFileModule, 'findFileWithMetadata')
+	const readFileSpy = vi.spyOn(utilsFileModule, 'readFile')
 	readFileSpy.mockImplementation(() => {
 		return Promise.resolve({ ok: true, value: jsoncFixtureBefore })
 	})
 
 	const contentVersionsSpy = vi.spyOn(
 		utilsContentVersionsModule,
-		'getProductVersionMetadata',
+		'getProductVersion',
 	)
 	contentVersionsSpy.mockImplementation(() => {
-		return {
-			ok: true,
-			value: { releaseStage: 'stable', version: 'v202410-1', isLatest: false },
-		}
+		return { ok: true, value: 'v202410-1' }
 	})
 
 	const productSlug = 'terraform-enterprise'

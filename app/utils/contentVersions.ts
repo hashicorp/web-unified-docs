@@ -8,7 +8,7 @@ import { Ok, Err } from '@utils/result'
 
 import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
 
-export type ProductVersionMetadata = {
+type ProductVersionMetadata = {
 	version: string
 	isLatest: boolean
 	releaseStage: string
@@ -16,7 +16,7 @@ export type ProductVersionMetadata = {
 
 type VersionMetadataMap = Record<string, ProductVersionMetadata[]>
 
-export const getProductVersionMetadata = (
+export const getProductVersion = (
 	productSlug: string,
 	version: string,
 	versionMetaData: VersionMetadataMap = versionMetadata,
@@ -27,7 +27,7 @@ export const getProductVersionMetadata = (
 		return Err(`Product, ${productSlug}, not found in version metadata`)
 	}
 
-	let parsedVersion, releaseStage, isLatest
+	let parsedVersion
 	if (version === 'latest') {
 		// Grab the latest version of the product
 		const foundVersion = productVersionMetadata.find(
@@ -36,8 +36,6 @@ export const getProductVersionMetadata = (
 			},
 		)
 
-		releaseStage = foundVersion.releaseStage
-		isLatest = foundVersion.isLatest
 		if (!PRODUCT_CONFIG[productSlug].versionedDocs) {
 			parsedVersion = '' // Set to an empty string if no latest version is found, as in the case for versionless docs such as terraform-docs-common
 		} else {
@@ -45,25 +43,21 @@ export const getProductVersionMetadata = (
 		}
 	} else {
 		// Ensure the requested version is valid
-		const foundVersion = productVersionMetadata.find(
-			(v: ProductVersionMetadata) => {
+		if (
+			!productVersionMetadata.find((v: ProductVersionMetadata) => {
 				return v.version === version
-			},
-		)
-
-		if (!foundVersion) {
+			})
+		) {
 			return Err(`Product, ${productSlug}, has no "${version}" version`)
 		}
 
-		releaseStage = foundVersion.releaseStage
-		isLatest = foundVersion.isLatest
 		parsedVersion = version
 	}
 
-	return Ok({ version: parsedVersion, releaseStage, isLatest })
+	return Ok(parsedVersion)
 }
 
-export const getProductMetadata = (
+export const getProductVersionMetadata = (
 	productSlug: string,
 	versionMetaData: VersionMetadataMap = versionMetadata,
 ) => {

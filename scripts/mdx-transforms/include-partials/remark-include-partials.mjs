@@ -6,7 +6,7 @@
 import path from 'path'
 import remark from 'remark'
 import flatMap from 'unist-util-flatmap'
-import fs from 'fs'
+import toVfile from 'to-vfile'
 
 /**
  * A remark plugin that allows including "partials" into other files.
@@ -59,7 +59,7 @@ export function remarkIncludePartialsPlugin({ partialsDir, filePath }) {
 			const includePath = path.join(partialsDir, includeMatch[1])
 			let includeContents
 			try {
-				includeContents = fs.readFileSync(includePath, 'utf8')
+				includeContents = toVfile.readSync(includePath, 'utf8')
 			} catch {
 				throw new Error(
 					`@include file not found. In "${filePath}", on line ${node.position.start.line}, column ${node.position.start.column}, please ensure the referenced file "${includePath}" exists.`,
@@ -82,15 +82,11 @@ export function remarkIncludePartialsPlugin({ partialsDir, filePath }) {
 				const ast = processor.parse(includeContents)
 				return processor.runSync(ast, includeContents).children
 			} else {
+				// Trim any leading or trailing whitespace in the file
+				includeContents.contents = includeContents.contents.trim()
 				const includeLang = path.extname(includePath).slice(1)
-				// Return the file contents wrapped inside a "code" node and trim any leading or trailing whitespace in the file
-				return [
-					{
-						type: 'code',
-						lang: includeLang,
-						value: includeContents.trim(),
-					},
-				]
+				// Return the file contents wrapped inside a "code" node
+				return [{ type: 'code', lang: includeLang, value: includeContents }]
 			}
 		})
 	}
