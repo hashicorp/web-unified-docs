@@ -3,105 +3,75 @@ name: Copy Cloud Docs For TFE
 on:
   workflow_dispatch:
     inputs:
-      branch:
-        description: 'Release branch. (Ex: docs-tfe-releases/v123456-1, ptfe-releases/v123456-1)'
+      version:
+        description: 'The TFE version for the upcoming TFE release, format is either vYYYYMM-# or MAJOR.MINOR.PATCH (without a "v" prefix).'
         required: true
-
-env:
-  release_branch: ${{ inputs.branch }}
+        type: string
+  workflow_call:
+    inputs:
+      version:
+        description: 'The TFE version for the upcoming TFE release, format is either vYYYYMM-# or MAJOR.MINOR.PATCH (without a "v" prefix).'
+        required: true
+        type: string
+    outputs:
+      release_branch_name:
+        description: 'The name of the branch created for the new TFE version docs.'
+        value: ${{ jobs.copy-docs.outputs.release_branch_name }}
+      release_branch_pr_url:
+        description: 'The URL of the release branch created for the new TFE version docs.'
+        value: ${{ jobs.copy-docs.outputs.release_branch_pr_url }}
+      diff_branch_pr_url:
+        description: 'The URL of the diff branch created for the new TFE version docs.'
+        value: ${{ jobs.copy-docs.outputs.diff_branch_pr_url }}
 
 jobs:
   copy-docs:
     name: Copy Docs
     runs-on: ubuntu-latest
+    outputs:
+      release_branch_name: ${{ steps.open-docs-pr.outputs.docs_branch_name }}
+      release_branch_pr_url: ${{ steps.open-docs-pr.outputs.release_branch_pr_url }}
+      diff_branch_pr_url: ${{ steps.open-diff-pr.outputs.diff_branch_pr_url }}
     steps:
-      # TODO: `exit 1` here short circuits the whole workflow, which we want, but results in
-      # an unnecessary `failure` status, which we don't want.
-      - name: Validate branch name
-        # ✅ docs-tfe-releases/v000011-1
-        # ✅ ptfe-releases/v000011-1
-        # ❌ ptfe-releases/v000011-2
-        # ❌ ptfe-releases/v000011-
-        # ❌ ptfe-releases/v000011
-        run: |
-          if [[ ${{ env.release_branch }} =~ ^(docs-tfe-releases|ptfe-releases)/v[0-9]{6}-1$ ]]
-          then
-            echo "::notice::Branch is valid — ${{ env.release_branch }}"
-          else
-            echo "::warning::Branch is invalid — ${{ env.release_branch }}"
-            exit 1
-          fi
-
-      - name: Set workspace & ref_name on env
-        run: |
-          echo "workspace=$GITHUB_WORKSPACE" >> $GITHUB_ENV
-          echo "ref_name=$GITHUB_REF_NAME"   >> $GITHUB_ENV
-
-      - name: Get series (YYYYMM) number from branch name
-        run: |
-          series=$(echo ${{ env.release_branch }} \
-            | awk -F '/' '{print $2}' \
-            | awk -F '-' '{print $1} {print $2}' \
-            | head -n 1)
-          echo "SERIES=$series" >> $GITHUB_ENV
-      - name: Get release (X) number from branch name
-        run: |
-          release=$(echo ${{ env.release_branch }} \
-            | awk -F '/' '{print $2}' \
-            | awk -F '-' '{print $1} {print $2}' \
-            | tail -n 1)
-          echo "RELEASE=$release" >> $GITHUB_ENV
-
       - name: Series/Release Summary
         run: |
           echo "# Summary"                                                                            >> $GITHUB_STEP_SUMMARY
-          echo "**Workflow ref**: ${{env.ref_name}}"                                                  >> $GITHUB_STEP_SUMMARY
+          echo "**Workflow ref**: ${{github.ref_name}}"                                                  >> $GITHUB_STEP_SUMMARY
           echo ""                                                                                     >> $GITHUB_STEP_SUMMARY
           echo "Triggered by branch creation (or manual workflow):"                                   >> $GITHUB_STEP_SUMMARY
-          echo "- ${{github.server_url}}/hashicorp/${{env.target_repo}}/tree/${{env.release_branch}}" >> $GITHUB_STEP_SUMMARY
           echo ""                                                                                     >> $GITHUB_STEP_SUMMARY
-          echo "**Series**: ${{env.SERIES}}"                                                          >> $GITHUB_STEP_SUMMARY
-          echo "**Release**: ${{env.RELEASE}}"                                                        >> $GITHUB_STEP_SUMMARY
           echo ""                                                                                     >> $GITHUB_STEP_SUMMARY
           echo "---"                                                                                  >> $GITHUB_STEP_SUMMARY
 
-      - name: Checkout new release branch
-        uses: actions/checkout@0ad4b8fadaa221de15dcec353f45205ec38ea70b # v4.1.4
-        with:
-          ref: ${{env.release_branch}}
-          path: '${{github.workspace}}/release'
-
-      # MAKE THE RELEASE PR
+      # MAKE THE DOCS PR
       - name: Checkout main for new docs version RELEASE PR
         uses: actions/checkout@0ad4b8fadaa221de15dcec353f45205ec38ea70b # v4.1.4
         with:
           path: '${{github.workspace}}/new-docs-pr'
 
       - name: Generate version-metadata for workflow
-        working-directory: '${{github.workspace}}/release'
+        working-directory: '${{github.workspace}}/new-docs-pr'
         run: |
           npm i
-          npm run prebuild-only-version-metadata
+          npm run prebuild -- --only-build-version-metadata
 
       - name: Create the new TFE version folder for RELEASE PR
         run: |
-          version=$(jq -r '.["terraform-enterprise"][] | select(.isLatest == true) | .version' "${{github.workspace}}/release/app/api/versionMetadata.json")
-          echo "Latest terraform-enterprise version: ${version}"
-          echo "LATEST_TFE_VERSION=$version" >> $GITHUB_ENV
+          prev_version=$(jq -r '.["terraform-enterprise"][] | select(.isLatest == true) | .version' "${{github.workspace}}/new-docs-pr/app/api/versionMetadata.json")
+          echo "Previous terraform-enterprise version: ${prev_version}"
+          echo "PREV_TFE_VERSION=${prev_version}" >> $GITHUB_ENV
 
-          mkdir -p "${{github.workspace}}/new-docs-pr/content/terraform-enterprise/${{env.SERIES}}-${{env.RELEASE}}"
+          mkdir -p "${{github.workspace}}/new-docs-pr/content/terraform-enterprise/${{inputs.version}}"
 
-          cp -a "${{github.workspace}}/release/content/terraform-enterprise/${version}/." "${{github.workspace}}/new-docs-pr/content/terraform-enterprise/${{env.SERIES}}-${{env.RELEASE}}"
+          cp -a "${{github.workspace}}/new-docs-pr/content/terraform-enterprise/${prev_version}/." "${{github.workspace}}/new-docs-pr/content/terraform-enterprise/${{inputs.version}}"
 
-      - name: Open new docs version RELEASE PR
+      - name: Open new version RELEASE PR
+        id: open-docs-pr
         working-directory: '${{github.workspace}}/new-docs-pr'
         env:
-          branch_name: docs/${{env.SERIES}}-${{env.RELEASE}}
-          pr_body: |
-            # Automated Docs Release PR for TFE ${{env.SERIES}}-${{env.RELEASE}}
-
-            **TFE Series**: ${{ env.SERIES }}
-            **TFE Release**: ${{ env.RELEASE }}
+          docs_branch_name: tfe-release/${{inputs.version}}
+          docs_pr_body: |
+            # TFE Release ${{inputs.version}}
 
             ...Waiting for the diff PR to be created, before finishing this PR's description...
 
@@ -111,67 +81,64 @@ jobs:
           git config --global user.email "team-rel-eng@hashicorp.com"
           git config --global user.name "tfe-release-bot"
 
-          if [ "$(git ls-remote --heads origin ${{env.branch_name}})" != "" ]; then
-            echo "❌ branch name ${{env.branch_name}} already exists, please delete it from remote/origin and try again. (i.e. git push origin --delete ${{env.branch_name}})"
+          if [ "$(git ls-remote --heads origin ${{env.docs_branch_name}})" != "" ]; then
+            echo "❌ branch name ${{env.docs_branch_name}} already exists, please delete it from remote/origin and try again. (i.e. git push origin --delete ${{env.docs_branch_name}})"
 
-            echo "❌ branch name ${{env.branch_name}} already exists, please delete it from remote/origin and try again. (i.e. git push origin --delete ${{env.branch_name}})" >> $GITHUB_STEP_SUMMARY
+            echo "❌ branch name ${{env.docs_branch_name}} already exists, please delete it from remote/origin and try again. (i.e. git push origin --delete ${{env.docs_branch_name}})" >> $GITHUB_STEP_SUMMARY
 
             exit 1
           fi
 
-          git checkout -b ${{env.branch_name}}
+          git checkout -b ${{env.docs_branch_name}}
           git add .
 
-          git commit -m "Automated Release Docs PR" --no-verify
+          git commit -m "TFE Release ${{inputs.version}}" --no-verify
           git push origin HEAD
 
           gh pr create \
-            --body="${{env.pr_body}}" \
-            --title="Automated Docs Release PR for TFE ${{env.SERIES}}-${{env.RELEASE}}" \
+            --body="${{env.docs_pr_body}}" \
+            --title="TFE Release ${{inputs.version}}" \
             --draft \
-            --head ${{env.branch_name}} \
+            --head ${{env.docs_branch_name}} \
             --base main
 
-          pr_url=$(gh pr view --json url --jq '.url')
-          echo "PR_URL=${pr_url}" >> $GITHUB_ENV
-          echo "**Automated Release PR URL**: ${pr_url}" >> $GITHUB_STEP_SUMMARY
+          echo "docs_branch_name=${{env.docs_branch_name}}" >> $GITHUB_OUTPUT
+          docs_pr_url=$(gh pr view --json url --jq '.url')
+          echo "DOCS_PR_URL=${docs_pr_url}" >> $GITHUB_ENV
+          echo "release_branch_pr_url=${docs_pr_url}" >> $GITHUB_OUTPUT
+          echo "**TFE Release PR URL**: ${docs_pr_url}" >> $GITHUB_STEP_SUMMARY
 
       # MAKE THE DIFF PR
       - name: Checkout main for new docs version DIFF PR
         uses: actions/checkout@0ad4b8fadaa221de15dcec353f45205ec38ea70b # v4.1.4
         with:
           path: '${{github.workspace}}/new-docs-diff-pr'
-          ref: docs/${{env.SERIES}}-${{env.RELEASE}}
+          ref: '${{steps.open-docs-pr.outputs.docs_branch_name}}'
 
       - name: Copy files for new docs version DIFF PR
-        uses: ./release/.github/actions/copy-cloud-docs-for-tfe
+        uses: ./new-docs-pr/.github/actions/copy-cloud-docs-for-tfe
         with:
-          source_path: '${{github.workspace}}/release'
+          source_path: '${{github.workspace}}/new-docs-pr'
           target_path: '${{github.workspace}}/new-docs-diff-pr'
-          new_TFE_version: ${{env.SERIES}}-${{env.RELEASE}}
+          new_TFE_version: ${{inputs.version}}
 
       - name: Open new docs version DIFF PR
+        id: open-diff-pr
         working-directory: '${{github.workspace}}/new-docs-diff-pr'
         env:
-          release_branch_name: docs/${{env.SERIES}}-${{env.RELEASE}}
-          branch_name: docs-diff/${{env.SERIES}}-${{env.RELEASE}}
-          pr_body: |
-            # Automated Docs Diff PR for TFE ${{env.SERIES}}-${{env.RELEASE}}
-
-            **TFE Series**: ${{ env.SERIES }}
-            **TFE Release**: ${{ env.RELEASE }}
+          docs_branch_name: ${{steps.open-docs-pr.outputs.docs_branch_name}}
+          diff_branch_name: HCPTF-diff/${{inputs.version}}
+          diff_pr_body: |
+            # HCP TF changes for TFE release ${{inputs.version}}
 
             This PR was created via:
             - ${{github.server_url}}/${{github.repository}}/actions/runs/${{github.run_id}}
 
-            Triggered by creation of branch:
-            - ${{github.server_url}}/${{github.repository}}/tree/${{env.release_branch}}
-
             Copies over `content/terraform-docs-common/docs/cloud-docs` from:
-            - ${{github.server_url}}/${{github.repository}}/tree/${{env.release_branch}}
+            - ${{github.server_url}}/${{github.repository}}/tree/main
 
             Merges into the docs release branch:
-            - ${{ env.PR_URL }}
+            - ${{ env.DOCS_PR_URL }}
 
             ### Reviewers
             - [ ] @hashicorp/ptfe-review
@@ -182,48 +149,44 @@ jobs:
           git config --global user.email "team-rel-eng@hashicorp.com"
           git config --global user.name "tfe-release-bot"
 
-          if [ "$(git ls-remote --heads origin ${{env.branch_name}})" != "" ]; then
-            echo "❌ branch name ${{env.branch_name}} already exists, please delete it from remote/origin and try again. (i.e. git push origin --delete ${{env.branch_name}})"
+          if [ "$(git ls-remote --heads origin ${{env.diff_branch_name}})" != "" ]; then
+            echo "❌ branch name ${{env.diff_branch_name}} already exists, please delete it from remote/origin and try again. (i.e. git push origin --delete ${{env.diff_branch_name}})"
 
-            echo "❌ branch name ${{env.branch_name}} already exists, please delete it from remote/origin and try again. (i.e. git push origin --delete ${{env.branch_name}})" >> $GITHUB_STEP_SUMMARY
+            echo "❌ branch name ${{env.diff_branch_name}} already exists, please delete it from remote/origin and try again. (i.e. git push origin --delete ${{env.diff_branch_name}})" >> $GITHUB_STEP_SUMMARY
 
             exit 1
           fi
 
-          git checkout -b ${{env.branch_name}}
+          git checkout -b ${{env.diff_branch_name}}
           git add .
 
-          git commit -m "Automated Docs Diff PR" --no-verify
+          git commit -m "HCP TF changes for TFE release" --no-verify
           git push origin HEAD
 
           gh pr create \
-            --body="${{env.pr_body}}" \
-            --title="Automated Docs Diff PR for TFE ${{env.SERIES}}-${{env.RELEASE}}" \
+            --body="${{env.diff_pr_body}}" \
+            --title="HCP TF changes for TFE release ${{inputs.version}}" \
             --draft \
-            --head ${{env.branch_name}} \
-            --base ${{env.release_branch_name}}
+            --head ${{env.diff_branch_name}} \
+            --base ${{env.docs_branch_name}}
 
           diff_pr_url=$(gh pr view --json url --jq '.url')
           echo "DIFF_PR_URL=${diff_pr_url}" >> $GITHUB_ENV
-          echo "**Automated DIFF PR URL**: ${diff_pr_url}" >> $GITHUB_STEP_SUMMARY
+          echo "diff_branch_pr_url=${diff_pr_url}" >> $GITHUB_OUTPUT
+          echo "**HCP TF changes for TFE release PR URL**: ${diff_pr_url}" >> $GITHUB_STEP_SUMMARY
 
       - name: Update RELEASE PR with DIFF PR URL
         env:
-          branch_name: docs/${{env.SERIES}}-${{env.RELEASE}}
-          pr_body: |
-            # Automated Docs Release PR for TFE ${{env.SERIES}}-${{env.RELEASE}}
-
-            **TFE Series**: ${{ env.SERIES }}
-            **TFE Release**: ${{ env.RELEASE }}
+          docs_pr_body: |
+            # TFE Release ${{inputs.version}}
 
             This PR was created via:
             - ${{github.server_url}}/${{github.repository}}/actions/runs/${{github.run_id}}
 
-            Triggered by creation of branch:
-            - ${{github.server_url}}/${{github.repository}}/tree/${{env.release_branch}}
-
             Changes since last release, diff PR:
             - ${{ env.DIFF_PR_URL }}
+
+            ❗ This is the Release PR that will be merged into main, once the release notes and diff PR are merged into it. ❗
 
             ### Reviewers
             - [ ] @hashicorp/ptfe-review
@@ -233,5 +196,5 @@ jobs:
           git config --global user.email "team-rel-eng@hashicorp.com"
           git config --global user.name "tfe-release-bot"
 
-          gh pr edit ${{env.PR_URL}} \
-            --body="${{env.pr_body}}"
+          gh pr edit ${{env.DOCS_PR_URL}} \
+            --body="${{env.docs_pr_body}}"

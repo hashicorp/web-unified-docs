@@ -422,44 +422,22 @@ export const PRODUCT_CONFIG = {
 	//  versionedDocs: true,
 	// 	websiteDir: 'website',
 	// },
-	// vault: {
-	// 	/**
-	// 	 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
-	// 	 *
-	// 	 * Fails for v1.6.x (and likely earlier) with error:
-	// 	 * `vault/website/content: No such file or directory`
-	// 	 * This likely indicates that older versions of docs have a different
-	// 	 * directory structure that needs to be accounted for. Need to confirm.
-	// 	 * See note at top of this document on `pages` directories for details.
-	// 	 */
-	// 	assetDir: 'public',
-	// 	contentDir: 'content',
-	// 	dataDir: 'data',
-	//  productSlug: 'vault',
-	// 	semverCoerce: semver.coerce,
-	//  versionedDocs: true,
-	// 	websiteDir: 'website',
-	// },
-	'well-architected-framework': {
+	vault: {
 		/**
-		 * ✅ Initial migration attempt: SEEMS TO WORK
+		 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
 		 *
-		 * Maybe worth noting: versioned docs is not enabled for `terraform-docs-common`.
-		 * `branchForLatest` is set to `main`. We treat the single version
-		 * as `v0.0.x` in our version metadata in the current content API:
-		 * https://content.hashicorp.com/api/content/terraform-docs-common/version-metadata?partial=true
+		 * Fails for v1.6.x (and likely earlier) with error:
+		 * `vault/website/content: No such file or directory`
+		 * This likely indicates that older versions of docs have a different
+		 * directory structure that needs to be accounted for. Need to confirm.
+		 * See note at top of this document on `pages` directories for details.
 		 */
-		/**
-		 * TODO: `terraform-docs-common` has _both_ an `img` folder, _and_ a
-		 * `public` folder. Need to investigate how these are used, and whether
-		 * we need to move both over (eg assetDirs could be an array?)
-		 */
-		assetDir: 'img',
-		contentDir: 'docs',
+		assetDir: 'public/img',
+		contentDir: 'content',
 		dataDir: 'data',
-		productSlug: 'well-architected-framework',
+		productSlug: 'vault',
 		semverCoerce: semver.coerce,
-		versionedDocs: false,
+		versionedDocs: true,
 		websiteDir: 'website',
 	},
 }

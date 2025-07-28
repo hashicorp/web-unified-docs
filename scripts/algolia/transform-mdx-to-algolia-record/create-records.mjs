@@ -34,12 +34,6 @@ export async function createAlgoliaRecordObject(
 	}
 
 	/**
-	 * extracts file path from docs directory and removes .mdx extension
-	 * filePath: 'public/content/terraform-enterprise/v202410-1/docs/enterprise/application-administration/github-app-integration.mdx'
-	 * docsPath: 'enterprise/application-administration/github-app-integration'
-	 */
-	const docPath = filePath.split('/docs/')[1].replace('.mdx', '')
-	/**
 	 * extracts directory name from the file path
 	 * filePath: 'public/content/terraform-enterprise/v202410-1/docs/enterprise/application-administration/github-app-integration.mdx'
 	 * directory: 'terraform-enterprise'
@@ -49,6 +43,13 @@ export async function createAlgoliaRecordObject(
 	 * uses directory name to get product slug in product config
 	 */
 	const productSlug = PRODUCT_CONFIG[directory].productSlug
+	/**
+	 * extracts file path from docs directory and removes .mdx extension
+	 * filePath: 'public/content/terraform-enterprise/v202410-1/docs/enterprise/application-administration/github-app-integration.mdx'
+	 * docsPath: 'enterprise/application-administration/github-app-integration'
+	 */
+	const contentDir = PRODUCT_CONFIG[directory].contentDir
+	const docPath = filePath.split(`/${contentDir}/`)[1].replace('.mdx', '')
 
 	const objectID = `docs_${productSlug}/${docPath}`
 	const headings = await collectHeadings(markdownFile)

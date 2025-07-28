@@ -106,8 +106,9 @@ export async function main(
 
 	//Read version metadata and get the latest version of terraform-enterprise
 	const versionMetadataPath = path.resolve(
-		'./release/app/api/versionMetadata.json',
+		path.join(sourcePath, 'app/api/versionMetadata.json'),
 	)
+
 	const versionMetadata = JSON.parse(
 		fs.readFileSync(versionMetadataPath, 'utf8'),
 	)
@@ -151,7 +152,7 @@ export async function main(
 		fs.mkdirSync(newTFEVersionDir, { recursive: true })
 
 		const prevTFEVersionDir = path.join(
-			targetPath,
+			sourcePath,
 			'content/terraform-enterprise',
 			currentTfeRelease,
 		)
@@ -169,74 +170,6 @@ export async function main(
 			filter: filterFunc,
 		})
 		items = items.concat(docItems)
-	}
-
-	// process each mdx file
-	for (const item of items) {
-		// ignore some files
-		if (
-			IGNORE_LIST.some((ignore: string) => {
-				return item.path.endsWith(ignore)
-			})
-		) {
-			continue
-		}
-
-		// extract mdx content; ignore frontmatter
-		const fullContent = fs.readFileSync(item.path, 'utf8')
-
-		// eslint-disable-next-line prefer-const
-		let { content, data } = matter(fullContent)
-
-		data = transformObject(data, [
-			// inject `source` frontmatter property
-			function injectSource(d: { [key: string]: any }) {
-				d.source = path.basename(HCPsourceDir)
-				return d
-			},
-			// replace cloud instances with enterprise
-			function replaceCloudWithEnterprise(d: { [key: string]: any }) {
-				// Some docs do not have all frontmatter properties. Make sure
-				// we do not assign `undefined` (which is invalid) in YAML
-				if (d.page_title) {
-					d.page_title = d.page_title.replace(
-						'Terraform Cloud',
-						'Terraform Enterprise',
-					)
-					d.page_title = d.page_title.replace(
-						'HCP Terraform',
-						'Terraform Enterprise',
-					)
-				}
-
-				if (d.description) {
-					d.description = d.description.replace(
-						'Terraform Cloud',
-						'Terraform Enterprise',
-					)
-					d.description = d.description.replace(
-						'HCP Terraform',
-						'Terraform Enterprise',
-					)
-				}
-				return d
-			},
-		])
-
-		const vfile = await remark()
-			.use(remarkMdx)
-			// @ts-expect-error remark is being passed in through the pipeline
-			.use(remarkGetImages, HCPsourceDir, imageSrcSet)
-			// @ts-expect-error remark is being passed in through the pipeline
-			.use(remarkTransformCloudDocsLinks)
-			.process(content)
-
-		// replace \-> with ->
-		const stringOutput = vfile.toString().replaceAll('\\->', '->')
-
-		// overwrite original file with transformed content
-		const contents = matter.stringify('\n' + stringOutput, data)
-		fs.writeFileSync(item.path, contents)
 	}
 
 	// Copy an entire directory
@@ -264,9 +197,69 @@ export async function main(
 				continue
 			}
 
-			const destAbsolutePath = item.path.replace(src, dest)
-			fs.mkdirSync(path.dirname(destAbsolutePath), { recursive: true })
-			fs.copyFileSync(item.path, destAbsolutePath)
+			// extract mdx content; ignore frontmatter
+			const fullContent = fs.readFileSync(item.path, 'utf8')
+
+			// eslint-disable-next-line prefer-const
+			let { content, data } = matter(fullContent)
+
+			data = transformObject(data, [
+				// inject `source` frontmatter property
+				function injectSource(d: { [key: string]: any }) {
+					d.source = path.basename(HCPsourceDir)
+					return d
+				},
+				// replace cloud instances with enterprise
+				function replaceCloudWithEnterprise(d: { [key: string]: any }) {
+					// Some docs do not have all frontmatter properties. Make sure
+					// we do not assign `undefined` (which is invalid) in YAML
+					if (d.page_title) {
+						d.page_title = d.page_title.replace(
+							'Terraform Cloud',
+							'Terraform Enterprise',
+						)
+						d.page_title = d.page_title.replace(
+							'HCP Terraform',
+							'Terraform Enterprise',
+						)
+					}
+
+					if (d.description) {
+						d.description = d.description.replace(
+							'Terraform Cloud',
+							'Terraform Enterprise',
+						)
+						d.description = d.description.replace(
+							'HCP Terraform',
+							'Terraform Enterprise',
+						)
+					}
+					return d
+				},
+			])
+
+			const vfile = await remark()
+				.use(remarkMdx)
+				// @ts-expect-error remark is being passed in through the pipeline
+				.use(remarkGetImages, HCPsourceDir, imageSrcSet)
+				// @ts-expect-error remark is being passed in through the pipeline
+				.use(remarkTransformCloudDocsLinks)
+				.process(content)
+
+			// replace \-> with ->
+			const stringOutput = vfile.toString().replaceAll('\\->', '->')
+
+			// overwrite original file with transformed content
+			const contents = matter.stringify('\n' + stringOutput, data)
+
+			// Get the relative path after "terraform-docs-common/docs/cloud-docs"
+			const relPath = path.relative(
+				path.join(HCPContentDir, 'cloud-docs'),
+				item.path,
+			)
+
+			const destAbsolutePath = path.join(dest, relPath)
+			fs.writeFileSync(destAbsolutePath, contents)
 		}
 	}
 

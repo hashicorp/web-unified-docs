@@ -7,6 +7,7 @@ import grayMatter from 'gray-matter'
 import { parse as jsoncParse } from 'jsonc-parser'
 
 import { Err, Ok, Result } from './result'
+import type { ProductVersionMetadata } from './contentVersions'
 
 const SELF_URL = process.env.VERCEL_URL
 	? `https://${process.env.VERCEL_URL}`
@@ -23,27 +24,36 @@ const headers = process.env.VERCEL_URL
  * via the Vercel CDN.
  *
  **/
-export const readFile = async (filePath: string[]) => {
+export const findFileWithMetadata = async (
+	filePath: string[],
+	versionMetaData: ProductVersionMetadata,
+) => {
+	const newFilePath = ifNeededAddReleaseStageToPath(
+		filePath,
+		versionMetaData.releaseStage,
+	)
+
 	try {
-		const res = await fetch(`${SELF_URL}/${filePath.join('/')}`, {
+		const res = await fetch(`${SELF_URL}/${newFilePath.join('/')}`, {
 			cache: 'no-cache',
 			headers,
 		})
 
 		if (!res.ok) {
-			return Err(`Failed to read file at path: ${filePath.join('/')}`)
+			return Err(`Failed to read file at path: ${newFilePath.join('/')}`)
 		}
 
 		const text = await res.text()
 
 		return Ok(text)
 	} catch {
-		return Err(`Failed to read file at path: ${filePath.join('/')}`)
+		return Err(`Failed to read file at path: ${newFilePath.join('/')}`)
 	}
 }
 
 export const getAssetData = async (
 	filePath: string[],
+	versionMetaData: ProductVersionMetadata,
 ): Promise<
 	Result<
 		{
@@ -53,14 +63,19 @@ export const getAssetData = async (
 		string
 	>
 > => {
+	const newFilePath = ifNeededAddReleaseStageToPath(
+		filePath,
+		versionMetaData.releaseStage,
+	)
+
 	try {
-		const res = await fetch(`${SELF_URL}/${filePath.join('/')}`, {
+		const res = await fetch(`${SELF_URL}/${newFilePath.join('/')}`, {
 			cache: 'no-cache',
 			headers,
 		})
 
 		if (!res.ok) {
-			return Err(`Failed to read asset at path: ${filePath.join('/')}`)
+			return Err(`Failed to read asset at path: ${newFilePath.join('/')}`)
 		}
 
 		const buffer = await res.arrayBuffer()
@@ -70,7 +85,7 @@ export const getAssetData = async (
 			contentType: res.headers.get('Content-Type'),
 		})
 	} catch {
-		return Err(`Failed to read asset at path: ${filePath.join('/')}`)
+		return Err(`Failed to read asset at path: ${newFilePath.join('/')}`)
 	}
 }
 
@@ -90,6 +105,7 @@ export const parseJsonc = (jsonString: string) => {
 		})
 
 		if (parserError.length > 0) {
+			console.log(`JSONC parse errors: ${JSON.stringify(parserError, null, 2)}`)
 			return Err(`Failed to parse JSONC: ${parserError}`)
 		}
 
@@ -107,4 +123,17 @@ export const parseMarkdownFrontMatter = (markdownString: string) => {
 	} catch (error) {
 		return Err(`Failed to parse Markdown front-matter: ${error}`)
 	}
+}
+
+// This assumes that the version is always third in the filePath
+function ifNeededAddReleaseStageToPath(
+	filePath: string[],
+	releaseStage: string,
+) {
+	const newFilePath = [...filePath]
+	if (releaseStage !== 'stable' && newFilePath[2]) {
+		newFilePath[2] = `${newFilePath[2]} (${releaseStage})`
+	}
+
+	return newFilePath
 }

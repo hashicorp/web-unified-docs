@@ -22165,9 +22165,9 @@ If you want to leave it as-is, add ${syntaxPluginInfo} to the 'plugins' section 
 
 			function isHexCode(c) {
 				return (
-					(0x30 /* 0 */ <= c && c <= 0x39 /* 9 */) ||
-					(0x41 /* A */ <= c && c <= 0x46 /* F */) ||
-					(0x61 /* a */ <= c && c <= 0x66 /* f */)
+					(0x30 /* 0 */ <= c && c <= 0x39) /* 9 */ ||
+					(0x41 /* A */ <= c && c <= 0x46) /* F */ ||
+					(0x61 /* a */ <= c && c <= 0x66) /* f */
 				)
 			}
 
@@ -129251,7 +129251,8 @@ Please specify the "importAttributesKeyword" generator option, whose value can b
 	})()
 	/******/
 	/******/ /* webpack/runtime/define property getters */
-	/******/ ;(() => {
+	/******/
+	;(() => {
 		/******/ // define getter functions for harmony exports
 		/******/ __nccwpck_require__.d = (exports, definition) => {
 			/******/ for (var key in definition) {
@@ -129273,14 +129274,16 @@ Please specify the "importAttributesKeyword" generator option, whose value can b
 	})()
 	/******/
 	/******/ /* webpack/runtime/hasOwnProperty shorthand */
-	/******/ ;(() => {
+	/******/
+	;(() => {
 		/******/ __nccwpck_require__.o = (obj, prop) =>
 			Object.prototype.hasOwnProperty.call(obj, prop)
 		/******/
 	})()
 	/******/
 	/******/ /* webpack/runtime/node module decorator */
-	/******/ ;(() => {
+	/******/
+	;(() => {
 		/******/ __nccwpck_require__.nmd = (module) => {
 			/******/ module.paths = []
 			/******/ if (!module.children) module.children = []
@@ -130465,7 +130468,7 @@ Please specify the "importAttributesKeyword" generator option, whose value can b
 			const prType = newTFEVersion ? PR_TYPE.NewVersion : PR_TYPE.Diff
 			//Read version metadata and get the latest version of terraform-enterprise
 			const versionMetadataPath = external_path_.resolve(
-				'./release/app/api/versionMetadata.json',
+				external_path_.join(sourcePath, 'app/api/versionMetadata.json'),
 			)
 			const versionMetadata = JSON.parse(
 				external_fs_.readFileSync(versionMetadataPath, 'utf8'),
@@ -130510,7 +130513,7 @@ Please specify the "importAttributesKeyword" generator option, whose value can b
 				core.info(`Creating new version directory: ${newTFEVersionDir}`)
 				external_fs_.mkdirSync(newTFEVersionDir, { recursive: true })
 				const prevTFEVersionDir = external_path_.join(
-					targetPath,
+					sourcePath,
 					'content/terraform-enterprise',
 					currentTfeRelease,
 				)
@@ -130527,69 +130530,6 @@ Please specify the "importAttributesKeyword" generator option, whose value can b
 					filter: filterFunc,
 				})
 				items = items.concat(docItems)
-			}
-			// process each mdx file
-			for (const item of items) {
-				// ignore some files
-				if (
-					IGNORE_LIST.some((ignore) => {
-						return item.path.endsWith(ignore)
-					})
-				) {
-					continue
-				}
-				// extract mdx content; ignore frontmatter
-				const fullContent = external_fs_.readFileSync(item.path, 'utf8')
-				// eslint-disable-next-line prefer-const
-				let { content, data } = gray_matter_default()(fullContent)
-				data = transformObject(data, [
-					// inject `source` frontmatter property
-					function injectSource(d) {
-						d.source = external_path_.basename(HCPsourceDir)
-						return d
-					},
-					// replace cloud instances with enterprise
-					function replaceCloudWithEnterprise(d) {
-						// Some docs do not have all frontmatter properties. Make sure
-						// we do not assign `undefined` (which is invalid) in YAML
-						if (d.page_title) {
-							d.page_title = d.page_title.replace(
-								'Terraform Cloud',
-								'Terraform Enterprise',
-							)
-							d.page_title = d.page_title.replace(
-								'HCP Terraform',
-								'Terraform Enterprise',
-							)
-						}
-						if (d.description) {
-							d.description = d.description.replace(
-								'Terraform Cloud',
-								'Terraform Enterprise',
-							)
-							d.description = d.description.replace(
-								'HCP Terraform',
-								'Terraform Enterprise',
-							)
-						}
-						return d
-					},
-				])
-				const vfile = await remark_default()()
-					.use(remark_mdx_default())
-					// @ts-expect-error remark is being passed in through the pipeline
-					.use(remarkGetImages, HCPsourceDir, imageSrcSet)
-					// @ts-expect-error remark is being passed in through the pipeline
-					.use(remarkTransformCloudDocsLinks)
-					.process(content)
-				// replace \-> with ->
-				const stringOutput = vfile.toString().replaceAll('\\->', '->')
-				// overwrite original file with transformed content
-				const contents = gray_matter_default().stringify(
-					'\n' + stringOutput,
-					data,
-				)
-				external_fs_.writeFileSync(item.path, contents)
 			}
 			// Copy an entire directory
 			// ---------------------------------------------
@@ -130613,11 +130553,64 @@ Please specify the "importAttributesKeyword" generator option, whose value can b
 					) {
 						continue
 					}
-					const destAbsolutePath = item.path.replace(src, dest)
-					external_fs_.mkdirSync(external_path_.dirname(destAbsolutePath), {
-						recursive: true,
-					})
-					external_fs_.copyFileSync(item.path, destAbsolutePath)
+					// extract mdx content; ignore frontmatter
+					const fullContent = external_fs_.readFileSync(item.path, 'utf8')
+					// eslint-disable-next-line prefer-const
+					let { content, data } = gray_matter_default()(fullContent)
+					data = transformObject(data, [
+						// inject `source` frontmatter property
+						function injectSource(d) {
+							d.source = external_path_.basename(HCPsourceDir)
+							return d
+						},
+						// replace cloud instances with enterprise
+						function replaceCloudWithEnterprise(d) {
+							// Some docs do not have all frontmatter properties. Make sure
+							// we do not assign `undefined` (which is invalid) in YAML
+							if (d.page_title) {
+								d.page_title = d.page_title.replace(
+									'Terraform Cloud',
+									'Terraform Enterprise',
+								)
+								d.page_title = d.page_title.replace(
+									'HCP Terraform',
+									'Terraform Enterprise',
+								)
+							}
+							if (d.description) {
+								d.description = d.description.replace(
+									'Terraform Cloud',
+									'Terraform Enterprise',
+								)
+								d.description = d.description.replace(
+									'HCP Terraform',
+									'Terraform Enterprise',
+								)
+							}
+							return d
+						},
+					])
+					const vfile = await remark_default()()
+						.use(remark_mdx_default())
+						// @ts-expect-error remark is being passed in through the pipeline
+						.use(remarkGetImages, HCPsourceDir, imageSrcSet)
+						// @ts-expect-error remark is being passed in through the pipeline
+						.use(remarkTransformCloudDocsLinks)
+						.process(content)
+					// replace \-> with ->
+					const stringOutput = vfile.toString().replaceAll('\\->', '->')
+					// overwrite original file with transformed content
+					const contents = gray_matter_default().stringify(
+						'\n' + stringOutput,
+						data,
+					)
+					// Get the relative path after "terraform-docs-common/docs/cloud-docs"
+					const relPath = external_path_.relative(
+						external_path_.join(HCPContentDir, 'cloud-docs'),
+						item.path,
+					)
+					const destAbsolutePath = external_path_.join(dest, relPath)
+					external_fs_.writeFileSync(destAbsolutePath, contents)
 				}
 			}
 			// Copy images
