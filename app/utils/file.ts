@@ -137,3 +137,10 @@ function ifNeededAddReleaseStageToPath(
 
 	return newFilePath
 }
+
+export const joinFilePath = (path: string[] = []): string => {
+	return path
+		.filter(Boolean)
+		.join('/')
+		.replace(/\/{2,}/g, '/')
+}
