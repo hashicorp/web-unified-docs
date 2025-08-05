@@ -66,6 +66,8 @@ async function main() {
 	console.log('### TEST3 ###')
 
 	console.log('### Test 4 ###')
+
+	console.log('### Test 5 ###')
 	console.log(
 		`Running prebuild script with args: ${JSON.stringify(args, null, 2)}\n`,
 	)
