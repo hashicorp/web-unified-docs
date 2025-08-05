@@ -62,6 +62,7 @@ async function main() {
 	const args = getCommandLineArgs()
 
 	console.log('### TEST ###')
+	console.log('### TEST2 ###')
 
 	console.log(
 		`Running prebuild script with args: ${JSON.stringify(args, null, 2)}\n`,
