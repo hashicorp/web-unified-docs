@@ -29,8 +29,8 @@ export const findFileWithMetadata = async (
 	filePath: string[],
 	versionMetaData: ProductVersionMetadata,
 	options: {
-		loadFromContentDirNotPublic?: boolean
-	} = { loadFromContentDirNotPublic: false },
+		loadFromContentDir?: boolean
+	} = { loadFromContentDir: false },
 ) => {
 	const newFilePath = ifNeededAddReleaseStageToPath(
 		filePath,
@@ -38,7 +38,7 @@ export const findFileWithMetadata = async (
 	)
 
 	try {
-		if (options.loadFromContentDirNotPublic) {
+		if (options.loadFromContentDir) {
 			const filePathString = joinFilePath(newFilePath)
 			const fileContent = await readFile(filePathString, 'utf-8')
 			return Ok(fileContent)

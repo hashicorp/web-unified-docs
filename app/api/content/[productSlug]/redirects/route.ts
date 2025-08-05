@@ -40,7 +40,7 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 	]
 
 	const readFileResult = await findFileWithMetadata(filePath, versionMetadata, {
-		loadFromContentDirNotPublic: process.env.VERCEL_ENV === 'development',
+		loadFromContentDir: process.env.NODE_ENV === 'development',
 	})
 	if (!readFileResult.ok) {
 		return new Response('Not found', { status: 404 })
