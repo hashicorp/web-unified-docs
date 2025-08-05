@@ -1,6 +1,169 @@
 ---
 layout: docs
-page_title: Vault Secrets Operator CSI driver
+page_title: Vault Secrets Operator CSI Driver
 description: >-
-  The Vault Secrets Operator CSI driver allows 
+  The Vault Secrets Operator CSI Driver allows for mounting secrets from Vault directly into application containers.
 ---
+
+# Vault Secrets Operator CSI Driver
+
+While the default settings for the Vault Secrets Operator (VSO) allow for Vault secrets to be stored in the cluster as native Kubernetes Secrets, 
+running VSO with the CSI driver option allows for mounting Vault secrets directly to containers, bypassing Kubernetes Secrets altogether.
+
+## Overview
+
+A Container Storage Interface (CSI) is a standardized approach to managing pod volumes in Kubernetes. 
+Running the Vault Secrets Operator (VSO) in CSI driver mode can provide Vault Enterprise users the ability to fetch secrets 
+from Vault and mount them directly to their containers as volumes.
+
+By hooking into the pod volume lifecycle, the VSO CSI driver can deliver Vault secrets to users seeking to avoid the use of Kubernetes Secrets in their workflows.
+
+[image comparing traditional VSO to VSO CSI driver]
+
+The VSO CSI driver operates by watching for the creation or modification of a Custom Resource (CR) called a `CSISecrets`.
+The [CSISecrets]() resource contains a declarative list of secrets to fetch, as well as access control configuration to allow only certain pods to be able to mount those secrets.
+
+When an approved pod's spec references a volume with the same name as a CSISecrets resource, the VSO CSI driver will populate 
+any containers in that pod (that are referencing the volume) with the secrets declared in that CSISecrets resource.
+
+## Features
+
+The following features are supported by the Vault Secrets Operator CSI driver:
+
+- Support for syncing multiple secrets from multiple secret engine mounts
+- Automatic generation and mounting of AppRole Secret IDs, allowing VSO to be a [trusted orchestrator]() for credentials to authenticate application pods to Vault
+- Support for installation using `Helm`<br />
+*see the [installation](/vault/docs/platform/k8s/vso/installation) docs for more details*
+- Support for [secret data transformation](/vault/docs/platform/k8s/vso/secret-transformation).
+
+## Supported secret sources
+
+The VSO CSI driver supports syncing of:
+* KV-v1 and KV-v2 secrets
+* Secret IDs for the AppRole auth method
+
+## Setup
+
+Running VSO with the `"csi.enabled=true"` flag deploys the VSO CSI driver as a DaemonSet running on every node.
+
+```shell-session
+$ helm install --version 0.10.0 --create-namespace --namespace vault-secrets-operator --set "csi.enabled=true" vault-secrets-operator hashicorp/vault-secrets-operator
+```
+
+Like traditional VSO, the VSO CSI driver requires the existence of certain Custom Resources (CRs). The Custom Resource Definitions (CRDs) for these resources are deployed as part of the 
+VSO [Helm chart](). In particular, the [VaultAuth]() and [VaultConnection]() resource are required to allow the driver to connect to Vault. 
+See [Vault authentication in detail]() for examples of how to set these up.
+
+The VSO CSI driver also requires the creation of a Custom Resource (CR) called a `CSISecrets`, which lists out the secrets that the CSI driver pods will fetch from Vault.
+
+Secrets are repopulated whenever an application container starts or restarts. In the case of AppRole secret IDs, a brand-new secret ID will be generated whenever a requesting container starts up.
+The VSO CSI driver does not yet support responding to update events of secrets in Vault, so application containers will need to manage their own restarts when that happens.
+
+The following example configuration for a CSISecrets resource showcases the ability to fetch multiple secrets from Vault, from multiple mounts, with the assumption that the user has already set up: 
+- 2 secrets engines in Vault: a KV-v1 secrets engine at the mount path "kv1", and a KV-v2 secrets engine at the mount path "kv2"
+- an AppRole auth method in Vault at the mount path "approle", with a role configured with the name "my-app"
+- a VaultAuth resource called `default` in the same Kubernetes namespace as their app, which in turn references a VaultConnection in an administrative namespace
+
+```yaml
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: CSISecrets
+metadata:
+  name: my-app-secrets
+  namespace: vault-secrets-operator-system
+spec:
+  vaultAuthRef:
+    name: default
+  secrets:
+    vaultStaticSecrets:
+      - mount: kv1
+        path: app-api-key
+        type: kv-v1
+      - mount: kv2
+        path: app-api-key
+        type: kv-v2
+        version: 1 # The version of the KV secret -- if not specified, defaults to the latest version
+    vaultAppRoleSecretIDs:
+      - role: my-app
+        mount: approle
+        wrapTTL: "30m"
+        ttl: "1h"
+        numUses: 2
+  accessControl:
+    serviceAccountPattern: "default"
+    namespacePatterns:
+      - "default"
+    podNamePatterns:
+      - "^my-app-"
+  syncConfig:
+    containerState:
+      namePattern: "^(app|sidecar)$" # Pattern to match authorized container names
+```
+
+The full API reference for the CSISecrets CR can be found in the [API reference]().
+
+## Usage
+
+Once the CSISecrets has been created, application pods matching the patterns specified in the CSISecrets resource's `accessControl` stanza can request to mount volumes containing the secrets declared in the `secrets` stanza.
+
+The CSI driver pod on that application's node will respond to the request, ensuring that the kubelet publishes a volume containing all the secrets in that CSISecrets resource.
+
+Here is an example Deployment spec. (This example may contain Kubernetes configuration that is inappropriate for a production environment.)
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+  namespace: default
+  labels:
+    app.kubernetes.io/component: my-app
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: my-app
+  replicas: 2
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: my-app
+    spec:
+      serviceAccountName: default
+      containers:
+      - name: app
+        image: my-app-image:latest
+        volumeMounts:
+        - name: csi-secrets
+          mountPath: /var/run/csi-secrets
+      - name: sidecar
+        image: my-app-sidecar-image:latest
+        volumeMounts:
+        - name: csi-secrets
+          mountPath: /var/run/csi-secrets
+      volumes:
+      - name: csi-secrets
+        csi:
+          driver: csi.vso.hashicorp.com
+          volumeAttributes:
+            csiSecretsName: my-app-secrets
+            csiSecretsNamespace: vault-secrets-operator-system
+```
+
+After the pod starts up, you can exec into your containers and then `cd` into the `/var/run/csi-secrets` directory to see all of the secrets from the CSISecrets resource.
+
+The files are indexed with a number representing their position in the CSISecrets `vaultStaticSecrets` or `vaultAppRoleSecretIDs` list, starting at 0.
+For example, the first file will be called `static_secret_0_secret`, the second will be `static_secret_1_secret`, etc.
+
+The Kubernetes field [subPath]() can be used to limit which files make it into which containers; otherwise, all containers in the pod will have access to all the secrets from the CSISecrets resource.
+```yaml
+...
+
+      - name: sidecar
+        image: my-app-sidecar-image:latest
+        volumeMounts:
+        - name: csi-secrets
+          mountPath: /var/run/app_role_0_wrap_info.json
+          subPath: app_role_0_wrap_info.json # Only make this file available to the container, not the others
+...
+```
+
+
+
