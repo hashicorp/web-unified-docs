@@ -247,6 +247,17 @@ export const PRODUCT_CONFIG = {
 		versionedDocs: true,
 		websiteDir: 'website',
 	},
+	'terraform-migrate': {
+		assetDir: '',
+		basePaths: ['migrate'],
+		contentDir: 'docs',
+		dataDir: 'data',
+		navDataPath: 'migrate',
+		productSlug: 'terraform',
+		semverCoerce: semver.coerce,
+		versionedDocs: true,
+		websiteDir: 'website',
+	},
 	'terraform-cdk': {
 		assetDir: '',
 		basePaths: ['cdktf'],
