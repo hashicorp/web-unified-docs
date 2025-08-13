@@ -247,6 +247,17 @@ export const PRODUCT_CONFIG = {
 		versionedDocs: true,
 		websiteDir: 'website',
 	},
+	'terraform-migrate': {
+		assetDir: '',
+		basePaths: ['migrate'],
+		contentDir: 'docs',
+		dataDir: 'data',
+		navDataPath: 'migrate',
+		productSlug: 'terraform',
+		semverCoerce: semver.coerce,
+		versionedDocs: true,
+		websiteDir: 'website',
+	},
 	'terraform-cdk': {
 		assetDir: '',
 		basePaths: ['cdktf'],
@@ -438,6 +449,28 @@ export const PRODUCT_CONFIG = {
 		productSlug: 'vault',
 		semverCoerce: semver.coerce,
 		versionedDocs: true,
+  	websiteDir: 'website',
+	},
+	'well-architected-framework': {
+		/**
+		 * ✅ Initial migration attempt: SEEMS TO WORK
+		 *
+		 * Maybe worth noting: versioned docs is not enabled for `terraform-docs-common`.
+		 * `branchForLatest` is set to `main`. We treat the single version
+		 * as `v0.0.x` in our version metadata in the current content API:
+		 * https://content.hashicorp.com/api/content/terraform-docs-common/version-metadata?partial=true
+		 */
+		/**
+		 * TODO: `terraform-docs-common` has _both_ an `img` folder, _and_ a
+		 * `public` folder. Need to investigate how these are used, and whether
+		 * we need to move both over (eg assetDirs could be an array?)
+		 */
+		assetDir: 'img',
+		contentDir: 'docs',
+		dataDir: 'data',
+		productSlug: 'well-architected-framework',
+		semverCoerce: semver.coerce,
+		versionedDocs: false,
 		websiteDir: 'website',
 	},
 }
