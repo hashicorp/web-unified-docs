@@ -69,20 +69,44 @@ export async function gatherVersionMetadata(contentDir) {
 			return semver.valid(normalizeVersion(v))
 		})
 
-		const versions = rawVersions
-			.sort((a, b) => {
-				const [aVersion, bVersion] = [a, b].map(normalizeVersion)
+		let versions
 
-				if (isAllSemver) {
+		if (isAllSemver) {
+			versions = rawVersions
+				.sort((a, b) => {
+					const [aVersion, bVersion] = [a, b].map(normalizeVersion)
 					// Sort by semver
 					return semver.compare(aVersion, bVersion)
-				} else {
+				})
+				// Reverse the array after sorting, so the latest version is first
+				.reverse()
+		} else {
+			const rawSemverVersions = rawVersions.filter((v) => {
+				return semver.valid(normalizeVersion(v))
+			})
+			const rawNonSemverVersions = rawVersions.filter((v) => {
+				return !semver.valid(normalizeVersion(v))
+			})
+
+			const sortedSemverVersions = rawSemverVersions
+				.sort((a, b) => {
+					const [aVersion, bVersion] = [a, b].map(normalizeVersion)
+					// Sort by semver
+					return semver.compare(aVersion, bVersion)
+				})
+				.reverse()
+
+			const sortedNonSemverVersions = rawNonSemverVersions
+				.sort((a, b) => {
+					const [aVersion, bVersion] = [a, b].map(normalizeVersion)
 					// Sort alphabetically
 					return aVersion.localeCompare(bVersion)
-				}
-			})
-			// Reverse the array after sorting, so the latest version is first
-			.reverse()
+				})
+				.reverse()
+
+			// semver versions should be before non-semver versions since they are more recent
+			versions = [...sortedSemverVersions, ...sortedNonSemverVersions]
+		}
 
 		/**
 		 * Iterate over the version entries, augmenting them with version metadata,
