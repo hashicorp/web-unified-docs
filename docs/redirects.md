@@ -4,16 +4,17 @@ Use redirects for fun and profit!
 
 ---
 
-- [Definitions](#definitions)
-- [Limitations and gotchas](#limitations-and-gotchas)
-- [Path parameter definition](#path-parameter-definition)
-  - [Predefined character classes](#predefined-character-classes)
-- [Example path parameter definitions](#example-path-parameter-definitions)
-- [Example redirects](#example-redirects)
-  - [Basic redirects](#basic-redirects)
-  - [Pattern matching](#pattern-matching)
-  - [Non-capture groups](#non-capture-groups)
-  - [Negative look-ahead non-capture groups](#negative-look-ahead-non-capture-groups)
+- [Using redirects](#using-redirects)
+  - [Definitions](#definitions)
+  - [Limitations and gotchas](#limitations-and-gotchas)
+  - [Path parameter definition](#path-parameter-definition)
+    - [Predefined character classes](#predefined-character-classes)
+  - [Example path parameter definitions](#example-path-parameter-definitions)
+  - [Example redirects](#example-redirects)
+    - [Basic redirects](#basic-redirects)
+    - [Pattern matching](#pattern-matching)
+    - [Non-capture groups](#non-capture-groups)
+    - [Negative look-ahead non-capture groups](#negative-look-ahead-non-capture-groups)
 
 ---
 
@@ -58,7 +59,7 @@ Use redirects for fun and profit!
 
 ## Limitations and gotchas
 
-- The `developers.hashicorp.com` platform does not support global redirects. The
+- The `developer.hashicorp.com` platform does not support global redirects. The
   most current docset only knows about redirects associated with that docset.
 
 - You must perpetuate backfacing redirects across future docsets. Otherwise,
