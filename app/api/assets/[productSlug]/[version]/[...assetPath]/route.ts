@@ -40,7 +40,7 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 	const assetLoc = [
 		`assets`,
 		productSlug,
-		versionMetadata.version,
+		// versionMetadata.version,
 		parsedAssetPath,
 	]
 	const assetData = await getAssetData(assetLoc, versionMetadata)

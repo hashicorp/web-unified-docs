@@ -7,6 +7,7 @@ import fs from 'fs'
 import path from 'path'
 import { batchPromises } from './batch-promises.mjs'
 import { listFiles } from './list-files.mjs'
+import { PRODUCT_CONFIG } from '../../app/utils/productConfig.mjs'
 
 /**
  * Check if a file is an image based on its extension.
@@ -21,22 +22,42 @@ export function isFileAnImage(file) {
 /**
  * Copy all asset files (images) from the source to the destination directory.
  */
-export async function copyAllAssetFiles(sourceDir, destDir) {
-	const assetFiles = (await listFiles(sourceDir)).filter((f) => {
-		return isFileAnImage(f)
-	})
+export async function copyAllAssetFiles(sourceDir, destDir, versionMetadata) {
+	console.log(`\nCopying Assets...`)
 
-	console.log(`\nCopying Assets from ${assetFiles.length} files...`)
+	for (const product of Object.keys(versionMetadata)) {
+		const versionAssetsDest = path.join(destDir, product)
 
-	await batchPromises('Assets', assetFiles, async (filePath) => {
-		const relativePath = path.relative(sourceDir, filePath)
-		const destPath = path.join(destDir, relativePath)
-		const parentDir = path.dirname(destPath)
-		if (!fs.existsSync(parentDir)) {
-			fs.mkdirSync(parentDir, { recursive: true })
+		if (!fs.existsSync(versionAssetsDest)) {
+			fs.mkdirSync(versionAssetsDest, { recursive: true })
 		}
-		fs.copyFileSync(filePath, destPath)
-	})
+
+		const productConfig = PRODUCT_CONFIG[product]
+
+		for (const metadata of versionMetadata[product]) {
+			const versionAssetsSrc = path.join(
+				sourceDir,
+				product,
+				productConfig.versionedDocs === false ? '' : metadata.releaseStage === 'stable' ?
+					metadata.version :
+					`${metadata.version} (${metadata.releaseStage})`
+			)
+
+			const assetFiles = (await listFiles(versionAssetsSrc)).filter((f) => {
+				return isFileAnImage(f)
+			})
+
+			for (const filePath of assetFiles) {
+				const relativePath = path.relative(versionAssetsSrc, filePath)
+				const destPath = path.join(versionAssetsDest, relativePath)
+				const parentDir = path.dirname(destPath)
+				if (!fs.existsSync(parentDir)) {
+					fs.mkdirSync(parentDir, { recursive: true })
+				}
+				fs.copyFileSync(filePath, destPath)
+			}
+		}
+	}
 }
 
 export function copySingleAssetFile(filePath) {
