@@ -1,0 +1,207 @@
+---
+page_title: Resource import
+description: >-
+  Learn how to migrate resource import functions from SDKv2 to the Terraform
+  plugin framework. Practitioners import resources to bring them under the
+  control of their Terraform projects.
+---
+
+# Resource import
+
+This page explains how to migrate import functions from SDKv2 to the plugin
+framework. In the framework, use the`ImportState()` function on your resource type to implement resource import.
+
+## Background
+
+Practitioners can use [`import` blocks](/terraform/language/import) to import existing infrastructure resources into their Terraform project's state so that Terraform can begin managing them. 
+
+A resource's importer function implements the logic to add a resource to Terraform's state. In SDKv2, the Importer field on the schema.Resource defines how the provider imports resources to Terraform's state. In the framework, you implement the `ResourceWithImportState` interface on your `resource.Resource` type. This interface requires that your type implement a `ImportState` function.
+
+To migrate an importer function, implement the `ResourceWithImportState` interface on your `resource.Resource` type in place of the `Importer` field in `schema.Resource`. 
+
+Refer to [Resources Import](/terraform/plugin/framework/resources/import) in
+the framework documentation for more details about implementing reource import
+in the framework.
+
+## Migrating resource import
+
+In SDKv2, the `Importer` field on the `schema.Resource` defines how the provider
+imports resources to Terraform's state.
+
+In the framework, you implement the
+[`ResourceWithImportState`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/resource#ResourceWithImportState)
+interface on your `resource.Resource` type to allow users to import a given
+resource. This interface requires that your type implement an `ImportState`
+function.
+
+<CodeBlockConfig filename="SDKv2">
+
+The following example implements resource import with SDKv2.
+
+```go
+func resourceExample() *schema.Resource {
+    return &schema.Resource{
+        Importer: &schema.ResourceImporter{
+            StateContext: StateContextFunc,
+        },
+        /* ... */
+```
+
+</CodeBlockConfig>
+
+Terraform calls the `StateContextFunc` function to import a resource into state. Terraform performs any operations that are necessary for importing the resource within this function. As a result, the `StateContextFunc` function may mutate the `ResourceData` passed into it. The return value is a slice of
+`schema.ResourceData`. This slice might return the `ResourceData` that was
+passed into the function or involve fanning out to multiple resources, such as
+AWS security groups.
+
+The following code shows how you ensure that your resource satisfies the
+`resource.ResourceWithImportState` interface with the framework.
+
+<CodeBlockConfig filename="Framework">
+
+```go
+var (
+    _ resource.Resource                = &resourceExample{}
+    _ resource.ResourceWithImportState = &resourceExample{}
+)
+```
+
+</CodeBlockConfig>
+
+The following code shows how you define an `ImportState` function with the
+framework.
+
+<CodeBlockConfig filename="Framework">
+
+```go
+func (r *resourceExample) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+    /* ... */
+}
+```
+
+</CodeBlockConfig>
+
+The `ImportState` function includes a `resource.ImportStateResponse`, which you
+use to set your resource's state.
+
+### Migration Notes
+
+Remember the following differences between SDKv2 and the framework when
+completing the migration.
+
+- Neither SDKv2 or framework provide access to the configuration, state,
+  or plan during import. The import functions can only access the value supplied to the `terraform import` command or `import` block, such as the resource's `ID` or resource identity.
+- In SDKv2, you implement resource importing by populating the `Importer` field
+  on the `schema.Resource` struct. In the framework, you define an `ImportState`
+  function on the type, which implements `resource.Resource`. This implementation
+  satisfies the [`resource.ResourceWithImportState`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/resource#ResourceWithImportState) interface.
+
+### Examples
+
+The following examples demonstrate migrating resource import from SDKv2 to the
+framework.
+
+#### Import with the `ImportStatePassthroughID()` function
+
+When a provider built on SDKv2 uses `schema.ImportStatePassthroughContext`  to implement import functionality, you can migrate to the framework by implementing the
+[`resource.ImportStatePassthroughID`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/resource#ImportStatePassthroughID) function.
+
+In SDKv2, the resource schema can include an optional `Importer` attribute that
+uses `schema.ImportStatePassthroughContext`.
+
+<CodeBlockConfig filename="SDKv2">
+
+```go
+func resourceExample() *schema.Resource {
+    return &schema.Resource{
+        Importer: &schema.ResourceImporter{
+			StateContext: schema.ImportStatePassthroughContext,
+        },
+        /* ... */
+    }
+}
+```
+
+</CodeBlockConfig>
+
+The following shows the same section of provider code after the migration.
+
+<CodeBlockConfig filename="Framework">
+
+```go
+func (r *resourceExample) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+    resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+}
+```
+
+</CodeBlockConfig>
+
+This example also demonstrates one way to handle populating attributes with
+their default values during import.
+
+#### Import with a custom import function
+
+The following example shows the import function for the `example_resource`
+resource with SDKv2 that uses a custom `importFunc()` function.
+
+<CodeBlockConfig filename="SDKv2">
+
+```go
+func exampleResource() *schema.Resource {
+    return &schema.Resource{
+        Importer: &schema.ResourceImporter{
+            StateContext: importFunc,
+        },
+        /* ... */
+    }
+}
+```
+
+</CodeBlockConfig>
+
+The following example shows the implementation of the `importFunc()` function
+with SDKv2.
+
+<CodeBlockConfig filename="SDKv2">
+
+```go
+func importFunc(ctx context.Context, d *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
+    d.SetId("id")
+
+    if err := d.Set("attribute", "value"); err != nil {
+        return nil, fmt.Errorf("resource example import failed, error setting attribute: %w", err)
+    }
+
+    return []*schema.ResourceData{d}, nil
+}
+```
+
+</CodeBlockConfig>
+
+The following shows the same section of provider code after the migration.
+
+This code implements the `ResourceWithImportState` interface on the
+`exampleResource` type by defining an `ImportState()` function.
+
+<CodeBlockConfig filename="Framework">
+
+```go
+func (r *exampleResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+    id := req.ID
+
+    state := exampleModel{
+        ID:         types.StringValue("id"),
+        Attribute:  types.StringValue("value"),
+    }
+
+    diags := resp.State.Set(ctx, &state)
+    resp.Diagnostics.Append(diags...)
+    if resp.Diagnostics.HasError() {
+        return
+    }
+}
+```
+
+</CodeBlockConfig>
+
+<!-- FIXME: Example using resource identity rather than ID alone? -->
