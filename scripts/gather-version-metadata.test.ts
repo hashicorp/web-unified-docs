@@ -169,3 +169,68 @@ it('Sort order - 1.10 is higher than 1.9', async () => {
 	const result = await gatherVersionMetadata('/content')
 	expect(result).toStrictEqual(expected)
 })
+
+it('handles semver versions', async () => {
+	const expected = {
+		'terraform-enterprise': [
+			{ version: '1.2.0', releaseStage: 'stable', isLatest: true },
+			{ version: '1.1.0', releaseStage: 'stable', isLatest: false },
+			{ version: '1.0.0', releaseStage: 'stable', isLatest: false },
+		],
+	}
+	vol.fromJSON(
+		{
+			'./terraform-enterprise/1.2.0/': null,
+			'./terraform-enterprise/1.1.0/': null,
+			'./terraform-enterprise/1.0.0/': null,
+		},
+		// default cwd
+		'/content',
+	)
+	const result = await gatherVersionMetadata('/content')
+	expect(result).toStrictEqual(expected)
+})
+
+it('handles non-semver versions and sorts alphabetically', async () => {
+	const expected = {
+		'terraform-enterprise': [
+			{ version: 'v202508-01', releaseStage: 'stable', isLatest: true },
+			{ version: 'v202507-01', releaseStage: 'stable', isLatest: false },
+			{ version: 'v202506-01', releaseStage: 'stable', isLatest: false },
+		],
+	}
+	vol.fromJSON(
+		{
+			'./terraform-enterprise/v202508-01/': null,
+			'./terraform-enterprise/v202507-01/': null,
+			'./terraform-enterprise/v202506-01/': null,
+		},
+		// default cwd
+		'/content',
+	)
+	const result = await gatherVersionMetadata('/content')
+	expect(result).toStrictEqual(expected)
+})
+
+it('handles mixed semver and non-semver versions', async () => {
+	const expected = {
+		'terraform-enterprise': [
+			{ version: '1.1.0', releaseStage: 'stable', isLatest: true },
+			{ version: '1.0.0', releaseStage: 'stable', isLatest: false },
+			{ version: 'v202507-01', releaseStage: 'stable', isLatest: false },
+			{ version: 'v202506-01', releaseStage: 'stable', isLatest: false },
+		],
+	}
+	vol.fromJSON(
+		{
+			'./terraform-enterprise/1.0.0/': null,
+			'./terraform-enterprise/1.1.0/': null,
+			'./terraform-enterprise/v202507-01/': null,
+			'./terraform-enterprise/v202506-01/': null,
+		},
+		// default cwd
+		'/content',
+	)
+	const result = await gatherVersionMetadata('/content')
+	expect(result).toStrictEqual(expected)
+})
