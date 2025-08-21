@@ -115,7 +115,7 @@ In this example, the Go standard library [`net/http.Client`](https://pkg.go.dev/
 
 ```go
 func (p *ExampleCloudProvider) Configure(ctx context.Context, req provider.ConfigureRequest, resp *provider.ConfigureResponse) {
-  resp.ActionResourceData = &http.Client{/* ... */}
+  resp.ActionData = &http.Client{/* ... */}
 }
 ```
 
@@ -153,17 +153,13 @@ func (d *DoThingAction) Configure(ctx context.Context, req action.ConfigureReque
 }
 
 func (d *DoThingAction) Invoke(ctx context.Context, req action.InvokeRequest, resp *action.InvokeResponse) {
-  // Prevent panic if the provider has not been configured.
-  if d.client == nil {
-    resp.Diagnostics.AddError(
-      "Unconfigured HTTP Client",
-      "Expected configured HTTP client. Please report this issue to the provider developers.",
-    )
+  httpReq, _ := http.NewRequest(
+    http.MethodPut,
+    "http://example.com/api/do_thing",
+    bytes.NewBuffer([]byte(`{"fake": "data"}`)),
+  )
 
-    return
-  }
-
-  httpResp, err := d.client.Get("https://example.com")
+  httpResp, err := d.client.Do(httpReq)
   /* ... */
 }
 ```
@@ -177,7 +173,7 @@ Implement the `Invoke` method by:
 
 1. [Accessing the `Config` data](/terraform/plugin/framework/handling-data/accessing-values) from the [`action.InvokeRequest` type](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/action#InvokeRequest).
 1. Performing logic or external calls for the action.
-1. Send any [progress messages](#sending-progress-messages) while invoking the action.
+1. Sending any [progress messages](#sending-progress-messages) while invoking the action.
 1. Return when the action is finished.
 
 If the logic needs to return [warning or error diagnostics](/terraform/plugin/framework/diagnostics), they can be added into the [`action.InvokeResponse.Diagnostics` field](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/action#InvokeResponse.Diagnostics).
@@ -191,7 +187,6 @@ type DoThingAction struct {}
 
 type DoThingActionModel struct {
     Name  types.String `tfsdk:"name"`
-    Token types.String `tfsdk:"token"`
 }
 
 func (e *DoThingAction) Schema(ctx context.Context, req action.SchemaRequest, resp *action.SchemaResponse) {
@@ -220,46 +215,65 @@ func (e *DoThingAction) Invoke(ctx context.Context, req action.InvokeRequest, re
 
 ### Sending progress messages
 
-For actions that can have longer invocation times, the provider can send progress updates back to Terraform that will be displayed to the practitioner.
+Optionally, for actions that can have longer invocation times, the provider can send progress updates back to Terraform that will be displayed to the practitioner.
 The [`action.InvokeResponse.SendProgress` function](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/action#InvokeResponse.SendProgress) can be called
 with the message that needs to be displayed while an action is invoking. The `InvokeAction` RPC is a [streaming RPC](https://grpc.io/docs/what-is-grpc/core-concepts/#server-streaming-rpc),
 so the message will immediately be sent back to Terraform to display to the practitioner.
 
-{/* TODO: Create a good example for waiting for an HTTP request, have a start below */}
+{/* TODO: We should write up some paragraph about when/why you'd want to send progress events back, since it's optional */}
+
+In this example, an action named `examplecloud_do_thing` sends progress messages every 10 seconds until an HTTP request has completed:
 
 ```go
 func (e *DoThingAction) Invoke(ctx context.Context, req action.InvokeRequest, resp *action.InvokeResponse) {
-    done := make(chan bool)
-    url := "https://example.com/posts/1"
+  done := make(chan bool)
 
-    go func() {
-        httpResp, err := http.Get(url)
-        if err != nil {
-            resp.Diagnostics.AddError(
-                "HTTP GET Error",
-                "Error retrieving data. Please report this issue to the provider developers.",
-            )
-            done <- true
-            return
-        }
-        done <- true
-    }()
+  // Long running API operation in a goroutine
+  go func() {
+    httpReq, _ := http.NewRequest(
+      http.MethodPut,
+      "http://example.com/api/do_thing",
+      bytes.NewBuffer([]byte(`{"fake": "data"}`)),
+    )
 
-    ticker := time.NewTicker(10 * time.Second) // Send message back to practitioner every 10 seconds
-    defer ticker.Stop()
-
-    for {
-        select {
-        case <-done:
-            // Check for diagnostics, add to resp.Diagnostics
-            return
-        case <-ticker.C:
-            resp.SendProgress(action.InvokeProgressEvent{
-                Message: "Waiting for HTTP request to finish...",
-            })
-        }
+    httpResp, err := d.client.Do(httpReq)
+    if err != nil {
+      resp.Diagnostics.AddError(
+        "HTTP PUT Error",
+        "Error updating data. Please report this issue to the provider developers.",
+      )
     }
+    done <- true
+  }()
+
+  ticker := time.NewTicker(10 * time.Second) // Send message back to practitioner every 10 seconds
+  defer ticker.Stop()
+
+  for {
+    select {
+    case <-done:
+      return
+    case <-ticker.C:
+      // Once this function is called, the message will be displayed in Terraform
+      resp.SendProgress(action.InvokeProgressEvent{
+        Message: "Waiting for HTTP request to finish...",
+      })
+    }
+  }
 }
+```
+
+Terraform will display the messages to the practitioner while the action is invoking, for example: 
+
+```bash
+ $ terraform apply -auto-approve
+
+# .. other plan / apply output
+Action started: action.bufo_print.success (triggered by terraform_data.test)
+Action action.examplecloud_do_thing.test_trigger (triggered by terraform_data.test): Waiting for HTTP request to finish...
+Action action.examplecloud_do_thing.test_trigger (triggered by terraform_data.test): Waiting for HTTP request to finish...
+Action action.examplecloud_do_thing.test_trigger (triggered by terraform_data.test): Waiting for HTTP request to finish...
+Action complete: action.examplecloud_do_thing.test_trigger (triggered by terraform_data.test)
 ```
 
 ## Validation
@@ -276,7 +290,7 @@ This section describes implementation details for validating entire action confi
 
 ### ConfigValidators Method
 
-The [`action.ActionResourceWithConfigValidators` interface](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/action#ActionResourceWithConfigValidators) follows a similar pattern to attribute validation and allows for a more declarative approach. This enables consistent validation logic across multiple actions. Each validator intended for this interface must implement the [`action.ConfigValidator` interface](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/action#ConfigValidator).
+The [`action.ActionWithConfigValidators` interface](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/action#ActionWithConfigValidators) follows a similar pattern to attribute validation and allows for a more declarative approach. This enables consistent validation logic across multiple actions. Each validator intended for this interface must implement the [`action.ConfigValidator` interface](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/action#ConfigValidator).
 
 The [`terraform-plugin-framework-validators` Go module](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework-validators) has a collection of common use case action configuration validators in the [`actionvalidator` package](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework-validators/actionvalidator). These use [path expressions](/terraform/plugin/framework/path-expressions) for matching attributes.
 
@@ -339,17 +353,31 @@ func (d DoThingAction) ValidateConfig(ctx context.Context, req action.ValidateCo
 }
 ```
 
-
 ## ModifyPlan method
+
+Actions have a limited ability to participate in the planning process of Terraform, which is facilitated by the `PlanAction` RPC. As actions do not have any output data that can be consumed by
+other parts of the Terraform configuration, the only impact an action can have on the plan is by returning diagnostics, like performing validation that requires API client access.
+
+Action types that can modify resource state will be able to plan whatever changes are needed during this operation. These action types are not available in Terraform 1.14, but are planned for future releases.
+
+Actions can participate in the planning operation of Terraform by implementing the [`action.ActionWithModifyPlan` interface](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/action#ActionWithModifyPlan). For example:
+
+```go
+// Ensure the Action satisfies the action.ActionWithModifyPlan interface.
+// Other methods to implement the action.Action interface are omitted for brevity
+var _ action.ActionWithModifyPlan = DoThingAction{}
+
+type DoThingAction struct {}
+
+func (a DoThingAction) ModifyPlan(ctx context.Context, req action.ModifyPlanRequest, resp *action.ModifyPlanResponse) {
+    // Fill in logic.
+}
+```
 
 {/* TODO: Skeleton
 
 
     Updates to framework docs
-
-        - Implementation (start with one page, then move to multiple if needed)
-            - ModifyPlan
-
 
         - Updates to make to other pages (maybe in a way that we don't have to constantly update for new schemas?)
             - Provider configuration page
