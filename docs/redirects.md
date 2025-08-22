@@ -219,7 +219,7 @@ Use a non-capture group to redirect all child paths:
 
 ```json
   {
-    "source": "/old/path/:slug(.*)",
+    "source": "/old/path:slug(/?.*)",
     "destination": "/new/path/:slug",
     "permanent": true,
   }
