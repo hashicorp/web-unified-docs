@@ -1,7 +1,7 @@
 # Copyright (c) HashiCorp, Inc.
 # SPDX-License-Identifier: BUSL-1.1
 
-FROM node:22
+FROM node:20
 
 WORKDIR /server
 
