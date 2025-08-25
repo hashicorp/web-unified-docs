@@ -1,0 +1,147 @@
+---
+page_title: Identity Upgrade
+description: >-
+  Learn how to implement upgrading identity data when provider schema changes from
+  one version of your Terraform framework provider to another.
+---
+
+# Identity Upgrade
+
+An identity schema captures the structure and types of a [managed resource identity](/terraform/plugin/framework/resources/identity). Any identity data that does not conform to the resource identity schema will generate errors or may not be persisted properly. Over time, it may be necessary for identities to make breaking changes to their schemas, such as changing an attribute type. Terraform supports versioning of these identity schemas and the current version is saved into the Terraform state. When the provider advertises a newer identity schema version, Terraform will call back to the provider to attempt to upgrade from the saved schema version to the one advertised. This operation is performed prior to planning, but with a configured provider.
+
+## Identity Upgrade Process
+
+1. When generating a plan, Terraform CLI will request the current resource identity schema, which contains a version.
+1. If Terraform CLI detects that an existing identity with its saved version does not match the current version, Terraform CLI will request an identity upgrade from the provider with the prior identity version and expecting the identity to match the current version.
+1. The framework will check the resource to see if it defines identity upgrade support:
+    * If no identity upgrade support is defined, an error diagnostic is returned.
+    * If identity upgrade support is defined, but not for the requested prior identity version, an error diagnostic is returned.
+    * If identity upgrade support is defined and has an implementation for the requested prior identity version, the provider defined implementation is executed.
+
+## Adding Identity Upgrade Support
+
+Ensure the [`identityschema.Schema` type `Version` field](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/resource/identityschema#Schema.Version) field for the [`resource.Resource`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/resource#Resource) is greater than `0`, then implement the `resource.ResourceWithUpgradeIdentity` interface for the [`resource.Resource`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/resource#Resource). Conventionally the version is incremented by `1` for each upgrade identity.
+
+This example shows a `Resource` with the necessary `UpgradeIdentity` method to implement the `ResourceWithUpgradeIdentity` interface:
+
+```go
+// Other Resource methods are omitted in this example
+var _ resource.Resource = &ThingResource{}
+var _ resource.ResourceWithUpgradeIdentity = &ThingResource{}
+
+type ThingResource struct{/* ... */}
+
+func (r *ThingResource) IdentitySchema(_ context.Context, _ resource.IdentitySchemaRequest, resp *resource.IdentitySchemaResponse) {
+    resp.IdentitySchema = identityschema.Schema{
+        // ... other fields ...
+
+        // This example conventionally declares that the resource has prior
+        // identity versions of 0 and 1, while the current version is 2.
+        Version: 2,
+    }
+}
+
+func (r *ThingResource) UpgradeIdentity(ctx context.Context) map[int64]resource.IdentityUpgrader {
+    return map[int64]resource.IdentityUpgrader{
+        // Identity upgrade implementation from 0 (prior identity version) to 1 (Schema.Version)
+        0: {
+            // Optionally, the PriorSchema field can be defined.
+            IdentityUpgrader: func(ctx context.Context, req resource.UpgradeIdentityRequest, resp *resource.UpgradeIdentityResponse) { /* ... */ },
+        },
+        // Identity upgrade implementation from 1 (prior identity version) to 2 (Schema.Version)
+        1: {
+            // Optionally, the PriorSchema field can be defined.
+            IdentityUpgrader: func(ctx context.Context, req resource.UpgradeIdentityRequest, resp *resource.UpgradeIdentityResponse) { /* ... */ },
+        },
+    }
+}
+```
+
+Each `resource.IdentityUpgrader` implementation is expected to wholly upgrade the resource identity from the prior version to the current version. The framework does not iterate through intermediate version implementations as incrementing versions by 1 is only conventional and not required.
+
+All identity data must be populated in the [`resource.UpgradeIdentityResponse`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/resource#UpgradeIdentityResponse). The framework does not copy any prior identity data from the `resource.UpgradeIdentityRequest`.
+
+The recommended approach for implementation is defining the prior schema matching the resource identity, which allows for prior identity access similar to other parts of the framework. It is possible to access the request data using lower level data handlers, but the response must be set with a [framework type](/terraform/plugin/framework/handling-data/types).
+
+### Implementing IdentityUpgrader
+
+Implement the `IdentityUpgrader` type `PriorSchema` field to enable the framework to populate the `resource.UpgradeIdentityRequest` type `Identity` field for the provider defined upgrade identity logic. Access the request `Identity` using methods such as `Get()` or `GetAttribute()`. Write the `resource.UpgradeIdentityResponse` type `Identity` field using methods such as `Set()` or `SetAttribute()`.
+
+This example shows a resource that changes the type for two attributes, using the `PriorSchema` approach:
+
+```go
+// Other Resource methods are omitted in this example
+var _ resource.Resource = &ThingResource{}
+var _ resource.ResourceWithUpgradeIdentity = &ThingResource{}
+
+type ThingResource struct{/* ... */}
+
+type ThingResourceModelV0 struct {
+    Id                string `tfsdk:"id"`
+    OldBoolAttribute  bool   `tfsdk:"old_bool_attribute"`
+}
+
+type ThingResourceModelV1 struct {
+    Id                 string   `tfsdk:"id"`
+    NewStringAttribute string `tfsdk:"new_string_attribute"`
+}
+
+func (r *ThingResource) IdentitySchema(_ context.Context, _ resource.IdentitySchemaRequest, resp *resource.IdentitySchemaResponse) {
+    resp.IdentitySchema = identityschema.Schema{
+        Attributes: map[string]identityschema.Attribute{
+            "id": identityschema.StringAttribute{
+                RequiredForImport: true,
+            },
+            "new_string_attribute": identityschema.StringAttribute{
+                // As compared to prior identityschema.BoolAttribute below
+                OptionalForImport: true,
+            },
+        },
+        // The resource has a prior identity version of 0, which had the attribute
+        // types of types.BoolType as shown below.
+        Version: 1,
+    }
+}
+
+func (r *ThingResource) UpgradeIdentity(ctx context.Context) map[int64]resource.IdentityUpgrader {
+    return map[int64]resource.IdentityUpgrader{
+        // Identity upgrade implementation from 0 (prior identity version) to 1 (identityschema.Version)
+        0: {
+            PriorSchema: &identityschema.Schema{
+                Attributes: map[string]identityschema.Attribute{
+                    "id": identityschema.StringAttribute{
+                        RequiredForImport: true,
+                    },
+                    "old_bool_attribute": identityschema.BoolAttribute{
+                        // As compared to current identityschema.StringAttribute above
+                        OptionalForImport: true,
+                    },
+                },
+            },
+            IdentityUpgrader: func(ctx context.Context, req resource.UpgradeIdentityRequest, resp *resource.UpgradeIdentityResponse) {
+                var priorIdentityData ThingResourceModelV0
+
+                resp.Diagnostics.Append(req.Identity.Get(ctx, &priorIdentityData)...)
+
+                if resp.Diagnostics.HasError() {
+                    return
+                }
+
+                upgradedIdentityData := ThingResourceModelV1{
+                    Id:                 priorIdentityData.Id,
+                    NewStringAttribute: fmt.Sprintf("%t", priorIdentityData.OldBoolAttribute),
+                }
+
+                resp.Diagnostics.Append(resp.Identity.Set(ctx, upgradedIdentityData)...)
+            },
+        },
+    }
+}
+```
+
+## Caveats
+
+Note these caveats when implementing the `UpgradeIdentity` method:
+
+* An error is returned if the response identity contains unknown values. Set all attributes to either null or known values in the response.
+* Any response errors will cause Terraform to keep the prior resource identity.

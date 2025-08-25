@@ -1,0 +1,374 @@
+---
+page_title: CRUD functions
+description: >-
+  Learn how to migrate resource create, read, update, and delete (CRUD)
+  functions from SDKv2 to the Terraform plugin framework.
+---
+
+# CRUD functions
+
+This page explains how to migrate a resource's CRUD functions from SDKv2 to the
+plugin framework. Migrating CRUD functions involves implementing functions on
+your resource's type.
+
+## Background
+
+In Terraform, a resource block represents a single instance of a given resource
+type. The provider modifies a specific resource in the API and in Terraform's
+state through a set of create, read, update, and delete (CRUD) functions to
+ensure that the resource instance matches the configuration provided in the
+resource's block. A resource's CRUD functions implement the logic required to
+manage your resources with Terraform. Refer to [Resources - Define
+Resources](/terraform/plugin/framework/resources#define-resources) in the
+framework documentation for details.
+
+## Migrating CRUD functions
+
+In SDKv2, a resource's CRUD functions are defined by populating the relevant
+fields, such as `CreateContext` and `ReadContext`, on the `schema.Resource` struct.
+
+In the framework, you implement CRUD functions for your resource by defining a
+type that implements the
+[`resource.Resource`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/resource#Resource)
+interface.
+
+The following code shows a basic implementation of CRUD functions with SDKv2.
+
+<CodeBlockConfig filename="SDKv2">
+
+```go
+func resourceExample() *schema.Resource {
+    return &schema.Resource{
+        CreateContext: create,
+        ReadContext:   read,
+        UpdateContext: update,
+        DeleteContext: delete,
+        /* ... */
+```
+
+</CodeBlockConfig>
+
+The following code shows how to define a `resource.Resource`, which implements CRUD functions with the framework.
+
+<CodeBlockConfig filename="Framework">
+
+```go
+type resourceExample struct {
+    p provider
+}
+
+func (r *resourceExample) Create(ctx context.Context, req resource.CreateRequest, resp
+*resource.CreateResponse) {
+    /* ... */
+}
+
+func (r *resourceExample) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+    /* ... */
+}
+
+func (r *resourceExample) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+    /* ... */
+}
+
+func (r *resourceExample) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+    /* ... */
+}
+```
+
+</CodeBlockConfig>
+
+### Migration notes
+
+Remember the following differences between SDKv2 and the framework when
+completing the migration.
+
+- In SDKv2, you don't need to define functions for parts of the CRUD
+  lifecycle that the resource doesn't use. For instance, if the resource
+  does not support in-place modification, you do not need to define an `Update`
+  function. In the framework, you must implement each of the CRUD lifecycle
+  functions on all resources to satisfy the `Resource` interface, even if the
+  function does nothing.
+- In SDKv2, the `Update` function, even if it's empty or missing, automatically
+  copies the request plan to the response state. This could be problematic when
+  the `Update` function also returns errors when the resource requires additional steps to disable the automatic SDKv2 behavior. In the framework, the
+  [`resource.Resource.Update()`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/resource#Resource.Update)
+  function must be written to explicitly copy data from `req.Plan` to
+  `resp.State` to actually update the resource's state and prevent `Provider
+  produced inconsistent result after apply` errors from Terraform.
+- In SDKv2, calling `d.SetId("")` signals resource removal. In the
+  framework, call the
+  [`resp.State.RemoveResource()`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/tfsdk#State.RemoveResource)
+  function, instead. Explicit calls to `RemoveResource()` should only occur within the
+  `Read()` function to prevent `Provider produced inconsistent result after
+  apply` errors during other operations. The `Delete()` function
+  automatically calls `resp.State.RemoveResource()` when `Delete()` returns no errors.
+- In SDKv2, you get and set attribute values in Terraform's state by calling
+  `Get()` and `Set()` on `schema.ResourceData`. In the framework, you get
+  attribute values from the configuration and plan by accessing `Config` and
+  `Plan` on
+  [`resource.CreateRequest`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/resource#CreateRequest).
+  You set attribute values in Terraform's state by mutating `State` on
+  [`resource.CreateResponse`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/resource#CreateResponse).
+- In SDKv2, certain resource schema definition and data consistency errors are
+  only visible as Terraform warning logs by default. After migration, these
+  errors are always visible to practitioners and prevent further Terraform
+  operations. The [SDKv2 resource data consistency errors
+  documentation](/terraform/plugin/sdkv2/resources/data-consistency-errors)
+  discusses how to find these errors in SDKv2 resources and potential solutions
+  prior to migrating. Refer to [Resolving Data Consistency
+  Errors](#resolving-data-consistency-errors) for framework solutions
+  during migration.
+
+## Examples
+
+The following examples describe common resource migration scenarios.
+
+### Migrating CRUD functions
+
+Migrating CRUD functions to the framework typically involves implementing the
+corresponding functions from the
+`resource.Resource`[https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/resource#Resource]
+interface.
+
+The following example from shows implementations of CRUD functions on the with
+SDKv2. The `UpdateContext` function is not implemented because the provider does
+not support updating this resource.
+
+<CodeBlockConfig filename="SDKv2">
+
+```go
+func resourceExample() *schema.Resource {
+    return &schema.Resource{
+        CreateContext: create,
+        ReadContext:   readNil,
+        DeleteContext: RemoveResourceFromState,
+        /* ... */
+```
+
+</CodeBlockConfig>
+
+The following example shows the implementation of the `create()` function with
+SDKv2. The implementations of the `readNil()` and `RemoveResourceFromState()`
+functions are not shown for brevity.
+
+<CodeBlockConfig filename="SDKv2">
+
+```go
+func create(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+    if err := d.Set("example_attribute", "value"); err != nil {
+        diags = append(diags, diag.Errorf("err: %s", err)...)
+        return diags
+    }
+
+    return nil
+}
+```
+
+</CodeBlockConfig>
+
+The following shows the same section of provider code after the migration.
+
+This code implements the `Create` function for the `example_resource` resource
+type with the framework.
+
+<CodeBlockConfig filename="Framework">
+
+```go
+func (r *exampleResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+    var plan exampleModel
+
+    diags := req.Plan.Get(ctx, &plan)
+    resp.Diagnostics.Append(diags...)
+    if resp.Diagnostics.HasError() {
+        return
+    }
+
+    plan.ExampleAttribute = types.StringValue("value")
+
+    diags = resp.State.Set(ctx, plan)
+    resp.Diagnostics.Append(diags...)
+}
+```
+
+</CodeBlockConfig>
+
+### Data consistency errors
+
+The following example describes how to mitigate ` Planned Value does not match Config Value` errors.
+<Note>
+
+Refer to [SDKv2 data consistency errors
+documentation](/terraform/plugin/sdkv2/resources/data-consistency-errors) for
+background info, debugging tips, and potential SDKv2 solutions.
+
+</Note>
+
+An SDKv2 resource may raise the following type of error or [warning
+log](/terraform/plugin/sdkv2/resources/data-consistency-errors#checking-for-warning-logs):
+
+```text
+TIMESTAMP [WARN]  Provider "TYPE" produced an invalid plan for ADDRESS, but we are tolerating it because it is using the legacy plugin SDK.
+    The following problems may be the cause of any confusing errors from downstream operations:
+      - .ATTRIBUTE: planned value cty.StringVal("VALUE") does not match config value cty.StringVal("value")
+```
+
+This occurs for attribute schema definitions that are `Optional: true` and
+`Computed: true` when the planned value returned by the provider does not match
+the attribute's value in the resource's configuration block or the prior state
+value. For example, values for an attribute of type string must match
+byte-for-byte.
+
+API normalization is a potential root cause of this issue. For example,
+Terraform may throw this error when the API returns a JSON string and stores it
+in state with different whitespace than what is defined in the resource's
+configuration block.
+
+The following example shows an SDKv2 resource schema and the Terraform
+configuration that simulates a data consistency error:
+
+<CodeBlockConfig filename="SDKv2">
+
+```go
+func thingResource() *schema.Resource {
+	return &schema.Resource{
+		// ...
+		Schema: map[string]*schema.Schema{
+			"word": {
+				Type:     schema.TypeString,
+				Optional: true,
+				Computed: true,
+				StateFunc: func(word interface{}) string {
+                    // This simulates an API returning the 'word' attribute as all uppercase,
+                    // which is stored to state even if it doesn't match the config or prior value.
+					return strings.ToUpper(word.(string))
+				},
+			},
+		},
+	}
+}
+```
+
+</CodeBlockConfig>
+
+```hcl
+resource "examplecloud_thing" "this" {
+  word = "value"
+}
+```
+
+A [warning log](/terraform/plugin/sdkv2/resources/data-consistency-errors#checking-for-warning-logs) will be produced and the resulting state after applying a new resource will be `VALUE` instead of `value`.
+
+When you migrate a resource with this behavior to the framework, Terraform may
+show resource drift when it generates plans that include these resources.
+
+Terraform will detect changes between the configuration and state value when
+they do not match exactly. As a result, it reports drift in during the plan
+operation if you do not implement [plan
+modification](/terraform/plugin/framework/resources/plan-modification) in your
+framework provider.
+
+```hcl
+resource "examplecloud_thing" "this" {
+  word = "value"
+}
+```
+
+```text
+examplecloud_thing.this: Refreshing state...
+
+Terraform used the selected providers to generate the following execution plan. Resource actions are indicated with the following symbols:
+  ~ update in-place
+
+Terraform will perform the following actions:
+
+  # examplecloud_thing.this will be updated in-place
+  ~ resource "examplecloud_thing" "this" {
+      ~ word = "VALUE" -> "value"
+    }
+
+Plan: 0 to add, 1 to change, 0 to destroy.
+```
+
+If you mimic the original SDKv2 behavior of storing a different value from
+configuration or a prior value into state in the `Update` method, Terraform will
+report an error similar to the following when it generates a plan:
+
+```text
+examplecloud_thing.this: Modifying...
+╷
+│ Error: Provider produced inconsistent result after apply
+│ 
+│ When applying changes to examplecloud_thing.this, provider "provider[\"TYPE\"]" produced an unexpected
+│ new value: .word: was cty.StringVal("value"), but now cty.StringVal("VALUE").
+│ 
+│ This is a bug in the provider, which should be reported in the provider's own issue tracker.
+```
+
+To solve this issue, the provider code must preserve the configuration value or
+prior state value when producing the new state. We recommend implementing this
+logic by creating a [custom
+type](/terraform/plugin/framework/handling-data/types/custom) with [semantic
+equality
+logic](/terraform/plugin/framework/handling-data/types/custom#semantic-equality).
+Terraform can share a custom type across multiple resource attributes and ensure
+that the semantic equality logic is invoked during the `Read`, `Create`, and
+`Update` methods, respectively.
+
+The following semantic equality implementation resolves the resource drift and
+error described in the previous example.
+
+<CodeBlockConfig filename="Framework">
+
+```go
+type CaseInsensitive struct {
+	basetypes.StringValue
+}
+
+// ... custom value type implementation
+
+// StringSemanticEquals returns true if the given string value is semantically equal to the current string value. (case-insensitive)
+func (v CaseInsensitive) StringSemanticEquals(_ context.Context, newValuable basetypes.StringValuable) (bool, diag.Diagnostics) {
+	var diags diag.Diagnostics
+
+	newValue, ok := newValuable.(CaseInsensitive)
+	if !ok {
+		diags.AddError(
+			"Semantic Equality Check Error",
+			"An unexpected value type was received while performing semantic equality checks. "+
+				"Please report this to the provider developers.\n\n"+
+				"Expected Value Type: "+fmt.Sprintf("%T", v)+"\n"+
+				"Got Value Type: "+fmt.Sprintf("%T", newValuable),
+		)
+
+		return false, diags
+	}
+
+    return strings.EqualFold(newValue.ValueString(), v.ValueString()), diags
+}
+```
+
+</CodeBlockConfig>
+
+This example code is a partial implementation of a custom type. Refer to [Custom
+Value Type](/terraform/plugin/framework/handling-data/types/custom#value-type)
+for detailed guidance.
+
+## Next steps
+
+1. To migrate import functionality, refer to the [Resources - Resource
+   import](/terraform/plugin/framework/migrating/resources/import) page in this
+   guide.
+1. Some resources may require plan modification during Terraform operations. If
+   your SDKv2 resource uses `CustomizeDiff` functions to modify the plan, refer
+   to the [Resources - Plan modification](/terraform/plugin/framework/migrating/resources/plan-modification) page in this guide.
+1. When a resource's implmentation changes in your provider in ways that break
+   compatability with older versions, your provider may implement state
+   upgraders to migrate resource state from one version to another. If your
+   SDKv2 provider implements `StateUpgraders`, refer to the [Resources - State
+   upgrading](/terraform/plugin/framework/migrating/resources/plan-modification)
+   page in this guide to migrate them to `UpgradeState` functions in the
+   framework.
+1. Some resources may require timeouts for long-running operations. Refer to the
+   [Resources -
+   Timeouts](/terraform/plugin/framework/migrating/resources/plan-modification)
+   page in this guide to implement resource timeouts in the framework.
