@@ -3,9 +3,9 @@
 The project in this repository, `hashicorp/web-unified-docs`, aims to implement [[DEVDOT-023] Unified Product Documentation Repository](https://docs.google.com/document/d/1p8kOqySttvWUVfn7qiC4wGBR73LMBGMelwLt69pM3FQ/edit). The RFC for this project was intentionally light on implementation details, in order to foster consensus on the broad direction.
 
 - **PR previews**: Show broken links in comments for awareness (informational only, don't block PRs)
-- **Production monitoring**: Weekly scans create GitHub issues and send critical alerts to Datadog when users are affected
+- **Production monitoring**: Monthly scans create GitHub issues and send critical alerts to Datadog when users are affected
 
-The weekly [`broken-link-check-full`](https://github.com/hashicorp/web-unified-docs/blob/main/.github/workflows/broken-link-check-full.yml) workflow generates comprehensive broken link reports with prioritization guidance. When contributors create PRs that modify content, the link checker shows any broken links in PR comments with actionable guidance without blocking development.
+The monthly [`broken-link-check-full`](https://github.com/hashicorp/web-unified-docs/blob/main/.github/workflows/broken-link-check-full.yml) workflow generates comprehensive broken link reports with prioritization guidance. When contributors create PRs that modify content, the link checker shows any broken links in PR comments with actionable guidance without blocking development.
 
 **Quick tips for contributors**:
 
@@ -119,23 +119,11 @@ Completed! All MDX files have been processed.
 The repository uses a focused broken link monitoring system:
 
 - **PR previews**: Show broken links in comments for awareness (informational only, don't block PRs)
-- **Production monitoring**: Weekly scans create GitHub issues and Datadog alerts for user-facing problems
+- **Production monitoring**: Monthly scans create GitHub issues and Datadog alerts for user-facing problems
 
-The weekly [`broken-link-check-full`](https://github.com/hashicorp/web-unified-docs/blob/main/.github/workflows/broken-link-check-full.yml) workflow generates comprehensive broken link reports. When contributors create PRs that modify content, the link checker shows any broken links in PR comments without blocking development.
+The monthly [`broken-link-check-full`](https://github.com/hashicorp/web-unified-docs/blob/main/.github/workflows/broken-link-check-full.yml) workflow generates comprehensive broken link reports. When contributors create PRs that modify content, the link checker shows any broken links in PR comments without blocking development.
 
 For detailed information about the monitoring system, see [Broken Link Monitoring Documentation](./.github/BROKEN_LINK_MONITORING.md).
-
-### UDR Migration Link Check
-
-For teams migrating products to UDR (Unified Docs Renderer), use the dedicated migration workflow:
-
-1. Go to [Actions → UDR Product Link Check](https://github.com/hashicorp/web-unified-docs/actions/workflows/udr-product-link-check.yml)
-2. Click "Run workflow" and select your product
-3. Review migration-specific broken link analysis in the generated GitHub issue
-
-This workflow provides targeted link checking with migration-focused reporting and prioritization.
-
-### Local Testing
 
 You can also run the broken link checker locally. The following commands launch a lychee Docker container to check the content directories you specify.
 

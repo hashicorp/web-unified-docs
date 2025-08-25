@@ -1,0 +1,102 @@
+#!/usr/bin/env node
+
+/**
+ * Test script for specific content paths we KNOW exist
+ */
+
+const BASE_URL = 'http://localhost:3001'
+
+async function testAPI(endpoint, description) {
+	try {
+		console.log(`\n🧪 Testing: ${description}`)
+		console.log(`   Endpoint: ${endpoint}`)
+
+		const response = await fetch(`${BASE_URL}${endpoint}`)
+		const status = response.status
+
+		if (status === 200) {
+			const contentType = response.headers.get('content-type')
+			if (contentType?.includes('application/json')) {
+				const data = await response.json()
+				console.log(`   ✅ SUCCESS (${status}) - JSON response`)
+				if (data.content) {
+					console.log(`   📄 Content length: ${data.content.length} chars`)
+					console.log(`   🔗 Path in response: ${data.githubFile || 'N/A'}`)
+				}
+				if (data.length) {
+					console.log(`   📋 Array with ${data.length} items`)
+				}
+			} else {
+				const text = await response.text()
+				console.log(
+					`   ✅ SUCCESS (${status}) - Text response (${text.length} chars)`,
+				)
+			}
+		} else if (status === 404) {
+			console.log(
+				`   ❌ NOT FOUND (${status}) - Content missing or path incorrect`,
+			)
+		} else {
+			console.log(`   ⚠️  UNEXPECTED STATUS (${status})`)
+			const text = await response.text()
+			console.log(`   Response: ${text.substring(0, 200)}...`)
+		}
+	} catch (error) {
+		console.log(`   💥 ERROR: ${error.message}`)
+	}
+}
+
+async function runKnownContentTests() {
+	console.log('🚀 Testing Known Existing Content Paths\n')
+	console.log('='.repeat(60))
+
+	// Test 1: Known terraform-enterprise content with specific version
+	await testAPI(
+		'/api/content/terraform-enterprise/doc/v202411-2/enterprise/cost-estimation/aws',
+		'TFE cost estimation AWS page (known to exist)',
+	)
+
+	// Test 2: Known terraform-enterprise index page
+	await testAPI(
+		'/api/content/terraform-enterprise/doc/v202411-2/enterprise/cost-estimation',
+		'TFE cost estimation index (known to exist)',
+	)
+
+	// Test 3: Working redirects endpoint
+	await testAPI(
+		'/api/content/terraform-enterprise/redirects',
+		'TFE redirects (working earlier)',
+	)
+
+	// Test 4: Test "latest" vs specific version
+	await testAPI(
+		'/api/content/terraform-enterprise/doc/latest/enterprise/cost-estimation',
+		'TFE latest version content',
+	)
+
+	// Test 5: Check if terraform content exists
+	await testAPI(
+		'/api/content/terraform/doc/v1.5.x/intro',
+		'Terraform v1.5.x intro',
+	)
+
+	// Test 6: Check path without double slashes
+	await testAPI(
+		'/api/content/terraform/doc/latest/intro',
+		'Terraform latest intro (testing path construction)',
+	)
+
+	// Test 7: Well-architected framework with correct structure
+	await testAPI(
+		'/api/content/well-architected-framework/doc/latest/define-and-automate-processes',
+		'WAF content (checking if structure different)',
+	)
+
+	console.log('\n' + '='.repeat(60))
+	console.log('🎯 Testing paths we know should exist based on file system')
+	console.log(
+		'💡 These tests validate our path construction and redirect fixes',
+	)
+}
+
+runKnownContentTests().catch(console.error)
