@@ -21,7 +21,7 @@
 
 const BASE_URL = 'http://localhost:3001'
 
-async function testAPI(endpoint, description) {
+const testAPI = async (endpoint, description) => {
 	try {
 		console.log(`\n🧪 Testing: ${description}`)
 		console.log(`   Endpoint: ${endpoint}`)
@@ -59,7 +59,7 @@ async function testAPI(endpoint, description) {
 	}
 }
 
-async function runTests() {
+const runTests = async () => {
 	console.log('🚀 Testing Specific API Fixes Based on Production Errors\n')
 	console.log('='.repeat(60))
 

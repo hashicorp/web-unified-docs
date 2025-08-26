@@ -13,17 +13,18 @@ import { NextResponse } from 'next/server'
 /**
  * Handle repository-to-product slug mapping and legacy redirects
  * @param {NextRequest} request
- *
  * @return {NextResponse}
  */
-export function middleware(request) {
-	const url = new URL(request.url)
+export const middleware = (request) => {
+	const { url: requestUrl } = request
+	const url = new URL(requestUrl)
 
 	// Handle ptfe-releases → terraform-enterprise mapping
 	if (url.pathname.includes('/ptfe-releases/')) {
-		return NextResponse.rewrite(
-			new URL(url.toString().replace('ptfe-releases', 'terraform-enterprise')),
+		const rewriteUrl = new URL(
+			url.toString().replace('ptfe-releases', 'terraform-enterprise'),
 		)
+		return NextResponse.rewrite(rewriteUrl)
 	}
 
 	// Handle terraform-docs-common repository mapping

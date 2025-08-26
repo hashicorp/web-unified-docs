@@ -33,19 +33,18 @@ const CRITICAL_ENDPOINTS = [
 		name: 'Terraform Enterprise Version Metadata',
 		path: '/api/content/terraform-enterprise/version-metadata',
 		validation: (data) => {
-			if (!data.result || !Array.isArray(data.result)) {
+			if (!data.result?.length) {
 				return 'Invalid response structure'
 			}
-			if (data.result.length === 0) {
-				return 'No versions found'
-			}
+
 			if (
-				!data.result.find((v) => {
+				!data.result.some((v) => {
 					return v.isLatest
 				})
 			) {
 				return 'No latest version found'
 			}
+
 			return null
 		},
 	},
@@ -66,15 +65,20 @@ const CRITICAL_ENDPOINTS = [
 		name: 'Terraform Enterprise Content',
 		path: '/api/content/terraform-enterprise/doc/latest/enterprise',
 		validation: (data) => {
-			if (!data.result) {
+			const { result } = data
+
+			if (!result) {
 				return 'No result in response'
 			}
-			if (!data.result.markdownSource) {
+
+			if (!result.markdownSource) {
 				return 'No markdown source'
 			}
-			if (!data.result.metadata) {
+
+			if (!result.metadata) {
 				return 'No metadata'
 			}
+
 			return null
 		},
 	},

@@ -135,7 +135,7 @@ class TestSuite {
 	}
 }
 
-async function runIntegrationTests() {
+const runIntegrationTests = async () => {
 	console.log(
 		`${colors.bold}🚀 Web Unified Docs API Integration Tests${colors.reset}`,
 	)

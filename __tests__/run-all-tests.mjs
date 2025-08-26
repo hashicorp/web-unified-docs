@@ -39,11 +39,11 @@ class TestRunner {
 	}
 
 	async runTestSuite(name, command, description) {
-		console.log(
-			`\n${colors.blue}${colors.bold}🧪 Running ${name}${colors.reset}`,
-		)
-		console.log(`${colors.cyan}${description}${colors.reset}`)
-		console.log(`${colors.yellow}Command: ${command}${colors.reset}`)
+		const { blue, bold, cyan, yellow, reset } = colors
+
+		console.log(`\n${blue}${bold}🧪 Running ${name}${reset}`)
+		console.log(`${cyan}${description}${reset}`)
+		console.log(`${yellow}Command: ${command}${reset}`)
 		console.log('─'.repeat(60))
 
 		const startTime = Date.now()

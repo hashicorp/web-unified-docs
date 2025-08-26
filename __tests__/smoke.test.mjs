@@ -17,25 +17,32 @@
 
 const BASE_URL = 'http://localhost:3001'
 
-async function testAPI(endpoint, description) {
+const testAPI = async (endpoint, description) => {
 	try {
 		console.log(`\n🧪 Testing: ${description}`)
 		console.log(`   Endpoint: ${endpoint}`)
 
 		const response = await fetch(`${BASE_URL}${endpoint}`)
-		const status = response.status
+		const { status } = response
 
 		if (status === 200) {
 			const contentType = response.headers.get('content-type')
+
 			if (contentType?.includes('application/json')) {
 				const data = await response.json()
 				console.log(`   ✅ SUCCESS (${status}) - JSON response`)
-				if (data.content) {
-					console.log(`   📄 Content length: ${data.content.length} chars`)
-					console.log(`   🔗 Path in response: ${data.githubFile || 'N/A'}`)
+
+				const contentLength = data.content?.length
+				const githubFile = data.githubFile ?? 'N/A'
+				const arrayLength = data.length
+
+				if (contentLength) {
+					console.log(`   📄 Content length: ${contentLength} chars`)
+					console.log(`   🔗 Path in response: ${githubFile}`)
 				}
-				if (data.length) {
-					console.log(`   📋 Array with ${data.length} items`)
+
+				if (arrayLength) {
+					console.log(`   📋 Array with ${arrayLength} items`)
 				}
 			} else {
 				const text = await response.text()
@@ -57,7 +64,7 @@ async function testAPI(endpoint, description) {
 	}
 }
 
-async function runKnownContentTests() {
+const runKnownContentTests = async () => {
 	console.log('🚀 Testing Known Existing Content Paths\n')
 	console.log('='.repeat(60))
 

@@ -20,7 +20,7 @@ import { promisify } from 'util'
 const execAsync = promisify(exec)
 
 // Try to detect which port is available (3000 first, then 3001)
-async function detectBaseUrl() {
+const detectBaseUrl = async () => {
 	if (process.env.TEST_BASE_URL) {
 		return process.env.TEST_BASE_URL
 	}
@@ -49,7 +49,7 @@ async function detectBaseUrl() {
 
 const BASE_URL = await detectBaseUrl()
 
-async function testAPIEndpoint(url, description) {
+const testAPIEndpoint = async (url, description) => {
 	console.log(`\n🧪 Testing: ${description}`)
 	console.log(`URL: ${url}`)
 
@@ -89,7 +89,7 @@ async function testAPIEndpoint(url, description) {
 	}
 }
 
-async function runTests() {
+const runTests = async () => {
 	console.log('🚀 Testing Web Unified Docs API Fixes\n')
 
 	const baseUrl = BASE_URL // Dev server running on port 3001
