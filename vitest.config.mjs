@@ -9,6 +9,10 @@ import tsconfigPaths from 'vite-tsconfig-paths'
 export default defineConfig({
 	plugins: [tsconfigPaths()],
 	test: {
+		exclude: [
+			...configDefaults.exclude,
+			'__tests__/**', // Integration tests - run separately
+		],
 		coverage: {
 			provider: 'v8',
 			exclude: [
@@ -23,6 +27,7 @@ export default defineConfig({
 				'app/layout.tsx',
 				'app/page.tsx',
 				'next-env.d.ts',
+				'__tests__/**', // Integration tests - exclude from coverage
 			],
 		},
 	},
