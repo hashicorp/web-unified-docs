@@ -1,6 +1,11 @@
 #!/usr/bin/env node
 
 /**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: BUSL-1.1
+ */
+
+/**
  * API Integration Test Suite
  *
  * Comprehensive integration tests for the Web Unified Docs API endpoints.

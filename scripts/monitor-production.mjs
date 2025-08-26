@@ -1,6 +1,11 @@
 #!/usr/bin/env node
 
 /**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: BUSL-1.1
+ */
+
+/**
  * Production Monitoring Script for Web Unified Docs API
  *
  * This script monitors the production API endpoints to ensure they remain healthy
