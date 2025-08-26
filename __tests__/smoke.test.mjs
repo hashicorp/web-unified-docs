@@ -1,7 +1,13 @@
 #!/usr/bin/env node
 
 /**
- * Test script for specific content paths we KNOW exist
+ * Smoke Test Suite
+ *
+ * Basic health checks for known-working content endpoints.
+ * These tests verify that fundamental API functionality is working
+ * by testing content paths that are known to exist and work correctly.
+ *
+ * Usage: npm run test:smoke
  */
 
 const BASE_URL = 'http://localhost:3001'

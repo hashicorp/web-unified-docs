@@ -1,12 +1,15 @@
 #!/usr/bin/env node
 
 /**
- * Integration Test Suite for Web Unified Docs API
+ * API Integration Test Suite
  *
- * This test suite validates the critical API endpoints and fixes implemented
- * to resolve production issues with content discovery, redirects, and version handling.
+ * Comprehensive integration tests for the Web Unified Docs API endpoints.
+ * This test suite validates critical API functionality and workflows including
+ * version metadata, redirects, content discovery, and error handling.
  *
- * Run with: npm run test:integration
+ * Usage:
+ * - Local: npm run test:integration
+ * - Production: npm run test:integration:production
  *
  * Tests cover:
  * - Version metadata endpoints

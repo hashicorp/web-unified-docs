@@ -1,10 +1,21 @@
 # Testing Strategy for Web Unified Docs Fixes
 
+## 📁 **Test Organization**
+
+Tests are now organized following the project's conventions:
+
+- **Unit Tests**: Co-located with source files using `*.test.*` naming (e.g., `utils.test.ts`)
+- **Integration Tests**: Located in `__tests__/` directory with `*.test.mjs` naming
+- **Monitoring Scripts**: Located in `scripts/` directory
+
+See `__tests__/TESTING_GUIDE.md` for detailed information about test organization and conventions.
+
 ## 🎯 **What We're Testing**
 
 Our fixes address these specific issues found in Vercel and Datadog logs:
+
 1. **Path Construction Issues**: Double slashes causing 404s
-2. **Redirect Handling**: Inconsistent redirect behavior across contexts  
+2. **Redirect Handling**: Inconsistent redirect behavior across contexts
 3. **Product Slug Mapping**: Misaligned backend-frontend routing
 4. **Content Discovery**: Missing content returning poor error messages
 
@@ -37,7 +48,7 @@ Test how our fixes handle edge cases:
 # Non-existent content (should return proper 404)
 curl -i "http://localhost:3001/api/content/terraform/doc/latest/nonexistent"
 
-# Invalid product slug (should return proper 404) 
+# Invalid product slug (should return proper 404)
 curl -i "http://localhost:3001/api/content/invalid-product/doc/latest/docs"
 
 # Malformed paths (should handle gracefully)
@@ -69,7 +80,7 @@ time curl -s "http://localhost:3001/api/content/terraform-docs-common/version-me
 
 When deployed to Vercel preview:
 
-1. **Automated Testing**: Use our `test-fixes.mjs` script against the preview URL
+1. **Automated Testing**: Use our integration test suite with `npm run test:integration` against the preview URL
 2. **Frontend Integration**: Test dev-portal integration with the preview API
 3. **Monitor Logs**: Check Vercel logs for any new errors
 
@@ -87,11 +98,13 @@ After deployment to production:
 ### **Key Metrics to Track**
 
 1. **API Error Rates**:
+
    - 404 errors should decrease significantly
    - 500 errors should remain low
    - Response times should be consistent
 
 2. **Frontend Integration**:
+
    - Dev-portal build success rate
    - Content loading success rate
    - Version selector functionality
@@ -109,7 +122,7 @@ Monitor these in Datadog:
 # API 404 rates
 sum:vercel.response{status:404,service:web-unified-docs} by {path}
 
-# API response times  
+# API response times
 avg:vercel.response_time{service:web-unified-docs} by {path}
 
 # Error patterns
@@ -119,16 +132,19 @@ logs("ERROR" OR "404" OR "redirect") service:web-unified-docs
 ## 🔧 **Testing Tools**
 
 ### **1. Automated Test Script**
-- Use our `test-fixes.mjs` for consistent API testing
+
+- Use our integration test suite (`npm run test:integration`) for consistent API testing
 - Run against local, staging, and production environments
 
 ### **2. Load Testing**
+
 ```bash
 # Use Apache Bench for load testing
 ab -n 100 -c 10 http://localhost:3001/api/content/terraform-docs-common/version-metadata
 ```
 
 ### **3. Integration Testing**
+
 - Test with actual dev-portal frontend
 - Verify search indexing workflows
 - Test content migration scripts
@@ -136,17 +152,20 @@ ab -n 100 -c 10 http://localhost:3001/api/content/terraform-docs-common/version-
 ## ✅ **Success Criteria**
 
 ### **Immediate (Local Testing)**
+
 - [ ] All API endpoints return proper HTTP status codes
 - [ ] Path construction works without double slashes
 - [ ] Redirects resolve correctly
 - [ ] Error messages are informative
 
 ### **Short Term (Staging)**
+
 - [ ] No new errors in Vercel logs
 - [ ] Dev-portal integration works smoothly
 - [ ] Performance meets expectations
 
 ### **Long Term (Production)**
+
 - [ ] 50%+ reduction in API 404 errors
 - [ ] Improved dev-portal build success rate
 - [ ] Consistent search indexing
@@ -169,6 +188,6 @@ Test Type: [api|integration|performance]
 
 ✅ Pass / ❌ Fail - Test Description
 - Expected: [description]
-- Actual: [description]  
+- Actual: [description]
 - Notes: [any additional context]
 ```
