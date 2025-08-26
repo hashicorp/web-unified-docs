@@ -11,20 +11,32 @@ import { NextResponse } from 'next/server'
  */
 
 /**
- * Rewrite requests for /ptfe-releases/* content to /terraform-enterprise/*
+ * Handle repository-to-product slug mapping and legacy redirects
  * @param {NextRequest} request
  *
  * @return {NextResponse}
  */
-export function middleware({ url }) {
-	return NextResponse.rewrite(
-		new URL(url.replace('ptfe-releases', 'terraform-enterprise')),
-	)
+export function middleware(request) {
+	const url = new URL(request.url)
+
+	// Handle ptfe-releases → terraform-enterprise mapping
+	if (url.pathname.includes('/ptfe-releases/')) {
+		return NextResponse.rewrite(
+			new URL(url.toString().replace('ptfe-releases', 'terraform-enterprise')),
+		)
+	}
+
+	// Handle terraform-docs-common repository mapping
+	// Note: We keep the repository name in the API path since that's how content is organized
+	// The product slug mapping is handled in the productConfig
+
+	return NextResponse.next()
 }
 
 export const config = {
 	matcher: [
 		'/api/content/ptfe-releases/:path*',
 		'/api/assets/ptfe-releases/:path*',
+		'/api/content/terraform-docs-common/:path*',
 	],
 }

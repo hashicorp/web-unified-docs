@@ -7,12 +7,80 @@ import {
 	findFileWithMetadata,
 	joinFilePath,
 	parseMarkdownFrontMatter,
+	parseJsonc,
 } from '@utils/file'
 import { getProductVersionMetadata } from '@utils/contentVersions'
 import { errorResultToString } from '@utils/result'
 import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
 import docsPathsAllVersions from '@api/docsPathsAllVersions.json'
 import { VersionedProduct } from '@api/types'
+
+/**
+ * Check if there's a redirect for the given path
+ * Always uses the latest version's redirects file
+ */
+async function checkForRedirect(
+	productSlug: string,
+	versionMetadata: any,
+	docsPath: string,
+): Promise<string | null> {
+	try {
+		// For redirects, we always want to use the latest version
+		const latestVersionResult = getProductVersionMetadata(productSlug, 'latest')
+		if (!latestVersionResult.ok) {
+			return null
+		}
+
+		const { value: latestVersionMetadata } = latestVersionResult
+
+		// Construct the redirects file path using latest version, handling non-versioned products
+		const redirectsPathParts = [`content`, productSlug]
+		if (latestVersionMetadata.version) {
+			redirectsPathParts.push(latestVersionMetadata.version)
+		}
+		redirectsPathParts.push('redirects.jsonc')
+
+		const redirectsFileResult = await findFileWithMetadata(
+			redirectsPathParts,
+			latestVersionMetadata,
+		)
+		if (!redirectsFileResult.ok) {
+			return null
+		}
+
+		const redirectsData = parseJsonc(redirectsFileResult.value)
+		if (!redirectsData.ok) {
+			return null
+		}
+
+		const redirects = redirectsData.value
+
+		// Look for a redirect that matches our current path
+		// Csonstruct the full path that would be in the redirects file
+		const { productSlug: frontendSlug } = PRODUCT_CONFIG[productSlug]
+		const fullPath = `/${frontendSlug}/${docsPath}`
+
+		if (Array.isArray(redirects)) {
+			for (const redirect of redirects) {
+				if (
+					redirect.source === fullPath ||
+					redirect.source.endsWith(docsPath)
+				) {
+					// Extract the path part from the destination
+					const destination = redirect.destination
+					if (destination.startsWith(`/${frontendSlug}/`)) {
+						return destination.substring(`/${frontendSlug}/`.length)
+					}
+				}
+			}
+		}
+
+		return null
+	} catch (error) {
+		console.warn(`Failed to check redirects for ${productSlug}:`, error)
+		return null
+	}
+}
 
 /**
  * Parameters expected by `GET` route handler
@@ -65,27 +133,24 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 	 * - `.../${contentDir}/${docsPath.join("/")}.mdx`. We'd be able to remove
 	 * one of the two locations below.
 	 */
+
+	// Build content paths, handling non-versioned products
+	const pathParts = [`content`, productSlug]
+	if (versionMetadata.version) {
+		pathParts.push(versionMetadata.version)
+	}
+	pathParts.push(contentDir)
+
 	const possibleContentLocations = [
-		[
-			`content`,
-			productSlug,
-			versionMetadata.version,
-			contentDir,
-			`${parsedDocsPath}.mdx`,
-		],
-		[
-			`content`,
-			productSlug,
-			versionMetadata.version,
-			contentDir,
-			parsedDocsPath,
-			`index.mdx`,
-		],
+		[...pathParts, `${parsedDocsPath}.mdx`],
+		[...pathParts, parsedDocsPath, `index.mdx`],
 	]
 
 	let foundContent, githubFile, createdAt
 	for (const loc of possibleContentLocations) {
-		const readFileResult = await findFileWithMetadata(loc, versionMetadata)
+		const readFileResult = await findFileWithMetadata(loc, versionMetadata, {
+			loadFromContentDir: process.env.NODE_ENV === 'development',
+		})
 
 		if (readFileResult.ok) {
 			foundContent = readFileResult.value
@@ -107,6 +172,53 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 				}
 			}
 			break
+		}
+	}
+
+	// If content not found, check for redirects
+	if (!foundContent) {
+		const redirectedPath = await checkForRedirect(
+			productSlug,
+			versionMetadata,
+			parsedDocsPath,
+		)
+		if (redirectedPath) {
+			// Try to find content at the redirected path using same path construction logic
+			const redirectedPathParts = [`content`, productSlug]
+			if (versionMetadata.version) {
+				redirectedPathParts.push(versionMetadata.version)
+			}
+			redirectedPathParts.push(contentDir)
+
+			const redirectedLocations = [
+				[...redirectedPathParts, `${redirectedPath}.mdx`],
+				[...redirectedPathParts, redirectedPath, `index.mdx`],
+			]
+
+			for (const loc of redirectedLocations) {
+				const readFileResult = await findFileWithMetadata(loc, versionMetadata)
+				if (readFileResult.ok) {
+					foundContent = readFileResult.value
+					githubFile = loc.join('/')
+					const productDocsPaths =
+						docsPathsAllVersions[productSlug][versionMetadata.version]
+					if (productDocsPaths) {
+						const matchingPath = productDocsPaths.find(
+							({ path }: { path: string }) => {
+								return path.endsWith(redirectedPath)
+							},
+						)
+						if (matchingPath) {
+							createdAt = matchingPath.created_at
+						} else {
+							console.warn(
+								`File metadata could not be found for redirected file ${githubFile}`,
+							)
+						}
+					}
+					break
+				}
+			}
 		}
 	}
 
