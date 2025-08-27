@@ -56,18 +56,46 @@ Use redirects for fun and profit!
   URL.
 
 
-## Limitations and gotchas
+## Redirect slugs
 
-- The `developers.hashicorp.com` platform does not support global redirects. The
-  most current docset only knows about redirects associated with that docset.
+There are 3 types of slugs: placeholders, wildcards, and named path parameters.
 
-- You must perpetuate backfacing redirects across future docsets. Otherwise,
-  the most current version of a docset will "forget" how to handle the
-  backfacing redirects.
+### Placeholders
 
-- You cannot split redirects across multiple files. For example, you cannot
-  create a file to define your backfacing redirects and include it in the main
-  redirect file.
+Placeholders only match to a single path section in the source definition.
+
+- Source definition: `:<name>`
+- Destination use: `:<name>`
+
+For example, the source definition `/path/:slug` matches to `path/subpath` but
+not `path`, `path/`, or `/path/subpath/anothersubpath/`.
+
+### Wildcards
+
+Wildcards match to the root path (with or without a trailing slash) and all
+subpaths.
+
+- Source definition: `:<name>*`
+- Destination use: `:<name>*`
+
+For example, the source definition `/path/:slug*` matches to `path`, `path/`,
+`path/subpath`, and `/path/subpath/anothersubpath/`.
+
+You must include the `*` character in the destination URL. Just using the slug
+name will not work properly.
+
+### Named path parameters
+
+Named parameters match to the corresponding pattern or non-capture group.
+Patterns and non-capture groups can include a single path segment, multiple path
+segments, or all subpaths.
+
+- Source definition: `:<name>(<pattern or non-capture group>)`
+- Destination use: `:<name>`
+
+For example, the source definition `/path/:slug(1\\.(?:9\|1[0-5])\\.x)` matches
+to `path/1.9.x` through `path/1.15.x` but not to `path`, `path/` or any other
+subpath.
 
 
 ## Path parameter definition
@@ -114,6 +142,29 @@ Notation | Character set
 `\W`     | Non-word characters including most special characters
 `\s`     | Whitespace characters
 `\S`     | Non-whitespace characters
+
+
+
+## Limitations and gotchas
+
+- Only the most recent redirect file matters.  The `developers.hashicorp.com`
+  platform only compiles redirects from the most recent redirect file.
+
+- You must perpetuate backfacing redirects across future docsets. Otherwise, the
+  most current version of a docset will "forget" how to handle the backfacing
+  redirects.
+
+- You cannot split redirects across multiple files. For example, you cannot
+  create a file to define your backfacing redirects and include it in the main
+  redirect file.
+
+- If you use a non-capture group to capture subpaths, the redirect only works
+  for the root path with the `/` included. For example, a source definition like
+  `/path/:slug(.*)` works for `/path/path1` or `/path/`, but not for `/path`.
+  To capture both forms of the root path, you need to include the `/` character
+  as part of the non-capture group instead of the explicit path. For example,
+  `/path:slug(/?.*)`. Unless you actually need a non-capture group for subpaths,
+  wildcards are typically easier to read.
 
 
 
@@ -219,7 +270,7 @@ Use a non-capture group to redirect all child paths:
 
 ```json
   {
-    "source": "/old/path/:slug(.*)",
+    "source": "/old/path:slug(/?.*)",
     "destination": "/new/path/:slug",
     "permanent": true,
   }
