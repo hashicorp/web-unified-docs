@@ -1,0 +1,99 @@
+---
+page_title: Increase Terraform Enterprise run capacity on Kubernetes
+description: >-
+  Learn how to increase the run capacity when operating Terraform Enterprise on Kubernetes.   
+---
+
+# Increase Terraform Enterprise run capacity
+
+This topic describes how to increase the run capacity of your Terraform Enterprise deployment on Kubernetes. For instructions on how to create the number of replicas, refer to [Increase number of replicas](/terraform/enterprise/deploy/kubernetes/scale/replicas).
+
+## Introduction
+
+Terraform Enterprise executes runs by creating agent jobs in a different namespace, which in turn creates agent pods. Each run executes in its own agent pod. When run finishes, Terraform automatically cleanse up the agent job and agent pod. You can increase the maximum number of concurrent agent pods to reduce run queue lengths and wait time for runs to begin execution.
+
+Complete the following steps to increase run capacity:
+
+- Configure the maximum number of concurrent agent jobs.
+- Configure memory and CPU limits for individual pods.
+- Adjust the Kubernetes worker timeout settings to allow Kubernetes to automatically scale the cluster. 
+
+## Configure concurrency
+
+To increase the number of agent pods that Terraform Enterpise can run concurrently, update the `TFE_CAPACITY_CONCURRENCY` value on the values file on the Helm chart and run `helm upgrade` to update the deployment. 
+
+The `TFE_CAPACITY_CONCURRENCY` value sets the maximum number of agent jobs each Terraform Enterprise pod can create at a given time in the `TFE_CAPACITY_CONCURRENCY` setting. The default concurrency is set to `10`. You can specify up to `50` agent jobs. The following example sets the concurrent number of agent jobs allowed to `11`:
+
+``` YAML
+  env:
+  ...
+  variables:
+    TFE_CAPACITY_CONCURRENCY: "11" 
+```
+
+`TFE_CAPACITY_CONCURRENCY` applies to each `terraform-enterprise` pod. For example, if you have three `terraform-enterprise` pods, and `TFE_CAPACITY_CONCURRENCY` is `10`, the maximum number of agent pods for Terraform Enterprise is `30`. Refer to [`TFE_CAPACITY_CONCURRENCY`](/terraform/enterprise/deploy/configuration#tfe_capacity_concurrency) for additional information.
+
+## Configure limits for individual agent pods
+
+You can increase the maximum amount of memory and CPU for each agent pod in the `TFE_CAPACITY_MEMORY`and `TFE_CAPACITY_CPU` values and run `helm upgrade` to update the deployment. Refer to the [Helm chart](https://github.com/hashicorp/terraform-enterprise-helm/blob/0e1a2eb6644bdf6b710c9ce97ed1d2b8e3c558ae/values.yaml#L167-L169) for additional information.
+
+In the following example, the CPU limit is set to `0`, which enables an unlimited about of CPU. The memory limit is set to `2048`, which enables up to 2048 mebibytes.  
+
+``` YAML
+  env:
+  ...
+  variables:
+    TFE_CAPACITY_CONCURRENCY: "10"     # Set the maximum number of concurrent runs, eg: 10
+    TFE_CAPACITY_CPU: "0"              # Set the maximum CPU utilization. "0" equals unlimited.
+    TFE_CAPACITY_MEMORY: "2048"        # Set the maximum memory utilization, eg: "2048" equals 2048Mi.
+```
+
+## Use Kubernetes cluster autoscaling
+
+
+Enable the `autoscaling` setting for your Kubernetes cluster so that Kubernetes can automatically scale the node capacity when Kubernetes cannot schedule the run due to resource constraints. You must also adjust the [`TFE_RUN_PIPELINE_KUBERNETES_WORKER_TIMEOUT`](/terraform/enterprise/deploy/reference/configuration#tfe_run_pipeline_kubernetes_worker_timeout) setting so that Terraform Enterprise does not timeout before the Kubernetes environment can scale to meet resource demand for additional runs. This setting should be set to be greater than the number of seconds Kubernetes requires to scale out and initiate a new node fitting the constraints and requirements for the agent jobs that Terraform Enterprise generates. 
+
+When `autoscaling` is enabled for the Kubernetes cluster, Terraform Enterprise still complies with the maximum number of jobs it can run concurrently per the `TFE_CAPACITY_CONCURRENCY` configuration. We recommend that you carefully configure your Kubernetes environment with infrastructure layer upper and lower bounds on node availability to meet your business needs outside of Terraform Enterprise.
+
+### Google Cloud Platform Kubernetes Engine with Autopilot
+
+You can use Google Cloud Platform Kubernetes Engine (GKE) pod annotations to fine tune the stability and availability of Terraform Enterprise. GKE Autopilot is a mode of operation that manages clusters. Refer to the [Autopilot documentation](https://cloud.google.com/kubernetes-engine/docs/concepts/autopilot-overview) for additional information. 
+
+At a minimum, we recommend the following annotations and node selectors:
+
+- require that `tfc-agent` pods are not interruptable using the following annotation: `cluster-autoscaler.kubernetes.io/safe-to-evict=false`
+- select a balanced compute class for both Terraform Enterprise pods and `tfc-agent` workloads using the following node selector: `cloud.google.com/compute-class: "Balanced"`
+- set resource requests for CPU and memory for Terraform Enterprise and `tfc-agent` pods
+
+Manage these settings in the [Terraform Enterprise Helm chart values](https://github.com/hashicorp/terraform-enterprise-helm/blob/main/values.yaml). 
+
+The following example shows how to configure features significant to operating Terraform Enterprise in GKE Autopilot. Note that the example is incomplete and does not include additional configurations for operating Terraform Enterprise:
+
+```yaml
+# Terraform Enterprise resource requests, annotations, and node selectors
+resources:
+  requests:
+    memory: "8000Mi"
+    cpu: "8"
+nodeSelector:
+  cloud.google.com/compute-class: "Balanced"
+pod:
+  annotations:
+    cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
+
+# Agent resource requests, annotations, and node selectors, utilizing the agent pod template feature
+agentWorkerPodTemplate :
+  metadata :
+    annotations :
+      "cluster-autoscaler.kubernetes.io/safe-to-evict": "false"
+  spec :
+    nodeSelector :
+      cloud.google.com/compute-class: "Balanced"
+    containers:
+      - name: "tfc-agent"
+        image:  "hashicorp/tfc-agent:1.17.5"
+        resources :
+          requests :
+            memory: 2Gi
+            cpu: 2
+```
