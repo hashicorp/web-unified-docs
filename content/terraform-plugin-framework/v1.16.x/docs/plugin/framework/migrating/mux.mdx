@@ -1,0 +1,371 @@
+---
+page_title: Migration using a mux server
+description: >-
+  Learn how to iteratively migrate from the SDKv2 to the plugin framework using
+  the terraform-plugin-mux Go library.
+---
+
+# Mux your provider server
+
+You can install the [terraform-plugin-mux Go
+module](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-mux) to help
+you migrate to the plugin framework over two or more release cycles. The module
+allows you to multiplex, also called **mux**, data from providers built on SDKv2
+and the plugin framework with your provider server. Each underlying provider
+implementation serves different managed resources and data sources. Refer to the
+[Combining and Translating documentation](/terraform/plugin/mux) for more
+details about implementing the `terraform-plugin-mux` module in your provider.
+
+## Background
+
+Use `terraform-plugin-mux` when:
+
+- You are migrating an existing provider based on the terraform-plugin-sdk
+  framework.
+- The provider includes more than a few managed resources and data sources.
+- You want to iteratively develop or release versions of your provider during
+  the migration process, with only some of your provider's resources and data
+  sources migrated to the framework.
+
+When possible, we recommend migrating directly to the framework in a single
+release cycle without temporarily implementing `terraform-plugin-mux` in your
+provider.
+
+## Requirements
+
+- Ensure `github.com/hashicorp/terraform-plugin-sdk/v2` is upgraded to the
+  latest version. For example, run the `go get
+  github.com/hashicorp/terraform-plugin-sdk/v2@latest` command to pull the most recent version.
+- Ensure existing acceptance tests pass. You can execute acceptance tests to
+  verify that the mux works before you release a new version of
+  your provider.
+
+## Implementation
+
+Complete the following steps to mux your provider server:
+
+1. Introduce a Go type implementing the framework's [`provider.Provider`
+   interface](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/provider#Provider).
+   Refer to the [provider definition
+   section](/terraform/plugin/framework/migrating/providers#provider-definition)
+   of the migration guide for additional details.
+1. Implement the `provider.Provider` type's
+   [`Schema`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/provider#Provider.Schema)
+   and
+   [`Configure`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/provider#Provider.Configure)
+   methods so it is compatible with `terraform-plugin-mux`. The schema and
+   configuration handling must exactly match between all underlying providers in
+   the provider server. Refer to the [provider schema
+   section](/terraform/plugin/framework/migrating/providers#provider-schema) of
+   the migration guide for additional details.
+1. Introduce a mux server using the `terraform-plugin-mux` module. Your
+   provider's `main()` function will reference this code. The `main()` function
+   is responsible for starting the provider server. Refer to the [Mux Server
+   Examples section](#mux-server-examples) for additional details.
+1. Introduce an acceptance test for the mux server implementation. Refer to the
+   [Example tests](#example-tests) for additional details.
+1. Ensure `github.com/hashicorp/terraform-plugin-mux` is added to the provider
+   Go module dependencies. For example, by running the `go get
+   github.com/hashicorp/terraform-plugin-mux@latest` command.
+1. Migrate your provider to the framework. Refer to the [Workflow - Migrating
+   with
+   mux](/terraform/plugin/framework/migrating/workflow#migrate-over-multiple-release-cycles)
+   section of this guide for additional details.
+1. Once the migration is complete, remove the mux configuration from your
+   provider, as well as any remaining references to SDKv2 libraries.
+1. Verify that all of your tests continue to pass.
+1. Release a new version of your provider.
+
+## Mux server examples
+
+The following examples demonstrate how to implement the `terraform-plugin-mux`
+module in your provider for various scenarios.
+
+### Terraform 0.12 compatibility
+
+If your provider maintains compatability with Terraform 0.12, implement the `terraform-plugin-mux` module
+with [protocol version
+5](/terraform/plugin/terraform-plugin-protocol#protocol-version-5).
+
+The following `main.go` example shows how to set up a mux server for a provider
+that uses protocol version 5 to maintain compatibility with Terraform 0.12 and
+later.
+
+This example also shows how to use the `debug` flag to optionally run the
+provider in debug mode.
+
+```go
+import (
+    "context"
+    "flag"
+    "log"
+
+    "github.com/hashicorp/terraform-plugin-framework/providerserver"
+    "github.com/hashicorp/terraform-plugin-go/tfprotov5"
+    "github.com/hashicorp/terraform-plugin-go/tfprotov5/tf5server"
+    "github.com/hashicorp/terraform-plugin-mux/tf5muxserver"
+
+    "example.com/terraform-provider-examplecloud/internal/provider"
+)
+
+func main() {
+    ctx := context.Background()
+
+    var debug bool
+
+    flag.BoolVar(&debug, "debug", false, "set to true to run the provider with support for debuggers like delve")
+    flag.Parse()
+
+    providers := []func() tfprotov5.ProviderServer{
+        providerserver.NewProtocol5(provider.New()), // Example terraform-plugin-framework provider
+        provider.Provider().GRPCProvider, // Example terraform-plugin-sdk provider
+    }
+
+    muxServer, err := tf5muxserver.NewMuxServer(ctx, providers...)
+
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    var serveOpts []tf5server.ServeOpt
+
+    if debug {
+        serveOpts = append(serveOpts, tf5server.WithManagedDebug())
+    }
+
+    err = tf5server.Serve(
+        "registry.terraform.io/<namespace>/<provider_name>",
+        muxServer.ProviderServer,
+        serveOpts...,
+    )
+
+    if err != nil {
+        log.Fatal(err)
+    }
+}
+```
+
+### Terraform 1.X compatibility
+
+You can set the mux server up to be incompatible with Terraform 0.12 through
+1.1.6 so that you can enable [protocol version
+6](/terraform/plugin/terraform-plugin-protocol#protocol-version-6) capabilities,
+such as nested attributes, in the framework provider. You should only introduce
+breaking changes to your provider in [major version
+updates](/terraform/plugin/best-practices/versioning#versioning-specification).
+
+The following `main.go` example shows how to use a mux server to upgrade a
+provider based on `terraform-plugin-sdk` so that it uses protocol version 6 and
+supports features in the framework provider.
+
+This example also shows how to use the `debug` flag to optionally run the
+provider in debug mode.
+
+```go
+import (
+    "context"
+    "flag"
+    "log"
+
+    "github.com/hashicorp/terraform-plugin-framework/providerserver"
+    "github.com/hashicorp/terraform-plugin-go/tfprotov6"
+    "github.com/hashicorp/terraform-plugin-go/tfprotov6/tf6server"
+    "github.com/hashicorp/terraform-plugin-mux/tf5to6server"
+    "github.com/hashicorp/terraform-plugin-mux/tf6muxserver"
+
+    "example.com/terraform-provider-examplecloud/internal/provider"
+)
+
+func main() {
+    ctx := context.Background()
+
+    var debug bool
+
+    flag.BoolVar(&debug, "debug", false, "set to true to run the provider with support for debuggers like delve")
+    flag.Parse()
+
+    upgradedSdkServer, err := tf5to6server.UpgradeServer(
+        ctx,
+        provider.Provider().GRPCProvider, // Example terraform-plugin-sdk provider
+    )
+
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    providers := []func() tfprotov6.ProviderServer{
+        providerserver.NewProtocol6(provider.New()()), // Example terraform-plugin-framework provider
+        func() tfprotov6.ProviderServer {
+            return upgradedSdkServer,
+        },
+    }
+
+    muxServer, err := tf6muxserver.NewMuxServer(ctx, providers...)
+
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    var serveOpts []tf6server.ServeOpt
+
+    if debug {
+        serveOpts = append(serveOpts, tf6server.WithManagedDebug())
+    }
+
+    err = tf6server.Serve(
+        "registry.terraform.io/<namespace>/<provider_name>",
+        muxServer.ProviderServer,
+        serveOpts...,
+    )
+
+    if err != nil {
+        log.Fatal(err)
+    }
+}
+```
+
+## Example tests
+
+The following examples demonstrate adding tests to verify that the mux server
+configuration works correctly during migration.
+
+### Protocol version 5
+
+The following acceptance test example would be included in the same Go package
+that defines the provider code to verify the mux server setup using protocol
+version 5:
+
+```go
+import (
+    "context"
+    "testing"
+
+    "github.com/hashicorp/terraform-plugin-go/tfprotov5"
+    "github.com/hashicorp/terraform-plugin-mux/tf5muxserver"
+    "github.com/hashicorp/terraform-plugin-testing/helper/resource"
+)
+
+func TestMuxServer(t *testing.T) {
+    resource.Test(t, resource.TestCase{
+        ProtoV5ProviderFactories: map[string]func() (tfprotov5.ProviderServer, error) {
+            "examplecloud": func() (tfprotov5.ProviderServer, error) {
+                ctx := context.Background()
+                providers := []func() tfprotov5.ProviderServer{
+                    providerserver.NewProtocol5(New()), // Example terraform-plugin-framework provider
+                    Provider().GRPCProvider, // Example terraform-plugin-sdk provider
+                }
+
+                muxServer, err := tf5muxserver.NewMuxServer(ctx, providers...)
+
+                if err != nil {
+                    return nil, err
+                }
+
+                return muxServer.ProviderServer(), nil
+            },
+        },
+        Steps: []resource.TestStep{
+            {
+                Config: "... configuration including simplest data source or managed resource",
+            },
+        },
+    })
+}
+```
+
+### Protocol Version 6
+
+The following acceptance test example would be included in the same Go package
+that defines the provider code to verify the mux server setup:
+
+```go
+import (
+    "context"
+    "testing"
+
+    "github.com/hashicorp/terraform-plugin-go/tfprotov6"
+    "github.com/hashicorp/terraform-plugin-mux/tf5to6server"
+    "github.com/hashicorp/terraform-plugin-mux/tf6muxserver"
+    "github.com/hashicorp/terraform-plugin-testing/helper/resource"
+)
+
+func TestMuxServer(t *testing.T) {
+    resource.Test(t, resource.TestCase{
+        ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error) {
+            "examplecloud": func() (tfprotov6.ProviderServer, error) {
+                ctx := context.Background()
+
+                upgradedSdkServer, err := tf5to6server.UpgradeServer(
+                    ctx,
+                    Provider().GRPCProvider, // Example terraform-plugin-sdk provider
+                )
+
+                if err != nil {
+                    return nil, err
+                }
+
+                providers := []func() tfprotov6.ProviderServer{
+                    providerserver.NewProtocol6(New()), // Example terraform-plugin-framework provider
+                    func() tfprotov6.ProviderServer {
+                        return upgradedSdkServer
+                    },
+                }
+
+                muxServer, err := tf6muxserver.NewMuxServer(ctx, providers...)
+
+                if err != nil {
+                    return nil, err
+                }
+
+                return muxServer.ProviderServer(), nil
+            },
+        },
+        Steps: []resource.TestStep{
+            {
+                Config: "... configuration including simplest data source or managed resource",
+            },
+        },
+    })
+}
+```
+
+## Migration notes
+
+- Only update acceptance test code for specific resources and data sources as
+  you migrate them to the framework. Refer to [Test your
+  migration](/terraform/plugin/framework/migrating/testing) for more
+  information.
+
+## Troubleshooting
+
+Use the following guidance to help you troubleshoot if the module returns an
+error.
+
+### `PreparedConfig` response from multiple servers
+
+Muxed provider servers may receive a new error, such as:
+
+```text
+Error: Plugin error
+
+  with provider["registry.terraform.io/example/examplecloud"],
+  on <empty> line 0:
+  (source code not available)
+
+The plugin returned an unexpected error from
+plugin.(*GRPCProvider).ValidateProviderConfig: rpc error: code = Unknown desc
+= got different PrepareProviderConfig PreparedConfig response from multiple
+servers, not sure which to use
+```
+
+If the terraform-plugin-sdk based provider was using
+[`Default`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-sdk/helper/schema#Schema.Default)
+or
+[`DefaultFunc`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-sdk/helper/schema#Schema.DefaultFunc),
+you must remove the usage of `Default` and `DefaultFunc` in that provider
+implementation. Transfer the logic into the provider
+[ConfigureFunc](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema#Provider.ConfigureFunc)
+or
+[ConfigureContextFunc](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema#Provider.ConfigureContextFunc),
+similar to how it must be implemented in a terraform-plugin-framework based
+provider.
