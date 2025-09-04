@@ -3,10 +3,11 @@
  * SPDX-License-Identifier: MPL-2.0
  */
 
-import path from 'path'
+import fs from 'node:fs'
+import path from 'node:path'
+
 import remark from 'remark'
 import flatMap from 'unist-util-flatmap'
-import fs from 'fs'
 
 /**
  * A remark plugin that allows including "partials" into other files.

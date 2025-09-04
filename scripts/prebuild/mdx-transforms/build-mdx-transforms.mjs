@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-import fs from 'fs'
-import path from 'path'
+import fs from 'node:fs'
+import path from 'node:path'
 
 // Third-party
 import remark from 'remark'
@@ -13,8 +13,8 @@ import grayMatter from 'gray-matter'
 
 import semver from 'semver'
 
-import { listFiles } from '../utils/list-files.mjs'
-import { batchPromises } from '../utils/batch-promises.mjs'
+import { listFiles } from '#scriptUtils/list-files.mjs'
+import { batchPromises } from '#scriptUtils/batch-promises.mjs'
 
 import { paragraphCustomAlertsPlugin } from './paragraph-custom-alert/paragraph-custom-alert.mjs'
 import { rewriteInternalLinksPlugin } from './add-version-to-internal-links/add-version-to-internal-links.mjs'

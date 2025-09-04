@@ -3,10 +3,10 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-import fs from 'fs'
+import fs from 'node:fs'
+import path from 'node:path'
 import { describe, expect, test } from 'vitest'
 
-import path from 'path'
 // Third-party
 import grayMatter from 'gray-matter'
 // Local
@@ -15,7 +15,7 @@ import { includePartials } from './include-partials.mjs'
 describe('Include Partials', () => {
 	const fixtureDir = path.join(
 		process.cwd(),
-		'scripts/mdx-transforms/include-partials/__fixtures__/basic',
+		'scripts/prebuild/mdx-transforms/include-partials/__fixtures__/basic',
 	)
 
 	const partialsDir = path.join(fixtureDir, 'partials')

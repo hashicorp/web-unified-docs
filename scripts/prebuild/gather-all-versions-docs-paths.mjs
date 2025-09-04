@@ -3,13 +3,14 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-import fs from 'fs'
-import path from 'path'
-import { PRODUCT_CONFIG } from '#productConfig.mjs'
-import { exec } from 'child_process'
-import { promisify } from 'util'
+import fs from 'node:fs'
+import path from 'node:path'
+import { exec } from 'node:child_process'
+import { promisify } from 'node:util'
 
-import { batchPromises } from './utils/batch-promises.mjs'
+import { PRODUCT_CONFIG } from '#productConfig.mjs'
+
+import { batchPromises } from '#scriptUtils/batch-promises.mjs'
 
 const execAsync = promisify(exec)
 

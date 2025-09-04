@@ -2,12 +2,12 @@
  * Copyright (c) HashiCorp, Inc.
  * SPDX-License-Identifier: BUSL-1.1
  */
+import path from 'node:path'
 
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { batchPostRecords } from './batch-post-records-to-algolia.mjs'
 import { algoliasearch } from 'algoliasearch'
 import algoliaRecords from '__fixtures__/algoliaRecords.json'
-import path from 'path'
 import { fs, vol } from 'memfs'
 
 vi.mock('algoliasearch')

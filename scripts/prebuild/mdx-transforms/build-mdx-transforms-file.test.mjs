@@ -12,7 +12,7 @@ import {
 import versionMetadata from '__fixtures__/versionMetadata.json'
 import * as repoConfig from '#productConfig.mjs'
 
-vi.mock('fs')
+vi.mock('node:fs')
 
 const mdxContent = `---
 page_title: 'Plugin Development - Framework: Paths'

@@ -2,14 +2,14 @@
  * Copyright (c) HashiCorp, Inc.
  * SPDX-License-Identifier: BUSL-1.1
  */
+import path from 'node:path'
+import { URL } from 'node:url'
 
 import remark from 'remark'
 import remarkMdx from 'remark-mdx'
 import flatMap from 'unist-util-flatmap'
 import is from 'unist-util-is'
-import path from 'path'
 
-import { URL } from 'url'
 import * as pathToRegexp from 'path-to-regexp'
 
 /**

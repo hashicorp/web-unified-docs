@@ -3,15 +3,16 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-import fs from 'fs'
-import path from 'path'
+import fs from 'node:fs'
+import path from 'node:path'
+
 import { buildMdxTransforms } from './mdx-transforms/build-mdx-transforms.mjs'
 import { gatherVersionMetadata } from './gather-version-metadata.mjs'
 import { gatherAllVersionsDocsPaths } from './gather-all-versions-docs-paths.mjs'
-import { buildAlgoliaRecords } from './algolia/build-algolia-records.mjs'
-import { copyNavDataFiles } from './utils/copy-nav-data-files.mjs'
-import { copyRedirectFiles } from './utils/copy-redirect-files.mjs'
-import { copyAllAssetFiles } from './utils/copy-asset-files.mjs'
+import { buildAlgoliaRecords } from '../algolia/build-algolia-records.mjs'
+import { copyNavDataFiles } from '#scriptUtils/copy-nav-data-files.mjs'
+import { copyRedirectFiles } from '#scriptUtils/copy-redirect-files.mjs'
+import { copyAllAssetFiles } from '#scriptUtils/copy-asset-files.mjs'
 
 /**
  * We expect the current working directory to be the project root.
