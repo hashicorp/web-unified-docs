@@ -27,6 +27,9 @@ export const rewriteInternalLinksPlugin = ({ entry, versionMetadata }) => {
 	 */
 	const [product, version] = relativePath.split('/')
 
+	// Remove any release stage in parentheses)
+	const cleanVersion = version.replace(/\s*\([^)]+\)/, '')
+
 	if (PRODUCT_CONFIG[product].versionedDocs === false) {
 		return
 	}
@@ -42,7 +45,7 @@ export const rewriteInternalLinksPlugin = ({ entry, versionMetadata }) => {
 	 * If the version in the filepath is the latest version or
 	 * no base paths exist for the product, then skip rewriting internal links
 	 */
-	if (version === latestVersion || !Object.entries(basePaths).length) {
+	if (cleanVersion === latestVersion || !Object.entries(basePaths).length) {
 		return
 	}
 	/**
@@ -63,7 +66,7 @@ export const rewriteInternalLinksPlugin = ({ entry, versionMetadata }) => {
 			// Check if the node is a link and matches the pattern for links to rewrite
 			if (node.type === 'link' && isLinkToRewritePattern.test(node.url)) {
 				// Replace the matched part of the URL with the versioned path
-				node.url = node.url.replace(replacePattern, `/$1/${version}$2`)
+				node.url = node.url.replace(replacePattern, `/$1/${cleanVersion}$2`)
 			}
 			// Return the node (those with and without a versioned path)
 			return [node]

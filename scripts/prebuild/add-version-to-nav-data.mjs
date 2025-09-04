@@ -34,6 +34,9 @@ export async function addVersionToNavData(filePath, versionMetadata) {
 		 */
 		const [product, version] = relativePath.split('/')
 
+		// Remove any release stage in parentheses)
+		const cleanVersion = version.replace(/\s*\([^)]+\)/, '')
+
 		// We are looking at a versionless doc
 		if (PRODUCT_CONFIG[product].versionedDocs === false) {
 			return
@@ -70,8 +73,8 @@ export async function addVersionToNavData(filePath, versionMetadata) {
 					(key === 'href' || key === 'path') &&
 					typeof obj[key] === 'string' &&
 					!obj[key].startsWith('http') &&
-					version !== latestVersion &&
-					!obj[key].includes(version)
+					cleanVersion !== latestVersion &&
+					!obj[key].includes(cleanVersion)
 				) {
 					// href allows linking outside of content subpath
 					let basePath = PRODUCT_CONFIG[product].basePaths?.find((basePath) => {
@@ -84,9 +87,9 @@ export async function addVersionToNavData(filePath, versionMetadata) {
 					// if the href starts with a basepath, e.g. "/cli", add version after the basepath
 					if (basePath && basePath.length) {
 						obj[key] =
-							`${basePath}/${version}${obj[key].substring(basePath.length)}`
+							`${basePath}/${cleanVersion}${obj[key].substring(basePath.length)}`
 					} else if (key === 'path') {
-						obj[key] = `${version}/${obj[key]}`
+						obj[key] = `${cleanVersion}/${obj[key]}`
 					}
 				}
 			}

@@ -253,4 +253,67 @@ describe('transformRewriteInternalLinks', () => {
 		)
 		expect(result).toBe(expectedOutput)
 	})
+
+	it('should remove release stage in parentheses from version', async () => {
+		const content = `[Link to plugin/testing](/plugin/testing/some-page)`
+		const entry = {
+			filePath:
+				'content/terraform-plugin-testing/v1.5.x (alpha)/docs/some-file.mdx',
+		}
+		const expectedOutput =
+			'[Link to plugin/testing](/plugin/testing/v1.5.x/some-page)\n'
+		const result = await transformRewriteInternalLinks(
+			content,
+			entry,
+			versionMetadata,
+		)
+		expect(result).toBe(expectedOutput)
+	})
+
+	it('should not modify version if there is no parentheses', async () => {
+		const content = `[Link to plugin/testing](/plugin/testing/some-page)`
+		const entry = {
+			filePath: 'content/terraform-plugin-testing/v1.5.x/docs/some-file.mdx',
+		}
+		const expectedOutput =
+			'[Link to plugin/testing](/plugin/testing/v1.5.x/some-page)\n'
+		const result = await transformRewriteInternalLinks(
+			content,
+			entry,
+			versionMetadata,
+		)
+		expect(result).toBe(expectedOutput)
+	})
+
+	it('should remove multiple spaces before parentheses', async () => {
+		const content = `[Link to plugin/testing](/plugin/testing/some-page)`
+		const entry = {
+			filePath:
+				'content/terraform-plugin-testing/v1.5.x    (alpha)/docs/some-file.mdx',
+		}
+		const expectedOutput =
+			'[Link to plugin/testing](/plugin/testing/v1.5.x/some-page)\n'
+		const result = await transformRewriteInternalLinks(
+			content,
+			entry,
+			versionMetadata,
+		)
+		expect(result).toBe(expectedOutput)
+	})
+
+	it('should handle version with parentheses but no space', async () => {
+		const content = `[Link to plugin/testing](/plugin/testing/some-page)`
+		const entry = {
+			filePath:
+				'content/terraform-plugin-testing/v1.5.x(alpha)/docs/some-file.mdx',
+		}
+		const expectedOutput =
+			'[Link to plugin/testing](/plugin/testing/v1.5.x/some-page)\n'
+		const result = await transformRewriteInternalLinks(
+			content,
+			entry,
+			versionMetadata,
+		)
+		expect(result).toBe(expectedOutput)
+	})
 })
