@@ -6,10 +6,13 @@
 import { expect, test, vi } from 'vitest'
 import { getDocsPaths } from './allDocsPaths'
 import docsPathsMock from '__fixtures__/docsPathsAllVersionsMock.json'
-import { getProductVersionMetadata } from '#utils/contentVersions'
+import { getProductVersionMetadata } from './contentVersions'
 import { Ok } from '#utils/result'
 
-vi.mock('#utils/contentVersions', async (importOriginal: any) => {
+// I tried to use the same import path as in the actual file
+// (#utils/contentVersions) but Vitest was not picking up the mock,
+// so I used a relative path instead... :(
+vi.mock('./contentVersions', async (importOriginal: any) => {
 	const mod = await importOriginal()
 	return {
 		...mod,
@@ -46,7 +49,7 @@ test('getDocsPaths should return filtered docs paths when a non-empty productSlu
 		releaseStage: 'stable',
 	}
 
-	vi.mocked(getProductVersionMetadata).mockResolvedValue(Ok(metadata))
+	vi.mocked(getProductVersionMetadata).mockReturnValue(Ok(metadata))
 
 	const response = await getDocsPaths(
 		['terraform-plugin-framework'],
