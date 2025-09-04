@@ -73,7 +73,11 @@ async function runPrebuild() {
 
 	try {
 		console.log(`\n`)
-		execSync(filename, { stdio: 'inherit' })
+
+		// Execute the prebuild binary with the same arguments passed in
+		const args = process.argv.slice(2).join(' ')
+		const command = args ? `${filename} ${args}` : filename
+		execSync(command, { stdio: 'inherit' })
 	} catch (error) {
 		console.error('Prebuild failed:', error.message)
 		process.exit(1)
