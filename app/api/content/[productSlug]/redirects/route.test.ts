@@ -6,11 +6,11 @@
 import { expect, test, vi } from 'vitest'
 import { GET } from './route'
 
-import * as utilsFileModule from '@utils/file'
-import * as utilsContentVersionsModule from '@utils/contentVersions'
-import { mockRequest } from '@utils/mockRequest'
+import * as utilsFileModule from '#utils/file'
+import * as utilsContentVersionsModule from '#utils/contentVersions'
+import { mockRequest } from '#utils/mockRequest'
 
-vi.mock('@api/versionMetadata.json', () => {
+vi.mock('#api/versionMetadata.json', () => {
 	return {
 		default: {
 			'terraform-docs-common': [

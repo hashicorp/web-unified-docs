@@ -7,7 +7,7 @@ import remark from 'remark'
 import remarkMdx from 'remark-mdx'
 import flatMap from 'unist-util-flatmap'
 
-import { PRODUCT_CONFIG } from '../../../app/utils/productConfig.mjs'
+import { PRODUCT_CONFIG } from '#productConfig.mjs'
 
 /**
  * Rewrites internal links in a document tree to include version information.

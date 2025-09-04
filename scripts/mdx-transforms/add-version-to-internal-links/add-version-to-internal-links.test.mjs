@@ -8,7 +8,7 @@ import { transformRewriteInternalLinks } from './add-version-to-internal-links.m
 import versionMetadata from '__fixtures__/versionMetadata.json'
 
 // Mock PRODUCT_CONFIG
-vi.mock('../../../app/utils/productConfig.mjs', () => {
+vi.mock('#productConfig.mjs', () => {
 	return {
 		PRODUCT_CONFIG: {
 			terraform: {

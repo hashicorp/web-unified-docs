@@ -7,7 +7,7 @@ import { beforeEach, expect, it, vi } from 'vitest'
 import { vol } from 'memfs'
 import { gatherVersionMetadata } from './gather-version-metadata.mjs'
 
-vi.mock('../app/utils/productConfig.mjs', () => {
+vi.mock('#productConfig.mjs', () => {
 	return {
 		PRODUCT_CONFIG: {
 			'terraform-enterprise': { contentDir: 'docs', versionedDocs: true },

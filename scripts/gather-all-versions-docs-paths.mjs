@@ -5,7 +5,7 @@
 
 import fs from 'fs'
 import path from 'path'
-import { PRODUCT_CONFIG } from '../app/utils/productConfig.mjs'
+import { PRODUCT_CONFIG } from '#productConfig.mjs'
 import { exec } from 'child_process'
 import { promisify } from 'util'
 

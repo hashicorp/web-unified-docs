@@ -5,7 +5,8 @@
 
 import { expect, test, vi, beforeEach, afterEach } from 'vitest'
 import { GET } from './route'
-import { mockRequest } from '@utils/mockRequest'
+import { mockRequest } from '#utils/mockRequest'
+import { findDocVersions } from '#utils/findDocVersions'
 
 import { vol } from 'memfs'
 
@@ -14,7 +15,7 @@ vi.mock('node:fs')
 vi.mock('node:fs/promises')
 
 // Mock PRODUCT_CONFIG
-vi.mock('@utils/productConfig.mjs', () => {
+vi.mock('#productConfig.mjs', () => {
 	return {
 		PRODUCT_CONFIG: {
 			'terraform-cdk': {
@@ -27,6 +28,12 @@ vi.mock('@utils/productConfig.mjs', () => {
 				websiteDir: 'website',
 			},
 		},
+	}
+})
+
+vi.mock('#utils/findDocVersions', () => {
+	return {
+		findDocVersions: vi.fn(),
 	}
 })
 
@@ -76,13 +83,8 @@ test('should return 404 if the product is invalid', async () => {
 })
 
 test('should return 200 and array of strings on valid params', async () => {
-	vi.mock('@utils/findDocVersions.ts', () => {
-		return {
-			findDocVersions: () => {
-				return ['v0.20.x', 'v0.21.x']
-			},
-		}
-	})
+	vi.mocked(findDocVersions).mockReturnValue(['v0.20.x', 'v0.21.x'])
+
 	const mockedResponse = {
 		versions: ['v0.20.x', 'v0.21.x'],
 	}

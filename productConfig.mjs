@@ -449,7 +449,7 @@ export const PRODUCT_CONFIG = {
 		productSlug: 'vault',
 		semverCoerce: semver.coerce,
 		versionedDocs: true,
-  	websiteDir: 'website',
+		websiteDir: 'website',
 	},
 	'well-architected-framework': {
 		/**

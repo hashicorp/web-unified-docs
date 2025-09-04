@@ -6,10 +6,10 @@
 import { expect, test, vi } from 'vitest'
 import { getDocsPaths } from './allDocsPaths'
 import docsPathsMock from '__fixtures__/docsPathsAllVersionsMock.json'
-import { getProductVersionMetadata } from '@utils/contentVersions'
-import { Ok } from '@utils/result'
+import { getProductVersionMetadata } from '#utils/contentVersions'
+import { Ok } from '#utils/result'
 
-vi.mock(import('@utils/contentVersions'), async (importOriginal: any) => {
+vi.mock('#utils/contentVersions', async (importOriginal: any) => {
 	const mod = await importOriginal()
 	return {
 		...mod,
@@ -17,13 +17,13 @@ vi.mock(import('@utils/contentVersions'), async (importOriginal: any) => {
 	}
 })
 
-vi.mock('@api/versionMetadata.json', () => {
+vi.mock('#api/versionMetadata.json', () => {
 	return {
 		default: {},
 	}
 })
 
-vi.mock('@api/docsPathsAllVersions.json', () => {
+vi.mock('#api/docsPathsAllVersions.json', () => {
 	return {
 		default: {},
 	}
@@ -46,7 +46,7 @@ test('getDocsPaths should return filtered docs paths when a non-empty productSlu
 		releaseStage: 'stable',
 	}
 
-	vi.mocked(getProductVersionMetadata).mockReturnValue(Ok(metadata))
+	vi.mocked(getProductVersionMetadata).mockResolvedValue(Ok(metadata))
 
 	const response = await getDocsPaths(
 		['terraform-plugin-framework'],
