@@ -9,60 +9,6 @@ import path from 'node:path'
 import remark from 'remark'
 import flatMap from 'unist-util-flatmap'
 
-// Module-level cache that persists across all plugin instances
-const includeCache = new Map()
-export const totalFilesCached = () => {
-	return includeCache.size
-}
-export let totalCacheHits = 0
-
-/**
- * Estimate the memory size of an object in bytes
- */
-function estimateObjectSize(obj) {
-	function sizeOf(obj) {
-		if (obj === null || obj === undefined) {
-			return 0
-		}
-
-		switch (typeof obj) {
-			case 'number':
-				return 8
-			case 'string':
-				return obj.length * 2 // UTF-16 encoding
-			case 'boolean':
-				return 4
-			case 'object':
-				if (Array.isArray(obj)) {
-					return obj.reduce((sum, item) => {
-						return sum + sizeOf(item)
-					}, 0)
-				} else {
-					return Object.keys(obj).reduce((sum, key) => {
-						return sum + sizeOf(key) + sizeOf(obj[key])
-					}, 0)
-				}
-			default:
-				return 0
-		}
-	}
-
-	return sizeOf(obj)
-}
-
-/**
- * Get the estimated cache size in MB
- */
-export const getCacheSizeMB = () => {
-	let totalBytes = 0
-
-	for (const [key, value] of includeCache) {
-		totalBytes += estimateObjectSize(key) + estimateObjectSize(value)
-	}
-
-	return (totalBytes / (1024 * 1024)).toFixed(2)
-}
-
 /**
  * A remark plugin that allows including "partials" into other files.
  *
@@ -83,7 +29,6 @@ export function remarkIncludePartialsPlugin({ partialsDir, filePath }) {
 			'Error in remarkIncludePartials: The partialsDir argument is required. Please provide the path to the partials directory.',
 		)
 	}
-
 	// Set up and return the transformer function to be used as a remark plugin
 	return function transformer(tree) {
 		/**
@@ -113,53 +58,41 @@ export function remarkIncludePartialsPlugin({ partialsDir, filePath }) {
 			 */
 
 			const includePath = path.join(partialsDir, includeMatch[1])
-			let cacheEntry
-
-			// Check if file contents are already cached
-			if (includeCache.has(includePath)) {
-				cacheEntry = includeCache.get(includePath)
-				totalCacheHits++
-			} else {
-				try {
-					const includeContents = fs.readFileSync(includePath, 'utf8')
-					const isMarkdownOrMdx = includePath.match(/\.md(?:x)?$/)
-
-					// Process the content based on file type and cache the result
-					if (isMarkdownOrMdx) {
-						const processor = remark()
-						processor.use(remarkIncludePartialsPlugin, { partialsDir })
-						const ast = processor.parse(includeContents)
-
-						cacheEntry = {
-							isMarkdownOrMdx: true,
-							processedContent: processor.runSync(ast, includeContents)
-								.children,
-						}
-					} else {
-						const includeLang = path.extname(includePath).slice(1)
-						cacheEntry = {
-							isMarkdownOrMdx: false,
-							processedContent: [
-								{
-									type: 'code',
-									lang: includeLang,
-									value: includeContents.trim(),
-								},
-							],
-						}
-					}
-
-					// Cache the processed entry for future use
-					includeCache.set(includePath, cacheEntry)
-				} catch {
-					throw new Error(
-						`@include file not found. In "${filePath}", on line ${node.position.start.line}, column ${node.position.start.column}, please ensure the referenced file "${includePath}" exists.`,
-					)
-				}
+			let includeContents
+			try {
+				includeContents = fs.readFileSync(includePath, 'utf8')
+			} catch {
+				throw new Error(
+					`@include file not found. In "${filePath}", on line ${node.position.start.line}, column ${node.position.start.column}, please ensure the referenced file "${includePath}" exists.`,
+				)
 			}
 
-			// Return the cached processed content
-			return cacheEntry.processedContent
+			/**
+			 * Replace the `@include` with the contents of the file.
+			 * We run some processing on the file contents based on the file type.
+			 *
+			 * If the file is Markdown or MDX, we process it with remark to enable
+			 * recursive includes, and then return the processed contents.
+			 *
+			 * Else for other file types, we wrap the file contents in a code block.
+			 */
+			const isMarkdownOrMdx = includePath.match(/\.md(?:x)?$/)
+			if (isMarkdownOrMdx) {
+				const processor = remark()
+				processor.use(remarkIncludePartialsPlugin, { partialsDir })
+				const ast = processor.parse(includeContents)
+				return processor.runSync(ast, includeContents).children
+			} else {
+				const includeLang = path.extname(includePath).slice(1)
+				// Return the file contents wrapped inside a "code" node and trim any leading or trailing whitespace in the file
+				return [
+					{
+						type: 'code',
+						lang: includeLang,
+						value: includeContents.trim(),
+					},
+				]
+			}
 		})
 	}
 }

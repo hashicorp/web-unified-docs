@@ -18,12 +18,7 @@ import { batchPromises } from '#scriptUtils/batch-promises.mjs'
 
 import { paragraphCustomAlertsPlugin } from './paragraph-custom-alert/paragraph-custom-alert.mjs'
 import { rewriteInternalLinksPlugin } from './add-version-to-internal-links/add-version-to-internal-links.mjs'
-import {
-	remarkIncludePartialsPlugin,
-	totalFilesCached,
-	totalCacheHits,
-	getCacheSizeMB,
-} from './include-partials/remark-include-partials.mjs'
+import { remarkIncludePartialsPlugin } from './include-partials/remark-include-partials.mjs'
 import {
 	rewriteInternalRedirectsPlugin,
 	loadRedirects,
@@ -112,12 +107,6 @@ export async function buildMdxTransforms(
 		console.error('\n❗ Build failed due to errors in MDX transforms.')
 		process.exit(1)
 	}
-
-	// Log out cache statistics
-	console.log(
-		`Cache: ${totalFilesCached()} files, ${getCacheSizeMB()} MB, ${totalCacheHits} hits`,
-	)
-
 	// Log out that the script has complete
 	console.log(`✅ Applied MDX transforms to ${mdxFileEntries.length} files.`)
 }
