@@ -3,12 +3,16 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-import { readFile, parseMarkdownFrontMatter } from '@utils/file'
-import { getProductVersion } from '@utils/contentVersions'
-import { errorResultToString } from '@utils/result'
-import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
-import docsPathsAllVersions from '@api/docsPathsAllVersions.json'
-import { VersionedProduct } from '@api/types'
+import {
+	findFileWithMetadata,
+	joinFilePath,
+	parseMarkdownFrontMatter,
+} from '#utils/file'
+import { getProductVersionMetadata } from '#utils/contentVersions'
+import { errorResultToString } from '#utils/result'
+import { PRODUCT_CONFIG } from '#productConfig.mjs'
+import docsPathsAllVersions from '#api/docsPathsAllVersions.json'
+import { VersionedProduct } from '#api/types'
 
 /**
  * Parameters expected by `GET` route handler
@@ -33,15 +37,15 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 
 	// Determine the content directory based on the "product" (actually repo) slug
 	const { contentDir } = PRODUCT_CONFIG[productSlug]
-	const productVersionResult = getProductVersion(productSlug, version)
+	const productVersionResult = getProductVersionMetadata(productSlug, version)
 	if (!productVersionResult.ok) {
 		console.error(errorResultToString('API', productVersionResult))
 		return new Response('Not found', { status: 404 })
 	}
 
-	const { value: parsedVersion } = productVersionResult
+	const { value: versionMetadata } = productVersionResult
 
-	let parsedDocsPath = docsPath.join('/')
+	let parsedDocsPath = joinFilePath(docsPath)
 	if (parsedDocsPath.endsWith('.mdx')) {
 		parsedDocsPath = parsedDocsPath.slice(0, -4)
 	}
@@ -65,14 +69,14 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 		[
 			`content`,
 			productSlug,
-			parsedVersion,
+			versionMetadata.version,
 			contentDir,
 			`${parsedDocsPath}.mdx`,
 		],
 		[
 			`content`,
 			productSlug,
-			parsedVersion,
+			versionMetadata.version,
 			contentDir,
 			parsedDocsPath,
 			`index.mdx`,
@@ -81,12 +85,13 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 
 	let foundContent, githubFile, createdAt
 	for (const loc of possibleContentLocations) {
-		const readFileResult = await readFile(loc)
+		const readFileResult = await findFileWithMetadata(loc, versionMetadata)
 
 		if (readFileResult.ok) {
 			foundContent = readFileResult.value
 			githubFile = loc.join('/')
-			const productDocsPaths = docsPathsAllVersions[productSlug][parsedVersion]
+			const productDocsPaths =
+				docsPathsAllVersions[productSlug][versionMetadata.version]
 			if (productDocsPaths) {
 				const matchingPath = productDocsPaths.find(
 					({ path }: { path: string }) => {
@@ -108,7 +113,7 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 	if (!foundContent) {
 		const locationsString = possibleContentLocations.map(
 			(location: string[]) => {
-				return `* ${location.join('/')}`
+				return `* ${joinFilePath(location)}`
 			},
 		)
 		console.error(
@@ -135,7 +140,7 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 			fullPath: parsedDocsPath,
 			product: productSlug,
 			version: PRODUCT_CONFIG[productSlug].versionedDocs
-				? parsedVersion
+				? versionMetadata.version
 				: 'v0.0.x',
 			metadata,
 			subpath: 'docs', // TODO: I guess we could grab the first part of the rawDocsPath? Is there something I am missing here?

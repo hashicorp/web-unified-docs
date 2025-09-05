@@ -3,10 +3,10 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-import { readFile, parseJson } from '@utils/file'
-import { getProductVersion } from '@utils/contentVersions'
-import { errorResultToString } from '@utils/result'
-import { VersionedProduct } from '@api/types'
+import { findFileWithMetadata, parseJson } from '#utils/file'
+import { getProductVersionMetadata } from '#utils/contentVersions'
+import { errorResultToString } from '#utils/result'
+import { VersionedProduct } from '#api/types'
 
 /**
  * Parameters expected by `GET` route handler
@@ -20,23 +20,26 @@ export type GetParams = VersionedProduct & {
 }
 export async function GET(request: Request, { params }: { params: GetParams }) {
 	const { productSlug, version, section } = params
-	const productVersionResult = getProductVersion(productSlug, version)
+	const productVersionResult = getProductVersionMetadata(productSlug, version)
 	if (!productVersionResult.ok) {
 		console.error(errorResultToString('API', productVersionResult))
 		return new Response('Not found', { status: 404 })
 	}
 
-	const { value: parsedVersion } = productVersionResult
+	const { value: versionMetadata } = productVersionResult
 
 	const sectionPath = section.join('/')
 
-	const readFileResult = await readFile([
-		'content',
-		productSlug,
-		parsedVersion,
-		'data',
-		`${sectionPath}-nav-data.json`,
-	])
+	const readFileResult = await findFileWithMetadata(
+		[
+			'content',
+			productSlug,
+			versionMetadata.version,
+			'data',
+			`${sectionPath}-nav-data.json`,
+		],
+		versionMetadata,
+	)
 
 	if (!readFileResult.ok) {
 		console.error(errorResultToString('API', readFileResult))

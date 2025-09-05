@@ -13,20 +13,20 @@ import {
 	MockInstance,
 } from 'vitest'
 import { GET } from './route'
-import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
-import { Err, Ok } from '@utils/result'
-import { getProductVersionMetadata } from '@utils/contentVersions'
-import { mockRequest } from '@utils/mockRequest'
+import { PRODUCT_CONFIG } from '#productConfig.mjs'
+import { Err, Ok } from '#utils/result'
+import { getProductMetadata } from '#utils/contentVersions'
+import { mockRequest } from '#utils/mockRequest'
 
-vi.mock(import('@utils/contentVersions'), async (importOriginal: any) => {
+vi.mock('#utils/contentVersions', async (importOriginal: any) => {
 	const mod = await importOriginal()
 	return {
 		...mod,
-		getProductVersionMetadata: vi.fn(),
+		getProductMetadata: vi.fn(),
 	}
 })
 
-vi.mock('@api/versionMetadata.json', () => {
+vi.mock('#api/versionMetadata.json', () => {
 	return {
 		default: {},
 	}
@@ -46,7 +46,7 @@ describe('GET /[productSlug]/version-metadata', () => {
 		const productSlug = 'invalid-product-name'
 
 		// Simulate an error from getProductversionMetadata
-		vi.mocked(getProductVersionMetadata).mockImplementationOnce(
+		vi.mocked(getProductMetadata).mockImplementationOnce(
 			(productName: string) => {
 				return Err(`Product, ${productName}, not found in version metadata`)
 			},
@@ -78,7 +78,7 @@ describe('GET /[productSlug]/version-metadata', () => {
 		]
 
 		// Fake the return value from getProductVersionMetadata
-		vi.mocked(getProductVersionMetadata).mockReturnValue(Ok(versionMetadata))
+		vi.mocked(getProductMetadata).mockReturnValue(Ok(versionMetadata))
 
 		const response = await mockRequest(GET, { productSlug })
 

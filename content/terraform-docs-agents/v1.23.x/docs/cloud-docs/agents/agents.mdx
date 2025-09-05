@@ -1,0 +1,333 @@
+---
+page_title: Install and run HCP Terraform agents
+description: >-
+  Use HCP Terraform agents to manage infrastructure in private networks. Learn how to install, configure, and run agents on your own infrastructure.
+---
+
+# Install and run agents
+
+@include 'agents.mdx'
+
+The agent software runs on your own infrastructure. The token you provide when starting the agent assigns it to an HCP Terraform [agent pool](/terraform/cloud-docs/agents/agent-pools).
+
+If you have your Agent pool and token already set up, [start the agent using the official Docker image](/terraform/cloud-docs/agents/agents#run-an-agent-with-docker).
+
+## Operational considerations
+
+Agents do not guarantee a clean working environment per Terraform execution. Each execution occurs in its own temporary directory with a clean environment, but references to absolute file paths or other machine state may cause interference between Terraform executions. We strongly recommend that you write your Terraform code to be stateless and idempotent. You may also want to consider using [single-execution mode](#optional-configuration-single-execution-mode) to ensure your agent only runs a single workload.
+
+### Run multiple agents
+
+You may choose to run multiple agents within your network, up to the organization's purchased agent limit. If there are multiple agents available within an organization, HCP Terraform selects the first available agent within the target pool.
+
+Each agent process runs a single Terraform run at a time. Multiple agent processes can be concurrently run on a single instance, license limit permitting.
+
+### Resilience
+
+The agent distributes as a standalone binary that runs on any supported system. By default, the agent runs in the foreground as a long-running process that continuously polls for workloads from HCP Terraform. An agent process may terminate unexpectedly due to stopping the process forcefully, power cycling the host machine, and other methods. We strongly recommend pairing the agent with a process supervisor to ensure that it automatically restarts in case of an error.
+
+### Updates
+
+By default, the agent automatically updates itself to the latest minor version. Administrators must update the host operating system and all other installed software.
+
+To customize this update behavior, pass the flag `-auto-update` or set the environment variable `TFC_AGENT_AUTO_UPDATE` to one of the following settings.
+
+| Update Setting | Behavior                                                                                                     |
+| -------------- | ------------------------------------------------------------------------------------------------------------ |
+| `minor`        | Matches the default behavior, automatically updates the agent to the latest minor version.                    |
+| `patch`        | The agent only updates to the newest patch version, new minor versions require a manual update. |
+| `disabled`     | Disables automatic updates, all updates are manual.
+
+## Run an agent with Docker
+
+To start the agent with the official Docker image and connect it to an HCP Terraform agent pool:
+
+1. Retrieve the [token](/terraform/cloud-docs/agents/agent-pools#create-an-agent-pool) from the HCP Terraform agent pool you want to use.
+1. Set the `TFC_AGENT_TOKEN` environment variable.
+1. (Optional) Set the `TFC_AGENT_NAME` environment variable. This name is for your reference only. The agent ID appears in logs and API requests.
+
+```shell-session
+export TFC_AGENT_TOKEN=your-token
+export TFC_AGENT_NAME=your-agent-name
+docker run --platform=linux/amd64 -e TFC_AGENT_TOKEN -e TFC_AGENT_NAME hashicorp/tfc-agent:latest
+```
+
+Once complete, your agent and its status appear on the **Agents** page in the HCP Terraform UI. Workspaces can now use this agent pool for runs. Refer to [Configure Workspaces to Use the Agent](/terraform/cloud-docs/agents/agent-pools#configure-workspaces-to-use-the-agent) for details.
+
+## Run an agent using the binary
+
+To download and install the agent:
+
+1. Download the latest [agent release](https://releases.hashicorp.com/tfc-agent/), the associated checksum file (.SHA256sums), and the checksum signature (.sig).
+1. Verify the integrity of the downloaded archive, as well as the signature of the `SHA256SUMS` file using the instructions available on [HashiCorp's security page](https://www.hashicorp.com/security).
+1. Extract the release archive. The `unzip` utility is available on most Linux distributions, and you can invoke it by running `unzip <archive file>`. The `unzip` command extracts two individual binaries (`tfc-agent` and `tfc-agent-core`). These binaries must reside in the same directory for the agent to function properly.
+
+To start the agent and connect it to an HCP Terraform agent pool:
+
+1. Retrieve the [token](/terraform/cloud-docs/agents/agent-pools#create-an-agent-pool) from the HCP Terraform agent pool you want to use.
+1. Set the `TFC_AGENT_TOKEN` environment variable.
+1. (Optional) Set the `TFC_AGENT_NAME` environment variable. This name is for your reference only. The agent ID appears in logs and API requests.
+
+```
+export TFC_AGENT_TOKEN=your-token
+export TFC_AGENT_NAME=your-agent-name
+./tfc-agent
+```
+Once complete, your agent and its status appear on the **Agents** page in the HCP Terraform UI. Workspaces can now use this agent pool for runs. Refer to [Configure Workspaces to Use the Agent](/terraform/cloud-docs/agents/agent-pools#configure-workspaces-to-use-the-agent) for details.
+
+## Optional configuration
+
+The optional configurations for customizing the agent include building a custom Docker image that grants sudo privileges for software installation, running in single-execution mode to process a single workload before terminating, and enabling request forwarding for secure access to private resources.
+
+### Customize the agent Docker image
+
+The Docker image executes the `tfc-agent` process as the non-root `tfc-agent` user. For some workflows, you may need to build a customized version of the agent Docker image for your internal use. For example, if your workflow needs to install software using `apt-get` during `local-exec` scripts.
+
+```Dockerfile
+FROM hashicorp/tfc-agent:latest
+
+USER root
+
+# Install sudo. The container runs as a non-root user, but people may rely on
+# the ability to apt-get install things.
+RUN apt-get -y install sudo
+
+# Permit tfc-agent to use sudo apt-get commands.
+RUN echo 'tfc-agent ALL=NOPASSWD: /usr/bin/apt-get , /usr/bin/apt' >> /etc/sudoers.d/50-tfc-agent
+
+USER tfc-agent
+```
+ 
+The above customized Dockerfile lets an agent install additional software using `sudo apt-get`.
+
+### Single-execution mode
+
+You can also configure the agent to run in single-execution mode, which ensures that the agent only runs a single workload, then terminates. You can use this configuration in combination with Docker and a process supervisor to ensure a clean working environment for every Terraform run.
+
+To use single-execution mode, start the agent with the `-single` command line argument.
+
+### Request forwarding
+
+You can configure the agent to accept forwarded requests from HCP Terraform. Request forwarding enables HCP Terraform to securely access private infrastructure resources, such as private VCS systems. See [Request Forwarding](/terraform/cloud-docs/agents/request-forwarding) for more details. By default, request forwarding is disabled. To enable it, start the agent with the `-request-forwarding` command line argument.
+
+Agents handle forwarded requests separately from other workloads and may process requests in parallel to plans, applies, policy checks, etc. You can modify this behavior by enabling or disabling certain workload types via the `-accept` parameter, and selectively setting the `-request-forwarding` flag on certain agent(s) only. For example, you may have a pool of 4 agents, where two are configured to handle only plans and applies, and the other two are configured to handle only request forwarding.
+
+## Stop the agent
+
+~> **Important:** We strongly recommend that you only terminate the agent using one of these methods. Abruptly terminating an agent by forcefully stopping the process or power cycling the host does not let the agent deregister and results in an **Unknown** agent status. Abrupt termination may cause further capacity issues. Refer to [capacity issues](/terraform/cloud-docs/agents/agent-pools#agent-capacity-usage) for details.
+
+The agent maintains a registration and a liveness indicator within HCP Terraform during the entire course of its runtime. When an agent retires, it must deregister itself from HCP Terraform. The agent deregisters automatically as part of its shutdown procedure in the following scenarios:
+
+- You enter `Ctrl-C` in an interactive terminal.
+- The agent process ID receives one of `SIGINT`, `SIGTERM`, or `SIGQUIT`. It is important to send only one signal. The agent interprets a second signal as forceful termination signal exits immediately.
+
+After initiating a graceful shutdown by either of these methods, the terminal user or parent program should wait for the agent to exit. The amount of time this exit takes depends on the agent's current workload. The agent waits for any current operations to complete before deregistering and exiting.
+
+## Address provider compatibility errors
+
+If a provider does not support your agent’s architecture, the following error appears in the agent’s TRACE logs, the CLI, or the UI:
+
+```plaintext
+Error: Incompatible provider version
+
+Provider registry.terraform.io/<namespace>/<name_version> does not have a 
+package available for your current platform, <os_architecture>.
+
+Provider releases are separate from Terraform CLI releases, so not all 
+providers are available for all platforms. Other versions of this provider 
+may have different platforms supported.
+```
+
+You can call the [Terraform provider registry API](/terraform/internals/provider-registry-protocol#list-available-versions) to confirm the architectures available for a provider. 
+
+Sample request:
+
+```shell-session
+$ curl 'https://registry.terraform.io/v1/providers/hashicorp/random/versions'
+```
+
+Sample response:
+
+```json
+{
+  "versions": [
+    {
+      "version": "2.0.0",
+      "protocols": ["4.0", "5.1"],
+      "platforms": [
+        {"os": "darwin", "arch": "amd64"},
+        {"os": "linux", "arch": "amd64"},
+        {"os": "linux", "arch": "arm"},
+        {"os": "windows", "arch": "amd64"}
+      ]
+    },
+    {
+      "version": "2.0.1",
+      "protocols": ["5.2"],
+      "platforms": [
+        {"os": "darwin", "arch": "amd64"},
+        {"os": "linux", "arch": "amd64"},
+        {"os": "linux", "arch": "arm"},
+        {"os": "windows", "arch": "amd64"}
+      ]
+    }
+  ]
+}
+```
+
+<!--
+  ⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️
+  WARNING: This the CLI options section is auto-generated during agent release process. 
+  Do not edit this section directly as your changes will be overwritten.
+  ⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️
+-->
+# CLI options
+
+
+* `-name <name>`:
+    An optional user-specified name for the agent. This name may be used in
+    the HCP Terraform user interface to help easily identify the agent.
+
+    Default: `The agent's ephemeral ID, assigned during boot.`
+
+    Environment variable: `TFC_AGENT_NAME`
+
+
+* `-log-level <level>`:
+    The log verbosity expressed as a level string. Level options include
+    "trace", "debug", "info", "warn", and "error". Log levels have a
+    progressive level of data sensitivy. The "info", "warn", and "error" levels
+    are considered generally safe for log collection and don't include
+    sensitive information. The "debug" log level may include internal system
+    details, such as specific commands and arguments including paths to user
+    data on the local filesystem.  The "trace" log level is the most sensitive
+    and may include personally identifiable information, secrets,
+    pre-authorized internal URLs, and other sensitive material.
+
+    Default: `info`
+
+    Environment variable: `TFC_AGENT_LOG_LEVEL`
+
+
+* `-log-json`:
+    Enable JSON logging mode.
+
+    Default: `false`
+
+    Environment variable: `TFC_AGENT_LOG_JSON`
+
+
+* `-data-dir <path>`:
+    The path to a directory to store all agent-related data, including
+    Terraform configurations, cached Terraform release archives, etc. It is
+    important to ensure that the given directory is backed by plentiful
+    storage.
+
+    Default: `~/.tfc-agent`
+
+    Environment variable: `TFC_AGENT_DATA_DIR`
+
+
+* `-cache-dir <path>`:
+    The path to a directory to store all agent-related cache data, including
+    cached Terraform release archives, policy binaries, etc. It is important to
+    ensure that the given directory is backed by plentiful storage.
+
+    Default: `<data-dir>/cache`
+
+    Environment variable: `TFC_AGENT_CACHE_DIR`
+
+
+* `-single`:
+    Enable single mode. This causes the agent to handle at most one job and
+    immediately exit thereafter. Useful for running agents as ephemeral
+    containers, VMs, or other isolated contexts with a higher-level scheduler
+    or process supervisor.
+
+    Default: `false`
+
+    Environment variable: `TFC_AGENT_SINGLE`
+
+
+* `-auto-update`:
+    Controls automatic core updates behavior. Acceptable values include
+    "disabled", "patch", and "minor".
+
+    Default: `minor`
+
+    Environment variable: `TFC_AGENT_AUTO_UPDATE`
+
+
+* `-address <addr>`:
+    The HTTP or HTTPS address of the HCP Terraform API.
+
+    Default: `https://app.terraform.io`
+
+    Environment variable: `TFC_ADDRESS`
+
+
+* `-token <token>`:
+    The agent token to use when making requests to the HCP Terraform API.
+    This token must be obtained from the API or UI.  It is recommended to use
+    the environment variable whenever possible for configuring this setting due
+    to the sensitive nature of API tokens.
+
+    Required, no default.
+    Environment variable: `TFC_AGENT_TOKEN`
+
+
+* `-otlp-address <addr>`:
+    Optional host:port address of an OpenTelemetry collector to send telemetry
+    data to, including metrics and tracing. Currently the agent connects to
+    this address using the gRPC protocol.
+
+    Default: `none`
+
+    Environment variable: `TFC_AGENT_OTLP_ADDRESS`
+
+
+* `-otlp-cert-file <path>`:
+    Optional path to a client TLS certificate file to load. When present, the
+    given certificate is used to encrypt the client connection to the
+    OpenTelemetry collector. When omitted, client connections are not secure.
+
+    Default: `none`
+
+    Environment variable: `TFC_AGENT_OTLP_CERT_FILE`
+
+
+* `-accept <job_types>`:
+    Optional string of comma-separated job types that this agent may run.
+    Acceptable job types are "plan", "apply", "policy", "assessment", "ingress",
+    and "test". Do not put whitespace in between entries.
+
+    Default: `plan,apply,policy,assessment`
+
+    Environment variable: `TFC_AGENT_ACCEPT`
+
+
+* `-request-forwarding`:
+    Enable handling of forwarded HTTP requests. Enable this option only if you 
+    are using product features which require it.
+
+    Default: `false`
+
+    Environment variable: `TFC_AGENT_REQUEST_FORWARDING`
+
+
+* `-hyok`:
+    Enable handling HYOK requests for generating, re-encrypting, or decrypting data
+    keys using your KMS. This is not required to handle runs on HYOK workspaces.
+    Enable this option only if you are using product features which require it.
+
+    Default: `false`
+
+    Environment variable: `TFC_AGENT_HYOK`
+
+
+* `-h`:
+    Display this message and exit.
+
+* `-v`:
+    Display the version and exit.
+

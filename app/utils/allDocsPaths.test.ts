@@ -6,24 +6,27 @@
 import { expect, test, vi } from 'vitest'
 import { getDocsPaths } from './allDocsPaths'
 import docsPathsMock from '__fixtures__/docsPathsAllVersionsMock.json'
-import { getProductVersion } from '@utils/contentVersions'
-import { Ok } from '@utils/result'
+import { getProductVersionMetadata } from './contentVersions'
+import { Ok } from '#utils/result'
 
-vi.mock(import('@utils/contentVersions'), async (importOriginal: any) => {
+// I tried to use the same import path as in the actual file
+// (#utils/contentVersions) but Vitest was not picking up the mock,
+// so I used a relative path instead... :(
+vi.mock('./contentVersions', async (importOriginal: any) => {
 	const mod = await importOriginal()
 	return {
 		...mod,
-		getProductVersion: vi.fn(),
+		getProductVersionMetadata: vi.fn(),
 	}
 })
 
-vi.mock('@api/versionMetadata.json', () => {
+vi.mock('#api/versionMetadata.json', () => {
 	return {
 		default: {},
 	}
 })
 
-vi.mock('@api/docsPathsAllVersions.json', () => {
+vi.mock('#api/docsPathsAllVersions.json', () => {
 	return {
 		default: {},
 	}
@@ -40,9 +43,13 @@ test('getDocsPaths should return an error if there are no paths for an empty pro
 })
 
 test('getDocsPaths should return filtered docs paths when a non-empty productSlugs array is provided', async () => {
-	// Some real(ish) data for version
-	const version = 'v1.14.x'
-	vi.mocked(getProductVersion).mockReturnValue(Ok(version))
+	const metadata = {
+		version: 'v1.14.x',
+		isLatest: false,
+		releaseStage: 'stable',
+	}
+
+	vi.mocked(getProductVersionMetadata).mockReturnValue(Ok(metadata))
 
 	const response = await getDocsPaths(
 		['terraform-plugin-framework'],
@@ -61,7 +68,7 @@ test('getDocsPaths should return an error if there are no paths for a non-empty 
 	const response = await getDocsPaths(['terraform-plugin-framework'], {})
 	expect(mockConsole).toHaveBeenCalledOnce()
 	expect(mockConsole).toHaveBeenLastCalledWith(
-		'Product, terraform-plugin-framework, not found in docs paths',
+		'Product, terraform-plugin-framework, version v1.14.x, not found in docs paths',
 	)
 	expect(response).toEqual({ ok: false, value: 'All docs paths not found' })
 })

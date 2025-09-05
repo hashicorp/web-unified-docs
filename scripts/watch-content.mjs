@@ -3,13 +3,14 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-import fs from 'fs'
-import path from 'path'
-import { buildFileMdxTransforms } from './mdx-transforms/build-mdx-transforms-file.mjs'
-import { copyNavDataFile } from './utils/copy-nav-data-file.mjs'
-import { copyAssetFile } from './utils/copy-asset-file.mjs'
-import { gatherVersionMetadata } from './gather-version-metadata.mjs'
-import { isFileAnImage } from './prebuild.mjs'
+import fs from 'node:fs'
+import path from 'node:path'
+
+import { buildFileMdxTransforms } from './prebuild/mdx-transforms/build-mdx-transforms-file.mjs'
+import { copyNavDataFile } from '#scriptUtils/copy-nav-data-file.mjs'
+import { copySingleAssetFile } from '#scriptUtils/copy-asset-files.mjs'
+import { gatherVersionMetadata } from './prebuild/gather-version-metadata.mjs'
+import { isFileAnImage } from '#scriptUtils/copy-asset-files.mjs'
 
 const contentDir = path.resolve('content')
 
@@ -98,7 +99,7 @@ fs.watch(contentDir, { recursive: true }, async (eventType, filename) => {
 		const filePath = path.join(contentDir, filename)
 		console.log(`Asset file changed: ${filePath}`, eventType)
 		try {
-			copyAssetFile(filePath)
+			copySingleAssetFile(filePath)
 
 			await fetch(`${process.env.DEV_PORTAL_URL}/api/refresh`, {
 				method: 'POST',

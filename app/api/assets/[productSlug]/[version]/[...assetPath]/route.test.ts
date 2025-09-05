@@ -5,13 +5,13 @@
 
 import { expect, test, vi } from 'vitest'
 import { GET } from './route'
-import { getAssetData } from '@utils/file'
-import { getProductVersion } from '@utils/contentVersions'
-import { mockRequest } from '@utils/mockRequest'
+import { getAssetData } from '#utils/file'
+import { getProductVersionMetadata } from '#utils/contentVersions'
+import { mockRequest } from '#utils/mockRequest'
 
-vi.mock('@utils/file')
-vi.mock('@utils/contentVersions')
-vi.mock('@utils/productConfig.mjs', () => {
+vi.mock('#utils/file')
+vi.mock('#utils/contentVersions')
+vi.mock('#productConfig.mjs', () => {
 	return {
 		PRODUCT_CONFIG: {
 			terraform: {},
@@ -19,7 +19,7 @@ vi.mock('@utils/productConfig.mjs', () => {
 	}
 })
 
-vi.mock('@api/versionMetadata.json', () => {
+vi.mock('#api/versionMetadata.json', () => {
 	return {}
 })
 
@@ -46,7 +46,10 @@ test("Return 404 if `version` doesn't exist for `productSlug`", async () => {
 	const version = 'fake_version'
 	const assetPath = ['test.png']
 
-	vi.mocked(getProductVersion).mockReturnValueOnce({ ok: false, value: '' })
+	vi.mocked(getProductVersionMetadata).mockReturnValueOnce({
+		ok: false,
+		value: '',
+	})
 
 	const response = await mockRequest(GET, { productSlug, version, assetPath })
 
@@ -73,7 +76,7 @@ test('Return 200 and an image for a valid `product`, `version`, and `assetPath`'
 		},
 	}
 
-	vi.mocked(getProductVersion).mockReturnValueOnce({
+	vi.mocked(getProductVersionMetadata).mockReturnValueOnce({
 		ok: true,
 		value: 'v1.1.x',
 	})
@@ -105,7 +108,7 @@ test('Return 200 and an image for the `version` being `latest` and the rest of t
 		},
 	}
 
-	vi.mocked(getProductVersion).mockReturnValueOnce({
+	vi.mocked(getProductVersionMetadata).mockReturnValueOnce({
 		ok: true,
 		value: 'v1.1.x',
 	})

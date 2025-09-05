@@ -3,11 +3,11 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-import { getAssetData } from '@utils/file'
-import { getProductVersion } from '@utils/contentVersions'
-import { errorResultToString } from '@utils/result'
-import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
-import { VersionedProduct } from '@api/types'
+import { getAssetData, joinFilePath } from '#utils/file'
+import { getProductVersionMetadata } from '#utils/contentVersions'
+import { errorResultToString } from '#utils/result'
+import { PRODUCT_CONFIG } from '#productConfig.mjs'
+import { VersionedProduct } from '#api/types'
 
 export type GetParams = VersionedProduct & {
 	/**
@@ -27,18 +27,23 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 		return new Response('Not found', { status: 404 })
 	}
 
-	const productVersionResult = getProductVersion(productSlug, version)
+	const productVersionResult = getProductVersionMetadata(productSlug, version)
 	if (!productVersionResult.ok) {
 		console.error(errorResultToString('API', productVersionResult))
 		return new Response('Not found', { status: 404 })
 	}
 
-	const { value: parsedVersion } = productVersionResult
+	const { value: versionMetadata } = productVersionResult
 
-	const parsedAssetPath = assetPath.join('/')
+	const parsedAssetPath = joinFilePath(assetPath)
 
-	const assetLoc = [`assets`, productSlug, parsedVersion, parsedAssetPath]
-	const assetData = await getAssetData(assetLoc)
+	const assetLoc = [
+		`assets`,
+		productSlug,
+		versionMetadata.version,
+		parsedAssetPath,
+	]
+	const assetData = await getAssetData(assetLoc, versionMetadata)
 
 	if (!assetData.ok) {
 		console.error(`API Error: No asset found at ${assetLoc}`)

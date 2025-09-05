@@ -1,0 +1,189 @@
+---
+page_title: Hold your own key concepts
+description: >-
+  Learn how HCP Terraform's hold your own key feature encrypts and decrypts state and plan data, which data HCP Terraform encrypts, and the effects of hold your own key encryption on state and plan files.
+tfc_only: true
+---
+
+# Hold your own key concepts
+
+Hold your own key lets you authenticate a key management system with HCP Terraform to encrypt HCP Terraform state and plan data with a key that you provide and control.
+
+@include 'tfc-package-callouts/hyok.mdx'
+
+Terraform artifacts can contain sensitive information, such as resource IDs, IP addresses, credentials, and other configuration details that Terraform uses to manage infrastructure. To secure sensitive data, HCP Terraform uses a HashiCorp-managed key to encrypt sensitive data such as state and plan files before storage.
+
+Hold your own key (HYOK) gives you control over your sensitive data by letting you provide your own encryption key to safeguard that data. Hold your own key lets you configure HCP Terraform artifact encryption using a key from a key management system (KMS) that you control.
+
+When you enable hold your own key, the HCP Terraform agent encrypts specific Terraform  artifacts using a data encryption key (DEK) before uploading those files to HCP Terraform storage. To ensure you retain control of the DEK, the HCP Terraform agent authenticates with your key management service (KMS) and uses a key encryption key (KEK) to encrypt the DEK.
+
+You can run the HCP Terraform agent on your own infrastructure, meaning that neither your KEK nor unencrypted secrets are uploaded to HCP Terraform, and no out-of-network traffic needs to connect to your KMS.
+
+## What is encrypted
+
+The artifacts that HCP Terraform agents encrypt with hold your own key are:
+
+- [State files](/terraform/language/state) and [JSON state files](/terraform/internals/json-format).
+- [Plan files](/terraform/cli/commands/plan#out-filename) and [JSON plan files](/terraform/internals/json-format#plan-representation).
+
+### Sensitive values in state
+
+Terraform marks attributes in state as sensitive when they are:
+
+- Dependent on [sensitive input variables](/terraform/language/values/variables#suppressing-values-in-cli-output).
+- Marked as [sensitive in a provider schema](/terraform/plugin/framework/handling-data/attributes/string#sensitive).
+- Marked as sensitive in the configuration using the [sensitive() helper function](/terraform/language/functions/sensitive).
+- Refer to another sensitive attribute. For example, if a resource references a sensitive input variable, Terraform also marks that resource argument as sensitive.
+
+Learn more about [Sensitive data in state](/terraform/language/state/sensitive-data).
+
+## Sanitized state and plan files
+
+Hold your own key also produces sanitized versions of artifacts that redact secrets from the artifacts it encrypts. Sanitized state and plan files let HCP Terraform continue running policy checks, run tasks, cost estimation, and assessments without using sensitive data.
+
+The sanitized state and sanitized plan artifacts are JSON files with the same content and format as the `json-state` and `json-plan` outputs, with sensitive data redacted.
+
+HCP Terraform produces sanitized files for two reasons:
+
+- To let you download or view state or plan files from the API or Terraform CLI.
+- To pass artifacts to HCP Terraform features that rely on state and plan data.
+
+The following HCP Terraform features read data from sanitized state and plan files:
+
+- The [explorer](/terraform/cloud-docs/workspaces/explorer)
+- Workspace resources
+- Policy checks
+- Cost estimation
+- Run tasks
+- Assessments
+- Plan export (Sentinel mocks)
+
+The above features do not have access to the sensitive information in your state and plan files in workspaces you configure to use HYOK.
+
+<Note>
+
+HCP Terraform features that depend on sensitive information can no longer access sensitive data after you enable HYOK on a workspace.
+
+</Note>
+
+To use sensitive data in policies, you can get around this limitation by using the [agent execution mode for that policy set](/terraform/cloud-docs/policy-enforcement/manage-policy-sets#policy-evaluations). When you enable agent execution mode, the HCP Terraform agent decrypts plan data before running your policies, ensuring your policies continue to run as expected.
+
+## Encryption process
+
+HYOK uses a process called [envelope encryption](https://cloud.ibm.com/docs/key-protect?topic=key-protect-envelope-encryption#envelope-encryption-overview) to secure artifacts using a KMS. Your key is stored in the KMS, and is referred to as a key encryption key (KEK).
+
+When you enable HYOK for a workspace, HCP Terraform creates a data encryption key (DEK) for that workspace. HCP Terraform uses an agent with [request forwarding](/terraform/cloud-docs/agents/request-forwarding#hold-your-own-key) enabled to generate a new random DEK, and encrypts that DEK using the KEK. HCP Terraform then stores the encrypted DEK.
+
+During an HCP Terraform run, the agent downloads the DEK and calls your KMS to decrypt it using the KEK, and uses the DEK to decrypt your workspace's state. Then, when Terraform creates artifacts during the run, the agent uses the DEK to encrypt those artifacts before uploading them to HCP Terraform.
+
+The HCP Terraform agent creates sanitized plan and state files before encrypting the unsanitized files and uploading them to HCP Terraform.
+
+HCP Terraform stores the encrypted DEK and the encrypted artifacts. For HCP Terraform to read the artifacts and any secrets they may contain, your KMS needs to decrypt the DEK, which your agent uses decrypt the associated artifacts. Access to Terraform artifacts are controlled by the KEK on the KMS without needing to directly send artifacts to your KMS for encryption or decryption.
+
+### JWT Claims
+
+The JWT issued by HCP Terraform and used to authenticate to the KMS has the following format:
+
+<CodeBlockConfig hideClipboard filename="Header">
+
+```json
+{
+  "typ": "JWT",
+  "kid": "d8c1fcfdfeb3348cdf0b7c89945f0dbd0714710be34a781e42e6b13e91b77f0e",
+  "alg": "RS256"
+}
+```
+
+</CodeBlockConfig>
+
+<CodeBlockConfig hideClipboard filename="Body">
+
+```json
+{
+  "jti": "9f7ff698-77c9-4e1f-a893-cde34d920c50",
+  "iss": "https://app.terraform.io",
+  "aud": "api://AzureADTokenExchange",
+  "iat": 1746534340,
+  "nbf": 1746534340,
+  "exp": 1746537940,
+  "sub": "organization:hyok-org:hyok_config:hyok-config-name"
+}
+```
+
+</CodeBlockConfig>
+
+When you configure your KMS's trust policy, you will match the following claims:
+
+- `iss`: the issuer is always `https://app.terraform.io`
+- `sub`: the subject claim for HYOK JWTs is: `organization:<ORG_NAME>:hyok_config:<HYOK_CONFIG_NAME>`
+- `aud`: the audience is the following, depending on your KMS provider:
+    - Vault: `vault.workload.identity`
+    - AWS: `aws.workload.identity`
+    - GCP: `//iam.googleapis.com/<WORKLOAD_PROVIDER_NAME>`
+    - Azure: `api://AzureADTokenExchange`
+
+### Data key encryption
+
+When you enable HYOK on a workspace, HCP Terraform generates a new data encryption key (DEK) for that workspace.
+
+The DEK is a random 256-bit string. HCP Terraform sends the DEK to your KMS for that key configuration. Encryption of the DEK is delegated to the KMS, so details vary depending on the key configuration:
+
+- [Vault Transit Secrets Engine Encrypt](/vault/api-docs/secret/transit#encrypt-data)
+- [AWS KMS Encrypt](https://docs.aws.amazon.com/kms/latest/APIReference/API_Encrypt.html)
+- [GCP Cloud KMS cryptroKeys.encrypt](https://cloud.google.com/kms/docs/reference/rest/v1/projects.locations.keyRings.cryptoKeys/encrypt)
+- [Azure Key Vault Encrypt](https://learn.microsoft.com/en-us/rest/api/keyvault/keys/encrypt/encrypt?view=rest-keyvault-keys-7.4&tabs=HTTP)
+
+When you revoke an HYOK configuration in HCP Terraform, it sends the encrypted DEK to the HCP Terraform agent. The agent first decrypts the DEK using the KMS configuration you are revoking, and then re-encrypts the key using your primary HYOK configuration before uploading the new encrypted DEK to HCP Terraform.
+
+![Diagram: HYOK encrypted DEK generation](/img/docs/tfc-hyok-dek-generation.png)
+
+### Artifact encryption
+
+During an HCP Terraform run on an HYOK-enabled workspace, the HCP Terraform agent runs a proxy between the Terraform CLI, which produces and consumes artifacts, and HCP Terraform's artifact storage service, "Archivist". This proxy watches for the download of encrypted state files, and uses stream decryption to pass the decrypted state files to the Terraform CLI without reading the entirety of the file into the agent's memory.
+
+Similarly, when the Terraform CLI uploads a state file, the agent proxy detects the upload, which stream-encrypts the artifact with your workspace's DEK on its way to HCP Terraform's storage service.
+
+All HCP Terraform artifacts are encrypted using AES256-GCM, with AEAD based on the ID of the artifact to be encrypted:
+
+- Key size: 32 bytes
+- HKDF algo: `HMAC-SHA256`
+- Size of AES-GCM derived keys: 32 bytes
+- Ciphertext segment size: 1048576 bytes (1 MB)
+
+Reference the following diagram for a visual representation of key handling and communication between HCP Terraform services and services inside your network during an HCP Terraform apply:
+
+![Diagram: HYOK apply workflow](/img/docs/tfc-hyok-apply-workflow.png)
+
+HCP Terraform plans follow the same flow, except they decrypt a state file and produce and encrypt a plan file instead of the apply workflow.
+
+### Download decrypted files
+
+You can download decrypted state files from the HCP Terraform API or using the Terraform CLI.
+
+When you attempt to download a decrypted state version in an HYOK-enabled workspace, HCP Terraform creates a temporary download link for its artifact storage service, archivist, then returns that link with an HTTP redirect response.
+
+To access the link, follow the redirect through your browser or your CLI tool. After the redirect, archivist requests a decrypted data encryption key from HCP Terraform for artifact decryption. HCP Terraform uses a short-lived JWT that it issues during the link generation process which is valid only for the specific artifact you request.
+
+HCP Terraform then requests the decryption of the relevant data key for the artifact, using a [request forwarding agent](/terraform/cloud-docs/agents/request-forwarding#hold-your-own-key) running inside your network. The agent decrypts the provided DEK using your KMS, and returns the decrypted DEK to HCP Terraform, which sends it to archivist.
+
+Archivist then begins streaming the Terraform state file to the client, using the DEK to decrypt the file as it is streamed. At no point are the decrypted DEK or the decrypted state file stored to disk in HCP Terraform or in archivist.
+
+HCP Terraform does not let you download decrypted JSON state, JSON plan, or plan files, because these files are not required for out-of-band operations. An out-of-band operation is any operation outside of a Terraform run, meaning that the Terraform CLI does not interact with these artifacts outside of a Terraform run.
+
+Refer to the following diagram for a visual representation of the decrypted download flow during a `terraform init` using the Terraform CLI and a request forwarding agent within your network :
+
+![Diagram: HYOK decrypted file download](/img/docs/tfc-hyok-decrypted-download.png)
+
+Note that neither the decrypted state file nor the decrypted key are ever stored to disk.
+
+## Authentication with key management systems
+
+An HCP Terraform agent sends all HYOK communication with a KMS using OpenID Connect (OIDC).
+
+Before using HYOK, you will establish a trust relationship between HCP Terraform and your chosen KMS. To do so, you configure your KMS to accept HCP Terraform's identity tokens, telling your KMS to allow token bearers signed by HCP Terraform to encrypt and decrypt data with the key you specify.
+
+HCP Terraform's identity tokens are in the "JWT" (JSON Web Token) format. Learn more about the format of the JWT in [JWT Claims](#jwt-claims).
+
+When HCP Terraform starts a run, or requires the generation or re-encryption of a DEK, it issues a new JWT. HCP Terraform passes the JWT to the HCP Terraform agent to make the necessary requests to your KMS.
+
+The HCP Terraform agent uses the KMS's encryption-as-a-service functionality to encrypt and decrypt the necessary data encryption key(s) without accessing the KEK.

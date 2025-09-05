@@ -6,13 +6,21 @@
 import { expect, test, vi } from 'vitest'
 import { GET } from './route'
 
-import * as utilsFileModule from '@utils/file'
-import * as utilsContentVersionsModule from '@utils/contentVersions'
-import { mockRequest } from '@utils/mockRequest'
+import * as utilsFileModule from '#utils/file'
+import * as utilsContentVersionsModule from '#utils/contentVersions'
+import { mockRequest } from '#utils/mockRequest'
 
-vi.mock('@api/versionMetadata.json', () => {
+vi.mock('#api/versionMetadata.json', () => {
 	return {
-		default: {},
+		default: {
+			'terraform-docs-common': [
+				{
+					version: 'v0.0.x',
+					releaseStage: 'stable',
+					isLatest: true,
+				},
+			],
+		},
 	}
 })
 
@@ -50,7 +58,7 @@ test("Return 404 if not redirect DOESN'T exists for `latest` on `productSlug`", 
 })
 
 test('Return 200 and parse the jsonc into json if valid for UNVERSIONED product', async () => {
-	const readFileSpy = vi.spyOn(utilsFileModule, 'readFile')
+	const readFileSpy = vi.spyOn(utilsFileModule, 'findFileWithMetadata')
 	readFileSpy.mockImplementation(() => {
 		return Promise.resolve({ ok: true, value: jsoncFixtureBefore })
 	})
@@ -64,17 +72,20 @@ test('Return 200 and parse the jsonc into json if valid for UNVERSIONED product'
 })
 
 test('Return 200 and parse the jsonc into json if valid for VERSIONED product', async () => {
-	const readFileSpy = vi.spyOn(utilsFileModule, 'readFile')
+	const readFileSpy = vi.spyOn(utilsFileModule, 'findFileWithMetadata')
 	readFileSpy.mockImplementation(() => {
 		return Promise.resolve({ ok: true, value: jsoncFixtureBefore })
 	})
 
 	const contentVersionsSpy = vi.spyOn(
 		utilsContentVersionsModule,
-		'getProductVersion',
+		'getProductVersionMetadata',
 	)
 	contentVersionsSpy.mockImplementation(() => {
-		return { ok: true, value: 'v202410-1' }
+		return {
+			ok: true,
+			value: { releaseStage: 'stable', version: 'v202410-1', isLatest: false },
+		}
 	})
 
 	const productSlug = 'terraform-enterprise'
