@@ -81,10 +81,8 @@ async function runPrebuild() {
 		const args = process.argv.slice(2)
 
 		if (binaryExists) {
-			// For binary files, execute directly
 			execFileSync(filename, args, { stdio: 'inherit' })
 		} else {
-			// For node scripts, execute with node
 			execFileSync('node', [path.join(__dirname, 'prebuild.mjs'), ...args], {
 				stdio: 'inherit',
 			})
