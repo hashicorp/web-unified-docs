@@ -6,7 +6,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { findDocVersions } from './findDocVersions'
 
-vi.mock('@api/docsPathsAllVersions.json', () => {
+vi.mock('#api/docsPathsAllVersions.json', () => {
 	return {
 		default: {},
 	}

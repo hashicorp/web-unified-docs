@@ -5,7 +5,7 @@
 
 import { getProductDirectoryFromFilePath } from '../product-directory/index.mjs'
 import { getVersionFromFilePath } from '../version/index.mjs'
-import { PRODUCT_CONFIG } from '../../../../app/utils/productConfig.mjs'
+import { PRODUCT_CONFIG } from '#productConfig.mjs'
 /**
  * Extracts the repo name from the file path,
  * then finds its respective url value from the docs paths
