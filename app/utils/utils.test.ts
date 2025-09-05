@@ -7,7 +7,7 @@ import { expect, test, vi, afterEach } from 'vitest'
 import {
 	getProductMetadata,
 	getProductVersionMetadata,
-} from '@utils/contentVersions'
+} from '#utils/contentVersions'
 import { findDocVersions } from './findDocVersions'
 import versionMetadata from '__fixtures__/versionMetadata.json'
 import docsPathsMock from '__fixtures__/docsPathsAllVersionsMock.json'
@@ -17,19 +17,19 @@ afterEach(() => {
 	vi.resetAllMocks()
 })
 
-vi.mock('@api/versionMetadata.json', () => {
+vi.mock('#api/versionMetadata.json', () => {
 	return {
 		default: '',
 	}
 })
 
-vi.mock('@api/docsPathsAllVersions.json', () => {
+vi.mock('#api/docsPathsAllVersions.json', () => {
 	return {
 		default: {},
 	}
 })
 
-vi.mock('@utils/productConfig.mjs', () => {
+vi.mock('#productConfig.mjs', () => {
 	return {
 		PRODUCT_CONFIG: {
 			terraform: { contentDir: 'docs', versionedDocs: true },

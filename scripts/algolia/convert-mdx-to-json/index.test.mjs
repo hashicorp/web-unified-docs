@@ -2,10 +2,10 @@
  * Copyright (c) HashiCorp, Inc.
  * SPDX-License-Identifier: BUSL-1.1
  */
+import path from 'node:path'
+import { readdir } from 'node:fs/promises'
 
 import { describe, test, expect, vi } from 'vitest'
-import path from 'path'
-import { readdir } from 'node:fs/promises'
 import { getLatestProductVersionDirectories } from './index.mjs'
 import versionMetadata from '__fixtures__/versionMetadata.json'
 
