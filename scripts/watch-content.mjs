@@ -5,10 +5,11 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { buildFileMdxTransforms } from './mdx-transforms/build-mdx-transforms-file.mjs'
+
+import { buildFileMdxTransforms } from './prebuild/mdx-transforms/build-mdx-transforms-file.mjs'
 import { copyNavDataFile } from '#scriptUtils/copy-nav-data-file.mjs'
 import { copySingleAssetFile } from '#scriptUtils/copy-asset-files.mjs'
-import { gatherVersionMetadata } from './gather-version-metadata.mjs'
+import { gatherVersionMetadata } from './prebuild/gather-version-metadata.mjs'
 import { isFileAnImage } from '#scriptUtils/copy-asset-files.mjs'
 
 const contentDir = path.resolve('content')
