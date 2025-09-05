@@ -1,0 +1,205 @@
+---
+page_title: Federate workload identity with Azure
+description: |-
+    Workload identity federation enables external workloads to access HCP services through an external identity provider. Learn how to configure the Azure identity provider and the HCP platform so that external workloads can authenticate with the HCP identity service.
+---
+
+# Federate workload identity with Azure
+
+This page describes how to set up workload identity federation to authenticate from Azure VM workloads using [managed identity](https://docs.microsoft.com/en-us/azure/active-directory/managed-identities-azure-resources/overview). Authenticated workloads can interact with HCP services without storing any HCP service principal keys.
+
+## Prerequisites
+
+You must complete the following steps before configuring a workload identity provider for Azure:
+
+- You must have the `Admin` role on the HCP project.
+- [Create a service principal in the desired project](/hcp/docs/hcp/iam/service-principal#project-level-service-principals) and grant it access to the HCP resources your workload requires.
+- Have access to the Azure account to federate access to HCP from.
+- Install the [HCP CLI](/hcp/docs/cli/install) or use the [HCP Terraform Provider](https://registry.terraform.io/providers/hashicorp/hcp/latest/docs) based on your desired configuration workflow.
+
+### Azure configuration prerequisites
+
+To federate workload identity with Azure, you need to create and configure a new [Azure AD application](https://docs.microsoft.com/en-us/azure/active-directory/develop/app-objects-and-service-principals#application-object) in your Azure AD tenant. After you configure the workload identity provider to trust the application, Azure workloads can retrieve access tokens for this application and exchange them for HCP access tokens.
+
+Complete the following steps to prepare your Azure environment for workload identity federation:
+
+1. [Register a Microsoft Entra app and create a service principal](https://docs.microsoft.com/en-au/azure/active-directory/develop/howto-create-service-principal-portal#register-an-application-with-azure-ad-and-create-a-service-principal). You can use the default [Application (client) ID](https://learn.microsoft.com/en-au/entra/identity-platform/howto-create-service-principal-portal#sign-in-to-the-application) or specify a custom URI, but make note of Application ID URI. You need this value when you configure the workload identity provider.
+1. [Create a managed identity](https://docs.microsoft.com/azure/active-directory/managed-identities-azure-resources/how-to-manage-ua-identity-portal). Note its [Object ID](https://learn.microsoft.com/en-us/entra/identity-platform/app-objects-and-service-principals?tabs=browser#service-principal-object). You can use this value when you configure the conditional access statement.
+1. [Assign the managed identity](https://docs.microsoft.com/azure/active-directory/managed-identities-azure-resources/qs-configure-portal-windows-vm#user-assigned-managed-identity). You can assign it to a virtual machine or another resource where your application is running.
+
+## Configure an external workload identity provider for Azure
+
+To create an HCP workload identity provider for Azure, you must provide the following configuration values:
+
+- Your [Azure AD Tenant ID (GUID)](https://learn.microsoft.com/en-us/azure/azure-portal/get-subscription-tenant-id).
+- The Application ID URI of the application you registered in Azure AD.
+- A conditional access statement.
+
+### Conditional access statement
+
+When federating workload identity, one of the requirements is a [conditional access statement](/hcp/docs/hcp/iam/service-principal/workload-identity-federation/conditional-access-statement). This statement is a boolean expression that has access to the identity claims and restricts which external identities are allowed.
+
+When exchanging an Azure token for access to HCP, the conditional access statement has access to all the claims in the token with the `jwt_claims.` prefix. For most scenarios, we recommend using the `sub` claim that matches the `Object ID` of the managed identity attached to the workload. For more information, refer to the [access token claim reference in the Azure documentation](https://learn.microsoft.com/en-us/entra/identity-platform/access-token-claims-reference).
+
+The following example conditional access statement restricts access to HCP services to Azure workloads assigned the managed role whose `Object ID` is `d4766c62-e179-49f9-b3a8-3a8c6720aa96`.
+
+```text
+`jwt_claims.sub == "d4766c62-e179-49f9-b3a8-3a8c6720aa96"`
+```
+
+For a complete list of claims you can reference, complete the following steps:
+
+1. Create a [VM that has the managed identity assigned to it](https://docs.microsoft.com/azure/active-directory/managed-identities-azure-resources/qs-configure-portal-windows-vm#user-assigned-managed-identity).
+1. SSH to the VM.
+1. Obtain an access token using the [IMDS endpoint](https://docs.microsoft.com/en-us/azure/active-directory/managed-identities-azure-resources/how-to-use-vm-token#get-a-token-using-http). Replace the `APP_ID` with the Application ID from the Azure AD application or the custom URI [described in the Azure configuration prerequisites](#azure-configuration-prerequisites).
+
+   ```shell-session
+   curl "http://169.254.169.254/metadata/identity/oauth2/token?resource=APP_ID&api-version=2018-02-01" \ 
+  -H "Metadata: true" | jq -r .access_token
+  ```
+
+1. To view the claims, copy the access token and paste it into a [browser-based token decoder](https://jwt.ms/). The claims listed are values available when creating the conditional access statement.
+
+## Create the workload identity provider
+
+After you gather the information you need, create the workload identity provider for Azure.
+
+<Tabs>
+<Tab heading="HCP CLI" group="cli">
+
+Use the [`hcp iam workload-identity-providers create-oidc` command](/hcp/docs/cli/commands/iam/workload-identity-providers/create-oidc).
+
+```shell-session
+$ hcp iam workload-identity-providers create-oidc <PROVIDER_NAME> \
+  --service-principal=<SP_RESOURCE_NAME> \
+  --issuer=https://sts.windows.net/<TENANT_ID>/ \
+  --allowed-audience=<APP_ID> \
+  --conditional-access=<CONDITION> \
+  --description=<DESCRIPTION>
+```
+
+This command requires the following information that is specific to your HCP and Azure accounts:
+
+- `<PROVIDER_NAME>`: The name of workload identity provider to create.
+- `<SP_RESOURCE_NAME>`:The service principal’s resource name, in the format `iam/project/<PROJECT_ID>/service-principal/<NAME>`.
+- `<TENANT_ID>`: The [Azure AD Tenant ID (GUID)](https://learn.microsoft.com/en-us/azure/azure-portal/get-subscription-tenant-id) you want to allow federation from. Sometimes this ID is formatted as `https://sts.windows.net/<TENANT_ID>/`.
+- `<APP_ID>`: The `Application ID` from the Azure AD Application, or the custom URI used.
+- `<CONDITION>`: The conditional access statement that restricts access to the specified Azure workload.
+- `<DESCRIPTION>`: An optional description for the provider.
+
+The following example creates a workload identity provider named `azure-example`. This provider configures HCP to restrict access to external workloads by requiring that their JWT token have `d4766c62-e179-49f9-b3a8-3a8c6720aa96` as a `sub` claim. Workloads that are granted access to HCP services use the `my-app-runtime` service principal.
+
+```shell-session
+$ hcp iam workload-identity-providers create-oidc azure-example \
+  --service-principal=iam/project/dcffbc8c-0873-4acc-bf96-4c79a4c3fd1a/service-principal/my-app-runtime \
+  --issuer=https://sts.windows.net/60a0d497-45cd-413d-95ca-e154bbb9129b/ \
+  --allowed-audience=d821efa3-8cd7-4977-bdf7-bd6e44b1dc46 \
+  --conditional-access='jwt_claims.sub == "d4766c62-e179-49f9-b3a8-3a8c6720aa96"' \
+  --description="Allow my-app-role on Azure to act as my-app-runtime service principal"
+```
+
+</Tab>
+
+<Tab heading="Terraform" group="tf">
+
+Use the [`hcp_iam_workload_identity_provider` resource](https://registry.terraform.io/providers/hashicorp/hcp/latest/docs/resources/iam_workload_identity_provider).
+
+```hcl
+# Replace with an existing service principal if created ahead of time.
+resource "hcp_service_principal" "workload_sp" {
+  name = "my-app-runtime"
+}
+
+resource "hcp_iam_workload_identity_provider" "example" {
+  name              = "azure-example"
+  service_principal = hcp_service_principal.workload_sp.resource_name
+  description       = "Allow my-app on Azure to act as my-app-runtime service principal"
+
+  oidc {
+    # The issuer URI should be as follows where the ID in the path is replaced
+    # with your Azure Tenant ID
+    issuer_uri = "https://sts.windows.net/<TENANT_ID>"
+
+    # The allowed audience should be set to the Application ID from the Azure AD
+    # Application or the custom URI used.
+    allowed_audiences = ["<APP_ID>"]
+  }
+
+  conditional_access = "<CONDITION>"
+}
+```
+
+This configuration requires the following information that is specific to your Azure account:
+
+- `<TENANT_ID>`: The [Azure AD Tenant ID (GUID)](https://learn.microsoft.com/en-us/azure/azure-portal/get-subscription-tenant-id) you want to allow federation from. Sometimes this ID is formatted as `https://sts.windows.net/<TENANT_ID>/`.
+- `<APP_ID>`: The `Application ID` from the Azure AD Application, or the custom URI used.
+- `<CONDITION>`: The conditional access statement that restricts access to the specified Azure workload.
+
+The following example creates a workload identity provider named `azure-example`. This provider configures HCP to restrict access to external workloads by requiring that their JWT token have `d4766c62-e179-49f9-b3a8-3a8c6720aa96` as a `sub` claim. Workloads that are granted access to HCP services use the `my-app-runtime` service principal.
+
+```hcl
+# Replace with an existing service principal if created ahead of time.
+resource "hcp_service_principal" "workload_sp" {
+  name = "my-app-runtime"
+}
+
+resource "hcp_iam_workload_identity_provider" "example" {
+  name              = "azure-example"
+  service_principal = hcp_service_principal.workload_sp.resource_name
+  description       = "Allow my-app-role on Azure to act as my-app-runtime service principal"
+
+ oidc {
+    # The issuer URI should be as follows where the ID in the path is replaced
+    # with your Azure Tenant ID.
+    issuer_uri = "https://sts.windows.net/60a0d497-45cd-413d-95ca-e154bbb9129b"
+
+    # The allowed audience should be set to the Application ID from the Azure AD
+    # Application or the custom URI used.
+    allowed_audiences = ["d821efa3-8cd7-4977-bdf7-bd6e44b1dc46"]
+  }
+
+  # Only allow workload's that are assigned the expected managed identity.
+  # The access_token given to Azure workload's will have the sub claim set to
+  # that of the managed identity.
+  conditional_access = "jwt_claims.sub == `d4766c62-e179-49f9-b3a8-3a8c6720aa96`"
+}
+```
+
+</Tab>
+</Tabs>
+
+## Authenticate the workload's credentials
+
+You can use the [HCP CLI](/hcp/docs/cli/install), [HCP Terraform Provider](https://registry.terraform.io/providers/hashicorp/hcp/latest/docs), or [HCP Go SDK](https://github.com/hashicorp/hcp-sdk-go/tree/main) to automatically retrieve external credentials and exchange them for an HCP access token. This process uses a credential file that contains the information required to obtain external credentials and the workload identity provider to exchange them with.
+
+For more information, refer to [credential files](/hcp/docs/hcp/iam/service-principal/workload-identity-federation#credential-files).
+
+### Create the credential file for Azure
+
+Use the [`hcp iam workload-identity-providers create-cred-file command`](/hcp/docs/cli/commands/iam/workload-identity-providers/create-cred-file).
+
+```shell-session
+$ hcp iam workload-identity-providers create-cred-file <PROVIDER_NAME> \
+  --azure \
+  --azure-resource=<APP_ID> \
+  --output-file=credentials.json 
+```
+
+This command requires the following information that is specific to your HCP and Azure accounts:
+
+- `<PROVIDER_NAME>`: The name of Workload Identity Provider to exchange credentials with, in the format `iam/project/<PROJECT_ID>/service-principal/<SP_NAME>/workload-identity-provider/<PROVIDER_NAME>`.
+- `<APP_ID>`: The `Application ID` from the Azure AD Application, or the custom URI used.
+
+The following example creates a `credentials.json` file using the `azure-example` provider, which is associated with the `my-app-runtime` service principal.
+
+```shell-session
+$ hcp iam workload-identity-providers create-cred-file \
+  iam/project/dcffbc8c-0873-4acc-bf96-4c79a4c3fd1a/service-principal/my-app-runtime/workload-identity-provider/azure-example \
+  --azure \
+  --azure-resource=d821efa3-8cd7-4977-bdf7-bd6e44b1dc46 \
+  --output-file=credentials.json
+```
+
+Ensure the credential file exists in the runtime environment. Because the credential file contains no secret values, you can store the credential file in the VM image. Alternatively, you can generate it at runtime.
+
+To use the credential file to authenticate, you can use the HCP CLI, the HCP Terraform provider, or the HCP Go SDK. Refer to [use a credential file to authenticate](/hcp/docs/hcp/iam/service-principal/workload-identity-federation#use-a-credential-file-to-authenticate) for more information.
