@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-import { execSync } from 'node:child_process'
+import { execFileSync } from 'node:child_process'
 import { platform, arch } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -50,7 +50,6 @@ async function runPrebuild() {
 		console.log('Running prebuild binary for x64 Linux...')
 	} else {
 		// Default fallback
-		filename = `node ${path.join(__dirname, 'prebuild.mjs')}`
 		console.log('Running default node prebuild...')
 	}
 
@@ -67,7 +66,7 @@ async function runPrebuild() {
 				`Error during gzip operation: ${error.message}.\n\nFalling back to default node prebuild...`,
 			)
 
-			filename = `node ${path.join(__dirname, 'prebuild.mjs')}`
+			binaryExists = false
 		}
 	}
 
@@ -75,9 +74,17 @@ async function runPrebuild() {
 		console.log(`\n`)
 
 		// Execute the prebuild binary with the same arguments passed in
-		const args = process.argv.slice(2).join(' ')
-		const command = args ? `${filename} ${args}` : filename
-		execSync(command, { stdio: 'inherit' })
+		const args = process.argv.slice(2)
+
+		if (binaryExists) {
+			// For binary files, execute directly
+			execFileSync(filename, args, { stdio: 'inherit' })
+		} else {
+			// For node scripts, execute with node
+			execFileSync('node', [path.join(__dirname, 'prebuild.mjs'), ...args], {
+				stdio: 'inherit',
+			})
+		}
 	} catch (error) {
 		console.error('Prebuild failed:', error.message)
 		process.exit(1)
