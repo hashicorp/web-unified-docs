@@ -44,6 +44,10 @@ async function runPrebuild() {
 		binaryExists = true
 		filename = `${path.join(__dirname, 'prebuild-arm-mac-binary')}`
 		console.log('Running prebuild binary for ARM Mac...')
+	} else if (systemPlatform === 'linux' && systemArch === 'arm64') {
+		binaryExists = true
+		filename = `${path.join(__dirname, 'prebuild-arm-linux-binary')}`
+		console.log('Running prebuild binary for ARM Linux...')
 	} else if (systemPlatform === 'linux' && systemArch === 'x64') {
 		binaryExists = true
 		filename = `${path.join(__dirname, 'prebuild-x64-linux-binary')}`
