@@ -5,7 +5,7 @@
 
 import { Command } from 'commander'
 import { diffLinesUnified, diff } from 'jest-diff'
-import { PRODUCT_CONFIG as contentDirMap } from '../../app/utils/productConfig.mjs'
+import { PRODUCT_CONFIG as contentDirMap } from '#productConfig.mjs'
 import stripAnsi from 'strip-ansi'
 import fs from 'node:fs'
 import path from 'node:path'
