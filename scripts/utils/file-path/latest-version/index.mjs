@@ -6,7 +6,7 @@
 import { getProductDirectoryFromFilePath } from '../product-directory/index.mjs'
 import { getVersionFromFilePath } from '../version/index.mjs'
 
-import { PRODUCT_CONFIG } from '../../../../app/utils/productConfig.mjs'
+import { PRODUCT_CONFIG } from '#productConfig.mjs'
 
 /**
  * Checks if the given file path corresponds to the latest version of the document.

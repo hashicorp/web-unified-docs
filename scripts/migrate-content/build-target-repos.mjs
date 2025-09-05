@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-import { PRODUCT_CONFIG } from '../../app/utils/productConfig.mjs'
+import { PRODUCT_CONFIG } from '#productConfig.mjs'
 
 /**
  * Given an array of argument strings, parse the intended target content
