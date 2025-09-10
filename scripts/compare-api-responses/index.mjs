@@ -11,6 +11,15 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'url'
 
+import { GENERATED_VERSION_METADATA_FILE_PATH } from '../../constants.mjs'
+
+const CWD = process.cwd()
+
+const VERSION_METADATA_FILE = path.resolve(
+	CWD,
+	GENERATED_VERSION_METADATA_FILE_PATH
+)
+
 const __filename = fileURLToPath(import.meta.url) // get the resolved path to the file
 const __dirname = path.dirname(__filename) // get the name of the directory
 
@@ -18,6 +27,8 @@ const versionMetadataPath = path.resolve(
 	__dirname,
 	'../../app/api/versionMetadata.json',
 )
+
+
 const versionMetadata = JSON.parse(
 	fs.readFileSync(versionMetadataPath, 'utf-8'),
 )

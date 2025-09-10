@@ -15,6 +15,8 @@ import remarkMdx from 'remark-mdx'
 import { remarkGetImages } from './remark-get-images-plugin'
 import { remarkTransformCloudDocsLinks } from './remark-transfrom-cloud-docs-links'
 
+import { GENERATED_VERSION_METADATA_FILE_PATH } from '#constants'
+
 const PR_TYPE = {
 	NewVersion: 'NewVersion',
 	Diff: 'Diff',
@@ -106,7 +108,7 @@ export async function main(
 
 	//Read version metadata and get the latest version of terraform-enterprise
 	const versionMetadataPath = path.resolve(
-		path.join(sourcePath, 'app/api/versionMetadata.json'),
+		path.join(sourcePath, GENERATED_VERSION_METADATA_FILE_PATH)
 	)
 
 	const versionMetadata = JSON.parse(
