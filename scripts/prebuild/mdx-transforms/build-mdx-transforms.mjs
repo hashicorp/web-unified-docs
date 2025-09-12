@@ -25,6 +25,8 @@ import {
 } from './rewrite-internal-redirects/rewrite-internal-redirects.mjs'
 import { transformExcludeTerraformContent } from './exclude-terraform-content/index.mjs'
 
+import { CountTablesPlugin, tableCount } from './count-tables/count-tables.mjs'
+
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
 
 /**
@@ -109,6 +111,8 @@ export async function buildMdxTransforms(
 	}
 	// Log out that the script has complete
 	console.log(`✅ Applied MDX transforms to ${mdxFileEntries.length} files.`)
+
+	console.log(`\n\n📊 Found a total of ${tableCount} tables in the docs.\n\n`)
 }
 
 /**
@@ -141,6 +145,7 @@ async function applyMdxTransforms(entry, versionMetadata = {}) {
 				redirects,
 			})
 			.use(rewriteInternalLinksPlugin, { entry, versionMetadata })
+			.use(CountTablesPlugin)
 			.process(content)
 
 		const transformedContent = String(remarkResults)
