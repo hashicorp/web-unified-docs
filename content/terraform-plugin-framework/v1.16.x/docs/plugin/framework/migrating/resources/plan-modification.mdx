@@ -1,0 +1,238 @@
+---
+page_title: Plan modification
+description: >-
+  Learn how to migrate resource CustomizeDiff functions in SDKv2 to plan
+  modifiers in the Terraform plugin framework.
+---
+
+# Plan modification
+
+Your provider can modify the Terraform plan to match the expected end state.
+This can include replacing unknown values with expected known values or marking
+a resource that must be replaced. Refer to [Plan
+Modification](/terraform/plugin/framework/resources/plan-modification) in the
+framework documentation for more details about implementing plan modifiers.
+
+This page explains how to migrate resource `CustomizeDiff` functions in SDKv2 to
+`PlanModifiers` in the plugin framework.
+
+## Migrating plan modifiers
+
+In SDKv2, plan modification is implemented with the `CustomizeDiff` field on the `schema.Resource` struct.
+
+In the framework, you implement the
+[`ResourceWithImportState`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/resource#ResourceWithImportState)
+interface on your `resource.Resource` type to allow users to import a given
+resource. To use this interface, your type must implement an `ImportState` function.
+
+In the framework, either implement the
+[`ResourceWithModifyPlan`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/resource#ResourceWithModifyPlan)
+interface on your `resource.Resource` type or implement
+[`*PlanModifiers()`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/resource/schema)
+functions on individual attributes. Refer to [Attributes - Force
+New](/terraform/plugin/framework/migrating/attributes-blocks/force-new) in this
+guide for more information on how to implement a plan modifier on an attribute.
+
+The following code shows a basic implementation of plan modification with SDKv2.
+
+<CodeBlockConfig filename="SDKv2">
+
+```go
+func resourceExample() *schema.Resource {
+    return &schema.Resource{
+        CustomizeDiff: CustomizeDiffFunc,
+        /* ... */
+```
+
+</CodeBlockConfig>
+
+The following code shows how you ensure that your resource satisfies the
+`resource.ResourceWithModifyPlan` interface with the framework.
+
+<CodeBlockConfig filename="Framework">
+
+```go
+var (
+    _ resource.Resource                = &resourceExample{}
+    _ resource.ResourceWithModifyPlan  = &resourceExample{}
+)
+```
+
+</CodeBlockConfig>
+
+The following code shows how you can implement the `ModifyPlan` function in the
+framework.
+
+<CodeBlockConfig filename="Framework">
+
+```go
+func (r *resourceExample) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+    /* ... */
+}
+```
+
+</CodeBlockConfig>
+
+### Migration Notes
+
+Remember the following differences between SDKv2 and the framework when
+completing the migration.
+
+- In SDKv2, you implement plan modification with the `CustomizeDiff` field on
+  the `schema.Resource` struct. In the framework, you can either enable plan
+  modification for the entire resource or for individual attributes. For the entire resource, implement the
+  [`ResourceWithModifyPlan`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/resource#ResourceWithModifyPlan)
+  interface on your `resource.Resource` type. For individual attributes, implement
+  [`*PlanModifiers()`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/resource/schema)
+  functions.
+
+### Examples
+
+Many existing `CustomizeDiff` implementations would be better suited to
+migration to attribute plan modifiers in the framework.
+
+#### Synchronize attributes
+
+The following example shows one way to implement `CustomizeDiff` in
+SDKv2 and `PlanModifiers` in the framework so that two attributes contain the same value. 
+
+In SDKv2, the `CustomizeDiff` field on the `schema.Resource` struct refers to a
+function or set of functions that implement plan modification.
+
+<CodeBlockConfig filename="SDKv2">
+
+```go
+func resourcePassword() *schema.Resource {
+    /* ... */
+    customizeDiffFuncs = append(customizeDiffFuncs, planSyncIfChange("attribute_one", "attribute_two"))
+    customizeDiffFuncs = append(customizeDiffFuncs, planSyncIfChange("attribute_two", "attribute_one"))
+
+    return &schema.Resource{
+        /* ... */
+        CustomizeDiff: customdiff.All(
+            customizeDiffFuncs...,
+        ),
+    }
+}
+```
+
+</CodeBlockConfig>
+
+The following example shows the implementation of the `planSyncIfChange`
+function in an SDKv2 provider.
+
+<CodeBlockConfig filename="SDKv2">
+
+```go
+func planSyncIfChange(key, keyToSync string) func(context.Context, *schema.ResourceDiff, interface{}) error {
+    return customdiff.IfValueChange(
+        key,
+        func(ctx context.Context, oldValue, newValue, meta interface{}) bool {
+            return oldValue != newValue
+        },
+        func(_ context.Context, d *schema.ResourceDiff, _ interface{}) error {
+            return d.SetNew(keyToSync, d.Get(key))
+        },
+    )
+}
+```
+
+</CodeBlockConfig>
+
+The following code shows the implementation using attribute plan modifiers with
+the framework.
+
+<CodeBlockConfig filename="Framework">
+
+```go
+func exampleSchema() schema.Schema {
+    return schema.Schema{
+        /* ... */
+        Attributes: map[string]schema.Attribute{
+            /* ... */
+            "attribute_one": schema.BoolAttribute{
+                /* ... */
+                PlanModifiers: []planmodifier.Bool{
+                    planmodifiers.SyncAttributePlanModifier(),
+                    /* ... */
+                },
+            },
+
+            "attribute_two": schema.BoolAttribute{
+                /* ... */
+                PlanModifiers: []planmodifier.Bool{
+                    planmodifiers.SyncAttributePlanModifier(),
+                    /* ... */
+                },
+            },
+```
+
+</CodeBlockConfig>
+
+The following shows an implementation of `SyncAttributePlanModifier` in the
+framework.
+
+<CodeBlockConfig filename="Framework">
+
+```go
+func SyncAttributePlanModifier() planmodifier.Bool {
+    return &syncAttributePlanModifier{}
+}
+
+type syncAttributePlanModifier struct {
+}
+
+func (d *syncAttributePlanModifier) Description(ctx context.Context) string {
+    return "Ensures that attribute_one and attribute_two attributes are kept synchronised."
+}
+
+func (d *syncAttributePlanModifier) MarkdownDescription(ctx context.Context) string {
+    return d.Description(ctx)
+}
+
+func (d *syncAttributePlanModifier) PlanModifyBool(ctx context.Context, req planmodifier.BoolRequest, resp *planmodifier.BoolResponse) {
+    var attributeOne types.Bool
+    diags := req.Plan.GetAttribute(ctx, path.Root("attribute_one"), &attributeOne)
+    resp.Diagnostics.Append(diags...)
+    if resp.Diagnostics.HasError() {
+        return
+    }
+
+    var attributeTwo types.Bool
+    req.Plan.GetAttribute(ctx, path.Root("attribute_two"), &attributeTwo)
+    resp.Diagnostics.Append(diags...)
+    if resp.Diagnostics.HasError() {
+        return
+    }
+
+	if !attributeOne.IsNull() && !attributeTwo.IsNull() && (attributeOne.ValueBool() != attributeTwo.ValueBool()) {
+		resp.Diagnostics.AddError(
+			"attribute_one and attribute_two are both configured with different values",
+			"attribute_one is deprecated, use attribute_two instead",
+		)
+		return
+	}
+
+    // Default to true for both attribute_one and attribute_two when both are null.
+    if attributeOne.IsNull() && attributeTwo.IsNull() {
+        resp.PlanValue = types.BoolValue(true)
+        return
+    }
+
+    // Default to using value for attribute_two if attribute_one is null
+    if attributeOne.IsNull() && !attributeTwo.IsNull() {
+        resp.PlanValue = numericConfig
+        return
+    }
+
+    // Default to using value for attribute_one if attribute_two is null
+    if !attributeOne.IsNull() && attributeTwo.IsNull() {
+        resp.PlanValue = numberConfig
+        return
+    }
+}
+```
+
+</CodeBlockConfig>
+
+<!-- FIXME: Add example of using ResourceWithModifyPlan? Any other common use cases? -->
