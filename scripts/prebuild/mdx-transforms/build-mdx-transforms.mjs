@@ -24,8 +24,11 @@ import {
 	loadRedirects,
 } from './rewrite-internal-redirects/rewrite-internal-redirects.mjs'
 import { transformExcludeTerraformContent } from './exclude-terraform-content/index.mjs'
+import { transformExcludeVaultContent } from './exclude-vault-content/index.mjs'
 
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
+
+export const DIRECTIVE_PRODUCTS = ['VLT', 'TFC', 'TFEnterprise']
 
 /**
  * Given a target directory,
@@ -36,6 +39,15 @@ import { PRODUCT_CONFIG } from '#productConfig.mjs'
  * - `<targetDir>/<repoSlug>/<version>/<contentDir>/<...file>.mdx`
  * And we expect the `partials` directory to be located at:
  * - `<targetDir>/<repoSlug>/<version>/<contentDir>/partials`
+ *
+ * Adding this note here for now but the location can change if it's decided
+ * to be somewhere better:
+ * To add content inclusions/exclusions for a certain product, it has to be
+ * included in the array named DIRECTIVE_PRODUCTS so that the regExpressions
+ * in `transformExcludeTerraformContent` and `transformExcludeVaultContent`
+ * know to look out for and account for these products.
+ *
+ * e.g. const DIRECTIVE_PRODUCTS = ['VLT', 'TFC', 'TFEnterprise', 'CONSUL', 'NOMAD']
  *
  * @param {string} targetDir
  * @param {string} outputDir the directory to write transformed files to
@@ -135,6 +147,7 @@ async function applyMdxTransforms(entry, versionMetadata = {}) {
 		const remarkResults = await remark()
 			.use(remarkMdx)
 			.use(transformExcludeTerraformContent, { filePath })
+			.use(transformExcludeVaultContent, { filePath, version })
 			.use(remarkIncludePartialsPlugin, { partialsDir, filePath })
 			.use(paragraphCustomAlertsPlugin)
 			.use(rewriteInternalRedirectsPlugin, {
