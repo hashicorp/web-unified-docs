@@ -5,8 +5,18 @@
 
 import { describe, it, expect, vi } from 'vitest'
 import { transformExcludeTerraformContent } from './index.mjs'
+// import { DIRECTIVE_PRODUCTS } from '../build-mdx-transforms.mjs'
 import remark from 'remark'
 import remarkMdx from 'remark-mdx'
+
+// Mock for testing custom directive products
+vi.mock('../build-mdx-transforms.mjs', async (importOriginal) => {
+	const actual = await importOriginal()
+	return {
+		...actual,
+		DIRECTIVE_PRODUCTS: ['VLT', 'TFC', 'TFEnterprise'], // Default for most tests
+	}
+})
 
 const runTransform = async (markdown, filePath) => {
 	const processor = await remark()
@@ -221,5 +231,40 @@ This content should stay.
 
 		const result = await runTransform(markdown, filePath)
 		expect(result.trim()).toBe(expected.trim())
+	})
+
+	it('should throw an error for directives with products not in directiveProducts array', async () => {
+		// Override DIRECTIVE_PRODUCTS for this test only
+		vi.doMock('../build-mdx-transforms.mjs', async (importOriginal) => {
+			const actual = await importOriginal()
+			return {
+				...actual,
+				DIRECTIVE_PRODUCTS: ['TFC', 'TFEnterprise'], // CONSUL not included
+			}
+		})
+
+		// Need to re-import the transform after mocking
+		const { transformExcludeTerraformContent: mockTransform } = await import(
+			'./index.mjs'
+		)
+
+		const markdown = `
+<!-- BEGIN: CONSUL:only -->
+This should cause an error - CONSUL not in directiveProducts.
+<!-- END: CONSUL:only -->
+`
+		const customRunTransform = async (markdown, filePath) => {
+			const processor = await remark()
+				.use(remarkMdx)
+				.use(mockTransform, { filePath })
+				.process(markdown)
+			return processor.contents
+		}
+
+		await expect(async () => {
+			return await customRunTransform(markdown, ptfeFilePath)
+		}).rejects.toThrow(
+			'Directive block CONSUL:only could not be parsed between lines 2 and 4',
+		)
 	})
 })
