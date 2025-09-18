@@ -27,8 +27,6 @@ export const DIRECTIVE_RE =
 // Adding the directive products parameter to allow for extensibility in tests
 export function transformExcludeVaultContent({ filePath, version }) {
 	return function transformer(tree) {
-		// // console.log('is version defined?', version)
-
 		// accumulate the content exclusion blocks
 		/** @type ({ start: number; block: string; end: number })[] */
 		const matches = []
@@ -130,51 +128,35 @@ export function transformExcludeVaultContent({ filePath, version }) {
 				// Check if this is a product we should handle
 				const productMatch = flag.match(/^(\w+):/)
 
-				// console.log('directive', directive)
-				// console.log('directiveProducts', DIRECTIVE_PRODUCTS)
-				// console.log('flag', flag)
-				// console.log('productMatch', productMatch)
-				// console.log('directive?.groups', directive?.groups)
+				// If the product matches the current one we care about 'VLT' then
+				// continue with further checks on the version and comparator
+				if (productMatch && productMatch[1] === 'VLT') {
+					// This is our product, but directive didn't match - check if it's a version format issue
+					const versionFormatCheck = flag.match(/^(\w+):(<=|>=|<|>|=)v(.+)$/)
 
-				// If the product is in the list of directive products, just skip it
-				// if (productMatch && DIRECTIVE_PRODUCTS.some(product => productMatch[1].includes(product))) {
-				// // 	throw new ExcludeVaultContentError(
-				// // 	`Directive block ${block} not valid product for inclusions/exclusions. Found in lines ${start} to ${end}`,
-				// // 	tree,
-				// // )
-				// 	return; // Skip this directive - it's for another product
-				// }
+					if (versionFormatCheck) {
+						const [, , , versionPart] = versionFormatCheck
+						// Check if version format is invalid (not X.Y.x pattern)
+						if (!versionPart.match(/^\d+\.\d+\.x$/)) {
+							throw new ExcludeVaultContentError(
+								`Invalid version format in directive: ${flag}. Expected format: vX.Y.x`,
+								tree,
+							)
+						}
+					}
+					// If we get here, it's some other directive format error
+					throw new ExcludeVaultContentError(
+						`Invalid directive format: ${flag}`,
+						tree,
+					)
+				}
 
-				// This check seems to be a bit universal... for now I'll just power through
-				// else if (productMatch && DIRECTIVE_PRODUCTS.includes(productMatch[1])) {
-				// 	// This is our product, but directive didn't match - check if it's a version format issue
-				// 	const versionFormatCheck = flag.match(/^(\w+):(<=|>=|<|>|=)v(.+)$/)
-
-				// 	if (versionFormatCheck) {
-				// 		const [, , , versionPart] = versionFormatCheck
-				// 		// Check if version format is invalid (not X.Y.x pattern)
-				// 		if (!versionPart.match(/^\d+\.\d+\.x$/)) {
-				// 			throw new ExcludeVaultContentError(
-				// 				`Invalid version format in directive: ${flag}. Expected format: vX.Y.x`,
-				// 				tree,
-				// 			)
-				// 		}
-				// 		// If it is a valid format, and a valid product, but not the one we're looking
-				// 		// for specifically, then that means we can skip it
-				// 		return;
-				// 	}
-
-				// 	// If we get here, it's some other directive format error
-				// 	throw new ExcludeVaultContentError(
-				// 		`Invalid directive format: ${flag}`,
-				// 		tree,
-				// 	)
-				// }
-
-				if (productMatch && DIRECTIVE_PRODUCTS.includes(productMatch[1])) {
+				// otherwise if it is in the directive products list, skip it
+				else if (productMatch && DIRECTIVE_PRODUCTS.includes(productMatch[1])) {
 					return // Skip this directive - it's for another product
 				}
 
+				// else if is not in the product list, throw this error
 				throw new ExcludeVaultContentError(
 					`Directive block ${block} could not be parsed between lines ${start} and ${end}`,
 					tree,
@@ -188,18 +170,12 @@ export function transformExcludeVaultContent({ filePath, version }) {
 			const { comparator, version: directiveVersion } = directive.groups
 
 			try {
-				// console.log('currentVersion', currentVersion)
-				// console.log('version', directiveVersion)
 				const versionSemVer = getTfeSemver(currentVersion)
 				const directiveSemVer = getTfeSemver(directiveVersion)
 				const compare = getComparisonFn(comparator, tree)
 
-				// console.log('versionSemVer', versionSemVer)
-				// console.log('directiveSemVer', directiveSemVer)
-
 				const shouldKeepContent = compare(versionSemVer, directiveSemVer)
 
-				// console.log('shouldKeepContent', shouldKeepContent)
 				// If the version comparison fails, remove the content
 				if (!shouldKeepContent) {
 					function removeNodesInRange(nodes) {

@@ -127,14 +127,8 @@ export function transformExcludeTerraformContent({ filePath }) {
 
 			// TODO: line start and end do not take into account front matter, as it is just tree parsing and technically front matter is not part of the MDX tree
 			if (!directive) {
-				// console.log('directive', directive)
-				// console.log('directiveProducts', DIRECTIVE_PRODUCTS)
-
 				// Check if this is a product we should handle
 				const productMatch = flag.match(/^(\w+):/)
-
-				// console.log('flag', flag)
-				// console.log('productMatch', productMatch)
 
 				if (productMatch && DIRECTIVE_PRODUCTS.includes(productMatch[1])) {
 					return // Skip this directive - it's for another product

@@ -99,7 +99,6 @@ This content should be removed.
 		}).rejects.toThrow('No block could be parsed from END comment')
 	})
 
-	// These edge cases may have to be handled
 	it('should throw error for names not in directiveProducts array', async () => {
 		const markdown = `
 <!-- BEGIN: INVALID:>=v1.21.x -->
@@ -159,13 +158,12 @@ This content should be removed.
 		expect(result.trim()).toBe('')
 	})
 
-	// This may have to get removed
 	it('should throw an error for invalid version format', async () => {
 		const markdown = `
-	<!-- BEGIN: VLT:>=v1.invalid -->
-	This content should be removed.
-	<!-- END: VLT:>=v1.invalid -->
-	`
+<!-- BEGIN: VLT:>=v1.invalid -->
+This content should throw an error.
+<!-- END: VLT:>=v1.invalid -->
+`
 
 		await expect(async () => {
 			return await runTransform(markdown, vaultVersion, filePath)
@@ -176,10 +174,10 @@ This content should be removed.
 
 	it('should throw an error for invalid comparator', async () => {
 		const markdown = `
-	<!-- BEGIN: VLT:!v1.20.x -->
-	This content should be removed.
-	<!-- END: VLT:!v1.20.x -->
-	`
+<!-- BEGIN: VLT:!v1.20.x -->
+This content should throw an error.
+<!-- END: VLT:!v1.20.x -->
+`
 
 		await expect(async () => {
 			return await runTransform(markdown, vaultVersion, filePath)
