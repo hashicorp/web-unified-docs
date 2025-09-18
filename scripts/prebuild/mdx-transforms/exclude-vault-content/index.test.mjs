@@ -18,10 +18,11 @@ vi.mock('../build-mdx-transforms.mjs', async (importOriginal) => {
 	}
 })
 
-const runTransform = async (markdown, version) => {
+const runTransform = async (markdown, version, filePath) => {
 	const processor = await remark()
 		.use(remarkMdx)
 		.use(transformExcludeVaultContent, {
+			filePath,
 			version,
 		})
 		.process(markdown)
@@ -29,6 +30,7 @@ const runTransform = async (markdown, version) => {
 }
 
 const vaultVersion = '1.20.x'
+const filePath = 'vault/some-file.md'
 
 describe('transformExcludeVaultContent', () => {
 	it('should remove content when version condition is not met', async () => {
@@ -38,7 +40,7 @@ This content should be removed.
 <!-- END: VLT:>=v1.21.x -->
 This content should stay.
 `
-		const result = await runTransform(markdown, vaultVersion)
+		const result = await runTransform(markdown, vaultVersion, filePath)
 
 		expect(result).toBe('This content should stay.\n')
 	})
@@ -51,7 +53,7 @@ This content should be removed.
 <!-- END: VLT:>=v1.22.x -->
 `
 		await expect(async () => {
-			return await runTransform(markdown, vaultVersion)
+			return await runTransform(markdown, vaultVersion, filePath)
 		}).rejects.toThrow('Mismatched block names')
 		expect(mockConsole).toHaveBeenCalledOnce()
 	})
@@ -61,7 +63,7 @@ This content should be removed.
 <!-- END: VLT:>=v1.21.x -->
 `
 		await expect(async () => {
-			return await runTransform(markdown, vaultVersion)
+			return await runTransform(markdown, vaultVersion, filePath)
 		}).rejects.toThrow('Unexpected END block')
 	})
 
@@ -71,7 +73,7 @@ This content should be removed.
 <!-- BEGIN: VLT:>=v1.21.x -->
 `
 		await expect(async () => {
-			return await runTransform(markdown, vaultVersion)
+			return await runTransform(markdown, vaultVersion, filePath)
 		}).rejects.toThrow('Unexpected BEGIN block')
 	})
 
@@ -82,7 +84,7 @@ This content should be removed.
 <!-- END: VLT:>=v1.21.x -->
 `
 		await expect(async () => {
-			return await runTransform(markdown, vaultVersion)
+			return await runTransform(markdown, vaultVersion, filePath)
 		}).rejects.toThrow('No block could be parsed from BEGIN comment')
 	})
 
@@ -93,30 +95,24 @@ This content should be removed.
 <!-- END:  -->
 `
 		await expect(async () => {
-			return await runTransform(markdown, vaultVersion)
+			return await runTransform(markdown, vaultVersion, filePath)
 		}).rejects.toThrow('No block could be parsed from END comment')
 	})
 
 	// These edge cases may have to be handled
-	// 	it('should skip directives for products not in directiveProducts array', async () => {
-	// 		const markdown = `
-	// <!-- BEGIN: INVALID:>=v1.21.x -->
-	// This content should throw an error
-	// <!-- END: INVALID:>=v1.21.x -->
-	// Other content.
-	// `
-
-	// 		const result = await runTransform(markdown, vaultVersion)
-
-	// 		// Since INVALID is not in DIRECTIVE_PRODUCTS, the directive should be left untouched
-	// 		expect(result.trim()).toBe(`<!-- BEGIN: INVALID:>=v1.21.x -->
-
-	// This content should be left untouched.
-
-	// <!-- END: INVALID:>=v1.21.x -->
-
-	// Other content.`)
-	// 	})
+	it('should throw error for names not in directiveProducts array', async () => {
+		const markdown = `
+<!-- BEGIN: INVALID:>=v1.21.x -->
+This content should throw an error
+<!-- END: INVALID:>=v1.21.x -->
+Other content.
+	`
+		await expect(async () => {
+			return await runTransform(markdown, vaultVersion, filePath)
+		}).rejects.toThrow(
+			'Directive block INVALID:>=v1.21.x could not be parsed between lines 2 and 4',
+		)
+	})
 
 	it('should keep content when version condition is met', async () => {
 		const markdown = `
@@ -125,7 +121,7 @@ This content should stay.
 <!-- END: VLT:<=v1.21.x -->
 Other content.
 `
-		const result = await runTransform(markdown, vaultVersion)
+		const result = await runTransform(markdown, vaultVersion, filePath)
 
 		expect(result.trim()).toBe(`<!-- BEGIN: VLT:<=v1.21.x -->
 
@@ -143,7 +139,7 @@ Other content.`)
 This content should stay.
 <!-- END: VLT:=v1.20.x -->
 `
-		const result = await runTransform(markdown, equalVersion)
+		const result = await runTransform(markdown, equalVersion, filePath)
 
 		expect(result.trim()).toBe(`<!-- BEGIN: VLT:=v1.20.x -->
 
@@ -158,37 +154,37 @@ This content should stay.
 This content should be removed.
 <!-- END: VLT:<v1.19.x -->
 `
-		const result = await runTransform(markdown, vaultVersion)
+		const result = await runTransform(markdown, vaultVersion, filePath)
 
 		expect(result.trim()).toBe('')
 	})
 
 	// This may have to get removed
-	// 	it('should throw an error for invalid version format', async () => {
-	// 		const markdown = `
-	// <!-- BEGIN: VLT:>=v1.invalid -->
-	// This content should be removed.
-	// <!-- END: VLT:>=v1.invalid -->
-	// `
+	it('should throw an error for invalid version format', async () => {
+		const markdown = `
+	<!-- BEGIN: VLT:>=v1.invalid -->
+	This content should be removed.
+	<!-- END: VLT:>=v1.invalid -->
+	`
 
-	// 		await expect(async () => {
-	// 			return await runTransform(markdown, vaultVersion)
-	// 		}).rejects.toThrow('Invalid version format in directive: VLT:>=v1.invalid. Expected format: vX.Y.x')
-	// 	})
+		await expect(async () => {
+			return await runTransform(markdown, vaultVersion, filePath)
+		}).rejects.toThrow(
+			'Invalid version format in directive: VLT:>=v1.invalid. Expected format: vX.Y.x',
+		)
+	})
 
-	// 	it('should throw an error for invalid comparator', async () => {
-	// 		const markdown = `
-	// <!-- BEGIN: VLT:!v1.20.x -->
-	// This content should be removed.
-	// <!-- END: VLT:!v1.20.x -->
-	// `
+	it('should throw an error for invalid comparator', async () => {
+		const markdown = `
+	<!-- BEGIN: VLT:!v1.20.x -->
+	This content should be removed.
+	<!-- END: VLT:!v1.20.x -->
+	`
 
-	// 		await expect(async () => {
-	// 			return await runTransform(markdown, vaultVersion)
-	// 		}).rejects.toThrow(
-	// 			/Invalid directive format: VLT:!v1.20.x/,
-	// 		)
-	// 	})
+		await expect(async () => {
+			return await runTransform(markdown, vaultVersion, filePath)
+		}).rejects.toThrow(/Invalid directive format: VLT:!v1.20.x/)
+	})
 
 	it('should handle multiple version blocks correctly', async () => {
 		const markdown = `
@@ -200,7 +196,7 @@ This should stay.
 <!-- END: VLT:<=v1.21.x -->
 Final content.
 `
-		const result = await runTransform(markdown, vaultVersion)
+		const result = await runTransform(markdown, vaultVersion, filePath)
 
 		expect(result.trim()).toBe(`<!-- BEGIN: VLT:<=v1.21.x -->
 
@@ -224,7 +220,7 @@ This Vault content should be removed.
 <!-- END: VLT:>=v1.21.x -->
 Regular content that stays.
 `
-		const result = await runTransform(markdown, vaultVersion)
+		const result = await runTransform(markdown, vaultVersion, filePath)
 
 		expect(result.trim()).toBe(`<!-- BEGIN: TFC:only -->
 
@@ -261,16 +257,16 @@ Regular content that stays.`)
 This should cause an error - CONSUL not in directiveProducts.
 <!-- END: CONSUL:>=v1.15.x -->
 `
-		const customRunTransform = async (markdown, version) => {
+		const customRunTransform = async (markdown, version, filePath) => {
 			const processor = await remark()
 				.use(remarkMdx)
-				.use(mockTransform, { version })
+				.use(mockTransform, { filePath, version })
 				.process(markdown)
 			return processor.contents
 		}
 
 		await expect(async () => {
-			return await customRunTransform(markdown, vaultVersion)
+			return await customRunTransform(markdown, vaultVersion, filePath)
 		}).rejects.toThrow(
 			'Directive block CONSUL:>=v1.15.x could not be parsed between lines 2 and 4',
 		)
