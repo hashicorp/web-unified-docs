@@ -43,7 +43,7 @@ export const DIRECTIVE_PRODUCTS = ['VLT', 'TFC', 'TFEnterprise']
  * Adding this note here for now but the location can change if it's decided
  * to be somewhere better:
  * To add content inclusions/exclusions for a certain product, it has to be
- * included in the array named DIRECTIVE_PRODUCTS so that the regExpressions
+ * included in the array named DIRECTIVE_PRODUCTS so that the relevant code
  * in `transformExcludeTerraformContent` and `transformExcludeVaultContent`
  * know to look out for and account for these products.
  *
