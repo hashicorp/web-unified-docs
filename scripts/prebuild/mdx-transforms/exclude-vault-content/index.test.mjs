@@ -5,7 +5,6 @@
 
 import { describe, it, expect, vi } from 'vitest'
 import { transformExcludeVaultContent } from './index.mjs'
-// import { DIRECTIVE_PRODUCTS } from '../build-mdx-transforms.mjs'
 import remark from 'remark'
 import remarkMdx from 'remark-mdx'
 

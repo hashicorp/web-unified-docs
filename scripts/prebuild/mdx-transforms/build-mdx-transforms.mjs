@@ -28,8 +28,6 @@ import { transformExcludeVaultContent } from './exclude-vault-content/index.mjs'
 
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
 
-export const DIRECTIVE_PRODUCTS = ['VLT', 'TFC', 'TFEnterprise']
-
 /**
  * Given a target directory,
  * Apply MDX transforms to all `.mdx` files found in the directory and its

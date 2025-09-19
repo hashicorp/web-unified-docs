@@ -4,7 +4,7 @@
  */
 
 import visit from 'unist-util-visit'
-import { DIRECTIVE_PRODUCTS } from '../build-mdx-transforms.mjs'
+import { DIRECTIVE_PRODUCTS } from '../shared.mjs'
 
 // this is a courtesy wrapper to prepend error messages
 class ExcludeTerraformContentError extends Error {

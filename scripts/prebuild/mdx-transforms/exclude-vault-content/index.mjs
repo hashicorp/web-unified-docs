@@ -5,7 +5,7 @@
 
 import visit from 'unist-util-visit'
 import { SemVer, gt, gte, lt, lte, eq } from 'semver'
-import { DIRECTIVE_PRODUCTS } from '../build-mdx-transforms.mjs'
+import { DIRECTIVE_PRODUCTS } from '../shared.mjs'
 
 // this is a courtesy wrapper to prepend error messages
 class ExcludeVaultContentError extends Error {
