@@ -24,6 +24,7 @@ import {
 	loadRedirects,
 } from './rewrite-internal-redirects/rewrite-internal-redirects.mjs'
 import { transformExcludeTerraformContent } from './exclude-terraform-content/index.mjs'
+import { transformExcludeVaultContent } from './exclude-vault-content/index.mjs'
 
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
 
@@ -135,6 +136,7 @@ async function applyMdxTransforms(entry, versionMetadata = {}) {
 		const remarkResults = await remark()
 			.use(remarkMdx)
 			.use(transformExcludeTerraformContent, { filePath })
+			.use(transformExcludeVaultContent, { filePath, version })
 			.use(remarkIncludePartialsPlugin, { partialsDir, filePath })
 			.use(paragraphCustomAlertsPlugin)
 			.use(rewriteInternalRedirectsPlugin, {
