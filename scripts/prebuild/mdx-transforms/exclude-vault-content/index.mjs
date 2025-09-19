@@ -22,7 +22,7 @@ class ExcludeVaultContentError extends Error {
 export const BEGIN_RE = /^(\s+)?<!--\s+BEGIN:\s+(?<block>.*?)\s+-->(\s+)?$/
 export const END_RE = /^(\s+)?<!--\s+END:\s+(?<block>.*?)\s+-->(\s+)?$/
 export const DIRECTIVE_RE =
-	/^(?<product>VLT):(?<comparator><=|>=|<|>|=)v(?<version>(\d+)\.(\d+)\.x)$/i
+	/^(?<product>Vault):(?<comparator><=|>=|<|>|=)v(?<version>(\d+)\.(\d+)\.x)$/i
 
 // Adding the directive products parameter to allow for extensibility in tests
 export function transformExcludeVaultContent({ filePath, version }) {
@@ -128,9 +128,9 @@ export function transformExcludeVaultContent({ filePath, version }) {
 				// Check if this is a product we should handle
 				const productMatch = flag.match(/^(\w+):/)
 
-				// If the product matches the current one we care about 'VLT' then
+				// If the product matches the current one we care about 'Vault' then
 				// continue with further checks on the version and comparator
-				if (productMatch && productMatch[1] === 'VLT') {
+				if (productMatch && productMatch[1] === 'Vault') {
 					// This is our product, but directive didn't match - check if it's a version format issue
 					const versionFormatCheck = flag.match(/^(\w+):(<=|>=|<|>|=)v(.+)$/)
 

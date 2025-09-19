@@ -38,15 +38,6 @@ import { PRODUCT_CONFIG } from '#productConfig.mjs'
  * And we expect the `partials` directory to be located at:
  * - `<targetDir>/<repoSlug>/<version>/<contentDir>/partials`
  *
- * Adding this note here for now but the location can change if it's decided
- * to be somewhere better:
- * To add content inclusions/exclusions for a certain product, it has to be
- * included in the array named DIRECTIVE_PRODUCTS so that the relevant code
- * in `transformExcludeTerraformContent` and `transformExcludeVaultContent`
- * know to look out for and account for these products.
- *
- * e.g. const DIRECTIVE_PRODUCTS = ['VLT', 'TFC', 'TFEnterprise', 'CONSUL', 'NOMAD']
- *
  * @param {string} targetDir
  * @param {string} outputDir the directory to write transformed files to
  */

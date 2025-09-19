@@ -13,7 +13,7 @@ vi.mock('../build-mdx-transforms.mjs', async (importOriginal) => {
 	const actual = await importOriginal()
 	return {
 		...actual,
-		DIRECTIVE_PRODUCTS: ['VLT', 'TFC', 'TFEnterprise'], // Default for most tests
+		DIRECTIVE_PRODUCTS: ['Vault', 'TFC', 'TFEnterprise'], // Default for most tests
 	}
 })
 
@@ -34,9 +34,9 @@ const filePath = 'vault/some-file.md'
 describe('transformExcludeVaultContent', () => {
 	it('should remove content when version condition is not met', async () => {
 		const markdown = `
-<!-- BEGIN: VLT:>=v1.21.x -->
+<!-- BEGIN: Vault:>=v1.21.x -->
 This content should be removed.
-<!-- END: VLT:>=v1.21.x -->
+<!-- END: Vault:>=v1.21.x -->
 This content should stay.
 `
 		const result = await runTransform(markdown, vaultVersion, filePath)
@@ -47,9 +47,9 @@ This content should stay.
 	it('should throw an error for mismatched block names', async () => {
 		const mockConsole = vi.spyOn(console, 'error').mockImplementation(() => {})
 		const markdown = `
-<!-- BEGIN: VLT:>=v1.21.x -->
+<!-- BEGIN: Vault:>=v1.21.x -->
 This content should be removed.
-<!-- END: VLT:>=v1.22.x -->
+<!-- END: Vault:>=v1.22.x -->
 `
 		await expect(async () => {
 			return await runTransform(markdown, vaultVersion, filePath)
@@ -59,7 +59,7 @@ This content should be removed.
 
 	it('should throw an error for unexpected END block', async () => {
 		const markdown = `
-<!-- END: VLT:>=v1.21.x -->
+<!-- END: Vault:>=v1.21.x -->
 `
 		await expect(async () => {
 			return await runTransform(markdown, vaultVersion, filePath)
@@ -68,8 +68,8 @@ This content should be removed.
 
 	it('should throw an error for unexpected BEGIN block', async () => {
 		const markdown = `
-<!-- BEGIN: VLT:>=v1.21.x -->
-<!-- BEGIN: VLT:>=v1.21.x -->
+<!-- BEGIN: Vault:>=v1.21.x -->
+<!-- BEGIN: Vault:>=v1.21.x -->
 `
 		await expect(async () => {
 			return await runTransform(markdown, vaultVersion, filePath)
@@ -80,7 +80,7 @@ This content should be removed.
 		const markdown = `
 <!-- BEGIN:  -->
 This content should be removed.
-<!-- END: VLT:>=v1.21.x -->
+<!-- END: Vault:>=v1.21.x -->
 `
 		await expect(async () => {
 			return await runTransform(markdown, vaultVersion, filePath)
@@ -89,7 +89,7 @@ This content should be removed.
 
 	it('should throw an error if no block could be parsed from END comment', async () => {
 		const markdown = `
-<!-- BEGIN: VLT:>=v1.21.x -->
+<!-- BEGIN: Vault:>=v1.21.x -->
 This content should be removed.
 <!-- END:  -->
 `
@@ -114,18 +114,18 @@ Other content.
 
 	it('should keep content when version condition is met', async () => {
 		const markdown = `
-<!-- BEGIN: VLT:<=v1.21.x -->
+<!-- BEGIN: Vault:<=v1.21.x -->
 This content should stay.
-<!-- END: VLT:<=v1.21.x -->
+<!-- END: Vault:<=v1.21.x -->
 Other content.
 `
 		const result = await runTransform(markdown, vaultVersion, filePath)
 
-		expect(result.trim()).toBe(`<!-- BEGIN: VLT:<=v1.21.x -->
+		expect(result.trim()).toBe(`<!-- BEGIN: Vault:<=v1.21.x -->
 
 This content should stay.
 
-<!-- END: VLT:<=v1.21.x -->
+<!-- END: Vault:<=v1.21.x -->
 
 Other content.`)
 	})
@@ -133,24 +133,24 @@ Other content.`)
 	it('should handle equality comparisons', async () => {
 		const equalVersion = '1.20.x'
 		const markdown = `
-<!-- BEGIN: VLT:=v1.20.x -->
+<!-- BEGIN: Vault:=v1.20.x -->
 This content should stay.
-<!-- END: VLT:=v1.20.x -->
+<!-- END: Vault:=v1.20.x -->
 `
 		const result = await runTransform(markdown, equalVersion, filePath)
 
-		expect(result.trim()).toBe(`<!-- BEGIN: VLT:=v1.20.x -->
+		expect(result.trim()).toBe(`<!-- BEGIN: Vault:=v1.20.x -->
 
 This content should stay.
 
-<!-- END: VLT:=v1.20.x -->`)
+<!-- END: Vault:=v1.20.x -->`)
 	})
 
 	it('should handle less than comparisons', async () => {
 		const markdown = `
-<!-- BEGIN: VLT:<v1.19.x -->
+<!-- BEGIN: Vault:<v1.19.x -->
 This content should be removed.
-<!-- END: VLT:<v1.19.x -->
+<!-- END: Vault:<v1.19.x -->
 `
 		const result = await runTransform(markdown, vaultVersion, filePath)
 
@@ -159,47 +159,47 @@ This content should be removed.
 
 	it('should throw an error for invalid version format', async () => {
 		const markdown = `
-<!-- BEGIN: VLT:>=v1.invalid -->
+<!-- BEGIN: Vault:>=v1.invalid -->
 This content should throw an error.
-<!-- END: VLT:>=v1.invalid -->
+<!-- END: Vault:>=v1.invalid -->
 `
 
 		await expect(async () => {
 			return await runTransform(markdown, vaultVersion, filePath)
 		}).rejects.toThrow(
-			'Invalid version format in directive: VLT:>=v1.invalid. Expected format: vX.Y.x',
+			'Invalid version format in directive: Vault:>=v1.invalid. Expected format: vX.Y.x',
 		)
 	})
 
 	it('should throw an error for invalid comparator', async () => {
 		const markdown = `
-<!-- BEGIN: VLT:!v1.20.x -->
+<!-- BEGIN: Vault:!v1.20.x -->
 This content should throw an error.
-<!-- END: VLT:!v1.20.x -->
+<!-- END: Vault:!v1.20.x -->
 `
 
 		await expect(async () => {
 			return await runTransform(markdown, vaultVersion, filePath)
-		}).rejects.toThrow(/Invalid directive format: VLT:!v1.20.x/)
+		}).rejects.toThrow(/Invalid directive format: Vault:!v1.20.x/)
 	})
 
 	it('should handle multiple version blocks correctly', async () => {
 		const markdown = `
-<!-- BEGIN: VLT:>=v1.21.x -->
+<!-- BEGIN: Vault:>=v1.21.x -->
 This should be removed.
-<!-- END: VLT:>=v1.21.x -->
-<!-- BEGIN: VLT:<=v1.21.x -->
+<!-- END: Vault:>=v1.21.x -->
+<!-- BEGIN: Vault:<=v1.21.x -->
 This should stay.
-<!-- END: VLT:<=v1.21.x -->
+<!-- END: Vault:<=v1.21.x -->
 Final content.
 `
 		const result = await runTransform(markdown, vaultVersion, filePath)
 
-		expect(result.trim()).toBe(`<!-- BEGIN: VLT:<=v1.21.x -->
+		expect(result.trim()).toBe(`<!-- BEGIN: Vault:<=v1.21.x -->
 
 This should stay.
 
-<!-- END: VLT:<=v1.21.x -->
+<!-- END: Vault:<=v1.21.x -->
 
 Final content.`)
 	})
@@ -212,9 +212,9 @@ This TFC content should be ignored by Vault transform.
 <!-- BEGIN: TFEnterprise:only -->
 This TFEnterprise content should also be ignored.
 <!-- END: TFEnterprise:only -->
-<!-- BEGIN: VLT:>=v1.21.x -->
+<!-- BEGIN: Vault:>=v1.21.x -->
 This Vault content should be removed.
-<!-- END: VLT:>=v1.21.x -->
+<!-- END: Vault:>=v1.21.x -->
 Regular content that stays.
 `
 		const result = await runTransform(markdown, vaultVersion, filePath)
@@ -240,7 +240,7 @@ Regular content that stays.`)
 			const actual = await importOriginal()
 			return {
 				...actual,
-				DIRECTIVE_PRODUCTS: ['VLT', 'TFC'], // CONSUL not included
+				DIRECTIVE_PRODUCTS: ['Vault', 'TFC'], // CONSUL not included
 			}
 		})
 

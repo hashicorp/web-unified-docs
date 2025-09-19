@@ -13,7 +13,7 @@ vi.mock('../build-mdx-transforms.mjs', async (importOriginal) => {
 	const actual = await importOriginal()
 	return {
 		...actual,
-		DIRECTIVE_PRODUCTS: ['VLT', 'TFC', 'TFEnterprise'], // Default for most tests
+		DIRECTIVE_PRODUCTS: ['Vault', 'TFC', 'TFEnterprise'], // Default for most tests
 	}
 })
 
