@@ -1,0 +1,354 @@
+---
+page_title: Implement actions
+description: >-
+  Learn how to implement actions with the Terraform plugin framework.
+---
+
+# Implement actions
+
+The main code components of an [action](/terraform/plugin/framework/actions) implementation are:
+
+* Implement the [`action.Action` interface](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/action#Action) as a Go type.
+* Define the [schema](#schema-method) and [metadata](#metadata-method) of the action.
+* [Add the action to the provider](#add-action-to-provider) so it is accessible by Terraform and practitioners.
+* [Implement configure for the action](#configure-method) to include any API clients or provider-level data needed.
+* Implement the [logic of the action](#invoke-method), [validation](#validation) or [planning](#modifyplan-method).
+
+## Metadata method
+
+The [`action.Action` interface `Metadata` method](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/action#Action.Metadata) defines the action type name as it would appear in Terraform configurations. This name should include the provider type prefix, an underscore, then the action specific name. For example, a provider named `examplecloud` and an action, "do_something", would be named `examplecloud_do_something`.
+
+The action type name can be hardcoded, for example:
+
+```go
+func (a *DoSomethingAction) Metadata(ctx context.Context, req action.MetadataRequest, resp *action.MetadataResponse) {
+    resp.TypeName = "examplecloud_do_something"
+}
+```
+
+Or the [`action.MetadataRequest.ProviderTypeName` field](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/action#MetadataRequest.ProviderTypeName) can be used to set the prefix:
+
+```go
+// The provider implementation
+func (p *ExampleCloudProvider) Metadata(ctx context.Context, req provider.MetadataRequest, resp *provider.MetadataResponse) {
+    resp.TypeName = "examplecloud"
+}
+
+// The action implementation
+func (a *DoSomethingAction) Metadata(ctx context.Context, req action.MetadataRequest, resp *action.MetadataResponse) {
+    resp.TypeName = req.ProviderTypeName + "_do_something"
+}
+```
+
+## Schema method
+
+The [`action.Action` interface `Schema` method](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/action#Action.Schema) defines a [schema](/terraform/plugin/framework/handling-data/schemas) describing what data is available in the action configuration. An action itself does not have output data that can be referenced by other parts of a Terraform configuration.
+
+### Action
+
+An action can be defined by using the [`schema.Schema`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/action/schema#Schema) type in the `Schema` field:
+
+```go
+func (a *DoSomethingAction) Schema(ctx context.Context, req action.SchemaRequest, resp *action.SchemaResponse) {
+    resp.Schema = schema.Schema{
+        Attributes: map[string]schema.Attribute{
+            "required_string": schema.StringAttribute{
+                Required: true,
+            },
+            "optional_bool": schema.BoolAttribute{
+                Optional: true,
+            },
+        },
+    }
+}
+```
+
+Actions can only return diagnostics and progress messages (during [`Invoke`](#invoke-method)). Actions still participate in planning operations
+via [`ModifyPlan`](#modifyplan-method), which can be used as an "online" validation for the action configuration.
+
+
+## Add action to provider
+
+Actions become available to practitioners when they are included in the [provider](/terraform/plugin/framework/providers) implementation via the optional [`provider.ProviderWithActions` interface `Actions` method](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/provider#ProviderWithActions.Actions).
+
+In this example, the `DoSomethingAction` type, which implements the `action.Action` interface, is added to the provider implementation:
+
+```go
+var _ provider.ProviderWithActions = (*ExampleCloudProvider)(nil)
+
+func (p *ExampleCloudProvider) Actions(_ context.Context) []func() action.Action {
+    return []func() action.Action{
+        NewDoSomethingAction,
+    }
+}
+
+func NewDoSomethingAction() action.Action {
+    return &DoSomethingAction{}
+}
+```
+
+## Configure method
+
+Actions may require provider-level data or remote system clients to operate correctly. The framework supports the ability to configure this data and/or
+clients once within the provider, then pass that information to actions by adding the `Configure` method.
+
+Implement the [`provider.ConfigureResponse.ActionData` field](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/provider#ConfigureResponse.ActionData) in the [`Provider` interface `Configure` method](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/provider#Provider.Configure). This value can be set to any type, whether an existing client or vendor SDK type, a provider-defined custom type, or the provider implementation itself. It is recommended to use pointer types so that actions can determine if this value was configured before attempting to use it.
+
+In this example, the Go standard library [`net/http.Client`](https://pkg.go.dev/net/http#Client) is configured in the provider, and made available for actions:
+
+```go
+func (p *ExampleCloudProvider) Configure(ctx context.Context, req provider.ConfigureRequest, resp *provider.ConfigureResponse) {
+  resp.ActionData = &http.Client{/* ... */}
+}
+```
+
+Implement the [`action.ActionWithConfigure` interface](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/action#ActionWithConfigure) which receives the provider configured data from the [`Provider` interface `Configure` method](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/provider#Provider.Configure) and saves it into the [`action.Action` interface](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/action#Action) implementation.
+
+The [`action.ActionWithConfigure` interface `Configure` method](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/action#ActionWithConfigure.Configure) is called during execution
+of any Terraform command, however the provider is not configured during "offline" operations like `terraform validate`, so implementations need to account for that situation.
+
+In this example, the provider configured the Go standard library [`net/http.Client`](https://pkg.go.dev/net/http#Client) which the action uses during `Invoke`:
+
+```go
+type DoThingAction struct {
+  client *http.Client
+}
+
+func (d *DoThingAction) Configure(ctx context.Context, req action.ConfigureRequest, resp *action.ConfigureResponse) {
+  // Always perform a nil check when handling ProviderData because Terraform
+  // sets that data after it calls the ConfigureProvider RPC.
+  if req.ProviderData == nil {
+    return
+  }
+
+  client, ok := req.ProviderData.(*http.Client)
+
+  if !ok {
+    resp.Diagnostics.AddError(
+      "Unexpected Action Configure Type",
+      fmt.Sprintf("Expected *http.Client, got: %T. Please report this issue to the provider developers.", req.ProviderData),
+    )
+
+    return
+  }
+
+  d.client = client
+}
+
+func (d *DoThingAction) Invoke(ctx context.Context, req action.InvokeRequest, resp *action.InvokeResponse) {
+  httpReq, _ := http.NewRequest(
+    http.MethodPut,
+    "http://example.com/api/do_thing",
+    bytes.NewBuffer([]byte(`{"fake": "data"}`)),
+  )
+
+  httpResp, err := d.client.Do(httpReq)
+  /* ... */
+}
+```
+
+## Invoke method
+
+Invoke is called by Terraform when an action is ready to be executed, either directly via the CLI or during a `terraform apply` command.
+Terraform calls the `InvokeAction` RPC, in which the framework calls the [`action.Action` interface `Invoke` method](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/action#Action.Invoke). The request contains the configuration supplied to Terraform for the action and the response contains any diagnostics related to the action invocation.
+
+Implement the `Invoke` method by:
+
+1. [Accessing the `Config` data](/terraform/plugin/framework/handling-data/accessing-values) from the [`action.InvokeRequest` type](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/action#InvokeRequest).
+1. Performing logic or external calls for the action.
+1. Sending any [progress messages](#sending-progress-messages) while invoking the action.
+1. Return when the action is finished.
+
+If the logic needs to return [warning or error diagnostics](/terraform/plugin/framework/diagnostics), they can be added into the [`action.InvokeResponse.Diagnostics` field](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/action#InvokeResponse.Diagnostics).
+
+In this example, an action named `examplecloud_do_thing` with hardcoded behavior is defined:
+
+```go
+// DoThingAction defines the action implementation.
+// Some action.Action interface methods are omitted for brevity.
+type DoThingAction struct {}
+
+type DoThingActionModel struct {
+    Name  types.String `tfsdk:"name"`
+}
+
+func (e *DoThingAction) Schema(ctx context.Context, req action.SchemaRequest, resp *action.SchemaResponse) {
+    resp.Schema = schema.Schema{
+        Attributes: map[string]schema.Attribute{
+            "name": schema.StringAttribute{
+                Description: "Name of the thing to do something to.",
+                Required:    true,
+            },
+        },
+    }
+}
+
+func (e *DoThingAction) Invoke(ctx context.Context, req action.InvokeRequest, resp *action.InvokeResponse) {
+    var data DoThingActionModel
+
+    // Read action config data into the model
+    resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
+    if resp.Diagnostics.HasError() {
+        return
+    }
+
+    // Execute action logic, adding any errors to resp.Diagnostics
+}
+```
+
+### Sending progress messages
+
+Optionally, for actions that can have longer invocation times, the provider can send progress updates back to Terraform that will be displayed to the practitioner.
+The [`action.InvokeResponse.SendProgress` function](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/action#InvokeResponse.SendProgress) can be called
+with the message that needs to be displayed while an action is invoking. The `InvokeAction` RPC is a [streaming RPC](https://grpc.io/docs/what-is-grpc/core-concepts/#server-streaming-rpc),
+so the message will immediately be sent back to Terraform to display to the practitioner.
+
+In this example, an action named `examplecloud_do_thing` sends progress messages every 10 seconds until an HTTP request has completed:
+
+```go
+func (e *DoThingAction) Invoke(ctx context.Context, req action.InvokeRequest, resp *action.InvokeResponse) {
+  done := make(chan bool)
+
+  // Long running API operation in a goroutine
+  go func() {
+    httpReq, _ := http.NewRequest(
+      http.MethodPut,
+      "http://example.com/api/do_thing",
+      bytes.NewBuffer([]byte(`{"fake": "data"}`)),
+    )
+
+    httpResp, err := d.client.Do(httpReq)
+    if err != nil {
+      resp.Diagnostics.AddError(
+        "HTTP PUT Error",
+        "Error updating data. Please report this issue to the provider developers.",
+      )
+    }
+    done <- true
+  }()
+
+  ticker := time.NewTicker(10 * time.Second) // Send message back to practitioner every 10 seconds
+  defer ticker.Stop()
+
+  for {
+    select {
+    case <-done:
+      return
+    case <-ticker.C:
+      // Once this function is called, the message will be displayed in Terraform
+      resp.SendProgress(action.InvokeProgressEvent{
+        Message: "Waiting for HTTP request to finish...",
+      })
+    }
+  }
+}
+```
+
+Terraform will display the messages to the practitioner while the action is invoking, for example: 
+
+```bash
+ $ terraform apply -auto-approve
+
+# .. other plan / apply output
+Action started: action.examplecloud_do_thing.test_trigger (triggered by terraform_data.test)
+Action action.examplecloud_do_thing.test_trigger (triggered by terraform_data.test): Waiting for HTTP request to finish...
+Action action.examplecloud_do_thing.test_trigger (triggered by terraform_data.test): Waiting for HTTP request to finish...
+Action action.examplecloud_do_thing.test_trigger (triggered by terraform_data.test): Waiting for HTTP request to finish...
+Action complete: action.examplecloud_do_thing.test_trigger (triggered by terraform_data.test)
+```
+
+## Validation
+
+Actions support validating an entire practitioner configuration in either declarative or imperative logic. Feedback, such as
+required syntax or acceptable combinations of values, is returned via [diagnostics](/terraform/plugin/framework/diagnostics).
+
+This section describes implementation details for validating entire action configurations, typically referencing multiple attributes. Further documentation is available for other configuration validation concepts:
+
+- [Single attribute validation](/terraform/plugin/framework/validation#attribute-validation) is a schema-based mechanism for implementing attribute-specific validation logic.
+- [Type validation](/terraform/plugin/framework/validation#type-validation) is a schema-based mechanism for implementing reusable validation logic for any attribute using the type.
+
+-> Configuration validation in Terraform occurs without provider configuration ("offline"), therefore the action `Configure` method will not have been called. To implement validation with a configured API client, use logic within the `ModifyPlan` method, which is executed during Terraform's planning phase.
+
+### ConfigValidators Method
+
+The [`action.ActionWithConfigValidators` interface](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/action#ActionWithConfigValidators) follows a similar pattern to attribute validation and allows for a more declarative approach. This enables consistent validation logic across multiple actions. Each validator intended for this interface must implement the [`action.ConfigValidator` interface](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/action#ConfigValidator).
+
+The [`terraform-plugin-framework-validators` Go module](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework-validators) has a collection of common use case action configuration validators in the [`actionvalidator` package](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework-validators/actionvalidator). These use [path expressions](/terraform/plugin/framework/path-expressions) for matching attributes.
+
+This example will raise an error if a practitioner attempts to configure both `attribute_one` and `attribute_two`:
+
+```go
+// Other methods to implement the action.Action interface are omitted for brevity
+type DoThingAction struct {}
+
+func (d DoThingAction) ConfigValidators(ctx context.Context) []action.ConfigValidator {
+    return []action.ConfigValidator{
+        actionvalidator.Conflicting(
+            path.MatchRoot("attribute_one"),
+            path.MatchRoot("attribute_two"),
+        ),
+    }
+}
+```
+
+### ValidateConfig Method
+
+The [`action.ActionWithValidateConfig` interface](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/action#ActionWithValidateConfig) is more imperative in design and is useful for validating unique functionality across multiple attributes that typically applies to a single action.
+
+This example will raise a warning if a practitioner attempts to configure `attribute_one`, but not `attribute_two`:
+
+```go
+// Other methods to implement the action.Action interface are omitted for brevity
+type DoThingAction struct {}
+
+type DoThingActionModel struct {
+    AttributeOne types.String `tfsdk:"attribute_one"`
+    AttributeTwo types.String `tfsdk:"attribute_two"`
+}
+
+func (d DoThingAction) ValidateConfig(ctx context.Context, req action.ValidateConfigRequest, resp *action.ValidateConfigResponse) {
+    var data DoThingActionModel
+
+    resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
+
+    if resp.Diagnostics.HasError() {
+        return
+    }
+
+    // If attribute_one is not configured, return without warning.
+    if data.AttributeOne.IsNull() || data.AttributeOne.IsUnknown() {
+        return
+    }
+
+    // If attribute_two is not null, return without warning.
+    if !data.AttributeTwo.IsNull() {
+        return
+    }
+
+    resp.Diagnostics.AddAttributeWarning(
+        path.Root("attribute_two"),
+        "Missing Attribute Configuration",
+        "Expected attribute_two to be configured with attribute_one. "+
+            "The action may return unexpected results.",
+    )
+}
+```
+
+## ModifyPlan method
+
+Actions have a limited ability to participate in the planning process of Terraform, which is facilitated by the `PlanAction` RPC. As actions do not have any output data that can be consumed by
+other parts of the Terraform configuration, the only impact an action can have on the plan is by returning diagnostics, like performing validation that requires API client access. Actions are currently not able to propose resource state modifications during the plan, but future work is planned to support this.
+
+Actions can participate in the planning operation of Terraform by implementing the [`action.ActionWithModifyPlan` interface](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/action#ActionWithModifyPlan). For example:
+
+```go
+// Ensure the Action satisfies the action.ActionWithModifyPlan interface.
+// Other methods to implement the action.Action interface are omitted for brevity
+var _ action.ActionWithModifyPlan = DoThingAction{}
+
+type DoThingAction struct {}
+
+func (a DoThingAction) ModifyPlan(ctx context.Context, req action.ModifyPlanRequest, resp *action.ModifyPlanResponse) {
+    // Fill in logic.
+}
+```
