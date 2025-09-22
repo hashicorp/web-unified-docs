@@ -23,8 +23,10 @@ import {
 	rewriteInternalRedirectsPlugin,
 	loadRedirects,
 } from './rewrite-internal-redirects/rewrite-internal-redirects.mjs'
-import { transformExcludeTerraformContent } from './exclude-terraform-content/index.mjs'
-import { transformExcludeVaultContent } from './exclude-vault-content/index.mjs'
+// import { transformExcludeTerraformContent } from './exclude-terraform-content/index.mjs'
+// import { transformExcludeVaultContent } from './exclude-vault-content/index.mjs'
+
+import { transformExcludeContent } from './exclude-content/index.mjs'
 
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
 
@@ -79,17 +81,25 @@ export async function buildMdxTransforms(
 		)
 		const redirectsDir = path.join(targetDir, repoSlug, verifiedVersion)
 		const outPath = path.join(outputDir, relativePath)
-		return { filePath, partialsDir, outPath, version, redirectsDir }
+		return { repoSlug, filePath, partialsDir, outPath, version, redirectsDir }
 	})
 	/**
 	 * Apply MDX transforms to each file entry, in batches
 	 */
+	const productDirectivePrefixes = Object.entries(PRODUCT_CONFIG)
+		.filter(([, config]) => { return config.supportsExclusionDirectives })
+		.map(([, config]) => { return config.directivePrefix })
+
 	console.log(`Running MDX transforms on ${mdxFileEntries.length} files...`)
 	const results = await batchPromises(
 		'MDX transforms',
 		mdxFileEntries,
 		(entry) => {
-			return applyMdxTransforms(entry, versionMetadata)
+			return applyMdxTransforms(
+				entry,
+				versionMetadata,
+				productDirectivePrefixes
+			)
 		},
 	)
 	// Log out any errors encountered
@@ -125,7 +135,11 @@ export async function buildMdxTransforms(
  * @param {string} entry.outPath
  * @return {object} { error: string | null }
  */
-async function applyMdxTransforms(entry, versionMetadata = {}) {
+async function applyMdxTransforms(
+	entry,
+	versionMetadata = {},
+	productDirectivePrefixes = []
+) {
 	try {
 		const { filePath, partialsDir, outPath, version, redirectsDir } = entry
 		const redirects = await loadRedirects(version, redirectsDir)
@@ -133,10 +147,19 @@ async function applyMdxTransforms(entry, versionMetadata = {}) {
 		const fileString = fs.readFileSync(filePath, 'utf8')
 		const { data, content } = grayMatter(fileString)
 
+		const supportsExclusionDirectives = PRODUCT_CONFIG[entry.repoSlug]?.supportsExclusionDirectives ?? false
+
 		const remarkResults = await remark()
 			.use(remarkMdx)
-			.use(transformExcludeTerraformContent, { filePath })
-			.use(transformExcludeVaultContent, { filePath, version })
+			// .use(transformExcludeTerraformContent, { filePath })
+			// .use(transformExcludeVaultContent, { filePath, version })
+			.use(transformExcludeContent, {
+				filePath,
+				version,
+				product: entry.repoSlug,
+				supportsExclusionDirectives,
+				productDirectivePrefixes
+			})
 			.use(remarkIncludePartialsPlugin, { partialsDir, filePath })
 			.use(paragraphCustomAlertsPlugin)
 			.use(rewriteInternalRedirectsPlugin, {
