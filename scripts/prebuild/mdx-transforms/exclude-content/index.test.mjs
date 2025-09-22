@@ -107,7 +107,7 @@ Other content.
 		await expect(async () => {
 			return await runTransform(markdown, vaultVersion, filePath, 'vault')
 		}).rejects.toThrow(
-			'Directive block INVALID:>=v1.21.x could not be parsed between lines 2 and 4',
+			'Invalid directive product: INVALID in block INVALID:>=v1.21.x between lines 2 and 4. Did you mean one of: TFEnterprise, TFC, Vault?',
 		)
 	})
 
@@ -158,15 +158,15 @@ This content should be removed.
 
 	it('should throw an error for invalid version format', async () => {
 		const markdown = `
-<!-- BEGIN: Vault:>=v1.invalid -->
+<!-- BEGIN: Vault:>=v1.x -->
 This content should throw an error.
-<!-- END: Vault:>=v1.invalid -->
+<!-- END: Vault:>=v1.x -->
 `
 
 		await expect(async () => {
 			return await runTransform(markdown, vaultVersion, filePath, 'vault')
 		}).rejects.toThrow(
-			'Invalid version format in directive: Vault:>=v1.invalid. Expected format: vX.Y.x',
+			'Invalid version format in directive: Vault:>=v1.x. Expected format: vZ.Y.x',
 		)
 	})
 
@@ -179,7 +179,7 @@ This content should throw an error.
 
 		await expect(async () => {
 			return await runTransform(markdown, vaultVersion, filePath, 'vault')
-		}).rejects.toThrow(/Invalid directive format: Vault:!v1.20.x/)
+		}).rejects.toThrow('Invalid comparator in directive: Vault:!v1.20.x. Expected one of: <=, >=, <, >, =')
 	})
 
 	it('should handle multiple version blocks correctly', async () => {
@@ -231,40 +231,5 @@ Final content.`)
 // <!-- END: TFEnterprise:only -->
 
 // Regular content that stays.`)
-// 	})
-
-// 	it('should throw an error for a supported product but a misspelled directive', async () => {
-// 		// Override DIRECTIVE_PRODUCTS for this test only
-// 		vi.doMock('../build-mdx-transforms.mjs', async (importOriginal) => {
-// 			const actual = await importOriginal()
-// 			return {
-// 				...actual,
-// 				DIRECTIVE_PRODUCTS: ['Vault', 'TFC'], // CONSUL not included
-// 			}
-// 		})
-
-// 		// Need to re-import the transform after mocking
-// 		const { transformExcludeVaultContent: mockTransform } = await import(
-// 			'./index.mjs'
-// 		)
-
-// 		const markdown = `
-// <!-- BEGIN: CONSUL:>=v1.15.x -->
-// This should cause an error - CONSUL not in directiveProducts.
-// <!-- END: CONSUL:>=v1.15.x -->
-// `
-// 		const customRunTransform = async (markdown, version, filePath) => {
-// 			const processor = await remark()
-// 				.use(remarkMdx)
-// 				.use(mockTransform, { filePath, version })
-// 				.process(markdown)
-// 			return processor.contents
-// 		}
-
-// 		await expect(async () => {
-// 			return await customRunTransform(markdown, vaultVersion, filePath)
-// 		}).rejects.toThrow(
-// 			'Directive block CONSUL:>=v1.15.x could not be parsed between lines 2 and 4',
-// 		)
 // 	})
 })

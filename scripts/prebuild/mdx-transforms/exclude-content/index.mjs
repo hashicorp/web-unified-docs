@@ -7,6 +7,12 @@ import visit from 'unist-util-visit'
 import { SemVer, gt, gte, lt, lte, eq } from 'semver'
 // import { DIRECTIVE_PRODUCTS } from '../shared.mjs'
 
+import { PRODUCT_CONFIG } from '#productConfig.mjs'
+
+const productDirectivePrefixes = Object.entries(PRODUCT_CONFIG)
+	.filter(([, config]) => { return config.supportsExclusionDirectives })
+	.map(([, config]) => { return config.directivePrefix })
+
 // this is a courtesy wrapper to prepend error messages
 class ExcludeContentError extends Error {
 	constructor(message, markdownSource, product) {
@@ -19,10 +25,9 @@ class ExcludeContentError extends Error {
 	}
 }
 
-export const BEGIN_RE = /^(\s+)?<!--\s+BEGIN:\s+(?<block>.*?)\s+-->(\s+)?$/
-export const END_RE = /^(\s+)?<!--\s+END:\s+(?<block>.*?)\s+-->(\s+)?$/
-export const DIRECTIVE_RE =
-	/^(?<product>Vault):(?<comparator><=|>=|<|>|=)v(?<version>(\d+)\.(\d+)\.x)$/i
+const BEGIN_RE = /^(\s+)?<!--\s+BEGIN:\s+(?<block>.*?)\s+-->(\s+)?$/
+const END_RE = /^(\s+)?<!--\s+END:\s+(?<block>.*?)\s+-->(\s+)?$/
+const VERSIONS_RE = /(?<comparator><=|>=|<|>|=)?v(?<version>(\d+)\.(\d+)\.x)?/i
 
 // Adding the directive products parameter to allow for extensibility in tests
 export function transformExcludeContent({
@@ -133,33 +138,46 @@ export function transformExcludeContent({
 			}
 		})
 
+		function removeNodesInRange(nodes, start, end) {
+			for (let i = nodes.length - 1; i >= 0; i--) {
+				const node = nodes[i]
+				if (
+					node.position &&
+					node.position.start.line >= start &&
+					node.position.end.line <= end
+				) {
+					nodes.splice(i, 1)
+				} else if (node.children && Array.isArray(node.children)) {
+					removeNodesInRange(node.children, start, end)
+				}
+			}
+		}
+
 		// iterate through the list of matches backwards to remove lines
 		matches.reverse().forEach(({ start, end, block }) => {
 			const [flag] = block.split(/\s+/)
-			const directive = flag.match(DIRECTIVE_RE)
+			const [product, versions] = flag.split(':')
 
-			if (!directive?.groups) {
-				// Check if this is a product we should handle
-				const productMatch = flag.match(/^(\w+):/)
+			// Check if this product is in our allowed list
+			if (!productDirectivePrefixes.includes(product)) {
+				throw new ExcludeContentError(
+					`Invalid directive product: ${product} in block ${block} between lines ${start} and ${end}. Did you mean one of: ${productDirectivePrefixes.join(', ')}?`,
+					tree,
+					product
+				)
+			}
 
-				// If the product matches the current one we care about 'Vault' then
-				// continue with further checks on the version and comparator
-				if (productMatch && productMatch[1] === 'Vault') {
-					// This is our product, but directive didn't match - check if it's a version format issue
-					const versionFormatCheck = flag.match(/^(\w+):(<=|>=|<|>|=)v(.+)$/)
+			let shouldKeepContent = true
 
-					if (versionFormatCheck) {
-						const [, , , versionPart] = versionFormatCheck
-						// Check if version format is invalid (not X.Y.x pattern)
-						if (!versionPart.match(/^\d+\.\d+\.x$/)) {
-							throw new ExcludeContentError(
-								`Invalid version format in directive: ${flag}. Expected format: vX.Y.x`,
-								tree,
-								product
-							)
-						}
-					}
-					// If we get here, it's some other directive format error
+			// If versions is "only" remove if not the right file path
+			// otherwise remove if the version comparison fails
+			if (versions === "only") {
+				shouldKeepContent = true
+				// Skip processing for TFEnterprise and HCP
+			} else {
+				const match = versions.match(VERSIONS_RE)
+
+				if (!match) {
 					throw new ExcludeContentError(
 						`Invalid directive format: ${flag}`,
 						tree,
@@ -167,51 +185,42 @@ export function transformExcludeContent({
 					)
 				}
 
-				// else if is not in the product list, throw this error
-				throw new ExcludeContentError(
-					`Directive block ${block} could not be parsed between lines ${start} and ${end}`,
-					tree,
-					product
-				)
+				const { comparator, version: directiveVersion } = match.groups
+
+				if (!directiveVersion) {
+					throw new ExcludeContentError(
+						`Invalid version format in directive: ${flag}. Expected format: vZ.Y.x`,
+						tree,
+						product
+					)
+				}
+
+				if (!comparator) {
+					throw new ExcludeContentError(
+						`Invalid comparator in directive: ${flag}. Expected one of: <=, >=, <, >, =`,
+						tree,
+						product
+					)
+				}
+
+				try {
+					const currentVersion = version || ''
+					const versionSemVer = getTfeSemver(currentVersion)
+					const directiveSemVer = getTfeSemver(directiveVersion)
+					const compare = getComparisonFn(comparator, tree, product)
+
+					shouldKeepContent = compare(versionSemVer, directiveSemVer)
+				} catch (error) {
+					throw new ExcludeContentError(
+						`Version comparison failed: ${error.message}`,
+						tree,
+						product
+					)
+				}
 			}
 
-			// This is the version that is parsed from reading the filename
-			const currentVersion = version || ''
-
-			// This is the directive that is parsed from the exclusion block
-			const { comparator, version: directiveVersion } = directive.groups
-
-			try {
-				const versionSemVer = getTfeSemver(currentVersion)
-				const directiveSemVer = getTfeSemver(directiveVersion)
-				const compare = getComparisonFn(comparator, tree, product)
-
-				const shouldKeepContent = compare(versionSemVer, directiveSemVer)
-
-				// If the version comparison fails, remove the content
-				if (!shouldKeepContent) {
-					function removeNodesInRange(nodes) {
-						for (let i = nodes.length - 1; i >= 0; i--) {
-							const node = nodes[i]
-							if (
-								node.position &&
-								node.position.start.line >= start &&
-								node.position.end.line <= end
-							) {
-								nodes.splice(i, 1)
-							} else if (node.children && Array.isArray(node.children)) {
-								removeNodesInRange(node.children, node)
-							}
-						}
-					}
-					removeNodesInRange(tree.children, tree)
-				}
-			} catch (error) {
-				throw new ExcludeContentError(
-					`Version comparison failed: ${error.message}`,
-					tree,
-					product
-				)
+			if (!shouldKeepContent) {
+				removeNodesInRange(tree.children, start, end)
 			}
 		})
 		return tree
