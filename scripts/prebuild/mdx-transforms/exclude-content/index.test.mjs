@@ -30,7 +30,7 @@ const runTransform = async (markdown, version, filePath, product) => {
 const vaultVersion = '1.20.x'
 const filePath = 'vault/some-file.md'
 
-describe('transformExcludeContent', () => {
+describe('transformExcludeContent with Versions', () => {
 	it('should remove content when version condition is not met', async () => {
 		const markdown = `
 <!-- BEGIN: Vault:>=v1.21.x -->
@@ -232,4 +232,211 @@ Final content.`)
 
 // Regular content that stays.`)
 // 	})
+})
+
+const ptfeFilePath = 'terraform-enterprise/some-file.md'
+const ptfeVersion = 'v1.20.x'
+
+describe('transformExcludeContent with Only', () => {
+	it('should remove content within TFC:only blocks', async () => {
+		const markdown = `
+<!-- BEGIN: TFC:only -->
+This content should be removed.
+<!-- END: TFC:only -->
+This content should stay.
+`
+		const result = await runTransform(markdown, ptfeVersion, ptfeFilePath, 'terraform-docs-common')
+
+		expect(result).toBe('This content should stay.\n')
+	})
+
+	it('should throw an error for mismatched block names', async () => {
+		const mockConsole = vi.spyOn(console, 'error').mockImplementation(() => {})
+		const markdown = `
+<!-- BEGIN: TFC:only -->
+This content should be removed.
+<!-- END: TFC:other -->
+`
+		await expect(async () => {
+			return await runTransform(markdown, ptfeVersion, ptfeFilePath, 'terraform-docs-common')
+		}).rejects.toThrow('Mismatched block names')
+		expect(mockConsole).toHaveBeenCalledOnce()
+	})
+
+	it('should throw an error for unexpected END block', async () => {
+		const markdown = `
+<!-- END: TFC:only -->
+`
+		await expect(async () => {
+			return await runTransform(markdown, ptfeVersion, ptfeFilePath, 'terraform-docs-common')
+		}).rejects.toThrow('Unexpected END block')
+	})
+
+	it('should throw an error for unexpected BEGIN block', async () => {
+		const markdown = `
+<!-- BEGIN: TFC:only -->
+<!-- BEGIN: TFC:only -->
+`
+		await expect(async () => {
+			return await runTransform(markdown, ptfeVersion, ptfeFilePath, 'terraform-docs-common')
+		}).rejects.toThrow('Unexpected BEGIN block')
+	})
+
+	it('should throw an error if no block could be parsed from BEGIN comment', async () => {
+		const markdown = `
+<!-- BEGIN:  -->
+This content should be removed.
+<!-- END: TFC:only -->
+`
+		await expect(async () => {
+			return await runTransform(markdown, ptfeVersion, ptfeFilePath, 'terraform-docs-common')
+		}).rejects.toThrow('Unexpected BEGIN block')
+	})
+
+	it('should throw an error if no block could be parsed from END comment', async () => {
+		const markdown = `
+<!-- BEGIN: TFC:only -->
+This content should be removed.
+<!-- END:  -->
+`
+		await expect(async () => {
+			return await runTransform(markdown, ptfeVersion, ptfeFilePath, 'terraform-docs-common')
+		}).rejects.toThrow('No block could be parsed from END comment')
+	})
+
+	it('should throw an error for blocks that do not match directive', async () => {
+		const markdown = `
+<!-- BEGIN: TFE:only -->
+This content should be removed.
+<!-- END: TFE:only -->
+`
+
+		await expect(async () => {
+			return await runTransform(markdown, ptfeFilePath)
+		}).rejects.toThrow(
+			/Directive block TFE:only could not be parsed between lines 2 and 4/,
+		)
+	})
+
+	it('should remove TFC:only content and leave TFEnterprise:only content for terraform-enterprise', async () => {
+		const markdown = `
+<!-- BEGIN: TFC:only -->
+This content should be removed.
+<!-- END: TFC:only -->
+<!-- BEGIN: TFEnterprise:only -->
+This content should NOT be removed.
+<!-- END: TFEnterprise:only -->
+This content should stay.`
+
+		const expected = `<!-- BEGIN: TFEnterprise:only -->
+
+This content should NOT be removed.
+
+<!-- END: TFEnterprise:only -->
+
+This content should stay.
+`
+
+		const result = await runTransform(markdown, ptfeVersion, ptfeFilePath, 'terraform-enterprise')
+		expect(result).toBe(expected)
+	})
+
+	it('should remove TFEnterprise:only and TFC:only content for terraform product', async () => {
+		const markdown = `
+<!-- BEGIN: TFC:only -->
+This content should be removed.
+<!-- END: TFC:only -->
+<!-- BEGIN: TFEnterprise:only -->
+This content should be removed.
+<!-- END: TFEnterprise:only -->
+This content should stay.
+`
+
+		const filePath = 'terraform/some-file.md'
+		const expected = `This content should stay.`
+
+		const result = await runTransform(markdown, ptfeVersion, filePath, 'terraform')
+
+		expect(result.trim()).toBe(expected.trim())
+	})
+
+	it('should remove NESTED TFEnterprise:only and TFC:only content for terraform product', async () => {
+		const markdown = `
+<!-- BEGIN: TFC:only -->
+This content should be removed.
+<!-- END: TFC:only -->
+	<!-- BEGIN: TFEnterprise:only name:revoke -->
+-   You can now revoke, and revert the revocation of, module versions. Learn more about [Managing module versions](/terraform/enterprise/api-docs/private-registry/manage-module-versions).
+		<!-- END: TFEnterprise:only name:revoke -->
+
+This content should stay.
+`
+
+		const filePath = 'terraform/some-file.md'
+		const expected = `This content should stay.`
+
+		const result = await runTransform(markdown, ptfeVersion, filePath, 'terraform')
+
+		expect(result.trim()).toBe(expected.trim())
+	})
+
+	it('should remove TFEnterprise:only and TFC:only content for terraform-cdk product', async () => {
+		const markdown = `
+<!-- BEGIN: TFC:only -->
+This content should be removed.
+<!-- END: TFC:only -->
+<!-- BEGIN: TFEnterprise:only -->
+This content should be removed.
+<!-- END: TFEnterprise:only -->
+This content should stay.
+`
+
+		const filePath = 'terraform-cdk/some-file.md'
+		const expected = `
+This content should stay.
+`
+
+		const result = await runTransform(markdown, ptfeVersion, filePath, 'terraform-cdk')
+		expect(result.trim()).toBe(expected.trim())
+	})
+
+	it('should remove TFEnterprise:only content for terraform-docs-common', async () => {
+		const markdown = `
+<!-- BEGIN: TFEnterprise:only -->
+This content should be removed.
+<!-- END: TFEnterprise:only -->
+This content should stay.
+`
+
+		const filePath = 'terraform-docs-common/cloud-docs/some-file.md'
+		const expected = `
+This content should stay.
+`
+
+		const result = await runTransform(markdown, ptfeVersion, filePath, 'terraform-docs-common')
+		expect(result.trim()).toBe(expected.trim())
+	})
+
+	it('should leave TFC:only content for terraform-docs-common', async () => {
+		const markdown = `
+<!-- BEGIN: TFC:only -->
+This content should NOT be removed.
+<!-- END: TFC:only -->
+This content should stay.
+`
+
+		const filePath = 'terraform-docs-common/cloud-docs/some-file.md'
+		const expected = `
+<!-- BEGIN: TFC:only -->
+
+This content should NOT be removed.
+
+<!-- END: TFC:only -->
+
+This content should stay.
+`
+
+		const result = await runTransform(markdown, ptfeVersion, filePath, 'terraform-docs-common')
+		expect(result.trim()).toBe(expected.trim())
+	})
 })

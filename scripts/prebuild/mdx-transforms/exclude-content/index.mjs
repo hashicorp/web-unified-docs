@@ -8,10 +8,22 @@ import { SemVer, gt, gte, lt, lte, eq } from 'semver'
 // import { DIRECTIVE_PRODUCTS } from '../shared.mjs'
 
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
+import { dir } from 'console'
 
 const productDirectivePrefixes = Object.entries(PRODUCT_CONFIG)
 	.filter(([, config]) => { return config.supportsExclusionDirectives })
 	.map(([, config]) => { return config.directivePrefix })
+
+
+const prefixToProductMap = productDirectivePrefixes.reduce((acc, prefix) => {
+	const entry =  Object.entries(PRODUCT_CONFIG).find(([, config]) =>
+			config.directivePrefix === prefix
+		)
+	if (entry) {
+		acc[prefix] = entry[0]
+	}
+	return acc
+}, {})
 
 // this is a courtesy wrapper to prepend error messages
 class ExcludeContentError extends Error {
@@ -156,12 +168,12 @@ export function transformExcludeContent({
 		// iterate through the list of matches backwards to remove lines
 		matches.reverse().forEach(({ start, end, block }) => {
 			const [flag] = block.split(/\s+/)
-			const [product, versions] = flag.split(':')
+			const [directive_product, versions] = flag.split(':')
 
 			// Check if this product is in our allowed list
-			if (!productDirectivePrefixes.includes(product)) {
+			if (!productDirectivePrefixes.includes(directive_product)) {
 				throw new ExcludeContentError(
-					`Invalid directive product: ${product} in block ${block} between lines ${start} and ${end}. Did you mean one of: ${productDirectivePrefixes.join(', ')}?`,
+					`Invalid directive product: ${directive_product} in block ${block} between lines ${start} and ${end}. Did you mean one of: ${productDirectivePrefixes.join(', ')}?`,
 					tree,
 					product
 				)
@@ -172,8 +184,19 @@ export function transformExcludeContent({
 			// If versions is "only" remove if not the right file path
 			// otherwise remove if the version comparison fails
 			if (versions === "only") {
-				shouldKeepContent = true
-				// Skip processing for TFEnterprise and HCP
+				if (!filePath.includes(prefixToProductMap[directive_product])) {
+					shouldKeepContent = false
+				}
+
+				// 	if (product === 'terraform-enterprise' &&
+				// 	!filePath.includes('terraform-enterprise')
+				// ) {
+				// 	shouldKeepContent = false
+				// } else if (product === 'terraform-docs-common' &&
+				// 	!filePath.includes('terraform-docs-common')
+				// ) {
+				// 	shouldKeepContent = false
+				// }
 			} else {
 				const match = versions.match(VERSIONS_RE)
 
