@@ -3,12 +3,15 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-/*
- * To add content inclusions/exclusions for a certain product, it has to be
- * included in the array named DIRECTIVE_PRODUCTS so that the relevant code
- * in `transformExcludeTerraformContent` and `transformExcludeVaultContent`
- * know to look out for and account for these products.
+/**
+ * List of product codes that are supported in content exclusion directives
+ * This array defines which products can have content inclusion/exclusion blocks
  *
- * e.g. const DIRECTIVE_PRODUCTS = ['Vault', 'TFC', 'TFEnterprise', 'CONSUL', 'NOMAD']
+ * To add content inclusions/exclusions for a new product:
+ * 1. Add the product code to this array (e.g., 'CONSUL', 'NOMAD')
+ * 2. Create a corresponding plugin in the content-exclusion directory
+ * 3. Register the plugin in the dispatcher
+ *
+ * @type {string[]} Array of supported product codes
  */
 export const DIRECTIVE_PRODUCTS = ['Vault', 'TFC', 'TFEnterprise']
