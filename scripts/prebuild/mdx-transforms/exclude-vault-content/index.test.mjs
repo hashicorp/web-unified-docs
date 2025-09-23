@@ -9,7 +9,7 @@ import remark from 'remark'
 import remarkMdx from 'remark-mdx'
 
 // Mock for testing custom directive products
-vi.mock('../build-mdx-transforms.mjs', async (importOriginal) => {
+vi.mock('../shared.mjs', async (importOriginal) => {
 	const actual = await importOriginal()
 	return {
 		...actual,
@@ -236,7 +236,7 @@ Regular content that stays.`)
 
 	it('should throw an error for directives with products not in directiveProducts array', async () => {
 		// Override DIRECTIVE_PRODUCTS for this test only
-		vi.doMock('../build-mdx-transforms.mjs', async (importOriginal) => {
+		vi.doMock('../shared.mjs', async (importOriginal) => {
 			const actual = await importOriginal()
 			return {
 				...actual,

@@ -9,7 +9,7 @@ import remark from 'remark'
 import remarkMdx from 'remark-mdx'
 
 // Mock for testing custom directive products
-vi.mock('../build-mdx-transforms.mjs', async (importOriginal) => {
+vi.mock('../shared.mjs', async (importOriginal) => {
 	const actual = await importOriginal()
 	return {
 		...actual,
