@@ -202,6 +202,7 @@ export const PRODUCT_CONFIG = {
 		 * See note at top of this document on `pages` directories for details.
 		 */
 		assetDir: 'public/images',
+		basePaths: ['sentinel'],
 		/**
 		 * TODO: consider implications of Sentinel's `contentDir`.
 		 *
@@ -444,6 +445,7 @@ export const PRODUCT_CONFIG = {
 		 * See note at top of this document on `pages` directories for details.
 		 */
 		assetDir: 'public/img',
+		basePaths: ['api-docs', 'docs'],
 		contentDir: 'content',
 		dataDir: 'data',
 		productSlug: 'vault',
