@@ -23,10 +23,8 @@ import {
 	rewriteInternalRedirectsPlugin,
 	loadRedirects,
 } from './rewrite-internal-redirects/rewrite-internal-redirects.mjs'
-// import { transformExcludeTerraformContent } from './exclude-terraform-content/index.mjs'
-// import { transformExcludeVaultContent } from './exclude-vault-content/index.mjs'
 
-import { transformExcludeContent } from './exclude_content_final/index.mjs'
+import { transformExcludeContent } from './exclude-content/index.mjs'
 
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
 
@@ -84,14 +82,6 @@ export async function buildMdxTransforms(
 		return { repoSlug, filePath, partialsDir, outPath, version, redirectsDir }
 	})
 
-	// this is confusing
-	// /**
-	//  * Apply MDX transforms to each file entry, in batches
-	//  */
-	// const productDirectivePrefixes = Object.entries(PRODUCT_CONFIG)
-	// 	.filter(([, config]) => { return config.supportsExclusionDirectives })
-	// 	.map(([, config]) => { return config.directivePrefix })
-
 	console.log(`Running MDX transforms on ${mdxFileEntries.length} files...`)
 	const results = await batchPromises(
 		'MDX transforms',
@@ -141,21 +131,17 @@ async function applyMdxTransforms(entry, versionMetadata = {}) {
 		const fileString = fs.readFileSync(filePath, 'utf8')
 		const { data, content } = grayMatter(fileString)
 
-		// This here is redundant- productDirectivePrefixes already
-		// tells us if the product supports exclusion directives since that
-		// check was done when building productDirectivePrefixes
-		// const supportsExclusionDirectives = PRODUCT_CONFIG[entry.repoSlug]?.supportsExclusionDirectives ?? false
-
 		const remarkResults = await remark()
 			.use(remarkMdx)
-			// .use(transformExcludeTerraformContent, { filePath })
-			// .use(transformExcludeVaultContent, { filePath, version })
+			// Passing in the full productConfig for simplicity
+			// since the transform figures out what it needs from there
 			.use(transformExcludeContent, {
 				filePath,
 				version,
 				repoSlug: entry.repoSlug,
 				productConfig: PRODUCT_CONFIG[entry.repoSlug],
 			})
+			// will have to handle edge cases here
 			.use(remarkIncludePartialsPlugin, { partialsDir, filePath })
 			.use(paragraphCustomAlertsPlugin)
 			.use(rewriteInternalRedirectsPlugin, {

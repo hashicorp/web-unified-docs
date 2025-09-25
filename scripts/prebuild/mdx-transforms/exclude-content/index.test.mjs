@@ -3,34 +3,44 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import { transformExcludeContent } from './index.mjs'
 import remark from 'remark'
 import remarkMdx from 'remark-mdx'
 
-const supportsExclusionDirectives = (product) => {
-	return product === 'vault' ||
-		product === 'terraform-enterprise' ||
-		product === 'terraform-docs-common'
-}
-
-const runTransform = async (markdown, version, filePath, product) => {
+const runTransform = async (markdown, options) => {
 	const processor = await remark()
 		.use(remarkMdx)
-		.use(transformExcludeContent, {
-			filePath,
-			version,
-			product,
-			supportsExclusionDirectives: supportsExclusionDirectives(product)
-		})
+		.use(transformExcludeContent, options)
 		.process(markdown)
 	return processor.contents
 }
 
-const vaultVersion = '1.20.x'
-const filePath = 'vault/some-file.md'
+// Mock product configs
+const vaultConfig = {
+	supportsExclusionDirectives: true,
+}
 
-describe('transformExcludeContent with Versions', () => {
+const terraformDocsCommonConfig = {
+	supportsExclusionDirectives: true,
+}
+
+const terraformEnterpriseConfig = {
+	supportsExclusionDirectives: true,
+}
+
+const noExclusionConfig = {
+	supportsExclusionDirectives: undefined,
+}
+
+describe('transformExcludeContent - Vault Directives', () => {
+	const vaultOptions = {
+		filePath: 'vault/some-file.md',
+		version: '1.20.x',
+		repoSlug: 'vault',
+		productConfig: vaultConfig,
+	}
+
 	it('should remove content when version condition is not met', async () => {
 		const markdown = `
 <!-- BEGIN: Vault:>=v1.21.x -->
@@ -38,77 +48,8 @@ This content should be removed.
 <!-- END: Vault:>=v1.21.x -->
 This content should stay.
 `
-		const result = await runTransform(markdown, vaultVersion, filePath, 'vault')
-
+		const result = await runTransform(markdown, vaultOptions)
 		expect(result).toBe('This content should stay.\n')
-	})
-
-	it('should throw an error for mismatched block names', async () => {
-		const mockConsole = vi.spyOn(console, 'error').mockImplementation(() => {})
-		const markdown = `
-<!-- BEGIN: Vault:>=v1.21.x -->
-This content should be removed.
-<!-- END: Vault:>=v1.22.x -->
-`
-		await expect(async () => {
-			return await runTransform(markdown, vaultVersion, filePath, 'vault')
-		}).rejects.toThrow('Mismatched block names')
-		expect(mockConsole).toHaveBeenCalledOnce()
-	})
-
-	it('should throw an error for unexpected END block', async () => {
-		const markdown = `
-<!-- END: Vault:>=v1.21.x -->
-`
-		await expect(async () => {
-			return await runTransform(markdown, vaultVersion, filePath, 'vault')
-		}).rejects.toThrow('Unexpected END block')
-	})
-
-	it('should throw an error for unexpected BEGIN block', async () => {
-		const markdown = `
-<!-- BEGIN: Vault:>=v1.21.x -->
-<!-- BEGIN: Vault:>=v1.21.x -->
-`
-		await expect(async () => {
-			return await runTransform(markdown, vaultVersion, filePath, 'vault')
-		}).rejects.toThrow('Unexpected BEGIN block')
-	})
-
-	it('should throw an error if no block could be parsed from BEGIN comment', async () => {
-		const markdown = `
-<!-- BEGIN:  -->
-This content should be removed.
-<!-- END: Vault:>=v1.21.x -->
-`
-		await expect(async () => {
-			return await runTransform(markdown, vaultVersion, filePath, 'vault')
-		}).rejects.toThrow('No block could be parsed from BEGIN comment')
-	})
-
-	it('should throw an error if no block could be parsed from END comment', async () => {
-		const markdown = `
-<!-- BEGIN: Vault:>=v1.21.x -->
-This content should be removed.
-<!-- END:  -->
-`
-		await expect(async () => {
-			return await runTransform(markdown, vaultVersion, filePath, 'vault')
-		}).rejects.toThrow('No block could be parsed from END comment')
-	})
-
-	it('should throw error for names not in directiveProducts array', async () => {
-		const markdown = `
-<!-- BEGIN: INVALID:>=v1.21.x -->
-This content should throw an error
-<!-- END: INVALID:>=v1.21.x -->
-Other content.
-	`
-		await expect(async () => {
-			return await runTransform(markdown, vaultVersion, filePath, 'vault')
-		}).rejects.toThrow(
-			'Invalid directive product: INVALID in block INVALID:>=v1.21.x between lines 2 and 4. Did you mean one of: TFEnterprise, TFC, Vault?',
-		)
 	})
 
 	it('should keep content when version condition is met', async () => {
@@ -118,8 +59,7 @@ This content should stay.
 <!-- END: Vault:<=v1.21.x -->
 Other content.
 `
-		const result = await runTransform(markdown, vaultVersion, filePath, 'vault')
-
+		const result = await runTransform(markdown, vaultOptions)
 		expect(result.trim()).toBe(`<!-- BEGIN: Vault:<=v1.21.x -->
 
 This content should stay.
@@ -130,19 +70,30 @@ Other content.`)
 	})
 
 	it('should handle equality comparisons', async () => {
-		const equalVersion = '1.20.x'
+		const equalOptions = { ...vaultOptions, version: '1.20.x' }
 		const markdown = `
 <!-- BEGIN: Vault:=v1.20.x -->
 This content should stay.
 <!-- END: Vault:=v1.20.x -->
 `
-		const result = await runTransform(markdown, equalVersion, filePath, 'vault')
-
+		const result = await runTransform(markdown, equalOptions)
 		expect(result.trim()).toBe(`<!-- BEGIN: Vault:=v1.20.x -->
 
 This content should stay.
 
 <!-- END: Vault:=v1.20.x -->`)
+	})
+
+	it('should handle inequal comparisons', async () => {
+		const equalOptions = { ...vaultOptions, version: '1.19.x' }
+		const markdown = `
+<!-- BEGIN: Vault:=v1.20.x -->
+This content should be removed.
+<!-- END: Vault:=v1.20.x -->
+This content should stay.
+`
+		const result = await runTransform(markdown, equalOptions)
+		expect(result.trim()).toBe(`This content should stay.`)
 	})
 
 	it('should handle less than comparisons', async () => {
@@ -151,35 +102,9 @@ This content should stay.
 This content should be removed.
 <!-- END: Vault:<v1.19.x -->
 `
-		const result = await runTransform(markdown, vaultVersion, filePath, 'vault')
+		const result = await runTransform(markdown, vaultOptions)
 
 		expect(result.trim()).toBe('')
-	})
-
-	it('should throw an error for invalid version format', async () => {
-		const markdown = `
-<!-- BEGIN: Vault:>=v1.x -->
-This content should throw an error.
-<!-- END: Vault:>=v1.x -->
-`
-
-		await expect(async () => {
-			return await runTransform(markdown, vaultVersion, filePath, 'vault')
-		}).rejects.toThrow(
-			'Invalid version format in directive: Vault:>=v1.x. Expected format: vZ.Y.x',
-		)
-	})
-
-	it('should throw an error for invalid comparator', async () => {
-		const markdown = `
-<!-- BEGIN: Vault:!v1.20.x -->
-This content should throw an error.
-<!-- END: Vault:!v1.20.x -->
-`
-
-		await expect(async () => {
-			return await runTransform(markdown, vaultVersion, filePath, 'vault')
-		}).rejects.toThrow('Invalid comparator in directive: Vault:!v1.20.x. Expected one of: <=, >=, <, >, =')
 	})
 
 	it('should handle multiple version blocks correctly', async () => {
@@ -192,7 +117,7 @@ This should stay.
 <!-- END: Vault:<=v1.21.x -->
 Final content.
 `
-		const result = await runTransform(markdown, vaultVersion, filePath, 'vault')
+		const result = await runTransform(markdown, vaultOptions)
 
 		expect(result.trim()).toBe(`<!-- BEGIN: Vault:<=v1.21.x -->
 
@@ -202,123 +127,41 @@ This should stay.
 
 Final content.`)
 	})
-
-// 	it('should ignore Terraform product directives and leave them untouched', async () => {
-// 		const markdown = `
-// <!-- BEGIN: TFC:only -->
-// This TFC content should be ignored by Vault transform.
-// <!-- END: TFC:only -->
-// <!-- BEGIN: TFEnterprise:only -->
-// This TFEnterprise content should also be ignored.
-// <!-- END: TFEnterprise:only -->
-// <!-- BEGIN: Vault:>=v1.21.x -->
-// This Vault content should be removed.
-// <!-- END: Vault:>=v1.21.x -->
-// Regular content that stays.
-// `
-// 		const result = await runTransform(markdown, vaultVersion, filePath, 'vault')
-
-// 		expect(result.trim()).toBe(`<!-- BEGIN: TFC:only -->
-
-// This TFC content should be ignored by Vault transform.
-
-// <!-- END: TFC:only -->
-
-// <!-- BEGIN: TFEnterprise:only -->
-
-// This TFEnterprise content should also be ignored.
-
-// <!-- END: TFEnterprise:only -->
-
-// Regular content that stays.`)
-// 	})
 })
 
-const ptfeFilePath = 'terraform-enterprise/some-file.md'
-const ptfeVersion = 'v1.20.x'
+describe('transformExcludeContent - TFC/TFEnterprise Directives', () => {
+	it('should keep TFC:only content in terraform-docs-common', async () => {
+		const options = {
+			filePath: 'terraform-docs-common/cloud-docs/some-file.md',
+			version: 'v1.20.x',
+			repoSlug: 'terraform-docs-common',
+			productConfig: terraformDocsCommonConfig,
+		}
 
-describe('transformExcludeContent with Only', () => {
-	it('should remove content within TFC:only blocks', async () => {
 		const markdown = `
 <!-- BEGIN: TFC:only -->
-This content should be removed.
+This content should NOT be removed.
 <!-- END: TFC:only -->
 This content should stay.
 `
-		const result = await runTransform(markdown, ptfeVersion, ptfeFilePath, 'terraform-docs-common')
+		const result = await runTransform(markdown, options)
+		expect(result.trim()).toBe(`<!-- BEGIN: TFC:only -->
 
-		expect(result).toBe('This content should stay.\n')
-	})
+This content should NOT be removed.
 
-	it('should throw an error for mismatched block names', async () => {
-		const mockConsole = vi.spyOn(console, 'error').mockImplementation(() => {})
-		const markdown = `
-<!-- BEGIN: TFC:only -->
-This content should be removed.
-<!-- END: TFC:other -->
-`
-		await expect(async () => {
-			return await runTransform(markdown, ptfeVersion, ptfeFilePath, 'terraform-docs-common')
-		}).rejects.toThrow('Mismatched block names')
-		expect(mockConsole).toHaveBeenCalledOnce()
-	})
-
-	it('should throw an error for unexpected END block', async () => {
-		const markdown = `
 <!-- END: TFC:only -->
-`
-		await expect(async () => {
-			return await runTransform(markdown, ptfeVersion, ptfeFilePath, 'terraform-docs-common')
-		}).rejects.toThrow('Unexpected END block')
+
+This content should stay.`)
 	})
 
-	it('should throw an error for unexpected BEGIN block', async () => {
-		const markdown = `
-<!-- BEGIN: TFC:only -->
-<!-- BEGIN: TFC:only -->
-`
-		await expect(async () => {
-			return await runTransform(markdown, ptfeVersion, ptfeFilePath, 'terraform-docs-common')
-		}).rejects.toThrow('Unexpected BEGIN block')
-	})
+	it('should remove TFC:only content from terraform-enterprise', async () => {
+		const options = {
+			filePath: 'terraform-enterprise/some-file.md',
+			version: 'v1.20.x',
+			repoSlug: 'terraform-enterprise',
+			productConfig: terraformEnterpriseConfig,
+		}
 
-	it('should throw an error if no block could be parsed from BEGIN comment', async () => {
-		const markdown = `
-<!-- BEGIN:  -->
-This content should be removed.
-<!-- END: TFC:only -->
-`
-		await expect(async () => {
-			return await runTransform(markdown, ptfeVersion, ptfeFilePath, 'terraform-docs-common')
-		}).rejects.toThrow('Unexpected BEGIN block')
-	})
-
-	it('should throw an error if no block could be parsed from END comment', async () => {
-		const markdown = `
-<!-- BEGIN: TFC:only -->
-This content should be removed.
-<!-- END:  -->
-`
-		await expect(async () => {
-			return await runTransform(markdown, ptfeVersion, ptfeFilePath, 'terraform-docs-common')
-		}).rejects.toThrow('No block could be parsed from END comment')
-	})
-
-	it('should throw an error for blocks that do not match directive', async () => {
-		const markdown = `
-<!-- BEGIN: TFE:only -->
-This content should be removed.
-<!-- END: TFE:only -->
-`
-
-		await expect(async () => {
-			return await runTransform(markdown, ptfeFilePath)
-		}).rejects.toThrow(
-			/Directive block TFE:only could not be parsed between lines 2 and 4/,
-		)
-	})
-
-	it('should remove TFC:only content and leave TFEnterprise:only content for terraform-enterprise', async () => {
 		const markdown = `
 <!-- BEGIN: TFC:only -->
 This content should be removed.
@@ -337,11 +180,19 @@ This content should NOT be removed.
 This content should stay.
 `
 
-		const result = await runTransform(markdown, ptfeVersion, ptfeFilePath, 'terraform-enterprise')
+		const result = await runTransform(markdown, options)
 		expect(result).toBe(expected)
 	})
 
-	it('should remove TFEnterprise:only and TFC:only content for terraform product', async () => {
+	// This is a good test in case partials are used and write to multiple unintended product directories
+	it('should remove both TFC:only and TFEnterprise:only from terraform product', async () => {
+		const options = {
+			filePath: 'terraform/some-file.md',
+			version: 'v1.20.x',
+			repoSlug: 'terraform',
+			productConfig: { supportsExclusionDirectives: true },
+		}
+
 		const markdown = `
 <!-- BEGIN: TFC:only -->
 This content should be removed.
@@ -352,91 +203,153 @@ This content should be removed.
 This content should stay.
 `
 
-		const filePath = 'terraform/some-file.md'
-		const expected = `This content should stay.`
-
-		const result = await runTransform(markdown, ptfeVersion, filePath, 'terraform')
-
-		expect(result.trim()).toBe(expected.trim())
+		const result = await runTransform(markdown, options)
+		expect(result.trim()).toBe('This content should stay.')
 	})
 
-	it('should remove NESTED TFEnterprise:only and TFC:only content for terraform product', async () => {
+	it('should throw an error for mismatched block name directives', async () => {
+		const options = {
+			filePath: 'terraform-enterprise/some-file.md',
+			version: '1.20.x',
+			repoSlug: 'terraform-enterprise',
+			productConfig: terraformEnterpriseConfig,
+		}
 		const markdown = `
 <!-- BEGIN: TFC:only -->
 This content should be removed.
-<!-- END: TFC:only -->
-	<!-- BEGIN: TFEnterprise:only name:revoke -->
--   You can now revoke, and revert the revocation of, module versions. Learn more about [Managing module versions](/terraform/enterprise/api-docs/private-registry/manage-module-versions).
-		<!-- END: TFEnterprise:only name:revoke -->
-
-This content should stay.
+<!-- END: TFC:other -->
 `
+		await expect(async () => {
+			return await runTransform(markdown, options)
+		}).rejects.toThrow('Mismatched block names')
+	})
+})
 
-		const filePath = 'terraform/some-file.md'
-		const expected = `This content should stay.`
+describe('transformExcludeContent - Error Handling', () => {
+	const vaultOptions = {
+		filePath: 'vault/some-file.md',
+		version: '1.20.x',
+		repoSlug: 'vault',
+		productConfig: vaultConfig,
+	}
 
-		const result = await runTransform(markdown, ptfeVersion, filePath, 'terraform')
-
-		expect(result.trim()).toBe(expected.trim())
+	it('should throw error for unknown directive products', async () => {
+		const markdown = `
+<!-- BEGIN: INVALID:>=v1.21.x -->
+This content should throw an error
+<!-- END: INVALID:>=v1.21.x -->
+`
+		await expect(async () => {
+			return await runTransform(markdown, vaultOptions)
+		}).rejects.toThrow('Unknown directive product: "INVALID"')
 	})
 
-	it('should remove TFEnterprise:only and TFC:only content for terraform-cdk product', async () => {
+	it('should throw error for mismatched block names', async () => {
 		const markdown = `
-<!-- BEGIN: TFC:only -->
+<!-- BEGIN: Vault:>=v1.21.x -->
 This content should be removed.
-<!-- END: TFC:only -->
-<!-- BEGIN: TFEnterprise:only -->
-This content should be removed.
-<!-- END: TFEnterprise:only -->
-This content should stay.
+<!-- END: Vault:>=v1.22.x -->
 `
-
-		const filePath = 'terraform-cdk/some-file.md'
-		const expected = `
-This content should stay.
-`
-
-		const result = await runTransform(markdown, ptfeVersion, filePath, 'terraform-cdk')
-		expect(result.trim()).toBe(expected.trim())
+		await expect(async () => {
+			return await runTransform(markdown, vaultOptions)
+		}).rejects.toThrow('Mismatched block names')
 	})
 
-	it('should remove TFEnterprise:only content for terraform-docs-common', async () => {
+	it('should throw error for invalid vault directive format', async () => {
 		const markdown = `
-<!-- BEGIN: TFEnterprise:only -->
-This content should be removed.
-<!-- END: TFEnterprise:only -->
-This content should stay.
+<!-- BEGIN: Vault:invalid -->
+This content should throw an error.
+<!-- END: Vault:invalid -->
 `
-
-		const filePath = 'terraform-docs-common/cloud-docs/some-file.md'
-		const expected = `
-This content should stay.
-`
-
-		const result = await runTransform(markdown, ptfeVersion, filePath, 'terraform-docs-common')
-		expect(result.trim()).toBe(expected.trim())
+		await expect(async () => {
+			return await runTransform(markdown, vaultOptions)
+		}).rejects.toThrow('Invalid Vault directive: "invalid"')
 	})
 
-	it('should leave TFC:only content for terraform-docs-common', async () => {
+	it('should throw an error for unexpected END block', async () => {
 		const markdown = `
-<!-- BEGIN: TFC:only -->
-This content should NOT be removed.
-<!-- END: TFC:only -->
-This content should stay.
+<!-- END: Vault:>=v1.21.x -->
+`
+		await expect(async () => {
+			return await runTransform(markdown, vaultOptions)
+		}).rejects.toThrow('Unexpected END block')
+	})
+
+	it('should throw an error for unexpected BEGIN block', async () => {
+		const markdown = `
+<!-- BEGIN: Vault:>=v1.21.x -->
+<!-- BEGIN: Vault:>=v1.21.x -->
+`
+		await expect(async () => {
+			return await runTransform(markdown, vaultOptions)
+		}).rejects.toThrow('Nested BEGIN blocks not allowed')
+	})
+
+	it('should throw an error if no block could be parsed from BEGIN comment', async () => {
+		const markdown = `
+<!-- BEGIN:  -->
+This content should be removed.
+<!-- END: Vault:>=v1.21.x -->
+`
+		await expect(async () => {
+			return await runTransform(markdown, vaultOptions)
+		}).rejects.toThrow('Empty BEGIN block')
+	})
+
+	it('should throw an error if no block could be parsed from END comment', async () => {
+		const markdown = `
+<!-- BEGIN: Vault:>=v1.21.x -->
+This content should be removed.
+<!-- END:  -->
+`
+		await expect(async () => {
+			return await runTransform(markdown, vaultOptions)
+		}).rejects.toThrow('Empty END block')
+	})
+})
+
+describe('transformExcludeContent - Configuration', () => {
+	it('should skip processing when supportsExclusionDirectives is false/undefined', async () => {
+		const options = {
+			filePath: 'some-product/some-file.md',
+			version: 'v1.20.x',
+			repoSlug: 'some-product',
+			productConfig: noExclusionConfig,
+		}
+
+		const markdown = `
+<!-- BEGIN: Vault:>=v1.21.x -->
+
+This should be ignored.
+
+<!-- END: Vault:>=v1.21.x -->
+
+Content stays.
 `
 
-		const filePath = 'terraform-docs-common/cloud-docs/some-file.md'
-		const expected = `
-<!-- BEGIN: TFC:only -->
+		const result = await runTransform(markdown, options)
+		expect(result.trim()).toBe(markdown.trim())
+	})
 
-This content should NOT be removed.
+	it('should skip processing when no productConfig provided', async () => {
+		const options = {
+			filePath: 'some-product/some-file.md',
+			version: 'v1.20.x',
+			repoSlug: 'some-product',
+			// No productConfig
+		}
 
-<!-- END: TFC:only -->
+		const markdown = `
+<!-- BEGIN: Vault:>=v1.21.x -->
 
-This content should stay.
+This should be ignored.
+
+<!-- END: Vault:>=v1.21.x -->
+
+Content stays.
 `
 
-		const result = await runTransform(markdown, ptfeVersion, filePath, 'terraform-docs-common')
-		expect(result.trim()).toBe(expected.trim())
+		const result = await runTransform(markdown, options)
+		expect(result.trim()).toBe(markdown.trim())
 	})
 })

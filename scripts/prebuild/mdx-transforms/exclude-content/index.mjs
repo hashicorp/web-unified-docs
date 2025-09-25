@@ -3,286 +3,71 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-import visit from 'unist-util-visit'
-import { SemVer, gt, gte, lt, lte, eq } from 'semver'
-// import { DIRECTIVE_PRODUCTS } from '../shared.mjs'
+import { parseDirectiveBlocks } from './ast-utils.mjs'
+import { processVaultBlock } from './vault-processor.mjs'
+import {
+	processTFCBlock,
+	processTFEnterpriseBlock,
+} from './terraform-processor.mjs'
 
-import { PRODUCT_CONFIG } from '#productConfig.mjs'
-import { dir } from 'console'
-
-const productDirectivePrefixes = Object.entries(PRODUCT_CONFIG)
-	.filter(([, config]) => { return config.supportsExclusionDirectives })
-	.map(([, config]) => { return config.directivePrefix })
-
-
-const prefixToProductMap = productDirectivePrefixes.reduce((acc, prefix) => {
-	const entry =  Object.entries(PRODUCT_CONFIG).find(([, config]) =>
-			config.directivePrefix === prefix
-		)
-	if (entry) {
-		acc[prefix] = entry[0]
-	}
-	return acc
-}, {})
-
-// this is a courtesy wrapper to prepend error messages
-class ExcludeContentError extends Error {
-	constructor(message, markdownSource, product) {
-		super(
-			`[strip-${product}-content] ${message}` +
-			`\n- ${markdownSource}` +
-			`\n- ${markdownSource}`,
-		)
-		this.name = 'ExcludeContentError'
-	}
-}
-
-const BEGIN_RE = /^(\s+)?<!--\s+BEGIN:\s+(?<block>.*?)\s+-->(\s+)?$/
-const END_RE = /^(\s+)?<!--\s+END:\s+(?<block>.*?)\s+-->(\s+)?$/
-const VERSIONS_RE = /(?<comparator><=|>=|<|>|=)?v(?<version>(\d+)\.(\d+)\.x)?/i
-
-// Adding the directive products parameter to allow for extensibility in tests
-export function transformExcludeContent({
-	filePath,
-	version,
-	product,
-	supportsExclusionDirectives
-}) {
+/**
+ * Content exclusion transform with explicit if-block routing
+ * for each product- intended to run through a single AST pass
+ *
+ * @param {Object} options Transform options
+ * @param {string} options.filePath File path being processed
+ * @param {string} options.version Content version (for version directives)
+ * @param {string} options.repoSlug Product repo slug (e.g., 'vault', 'terraform-docs-common')
+ * @param {Object} options.productConfig Product configuration from PRODUCT_CONFIG
+ * @returns {Function} Remark transformer function
+ */
+export function transformExcludeContent(options = {}) {
 	return function transformer(tree) {
-		// accumulate the content exclusion blocks
-		/** @type ({ start: number; block: string; end: number })[] */
-		const matches = []
-		let matching = false
-		let block = ''
+		const { productConfig } = options
 
-		// This can be set in productConfig.mjs to enable exclusion directives
-		if (!supportsExclusionDirectives) {
+		// Early return if product doesn't support exclusion directives
+		if (!productConfig?.supportsExclusionDirectives) {
 			return tree
 		}
 
-		visit(tree, (node) => {
-			const nodeValue = node.value
-			const nodeIndex = node.position?.end?.line
+		try {
+			// Single AST pass to find all directive blocks
+			const blocks = parseDirectiveBlocks(tree)
 
-			if (!nodeValue || !nodeIndex) {
-				return
-			}
+			// Process each block with explicit routing (reverse order for safe removal)
+			blocks.reverse().forEach((block) => {
+				routeAndProcessBlock(block, tree, options)
+			})
 
-			if (!matching) {
-				// Wait for a BEGIN block to be matched
-
-				// throw if an END block is matched first
-				const endMatch = nodeValue.match(END_RE)
-				if (endMatch) {
-					throw new ExcludeContentError(
-						`Unexpected END block: line ${nodeIndex}`,
-						tree,
-						product
-					)
-				}
-
-				const beginMatch = nodeValue.match(BEGIN_RE)
-
-				if (beginMatch) {
-					matching = true
-
-					if (!beginMatch.groups?.block) {
-						throw new ExcludeContentError(
-							'No block could be parsed from BEGIN comment',
-							tree,
-							product
-						)
-					}
-
-					block = beginMatch.groups.block
-
-					matches.push({
-						start: nodeIndex,
-						block: beginMatch.groups.block,
-						end: -1,
-					})
-				}
-			} else {
-				// If we are actively matching within a block, monitor for the end
-
-				// throw if a BEGIN block is matched again
-				const beginMatch = nodeValue.match(BEGIN_RE)
-				if (beginMatch) {
-					throw new ExcludeContentError(
-						`Unexpected BEGIN block: line ${nodeIndex}`,
-						tree,
-						product
-					)
-				}
-
-				const endMatch = nodeValue.match(END_RE)
-				if (endMatch) {
-					const latestMatch = matches[matches.length - 1]
-
-					if (!endMatch.groups?.block) {
-						throw new ExcludeContentError(
-							'No block could be parsed from END comment',
-							tree,
-							product
-						)
-					}
-
-					// If we reach and end with an un-matching block name, throw an error
-					if (endMatch.groups.block !== block) {
-						const errMsg =
-							`Mismatched block names: Block opens with "${block}", and closes with "${endMatch.groups.block}".` +
-							`\n` +
-							`Please make sure opening and closing block names are matching. Blocks cannot be nested.` +
-							`\n` +
-							`- Open:  ${latestMatch.start}: ${block}` +
-							`\n` +
-							`- Close: ${nodeIndex}: ${endMatch.groups.block}` +
-							`\n`
-						console.error(errMsg)
-						throw new ExcludeContentError('Mismatched block names', tree, product)
-					}
-
-					// Push the ending index of the block into the match result and set matching to false
-					latestMatch.end = nodeIndex
-					block = ''
-					matching = false
-				}
-			}
-		})
-
-		function removeNodesInRange(nodes, start, end) {
-			for (let i = nodes.length - 1; i >= 0; i--) {
-				const node = nodes[i]
-				if (
-					node.position &&
-					node.position.start.line >= start &&
-					node.position.end.line <= end
-				) {
-					nodes.splice(i, 1)
-				} else if (node.children && Array.isArray(node.children)) {
-					removeNodesInRange(node.children, start, end)
-				}
-			}
+			return tree
+		} catch (error) {
+			// Add file context to any errors
+			throw new Error(
+				`Content exclusion failed in ${options.filePath}: ${error.message}`,
+			)
 		}
-
-		// iterate through the list of matches backwards to remove lines
-		matches.reverse().forEach(({ start, end, block }) => {
-			const [flag] = block.split(/\s+/)
-			const [directive_product, versions] = flag.split(':')
-
-			// Check if this product is in our allowed list
-			if (!productDirectivePrefixes.includes(directive_product)) {
-				throw new ExcludeContentError(
-					`Invalid directive product: ${directive_product} in block ${block} between lines ${start} and ${end}. Did you mean one of: ${productDirectivePrefixes.join(', ')}?`,
-					tree,
-					product
-				)
-			}
-
-			let shouldKeepContent = true
-
-			// If versions is "only" remove if not the right file path
-			// otherwise remove if the version comparison fails
-			if (versions === "only") {
-				if (!filePath.includes(prefixToProductMap[directive_product])) {
-					shouldKeepContent = false
-				}
-
-				// 	if (product === 'terraform-enterprise' &&
-				// 	!filePath.includes('terraform-enterprise')
-				// ) {
-				// 	shouldKeepContent = false
-				// } else if (product === 'terraform-docs-common' &&
-				// 	!filePath.includes('terraform-docs-common')
-				// ) {
-				// 	shouldKeepContent = false
-				// }
-			} else {
-				const match = versions.match(VERSIONS_RE)
-
-				if (!match) {
-					throw new ExcludeContentError(
-						`Invalid directive format: ${flag}`,
-						tree,
-						product
-					)
-				}
-
-				const { comparator, version: directiveVersion } = match.groups
-
-				if (!directiveVersion) {
-					throw new ExcludeContentError(
-						`Invalid version format in directive: ${flag}. Expected format: vZ.Y.x`,
-						tree,
-						product
-					)
-				}
-
-				if (!comparator) {
-					throw new ExcludeContentError(
-						`Invalid comparator in directive: ${flag}. Expected one of: <=, >=, <, >, =`,
-						tree,
-						product
-					)
-				}
-
-				try {
-					const currentVersion = version || ''
-					const versionSemVer = getTfeSemver(currentVersion)
-					const directiveSemVer = getTfeSemver(directiveVersion)
-					const compare = getComparisonFn(comparator, tree, product)
-
-					shouldKeepContent = compare(versionSemVer, directiveSemVer)
-				} catch (error) {
-					throw new ExcludeContentError(
-						`Version comparison failed: ${error.message}`,
-						tree,
-						product
-					)
-				}
-			}
-
-			if (!shouldKeepContent) {
-				removeNodesInRange(tree.children, start, end)
-			}
-		})
-		return tree
 	}
 }
 
-const getTfeSemver = (version) => {
-	// Handle version strings like "1.20.x" by converting to "1.20.0"
-	const normalized = version.replace(/\.x$/, '.0')
-	return new SemVer(normalized)
-}
+/**
+ * Route directive blocks to appropriate processors with if-blocks
+ */
+function routeAndProcessBlock(block, tree, options) {
+	// Parse the directive: "Vault:>=v1.21.x" -> product="Vault", directive=">=v1.21.x"
+	const [product, ...rest] = block.content.split(':')
+	const directive = rest.join(':') // Handle edge cases like "TFEnterprise:only name:something"
 
-const getComparisonFn = (operator, document, product) => {
-	switch (operator) {
-		case '<=':
-			return (a, b) => {
-				return lte(a, b)
-			}
-		case '>=':
-			return (a, b) => {
-				return gte(a, b)
-			}
-		case '<':
-			return (a, b) => {
-				return lt(a, b)
-			}
-		case '>':
-			return (a, b) => {
-				return gt(a, b)
-			}
-		case '=':
-			return (a, b) => {
-				return eq(a, b)
-			}
-		default:
-			throw new ExcludeContentError(
-				'Invalid comparator: ' + operator,
-				document,
-				product
-			)
+	// Explicit routing
+	if (product === 'Vault') {
+		processVaultBlock(directive, block, tree, options)
+	} else if (product === 'TFC') {
+		processTFCBlock(directive, block, tree, options)
+	} else if (product === 'TFEnterprise') {
+		processTFEnterpriseBlock(directive, block, tree, options)
+	} else {
+		// Error for unknown products
+		throw new Error(
+			`Unknown directive product: "${product}" in block "${block.content}" at lines ${block.start}-${block.end}. Expected: Vault, TFC, or TFEnterprise`,
+		)
 	}
 }
