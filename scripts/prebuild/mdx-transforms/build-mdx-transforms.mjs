@@ -23,9 +23,8 @@ import {
 	rewriteInternalRedirectsPlugin,
 	loadRedirects,
 } from './rewrite-internal-redirects/rewrite-internal-redirects.mjs'
-// import { transformExcludeTerraformContent } from './exclude-terraform-content/index.mjs'
-// import { transformExcludeVaultContent } from './exclude-vault-content/index.mjs'
-import { transformExcludeContent } from './simple-content-exclusion/index.mjs'
+
+import { transformExcludeContent } from './exclude-content/index.mjs'
 
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
 
@@ -80,11 +79,9 @@ export async function buildMdxTransforms(
 		)
 		const redirectsDir = path.join(targetDir, repoSlug, verifiedVersion)
 		const outPath = path.join(outputDir, relativePath)
-		return { filePath, partialsDir, outPath, version, redirectsDir }
+		return { repoSlug, filePath, partialsDir, outPath, version, redirectsDir }
 	})
-	/**
-	 * Apply MDX transforms to each file entry, in batches
-	 */
+
 	console.log(`Running MDX transforms on ${mdxFileEntries.length} files...`)
 	const results = await batchPromises(
 		'MDX transforms',
@@ -136,9 +133,15 @@ async function applyMdxTransforms(entry, versionMetadata = {}) {
 
 		const remarkResults = await remark()
 			.use(remarkMdx)
-			// .use(transformExcludeTerraformContent, { filePath })
-			// .use(transformExcludeVaultContent, { filePath, version })
-			.use(transformExcludeContent, { filePath, version })
+			// Passing in the full productConfig for simplicity
+			// since the transform figures out what it needs from there
+			.use(transformExcludeContent, {
+				filePath,
+				version,
+				repoSlug: entry.repoSlug,
+				productConfig: PRODUCT_CONFIG[entry.repoSlug],
+			})
+			// will have to handle edge cases here
 			.use(remarkIncludePartialsPlugin, { partialsDir, filePath })
 			.use(paragraphCustomAlertsPlugin)
 			.use(rewriteInternalRedirectsPlugin, {
