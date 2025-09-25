@@ -2,11 +2,11 @@
  * Copyright (c) HashiCorp, Inc.
  * SPDX-License-Identifier: BUSL-1.1
  */
+import fs from 'node:fs'
+import path from 'node:path'
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { copySingleAssetFile } from './copy-asset-files.mjs'
-import fs from 'fs'
-import path from 'path'
 
 describe('copyAssetFile', () => {
 	beforeEach(() => {

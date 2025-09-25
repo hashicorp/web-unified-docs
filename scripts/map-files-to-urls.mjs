@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-import { getUrlFromFilePath } from './utils/file-path/url/index.mjs'
-import allDocsPathsJson from '../app/api/docsPathsAllVersions.json' with { type: 'json' }
+import { getUrlFromFilePath } from '#scriptUtils/file-path/url/index.mjs'
+import allDocsPathsJson from '#api/docsPathsAllVersions.json' with { type: 'json' }
 
 const filePaths = process.argv.slice(2)
 

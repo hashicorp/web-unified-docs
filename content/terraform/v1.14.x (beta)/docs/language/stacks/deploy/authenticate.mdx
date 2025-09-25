@@ -1,0 +1,288 @@
+---
+page_title: Authenticate a Stack
+description: Learn how to set up OIDC authentication or use the store block to authenticate Stacks with their providers.
+---
+
+# Authenticate a Stack
+
+You can authenticate a Stack in two ways:
+- The `store` block lets you reference values in an HCP Terraform [variable set](/terraform/cloud-docs/workspaces/variables/managing-variables#variable-sets).
+- The `identity_token` block generates a JSON Web Token (JWT) for OIDC authentication.
+
+We recommend authenticating your Stack with OIDC because using static credentials to authenticate providers presents a security risk, even if you rotate your credentials regularly. Defining your authentication with OIDC also aligns with the Stack principle of defining everything about your infrastructure in code.
+
+## Authenticate with OIDC
+
+[OpenID Connect](https://openid.net/connect/) (OIDC) is an identity layer on top of the OAuth 2.0 protocol. You can use HCP Terraform's [Workload identity](/terraform/cloud-docs/workspaces/dynamic-provider-credentials/workload-identity-tokens) tokens, built on the OpenID Connect protocol, to securely connect and authenticate your Stacks with cloud providers.
+
+-> **Hands on**: Walk through setting up OIDC for a Stack in the [Deploy a Stack with HCP Terraform](/terraform/tutorials/cloud/stacks-deploy) tutorial.
+
+Stacks have a built-in `identity_token` block that creates workload identity tokens, also known as JWT tokens. You can use these tokens to authenticate Stacks with Terraform providers securely.
+
+### Overview
+
+The details of Stack authentication differ based on which cloud provider you are setting up, but the basic steps remain the same:
+
+1. Set up the trust configuration between your cloud provider and HCP Terraform, which usually includes creating roles and policies for your cloud provider.
+1. Add an `identity_token` block to your Stack's deployment file using the audience and roles you created in the previous step.
+
+Your deployments can reference the value of the `identity_token` block to pass the trust relationship role to your Stack's operations.
+
+### Configure trust configuration
+
+In this example, you will set up an example trust policy with AWS. For examples of setting up trust policies with other providers, refer to our [repository of example configurations](https://github.com/hashicorp-guides/terraform-stacks-identity-tokens/tree/main).
+
+We recommend using Terraform to create and configure the trust relationship and permissions for the cloud provider you want to authenticate with. Using the following Terraform configuration, [create a new workspace](/terraform/cloud-docs/workspaces/create) and configure the `aws_region`, `tf_organization`, `tf_project,` and `tf_stack` variables for your specific set up.
+
+<CodeBlockConfig filename="main.tf">
+
+```hcl
+variable "aws_region" {
+  type        = string
+  description = "The AWS region to create the role in."
+}
+
+variable "tf_organization" {
+  type        = string
+  description = "The name of the organization that this workspace and Stack live in."
+}
+
+variable "tf_project" {
+  type        = string
+  description = "The name of the project that this workspace and Stack live in."
+}
+
+variable "tf_stack" {
+  type        = string
+  description = "The name of the Stack you will you use this token in."
+}
+
+provider "aws" {
+  region = var.aws_region
+}
+
+resource "aws_iam_openid_connect_provider" "stacks_openid_provider" {
+  url            = "https://app.terraform.io"
+  client_id_list = ["aws.workload.identity"]
+
+  # This is the thumbprint of https://app.terraform.io as of 2024/08/07
+  # Refer to "Adjust access of trust" to learn how to update this thumbprint
+  thumbprint_list = ["9e99a48a9960b14926bb7f3b02e22da2b0ab7280"]
+}
+
+resource "aws_iam_role" "stacks_role" {
+  name               = "stacks-${var.tf_organization}-${var.tf_project}-${var.tf_stack}"
+  assume_role_policy = data.aws_iam_policy_document.stacks_role_policy.json
+}
+
+data "aws_iam_policy_document" "stacks_role_policy" {
+  statement {
+    effect = "Allow"
+    principals {
+      type        = "Federated"
+      identifiers = [aws_iam_openid_connect_provider.stacks_openid_provider.arn]
+    }
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+    condition {
+      test     = "StringEquals"
+      variable = "app.terraform.io:aud"
+      values   = ["aws.workload.identity"]
+    }
+    condition {
+      test     = "StringLike"
+      variable = "app.terraform.io:sub"
+      # This value dictates which HCP Terraform organizations, projects,
+      # and stacks can assume the new role you are creating.
+      #
+      # You can widen access to an entire organization or project by
+      # tweaking the value below. You can also restrict access to specific
+      # deployments or operations. Refer to Configure trust for more information.
+      values = ["organization:${var.tf_organization}:project:${var.tf_project}:stack:${var.tf_stack}:*"]
+    }
+  }
+}
+
+# Now, you give the new role access to things you want to manage in your Stack.
+#
+# The policies below are too broad for a production use case, but you set them
+# broadly for now to ensure this Stacks can do anything during development and
+# testing. In practice, only give your Stack access to what it needs to manage.
+
+resource "aws_iam_role_policy_attachment" "iam" {
+  role       = aws_iam_role.stacks_role.name
+  policy_arn = "arn:aws:iam::aws:policy/IAMFullAccess"
+}
+
+resource "aws_iam_role_policy_attachment" "sudo" {
+  role       = aws_iam_role.stacks_role.name
+  policy_arn = "arn:aws:iam::aws:policy/PowerUserAccess"
+}
+
+# Your workspace returns this output role, which you use to configure your
+# deployments.
+output "role_arn" {
+  value = aws_iam_role.stacks_role.arn
+}
+```
+
+</CodeBlockConfig>
+
+After setting up your workspace in HCP Terraform, perform a plan and apply operation. HCP Terraform will create your OpenID provider, policy, and role before outputting your new role's ARN with the `role_arn` output. Copy your new AWS ARN role because this is the value you use to configure your cloud provider with your Stack and HCP Terraform.
+
+To learn more about the workload identity trust claims and metadata, refer to the `identity_token` block reference](/terraform/language/block/stack/tfdeploy/identity_token#token-attributes).
+
+### Configure HCP Terraform
+
+Stacks use the [`identity_token` block](/terraform/language/block/stack/tfdeploy/identity_token) to define a JSON Web Token (JWT) for a specific deployment. This token enables OIDC-based authentication, allowing your Stack deployments to securely connect to cloud providers like AWS, Azure, and GCP.
+
+When you define the `identity_token` block, you specify its audience. For example, the following Stack deployment configuration defines an `identity_token` block specifying the AWS audience.
+
+```hcl
+identity_token "aws" {
+  audience = ["aws.workload.identity"]
+}
+```
+
+Once defined, you can reference an identity token in a deployment's input variables and reference that token in a provider's configuration.
+
+You also need to add your trust relationship, your role ARN, to configure your token with the trust relationship to authenticate AWS resources.
+
+<CodeBlockConfig filename="deployments.tfdeploy.hcl">
+
+```hcl
+identity_token "aws" {
+  audience = ["aws.workload.identity"]
+}
+
+deployment "development" {
+  inputs = {
+    role_arn       = "<YOUR_ROLE_ARN>"
+    identity_token = identity_token.aws.jwt
+  }
+}
+```
+
+</CodeBlockConfig>
+
+Now, the deployments are authenticated with AWS and can pass the trust configuration to your Stack's providers for authentication.
+
+```hcl
+# variables.tfcomponent.hcl
+
+variable "role_arn" {
+  type = string
+}
+
+variable "identity_token" {
+  type      = string
+  ephemeral = true
+}
+
+# providers.tfcomponent.hcl
+
+required_providers {
+  aws = {
+    source  = "hashicorp/aws"
+    version = "~> 5.7.0"
+  }
+}
+
+provider "aws" "this" {
+  config {
+    region = var.region
+    assume_role_with_web_identity {
+      role_arn           = var.role_arn
+      web_identity_token = var.identity_token
+    }
+  }
+}
+```
+
+With this setup, each of your deployments pass the ARN of your trust relationship role and a JWT token generated by AWS each time you plan or apply your Stack. Each of your deployments uses their own role, configured with the specific permissions you require.
+
+For more examples of setting up OIDC with different providers, refer to our [repository of example configurations](https://github.com/hashicorp-guides/terraform-stacks-identity-tokens/tree/main).
+
+## Authenticate with a variable set
+
+You can use the `store` block to access credentials stored in an [HCP Terraform variable set](/terraform/cloud-docs/workspaces/variables/managing-variables#variable-sets). Before writing any configuration, ensure your Stack can access the variable set you are targeting, by allowing your project to access the variable set or making that set globally available.
+
+Next, add a `store` block to your deployment configuration file to access the values in your variable set:
+
+<CodeBlockConfig filename="deployments.tfdeploy.hcl">
+
+```hcl
+store "varset" "tokens" {
+  name     = "Example_Varset_Name"
+  category = "env"
+}
+```
+
+</CodeBlockConfig>
+
+Once defined, your deployments can access your variable set's values. In the following example, the `test` deployment uses the `tokens` store to access the variable set named `Example_Varset_Name`:
+
+<CodeBlockConfig filename="deployments.tfdeploy.hcl">
+
+```hcl
+store "varset" "tokens" {
+  name     = "Example_Varset_Name"
+  category = "env"
+}
+
+deployment "test" {
+  inputs = {
+    access_key    = store.varset.tokens.AWS_ACCESS_KEY_ID
+    secret_key    = store.varset.tokens.AWS_SECRET_ACCESS_KEY
+    session_token = store.varset.tokens.AWS_SESSION_TOKEN
+  }
+}
+```
+
+</CodeBlockConfig>
+
+After defining a `store` block, deployments can reference specific values from that variable set using `store.varset.<STORE_NAME>.<VARIABLE_NAME>` syntax. The `test` deployment passes the variable values as inputs, letting its providers and components use those values:
+
+<CodeBlockConfig highlight="" filename="providers.tfcomponent.hcl">
+
+```hcl
+variable "access_key" {
+  description = "AWS access key"
+  type        = string
+  ephemeral   = true
+}
+
+variable "secret_key" {
+  description = "AWS sensitive secret key."
+  type        = string
+  sensitive   = true
+  ephemeral   = true
+}
+
+variable "session_token" {
+  description = "AWS session token."
+  type        = string
+  sensitive   = true
+  ephemeral   = true
+}
+
+required_providers {
+  aws = {
+    source  = "hashicorp/aws"
+    version = "~> 5.7.0"
+  }
+}
+
+provider "aws" "this" {
+  config {
+    access_key = var.access_key
+    secret_key = var.secret_key
+    token      = var.session_token
+  }
+}
+```
+
+</CodeBlockConfig>
+
+By default, Stacks deployments do not save the values of variable sets into their state, because variable set values usually include sensitive data, such as passwords or API keys. For variables that need to persist in your deployment state, such as license keys, you can use the `stable` keyword. To learn more, refer to [Persist store values for deployments](/terraform/language/block/stack/tfdeploy/store#persist-store-values-for-deployments).
+
+For more information and examples about the `store` block, refer to the [`store` block reference](/terraform/language/block/stack/tfdeploy/store).

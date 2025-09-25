@@ -1,0 +1,127 @@
+---
+page_title: Stack runs in HCP Terraform
+description: |-
+  Learn how HCP Terraform executes Terraform runs to keep Stack deployments up to date with configuration versions over time.
+tfc_only: true
+---
+
+# Stack deployment runs
+
+HCP Terraform is the interface for keeping track of your Stack configuration over time and the corresponding deployments for each version of your configuration. Learn how HCP Terraform executes Terraform runs to keep Stack deployments up to date.
+
+## Run environment
+
+HCP Terraform is designed as an execution platform for Terraform, and executes runs on its own disposable virtual machines. Terraform runs managed by HCP Terraform are called remote operations. HCP Terraform executes Stack deployment runs remotely, and you cannot execute Stack runs locally.
+
+### Protecting private environments
+
+[HCP Terraform agents](/terraform/cloud-docs/agents/) let HCP Terraform communicate with isolated, private, or on-premises infrastructure. The agent polls HCP Terraform for any changes to your configuration and executes the changes locally, so you do not need to allow public ingress traffic to your resources. Agents let you control infrastructure in private environments without modifying your network perimeter. Note that [agent hooks](/terraform/cloud-docs/agents/hooks) do not support Stack workflows.
+
+## Configuration versions
+
+A Stack configuration version is a snapshot of all of the pieces that make up your Stack. A Stack configuration version includes:
+
+- Your component configuration, in `tfcomponent.hcl` files.
+- Your deployment configuration, in the `tfdeploy.hcl` file.
+- The modules that implement your individual Stack components
+- The input values that deployment block passes to your Stack components.
+
+HCP Terraform creates a new configuration version each time any of the following change:
+
+- Your configuration changes and VCS automatically fetches that change
+- Your configuration changes and you manually fetch that change in HCP Terraform
+- You manually upload a configuration
+- An [`upstream_input`](/terraform/language/stacks/deploy/pass-data#consume-the-output-from-an-upstream-stack) that your Stack depends on changes.
+
+## Stack deployment runs
+
+Each configuration version creates a deployment run for every deployment of your Stack to implement the changes in that version. A deployment run consists of the steps that Terraform can perform to update that deployment to match the associated configuration version. A single run can include many plan and apply cycles, and a successful run ends with an empty plan to reflect that deployments have executed all downstream changes.
+
+The goal of deployment runs is to apply a configuration version to every deployment in the Stack. When all deployments successfully match the same Stack configuration, the Stack achieves convergence.
+
+To learn more about interacting with your Stack's deployment runs, refer to [Review deployment runs](/terraform/cloud-docs/stacks/deploy/runs).
+
+### Deployment run order
+
+Each Stack in HCP Terraform maintains its own configuration versions, and each version has a queue of deployment runs. HCP Terraform executes deployment runs in the order that you approve them.
+
+When you approve a deployment plan, HCP Terraform automatically dismisses all pending plans for that deployment from other configuration versions. HCP Terraform permanently discards plans from older configuration versions because you cannot revert your deployment to a previous configuration version.
+
+Plans from newer configuration versions remain rerunnable. After the current deployment completes, you can rerun plans from newer configuration versions and approve them to update your deployment to that newer version.
+
+### Deployment runs and state
+
+HCP Terraform lets multiple deployment runs exist simultaneously for different configuration versions, but only one run can modify a deployment's state at a time. Deployment runs lock state while they are applying to ensure a run can finish without interference.
+
+When you approve a deployment run, HCP Terraform locks the deployment's state before beginning execution. This lock remains in place throughout the entire run, because a run may require multiple plan-and-apply cycles to reach convergence. The lock prevents any other approved runs from starting their execution and potentially creating conflicts.
+
+Each step in a deployment run can acquire a state lock, but only steps that modify state actually require locking. Two step types modify state and require locks:
+
+- Apply steps that create, update, or destroy infrastructure.
+- Import steps that move existing workspace resources under the management of a Stack.
+
+While a deployment holds a state lock, other runs for that deployment must wait. These waiting runs queue in order and cannot begin execution until the current run:
+
+- Successfully completes all its plan-and-apply cycles
+- Fails and stops execution
+- Gets manually canceled by an operator
+
+After the running deployment releases its lock, the next approved run in the queue can acquire the lock and begin its execution. To learn more about state for deployments in a Stack, refer to [State for Stacks](/terraform/cloud-docs/stacks/state).
+
+### Deployment run modes
+
+Deployment runs have three possible run modes:
+
+- The default run mode, normal mode, creates plans and applies them after approval.
+- The destroy run mode triggers when you delete a deployment from your configuration.
+- The import run mode triggers when HCP Terraform converts a workspace into a Stack. To learn more, refer to [Terraform migrate](#LINK).
+
+#### Destroy mode
+
+You can trigger the destroy run mode for Stacks in two ways:
+
+- If you set the destroy argument to true on a deployment block.
+- If you remove a deployment block from your deployment configuration.
+
+If you remove a deployment block from your configuration, HCP Terraform starts a destroy run using the last configuration that included that deployment. If you plan on updating the provider configuration in your Stack and also destroying some deployments, we recommend using the destroy argument to remove deployments to ensure your configuration has the authentication necessary to destroy that deployment.
+
+### Steps in a deployment run
+
+A deployment run consists of the steps that Terraform can perform to update that deployment to match the associated configuration version.
+
+The number of steps is different for each plan, depending on what is necessary to get a deployment to match the change in that configuration version. A deployment run can include multiple plan-and-apply steps to ensure the downstream impacts of changes fully roll out to that deployment.
+
+## States of a deployment run step
+
+Each step in a deployment run matches a specific state as HCP Terraform executes a deployment run. A deployment run step exists in one of four primary states:
+
+- [Pending](#pending)
+- [Running](#running)
+- [Waiting](#waiting)
+- [Complete](#complete)
+
+### Pending
+
+Pending steps waits for previous steps to complete. Steps execute sequentially within a deployment run, so each step remains in the pending state until all preceding steps finish. For example, an apply step waits in the pending state while its associated plan step executes.
+
+### Running
+
+Running steps are when HCP Terraform actively executes part of the deployment run. During a running step Terraform is doing one of the following:
+
+- Planning what changes a deployment needs to match the configuration version.
+- Applying approved changes.
+- Importing existing workspace resources under the management of a Stack.
+
+### Waiting
+
+Runs that produce changes pause in the waiting step state to wait for operator approval. HCP Terraform requires manual confirmation before proceeding with infrastructure changes, unless you configure [auto-approval rules for your deployments](/terraform/language/stacks/deploy/conditions).
+
+### Complete
+
+The step finishes execution and enters one of three final states:
+
+- Success
+- Failed
+- Cancelled
+
+Once a step reaches the complete state, you cannot restart the deployment run. If a step fails or gets canceled, you must create a new deployment run to retry the operation.
