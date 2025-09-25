@@ -89,13 +89,13 @@ export async function applyFileMdxTransforms(entry, versionMetadata = {}) {
 
 		const remarkResults = await remark()
 			.use(remarkMdx)
-			.use(remarkIncludePartialsPlugin, { partialsDir, filePath })
 			.use(transformExcludeContent, {
 				filePath,
 				version,
 				repoSlug: entry.repoSlug,
 				productConfig: PRODUCT_CONFIG[entry.repoSlug],
 			})
+			.use(remarkIncludePartialsPlugin, { partialsDir, filePath })
 			.use(paragraphCustomAlertsPlugin)
 			.use(rewriteInternalRedirectsPlugin, {
 				redirects,
