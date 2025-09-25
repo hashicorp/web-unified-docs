@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-import { findDocVersions } from '../../utils/findDocVersions'
-import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
+import { findDocVersions } from '#utils/findDocVersions'
+import { PRODUCT_CONFIG } from '#productConfig.mjs'
 
 export async function GET(request: Request) {
 	const url = new URL(request.url)

@@ -1,0 +1,324 @@
+---
+page_title: Testing migration
+description: >-
+  Learn how to write tests to verify that migrating from SDKv2 to the framework
+  does not affect provider behavior. Avoid introducing bugs while migrating with
+  test-driven development.
+---
+
+# Test the migration
+
+Before migration, ensure that your SDKv2 provider has adequete test coverage,
+and that all of your tests pass. During migration, write migration tests to
+verify that the behaviour of your provider has not been altered by the migration
+itself. You must also update your existing tests to use a provider factory to
+test both the SDKv2 and framework versions of your provider.
+
+## Background
+
+To reduce the risk of introducing breaking changes during migration, we strongly
+recommend that your ensure adequate [test
+coverage](/terraform/plugin/sdkv2/testing) before you begin migrating your
+provider to the framework and that all of your tests pass.
+
+During migration, we recommend [writing tests](#migration-tests) to verify that
+switching from SDKv2 to the framework does not affect your provider's behavior.
+These tests use identical configuration for both the SDK and the framework, and
+validate that migrating does not result in Terraform plan changes when there are
+no configuration changes.
+
+To run your provider's existing tests against your framework implementation, you
+must update your [provider factories](#provider-factories) to use the framework.
+
+Refer to the [Plugin Testing documentation](/terraform/plugin/testing) for more
+details about testing providers that use the framework.
+
+<Tip>
+
+  If you are implementing your [Migration using a mux
+  server](/terraform/plugin/framework/migrating/mux) for your SDKv2 and
+  framework provider implementations to incrementally migrate, update the test
+  code for each resource and data source immediately before migrating them. You
+  do not have to update tests for resources and data sources that you are not
+  yet migrating to the framework.
+
+</Tip>
+
+## Migration tests
+
+Before you migrate a resource or data source, create a migration test to ensure
+that the behavior of the resource or data source does not change between the
+SDKv2 implementation and the framework version.
+
+Each migration test runs `terraform plan` to generate state with the SDKv2
+version of your provider. Next, it generates a plan with the framework version
+of the provider. This step also verifies that the there are no differences
+between the plans created by the SDKv2 and provider versions, and confirms that
+migrating to the framework will not alter the behavior of existing
+configurations that use your provider.
+
+Use the `ExternalProviders` field within a
+[`resource.TestStep`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-testing/helper/resource#TestStep)
+to specify which provider to use during each test step. Specify a version of the
+provider built on SDKv2 during the first test step, and then use a version of
+the provider built on the framework in subsequent test steps to verify that
+Terraform CLI does not detect any planned changes.
+
+### External providers
+
+To test migration of a resource or data source to the framework, use an external
+provider to generate state with a previous version of the provider and then
+verify that there are no planned changes after migrating to the framework.
+
+#### Example
+
+This example test uses an external provider to test that the resource's
+attribute values are the same between the SDK and framework implementations.
+
+```go
+func TestResource_UpgradeFromVersion(t *testing.T) {
+    /* ... */
+    resource.Test(t, resource.TestCase{
+        Steps: []resource.TestStep{
+            {
+                ExternalProviders: map[string]resource.ExternalProvider{
+                    "<provider>": {
+                        VersionConstraint: "<sdk_version>",
+                        Source:            "hashicorp/<provider>",
+                    },
+                },
+                Config: `resource "provider_resource" "example" {
+                            /* ... */
+                        }`,
+                Check: resource.ComposeTestCheckFunc(
+                    resource.TestCheckResourceAttr("provider_resource.example", "<attribute>", "<value>"),
+                    /* ... */
+                ),
+            },
+            {
+                ProtoV6ProviderFactories: protoV6ProviderFactories(),
+                Config: `resource "provider_resource" "example" {
+                            /* ... */
+                        }`,
+                // ConfigPlanChecks is a terraform-plugin-testing feature.
+                // If acceptance testing is still using terraform-plugin-sdk/v2,
+                // use `PlanOnly: true` instead. When migrating to
+                // terraform-plugin-testing, switch to `ConfigPlanChecks` or you
+                // will likely experience test failures.
+                ConfigPlanChecks: resource.ConfigPlanChecks{
+                    PreApply: []plancheck.PlanCheck{
+                        plancheck.ExpectEmptyPlan(),
+                    },
+                },
+            },
+        },
+    })
+}
+```
+
+- The first `TestStep` uses `ExternalProviders` to cause `terraform apply` to
+  execute with a previous version of the provider, which is built on SDKv2.
+
+- The second `TestStep` uses
+  [`ProtoV6ProviderFactories`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-testing/helper/resource#TestCase.ProtoV6ProviderFactories)
+  so that the test uses the provider code contained within the provider
+  repository. Then it uses
+  [`ConfigPlanChecks`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-testing/helper/resource#ConfigPlanChecks)
+  to verify that an empty (no-op) plan is generated, indicating that configuring
+  using the SDKv2 version of your provider will continue to work the same way
+  after you migrate your provider to the framework.
+
+### Testing data sources
+
+Terraform refreshes data sources during every plan operation, but it does not
+use prior state during the operation. As a result, you should use a separate
+managed resource or output value to ensure that there are no differences between
+a data source implemented with SDKv2 and the same data source after migration to
+the framework.
+
+If you are using Terraform 1.4 and later, use the [`terraform_data` managed
+resource](/terraform/language/resources/terraform-data), which is implicitly
+available for configurations in Terraform 1.4 and later.
+
+If testing on older versions of Terraform is required, use the [`null_resource`
+managed
+resource](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource)
+with an associated `ExternalProviders` step configuration instead.
+
+#### Terraform data resource example
+
+In this example, all data source attribute values are compared between the SDKv2
+and framework implementations using a `terraform_data` resource to mirror the
+attributes from the data source:
+
+```go
+func TestDataSource_UpgradeFromVersion(t *testing.T) {
+    /* ... */
+    resource.Test(t, resource.TestCase{
+        Steps: []resource.TestStep{
+            {
+                ExternalProviders: map[string]resource.ExternalProvider{
+                    "<provider>": {
+                        VersionConstraint: "<sdk_version>",
+                        Source:            "hashicorp/<provider>",
+                    },
+                },
+                Config: `data "provider_datasource" "test" {
+                            /* ... */
+                        }
+                        
+                        resource "terraform_data" "test" {
+                            input = data.provider_datasource.test
+                        }`,
+            },
+            {
+                ProtoV6ProviderFactories: protoV6ProviderFactories(),
+                Config: `data "provider_datasource" "test" {
+                            /* ... */
+                        }
+                        
+                        resource "terraform_data" "test" {
+                            input = data.provider_datasource.test
+                        }`,
+                // ConfigPlanChecks is a terraform-plugin-testing feature.
+                // If acceptance testing is still using terraform-plugin-sdk/v2,
+                // use `PlanOnly: true` instead. When migrating to
+                // terraform-plugin-testing, switch to `ConfigPlanChecks` or you
+                // will likely experience test failures.
+                ConfigPlanChecks: resource.ConfigPlanChecks{
+                    PreApply: []plancheck.PlanCheck{
+                        plancheck.ExpectEmptyPlan(),
+                    },
+                },
+            },
+        },
+    })
+}
+```
+
+<!-- FIXME: Suggested example: data source test using null_resource -->
+
+## Provider factories
+
+In many cases, existing tests do not require significant updates. The only
+necessary change is to the provider factories that create the provider during
+the test case. Refer to [Acceptance Tests - Specify
+Providers](/terraform/plugin/framework/acctests#specify-providers) in the
+framework documentation for details about selecting specefic provider versions
+in your tests.
+
+In SDKv2, you use the `ProviderFactories` field on the `resource.TestCase`
+struct to obtain `schema.Provider`.
+
+The following example shows a test written in SDKv2.
+
+<CodeBlockConfig filename="SDKv2">
+
+```go
+resource.UnitTest(t, resource.TestCase{
+    ProviderFactories: testProviders(),
+```
+
+</CodeBlockConfig>
+
+In the framework, use either the `ProtoV5ProviderFactories` or
+`ProtoV6ProviderFactories` field on the `resource.TestCase` struct to obtain the
+[`provider.Provider`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/provider#Provider),
+depending on the [Terraform Plugin
+Protocol](/terraform/plugin/how-terraform-works#terraform-plugin-protocol)
+version your provider is using.
+
+### Protocol version 6
+
+The following example shows how you can write a test in the framework for a
+provider that uses protocol version 6.
+
+<CodeBlockConfig filename="Framework">
+
+```go
+resource.UnitTest(t, resource.TestCase{
+    ProtoV6ProviderFactories: protoV6ProviderFactories(),
+```
+
+</CodeBlockConfig>
+
+### Protocol version 5
+
+The following example shows how you can write a test in the framework for a
+provider that uses protocol version 5.
+
+<CodeBlockConfig filename="Framework">
+
+```go
+resource.UnitTest(t, resource.TestCase{
+    ProtoV5ProviderFactories: protoV5ProviderFactories(),
+```
+
+</CodeBlockConfig>
+
+### Provider factory example
+
+The following code sample shows how to define provider factories within a test
+case when using SDKv2.
+
+<CodeBlockConfig filename="SDKv2">
+
+```go
+func TestDataSource_Exmple(t *testing.T) {
+    /* ... */
+    resource.UnitTest(t, resource.TestCase{
+        ProviderFactories: testProviders(),
+        /* ... */
+    })
+}
+```
+
+</CodeBlockConfig>
+
+The following shows how to generate provider factories when using SDKv2.
+
+<CodeBlockConfig filename="SDKv2">
+
+```go
+func testProviders() map[string]func() (*schema.Provider, error) {
+    return map[string]func() (*schema.Provider, error){
+        "example": func() (*schema.Provider, error) { return New(), nil },
+    }
+}
+```
+
+</CodeBlockConfig>
+
+The following shows how to define provider factories within a test case when
+using the framework.
+
+<CodeBlockConfig filename="Framework">
+
+```go
+func TestDataSource_Example(t *testing.T) {
+    /* ... */
+
+    resource.UnitTest(t, resource.TestCase{
+        ProtoV6ProviderFactories: protoV6ProviderFactories(),
+        /* ... */
+    })
+}
+```
+
+</CodeBlockConfig>
+
+The following shows how to generate provider factories when using
+the framework. The call to `New` returns an instance of the provider. Refer to
+[Provider Definition](/terraform/plugin/framework/migrating/providers#provider-definition) in this guide for details.
+
+<CodeBlockConfig filename="Framework">
+
+```go
+func protoV5ProviderFactories() map[string]func() (tfprotov5.ProviderServer, error) {
+    return map[string]func() (tfprotov5.ProviderServer, error){
+        "example": providerserver.NewProtocol5WithError(New()),
+    }
+}
+```
+
+</CodeBlockConfig>
