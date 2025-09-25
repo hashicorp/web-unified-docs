@@ -176,7 +176,6 @@ export const PRODUCT_CONFIG = {
 		dataDir: 'data',
 		productSlug: 'terraform',
 		supportsExclusionDirectives: true,
-		directivePrefix: 'TFEnterprise',
 		/**
 		 * Note: we need to sort versions for various reasons. Nearly all
 		 * our documentation is semver-versioned. PTFE is not. Rather than
@@ -313,7 +312,6 @@ export const PRODUCT_CONFIG = {
 		versionedDocs: false,
 		websiteDir: 'website',
 		supportsExclusionDirectives: true,
-		directivePrefix: 'TFC',
 	},
 	'terraform-plugin-framework': {
 		/**
@@ -455,7 +453,6 @@ export const PRODUCT_CONFIG = {
 		versionedDocs: true,
 		websiteDir: 'website',
 		supportsExclusionDirectives: true,
-		directivePrefix: 'Vault',
 	},
 	'well-architected-framework': {
 		/**

@@ -26,7 +26,7 @@ import {
 // import { transformExcludeTerraformContent } from './exclude-terraform-content/index.mjs'
 // import { transformExcludeVaultContent } from './exclude-vault-content/index.mjs'
 
-import { transformExcludeContent } from './exclude-content/index.mjs'
+import { transformExcludeContent } from './exclude_content_final/index.mjs'
 
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
 
@@ -83,23 +83,21 @@ export async function buildMdxTransforms(
 		const outPath = path.join(outputDir, relativePath)
 		return { repoSlug, filePath, partialsDir, outPath, version, redirectsDir }
 	})
-	/**
-	 * Apply MDX transforms to each file entry, in batches
-	 */
-	const productDirectivePrefixes = Object.entries(PRODUCT_CONFIG)
-		.filter(([, config]) => { return config.supportsExclusionDirectives })
-		.map(([, config]) => { return config.directivePrefix })
+
+	// this is confusing
+	// /**
+	//  * Apply MDX transforms to each file entry, in batches
+	//  */
+	// const productDirectivePrefixes = Object.entries(PRODUCT_CONFIG)
+	// 	.filter(([, config]) => { return config.supportsExclusionDirectives })
+	// 	.map(([, config]) => { return config.directivePrefix })
 
 	console.log(`Running MDX transforms on ${mdxFileEntries.length} files...`)
 	const results = await batchPromises(
 		'MDX transforms',
 		mdxFileEntries,
 		(entry) => {
-			return applyMdxTransforms(
-				entry,
-				versionMetadata,
-				productDirectivePrefixes
-			)
+			return applyMdxTransforms(entry, versionMetadata)
 		},
 	)
 	// Log out any errors encountered
@@ -135,11 +133,7 @@ export async function buildMdxTransforms(
  * @param {string} entry.outPath
  * @return {object} { error: string | null }
  */
-async function applyMdxTransforms(
-	entry,
-	versionMetadata = {},
-	productDirectivePrefixes = []
-) {
+async function applyMdxTransforms(entry, versionMetadata = {}) {
 	try {
 		const { filePath, partialsDir, outPath, version, redirectsDir } = entry
 		const redirects = await loadRedirects(version, redirectsDir)
@@ -147,7 +141,10 @@ async function applyMdxTransforms(
 		const fileString = fs.readFileSync(filePath, 'utf8')
 		const { data, content } = grayMatter(fileString)
 
-		const supportsExclusionDirectives = PRODUCT_CONFIG[entry.repoSlug]?.supportsExclusionDirectives ?? false
+		// This here is redundant- productDirectivePrefixes already
+		// tells us if the product supports exclusion directives since that
+		// check was done when building productDirectivePrefixes
+		// const supportsExclusionDirectives = PRODUCT_CONFIG[entry.repoSlug]?.supportsExclusionDirectives ?? false
 
 		const remarkResults = await remark()
 			.use(remarkMdx)
@@ -156,9 +153,8 @@ async function applyMdxTransforms(
 			.use(transformExcludeContent, {
 				filePath,
 				version,
-				product: entry.repoSlug,
-				supportsExclusionDirectives,
-				productDirectivePrefixes
+				repoSlug: entry.repoSlug,
+				productConfig: PRODUCT_CONFIG[entry.repoSlug],
 			})
 			.use(remarkIncludePartialsPlugin, { partialsDir, filePath })
 			.use(paragraphCustomAlertsPlugin)
