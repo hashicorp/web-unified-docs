@@ -14,7 +14,7 @@ vi.mock('../product-directory/index.mjs', () => {
 	}
 })
 
-vi.mock('../../app/utils/productConfig.mjs', () => {
+vi.mock('#productConfig.mjs', () => {
 	return {
 		PRODUCT_CONFIG: {
 			'terraform-docs-common': { productSlug: 'terraform' },

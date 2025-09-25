@@ -1,0 +1,591 @@
+---
+page_title: Configure and manage keys
+description: >-
+  Learn how to set up hold your own key encryption for HCP Terraform, letting you secure your sensitive data in state and plan files using a key from an external key management system.
+tfc_only: true
+---
+
+# Configure and manage keys
+
+Configure your key management system (KMS) and HCP Terraform to use the hold your own key (HYOK) feature to encrypt your sensitive Terraform artifacts.
+
+## Background
+
+HCP Terraform lets you configure multiple HYOK configurations for an
+organization. Each HYOK configuration corresponds to a single key in a
+KMS. Additional HYOK configurations can point to different keys in the same KMS, or keys in others KMSs.
+
+When you set up HYOK, you designate one configuration as your organization's **primary** configuration. When you enable HYOK on a workspace, HCP Terraform automatically secures that workspace's artifacts using your organization's primary HYOK configuration.
+
+Refer to [How hold your own key concepts](/terraform/cloud-docs/hold-your-own-key/concepts) to learn more about the details of encryption and decryption.
+
+## Requirements
+
+@include 'tfc-package-callouts/hyok.mdx'
+
+To use hold your own key, first ensure you meet the following requirements:
+- Your organization has at least one agent pool, and you [enable request forwarding on at least one agent in that pool](/terraform/cloud-docs/agents/request-forwarding#hold-your-own-key).
+- Configure healthy key management policies on your KMS to prevent data loss. Otherwise, if a key is deleted from a KMS while HCP Terraform is using it, you can experience state loss.
+- Configure your workspaces to use Terraform 1.3+.
+
+## Create key configuration
+
+To configure hold your own key, begin by letting your key management system accept the necessary OpenID Connect (OIDC) requests from HCP Terraform. Then, set up your keys and grant the necessary roles and permissions in your cloud provider.
+
+<TabProvider>
+
+<Tabs>
+
+<Tab heading="Azure" group="azure">
+
+To use Azure with HYOK, you need to configure the following:
+
+- A Key Vault and encryption key.
+- An Entra ID Application which trusts the OIDC credentials issued by HCP
+  Terraform.
+- A service principal in the application with permission to use your key.
+
+### Create a Key Vault and an encryption key
+
+Create a Key Vault and key to secure your sensitive HCP Terraform artifacts:
+
+- If you do not already have one, [create a Key Vault using the Azure
+portal](https://learn.microsoft.com/en-us/azure/key-vault/general/quick-create-portal).
+- Then, [add a key to the Key
+Vault](https://learn.microsoft.com/en-us/azure/key-vault/keys/quick-create-portal#add-a-key-to-key-vault) to use to secure your sensitive Terraform artifacts.
+
+Take note of the key URI, which is in the format: `https://<KEY_VAULT_NAME>.vault.azure.net/keys/<KEY_NAME>`. You will use this URI later to configure your key in HCP Terraform.
+
+### Create an Entra ID Application
+
+Next, follow the steps to [create the Application and Service
+Principal](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/guides/service_principal_oidc#creating-the-application-and-service-principal).
+Do not proceed to the **Configure Microsoft Entra ID Application to Trust a
+GitHub Repository** step, and set your **Application Redirect URI** type to **Web**.
+Also, take note of the `client_id` and `tenant_id` for your application. You
+use these values to configure your key in HCP Terraform.
+
+### Configure Entra ID to trust HCP Terraform
+
+Next, create federated identity credentials in your application, which validate
+the contents of the token sent to Azure from HCP Terraform.
+
+Follow the steps in the AzureRM provider docs: [Configure Azure Microsoft Entra
+ID Application to Trust a Generic
+Issuer](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/guides/service_principal_oidc#configure-azure-active-directory-application-to-trust-a-generic-issuer),
+and use the values below when you add the credential.
+
+Specify the following information in the **Add a credential** step:
+
+- **Federated credential scenario**: Set to **Other issuer**.
+- **Issuer**: The address of HCP Terraform, `https://app.terraform.io`.
+- **Subject identifier**: The subject identifier from HCP Terraform that this
+credential will match. This is in the form `organization:<ORG_NAME>:hyok_config:<HYOK_CONFIG_NAME>`. The HYOK configuration name can
+contain letters, numbers, hyphens, and underscores.
+- **Audience**: Leave this as the default value, `api://AzureADTokenExchange`.
+
+Make a note of the HYOK config name you choose here, you will use it later
+when you configure HCP Terraform.
+
+</Tab>
+
+<Tab heading="AWS" group="aws">
+
+To use AWS with HYOK, you need to configure the following:
+
+- An OIDC Identity Provider for HCP Terraform.
+- An IAM role with a trust policy that lets the HCP Terraform agent assume it.
+- An AWS KMS key that your IAM role can use.
+
+### Create an OIDC Identity Provider
+
+Follow the steps for [Creating OpenID Connect (OIDC) identity providers - AWS
+Identity and Access
+Management](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_create_oidc.html)
+through the AWS console or API.
+
+Set your provider URL to the address of HCP Terraform
+(`https://app.terraform.io`) and the audience to `aws.workload.identity`.
+
+### Create an IAM Role and Trust Policy
+
+Next, configure a role and corresponding trust policy by following: [Creating a
+role for web identity or OpenID Connect Federation (console) - AWS Identity and
+Access
+Management](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_create_for-idp_oidc.html).
+
+Use the following trust policy as a template:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+      {
+          "Effect": "Allow",
+          "Principal": {
+              "Federated": "<the ARN of your new Identity Provider>"
+          },
+          "Action": "sts:AssumeRoleWithWebIdentity",
+          "Condition": {
+              "StringEquals": {
+                  "app.terraform.io:aud": "aws.workload.identity"
+              },
+              "StringLike": {
+                  "app.terraform.io:sub": "organization:<ORG_NAME>:hyok_config:<HYOK_CONFIG_NAME>"
+
+              }
+          }
+      }
+  ]
+}
+```
+
+The **Condition** field matches against the subject claim of HCP Terraform's
+JWT. For HYOK, the subject claim is: `organization:<ORG_NAME>:hyok_config:<HYOK_CONFIG_NAME>`.
+
+Wildcards are allowed when matching claims. For example, if you want to use the
+same role for all keys within your HCP Terraform organization, you can configure
+your subject claim to match all HYOK configurations in your organization:
+`organization:<ORG_NAME>:hyok_config:*`.
+
+For additional security we recommend that you choose a configuration name now,
+so that only the specified HYOK configuration may assume this role:
+`organization:<ORG_NAME>:hyok_config:<HYOK_CONFIG_NAME>`. The HYOK configuration
+name can contain letters, numbers, hyphens, and underscores. Take note of the
+HYOK configuration name you specify here, you will use it when you create your
+HYOK configuration in HCP Terraform.
+
+### Create an AWS KMS Key
+
+You must choose or create a symmetric AWS KMS key to use to encrypt and decrypt
+your data encryption keys. Use the AWS console or API and the steps in [Create a
+symmetric encryption KMS key](https://docs.aws.amazon.com/kms/latest/developerguide/create-symmetric-cmk.html).
+
+Add the IAM role you created in the previous step as a key user, so that the HCP
+Terraform agent can use it to perform cryptographic operations.
+
+</Tab>
+
+<Tab heading="GCP" group="gcp">
+
+To use GCP with HYOK, you will configure the following:
+
+- A key ring and a key to encrypt your sensitive HCP Terraform artifacts.
+- A Workload Identity Pool and Provider configured to trust OIDC tokens issued
+  by HCP Terraform.
+- A service account that can be assumed with the workload identity provider and
+  has permission to use the key.
+
+### Create a Key Ring and Key
+
+To begin, [Create a key ring](https://cloud.google.com/kms/docs/create-key-ring)
+and a [Create a symmetric encryption
+key](https://cloud.google.com/kms/docs/create-key#create-symmetric) in Google
+Cloud KMS.
+
+Make a note of the **key name** and the **key ring name**. You use these values
+later when you create your HYOK configuration in HCP Terraform.
+
+### Create a Service Account
+
+Next, [create a service
+account](https://cloud.google.com/iam/docs/service-accounts-create) with
+permissions to encrypt and decrypt data with the key you created. The HCP
+Terraform Agent will assume the role of this service account in order to use
+this key to encrypt and decrypt your data encryption keys.
+
+Ensure that you grant the service account the necessary IAM permissions to
+encrypt and decrypt data using your key. For example, you could use the **Cloud
+KMS CryptoKey Encrypter/Decrypter** role, though you may want further scope
+access to only your key.
+
+### Create a Workload Identity Pool and Provider
+
+Create a workload identity pool and provider by following the steps in [Configure Workload Identity Federation](https://cloud.google.com/iam/docs/workload-identity-federation-with-other-providers#configure).
+
+Make a note of the name you choose for the **Workload Identity Pool**, you will
+use it when you create your HYOK configuration in HCP Terraform.
+
+When creating the Identity Provider, specify the following details:
+
+- **Provider type**: Must be "OpenID Connect (OIDC)".
+- **Issuer (URL)**: The address of HCP Terraform, `https://app.terraform.io`.
+- **Audience**: Leave the default value.
+- **Provider attributes mapping**: Set the `google.subject` value to `assertion.sub`.
+- **Attribute Conditions**: Restrict which identity tokens this provider authenticates by matching on the subject claim of the JWT minted by HCP Terraform. For HYOK, this would be: `organization:<ORG_NAME>:hyok_config:<HYOK_CONFIG_NAME>`.
+
+If you want to use the same provider to access all keys within your
+organization, you may use wildcard matching in the condition:
+`assertion.sub.startsWith("organization:<ORG_NAME>:hyok_config:")` For
+additional security, we recommend choosing a configuration name now so
+that only workloads requiring a particular key may assume this role:
+`assertion.sub.startsWith("organization:<ORG_NAME>:hyok_config:<HYOK_CONFIG_NAME>")`. The HYOK configuration name can contain letters, numbers,
+hyphens, and underscores.
+
+Note the **HYOK_CONFIG_NAME** value you choose here, as well as the **pool
+name** and **provider name**. You use these values when you create your HYOK
+configuration in HCP Terraform.
+
+<Note>
+
+GCP has a limit of 127 characters for subject claims. This means
+`organization:<ORG_NAME>:hyok_config:<HYOK_CONFIG_NAME>` must be under 127
+characters. Make sure to choose your HYOK config name accordingly, based on the
+length of ORG_NAME.
+
+</Note>
+
+### Grant Service Account Access to the Identity Pool
+
+Finally, you need to grant the workload identity pool access to the service
+account by following the steps in [Allow the external workload to impersonate
+the service
+account](https://cloud.google.com/iam/docs/workload-identity-federation-with-other-providers#access).
+
+</Tab>
+
+<Tab heading="Vault" group="vault">
+
+To use Vault with HYOK, you need to configure the following:
+
+- Mount and configure a JWT Authentication backend.
+- Mount a transit secrets engine and add a key.
+- Add a role for [the `tfc-agent`](/terraform/cloud-docs/agents) to assume and policies that let it use the key.
+
+## Mount and Configure a JWT Authentication backend
+
+If you already have a JWT Authentication backend set up, use that existing
+backend. If not, enable it as shown below.
+
+```shell-session
+$ vault auth enable -path=jwt-prod jwt
+Success! Enabled jwt auth method at: jwt-prod/
+```
+
+Configure Vault to trust HCP Terraform's identity tokens and verify them using
+HCP Terraform's public key. The following command configures the JWT authentication
+backend in Vault to trust HCP Terraform as an OIDC identity provider:
+
+```shell-session
+$ vault write auth/jwt-prod/config \
+   oidc_discovery_url="https://app.terraform.io" \
+   bound_issuer="https://app.terraform.io"
+Success! Data written to: auth/jwt-prod/config
+```
+
+Do not include any trailing slashes from the HCP Terraform URL.
+
+### Create a key
+
+Set up the resource you want to access, which is the key encryption key you will
+create in the next step. To do this, enable Vault's transit secrets engine if it
+is not already enabled, as shown below:
+
+```shell-session
+$ vault secrets enable transit
+Success! Enabled the transit secrets engine at: transit/
+```
+
+Next, create the key which Vault will use to encrypt and decrypt your data
+encryption keys. To do this, give your key a unique name, as shown below. In the
+example below, the key name is `unique-prod`:
+
+```shell-session
+$ vault write -f transit/keys/unique-prod
+
+
+Key                       Value
+---                       -----
+allow_plaintext_backup    false
+auto_rotate_period        0s
+deletion_allowed          false
+derived                   false
+exportable                false
+imported_key              false
+keys                      map[1:1738617996]
+latest_version            1
+min_available_version     0
+min_decryption_version    1
+min_encryption_version    0
+name                      unique-prod
+supports_decryption       true
+supports_derivation       true
+supports_encryption       true
+supports_signing          false
+type                      aes256-gcm96
+```
+
+Take note of the key name you chose, as you will need to refer to the value
+later.
+
+### Configure roles and policies
+
+To add roles and policies, grant entities authenticating with the
+JWT the ability to encrypt and decrypt with your newly created key
+encryption key. This requires a role and an access policy that grants
+access to the key. Create a new `encrypt-decrypt-policy.hcl` file with the
+following contents:
+
+<CodeBlockConfig filename="encrypt-decrypt-policy.hcl">
+
+```hcl
+path "transit/encrypt/<your key>" {
+ capabilities = [ "create", "update" ]
+}
+path "transit/decrypt/<your key>" {
+ capabilities = [ "create", "update" ]
+}
+```
+
+</CodeBlockConfig>
+
+Replace `<your key>` with the name of the key you created in the previous step.
+
+```shell-session
+$ vault policy write hyok-encrypt-prod encrypt-decrypt-policy.hcl
+Success! Uploaded policy: hyok-encrypt-prod
+```
+
+Next, create a role that you will grant the policy above to, and that can also
+be assumed by the JWT authentication endpoint when given a valid HCP Terraform HYOK JWT.
+
+Choose a unique name for the role, as outlined in the example below:
+
+<CodeBlockConfig filename="hyok-prod-role.json">
+
+```hcl
+{
+ "policies": ["hyok-encrypt-prod"],
+ "bound_audiences": ["vault.workload.identity"],
+ "bound_claims_type": "glob",
+ "bound_claims": {
+   "sub": "organization:<ORG_NAME>:hyok_config:<HYOK_CONFIG_NAME>"
+ },
+ "user_claim": "sub",
+ "role_type": "jwt",
+ "token_ttl": "20m"
+}
+```
+
+</CodeBlockConfig>
+
+Replace the following values in the above role configuration:
+
+- The policies list needs to include the name of the policy you created.
+- The `bound_audiences` list needs to be `vault.workload.identity`.
+- The `bound_claims.sub` matches against the subject claim of the
+HCP Terraform-issued JWT, which for HYOK is `organization:<ORG_NAME>:hyok_config:<HYOK_CONFIG_NAME>"`.
+
+Wildcards are allowed when matching claims. For example, if you want to use the same role for all keys within your HCP Terraform organization, you can configure your subject claim to match all HYOK configurations in your organization: `organization:<ORG_NAME>:hyok_config:*`.
+
+For additional security we recommend that you choose a configuration name now,
+so that only the specified HYOK configuration may assume this role:
+`organization:<ORG_NAME>:hyok_config:<HYOK_CONFIG_NAME>`. The HYOK configuration
+name can contain letters, numbers, hyphens, and underscores. Note the
+**HYOK_CONFIG_NAME** value you choose here. You use this value when you create
+your HYOK configuration in HCP Terraform.
+
+Run the following command to create the role in Vault:
+
+```shell-session
+$ vault write auth/jwt-prod/role/unique-prod-role-prod @hyok-prod-role.json
+Success! Data written to: auth/jwt-prod/role/unique-prod
+```
+
+</Tab>
+</Tabs>
+
+## Configure HYOK in HCP Terraform
+
+Once you have configured your KMS with a key encryption key and the necessary OIDC trust relationship to HCP Terraform, you can create an HYOK
+configuration for your organization.
+
+Each HYOK configuration in your organization represents a single KMS key
+encryption key with potentially multiple key versions. You can configure
+multiple keys in different HYOK configurations, across one or more KMSs. Follow
+the steps outlined above for each KMS you wish to use with HYOK.
+
+Navigate to **Organization Settings** then **HYOK Encryption**. Open the HYOK
+configuration wizard by clicking **Configure a key**.
+
+### Choose an agent pool
+
+On the first step of the wizard, select an agent pool that is hosting agents
+with [request forwarding
+enabled](/terraform/cloud-docs/agents/request-forwarding#hold-your-own-key).
+
+HCP Terraform uses this agent pool to:
+
+- Generate and encrypt data encryption keys for workspaces onboarded with HYOK.
+- Re-encrypt data keys when an HYOK configuration is revoked.
+- Connect to your KMS to check for new key versions.
+
+The agent pool you specify is not used to perform Terraform runs. HCP Terraform
+continues to use the agent pool specified in your workspace's execution mode
+when performing runs. The agents running your workspace's operations do not require request forwarding, but you should update them to version `1.23.0` or later to use them with HYOK.
+
+### Configure OIDC settings
+
+The next step of the wizard collects the information needed to authenticate to
+your KMS using OIDC. Select your KMS type and fill in the required information
+for your KMS provider.
+
+<Tabs>
+<Tab heading="Azure" group="azure">
+
+To configure your OIDC connection in HCP Terraform, you need the following
+values from Azure:
+
+- **Application ID** for your Entra ID Application. This is also called an **Application (client) ID** on the EntraID Application
+  overview page.
+- **Tenant ID** for your Entra ID Application. This is also called an **Directory
+  (tenant) ID** on the EntraID Application overview page.
+- Your **Subscription ID** from the Azure subscription overview page.
+
+</Tab>
+<Tab heading="AWS" group="aws">
+
+To configure your OIDC connection in HCP Terraform, you need the following
+values from AWS:
+
+- **Role ARN**: The ARN of the IAM role you configured earlier.
+
+</Tab>
+<Tab heading="GCP" group="gcp">
+
+To configure your OIDC connection in HCP Terraform, you need the following
+values from GCP:
+
+- **Service account email**: The email of the service account you created in the
+  [previous step](#create-key-configuration), with permission to encrypt and decrypt using your key.
+- Your **GCP Project Number** for the project containing the Workload Identity
+  Provider and service account.
+- The fully qualified [**Workload Provider name**](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/iam_workload_identity_pool_provider?product_intent=terraform#name-1), in the format:
+`projects/<PROJECT_NUMBER>/locations/global/workloadIdentityPools/<WORKLOAD_IDENTITY_POOL_ID>/providers/<WORKLOAD_IDENTITY_POOL_PROVIDER_ID>`
+
+</Tab>
+<Tab heading="Vault" group="vault">
+
+To configure your OIDC connection in HCP Terraform, you need the following
+values from Vault:
+
+- The **Address (URL)** of your Vault instance, with `https://` included.
+- The **Role name** for the role you created on the JWT authentication endpoint in the
+  previous step. In the Vault configuration example above, this was
+  `unique-prod-role-prod`.
+- The **namespace** to use when authenticating to Vault, such as `admin`.
+- The **JWT auth path** where your JWT authentication backend is mounted. By default this is `admin`, but in the [Vault configuration example](#create-key-configuration) above, it was `jwt-prod`.
+
+If you are using Vault Enterprise with a custom CA, enter the **TLS CA Certificate** which authenticates it.
+
+</Tab>
+</Tabs>
+
+### Configure key settings
+
+On the final page of the wizard, tell HCP Terraform which key to use for this
+HYOK configuration.
+
+Also, give your HYOK configuration a unique name to identify it. Your configuration name can be any combination of letters, numbers, hyphens, and underscores, and is included in the subject claim of HYOK JWTs that HCP Terraform issues. If you configured your KMS to match against your `hyok_config` name, use the same name for your HYOK configuration.
+
+<Tabs>
+<Tab heading="Azure" group="azure">
+
+To configure your key in HCP Terraform, you need the full **Key URI** for the key you created in Azure, which uses the format: `https://<KEY_VAULT_NAME>.vault.azure.net/keys/<KEY_NAME>`
+
+</Tab>
+<Tab heading="AWS" group="aws">
+
+To configure your key in HCP Terraform, you need the following values from AWS:
+
+- The full **Key ARN** for the KMS key.
+- The **Region** that the key is located in.
+
+</Tab>
+<Tab heading="GCP" group="gcp">
+
+To configure your key in HCP Terraform, you need the following values from GCP:
+
+- The **Key Ring Name** for the key ring.
+- The **Key Name** for the specific key in that ring.
+- The **Location** that the key ring was created in, for example `global` or `us-central1`.
+
+</Tab>
+<Tab heading="Vault" group="vault">
+
+To configure your key in HCP Terraform, you need the **Name** of the key you created in the transit secrets engine. In the Vault configuration example above, this was `unique-prod`.
+
+</Tab>
+</Tabs>
+
+</TabProvider>
+
+### Test the key configuration
+
+To test your HYOK configuration, click **Test Connection** on the last step of the **Configure a new key** wizard. Clicking **Test Connection** tells HCP Terraform to attempt to authenticate to your KMS and test that basic encryption and decryption works.
+
+Once a configuration is saved, you can also access the **Test Connection** button on the settings page for your HYOK configuration.
+
+If HCP Terraform cannot successfully connect to your KMS and use your key to
+encrypt and decrypt data, it will display an error message. The most likely cause of
+failures are:
+
+- There are no agents with **Request Forwarding** enabled running in the chosen
+  **Agent Pool**.
+- Permissions have not been set correctly in your KMS.
+- The required resources are not fully provisioned in your KMS. In rare cases, it can take up to 15 minutes for keys to be accessible to HCP Terraform after creation, particularly for Azure and GCP.
+
+## Use a key configuration to encrypt a workspace
+
+After you set up an HYOK configuration, you can use it to encrypt a workspace's artifacts.
+
+When you enable HYOK for a workspace, HCP Terraform uses the primary
+configuration to secure that workspace's artifacts. When you revoke an HYOK configuration in HCP Terraform, HCP Terraform migrates all of the workspaces that used the revoked configuration to the new primary configuration.
+
+To manually promote a configuration to primary, navigate to your organization's
+**Settings**, then to **HYOK Encryption**. Click **Promote to primary** on your desired HYOK configuration. HCP Terraform automatically promotes the first HYOK configuration with a status of **Available**.
+
+<Note>
+
+  If you enable hold your own key encryption for a workspace, you cannot disable HYOK on that workspace.
+
+</Note>
+
+To encrypt a workspace's artifacts using HYOK, go to the workspace's **Settings**, and navigate to **HYOK Encryption**. Check **Enable HYOK for this workspace** to enable HYOK for that workspace.
+
+Once you enable HYOK on a workspace, HCP Terraform generates a data encryption key, connects to your KMS to encrypt it with your key encryption key, and stores the encrypted DEK.
+
+Any future runs on your workspace will now produce encrypted state and plan files.
+You can test this by performing a run. State versions are annotated with the
+name of the HYOK configuration HCP Terraform used to them.
+
+## Revoke a key configuration
+
+HCP Terraform keeps track of which HYOK configurations secure each
+of your workspace's artifacts. If you want to stop using a given KEK or a
+specific key version, you can revoke that key configuration within HCP Terraform. For example, if a key version is old or has been leaked, revoking it in HCP Terraform instructs the platform to stop using that key for encryption and to migrate all existing data off of it.
+
+Note that HCP Terraform does not manage keys within your KMS. Revoking a key configuration in HCP Terraform does not revoke that key within your KMS. Revoking a key configuration in HCP Terraform lets you migrate data off of the key so that you can then revoke and safely delete the corresponding key from your KMS.
+
+To revoke a key configuration:
+1. Navigate to your organization's **Settings**.
+1. Then to **HYOK Encryption**.
+1. Click the **Revoke** button next to the HYOK configuration you want to revoke.
+
+When you revoke a key configuration, HCP Terraform migrates all of the workspaces that used that configuration to the primary configuration. If you have not set a primary configuration, HCP Terraform automatically promotes the first available HYOK configuration to primary when you revoke your primary configuration.
+
+When you revoke a key version, HCP Terraform automatically re-secures all of the artifacts it currently secures with the latest version of the same key.
+
+When you revoke a key or key version, HCP Terraform does not need to directly
+re-encrypt all the artifacts it secures. Instead, HCP Terraform uses an HCP
+Terraform agent to re-encrypt all of the DEKs that are encrypted with that key.
+This makes the re-encryption process much quicker and requires less transferring
+data than re-encrypting the artifacts themselves.
+
+In order to safely revoke a key being used by HCP Terraform in your KMS, you
+must:
+
+1. Revoke the key in HCP Terraform.
+1. Wait until all workspaces have been migrated off of the key, which you can
+   check on the the **HYOK Encryption** page.
+1. Revoke the key in the KMS itself.

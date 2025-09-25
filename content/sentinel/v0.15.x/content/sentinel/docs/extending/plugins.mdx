@@ -1,0 +1,521 @@
+---
+page_title: >-
+  Extending Sentinel: Plugins
+sidebar_title: Plugins
+sidebar_current: docs-extending-plugins
+description: >-
+  Plugins allow you to write imports as standalone executables, allowing you to
+  extend Sentinel in ways not normally possible with policy code alone.
+layout: docs
+---
+
+# Extending Sentinel: Plugins
+
+-> **NOTE:** Plugins are currently only supported on the CLI and not in any
+production Sentinel integration.
+
+Plugins allow you to write imports as standalone executables, allowing you to
+extend Sentinel in ways not normally possible with policy code alone.
+
+You might want to write or use a plugin when you need to:
+
+- **Use a provider or API integration for Sentinel.** In this case, you will
+  probably be working with a provider SDK, or other libraries that will be making
+  complex network requests to external services. Sentinel only provides limited
+  capabilities for these kinds of operations in the standard library, so writing
+  this kind of import as a module is not optimal.
+- **Introduce novel functionality not currently supported by Sentinel.**
+  Sentinel's policy language is limited by design to encourage simple policies,
+  reduce its runtime footprint, and to keep it efficient and safe. This will
+  mean that some functionality may be difficult or impossible to express as
+  Sentinel code, and would require a plugin to write.
+- **Extend a complex module.** Additionally, modules are restricted to a single
+  file of Sentinel code, so these will naturally become more and more unwieldy as
+  you continue to add to them. Eventually, there might be a time where a plugin is
+  better suited for the functionality, especially if it's a general-purpose
+  library.
+
+This section details how import plugins are currently configured in the Sentinel
+CLI, and some detail on how they are written. As we continue to build on the
+ability to use import plugins, we will extend this section with more details.
+
+-> **Not all Sentinel-enabled applications will support plugins.** Some
+applications will disable plugins for security reasons. For those that do enable
+plugins, the method to configure plugins will vary.
+
+## Installing Plugins
+
+Sentinel plugins are standalone executables. Sentinel-enabled applications such
+as the CLI launch these plugins and communicate with them via
+[RPC](https://en.wikipedia.org/wiki/Remote_procedure_call). To install a plugin,
+the first step is to download the plugin executable.
+
+After downloading the plugin, you must add it in the CLI configuration file,
+setting its name, path, and any arguments, environment variables, or
+configuration. An example is below:
+
+```json
+{
+  "imports": {
+    "time": {
+      "path": "/path/to/sentinel-import-time",
+      "config": { "fixed_time": 1504155600 }
+    }
+  }
+}
+```
+
+After configuring the plugin, it will be available on the next `sentinel apply`
+or `sentinel test`.
+
+For more details on configuration, see the
+[plugins](/sentinel/commands/config#plugins) section of the [CLI configuration
+file syntax](/sentinel/commands/config).
+
+## Debugging Plugins
+
+The Sentinel CLI logs when it launches, configures, and closes a plugin. The
+plugin may also log additional information when it is running.
+
+To debug issues with a plugin, you can usually refer to these logs. Depending on
+the plugin configuration, the logs you see may vary - refer to the plugin
+documentation on how to enable logs for a particular plugin.
+
+## Developing an Import Plugin
+
+Anyone can develop a Sentinel import plugin using the [Sentinel
+SDK](https://github.com/hashicorp/sentinel-sdk). The SDK contains a high-level
+framework for writing plugins in [Go](https://golang.org) including a test
+framework. Additionally, the SDK contains the low-level [gRPC protocol buffers
+definition](https://github.com/hashicorp/sentinel-sdk/blob/master/proto/import.proto)
+for writing plugins in other languages.
+
+The rest of this page will document how to write a new Sentinel import in Go
+using the Sentinel SDK and the high-level framework provided. You are expected
+to already know the basics of Go and have a properly configured Go installation.
+
+Throughout this page, we'll be developing a simple import to access time values.
+
+-> **NOTE:** The example here is not reflective of the actual implementation of
+the [`time`](/sentinel/imports/time) standard import, so make sure to not
+get the two confused.
+
+### Import Framework
+
+The Sentinel SDK provides a high-level
+[framework](https://godoc.org/github.com/hashicorp/sentinel-sdk/framework)
+for writing imports. We recommend using this framework.
+
+#### Basic Concepts
+
+This framework works by implementing the correct Go interfaces.
+
+As a general overview:
+[`framework.Import`](https://godoc.org/github.com/hashicorp/sentinel-sdk/framework#Import)
+implements the
+[`sdk.Import`](https://godoc.org/github.com/hashicorp/sentinel-sdk#Import)
+interface and therefore is a valid import plugin. You must implement the
+[`framework.Root`](https://godoc.org/github.com/hashicorp/sentinel-sdk/framework#Root)
+interface to configure the import. The root may then delegate nested access to
+various
+[`framework.Namespace`](https://godoc.org/github.com/hashicorp/sentinel-sdk/framework#Namespace)
+implementations. Other interfaces are implemented to provide functionality past
+what is provided by the basic `framework.Namespace` implementation - these are
+documented below.
+
+This all may sound like a lot of interfaces, but each interface typically only
+requires a single function implementation and you're only required to implement
+a single namespace (`framework.Namespace`).
+
+As we move on, we'll use real examples to make this clear.
+
+#### Implementing framework.Root
+
+To begin, you must implement the
+[`framework.Root`](https://godoc.org/github.com/hashicorp/sentinel-sdk/framework#Root)
+interface. This is the interface representing the root of your import. The root
+itself must be implement
+[`framework.Namespace`](https://godoc.org/github.com/hashicorp/sentinel-sdk/framework#Namespace),
+which allows values to be accessed. Note that the root can optionally implement
+other interfaces, but they're more advanced and omitted here for simplicity.
+
+For our time example, our root may look like this:
+
+```sentinel
+type root struct {
+	time time.Time
+}
+
+// framework.Root impl.
+func (m *root) Configure(raw map[string]interface{}) error {
+	if _, ok := raw["timestamp"]; !ok {
+		raw["timestamp"] = time.Now().Unix()
+	}
+
+	v := raw["timestamp"]
+	timestamp, ok := v.(int)
+	if !ok {
+		return fmt.Errorf("invalid timestamp type %T", v)
+	}
+
+	m.time = time.Unix(timestamp, 0).UTC()
+	return nil
+}
+
+// framework.Namespace impl.
+func (m *root) Get(key string) (interface{}, error) {
+	switch key {
+	case "minute":
+		return m.time.Minute(), nil
+	}
+
+	return nil, nil
+}
+```
+
+This example implements `framework.Root` and `framework.Namespace` and would
+enable the following within a Sentinel policy once the completed import is
+installed.
+
+```sentinel
+import "time"
+
+print(time.minute)
+main = true
+```
+
+#### framework.Namespace
+
+The
+[`framework.Namespace`](https://godoc.org/github.com/hashicorp/sentinel-sdk/framework#Namespace)
+interface implements a namespace of values. You saw above that
+[`framework.Root`](https://godoc.org/github.com/hashicorp/sentinel-sdk/framework#Root)
+must itself be a namespace. However, a namespace `Get` implementation may
+further return namespaces to access nested values.
+
+This enables behavior such as `time.month.string` vs. `time.month.index`.
+Notice each of these examples accesses a nested value within `month`. This can
+be modeled as namespaces within the framework.
+
+In the example below, we return a new namespace for `month` to do just this:
+
+```sentinel
+func (m *root) Get(key string) (interface{}, error) {
+	switch key {
+	case "month":
+		return &namespaceMonth{Month: m.time.Month()}, nil
+	}
+
+	// ...
+}
+
+type namespaceMonth struct { Month time.Month }
+
+func (m *namespaceMonth) Get(key string) (interface{}, error) {
+	switch key {
+	case "string":
+		return m.Month.String(), nil
+
+	case "index":
+		return int(m.Month), nil
+	}
+
+	return nil nil
+}
+```
+
+#### Primitive Types and Structs
+
+A namespace may also return any primitive Go type as well as structs. The
+framework automatically exposes primitive values as you would expect. For
+structs, exported fields are lowercased and exposed to the policies. The
+`sentinel` struct tag can be used to control how Sentinel can access the field.
+
+In the example below, we expose a struct directly from the root namespace:
+
+```sentinel
+type Location struct {
+	Name     string
+	TimeZone string `sentinel:"time_zone"`
+}
+
+func (m *root) Get(key string) (interface{}, error) {
+	switch key {
+	case "location":
+		return &Location{Name: "somewhere", TimeZone: "some zone"}, nil
+	}
+
+	// ...
+}
+```
+
+This makes the following values work within a Sentinel policy:
+`time.location.name`, `time.location.time_zone`.
+
+If a field has an empty `sentinel` struct tag (example: `sentinel:""`),
+then that field will not be accessible from a policy.
+
+#### Optional Interfaces
+
+The following are optional interfaces that can be implemented on top of
+[`framework.Namespace`](https://godoc.org/github.com/hashicorp/sentinel-sdk/framework#Namespace).
+All of these interfaces can be implemented at any level, except for
+[`framework.New`](#framework-new), which only works at the root level.
+
+##### `framework.Call`
+
+The
+[`framework.Call`](https://godoc.org/github.com/hashicorp/sentinel-sdk/framework#Call)
+interface can be implemented to support function calls.
+
+Implementing this interface is very similar to attribute access, except instead
+of returning the attribute value, you return a function. The framework uses Go
+reflection to determine the argument and result types and calls it. If the
+argument types do not match or the signature is otherwise invalid, an error is
+returned.
+
+For example, let's implement a function to add months to the current month:
+
+```sentinel
+func (m *root) Func(key string) interface{} {
+	switch key {
+	case "add_month":
+		return m.addMonth
+	}
+
+	return nil
+}
+
+func (m *root) addMonth(n int) *namespaceMonth {
+	return &namespaceMonth{Month: m.time.AddDate(0, n, 0).Month()}
+}
+```
+
+You can now call the function. If today was in the month of September,
+the policy below would pass:
+
+```sentinel
+import "time"
+
+main = time.add_month(4).string == "January"
+```
+
+##### `framework.Map`
+
+The optional
+[`framework.Map`](https://godoc.org/github.com/hashicorp/sentinel-sdk/framework#Map)
+interface allows an alternative method to to present a namespace back to a
+Sentinel policy as a map.
+
+`framework.Map` is best paired with
+[`framework.MapFromKeys`](https://godoc.org/github.com/hashicorp/sentinel-sdk/framework#MapFromKeys),
+which allows you to quickly fetch the necessary data via `Get` calls on the
+namespace:
+
+```
+type namespaceMonth struct { Month time.Month }
+
+func (m *namespaceMonth) Get(key string) (interface{}, error) {
+	switch key {
+	case "string":
+		return m.Month.String(), nil
+
+	case "index":
+		return int(m.Month), nil
+	}
+
+	return nil, nil
+}
+
+func (m *namespaceMonth) Map() (map[string]interface{}, error) {
+	return framework.MapFromKeys(m, []string{"string", "index"})
+}
+```
+
+##### `framework.New`
+
+The optional
+[`framework.New`](https://godoc.org/github.com/hashicorp/sentinel-sdk/framework#New)
+interface can be implemented on a root namespace to add _methods_ to your
+namespaces.
+
+Data returned from a namespace is memoized and returned as a map, and is
+normally not callable - to call a function to operate on the data, you would
+need to create a new namespace from the top-level of the import, and then make a
+function call on the result within the same expression.
+
+Let's consider the [root example](#implementing-framework-root). Let's say,
+instead of hard-coding the time value at configuration, we wanted to load it
+on-demand using a `time.now` key, and allow `add_month` to be callable on that
+value. Our root and de-coupled time namespace would now look like:
+
+```
+type root struct{}
+
+func (m *root) Configure(raw map[string]interface{}) error { return nil }
+
+func (m *root) Get(key string) (interface{}, error) {
+	switch key {
+	case "now":
+		return &namespaceTime{Time: time.Now()}
+	}
+
+	return nil
+}
+
+func (m *root) New(data map[string]interface{}) (framework.Namespace, error) {
+	if v, ok := data["unix"]; ok {
+		if t, ok := v.(int64); !ok {
+			return &namespaceTime{Time: time.Unix(t, 0)}
+		}
+
+		return nil, fmt.Errorf("expected timestamp to be int64, got %T", v)
+	}
+
+	return nil, nil
+}
+
+type namespaceTime struct {
+	Time time.Time
+}
+
+func (m *namespaceTime) Get(key string) interface{} {
+	switch key {
+	case "unix":
+		return m.Time.Unix()
+
+  // case ...
+	}
+
+	return nil
+}
+
+func (m *namespaceTime) Get(key string) (interface{}, error) {
+	return framework.MapFromKeys(m, []string{"unix", "..."})
+}
+
+func (m *namespaceTime) Func(key string) interface{} {
+	switch key {
+	case "add_month":
+		return m.addMonth
+	}
+
+	return nil
+}
+
+func (m *namespaceTime) addMonth(n int) *namespaceMonth {
+	return &namespaceMonth{Month: m.Time.AddDate(0, n, 0).Month()}
+}
+```
+
+Via this example, we can now create and assign a `namespaceTime` using `t = time.now`, and then call `t.add_month(months_to_add)` to return a
+`namespaceMonth` for the corresponding month.
+
+Methods on a namespace can also _modfiy_ the receiver data. So you can, for
+example, add a method named `increment_month` that takes no arguments, but
+increments the time stored in `namespaceTime.Time` by a month. Subsequent
+statements using the receiver would see the new value.
+
+Note that there are some restrictions and guidelines that you should take into
+account when using `framework.New`:
+
+- Only data that makes it back to a policy can be used as receiver data to
+  instantiate new namespaces. As such it's recommended to make use of
+  [`framework.Map`](https://godoc.org/github.com/hashicorp/sentinel-sdk/framework#Map)
+  and
+  [`framework.MapFromKeys`](https://godoc.org/github.com/hashicorp/sentinel-sdk/framework#MapFromKeys)
+  to return all of the attribute data you need to construct new objects.
+- `framework.New` is only supported on the root namespace and has no effect on
+  namespaces below the root. Check all possible cases of receiver data within
+  the top-level `New` function and return the appropriate namespace based on the
+  input data.
+- Do not return general errors from your `New` method. When an unknown lookup is
+  made off of memoized data, it will hit your `New` method for possible
+  instantiation and key calls. This will ensure `undefined` is correctly
+  returned for these cases.
+- `framework.New` is designed to add utility to imports where calling methods on
+  a value is more intuitive than just making a function call, or just returning
+  all of a data set as a memoized map. Use it sparingly and avoid using it on
+  recursively complex data sets.
+
+### Testing
+
+The SDK exposes a testing framework to verify your plugin works as
+expected. This test framework integrates directly into `go test` so it
+is part of a familiar workflow.
+
+The test framework works by dynamically building your import and
+running it against the `sentinel` CLI to verify it behaves as expected.
+This ensures that your plugin builds, your plugin communicates via RPC
+correctly, and that the behavior within a policy is also correct.
+
+The example below shows a complete ready table-driven test for our time plugin.
+You can run this with a normal `go test`.
+
+```sentinel
+package main
+
+import (
+	"os"
+	"testing"
+
+	"github.com/hashicorp/sentinel-sdk"
+	plugintesting "github.com/hashicorp/sentinel-sdk/testing"
+)
+
+func TestMain(m *testing.M) {
+	exitCode := m.Run()
+	plugintesting.Clean()
+	os.Exit(exitCode)
+}
+
+func TestImport(t *testing.T) {
+	cases := []struct {
+		Name   string
+		Data   map[string]interface{}
+		Source string
+	}{
+		{
+			"month",
+			map[string]interface{}{"timestamp": 1495483674},
+			`main = subject.month.string == "September"`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.Name, func(t *testing.T) {
+			plugintesting.TestImport(t, plugintesting.TestImportCase{
+				Config: tc.Data,
+				Source: tc.Source,
+			})
+		})
+	}
+}
+```
+
+### Building Your Import
+
+To build your import, you must first implement the `main` function.
+The main function should just use the `rpc.Serve` method to serve the
+plugin over the Sentinel RPC layer:
+
+```sentinel
+package main
+
+import (
+	"github.com/hashicorp/sentinel-sdk"
+	"github.com/hashicorp/sentinel-sdk/rpc"
+)
+
+func main() {
+	rpc.Serve(&rpc.ServeOpts{
+		ImportFunc: func() sdk.Import {
+			return &framework.Import{Root: &root{}}
+		},
+	})
+}
+```
+
+You can then build this using `go build`. The output can be named
+anything. Once your plugin is built, [install it](#installing-plugins)
+and try it out!

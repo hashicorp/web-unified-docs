@@ -5,13 +5,13 @@
 
 import { expect, test, vi } from 'vitest'
 import { GET } from './route'
-import { getAssetData } from '@utils/file'
-import { getProductVersionMetadata } from '@utils/contentVersions'
-import { mockRequest } from '@utils/mockRequest'
+import { getAssetData } from '#utils/file'
+import { getProductVersionMetadata } from '#utils/contentVersions'
+import { mockRequest } from '#utils/mockRequest'
 
-vi.mock('@utils/file')
-vi.mock('@utils/contentVersions')
-vi.mock('@utils/productConfig.mjs', () => {
+vi.mock('#utils/file')
+vi.mock('#utils/contentVersions')
+vi.mock('#productConfig.mjs', () => {
 	return {
 		PRODUCT_CONFIG: {
 			terraform: {},
@@ -19,7 +19,7 @@ vi.mock('@utils/productConfig.mjs', () => {
 	}
 })
 
-vi.mock('@api/versionMetadata.json', () => {
+vi.mock('#api/versionMetadata.json', () => {
 	return {}
 })
 
