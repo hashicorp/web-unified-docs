@@ -20,6 +20,14 @@ import { PRODUCT_CONFIG } from '#productConfig.mjs'
  * @returns {Function} A transformer function that rewrites internal links in the document tree.
  */
 export const rewriteInternalLinksPlugin = ({ entry, versionMetadata }) => {
+	/** This REGEX is used to parse a product version from a URL */
+	const VERSION_IN_PATH_REGEX = /^v\d+\.\d+\.(\d+|\w+)/i
+
+	/** This REGEX is used to parse a product version that does not include 'v' at the beginning */
+	const NO_V_VERSION_IN_PATH_REGEX = /^\d+\.\d+\.(\d+|\w+)/i
+
+	/** This REGEX is used to parse a Terraform Enterprise version from a URL */
+	const TFE_VERSION_IN_PATH_REGEXP = /^v[0-9]{6}-\d+/i
 	const relativePath = entry.filePath.split('content/')[1]
 	/**
 	 * product and version variables, which are assigned based on the
@@ -65,8 +73,18 @@ export const rewriteInternalLinksPlugin = ({ entry, versionMetadata }) => {
 		return flatMap(tree, (node) => {
 			// Check if the node is a link and matches the pattern for links to rewrite
 			if (node.type === 'link' && isLinkToRewritePattern.test(node.url)) {
-				// Replace the matched part of the URL with the versioned path
-				node.url = node.url.replace(replacePattern, `/$1/${cleanVersion}$2`)
+				const splitUrl = node.url.split('/')
+				const hasVersionInPath = splitUrl.find((el) => {
+					return (
+						TFE_VERSION_IN_PATH_REGEXP.test(el) ||
+						VERSION_IN_PATH_REGEX.test(el) ||
+						NO_V_VERSION_IN_PATH_REGEX.test(el)
+					)
+				})
+				// Replace the matched part of the URL with the versioned path if no version is present
+				if (!hasVersionInPath) {
+					node.url = node.url.replace(replacePattern, `/$1/${cleanVersion}$2`)
+				}
 			}
 			// Return the node (those with and without a versioned path)
 			return [node]
