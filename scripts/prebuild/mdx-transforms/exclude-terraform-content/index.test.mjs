@@ -8,6 +8,15 @@ import { transformExcludeTerraformContent } from './index.mjs'
 import remark from 'remark'
 import remarkMdx from 'remark-mdx'
 
+// Mock for testing custom directive products
+vi.mock('../shared.mjs', async (importOriginal) => {
+	const actual = await importOriginal()
+	return {
+		...actual,
+		DIRECTIVE_PRODUCTS: ['Vault', 'TFC', 'TFEnterprise'], // Default for most tests
+	}
+})
+
 const runTransform = async (markdown, filePath) => {
 	const processor = await remark()
 		.use(remarkMdx)
