@@ -3,7 +3,7 @@ name: Broken Link Check (full)
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 0 1 * *"
+    - cron: '0 0 * * 1'
 
 jobs:
   link-checker:
@@ -42,25 +42,125 @@ jobs:
           days-before-issue-stale: 0
           # Idle number of days before closing old issues
           days-before-issue-close: 0
-          close-issue-message: "This issue was closed because an updated Link Checker Report has been generated."
+          close-issue-message: 'This issue was closed because an updated Link Checker Report has been generated.'
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Create GitHub Issue From lychee output file
+      - name: Generate enhanced issue content with categorization
+        if: steps.lychee.outputs.exit_code != 0
+        run: |
+          # Count different types of broken links
+          TOTAL_COUNT=$(grep -c "✗" ./lychee/out.md || echo "0")
+          
+          # Define HashiCorp domains (easily maintainable list)
+          HASHICORP_DOMAINS="hashicorp\.com|hashicorp\.io|terraform\.io|consul\.io|vault\.io|nomad\.io|packer\.io|vagrant\.io|waypoint\.io|boundary\.io|hcp\.io"
+          
+          # Count internal HashiCorp links using the dynamic list
+          INTERNAL_COUNT=$(grep -E "✗.*($HASHICORP_DOMAINS)" ./lychee/out.md | wc -l || echo "0")
+          
+          EXTERNAL_COUNT=$((TOTAL_COUNT - INTERNAL_COUNT))
+
+          # Create enhanced issue content
+          cat > ./issue-content.md << EOF
+          # 🔗 Weekly Link Checker Report - $(date '+%B %Y')
+
+          ## 📊 Summary
+
+          - **Total broken links**: $TOTAL_COUNT
+          - **Internal HashiCorp links**: $INTERNAL_COUNT 🚨
+          - **External links**: $EXTERNAL_COUNT ⚠️
+          - **Scan date**: $(date '+%Y-%m-%d')
+          - **Content scanned**: All \`/content/\` directories
+
+          ## 🎯 Prioritization Guide
+
+          When reviewing broken links, prioritize fixes in this order:
+
+          1. **🚨 High Priority**: Internal HashiCorp links (developer.hashicorp.com, etc.)
+          2. **⚠️ Medium Priority**: External documentation/API references users rely on  
+          3. **ℹ️ Low Priority**: External blog posts, news articles, or optional resources
+
+          ## 📋 Action Items
+
+          - [ ] Review high-priority internal links ($INTERNAL_COUNT found)
+          - [ ] Check if external links have moved to new URLs
+          - [ ] Update or remove links that are permanently broken
+          - [ ] Consider adding warnings for unreliable external sources
+
+          ## 🔍 Link Details
+
+          EOF
+
+          # Add the actual lychee output
+          cat ./lychee/out.md >> ./issue-content.md
+
+          # Add footer
+          cat >> ./issue-content.md << EOF
+
+          ---
+
+          **Note**: This issue is automatically updated weekly. Previous reports are closed when new ones are generated.
+
+          For more information, see our [Broken Link Monitoring documentation](.github/BROKEN_LINK_MONITORING.md).
+          EOF
+
+      - name: Create automated GitHub issue with broken link report
         id: create_issue
         if: steps.lychee.outputs.exit_code != 0
         uses: peter-evans/create-issue-from-file@e8ef132d6df98ed982188e460ebb3b5d4ef3a9cd # v5.0.1
         with:
-          title: Link Checker Report
-          content-filepath: ./lychee/out.md
-          labels: link-checker-report
+          title: 'Link Checker Report - $(date +"%B %Y")'
+          content-filepath: ./issue-content.md
+          labels: |
+            link-checker-report
+            content-quality
+
+      - name: Log production broken links to Datadog
+        if: steps.lychee.outputs.exit_code != 0
+        run: |
+          BROKEN_COUNT=$(grep -c "✗" ./lychee/out.md || echo "0")
+          echo "::error::PRODUCTION broken links detected: $BROKEN_COUNT issues affecting end users"
+          echo "GitHub issue: https://github.com/${{ github.repository }}/issues/${{ steps.create_issue.outputs.issue-number }}"
+
+          # Send structured alert to Datadog for production monitoring
+          curl -X POST "https://http-intake.logs.datadoghq.com/v1/input/${{ secrets.DD_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "ddsource": "github-actions",
+              "ddtags": "environment:production,service:web-unified-docs,alert_type:broken_links_production",
+              "hostname": "github-actions",
+              "message": "Production broken links detected: '"$BROKEN_COUNT"' issues affecting end users",
+              "level": "error",
+              "broken_link_count": '"$BROKEN_COUNT"',
+              "issue_url": "https://github.com/${{ github.repository }}/issues/${{ steps.create_issue.outputs.issue-number }}"
+            }' || echo "Failed to send Datadog alert"
 
       - name: Report success in GitHub Step Summary
         if: steps.lychee.outputs.exit_code == 0
         run: |
-            echo "🎉 No broken links found! 🎉" >> $GITHUB_STEP_SUMMARY
-            exit 0
+          echo "##  Link Health Report - Success!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo " **No broken links found in production content**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Scan date**: $(date '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "- **Content scanned**: All \`/content/\` directories" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: All links are healthy " >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Great work maintaining high content quality!" >> $GITHUB_STEP_SUMMARY
+
+          # Log success to Datadog for trend tracking
+          curl -X POST "https://http-intake.logs.datadoghq.com/v1/input/${{ secrets.DD_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "ddsource": "github-actions",
+              "ddtags": "environment:production,service:web-unified-docs,alert_type:link_health_success",
+              "hostname": "github-actions", 
+              "message": "Production link check passed - no broken links found",
+              "level": "info",
+              "broken_link_count": 0,
+              "scan_status": "success"
+            }' || echo "Failed to send Datadog success metric"
 
       - name: Report failure in GitHub Step Summary
         if: steps.lychee.outputs.exit_code != 0
         run: |
-            echo "Broken links found, [check the following Github issue for more information.](https://github.com/${{ github.repository }}/issues/${{ steps.create_issue.outputs.issue-number }})" >> $GITHUB_STEP_SUMMARY
+          echo "Broken links found, [check the following Github issue for more information.](https://github.com/${{ github.repository }}/issues/${{ steps.create_issue.outputs.issue-number }})" >> $GITHUB_STEP_SUMMARY

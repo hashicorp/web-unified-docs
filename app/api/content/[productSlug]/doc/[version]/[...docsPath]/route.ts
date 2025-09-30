@@ -7,12 +7,12 @@ import {
 	findFileWithMetadata,
 	joinFilePath,
 	parseMarkdownFrontMatter,
-} from '@utils/file'
-import { getProductVersionMetadata } from '@utils/contentVersions'
-import { errorResultToString } from '@utils/result'
-import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
-import docsPathsAllVersions from '@api/docsPathsAllVersions.json'
-import { VersionedProduct } from '@api/types'
+} from '#utils/file'
+import { getProductVersionMetadata } from '#utils/contentVersions'
+import { errorResultToString } from '#utils/result'
+import { PRODUCT_CONFIG } from '#productConfig.mjs'
+import docsPathsAllVersions from '#api/docsPathsAllVersions.json'
+import { VersionedProduct } from '#api/types'
 
 /**
  * Parameters expected by `GET` route handler

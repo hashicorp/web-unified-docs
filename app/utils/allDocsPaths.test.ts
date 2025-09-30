@@ -6,10 +6,13 @@
 import { expect, test, vi } from 'vitest'
 import { getDocsPaths } from './allDocsPaths'
 import docsPathsMock from '__fixtures__/docsPathsAllVersionsMock.json'
-import { getProductVersionMetadata } from '@utils/contentVersions'
-import { Ok } from '@utils/result'
+import { getProductVersionMetadata } from './contentVersions'
+import { Ok } from '#utils/result'
 
-vi.mock(import('@utils/contentVersions'), async (importOriginal: any) => {
+// I tried to use the same import path as in the actual file
+// (#utils/contentVersions) but Vitest was not picking up the mock,
+// so I used a relative path instead... :(
+vi.mock('./contentVersions', async (importOriginal: any) => {
 	const mod = await importOriginal()
 	return {
 		...mod,
@@ -17,13 +20,13 @@ vi.mock(import('@utils/contentVersions'), async (importOriginal: any) => {
 	}
 })
 
-vi.mock('@api/versionMetadata.json', () => {
+vi.mock('#api/versionMetadata.json', () => {
 	return {
 		default: {},
 	}
 })
 
-vi.mock('@api/docsPathsAllVersions.json', () => {
+vi.mock('#api/docsPathsAllVersions.json', () => {
 	return {
 		default: {},
 	}

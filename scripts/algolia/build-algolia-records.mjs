@@ -3,12 +3,14 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-import path from 'path'
-import grayMatter from 'gray-matter'
-import { createAlgoliaRecordObject } from './transform-mdx-to-algolia-record/create-records.mjs'
-import { listFiles } from '../utils/list-files.mjs'
-import { batchPromises } from '../utils/batch-promises.mjs'
+import path from 'node:path'
 import { readFile, writeFile } from 'node:fs/promises'
+
+import grayMatter from 'gray-matter'
+
+import { createAlgoliaRecordObject } from './transform-mdx-to-algolia-record/create-records.mjs'
+import { listFiles } from '#scriptUtils/list-files.mjs'
+import { batchPromises } from '#scriptUtils/batch-promises.mjs'
 import { getLatestProductVersionDirectories } from './convert-mdx-to-json/index.mjs'
 
 /**
