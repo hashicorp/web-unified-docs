@@ -6,20 +6,20 @@
 import { expect, test, vi, afterEach } from 'vitest'
 import docsPathsMock from '__fixtures__/docsPathsAllVersionsMock.json'
 import { GET } from './route'
-import * as getDocsPaths from '@utils/allDocsPaths'
-import { mockRequest } from '@utils/mockRequest'
+import * as getDocsPaths from '#utils/allDocsPaths'
+import { mockRequest } from '#utils/mockRequest'
 
 afterEach(() => {
 	vi.restoreAllMocks()
 })
 
-vi.mock('@api/versionMetadata.json', () => {
+vi.mock('#api/versionMetadata.json', () => {
 	return {
 		default: {},
 	}
 })
 
-vi.mock('@api/docsPathsAllVersions.json', () => {
+vi.mock('#api/docsPathsAllVersions.json', () => {
 	return {
 		default: {},
 	}

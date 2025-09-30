@@ -173,6 +173,7 @@ The following list contains common words and phrases that you should avoid in ed
 | blast radius | affected scope | metaphor, jargon |
 | ergo | therefore, as a result, so | Latin word meaning "therefore" |
 | etc. | " . . . and other {entities matching the description}." | Latin abbreviation of "et cetera", which means "and the rest". |
+| e.g. or i.e. | "For example", "such as" | Abbreviation of Latin phrases used to give examples or restate what was previously said. |
 | carte blanche | full permission, admin access | French word that literally translates to "blank document" and means "unlimited authority". |
 | via | Choose a more concrete word to describe the relationship. | Latin word meaning "by way of". |
 | vice versa | conversely | Latin word meaning "the other way around". |

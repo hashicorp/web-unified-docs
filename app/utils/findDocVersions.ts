@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-import docsPathsAllVersions from '@api/docsPathsAllVersions.json'
+import docsPathsAllVersions from '#api/docsPathsAllVersions.json'
 
 /**
  * Finds the versions in which a document exists for a certain product. It uses the

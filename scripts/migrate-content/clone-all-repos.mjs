@@ -6,7 +6,7 @@
 import { execSync } from 'child_process'
 // Local
 import { cloneRepo } from './clone-repo.mjs'
-import { PRODUCT_CONFIG } from '../../app/utils/productConfig.mjs'
+import { PRODUCT_CONFIG } from '#productConfig.mjs'
 import { getTargetReleaseRefs } from './get-target-release-refs.mjs'
 
 /**
