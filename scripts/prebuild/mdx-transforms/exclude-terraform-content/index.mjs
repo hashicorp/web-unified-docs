@@ -4,6 +4,7 @@
  */
 
 import visit from 'unist-util-visit'
+import { DIRECTIVE_PRODUCTS } from '../shared.mjs'
 
 // this is a courtesy wrapper to prepend error messages
 class ExcludeTerraformContentError extends Error {
@@ -21,6 +22,7 @@ export const BEGIN_RE = /^(\s+)?<!--\s+BEGIN:\s+(?<block>.*?)\s+-->(\s+)?$/
 export const END_RE = /^(\s+)?<!--\s+END:\s+(?<block>.*?)\s+-->(\s+)?$/
 export const DIRECTIVE_RE = /(?<exclusion>TFC|TFEnterprise):only/i
 
+// Adding the directive products parameter to allow for extensibility in tests
 export function transformExcludeTerraformContent({ filePath }) {
 	return function transformer(tree) {
 		// accumulate the content exclusion blocks
@@ -125,6 +127,12 @@ export function transformExcludeTerraformContent({ filePath }) {
 
 			// TODO: line start and end do not take into account front matter, as it is just tree parsing and technically front matter is not part of the MDX tree
 			if (!directive) {
+				// Check if this is a product we should handle
+				const productMatch = flag.match(/^(\w+):/)
+
+				if (productMatch && DIRECTIVE_PRODUCTS.includes(productMatch[1])) {
+					return // Skip this directive - it's for another product
+				}
 				throw new ExcludeTerraformContentError(
 					`Directive block ${block} could not be parsed between lines ${start} and ${end}`,
 					tree,
