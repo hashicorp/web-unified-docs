@@ -1,0 +1,159 @@
+---
+page_title: Workload identity federation
+description: |-
+  Workload identity federation enables external workloads to access HCP services through an external identity provider. Learn about workload identity federation, how it works, and how to use credential files.
+---
+
+# Workload identity federation
+
+This topic provides an overview for workload identity federation on the HashiCorp Cloud Platform (HCP).
+
+## Introduction
+
+Configure a workload identity provider when you want to create a trust relationship between HashiCorp Cloud Platform (HCP) and an external identity provider. This trust relationship is called _federation_. External workloads can leverage identity federation to exchange an external identity token for an HCP access token. Use workload identity federation to exchange workload identity tokens for HCP service principal access tokens without storing service principal credentials with the workload.
+
+HCP supports workload identity federation through the [HCP CLI](/hcp/docs/cli/install) and the [HCP Terraform Provider](https://registry.terraform.io/providers/hashicorp/hcp/latest/docs) for the following identity providers:
+
+- [AWS](/hcp/docs/hcp/iam/service-principal/workload-identity-federation/configure-provider/aws)
+- [Azure](/hcp/docs/hcp/iam/service-principal/workload-identity-federation/configure-provider/azure)
+- [GCP](/hcp/docs/hcp/iam/service-principal/workload-identity-federation/configure-provider/gcp)
+- [GitHub](/hcp/docs/hcp/iam/service-principal/workload-identity-federation/configure-provider/github)
+- [GitLab](/hcp/docs/hcp/iam/service-principal/workload-identity-federation/configure-provider/gitlab)
+- [Other OIDC providers](/hcp/docs/hcp/iam/service-principal/workload-identity-federation/configure-provider/oidc)
+
+## Why use workload identity federation?
+
+The HCP identity service must authenticate any workload, such as a service, script, or container-based application, before the workload can access other HCP services. On HCP, workloads authenticate as a [service principal](/hcp/docs/hcp/iam/service-principal), typically using [service principal keys](/hcp/docs/hcp/iam/service-principal#keys). These credentials pose a security risk as anyone with access to them can authenticate with HCP. You must store them securely, rotate them regularly, and carefully manage their distribution.
+
+With workload identity federation, external workloads authenticate to HCP without storing any secret keys. After you federate workload identity, your workload sends its trusted identity token to HCP and retrieves an HCP access token when it needs to interact with HCP services. This process eliminates the need to manually manage credentials and lowers the risk of leaked secrets from service principals.
+
+## How does workload identity federation work?
+
+Workload identity federation relies on the fact that many platforms provide workloads with an externally verifiable identity. Your workload can use this external identity to authenticate with HCP and receive a service principal token in exchange.
+
+First, configure HCP to trust the identity provider that minted the token. You need to tell HCP where to expect the identity from and how to verify that identity. HCP verifies the identity with a [conditional access statement](/hcp/docs/hcp/iam/service-principal/workload-identity-federation/conditional-access-statement), a boolean expression that asserts the identity's expected attributes.
+
+For AWS, the identity provider configuration requires you to specify the AWS Account ID that originates the tokens. You can then restrict access to your AWS account by configuring the conditional access statement to restrict exchanges to a specific IAM Role. For example, the following conditional access statement restricts access to workloads running with the IAM Role named "example-role": `aws.arn matches ^arn:aws:sts::123456789012:assumed-role/example-role`.
+
+For OIDC providers, the identity provider configuration requires the Issuer URI, which tells HCP how to verify the token's validity. You may configure the `aud` of the token, but it must match what HCP expects, which by default is the workload identity provider’s resource name. HCP uses the conditional access statement to restrict access to the correct upstream identity. For example, when using GitHub Actions, the following conditional access statement allows the `deploy` workload in the GitHub repo `my-org/my-repo` to exchange its GitHub Actions identity for the service principal access token: `jwt_claims.repository == "my-org/my-repo" and jwt_claims.workflow == “deploy”`.
+
+The request flow for the token exchange occurs in the following order:
+
+![Workload identity federation diagram](/img/docs/hcp-core/workload-identity-federation-light.png#light-theme-only)
+
+![Workload identity federation diagram](/img/docs/hcp-core/workload-identity-federation-dark.png#dark-theme-only)
+
+1. The external workload requests a token from the external workload identity provider.
+1. The external workload identity provider issues a token to the external workload.
+1. The external workload requests an HCP access token from the HCP identity service and sends the external token for authentication.
+1. The HCP identity service validates the external token.
+1. The HCP identity service validates the conditional access statement.
+1. The HCP identity service issues an access token to the external workload.
+1. The external workload accesses the HCP services, authenticated as a service principal.
+
+You must configure workload providers with [project-level service principals](/hcp/docs/hcp/iam/service-principal#project-level-service-principals). If you do not have project-level service principals, you must create one before you can configure the external identity provider.
+
+## Credential files
+
+Tools such as the [HCP CLI](/hcp/docs/cli/install), the [HCP Terraform Provider](https://registry.terraform.io/providers/hashicorp/hcp/latest/docs), and [the Go SDK](https://github.com/hashicorp/hcp-sdk-go) must authenticate with HCP before interacting with it. Credential files are a way to authenticate with HCP when using either service principal keys or external credentials.
+
+HCP attempts to discover a credential file in the following order:
+
+1. `HCP_CRED_FILE` environment variable. The value should be the file path to the credential file, formatted as `/path/to/cred_file.json`.
+1. The default credential file location, which is `~/.config/hcp/cred_file.json`.
+
+To create a credential file with a service principal key, run the [`hcp iam service-principals key create` command with the `--output-cred-file` flag](/hcp/docs/cli/commands/iam/service-principals/keys/create).
+
+To create a credential file for an external workload to authenticate using workload identity federation, use the [`hcp iam workload-identity-providers create-cred-file` command](/hcp/docs/cli/commands/iam/workload-identity-providers/create-cred-file).
+
+### Use a credential file to authenticate
+
+HCP automatically uses the credential file when detected. Set the environment variable `HCP_CRED_FILE` and point it to the credential configuration file.
+
+```shell-session
+export HCP_CRED_FILE=/path/to/credentials.json
+```
+
+Alternatively, supporting tools can be configured explicitly.
+
+<Tabs>
+
+<Tab heading="HCP CLI" group="cli">
+
+Use [`hcp auth login` command](/hcp/docs/cli/commands/auth/login) to authenticate using the credential file.
+
+```shell-session
+hcp auth login --cred-file=/path/to/credentials.json
+```
+
+</Tab>
+
+<Tab heading="Terraform" group="tf">
+
+Configure the [HCP Terraform Provider](https://registry.terraform.io/providers/hashicorp/hcp/latest/docs) to use a credential file.
+
+```hcl
+// Pin the version
+terraform {
+  required_providers {
+    hcp = {
+      source  = "hashicorp/hcp"
+      
+      // Replace with desired version
+      version = "~> 0.93.0" 
+    }
+  }
+}
+
+// Configure the provider
+provider "hcp" {
+  credential_file = "/path/to/credentials.json"
+}
+```
+
+</Tab>
+
+<Tab heading="HCP Go SDK" group="sdk">
+
+Configure the [HCP Go SDK](https://github.com/hashicorp/hcp-sdk-go/tree/main) to use a credential file.
+
+```go
+package main
+
+import (
+ "log"
+
+ vs "github.com/hashicorp/hcp-sdk-go/clients/cloud-vault-secrets/stable/2023-06-13/client/secret_service"
+ "github.com/hashicorp/hcp-sdk-go/config"
+ "github.com/hashicorp/hcp-sdk-go/httpclient"
+)
+
+func main() {
+ // Construct HCP config
+ hcpConfig, err := config.NewHCPConfig(
+  config.WithCredentialFilePath("/path/to/credentials.json"),
+ )
+ if err != nil {
+  log.Fatal(err)
+ }
+
+ // Construct HTTP client config
+ httpclientConfig := httpclient.Config{
+  HCPConfig: hcpConfig,
+ }
+
+ // Initialize SDK http client
+ cl, err := httpclient.New(httpclientConfig)
+ if err != nil {
+  log.Fatal(err)
+ }
+
+ // Import versioned client for the desired service.
+ vsClient := vs.New(cl, nil)
+
+ // Use the client
+ // resp, err := vsClient.OpenAppSecret(...)
+```
+
+</Tab>
+</Tabs>

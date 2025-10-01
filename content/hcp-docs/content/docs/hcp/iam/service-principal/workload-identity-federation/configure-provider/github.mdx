@@ -1,0 +1,183 @@
+---
+page_title: Federate workload identity with GitHub
+description: |-
+    Workload identity federation enables external workloads to access HCP services through an external identity provider. Learn how to configure the GitHub identity provider and the HCP platform so that external workloads can authenticate with the HCP identity service.
+---
+
+# Federate workload identity with GitHub
+
+This page describes how to set up workload identity federation to authenticate from a [GitHub Actions Workflow](https://docs.github.com/en/actions/using-workflows/about-workflows) using a [GitHub OIDC token](https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect). Authenticated workloads can interact with HCP services without storing any HCP service principal keys.
+
+## Prerequisites
+
+You must complete the following steps before configuring a workload identity provider for GitHub:
+
+- You must have the `Admin` role on the HCP project.
+- [Create a service principal in the desired project](/hcp/docs/hcp/iam/service-principal#project-level-service-principals) and grant it access to the HCP resources your workload requires.
+- Have access to the GitHub Workflow to federate access to HCP from.
+- Install the [HCP CLI](/hcp/docs/cli/install) or use the [HCP Terraform Provider](https://registry.terraform.io/providers/hashicorp/hcp/latest/docs) based on your desired configuration workflow.
+
+## Configure an external workload identity provider for GitHub
+
+To create an HCP workload identity provider for GitHub Actions, you need a conditional access statement.
+
+### Conditional access statement
+
+When federating workload identity, one of the requirements is a [conditional access statement](/hcp/docs/hcp/iam/service-principal/workload-identity-federation/conditional-access-statement). This statement is a boolean expression that has access to the identity claims and restricts which external identities are allowed.
+
+When exchanging a GitHub OIDC token for access to HCP, the conditional access statement has access to all the claims in the token with the `jwt_claims.` prefix. For more information, refer to the [OIDC token claim reference in the GitHub documentation](https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect#understanding-the-oidc-token).
+
+The following example conditional access statement restricts access to HCP services to GitHub Actions that originate from `acme-org/acme-repo` GitHub repository.
+
+```text
+`jwt_claims.repository == "acme-org/acme-repo"`
+```
+
+To restrict access further so that only requests from the Git branch `main` are authenticated, you can add an additional selector and value.
+
+```text
+`jwt_claims.repository == "acme-org/acme-repo" and jwt_claims.ref == "refs/heads/main"`
+```
+
+For more information about using selectors and values to create compound conditional access statements, refer to [conditional access statements](/hcp/docs/hcp/iam/service-principal/workload-identity-federation/conditional-access-statement).
+
+## Create the workload identity provider
+
+After you gather the information you need, create the workload identity provider for GitHub.
+
+<Tabs>
+<Tab heading="HCP CLI" group="cli">
+
+Use the [`hcp iam workload-identity-providers create-oidc` command](/hcp/docs/cli/commands/iam/workload-identity-providers/create-oidc).
+
+```shell-session
+$ hcp iam workload-identity-providers create-oidc <PROVIDER_NAME> \
+  --service-principal=<SP_RESOURCE_NAME> \
+  --issuer=https://token.actions.githubusercontent.com \
+  --conditional-access='<CONDITION>' \
+  --description=<DESCRIPTION>
+```
+
+This command requires the following information that is specific to your HCP and GitHub accounts:
+
+- `<PROVIDER_NAME>`: The name of workload identity provider to create.
+- `<SP_RESOURCE_NAME>`:The service principal’s resource name, in the format `iam/project/<PROJECT_ID>/service-principal/<NAME>`.
+- `<CONDITION>`: The conditional access statement that restricts access to the specified GitHub repository and branch.
+- `<DESCRIPTION>`: An optional description for the provider.
+
+The following example creates a workload identity provider named `github-example`. This provider configures HCP to restrict access to GitHub Actions by requiring that the JWT token identifies the action as originating from the `main` branch of the `acme-org/acme-repo` repository. Workloads that are granted access to HCP services use the `my-app-deployer` service principal.
+
+```shell-session
+$ hcp iam workload-identity-providers create-oidc github-example \
+  --service-principal=iam/project/dcffbc8c-0873-4acc-bf96-4c79a4c3fd1a/service-principal/my-app-deployer \
+  --issuer=https://token.actions.githubusercontent.com \
+  --conditional-access='jwt_claims.repository == "acme-org/acme-repo" and jwt_claims.ref == "refs/heads/main"' \
+  --description="Allow acme-repo deploy workflow to access my-app-deployer service principal"
+```
+
+</Tab>
+
+<Tab heading="Terraform" group="tf">
+
+Use the [`hcp_iam_workload_identity_provider` resource](https://registry.terraform.io/providers/hashicorp/hcp/latest/docs/resources/iam_workload_identity_provider).
+
+```hcl
+# Replace with an existing service principal if created ahead of time.
+resource "hcp_service_principal" "deployment_sp" {
+  name = "my-app-deployer"
+}
+
+resource "hcp_iam_workload_identity_provider" "example" {
+  name              = "github-example"
+  service_principal = hcp_service_principal.deployment_sp.resource_name
+  description       = "Allow acme-repo deploy workflow to access my-app-runtime service principal"
+
+  oidc {
+    issuer_uri = "https://token.actions.githubusercontent.com"
+  }
+
+  conditional_access = "<CONDITION>"
+}
+```
+
+This configuration requires the following information that is specific to your GitHub account:
+
+- `<CONDITION>`: The conditional access statement that restricts access to the specified repository and branch.
+
+The following example creates a workload identity provider named `github-example`. This provider configures HCP to restrict access to GitHub Actions by requiring that the JWT token identifies the action as originating from the `main` branch of the `acme-org/acme-repo` repository. Workloads that are granted access to HCP services use the `my-app-deployer` service principal.
+
+```hcl
+# Replace with an existing service principal if created ahead of time.
+resource "hcp_service_principal" "deployment_sp" {
+  name = "my-app-deployer"
+}
+
+resource "hcp_iam_workload_identity_provider" "example" {
+  name              = "github-example"
+  service_principal = hcp_service_principal.deployment_sp.resource_name
+  description       = "Allow acme-repo deploy workflow to access my-app-deployer service principal"
+
+  oidc {
+    issuer_uri = "https://token.actions.githubusercontent.com"
+  }
+
+  conditional_access = "jwt_claims.repository == `acme-org/acme-repo` and jwt_claims.ref == `refs/heads/main`"
+}
+```
+
+</Tab>
+</Tabs>
+
+## Configure the GitHub Actions workflow
+
+The [`hashicorp/hcp-auth-action` GitHub Action](https://github.com/hashicorp/hcp-auth-action) automatically generates a credential file during workflow execution. You can use the [HCP CLI](/hcp/docs/cli/install) to automatically retrieve external credentials and exchange them for an HCP access token.
+
+Add the following configuration to your GitHub Actions YAML file.
+
+```yaml
+jobs:
+  job_id:
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+
+    steps:
+      - id: 'Authenticate to HCP'
+      - uses: 'hashicorp/hcp-auth-action@v0'
+        with:
+          workload_identity_provider: <PROVIDER_NAME>
+```
+
+This command requires the following information that is specific to your HCP account:
+
+- `<PROVIDER_NAME>`: The name of workload identity provider to exchange credentials with, in the format `iam/project/<PROJECT_ID>/service-principal/<SP_NAME>/workload-identity-provider/<PROVIDER_NAME>`.
+
+The following example uses the [`hashicorp/hcp-auth-action` GitHub Action](https://github.com/hashicorp/hcp-auth-action) to authenticate with HCP. Then it runs the [`hashicorp/hcp-setup-action` GitHub Action](https://github.com/hashicorp/hcp-setup-action) to download the HCP CLI. Finally, it uses the the HCP CLI to read a secret from [HCP Vault Secrets](/hcp/docs/vault-secrets).
+
+```yaml
+jobs:
+  job_id:
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+
+    steps:
+      - id: 'Authenticate to HCP'
+      - uses: 'hashicorp/hcp-auth-action@v0'
+        with:
+          workload_identity_provider: 'GitHub'
+  
+      - name: 'Download hcp CLI'
+        uses: 'hashicorp/hcp-setup-action@v0'
+        with:
+          version: 'latest'
+
+      - name: 'Use hcp CLI to read a secret'
+        run: |
+          MY_SECRET=$(hcp vault-secrets secrets open \
+            --app=cli --format=json foo | jq -r '.static_version.value')
+          echo "::add-mask::$MY_SECRET"
+          echo "MY_SECRET=$MY_SECRET" >> $GITHUB_ENV
+ ```
+
+Refer to the [HCP CLI command reference](/hcp/docs/cli/commands) for more information on commands you can use in your GitHub Actions workflows.

@@ -97,23 +97,23 @@ export const PRODUCT_CONFIG = {
 	// 	versionedDocs: true,
 	// 	websiteDir: 'website',
 	// },
-	// 'hcp-docs': {
-	// 	/**
-	// 	 * ✅ Initial migration attempt: SEEMS TO WORK
-	// 	 *
-	// 	 * Maybe worth noting: versioned docs is not enabled for `hcp-docs`.
-	// 	 * `branchForLatest` is set to `main`. We treat the single version
-	// 	 * as `v0.0.x` in our version metadata in the current content API:
-	// 	 * https://content.hashicorp.com/api/content/hcp-docs/version-metadata?partial=true
-	// 	 */
-	// 	assetDir: 'public',
-	// 	contentDir: 'content',
-	// 	dataDir: 'data',
-	//  productSlug: 'hcp',
-	// 	semverCoerce: semver.coerce,
-	//  versionedDocs: false,
-	// 	websiteDir: '.',
-	// },
+	'hcp-docs': {
+		/**
+		 * ✅ Initial migration attempt: SEEMS TO WORK
+		 *
+		 * Maybe worth noting: versioned docs is not enabled for `hcp-docs`.
+		 * `branchForLatest` is set to `main`. We treat the single version
+		 * as `v0.0.x` in our version metadata in the current content API:
+		 * https://content.hashicorp.com/api/content/hcp-docs/version-metadata?partial=true
+		 */
+		assetDir: 'public/img',
+		contentDir: 'content',
+		dataDir: 'data',
+		productSlug: 'hcp',
+		semverCoerce: semver.coerce,
+		versionedDocs: false,
+		websiteDir: '.',
+	},
 	// nomad: {
 	// 	/**
 	// 	 *  🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions

@@ -1,0 +1,425 @@
+---
+page_title: GCP Rotating Secrets
+sidebar_title: GCP Rotating Secrets
+description: |-
+  Describes how to set up an automated secret rotation of GCP service account keys
+---
+
+# GCP automatic secret rotation
+
+@include 'alerts/vault-secrets-standard-only.mdx'
+
+GCP allows users to [upload](https://cloud.google.com/iam/docs/keys-upload) a public key for a given service account. The corresponding private key can then be used to authenticate with GCP as the service account.
+
+HCP Vault Secrets can create and automatically rotate these GCP service account public keys while securely maintaining the corresponding private keys.
+
+## Prerequisites
+
+- Ability to create, upload, and manage GCP service account keys
+  - Your GCP principal may use the predefined [Service Account Key Admin](https://cloud.google.com/iam/docs/understanding-roles#iam.serviceAccountKeyAdmin) role for authorization
+  - Your GCP organization may need to be granted other [policies](https://cloud.google.com/iam/docs/keys-upload#required-permissions) to allow service account keys to be uploaded
+  - Your GCP organization should have the `iam.disableServiceAccountKeyUpload` policy [disabled or exempted](https://cloud.google.com/iam/docs/keys-upload#allow-upload)
+
+- Ability to create HCP Vault Secrets integrations, apps, and secrets
+
+## Set up GCP
+
+HCP Vault Secrets is able to authenticate with your GCP project using two different
+methods. Each method requires GCP resources to rotate secrets.
+
+- Workload Identity Federation (**Recommended**)
+  - Workload identity pool
+  - Workload identity provider
+  - IAM service account that HCP can impersonate through its web identity
+  - IAM service account with the permissions to grant to the generated rotating credentials
+- Service Account Keys
+  - IAM service account with a key
+  - IAM service account with the permissions to grant to the generated rotating credentials
+
+## Add identity provider
+
+<Tabs>
+<Tab heading="Console - WIF" group="console-wif">
+
+1. Navigate to the [New workload provider and pool](https://console.cloud.google.com/iam-admin/workload-identity-pools/create) section in the Google Cloud IAM & Admin service.
+
+2. Provide a name and optionally a description then click **Continue**.
+
+3. Select the **OpenID connect (OIDC)** provider type.
+
+4. Provide a descriptive name such as `hcp-rotating-secrets-<project-name>`.
+
+5. Use `https://idp.hashicorp.com/oidc/organization/<org-id>` as the issuer URL, replacing the placeholder with your **HCP organization ID**.
+
+   <Note>
+
+   You can navigate to the [GCP integration creation
+   page](https://portal.cloud.hashicorp.com/services/secrets/integrations/create)
+   on the HCP portal and select **GCP service account credentials** from the list to easily
+   find the appropriate Issuer URL.
+
+   </Note>
+
+6. **Note the default audience** for the next steps then click **Continue**.
+
+7. Enter `assertion.sub` in the OIDC 1 input field to map the provider attributes then click **Save**.
+   
+</Tab>
+
+<Tab heading="Console - Service account keys" group="console-sa-keys">
+  This step is not needed for setting up auth with service account keys.
+</Tab>
+
+<Tab heading="Terraform - WIF" group="tf-wif">
+
+1. Follow the [Terraform
+documentation](https://registry.terraform.io/providers/hashicorp/google/latest/docs/guides/provider_reference)
+to authenticate the Google provider.
+
+1. Use your preferred text editor and create a Terraform configuration file with the following snippet:
+
+  ```hcl
+  provider "google" {
+    project = var.gcp_project_id
+  }
+
+  variable "gcp_project_id" {
+    type        = string
+    description = "Your GCP project ID"
+  }
+  variable "organization_id" {
+    type        = string
+    description = "Your HCP organization ID"
+  }
+  variable "project_id" {
+    type        = string
+    description = "Your HCP project ID"
+  }
+  variable "integration_name" {
+    type        = string
+    description = "Your GCP integration name. Must match the name of the GCP integration you'll eventually create in HCP Vault Secrets."
+  }
+
+  data "google_project" "gcp_project" {}
+
+  locals {
+    pool_id            = "hcp-vault-secrets"
+    pool_provider_id   = "hcp-vault-secrets"
+    gcp_project_number = data.google_project.gcp_project.number
+    audience           = "https://iam.googleapis.com/projects/${local.gcp_project_number}/locations/global/workloadIdentityPools/${local.pool_id}/providers/${local.pool_provider_id}"
+    subject            = "project:${var.project_id}:geo:us:service:vault-secrets:type:integration:name:${var.integration_name}"
+  }
+
+  resource "google_iam_workload_identity_pool" "hcp_vault_secrets" {
+    workload_identity_pool_id = local.pool_id
+  }
+  resource "google_iam_workload_identity_pool_provider" "hcp_vault_secrets" {
+    workload_identity_pool_id          = google_iam_workload_identity_pool.hcp_vault_secrets.workload_identity_pool_id
+    workload_identity_pool_provider_id = local.pool_provider_id
+    display_name                       = "HCP Vault Secrets"
+    description                        = "OIDC identity pool provider for HCP Vault Secrets"
+    attribute_mapping = {
+      "google.subject" = "assertion.sub"
+    }
+    oidc {
+      allowed_audiences = [local.audience]
+      issuer_uri        = "https://idp.hashicorp.com/oidc/organization/${var.organization_id}"
+    }
+  }
+
+  resource "google_service_account" "integration_service_account" {
+    account_id   = "integration-service-account"
+    display_name = "Integration service account"
+  }
+  resource "google_service_account_iam_member" "integration_binding" {
+    service_account_id = google_service_account.integration_service_account.id
+    role               = "roles/iam.workloadIdentityUser"
+    member             = "principal://iam.googleapis.com/projects/${local.gcp_project_number}/locations/global/workloadIdentityPools/${google_iam_workload_identity_pool.hcp_vault_secrets.workload_identity_pool_id}/subject/${local.subject}"
+  }
+  resource "google_project_iam_member" "integration_binding" {
+    project = var.gcp_project_id
+    role    = "roles/iam.serviceAccountKeyAdmin"
+    member  = "serviceAccount:${google_service_account.integration_service_account.email}"
+  }
+
+  resource "google_service_account" "rotating_secret_service_account" {
+    account_id   = "secret-service-account"
+    display_name = "Rotating secret service account"
+  }
+  resource "google_project_iam_member" "secret_binding" {
+    project = var.gcp_project_id
+    role    = "roles/iam.serviceAccountViewer"
+    member  = "serviceAccount:${google_service_account.rotating_secret_service_account.email}"
+  }
+
+  output "integration_name" {
+    value = var.integration_name
+  }
+
+  output "audience" {
+    value = local.audience
+  }
+
+  output "integration_service_account_email" {
+    value = google_service_account.integration_service_account.email
+  }
+
+  output "rotating_secret_service_account_email" {
+    value = google_service_account.rotating_secret_service_account.email
+  }
+  ```
+
+1. Initialize Terraform.
+
+  ```shell-session
+  $ terraform init
+  ```
+
+  This will prepare a working directory:
+
+  <CodeBlockConfig hideClipboard>
+
+    ```plaintext
+    ...snip...
+
+    Terraform has been successfully initialized!
+    ```
+  </CodeBlockConfig>
+
+1. Run `terraform apply -auto-approve` to create the Google Cloud configuration.
+
+  ```shell-session
+  $ terraform apply
+  ```
+
+1. Review the actions Terraform is about to perform and type `yes` to accept the plan.
+
+  <CodeBlockConfig hideClipboard>
+
+    ```plaintext
+    ...snip...
+
+    Plan: 7 to add, 0 to change, 0 to destroy.
+
+    Changes to Outputs:
+    + audience                             = "https://iam.googleapis.com/projects/<proj-id>/locations/global/workloadIdentityPools/hcp-vault-secrets/providers/hcp-vault-secrets"
+    + rotating_secret_service_account_email = (known after apply)
+    + integration_name                     = "<integration-name>"
+    + integration_service_account_email    = (known after apply)
+
+    Do you want to perform these actions?
+    Terraform will perform the actions described above.
+    Only 'yes' will be accepted to approve.
+
+    Enter a value: yes
+    ```
+
+  </CodeBlockConfig>
+
+1. Keep the Terraform outputs on hand for the next steps:
+
+  <CodeBlockConfig hideClipboard>
+
+    ```plaintext
+    Apply complete! Resources: 7 added, 0 changed, 0 destroyed.
+
+    Outputs:
+
+    audience = "https://iam.googleapis.com/projects/<proj-id>/locations/global/workloadIdentityPools/hcp-vault-secrets/providers/hcp-vault-secrets"
+    rotating_secret_service_account_email = "secret-service-account@hvs-test-<id>.iam.gserviceaccount.com"
+    integration_name = "<integration-name>"
+    integration_service_account_email = "integration-service-account@hvs-test-<id>.iam.gserviceaccount.com"
+    ```
+
+  </CodeBlockConfig>
+
+</Tab>
+
+</Tabs>
+
+## Create service account for integration
+
+<Tabs>
+<Tab heading="Console - WIF" group="console-wif">
+
+1. Click **+ Grant Access** by the top navigation bar.
+
+1. Select **Grant access using Service Account Impersonation**.
+
+1. Click the drop-down menu for **Select service account**, then **New Service Account**.
+
+1. Provide a descriptive name such as `hvs-rotating-secrets-integration` and optionally a description, then click **Create and Continue**.
+
+1. Select the **Service Account Key Admin** role, then click **Continue**.
+
+1. Do not grant users access to this service account, simply click **Done**.
+
+1. Navigate back to the Grant Access panel and **select the service account** we just created.
+
+1. Use `project:<project-id>:geo:us:service:vault-secrets:type:integration:name:<integration-name>` as the attribute value,
+   replacing the placeholders with your **HCP project ID** and **HCP integration name**.
+
+   <Note>
+
+   You can navigate to the [GCP integration creation
+   page](https://portal.cloud.hashicorp.com/services/secrets/integrations/create)
+   on the HCP portal and select **GCP service account credentials** from the list to easily
+   find the appropriate Service Account subject.
+
+   </Note>
+
+1. Dismiss the **Configure your application** modal.
+
+1. Click to Service Accounts in the left navigation bar, and **note the email** for the service account you just created for the next steps.
+
+</Tab>
+
+<Tab heading="Console - Service account keys" group="console-sa-keys">
+
+1. Navigate to the [Create Service Account](https://console.cloud.google.com/iam-admin/serviceaccounts/create) section in the Google Cloud IAM Admin service.
+
+2. Give the service account a name and optionally a description, click **Create and Continue**
+
+3. Select the **Service Account Key Admin** role, click **Continue**
+
+4. Do not grant users access to this service account, click **Done**
+
+5. Select the service account you just created from the Service Accounts table
+
+6. From the **Keys** tab, click **Add Key**, then **Create new key**
+
+7. Select the JSON key type, click **Create**
+
+8. A JSON file will be downloaded by your browser. You'll need this later when configuring the integration.
+
+<Warning>
+Be cautious with the service account key JSON file while it is in transit to HCP Vault Secrets. 
+These credentials provide access to your GCP project and do not automatically expire.
+</Warning>
+</Tab>
+
+<Tab heading="Terraform - WIF" group="tf-wif">
+
+The GCP service account was created in the Terraform configuration file from the previous step, continue to the next step.
+
+</Tab>
+</Tabs>
+
+
+## Create service account for the rotating secret
+
+<Tabs>
+<Tab heading="Console - WIF" group="console-wif">
+
+1. Navigate to the [Create Service Account](https://console.cloud.google.com/iam-admin/serviceaccounts) section in the Google Cloud IAM & Admin service.
+
+1. Give the service account a name and optionally a description, then click **Create and Continue**.
+
+1. Click on Service Accounts in the left navigation bar, and **note the service account email** you just created for the next steps.
+
+</Tab>
+
+<Tab heading="Console - Service account keys" group="console-sa-keys">
+
+1. Navigate to the [Create Service Account](https://console.cloud.google.com/iam-admin/serviceaccounts)
+   section in the Google Cloud IAM & Admin service.
+
+2. Give the service account a name and optionally a description, then click **Create and Continue**.
+
+3. Click on Service Accounts in the left navigation bar, and **note the service account email** you just created
+   for the next steps.
+
+</Tab>
+
+<Tab heading="Terraform - WIF" group="tf-wif">
+
+The GCP service account was created in the Terraform configuration file from a previous step, continue to the next step.
+
+</Tab>
+
+</Tabs>
+
+## Configure rotating secrets
+
+1. Navigate to the [Vault Secrets app
+   panel](https://portal.cloud.hashicorp.com/services/secrets/apps) and select
+   an app where you want to create a rotating secret.
+
+1. Click **Create new secret** and select **Auto-rotating secret**.
+
+1. Select the **GCP** option from the pull down menu.
+
+1. Select an existing integration or select **Add new integration**.
+
+1. Select an **Authentication method** and follow the appropriate steps below.
+   ![Setup new gcp_integration](/img/docs/vault-secrets/create-gcp-dyn-integration.png)
+
+<Tabs>
+<Tab heading="Console - WIF" group="console-wif">
+
+1. Provide a unique **Integration Name** for this integration.
+
+2. Use the **integration service account email** configured during the previous steps.
+
+3. Use the **GCP workload identity provider audience** configured during the previous
+   steps. The format is `https://iam.googleapis.com/projects/<project>/locations/global/workloadIdentityPools/<pool-name>/providers/<provider-name>`.
+
+4. Click **Add new integration** to return to the new secret form.
+
+  <Note>
+
+   If you encounter an error, make sure the service account subject and audience matches between HCP and GCP.
+
+  </Note>
+
+</Tab>
+<Tab heading="Console - Service account keys" group="console-sa-keys">
+
+1. Provide a unique **Integration Name** for this integration.
+
+1. Upload or copy/paste the **Service Account Key JSON file** you downloaded from GCP during the previous steps.
+
+1. Click **Add new integration** to return to the new secret form.
+
+</Tab>
+<Tab heading="Terraform - WIF" group="tf-wif">
+
+1. Provide a unique **Integration Name** for this integration.
+
+1. Use the **integration service account email** configured during the previous steps.
+
+1. Use the **GCP workload identity provider audience** configured during the previous
+   steps. The format is `https://iam.googleapis.com/projects/<project>/locations/global/workloadIdentityPools/<pool-name>/providers/<provider-name>`.
+
+1. Click **Add new integration** to return to the new secret form.
+
+  <Note>
+
+   If you encounter an error, make sure the service account subject and audience matches between HCP and GCP.
+
+  </Note>
+
+</Tab>
+
+</Tabs>
+
+### Add new auto-rotating secret
+
+1. Provide a unique **Secret Name** for this secret.
+  ![Setup new gcp_auto_rotating_secret](/img/docs/vault-secrets/create-gcp-rotating-secret.png)
+
+1. Select a **Rotation frequency** from the dropdown.
+
+1. Use the **rotating secret service account email** configured during the previous steps.
+
+## Rotation period
+
+There are at most 2 active versions of an auto-rotating GCP credential at a time. In order to ensure that applications are consuming active secrets, it is recommended that applications fetch the latest secret at least once per rotation period.
+
+If an application has multiple rotating secrets, the minimum frequency for fetching the latest secrets should be the minimum of the rotation periods of the auto-rotating secrets.
+
+  <Note>
+
+   If an auto-rotating secret is manually rotated, it is recommended that any applications consuming the secret should fetch the latest version.
+
+  </Note>

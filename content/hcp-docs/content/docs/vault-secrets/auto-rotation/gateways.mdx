@@ -1,0 +1,429 @@
+---
+page_title: Use gateways to expose an integration
+sidebar_title: Integrations with gateways
+description: >-
+  Attach a gateway to an integration to allow for on-prem rotation.
+---
+
+# Use gateways to expose an integration
+
+@include 'alerts/vault-secrets-standard-only.mdx'
+
+Some rotating secret use cases involve integrations with services that aren't exposed to the internet,
+for example, your local on-premises PostgreSQL cluster.  To accommodate these use cases, HashiCorp introduced a
+tool named `vault-secrets-gateway` that makes the service accessible to HCP Vault Secrets.  This is a
+[binary](https://releases.hashicorp.com/vault-secrets-gateway) that you can run within your network, where it's
+able to communicate with the service you want to auto-rotate secrets for.
+
+## Key concepts
+
+- **Gateways** are running instances of `vault-secrets-gateway`.
+- **Gateways pools** are collections of gateways that run within the same network.
+These gateway pools can be attached to integrations.
+- **Integrations** manage the authentication and connection details that
+HCP Vault Secrets uses to access third-party providers to create and
+revoke credentials.
+
+## How do gateways work?
+
+Gateways connect to HCP and identify themselves as a gateway for a specific gateway pool.
+Gateway pool IDs can be provided when creating an integration in HCP Vault Secrets. When
+HCP Vault Secrets needs to perform a rotation operation for an integration that has an associated gateway pool,
+instead of trying to connect directly to the third-party provider defined in the integration,
+HCP Vault Secrets reaches out to the gateway. HCP Vault Secrets can't initiate connections to the gateway directly,
+but it can send messages to any gateways that have already connected to HCP and are waiting for a response
+to its question "does anyone need to connect to my integration?"
+
+## Gateway pool setup
+
+There is currently no support for creating gateway-pools via the UI.
+
+<Tabs>
+<Tab heading="HCP CLI" group="cli">
+
+Run `hcp vault-secrets gateway-pools create` to create a gateway pool.
+
+<Note title="Sensitive data">
+
+The `creds.json` generated includes the `client_secret`, used for the gateway to
+connect to HCP, and is considered sensitive information.
+
+</Note>
+
+```shell-session
+$ hcp vault-secrets gateway-pools create --description "test gateway" my-gateway-pool --output-dir ./gateway
+Gateway Pool Name:          my-gateway-pool
+Gateway Pool Resource Name: secrets/project/ad203a6b-b390-46a5-b9b7-98d192be2159/gateway-pool/my-gateway-pool
+Gateway Pool Resource ID:   72eaad2f-0958-46ea-8cc4-c75ff5382446
+Description:                test gateway
+```
+
+The command will create a configuration file and a credentials file in the given output directory.
+
+Create environment variables required by the gateway.
+
+```shell-session
+$ hcp vault-secrets gateway-pools read my-gateway-pool --format=json > gatewayResponse.json \
+GATEWAY_RESOURCE_NAME=$(jq -r .gateway_pool.resource_name < gatewayResponse.json) \
+GATEWAY_SERVICE_PRINCIPAL_ID=$(jq -r .gateway_pool.service_principal_id < gatewayResponse.json | sed 's/-[0-9][0-9]*@.*$//')
+```
+
+</Tab>
+<Tab heading="HCP API" group="api">
+
+1. Use the `POST /secrets/2023-11-28/organizations/{org_id}/projects/{proj_id}/gateway-pools` endpoint to create a gateway pool.
+
+   ```shell-session
+   $ curl \
+   --location "https://api.cloud.hashicorp.com/secrets/2023-11-28/organizations/${HCP_ORG_ID}/projects/${HCP_PROJ_ID}/gateway-pools" \
+   --request POST \
+   --data '{"name": "my-gateway-pool", "description": "test gateway"}' \
+   --header "Authorization: Bearer ${HCP_API_TOKEN}" > gatewayResponse.json
+   ```
+
+   **Example output:**
+
+   <CodeBlockConfig hideClipboard>
+
+   ```json
+   {
+       "gateway_pool": {
+           "organization_id": "f4ad6462-8846-4798-8923-b4b397b982b4",
+           "project_id": "63674848-312a-48b4-ad28-e86793eb0496",
+           "name": "my-gateway-pool",
+           "description": "test gateway",
+           "resource_name": "secrets/project/63674848-312a-48b4-ad28-e86793eb0496/gateway-pool/my-gateway-pool",
+           "resource_id": "1e76229a-6136-4ba4-81d8-b90ac87fda2c",
+           "created_at": "2024-11-20T20:29:53.049515Z",
+           "updated_at": null,
+           "created_by": {
+               "name": "test",
+               "type": "TYPE_SERVICE",
+               "email": ""
+           },
+           "updated_by": null,
+           "service_principal_id": "my-test-gateway-6afea9de-459202@63674848-312a-48b4-ad28-e86793eb0496"
+       },
+       "client_id": "sNvydiLmJj3hjDU3QQTsmme35jxXMHyX",
+       "client_secret": "3D91JOnhkW15CbL_cZrOFpMvK_0ysbRzbLcBhLrX8vbPtaG9tZEqyffwajUg24QV"
+   }
+   ```
+
+   </CodeBlockConfig>
+
+   Create environment variables required by the gateway.
+
+   ```shell-session
+   $ GATEWAY_RESOURCE_NAME=$(jq -r .gateway_pool.resource_name < gatewayResponse.json)
+   GATEWAY_CLIENT_ID=$(jq -r .client_id < gatewayResponse.json)
+   GATEWAY_CLIENT_SECRET=$(jq -r .client_secret < gatewayResponse.json)
+   GATEWAY_SERVICE_PRINCIPAL_ID=$(jq -r .gateway_pool.service_principal_id < gatewayResponse.json | sed 's/-[0-9][0-9]*@.*$//')
+   ```
+
+1. Create a directory to store the credentials file (`creds.json`), and
+   configuration (`config.hcl`) files.
+
+   ```shell-session
+   $ mkdir -p gateway
+   ```
+
+1. Create a credentials file using the `client_id` and `client_secret` from the
+   [CreateGatewayPool](https://developer.hashicorp.com/hcp/api-docs/vault-secrets/2023-11-28#CreateGatewayPool) response.
+
+   <Note title="Sensitive data">
+
+   The `creds.json` generated includes the `client_secret`, used for the gateway to
+   connect to HCP, and is considered sensitive information.
+
+   </Note>
+
+   ```shell-session
+   $ cat - > gateway/creds.json <<EOF
+   {
+       "project_id": "$HCP_PROJECT_ID",
+       "scheme": "service_principal_creds",
+       "oauth": {
+           "client_id": "$GATEWAY_CLIENT_ID",
+           "client_secret": "$GATEWAY_CLIENT_SECRET"
+       }
+   }
+   EOF
+   ```
+
+1. Create the configuration file from the
+   [CreateGatewayPool](https://developer.hashicorp.com/hcp/api-docs/vault-secrets/2023-11-28#CreateGatewayPool) response.
+
+   ```shell-session
+   $ cat - > gateway/config.hcl <<EOF
+   cloud {
+     cred_file     = "./creds.json"
+     resource_name = "$GATEWAY_RESOURCE_NAME"
+   }
+   EOF
+   ```
+
+</Tab>
+</Tabs>
+
+## Installation
+
+The gateway can be installed using Helm for Kubernetes environments, as a
+stand-alone Docker container, or manually by downloading the binary.
+
+<Tabs>
+<Tab heading="Helm" group="helm">
+
+1. Add the Helm repository.
+
+   ```shell-session
+   $ helm repo add hashicorp https://helm.releases.hashicorp.com
+   ```
+
+1. Install the helm chart.
+
+   ```shell-session
+   $ helm install gateway hashicorp/vault-secrets-gateway
+   ```
+
+</Tab>
+<Tab heading="Docker" group="docker">
+
+[Docker](https://hub.docker.com/u/hashicorp/vault-secrets-gateway):
+
+```shell-session
+$ docker pull hashicorp/vault-secrets-gateway
+```
+
+If you're running this on an Apple silicon machine, run:
+
+```shell-session
+$ docker pull --platform=linux/amd64 hashicorp/vault-secrets-gateway
+```
+
+</Tab>
+<Tab heading="Manual" group="manual">
+
+Binaries and Linux packages are available at
+[releases.hashicorp.com](https://releases.hashicorp.com/vault-secrets-gateway).
+
+The gateway won't run automatically, there is no init script or systemd configuration in the deb/rpm packages.
+
+</Tab>
+</Tabs>
+
+## Start the gateway
+
+The `vault-secrets-gateway` needs two things to run:
+- the resource name of a gateway pool
+- a way to authenticate to HCP, in the form of a credentials file or workload identity federation
+
+<Tabs>
+<Tab heading="Helm" group="helm">
+
+<Tabs>
+<Tab heading="File based authentication">
+
+1. Create a directory to store the credentials file and copy `creds.json` to it.
+
+   ```shell-session
+   $ mkdir -p ./creds && cp gateway/creds.json ./creds
+   ```
+
+1. Create a Kubernetes secret.
+
+   ```shell-session
+   $ kubectl create secret generic my-hcp-creds --from-file=./creds/
+   ```
+
+1. Install the helm chart.
+
+   ```shell-session
+   $ helm install gateway hashicorp/vault-secrets-gateway \
+       --set hcpGatewayPoolResourceName="$GATEWAY_RESOURCE_NAME" \
+       --set credsSecretName=my-hcp-creds
+   ```
+
+</Tab>
+<Tab heading="Workload identity federation">
+
+The creds.json approach requires storing the service principle credentials in a file on disk. A better option
+is to use [Workload Identity Federation](https://developer.hashicorp.com/hcp/docs/hcp/iam/service-principal/workload-identity-federation).
+
+1. Configure workload identity federation in HCP using the `.gateway_pool.service_principal_id` from the CreateGatewayPool response.
+
+   ```shell-session
+   $ hcp iam workload-identity-providers create-oidc k8s_pod --allowed-audience vault-secrets \
+     --issuer "$(kubectl get --raw /.well-known/openid-configuration | jq -r .issuer)" \
+     --conditional-access 'jwt_claims.sub == "system:serviceaccount:default:gateway-vault-secrets-gateway"' \
+     --service-principal iam/project/$HCP_PROJECT_ID/service-principal/$GATEWAY_SERVICE_PRINCIPAL_ID
+   ```
+
+1. Deploy the helm chart.
+
+   ```shell-session
+   $ helm install gateway hashicorp/vault-secrets-gateway \
+     --set hcpGatewayPoolResourceName="$GATEWAY_RESOURCE_NAME" \
+     --set hcpWorkloadIdentityProviderResourceName=iam/project/$HCP_PROJECT_ID/service-principal/$GATEWAY_SERVICE_PRINCIPAL_ID/workload-identity-provider/k8s_pod
+   ```
+
+  This requires that the Kubernetes cluster exposes at least the paths `.well-known/openid-configuration` and `/openid/v1/jwks` so that
+  HCP can verify the claim.
+
+</Tab>
+</Tabs>
+
+</Tab>
+<Tab heading="Docker" group="docker">
+
+Start the gateway using the configuration and credentials files created in the `gateway` directory earlier.
+
+```shell-session
+$ docker run --rm --name vault-secrets-gateway \
+    --add-host=host.docker.internal:host-gateway \
+    -v $(pwd)/gateway:/gateway \
+    -w /gateway hashicorp/vault-secrets-gateway \
+  /bin/vault-secrets-gateway run --config-file config.hcl
+```
+
+<Note>
+
+When launching a docker container this way, the local host machine itself can be addressed as `host.docker.internal`.
+So for example, if the gateway will be used in order to rotate PostgreSQL user passwords, and the PostgreSQL
+cluster is running on the same host as the gateway docker container, then the PostgreSQL URL used in the integration
+should use `host.docker.internal` as the hostname part of the URL.
+
+If there's no need for the gateway to connect to the local host machine on which the docker container is running,
+the `--add-host` option may be omitted.
+
+</Note>
+
+</Tab>
+<Tab heading="Manual" group="manual">
+
+Start the gateway using the configuration and credentials files created in the `gateway` directory earlier.
+
+```shell-session
+$ cd gateway && vault-secrets-gateway run --config-file ./config.hcl
+```
+
+</Tab>
+</Tabs>
+
+## Additional example
+
+Here is a more complete configuration file example showing some optional configuration.
+
+```hcl
+gateway {
+  log_level = "trace"
+  meta_config {
+    use_hostname = true
+  }
+  metadata = {
+    foo = "bar"
+  }
+  http_port = 8080
+  cert_path = "./cached-cert.pem"
+}
+
+cloud {
+  cred_file     = "./creds.json"
+  resource_name = "secrets/project/63674848-312a-48b4-ad28-e86793eb0496/gateway-pool/my-gateway-pool"
+}
+```
+
+* `log_level` controls what log messages are emitted
+* `use_hostname` adds a metadata "hostname" field to the gateway telemetry shared with HCP Vault Secrets;
+this can be useful for debugging, but is turned off by default for those who consider this too sensitive
+* `metadata` defines key-value metadata pairs that are shared with HCP Vault Secrets, which are visible when doing a
+list-gateways request; this can be useful for debugging and identifying which gateway is which
+* `http_port` exposes an HTTP listener that provides `/liveness` and `/ready` endpoints; this is mostly intended for
+use with the helm chart
+* `cert_path` specifies where to write the X.509 certificate used by the gateway
+
+## Gateway certificates
+
+If `cert_path` isn't provided as configuration, the following warning log message will appear in `vault-secrets-gateway`'s output:
+
+<CodeBlockConfig hideClipboard>
+
+```plaintext
+no cert_path specified in config, will not persist fetched certificate
+```
+
+</CodeBlockConfig>
+
+As part of its self-initialization, once `vault-secrets-gateway` authenticates to HCP, it will request an X.509
+certificate from HCP Vault Secrets.  Ideally, this certificate would be persisted to disk so that if restarted we can
+avoid generating a new cert, but it's not essential, so we don't block startup if we can't persist it.
+
+#### Why is this certificate needed?
+
+It's used to encrypt the channel created between HCP Vault Secrets and `vault-secrets-gateway`.
+The HTTP requests `vault-secrets-gateway` makes to HCP don't go to HCP Vault Secrets directly.  Instead, both `vault-secrets-gateway`
+and HCP Vault Secrets speak to a broker running within HCP.  Using the certificate ensures that the broker is unable
+to see any of the content of the communication, it only gets to see the wrapper information necessary to route
+between them.
+
+## Rotating the service principal key
+
+The service principal key is returned as the `client_secret` field in the gateway pool creation response, when using the API.
+Alternatively, it can be found in the `creds.json` file created by the CLI command `hcp vault-secrets gateway-pools create`.
+When using the helm chart without workload identity federation, it will be present as a kubernetes secret.
+
+If the service principal key is compromised, you should create a new one, update the gateway to use it, then delete the old one.
+
+### Creating a new key
+
+The service principal ID of the gateway can be obtained using the [`GetGatewayPool`](/hcp/api-docs/vault-secrets/getgatewaypool)
+command, e.g. for a gateway named `gp1`:
+
+```shell-session
+$ SP_NAME=$(hcp vs gateway-pools read gp1 --format=json | jq -r .GatewayPool.service_principal_id | sed 's/-[0-9][0-9]*@.*$//')
+```
+
+Use this to create a new creds.json file:
+
+```shell-session
+$ hcp iam service-principals keys create $SP_NAME --output-cred-file=creds.json
+```
+
+Replace your existing creds.json file in your gateway deployment with the new one.  Restart the gateway and verify that
+it's visible to HCP using [`list-gateways`](/hcp/docs/cli/commands/vault-secrets/gateway-pools/list-gateways).
+
+### Deleting the old key
+
+List the keys to find the resource name of the old key to delete:
+
+```shell-session
+$ hcp iam service-principals keys list $SP_NAME 
+```
+
+Then delete the key:
+
+```shell-session
+$ hcp iam service-principals keys delete old-key-resource-name
+```
+
+### References
+
+- [UI/CLI/Terraform instructions](/hcp/docs/hcp/iam/service-principal/key#project-level-keys)
+- [Detailed CLI instructions for create key](/hcp/docs/cli/commands/iam/service-principals/keys/create)
+- [Detailed CLI instructions for delete key](/hcp/docs/cli/commands/iam/service-principals/keys/delete)
+
+## Commands
+
+- [`create`](/hcp/docs/cli/commands/vault-secrets/gateway-pools/create) - Create a new Vault Secrets Gateway Pool.
+- [`list`](/hcp/docs/cli/commands/vault-secrets/gateway-pools/list) - List Vault Secrets gateway pools.
+- [`list-gateways`](/hcp/docs/cli/commands/vault-secrets/gateway-pools/list-gateways) - List Vault Secrets gateway pools gateways.
+- [`read`](/hcp/docs/cli/commands/vault-secrets/gateway-pools/read) - Read a Vault Secrets gateway pool.
+- [`update`](/hcp/docs/cli/commands/vault-secrets/gateway-pools/update) - Update a Vault Secrets gateway pool.
+- [`delete`](/hcp/docs/cli/commands/vault-secrets/gateway-pools/delete) - Delete a Vault Secrets gateway pool.
+
+## API
+
+- [`CreateGatewayPool`](/hcp/api-docs/vault-secrets/creategatewaypool)
+- [`ListGatewayPools`](/hcp/api-docs/vault-secrets/listgatewaypools)
+- [`GetGatewayPool/{gateway_pool_name}`](/hcp/api-docs/vault-secrets/getgatewaypool)
+- [`UpdateGatewayPool`](/hcp/api-docs/vault-secrets/updategatewaypool)
+- [`DeleteGatewayPool`](/hcp/api-docs/vault-secrets/deletegatewaypool)

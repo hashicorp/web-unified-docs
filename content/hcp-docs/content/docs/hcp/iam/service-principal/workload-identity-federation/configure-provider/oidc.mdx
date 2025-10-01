@@ -1,0 +1,183 @@
+---
+page_title: Federate workload identity with other OIDC providers
+description: |-
+    Workload identity federation enables external workloads to access HCP services through an external identity provider. Learn how to configure an OIDC provider and the HCP platform so that external workloads can authenticate with the HCP identity service.
+---
+
+# Federate workload identity with other OIDC providers
+
+This page describes how to set up workload identity federation to authenticate using an identity token from an identity provider (IdP). Authenticated workloads can interact with HCP services without storing any HCP service principal keys.
+
+## Prerequisites
+
+You must complete the following steps before configuring a workload identity provider:
+
+- You must have the `Admin` role on the HCP project.
+- [Create a service principal in the desired project](/hcp/docs/hcp/iam/service-principal#project-level-service-principals) and grant it access to the HCP resources your workload requires.
+- Install the [HCP CLI](/hcp/docs/cli/install) or use the [HCP Terraform Provider](https://registry.terraform.io/providers/hashicorp/hcp/latest/docs) based on your desired configuration workflow.
+
+### Identity provider prerequisites
+
+The IdP you use must meet the following requirements:
+
+- Support OpenID Connect 1.0.
+- Have a publicly accessible [OIDC metadata](https://openid.net/specs/openid-connect-discovery-1_0.html#ProviderMetadata) and JWKS endpoint. The endpoint must be secured with SSL and TLS and begin with `https://`.
+
+## Configure an external workload identity provider
+
+To create an HCP workload identity provider for a custom OIDC IdP, you must provide the following configuration values:
+
+- The issuer URI
+- The expected audience
+- A conditional access statement
+
+### Audience
+
+By default, an OIDC workload identity provider verifies that the incoming token has an `aud` field equal to the resource name of the workload identity provider. This behavior ensures that the token was intended to be exchanged with HCP. 
+
+The format for this value is:
+
+```text
+`iam/project/<PROJECT_ID>/service-principal/<SERVICE_PRINCIPAL_NAME>/workload-identity-provider/<NAME>`
+```
+
+The following example identifies `my_sp` as the HCP service principal and `oidc-example` as the name of the workload identity provider that uses the service principal.
+
+```text
+`iam/project/dcffbc8c-0873-4acc-bf96-4c79a4c3fd1a/service-principal/my-sp/workload-identity-provider/oidc-example`. 
+```
+
+If you do not define an expected audience when you create the workload identity provider, ensure that the token the workload ultimately receives has its `aud` set to the formatted resource name.
+
+You can also configure the provider to expect a custom `aud` claim.
+
+### Conditional access statement
+
+When federating workload identity, one of the requirements is a [conditional access statement](/hcp/docs/hcp/iam/service-principal/workload-identity-federation/conditional-access-statement). This statement is a boolean expression that has access to the identity claims and restricts which external identities are allowed.
+
+When exchanging an identity token for access to HCP, the conditional access statement has access to all the claims in the token with the `jwt_claims.` prefix. The following example lists the fields and names for a JWT token and then describes conditional access statements that use the information from this token.
+
+```json
+{
+  "jti": "example-id",
+  "sub": "env:prod::namespace:my-namespace::service:my-workload",
+  "namespace": "my-namespace",
+  "service": "my-workload",
+  "env": "prod",
+  "aud": "iam/project/dcffbc8c-0873-4acc-bf96-4c79a4c3fd1a/service-principal/my-sp/workload-identity-provider/oidc-example",
+  "iss": "https://custom-oidc-idp.com",
+  "nbf": 1632492967,
+  "exp": 1632493867,
+  "iat": 1632493567
+}
+```
+
+In the following example, HCP only allows access to workloads when the token's `sub` field is `“env:prod::namespace:my-namespace::service:my-workload”`.
+
+```text
+`jwt_claims.sub == “env:prod::namespace:my-namespace::service:my-workload”`
+```
+
+In the following example, HCP allows workloads that have the service name `my-workload` and the namspace `my-namespace`, regardless of environment where the workload originates.
+
+```text
+`jwt_claims.sub matches “^env:.+::namespace:my-namespace::service:my-workload$”`
+```
+
+In the following example, HCP allows workloads in `my-namespace` namespace of the `prod` enviornment.
+
+```text
+`jwt_claims.env == “prod” and jwt_claims.namespace == “my-namespace”`
+```
+
+For more information about formatting conditional access statements, refer to [OIDC providers](/hcp/docs/hcp/iam/service-principal/workload-identity-federation/conditional-access-statement#oidc-providers).
+
+## Create the workload identity provider
+
+After you compile the information you need to create the workload identity provider, create the workload identity provider.
+
+<Tabs>
+<Tab heading="HCP CLI" group="cli">
+
+Use the [`hcp iam workload-identity-providers create-oidc` command](/hcp/docs/cli/commands/iam/workload-identity-providers/create-oidc):
+
+```shell-session
+$ hcp iam workload-identity-providers create-oidc <PROVIDER_NAME> \
+  --service-principal=<SP_RESOURCE_NAME> \
+  --issuer=<ISSUER_URI> \
+  --conditional-access=<CONDITION> \
+  --allowed-audience=<CUSTOM_AUDIENCE_1> \
+  --allowed-audiences=<CUSTOM_AUDIENCE_2> \
+  --description=<DESCRIPTION>
+```
+
+This command requires the following information that is specific to your HCP and IdP accounts:
+
+- `<PROVIDER_NAME>`: The name of workload identity provider to create.
+- `<SP_RESOURCE_NAME>`:The service principal’s resource name, in the format `iam/project/<PROJECT_ID>/service-principal/<NAME>`.
+- `<ISSUER_URI>`: The issuer URI for your IdP. Must start with `https://`.
+- `<CONDITION>`: The conditional access statement that restricts access to the specified workload.
+- `<CUSTOM_AUDIENCE>`: Expected audience of the ID tokens. When you use the default expected audience, omit the flags.
+- `<DESCRIPTION>`: An optional description for the provider.
+
+</Tab>
+
+<Tab heading="Terraform" group="tf">
+
+Use the [`hcp_iam_workload_identity_provider` resource](https://registry.terraform.io/providers/hashicorp/hcp/latest/docs/resources/iam_workload_identity_provider).
+
+```hcl
+# Replace with an existing service principal if created ahead of time.
+resource "hcp_service_principal" "workload_sp" {
+  name = "my-app-runtime"
+}
+
+resource "hcp_iam_workload_identity_provider" "example" {
+  name              = "oidc-example"
+  service_principal = hcp_service_principal.workload_sp.resource_name
+  description       = "Allow my-workload to act as my-app-runtime service principal"
+
+  oidc {
+    issuer_uri = "<ISSUER_URI>"
+    
+    # If not using the default audience, configure up to 16 allowed audiences.
+    # allowed_audiences = ["<CUSTOM_AUDIENCE_1>", "<CUSTOM_AUDIENCE_>", ..., "<CUSTOM_AUDIENCE_N>" ]
+  }
+
+  conditional_access = "<CONDITION>"
+}
+```
+
+This configuration requires the following information that is specific to your IdP:
+
+- `<ISSUER_URI>`: The issuer URI for your IdP. Must start with `https://`.
+- `<CUSTOM_AUDIENCE>`: Expected audience of the ID tokens when not using the default expected audience.
+- `<CONDITION>`: The conditional access statement that restricts access to the specified workload.
+
+</Tab>
+</Tabs>
+
+## Authenticate the workload's credentials
+
+You can use the [HCP CLI](/hcp/docs/cli/install), [HCP Terraform Provider](https://registry.terraform.io/providers/hashicorp/hcp/latest/docs), or [HCP Go SDK](https://github.com/hashicorp/hcp-sdk-go/tree/main) to automatically retrieve external credentials and exchange them for an HCP access token. This process uses a credential file that contains the information required to obtain external credentials and the workload identity provider to exchange them with.
+
+For more information, refer to [credential files](/hcp/docs/hcp/iam/service-principal/workload-identity-federation#credential-files).
+
+### Create the credential file for a custom IdP
+
+Use the [`hcp iam workload-identity-providers create-cred-file` command](https://developer.hashicorp.com/hcp/docs/cli/commands/iam/workload-identity-providers/create-cred-file).
+
+```shell-session
+$ hcp iam workload-identity-providers create-cred-file <PROVIDER_NAME> \
+  --source-[<TOKEN_SOURCE>]
+  --output-file=credentials.json 
+```
+
+This command requires the following information that is specific to your HCP account:
+
+- `<PROVIDER_NAME>`: The name of workload identity provider to exchange credentials with, in the format `iam/project/<PROJECT_ID>/service-principal/<SP_NAME>/workload-identity-provider/<PROVIDER_NAME>`.
+- `<TOKEN_SOURCE>`: Credential files can retrieve the workload’s token from an environment variable, a file, or URL. Select the appropriate flag and reference the command's documentation and examples.
+
+Ensure the credential file exists in the runtime environment. Because the credential file contains no secret values, you can store the credential file in the VM or container. Alternatively, you can generate it at runtime.
+
+To use the credential file to authenticate, you can use the HCP CLI, the HCP Terraform provider, or the HCP Go SDK. Refer to [use a credential file to authenticate](/hcp/docs/hcp/iam/service-principal/workload-identity-federation#use-a-credential-file-to-authenticate) for more information.
