@@ -1,0 +1,409 @@
+---
+layout: docs
+page_title: Vault on Amazon EKS
+description: >-
+  Guide to setting up Vault on Amazon EKS.
+---
+
+Amazon Elastic Kubernetes Service (EKS) can run and scale Vault in the Amazon
+Web Services (AWS) cloud or on-premises. Amazon EKS is a managed Kubernetes service that
+makes it easy to run Kubernetes without needing to install and operate your own
+Kubernetes control plane or nodes.
+
+In this guide, you create a cluster in AWS, deploy a MySQL server, install
+Vault in high-availability (HA) mode via the Helm chart and then configure the
+authentication between Vault and the cluster. 
+
+## Before you start
+
+This guide requires:
+
+- [AWS account](https://aws.amazon.com/account/) 
+- [AWS command-line interface (CLI)](https://aws.amazon.com/cli/)
+- [Amazon EKS CLI](https://docs.aws.amazon.com/eks/latest/userguide/getting-started-eksctl.html) 
+- [Kubernetes CLI](https://kubernetes.io/docs/tasks/tools/install-kubectl/)
+- [Helm CLI](https://helm.sh/docs/helm/)
+
+In addition you need to have the MySql and Vault Helm charts. You can add the
+Helm repositories with the following commands:
+
+```shell-session
+$ helm repo add bitnami https://charts.bitnami.com/bitnami
+"bitnami" has been added to your repositories
+```
+
+```shell-session
+$ helm repo add hashicorp https://helm.releases.hashicorp.com
+"hashicorp" has been added to your repositories
+```
+
+You will need a SSH key pair to access the nodes in your cluster. You
+can create a key pair using the AWS Management Console or the AWS CLI. For more
+information, see [Create a key pair for Amazon EC2 instances](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/create-key-pairs.html).
+
+## Step 1: Start cluster
+
+A high availability Vault cluster that requires a Kubernetes cluster with three nodes.
+
+1. Create a three node cluster named `learn-vault`.
+
+   ```shell-session
+   $ eksctl create cluster \
+       --name learn-vault \
+       --nodes 3 \
+       --with-oidc \
+       --ssh-access \
+       --ssh-public-key learn-vault \
+       --managed
+   ```
+
+1. MySQL needs EBS volume type to use a the `gp2` storage class as the default. Patch the default storage class with the following command.
+
+   ```shell-session
+   $ kubectl patch storageclass gp2 -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
+   ```
+
+1. Once all the nodes are in `Ready` status, enable volume support with the [EBS CSI driver add-on](https://docs.aws.amazon.com/eks/latest/userguide/ebs-csi.html).
+
+   ```shell-session
+   $ eksctl create iamserviceaccount \
+       --name ebs-csi-controller-sa \
+       --namespace kube-system \
+       --cluster learn-vault \
+       --attach-policy-arn arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy \
+       --approve \
+       --role-only \
+       --role-name AmazonEKS_EBS_CSI_DriverRole
+   ```
+   
+1. Run the following command to create the add-on:
+
+   ```shell-session
+   $ eksctl create addon \
+       --name aws-ebs-csi-driver \
+       --cluster learn-vault \
+       --service-account-role-arn arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):role/AmazonEKS_EBS_CSI_DriverRole
+   ```
+
+   The cluster is ready.
+
+## Step 2: Install MySQL
+
+1. Install the latest version of the MySQL Helm chart.
+
+   ```shell-session
+   $ helm install mysql bitnami/mysql --set image.repository=bitnamilegacy/mysql
+   ```
+
+   Wait until the MySQL pod is in Ready `(1/1)` status before continuing.
+
+1. Create a variable named `ROOT_PASSWORD` that stores the mysql root user
+   password.
+
+   ```shell-session
+   $ ROOT_PASSWORD=$(kubectl get secret --namespace default mysql -o jsonpath="{.data.mysql-root-password}" | base64 --decode)
+   ```
+
+## Step 3: Install Vault
+
+1. Create a file named `helm-vault-raft-values.yml` with the following contents:
+
+   ```shell-session
+   $ cat > helm-vault-raft-values.yml <<EOF
+   server:
+      affinity: ""
+      ha:
+         enabled: true
+         raft:
+            enabled: true
+            setNodeId: true
+            config: |
+               cluster_name = "vault-integrated-storage"
+               storage "raft" {
+                  path    = "/vault/data/"
+               }
+
+               listener "tcp" {
+                  address = "[::]:8200"
+                  cluster_address = "[::]:8201"
+                  tls_disable = "true"
+               }
+               service_registration "kubernetes" {}
+   EOF
+   ```
+
+   <Note title="Recommendation">
+
+   If you are using Prometheus for monitoring and alerting, we recommend to set the `cluster_name` in the HCL configuration.  With the Vault Helm chart, this is accomplished with the config parameter.
+
+   </Note>
+
+1. Install the latest version of the Vault Helm chart with Integrated Storage.
+
+   ```shell-session
+   $ helm install vault hashicorp/vault --values helm-vault-raft-values.yml
+   ```
+
+   This creates three Vault server instances with an Integrated Storage (Raft)
+   backend. 
+
+   Along with the Vault pods and Vault Agent Injector pod are deployed in the default
+   namespace.
+
+## Step 4: Initialize and unseal primary Vault pod
+
+Vault starts [uninitialized](/vault/docs/commands/operator/init) and in the [sealed](/vault/docs/concepts/seal#why) state. Prior to initialization the Integrated Storage backend is not prepared to
+receive data.
+
+1. Initialize Vault with one key share and one key threshold.
+
+   ```shell-session
+   $ kubectl exec vault-0 -- vault operator init \
+       -key-shares=1 \
+       -key-threshold=1 \
+       -format=json > cluster-keys.json
+   ```
+
+1. Display the unseal key found in `cluster-keys.json`.
+
+   ```shell-session
+   $ cat cluster-keys.json | jq -r ".unseal_keys_b64[]"
+   ```
+
+1. Create a variable named `VAULT_UNSEAL_KEY` to capture the Vault unseal key.
+
+   ```shell-session
+   $ VAULT_UNSEAL_KEY=$(cat cluster-keys.json | jq -r ".unseal_keys_b64[]")
+   ```
+
+1. Unseal Vault running on the `vault-0` pod.
+
+   ```shell-session
+   $ kubectl exec vault-0 -- vault operator unseal $VAULT_UNSEAL_KEY
+   ```
+
+## Step 5: Join the other Vaults to the Vault cluster
+
+The Vault server running on the `vault-0` pod is a Vault HA cluster with a
+single node. To display the list of nodes requires that you are logging in with
+the root token.
+
+1. Create a variable named `CLUSTER_ROOT_TOKEN` to capture the Vault unseal key.
+
+   ```shell-session
+   $ CLUSTER_ROOT_TOKEN=$(cat cluster-keys.json | jq -r ".root_token")
+   ```
+
+1. Login with the root token on the `vault-0` pod.
+
+   ```shell-session
+   $ kubectl exec vault-0 -- vault login $CLUSTER_ROOT_TOKEN
+   ```
+
+1. Join the Vault server on `vault-1` to the Vault cluster.
+
+   ```shell-session
+   $ kubectl exec vault-1 -- vault operator raft join http://vault-0.vault-internal:8200
+   ```
+
+   This Vault server joins the cluster sealed. To unseal the Vault server requires
+   the same unseal key, `VAULT_UNSEAL_KEY`, provided to the first Vault server.
+
+1. Unseal the Vault server on `vault-1` with the unseal key.
+
+   ```shell-session
+   $ kubectl exec vault-1 -- vault operator unseal $VAULT_UNSEAL_KEY
+   ```
+
+   The Vault server on `vault-1` is now a functional node within the Vault
+   cluster.
+
+1. Join the Vault server on `vault-2` to the Vault cluster.
+
+   ```shell-session
+   $ kubectl exec vault-2 -- vault operator raft join http://vault-0.vault-internal:8200
+   ```
+
+1. Unseal the Vault server on `vault-2` with the unseal key.
+
+   ```shell-session
+   $ kubectl exec vault-2 -- vault operator unseal $VAULT_UNSEAL_KEY
+   ```
+
+## Step 6: Create a Vault database role
+
+The web application that you deploy in the [Launch a web
+application](#launch-a-web-application) section, expects Vault to store a
+username and password at the path `secret/webapp/config`. To create this secret
+requires you to login with the root token, enable the [key-value secret
+engine](/vault/docs/secrets/kv/kv-v2), and store a
+secret username and password at that defined path.
+
+1. Enable database secrets at the path `database`.
+
+   ```shell-session
+   $ kubectl exec vault-0 -- vault secrets enable database
+   ```
+
+1. Configure the database secrets engine with the connection credentials for the
+   MySQL database.
+
+   ```shell-session
+   $ kubectl exec vault-0 -- vault write database/config/mysql \
+       plugin_name=mysql-database-plugin \
+       connection_url="{{username}}:{{password}}@tcp(mysql.default.svc.cluster.local:3306)/" \
+       allowed_roles="readonly" \
+       username="root" \
+       password="$ROOT_PASSWORD"
+   ```
+
+1. Create a database secrets engine role named `readonly`.
+
+   ```shell-session
+   $ kubectl exec vault-0 -- vault write database/roles/readonly \
+       db_name=mysql \
+       creation_statements="CREATE USER '{{name}}'@'%' IDENTIFIED BY '{{password}}';GRANT SELECT ON *.* TO '{{name}}'@'%';" \
+       default_ttl="1h" \
+       max_ttl="24h"
+   ```
+
+## Step 7: Configure Kubernetes authentication
+
+Vault provides a [Kubernetes authentication](/vault/docs/auth/kubernetes) method that enables clients to authenticate with a Kubernetes Service Account Token.
+
+1. Start an interactive shell session on the `vault-0` pod.
+
+   ```shell-session
+   $ kubectl exec --stdin=true --tty=true vault-0 -- /bin/sh
+   ```
+
+1. Enable the Kubernetes authentication method.
+
+   ```shell-session
+   $ vault auth enable kubernetes 
+   ```
+
+1. Configure the Kubernetes authentication method to use the location of the
+   Kubernetes API.
+
+   ```shell-session
+   $ vault write auth/kubernetes/config \
+       kubernetes_host="https://$KUBERNETES_PORT_443_TCP_ADDR:443"
+   ```
+
+1. Write out the policy named `devwebapp` that enables the `read` capability
+   for secrets at path `database/creds/readonly`
+
+   ```shell-session
+   $ vault policy write devwebapp - <<EOF
+   path "database/creds/readonly" {
+     capabilities = ["read"]
+   }
+   EOF
+   ```
+
+1. Create a Kubernetes authentication role named `devweb-app`.
+
+   ```shell-session
+   $ vault write auth/kubernetes/role/devweb-app \
+         bound_service_account_names=internal-app \
+         bound_service_account_namespaces=default \
+         policies=devwebapp \
+         audience=https://kubernetes.default.svc" \
+         ttl=24h
+   ```
+
+## Launch web application
+
+The web application pod requires the creation of the `internal-app` Kubernetes
+service account specified in the Vault Kubernetes authentication role created in
+the [Configure Kubernetes authentication](#configure-kubernetes-authentication)
+step.
+
+1. Define a Kubernetes service account named `internal-app`.
+
+   ```shell-session
+   $ cat > internal-app.yaml <<EOF
+   apiVersion: v1
+   kind: ServiceAccount
+   metadata:
+     name: internal-app
+   EOF
+   ```
+
+1. Create the `internal-app` service account.
+
+   ```shell-session
+   $ kubectl apply --filename internal-app.yaml
+   ```
+
+1. Define a pod named `devwebapp` with the web application.
+
+   ```shell-session
+   $ cat > devwebapp.yaml <<EOF
+   ---
+   apiVersion: v1
+   kind: Pod
+   metadata:
+     name: devwebapp
+     labels:
+       app: devwebapp
+     annotations:
+       vault.hashicorp.com/agent-inject: "true"
+       vault.hashicorp.com/agent-cache-enable: "true"
+       vault.hashicorp.com/role: "devweb-app"
+       vault.hashicorp.com/agent-inject-secret-database-connect.sh: "database/creds/readonly"
+       vault.hashicorp.com/agent-inject-template-database-connect.sh: |
+         {{- with secret "database/creds/readonly" -}}
+         mysql -h my-release-mysql.default.svc.cluster.local --user={{ .Data.username }} --password={{ .Data.password }} my_database
+
+         {{- end -}}
+   spec:
+     serviceAccountName: internal-app
+     containers:
+       - name: devwebapp
+         image: jweissig/app:0.0.1
+   EOF
+   ```
+
+1. Create the `devwebapp` pod.
+
+   ```shell-session
+   $ kubectl apply --filename devwebapp.yaml
+   ```
+
+   This definition creates a pod with the specified container running with the `internal-app` kubernetes service account. The container within the pod is unaware of the Vault cluster. The Vault Injector service reads the [annotations](/vault/docs/platform/k8s/injector#annotations) and determines that it should act.
+
+   Wait until the `devwebapp` pod reports that is running and ready (`2/2`).
+
+1. Display the secrets written to the file `/vault/secrets/database-connect.sh`
+   on the `devwebapp` pod.
+
+   ```shell-session
+   $ kubectl exec --stdin=true \
+       --tty=true devwebapp \
+       --container devwebapp \
+       -- cat /vault/secrets/database-connect.sh
+   ```
+
+   The result displays a `mysql` command with the credentials generated for this
+   pod.
+
+   <CodeBlockConfig hideClipboard>
+
+   ```plaintext
+   mysql -h my-release-mysql.default.svc.cluster.local --user=v-kubernetes-readonly-zpqRzAee2b --password=Jb4epAXSirS2s-pnrI9- my_database
+   ```
+
+   </CodeBlockConfig>
+
+
+## Clean up
+
+Destroy the cluster.
+
+```shell-session
+$ eksctl delete cluster --name learn-vault
+```
+
+The cluster is destroyed.
