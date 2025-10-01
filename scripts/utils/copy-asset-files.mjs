@@ -5,9 +5,25 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { batchPromises } from './batch-promises.mjs'
+// import { batchPromises } from './batch-promises.mjs'
 import { listFiles } from './list-files.mjs'
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
+
+import crypto from 'node:crypto'
+
+function getFileShaHashSync(filePath) {
+	try {
+		const fileBuffer = fs.readFileSync(filePath)
+
+		const hash = crypto.createHash('sha256')
+		hash.update(fileBuffer)
+
+		return hash.digest('hex')
+	} catch (error) {
+		console.error(`Error calculating hash for file ${filePath}:`, error.message)
+		return null
+	}
+}
 
 /**
  * Check if a file is an image based on its extension.
@@ -46,9 +62,11 @@ export async function copyAllAssetFiles(sourceDir, destDir, versionMetadata) {
 			const versionAssetsSrc = path.join(
 				sourceDir,
 				product,
-				productConfig.versionedDocs === false ? '' : metadata.releaseStage === 'stable' ?
-					metadata.version :
-					`${metadata.version} (${metadata.releaseStage})`
+				productConfig.versionedDocs === false
+					? ''
+					: metadata.releaseStage === 'stable'
+						? metadata.version
+						: `${metadata.version} (${metadata.releaseStage})`,
 			)
 
 			const assetFiles = (await listFiles(versionAssetsSrc)).filter((f) => {
@@ -65,11 +83,37 @@ export async function copyAllAssetFiles(sourceDir, destDir, versionMetadata) {
 
 				const filename = path.basename(filePath)
 
+				const sha = getFileShaHashSync(filePath)
+				const filePathRelativeToContent = path.relative(sourceDir, filePath)
+
 				// Track filename usage for this product
-				if (fileNameUsage[product][filename]) {
-					fileNameUsage[product][filename]++
+				if (!fileNameUsage[product][filename]) {
+					fileNameUsage[product][filename] = {
+						totalFileNameCount: 1,
+						uniqueShas: [
+							{
+								sha,
+								filePaths: [filePathRelativeToContent],
+							},
+						],
+					}
 				} else {
-					fileNameUsage[product][filename] = 1
+					const existingSha = fileNameUsage[product][filename].uniqueShas
+
+					const foundEntry = existingSha.find((entry) => {
+						return entry.sha === sha
+					})
+
+					if (!foundEntry) {
+						fileNameUsage[product][filename].uniqueShas.push({
+							sha,
+							filePaths: [filePathRelativeToContent],
+						})
+					} else {
+						foundEntry.filePaths.push(filePathRelativeToContent)
+					}
+
+					fileNameUsage[product][filename].totalFileNameCount++
 				}
 
 				fs.copyFileSync(filePath, destPath)
@@ -77,19 +121,30 @@ export async function copyAllAssetFiles(sourceDir, destDir, versionMetadata) {
 		}
 	}
 
-	console.log('\nImage Usage Statistics across products:')
+	console.log(
+		`\nImage's that share the same name but have different SHAs across versions:`,
+	)
 	console.log('==========================')
-	for (const product of Object.keys(fileNameUsage)) {
-		console.log(`\n${product}:`)
-		const sortedFiles = Object.entries(fileNameUsage[product])
-			.sort((a, b) => {
-				return b[1] - a[1]
-			})
 
-		for (const [filename, count] of sortedFiles) {
-			console.log(`  ${filename}: ${count}`)
+	// Filter out filenames that have only one unique SHA (not duplicated)
+	for (const product in fileNameUsage) {
+		for (const filename in fileNameUsage[product]) {
+			const { uniqueShas } = fileNameUsage[product][filename]
+			if (uniqueShas.length === 1) {
+				delete fileNameUsage[product][filename]
+			}
 		}
 	}
+
+	// Remove products that have no duplicated filenames
+	for (const product in fileNameUsage) {
+		const filenames = Object.keys(fileNameUsage[product])
+		if (filenames.length === 0) {
+			delete fileNameUsage[product]
+		}
+	}
+
+	console.log(JSON.stringify(fileNameUsage, null, 2))
 }
 
 export function copySingleAssetFile(filePath) {
