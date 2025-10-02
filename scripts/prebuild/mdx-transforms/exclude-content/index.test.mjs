@@ -207,6 +207,55 @@ This content should stay.
 		expect(result.trim()).toBe('This content should stay.')
 	})
 
+	// Here adding in test for cross product support- this behavior is currently well documented in the README so if any change needs to happen later
+	// it can
+	it('should remove TFEnterprise:only with name parameter from terraform product', async () => {
+		const options = {
+			filePath: 'terraform/some-file.md',
+			version: 'v1.20.x',
+			repoSlug: 'terraform',
+			productConfig: { supportsExclusionDirectives: true },
+		}
+
+		const markdown = `
+<!-- BEGIN: TFC:only -->
+This content should be removed.
+<!-- END: TFC:only -->
+<!-- BEGIN: TFEnterprise:only name:revoke -->
+-   You can now revoke, and revert the revocation of, module versions. Learn more about [Managing module versions](/terraform/enterprise/api-docs/private-registry/manage-module-versions).
+<!-- END: TFEnterprise:only name:revoke -->
+
+This content should stay.
+`
+
+		const result = await runTransform(markdown, options)
+		expect(result.trim()).toBe('This content should stay.')
+	})
+
+	it('should remove TFC:only with name parameter from terraform-enterprise', async () => {
+		const options = {
+			filePath:
+				'terraform-enterprise/v202409-2/docs/enterprise/projects/managing.md',
+			version: 'v202409-2',
+			repoSlug: 'terraform-enterprise',
+			productConfig: terraformEnterpriseConfig,
+		}
+
+		const markdown = `
+## Automatically destroy inactive workspaces
+
+<!-- BEGIN: TFC:only name:pnp-callout -->
+**Note:** Ephemeral workspace functionality is available in HCP Terraform Plus Edition.
+<!-- END: TFC:only name:pnp-callout -->
+
+You can configure HCP Terraform to automatically destroy.
+`
+
+		const result = await runTransform(markdown, options)
+		expect(result).not.toContain('Ephemeral workspace')
+		expect(result).toContain('You can configure HCP Terraform')
+	})
+
 	it('should throw an error for mismatched block name directives', async () => {
 		const options = {
 			filePath: 'terraform-enterprise/some-file.md',
