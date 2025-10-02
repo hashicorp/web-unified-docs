@@ -57,13 +57,15 @@ function routeAndProcessBlock(block, tree, options) {
 	const [product, ...rest] = block.content.split(':')
 	const directive = rest.join(':') // Handle edge cases like "TFEnterprise:only name:something"
 
+	const directiveProcessingFuncs = {
+		Vault: processVaultBlock,
+		TFC: processTFCBlock,
+		TFEnterprise: processTFEnterpriseBlock,
+	}
+
 	// Explicit routing
-	if (product === 'Vault') {
-		processVaultBlock(directive, block, tree, options)
-	} else if (product === 'TFC') {
-		processTFCBlock(directive, block, tree, options)
-	} else if (product === 'TFEnterprise') {
-		processTFEnterpriseBlock(directive, block, tree, options)
+	if (product in directiveProcessingFuncs) {
+		directiveProcessingFuncs[product](directive, block, tree, options)
 	} else {
 		// Error for unknown products
 		throw new Error(
