@@ -728,5 +728,270 @@ page_title: File 2
 			)
 			expect(output2).not.toContain('New feature documentation')
 		})
+
+		describe('Partial Content Edge Cases - Multi-line Partials', () => {
+			test('should remove multi-line partial wrapped in TFC:only directive', async () => {
+				vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({
+					'terraform-enterprise': {
+						contentDir: 'docs',
+						versionedDocs: true,
+						supportsExclusionDirectives: true,
+					},
+				})
+
+				// Multi-line partial (2 lines) - this was the bug case
+				const partialContent = `-> **Note:** Ephemeral workspace (automatic destroy runs) functionality is available in Terraform Cloud **Plus** Edition. Refer to [Terraform Cloud pricing](https://www.hashicorp.com/products/terraform/pric
+ing) for details.
+`
+
+				const mainContent = `---
+page_title: Notification Configurations
+---
+
+## Workspace Notifications
+
+<!-- BEGIN: TFC:only name:pnp-callout -->
+
+@include 'tfc-package-callouts/ephemeral-workspaces.mdx'
+
+<!-- END: TFC:only name:pnp-callout -->
+
+Automatic destroy run notifications contain the following information.
+`
+
+				vol.fromJSON({
+					'/content/terraform-enterprise/v202311-1/docs/enterprise/api-docs/notification-configurations.mdx':
+						mainContent,
+					'/content/terraform-enterprise/v202311-1/docs/partials/tfc-package-callouts/ephemeral-workspaces.mdx':
+						partialContent,
+				})
+
+				await buildMdxTransforms('/content', '/output', mockVersionMetadata)
+
+				const output = fs.readFileSync(
+					'/output/terraform-enterprise/v202311-1/docs/enterprise/api-docs/notification-configurations.mdx',
+					'utf8',
+				)
+
+				// The multi-line partial content should be removed
+				expect(output).not.toContain('Ephemeral workspace')
+				expect(output).not.toContain('Plus Edition')
+				expect(output).not.toContain('pricing')
+				expect(output).toContain('Automatic destroy run notifications')
+			})
+
+			test('should remove partial with multiple paragraphs', async () => {
+				vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({
+					'terraform-enterprise': {
+						contentDir: 'docs',
+						versionedDocs: true,
+						supportsExclusionDirectives: true,
+					},
+				})
+
+				const partialContent = `**Note:** First paragraph.
+
+Second paragraph with more content.
+
+Third paragraph.
+`
+
+				const mainContent = `---
+page_title: Test
+---
+
+## Section
+
+<!-- BEGIN: TFC:only -->
+
+@include 'multi-para.mdx'
+
+<!-- END: TFC:only -->
+
+Keep this content.
+`
+
+				vol.fromJSON({
+					'/content/terraform-enterprise/v202402-1/docs/test.mdx': mainContent,
+					'/content/terraform-enterprise/v202402-1/docs/partials/multi-para.mdx':
+						partialContent,
+				})
+
+				await buildMdxTransforms('/content', '/output', mockVersionMetadata)
+
+				const output = fs.readFileSync(
+					'/output/terraform-enterprise/v202402-1/docs/test.mdx',
+					'utf8',
+				)
+
+				expect(output).not.toContain('First paragraph')
+				expect(output).not.toContain('Second paragraph')
+				expect(output).not.toContain('Third paragraph')
+				expect(output).toContain('Keep this content')
+			})
+
+			test('should remove partial with nested markdown (lists, code blocks)', async () => {
+				vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({
+					'terraform-enterprise': {
+						contentDir: 'docs',
+						versionedDocs: true,
+						supportsExclusionDirectives: true,
+					},
+				})
+
+				const partialContent = `**Features:**
+
+- Item 1
+- Item 2
+- Item 3
+
+\`\`\`bash
+echo "test"
+\`\`\`
+`
+
+				const mainContent = `---
+page_title: Test
+---
+
+<!-- BEGIN: TFC:only -->
+
+@include 'nested.mdx'
+
+<!-- END: TFC:only -->
+
+Regular content.
+`
+
+				vol.fromJSON({
+					'/content/terraform-enterprise/v202310-1/docs/test.mdx': mainContent,
+					'/content/terraform-enterprise/v202310-1/docs/partials/nested.mdx':
+						partialContent,
+				})
+
+				await buildMdxTransforms('/content', '/output', mockVersionMetadata)
+
+				const output = fs.readFileSync(
+					'/output/terraform-enterprise/v202310-1/docs/test.mdx',
+					'utf8',
+				)
+
+				expect(output).not.toContain('Features:')
+				expect(output).not.toContain('Item 1')
+				expect(output).not.toContain('echo "test"')
+				expect(output).toContain('Regular content')
+			})
+
+			test('should handle partial with many lines (high line numbers)', async () => {
+				vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({
+					'terraform-enterprise': {
+						contentDir: 'docs',
+						versionedDocs: true,
+						supportsExclusionDirectives: true,
+					},
+				})
+
+				// Partial spanning 20+ lines
+				const partialContent = `Line 1 content.
+
+Line 3 content.
+
+Line 5 content.
+
+Line 7 content.
+
+Line 9 content.
+
+Line 11 content.
+
+Line 13 content.
+
+Line 15 content.
+
+Line 17 content.
+
+Line 19 content.
+`
+
+				const mainContent = `---
+page_title: Test
+---
+
+## Section
+
+<!-- BEGIN: TFC:only -->
+
+@include 'long.mdx'
+
+<!-- END: TFC:only -->
+
+Keep this.
+`
+
+				vol.fromJSON({
+					'/content/terraform-enterprise/v202301-1/docs/test.mdx': mainContent,
+					'/content/terraform-enterprise/v202301-1/docs/partials/long.mdx':
+						partialContent,
+				})
+
+				await buildMdxTransforms('/content', '/output', mockVersionMetadata)
+
+				const output = fs.readFileSync(
+					'/output/terraform-enterprise/v202301-1/docs/test.mdx',
+					'utf8',
+				)
+
+				expect(output).not.toContain('Line 1 content')
+				expect(output).not.toContain('Line 9 content')
+				expect(output).not.toContain('Line 19 content')
+				expect(output).toContain('Keep this')
+			})
+
+			test('should keep multi-line partial in terraform-docs-common when wrapped in TFC:only', async () => {
+				vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({
+					'terraform-docs-common': {
+						versionedDocs: true,
+						basePaths: ['docs'],
+						supportsExclusionDirectives: true,
+					},
+				})
+
+				const partialContent = `-> **Note:** Multi-line
+partial content for TFC.
+`
+
+				const mainContent = `---
+page_title: Test
+---
+
+<!-- BEGIN: TFC:only -->
+
+@include 'tfc-feature.mdx'
+
+<!-- END: TFC:only -->
+
+Regular content.
+`
+
+				vol.fromJSON({
+					'/content/terraform-docs-common/v1.9.x/docs/cloud-docs/test.mdx':
+						mainContent,
+					'/content/terraform-docs-common/v1.9.x/docs/partials/tfc-feature.mdx':
+						partialContent,
+				})
+
+				await buildMdxTransforms('/content', '/output', mockVersionMetadata)
+
+				const output = fs.readFileSync(
+					'/output/terraform-docs-common/v1.9.x/docs/cloud-docs/test.mdx',
+					'utf8',
+				)
+
+				// TFC:only content should be KEPT in terraform-docs-common
+				expect(output).toContain('Multi-line')
+				expect(output).toContain('partial content for TFC')
+				expect(output).toContain('Regular content')
+			})
+		})
 	})
 })

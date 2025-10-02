@@ -127,12 +127,8 @@ export function removeNodesInRange(tree, startLine, endLine) {
 				}
 				// If we're inside range but node has position that indicates it's from a partial
 				// (position data doesn't match parent file), remove it
-				else if (
-					insideRange &&
-					nodeStart === nodeEnd &&
-					nodeStart < startLine
-				) {
-					// Node from partial - single line with low line number (from partial file)
+				else if (insideRange) {
+					// Node from partial - has position data from partial file, not parent
 					indicesToRemove.push(i)
 				}
 
