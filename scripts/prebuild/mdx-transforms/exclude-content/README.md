@@ -1,4 +1,4 @@
-# Content Exclusion Transform - Final Implementation
+# Content Exclusion Transform
 
 A single-pass MDX transform that handles content exclusion directives for HashiCorp products with explicit, maintainable if-block routing.
 
@@ -38,6 +38,14 @@ This content appears only in Terraform Enterprise docs
 <!-- END: TFEnterprise:only -->
 ```
 
+**Optional name parameter:**
+```html
+<!-- BEGIN: TFEnterprise:only name:revoke -->
+Content with a descriptive name for documentation purposes
+<!-- END: TFEnterprise:only name:revoke -->
+```
+The `name:` parameter is optional and can be used to add semantic meaning to directive blocks. It does not affect the processing logic - blocks are still evaluated based on the product (TFC/TFEnterprise) and the "only" directive.
+
 ### Cross-Product Behavior
 
 | Product | TFC:only | TFEnterprise:only | Vault:* |
@@ -70,17 +78,24 @@ exclude-content/
 
 1. **Early Return**: If `productConfig.supportsExclusionDirectives` is false, skip processing
 2. **Single AST Pass**: Parse all directive blocks in one traversal (`parseDirectiveBlocks`)
-3. **Explicit Routing**: For each block, use if-blocks to route to appropriate processor:
+3. **Explicit Routing**: For each block, check if in (`directiveProcessingFuncs`) object to route to appropriate processor:
    ```javascript
-   if (product === 'Vault') {
-     processVaultBlock(...)
-   } else if (product === 'TFC') {
-     processTFCBlock(...)
-   } else if (product === 'TFEnterprise') {
-     processTFEnterpriseBlock(...)
-   } else {
-     throw new Error(`Unknown product: ${product}`)
-   }
+   const directiveProcessingFuncs = {
+		Vault: processVaultBlock,
+		TFC: processTFCBlock,
+		TFEnterprise: processTFEnterpriseBlock,
+	}
+
+	// Explicit routing
+	if (product in directiveProcessingFuncs) {
+		directiveProcessingFuncs[product](directive, block, tree, options)
+	} 
+	else {
+		// Error for unknown products
+		throw new Error(
+			`Unknown directive product: "${product}" in block "${block.content}" at lines ${block.start}-${block.end}. Expected: Vault, TFC, or TFEnterprise`,
+		)
+	}
    ```
 4. **Product-Specific Processing**: Each processor handles its own business logic
 5. **Error Handling**: Contextual error messages with line numbers
@@ -90,21 +105,182 @@ exclude-content/
 - **Explicit over Implicit**: No configuration-driven pattern matching
 - **Single Pass Performance**: Parse all blocks once, route individually
 - **Clear Error Messages**: Immediate feedback with file context and line numbers
-- **Extensible**: Add new products with one if-block and one processor file
+- **Extensible**: Add new products with an additional key-val pair in directiveProcessingFuncs and one processor file
 
 ## Integration
+
+### Processing Pipeline Order
+
+**IMPORTANT**: This transform runs AFTER the `remarkIncludePartialsPlugin` in the MDX processing pipeline:
+
+```javascript
+.use(remarkIncludePartialsPlugin, { partialsDir, filePath })  // ← First: expand all @include statements
+.use(transformExcludeContent, { ... })                        // ← Second: process exclusion directives
+```
+
+**Why this order matters (The Chicken/Egg Problem):**
+
+There's a dependency relationship that dictates this processing order:
+- **Content exclusion** needs to see all directive blocks in the AST to process them
+- **Global partials** can contain exclusion directives, but aren't in the AST until `@include` statements are expanded
+- **Therefore**: If content exclusion runs first, it won't see directives in global partials because they haven't been included yet
+
+This creates a chicken/egg problem if we try to reverse the order:
+1. ❌ If content exclusion runs first: Global partial directives are missed (partials not yet expanded)
+2. ✅ If partials run first: All directives are present in the AST (partials are expanded), then content exclusion processes everything
+
+**How it works:**
+- Global partials (e.g., `/vault/global/partials/`) can contain exclusion directives
+- The partials plugin expands all `@include` statements into the main AST
+- Content exclusion then processes the fully expanded AST with all partial content included
+- This ensures exclusion directives in global partials are properly evaluated
+
+### Global Partials Exception
+
+**IMPORTANT**: Files located in `*/global/partials/` directories are **excluded** from content exclusion processing:
+
+```javascript
+const isGlobalPartial = filePath.includes('/global/partials/')
+
+// Only apply content exclusion if this is NOT a global partial
+if (!isGlobalPartial) {
+  processor.use(transformExcludeContent, { ... })
+}
+```
+
+**Why this matters:**
+- Global partials are version-agnostic and shared across all versions
+- They should contain the raw exclusion directives, not have them processed
+- When a version-specific file includes a global partial, the directives ARE processed based on that file's version
+- This allows global partials to contain version-specific content through directives
+
+**Example:**
+1. `/vault/global/partials/feature.mdx` contains `<!-- BEGIN: Vault:>=v1.21.x -->` directive
+2. This file is processed WITHOUT content exclusion - directive stays intact
+3. `/vault/v1.20.x/docs/page.mdx` includes the global partial via `@include`
+4. During processing, the partial is expanded into the v1.20.x file's AST
+5. Content exclusion runs on the v1.20.x file, processing the directive (v1.20.x < v1.21.x, content removed)
+6. `/vault/v1.21.x/docs/page.mdx` includes the same global partial
+7. Content exclusion runs on the v1.21.x file (v1.21.x >= v1.21.x, content kept)
+
+### Edge Case: Exclusion Directives Wrapping @include Statements
+
+**The Problem:**
+
+When an exclusion directive wraps an `@include` statement, there's a subtle bug related to AST position data:
+
+```html
+<!-- BEGIN: TFC:only -->
+@include 'tfc-feature.mdx'
+<!-- END: TFC:only -->
+```
+
+**What Should Happen:**
+In terraform-enterprise files, the entire block (including the partial content) should be removed.
+
+**What Was Happening:**
+- ✅ BEGIN comment removed (line 65)
+- ❌ Partial content NOT removed (reports position as line 1)
+- ✅ END comment removed (line 69)
+- Result: The partial content survived!
+
+**Root Cause - AST Position Mismatch:**
+
+1. The include-partials plugin replaces `@include` with the partial's AST nodes
+2. Those nodes retain position data from the **partial file** (line 1, line 2, etc.)
+3. Content exclusion's `removeNodesInRange(tree, 65, 69)` looks for nodes between lines 65-69
+4. Partial nodes with `position.start.line = 1` are **not** in range 65-69
+5. They don't get removed
+
+**Example AST Structure After Partials:**
+```javascript
+// Parent file: lines 65-69 contain the exclusion block
+{
+  type: 'html',           // BEGIN comment
+  position: { line: 65 }  // ✅ In range, removed
+}
+{
+  type: 'paragraph',      // Content from partial
+  position: { line: 1 }   // ❌ NOT in range 65-69, survives
+}
+{
+  type: 'html',           // END comment
+  position: { line: 69 }  // ✅ In range, removed
+}
+```
+
+**The Fix:**
+
+Modified `removeNodesInRange` in `ast-utils.mjs` to track when we're "inside" a removal range:
+
+```javascript
+let insideRange = false
+
+for (let i = 0; i < nodes.length; i++) {
+  const node = nodes[i]
+
+  if (hasPosition) {
+    // Mark when we enter the range (BEGIN comment)
+    if (nodeStart >= startLine && nodeEnd <= endLine && !insideRange) {
+      insideRange = true
+    }
+
+    // Normal case: node fully in range
+    if (nodeStart >= startLine && nodeEnd <= endLine) {
+      indicesToRemove.push(i)
+    }
+    // Edge case: inside range but position is outside (partial node)
+    else if (insideRange && nodeStart < startLine) {
+      indicesToRemove.push(i)  // Remove it anyway
+    }
+
+    // Mark when we exit the range (END comment)
+    if (nodeEnd === endLine) {
+      insideRange = false
+    }
+  } else {
+    // Node without position - remove if inside range
+    if (insideRange) {
+      indicesToRemove.push(i)
+    }
+  }
+}
+```
+
+**Key Logic:**
+- If we're between BEGIN and END (`insideRange = true`)
+- And a node has position data that doesn't match the expected range (like line 1 when range is 65-69)
+- It's a partial node that needs to be removed
+
+**Testing:**
+
+Added integration test in `build-mdx-transforms.test.mjs`:
+```javascript
+test('should remove TFC:only block wrapping @include in terraform-enterprise')
+```
+
+This test creates the exact scenario: TFC:only wrapping an @include statement in a terraform-enterprise file, and verifies the partial content is removed.
 
 ### build-mdx-transforms.mjs Integration
 ```javascript
 import { transformExcludeContent } from './exclude-content/index.mjs'
 
-// In the remark pipeline:
-.use(transformExcludeContent, {
-  filePath,                                    // Full file path
-  version,                                     // Content version
-  repoSlug: entry.repoSlug,                   // Product slug (e.g., 'vault')
-  productConfig: PRODUCT_CONFIG[entry.repoSlug] // Full product config
-})
+// Check if file is a global partial
+const isGlobalPartial = filePath.includes('/global/partials/')
+
+const processor = remark()
+  .use(remarkMdx)
+  .use(remarkIncludePartialsPlugin, { partialsDir, filePath })
+
+// Only apply content exclusion if NOT a global partial
+if (!isGlobalPartial) {
+  processor.use(transformExcludeContent, {
+    filePath,                                    // Full file path
+    version,                                     // Content version
+    repoSlug: entry.repoSlug,                   // Product slug (e.g., 'vault')
+    productConfig: PRODUCT_CONFIG[entry.repoSlug] // Full product config
+  })
+}
 ```
 
 ### Product Configuration (productConfig.mjs)
@@ -142,24 +318,22 @@ export const PRODUCT_CONFIG = {
 In `exclude-content/index.mjs`, add your product to the if-block routing:
 
 ```javascript
-function routeAndProcessBlock(block, tree, options) {
-  const [product, ...rest] = block.content.split(':')
-  const directive = rest.join(':')
+const directiveProcessingFuncs = {
+  Vault: processVaultBlock,
+  TFC: processTFCBlock,
+  TFEnterprise: processTFEnterpriseBlock,
+  Consul: processConsulBlock // <- ADD THIS
+}
 
-  if (product === 'Vault') {
-    processVaultBlock(directive, block, tree, options)
-  } else if (product === 'TFC') {
-    processTFCBlock(directive, block, tree, options)
-  } else if (product === 'TFEnterprise') {
-    processTFEnterpriseBlock(directive, block, tree, options)
-  } else if (product === 'Consul') {  // ← ADD THIS
-    processConsulBlock(directive, block, tree, options)
-  } else {
-    throw new Error(
-      `Unknown directive product: "${product}" in block "${block.content}" at lines ${block.start}-${block.end}. ` +
-      `Expected: Vault, TFC, TFEnterprise, or Consul`  // ← UPDATE ERROR MESSAGE
-    )
-  }
+// Explicit routing
+if (product in directiveProcessingFuncs) {
+  directiveProcessingFuncs[product](directive, block, tree, options)
+} 
+else {
+  // Error for unknown products
+  throw new Error(
+    `Unknown directive product: "${product}" in block "${block.content}" at lines ${block.start}-${block.end}. Expected: Vault, TFC, TFEnterprise, or Consul`, // <- ADD THIS
+  )
 }
 ```
 
@@ -319,19 +493,55 @@ Invalid Vault directive: "invalidformat" at lines 8-10. Expected format: Vault:>
 - **Single AST Traversal**: All directive blocks are parsed in one pass
 - **Reverse Processing**: Blocks are processed in reverse order for safe node removal
 - **Early Returns**: Products without exclusion support skip processing entirely
-- **Explicit Routing**: No regex matching or configuration lookups during processing
 
 ## Testing
 
-Run the tests with:
+### Unit Tests
+
+Run the unit tests with:
 ```bash
 npx vitest scripts/prebuild/mdx-transforms/exclude-content
 ```
 
-The test suite covers:
+The unit test suite (`index.test.mjs`) covers:
 - Version directive processing for Vault
 - "Only" directive processing for Terraform products
 - Cross-product behavior (ignore vs remove vs keep)
 - Error handling for malformed directives
 - Configuration edge cases
-- TODO include tests for global partials with versioning
+
+### Integration Tests
+
+Run the integration tests with:
+```bash
+npx vitest scripts/prebuild/mdx-transforms/build-mdx-transforms.test.mjs
+```
+
+The integration test suite (`build-mdx-transforms.test.mjs`) covers the full MDX processing pipeline:
+
+**Global Partials Processing:**
+- Basic partial inclusion and content expansion
+- Nested partials (partials that include other partials)
+
+**Content Exclusion After Partials:**
+- Exclusion directives inside global partials work correctly
+- Exclusion directives wrapping `@include` statements
+- Multiple exclusion blocks in the same partial
+
+**Global Partials Skip Logic:**
+- Files in `*/global/partials/` directories skip content exclusion
+- Global partial files retain their directives
+- Directives are processed when partials are included in version-specific files
+
+**Error Cases:**
+- Missing partial files
+- Malformed exclusion directives in partials
+- Mismatched BEGIN/END tags in partials
+
+**Cross-Product Support:**
+- TFC:only and TFEnterprise:only directives in global partials
+
+**Multi-File Processing:**
+- Processing multiple files with shared and versioned partials
+
+All tests use mock filesystem data (`memfs`) and do not rely on real files in the repository.
