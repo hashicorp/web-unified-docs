@@ -1,8 +1,8 @@
 ## Description
 
-<!-- Link to a relevant Jira ticket -->
+<!-- ID for Jira ticket e.g [SPE-1234] -->
 
-:ticket: [Jira ticket]()
+:ticket: [Jira ticket]
 
 <!-- Add a brief description of changes here. Include any other necessary relevant links -->
 
@@ -33,7 +33,7 @@ I have:
 - [ ] Verified that all status checks have passed
 - [ ] Verified that preview environment has successfully deployed
 - [ ] Assigned an appropriate `label` (`hcp` + `product name`)
-- [ ] Requested at least one reviewer
+- [ ] Added all required reviewers (code owners and external)
 
 ## Content checklist (optional)
 
