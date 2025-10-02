@@ -131,18 +131,28 @@ async function applyMdxTransforms(entry, versionMetadata = {}) {
 		const fileString = fs.readFileSync(filePath, 'utf8')
 		const { data, content } = grayMatter(fileString)
 
-		const remarkResults = await remark()
+		// Check if this file is in a global/partials directory
+		// Global partials should not have content exclusion applied to them
+		// as they are version-agnostic and shared across all versions
+		const isGlobalPartial = filePath.includes('/global/partials/')
+
+		const processor = remark()
 			.use(remarkMdx)
-			// Passing in the full productConfig for simplicity
-			// since the transform figures out what it needs from there
-			.use(transformExcludeContent, {
+			// Process partials first, then content exclusion
+			// This ensures exclusion directives in global partials are properly evaluated
+			.use(remarkIncludePartialsPlugin, { partialsDir, filePath })
+
+		// Only apply content exclusion if this is NOT a global partial
+		if (!isGlobalPartial) {
+			processor.use(transformExcludeContent, {
 				filePath,
 				version,
 				repoSlug: entry.repoSlug,
 				productConfig: PRODUCT_CONFIG[entry.repoSlug],
 			})
-			// will have to handle edge cases here
-			.use(remarkIncludePartialsPlugin, { partialsDir, filePath })
+		}
+
+		const remarkResults = await processor
 			.use(paragraphCustomAlertsPlugin)
 			.use(rewriteInternalRedirectsPlugin, {
 				redirects,
