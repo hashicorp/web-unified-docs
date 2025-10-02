@@ -91,6 +91,10 @@ export function parseDirectiveBlocks(tree) {
 /**
  * Remove nodes from AST within specified line range
  *
+ * This handles nodes from included partials which may not have position data
+ * matching the parent file's line numbers. We track when we enter/exit the
+ * removal range based on the BEGIN/END comments.
+ *
  * @param {Object} tree Remark AST
  * @param {number} startLine Start line (inclusive)
  * @param {number} endLine End line (inclusive)
@@ -101,20 +105,58 @@ export function removeNodesInRange(tree, startLine, endLine) {
 			return
 		}
 
-		for (let i = nodes.length - 1; i >= 0; i--) {
-			const node = nodes[i]
+		const indicesToRemove = []
+		let insideRange = false
 
-			// Check if node is in range
-			if (
-				node.position &&
-				node.position.start.line >= startLine &&
-				node.position.end.line <= endLine
-			) {
-				nodes.splice(i, 1)
-			} else if (node.children) {
-				// Recursively check children
+		for (let i = 0; i < nodes.length; i++) {
+			const node = nodes[i]
+			const hasPosition = node.position?.start?.line && node.position?.end?.line
+
+			if (hasPosition) {
+				const nodeStart = node.position.start.line
+				const nodeEnd = node.position.end.line
+
+				// Check if this node marks the start of the range
+				if (nodeStart >= startLine && nodeEnd <= endLine && !insideRange) {
+					insideRange = true
+				}
+
+				// If node is fully within range, mark for removal
+				if (nodeStart >= startLine && nodeEnd <= endLine) {
+					indicesToRemove.push(i)
+				}
+				// If we're inside range but node has position that indicates it's from a partial
+				// (position data doesn't match parent file), remove it
+				else if (
+					insideRange &&
+					nodeStart === nodeEnd &&
+					nodeStart < startLine
+				) {
+					// Node from partial - single line with low line number (from partial file)
+					indicesToRemove.push(i)
+				}
+
+				// Check if this node marks the end of the range
+				if (nodeEnd === endLine) {
+					insideRange = false
+				}
+			} else {
+				// Node without position (e.g., from included partial)
+				// Remove it if we're currently inside the range
+				if (insideRange) {
+					indicesToRemove.push(i)
+				}
+			}
+
+			// Recursively check children for nodes not being removed
+			if (node.children && !indicesToRemove.includes(i)) {
 				removeFromNodes(node.children)
 			}
+		}
+
+		// Remove marked nodes in reverse order to maintain indices
+		for (let i = indicesToRemove.length - 1; i >= 0; i--) {
+			nodes.splice(indicesToRemove[i], 1)
 		}
 	}
 
