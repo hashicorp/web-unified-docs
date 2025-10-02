@@ -32,7 +32,7 @@ I have:
 
 - [ ] Verified that all status checks have passed
 - [ ] Verified that preview environment has successfully deployed
-- [ ] Assigned an appropriate `label` (`hcp` + `product name`)
+- [ ] Verified appropriate `label` applied (`hcp` + `product name`)
 - [ ] Added all required reviewers (code owners and external)
 
 ## Content checklist (optional)
