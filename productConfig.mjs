@@ -248,6 +248,17 @@ export const PRODUCT_CONFIG = {
 		versionedDocs: true,
 		websiteDir: 'website',
 	},
+	'terraform-mcp-server': {
+		assetDir: '',
+		basePaths: ['mcp-server'],
+		contentDir: 'docs',
+		dataDir: 'data',
+		navDataPath: 'mcp-server',
+		productSlug: 'terraform',
+		semverCoerce: semver.coerce,
+		versionedDocs: true,
+		websiteDir: 'website',
+	},
 	'terraform-migrate': {
 		assetDir: '',
 		basePaths: ['migrate'],
