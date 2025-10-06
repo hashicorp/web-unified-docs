@@ -184,6 +184,33 @@ This content should stay.
 		expect(result).toBe(expected)
 	})
 
+	it('should remove TFC:only content from terraform-enterprise but when wrapped in list item/special text', async () => {
+		const options = {
+			filePath: 'terraform-enterprise/some-file.md',
+			version: 'v1.20.x',
+			repoSlug: 'terraform-enterprise',
+			productConfig: terraformEnterpriseConfig,
+		}
+
+		const markdown = `
+
+## 2025-05-1
+
+-   Add \`agent-pool\` relationship to the [run task API](/terraform/enterprise/api-docs/run-tasks/run-tasks), which you can use to assign a run task to an agent pool.
+    <!-- BEGIN: TFC:only name:premium -->
+-   Add \`private-run-tasks\` to [feature entitlements](/terraform/enterprise/api-docs#feature-entitlements).
+    <!-- END: TFC:only name:premium -->
+-   You can now revoke, and revert the revocation of, module versions. Learn more about [Managing module versions](/terraform/enterprise/api-docs/private-registry/manage-module-versions).
+
+`
+
+		const result = await runTransform(markdown, options)
+		expect(result.trim()).toBe(`## 2025-05-1
+
+-   Add \`agent-pool\` relationship to the [run task API](/terraform/enterprise/api-docs/run-tasks/run-tasks), which you can use to assign a run task to an agent pool.
+-   You can now revoke, and revert the revocation of, module versions. Learn more about [Managing module versions](/terraform/enterprise/api-docs/private-registry/manage-module-versions).`)
+	})
+
 	// This is a good test in case partials are used and write to multiple unintended product directories
 	it('should remove both TFC:only and TFEnterprise:only from terraform product', async () => {
 		const options = {
@@ -207,8 +234,6 @@ This content should stay.
 		expect(result.trim()).toBe('This content should stay.')
 	})
 
-	// Here adding in test for cross product support- this behavior is currently well documented in the README so if any change needs to happen later
-	// it can
 	it('should remove TFEnterprise:only with name parameter from terraform product', async () => {
 		const options = {
 			filePath: 'terraform/some-file.md',
@@ -354,6 +379,130 @@ This content should be removed.
 		await expect(async () => {
 			return await runTransform(markdown, vaultOptions)
 		}).rejects.toThrow('Empty END block')
+	})
+})
+
+describe('transformExcludeContent - Real World Edge Cases (Bug Fixes)', () => {
+	// Bug 1: END comment indented inside list item causes following content to be removed
+	// From: content/terraform-enterprise/1.0.x/docs/enterprise/api-docs/changelog.mdx:394
+	it('should preserve content after TFC:only block when END comment is indented in list item', async () => {
+		const options = {
+			filePath:
+				'terraform-enterprise/1.0.x/docs/enterprise/api-docs/changelog.mdx',
+			repoSlug: 'terraform-enterprise',
+			productConfig: terraformEnterpriseConfig,
+		}
+
+		const markdown = `### 2022-06-23
+
+<!-- BEGIN: TFC:only name:health-assessments -->
+
+-   Added the [Assessments](/terraform/enterprise/api-docs/assessment-results).
+
+-   Updated [Workspace](/terraform/enterprise/api-docs/workspaces#create-a-workspace) and
+    [Notification Configurations](/terraform/enterprise/api-docs/notification-configurations#notification-triggers) to account for assessments.
+    <!-- END: TFC:only name:health-assessments -->
+
+-   Added new query parameter(s) to [List Runs endpoint](/terraform/enterprise/api-docs/run#list-runs-in-a-workspace).
+
+### 2022-06-21`
+
+		const expected = `### 2022-06-23
+
+-   Added new query parameter(s) to [List Runs endpoint](/terraform/enterprise/api-docs/run#list-runs-in-a-workspace).
+
+### 2022-06-21`
+
+		const result = await runTransform(markdown, options)
+		expect(result.trim()).toBe(expected.trim())
+	})
+
+	// Bug 2: BEGIN comment indented inside list item causes entire list to be removed
+	// From: content/terraform-enterprise/v202506-1/docs/enterprise/api-docs/changelog.mdx:160
+	it('should preserve content before and after TFC:only block when BEGIN comment is indented in list item', async () => {
+		const options = {
+			filePath:
+				'terraform-enterprise/v202506-1/docs/enterprise/api-docs/changelog.mdx',
+			repoSlug: 'terraform-enterprise',
+			productConfig: terraformEnterpriseConfig,
+		}
+
+		const markdown = `-   Add documentation for configuring organization and workspace data retention policies through the API and on the different [types of data retention policies](/terraform/enterprise/api-docs/data-retention-policies).
+    <!-- BEGIN: TFC:only name:explorer -->
+
+## 2024-2-8
+
+-   Add [Explorer API documentation](/terraform/enterprise/api-docs/explorer)
+    <!-- END: TFC:only name:explorer -->
+<!-- BEGIN: TFC:only -->
+## 2024-1-30
+
+-   Update the [Audit trails](/terraform/enterprise/api-docs/audit-trails) documentation to expand on the payloads for each event.
+<!-- END: TFC:only -->
+## 2024-1-24
+
+-   Introduce configurable data retention policies at the site-wide level and extend data retention policies at the organization and workspace levels.`
+
+		const expected = `-   Add documentation for configuring organization and workspace data retention policies through the API and on the different [types of data retention policies](/terraform/enterprise/api-docs/data-retention-policies).
+
+## 2024-1-24
+
+-   Introduce configurable data retention policies at the site-wide level and extend data retention policies at the organization and workspace levels.`
+
+		const result = await runTransform(markdown, options)
+		expect(result.trim()).toBe(expected.trim())
+	})
+
+	// Bug 3: TFEnterprise:only content being removed from terraform-enterprise files
+	// From: content/terraform-enterprise/v202507-1/docs/enterprise/api-docs/index.mdx:59
+	it('should keep TFEnterprise:only content in terraform-enterprise files', async () => {
+		const options = {
+			filePath:
+				'terraform-enterprise/v202507-1/docs/enterprise/api-docs/index.mdx',
+			repoSlug: 'terraform-enterprise',
+			productConfig: terraformEnterpriseConfig,
+		}
+
+		const markdown = `Before planning an API integration, consider whether the [HCP Terraform and Terraform Enterprise provider](https://registry.terraform.io/providers/hashicorp/tfe/latest/docs) meets your needs.
+
+The [HashiCorp API stability policy](/terraform/enterprise/api-docs/stability-policy) ensures backward compatibility for stable endpoints.
+
+<!-- BEGIN: TFEnterprise:only name:api-overview -->
+
+## System endpoints
+
+The API includes endpoints for system-level operations, such as health checks and usage reporting. System endpoints have different authentication and rate limiting requirements than application endpoints. Refer to the following documentation for details about system endpoints:
+
+-   [\`/api/v1/ping\`](/terraform/enterprise/api-docs/ping). Call this endpoint to verify system operation.
+-   [\`/api/v1/usage/bundle\`](/terraform/enterprise/api-docs/usage-bundle). Call this endpoint to retrieve a usage data bundle.
+
+<!-- END: TFEnterprise:only name:api-overview  -->
+
+## Authentication
+
+All requests must be authenticated with a bearer token.`
+
+		const expected = `Before planning an API integration, consider whether the [HCP Terraform and Terraform Enterprise provider](https://registry.terraform.io/providers/hashicorp/tfe/latest/docs) meets your needs.
+
+The [HashiCorp API stability policy](/terraform/enterprise/api-docs/stability-policy) ensures backward compatibility for stable endpoints.
+
+<!-- BEGIN: TFEnterprise:only name:api-overview -->
+
+## System endpoints
+
+The API includes endpoints for system-level operations, such as health checks and usage reporting. System endpoints have different authentication and rate limiting requirements than application endpoints. Refer to the following documentation for details about system endpoints:
+
+-   [\`/api/v1/ping\`](/terraform/enterprise/api-docs/ping). Call this endpoint to verify system operation.
+-   [\`/api/v1/usage/bundle\`](/terraform/enterprise/api-docs/usage-bundle). Call this endpoint to retrieve a usage data bundle.
+
+<!-- END: TFEnterprise:only name:api-overview  -->
+
+## Authentication
+
+All requests must be authenticated with a bearer token.`
+
+		const result = await runTransform(markdown, options)
+		expect(result.trim()).toBe(expected.trim())
 	})
 })
 

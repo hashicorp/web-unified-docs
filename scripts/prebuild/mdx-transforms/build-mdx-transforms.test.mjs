@@ -368,6 +368,95 @@ Always visible content.
 			expect(outputV122).toContain('Partial footer')
 			expect(outputV122).toContain('Always visible content')
 		})
+
+		test('should preserve content after Vault:>=v1.21.x wrapping partial in v1.20.x', async () => {
+			vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({
+				vault: {
+					versionedDocs: true,
+					basePaths: ['docs'],
+					supportsExclusionDirectives: true,
+				},
+			})
+
+			// Realistic partial content for a new feature
+			const partialContent = `## New Authentication Method
+
+The LDAP authentication method now supports advanced filtering.
+
+### Configuration
+
+\`\`\`hcl
+auth "ldap" {
+  url = "ldap://ldap.example.com"
+  user_filter = "(cn={{.Username}})"
+}
+\`\`\`
+
+### API Endpoints
+
+- \`POST /auth/ldap/config\` - Configure the LDAP auth method
+- \`GET /auth/ldap/config\` - Read the LDAP configuration
+`
+
+			const mainContent = `---
+page_title: Authentication Methods
+---
+
+# Authentication Methods
+
+Vault supports multiple authentication methods.
+
+## Token Authentication
+
+Token authentication is the default method in Vault.
+
+<!-- BEGIN: Vault:>=v1.21.x -->
+
+@include 'ldap-advanced.mdx'
+
+<!-- END: Vault:>=v1.21.x -->
+
+## AppRole Authentication
+
+AppRole is designed for machine authentication.
+
+### Configuration Steps
+
+1. Enable the AppRole auth method
+2. Create a role with policies
+3. Generate role credentials
+`
+
+			vol.fromJSON({
+				'/content/vault/v1.20.x/docs/auth-methods.mdx': mainContent,
+				'/content/vault/v1.20.x/docs/partials/ldap-advanced.mdx':
+					partialContent,
+			})
+
+			await buildMdxTransforms('/content', '/output', mockVersionMetadata)
+
+			const output = fs.readFileSync(
+				'/output/vault/v1.20.x/docs/auth-methods.mdx',
+				'utf8',
+			)
+
+			// Content before Vault:>=v1.21.x should be present
+			expect(output).toContain('## Token Authentication')
+			expect(output).toContain('Token authentication is the default method')
+
+			// Vault:>=v1.21.x content (the entire partial) should be removed in v1.20.x
+			expect(output).not.toContain('## New Authentication Method')
+			expect(output).not.toContain('LDAP authentication method')
+			expect(output).not.toContain('auth "ldap"')
+			expect(output).not.toContain('POST /auth/ldap/config')
+
+			// CRITICAL: Content after Vault:>=v1.21.x block should be preserved
+			// This is the bug - when all nodes in range are removed, insideRange stays true
+			expect(output).toContain('## AppRole Authentication')
+			expect(output).toContain('AppRole is designed for machine authentication')
+			expect(output).toContain('### Configuration Steps')
+			expect(output).toContain('Enable the AppRole auth method')
+		})
 	})
 
 	describe('Error Cases', () => {
@@ -666,6 +755,94 @@ page_title: Test Page
 			expect(output).toContain('This is TFC-only content')
 			expect(output).not.toContain('This is TFE-only content')
 			expect(output).toContain('Common content')
+		})
+
+		test('should preserve content after TFC:only wrapping partial in terraform-enterprise', async () => {
+			vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({
+				'terraform-enterprise': {
+					contentDir: 'docs',
+					versionedDocs: true,
+					supportsExclusionDirectives: true,
+				},
+			})
+
+			// Realistic partial content matching actual changelog structure
+			const partialContent = `### 2022-10-06
+
+-   Updated the [Policies API](/enterprise/api-docs/policies) with support for Open Policy Agent (OPA) policies.
+-   Update [Policy Sets](/enterprise/api-docs/policy-sets) with support for OPA policy sets.
+-   Updated [Policy Checks](/enterprise/api-docs/policy-checks) to add support for listing policy evaluations and policy set outcomes.
+-   Update [Run Tasks Stage](/enterprise/api-docs/run-tasks/run-task-stages-and-results) to include the new \`policy_evaluations\` attribute in the output.
+`
+
+			const mainContent = `---
+page_title: API Changelog - API Docs - Terraform Enterprise
+---
+
+# API Changelog
+
+Keep track of changes to the API for Terraform Cloud and Terraform Enterprise.
+
+## 2022-10-17
+
+-   Updated the Organizations API with force-delete-workspaces.
+-   Updated the Workspaces API with a safe delete endpoint.
+
+### 2022-10-12
+
+-   Update Policy Checks with result counts.
+-   Update Team Membership API to include adding users.
+
+<!-- BEGIN: TFC:only name:opa-policies -->
+
+@include 'opa-policies.mdx'
+
+<!-- END: TFC:only name:opa-policies -->
+
+### 2022-09-21
+
+-   Update State Versions with optional json-state-outputs.
+-   Update State Version Outputs with a detailed-type attribute.
+
+### 2022-07-26
+
+-   Updated the Run status list with fetching and queuing.
+-   Update Run Tasks to include the new stages attribute.
+`
+
+			vol.fromJSON({
+				'/content/terraform-enterprise/v202301-1/docs/enterprise/api-docs/changelog.mdx':
+					mainContent,
+				'/content/terraform-enterprise/v202301-1/docs/partials/opa-policies.mdx':
+					partialContent,
+			})
+
+			await buildMdxTransforms('/content', '/output', mockVersionMetadata)
+
+			const output = fs.readFileSync(
+				'/output/terraform-enterprise/v202301-1/docs/enterprise/api-docs/changelog.mdx',
+				'utf8',
+			)
+
+			// Content before TFC:only should be present
+			expect(output).toContain('### 2022-10-12')
+			expect(output).toContain('Update Policy Checks with result counts')
+
+			// TFC:only content (the entire partial) should be removed in terraform-enterprise
+			expect(output).not.toContain('### 2022-10-06')
+			expect(output).not.toContain('Open Policy Agent (OPA)')
+			expect(output).not.toContain('policy_evaluations')
+
+			// CRITICAL: Content after TFC:only block should be preserved
+			// This is the bug - when all nodes in range are removed, insideRange stays true
+			expect(output).toContain('### 2022-09-21')
+			expect(output).toContain(
+				'Update State Versions with optional json-state-outputs',
+			)
+			expect(output).toContain('### 2022-07-26')
+			expect(output).toContain(
+				'Updated the Run status list with fetching and queuing',
+			)
 		})
 	})
 
