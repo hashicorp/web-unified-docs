@@ -165,101 +165,360 @@ if (!isGlobalPartial) {
 
 ### Edge Case: Exclusion Directives Wrapping @include Statements
 
-**The Problem:**
+**The Problem - Three Layers of Complexity:**
 
-When an exclusion directive wraps an `@include` statement, there's a subtle bug related to AST position data:
+When exclusion directives wrap `@include` statements, there are actually THREE interconnected bugs:
 
+1. **Partial content not removed** - Position data mismatch
+2. **Content after exclusion blocks deleted** - `insideRange` never resets
+3. **END comments nested in nodes** - Remark parsing quirk
+
+**Scenario:**
 ```html
-<!-- BEGIN: TFC:only -->
-@include 'tfc-feature.mdx'
-<!-- END: TFC:only -->
+<!-- Line 37: BEGIN: TFC:only -->
+<!-- Line 38: @include 'tfc-feature.mdx' -->
+<!-- Line 45: END: TFC:only -->
+<!-- Line 46: Content that should survive -->
 ```
 
 **What Should Happen:**
-In terraform-enterprise files, the entire block (including the partial content) should be removed.
+- Lines 37-45: Removed in terraform-enterprise
+- Line 46+: PRESERVED
 
 **What Was Happening:**
-- ✅ BEGIN comment removed (line 65)
-- ❌ Partial content NOT removed (reports position as line 1)
-- ✅ END comment removed (line 69)
-- Result: The partial content survived!
+- ✅ BEGIN comment removed (line 37)
+- ❌ Partial content NOT removed (position reports as line 1)
+- ✅ END comment removed (line 45)
+- ❌ **ALL content after line 45 also removed!**
 
-**Root Cause - AST Position Mismatch:**
+**Root Cause 1 - Position Data Mismatch:**
 
-1. The include-partials plugin replaces `@include` with the partial's AST nodes
-2. Those nodes retain position data from the **partial file** (line 1, line 2, etc.)
-3. Content exclusion's `removeNodesInRange(tree, 65, 69)` looks for nodes between lines 65-69
-4. Partial nodes with `position.start.line = 1` are **not** in range 65-69
-5. They don't get removed
+The include-partials plugin replaces `@include` with partial's AST nodes, which retain position data from the **partial file**:
 
-**Example AST Structure After Partials:**
 ```javascript
-// Parent file: lines 65-69 contain the exclusion block
+// After partial expansion:
 {
-  type: 'html',           // BEGIN comment
-  position: { line: 65 }  // ✅ In range, removed
+  type: 'jsx',           // BEGIN comment
+  position: { line: 37 } // ✅ In range 37-45
 }
 {
-  type: 'paragraph',      // Content from partial
-  position: { line: 1 }   // ❌ NOT in range 65-69, survives
+  type: 'paragraph',     // Partial content
+  position: { line: 1 }  // ❌ NOT in range 37-45 (from partial file!)
 }
 {
-  type: 'html',           // END comment
-  position: { line: 69 }  // ✅ In range, removed
+  type: 'jsx',           // END comment
+  position: { line: 45 } // ✅ In range 37-45
+}
+{
+  type: 'paragraph',     // Content after
+  position: { line: 46 } // Should be preserved
 }
 ```
 
-**The Fix:**
+**Root Cause 2 - insideRange Never Resets:**
 
-Modified `removeNodesInRange` in `ast-utils.mjs` to track when we're "inside" a removal range:
+When all partial nodes are removed, no node matches `endLine` to reset the flag:
 
 ```javascript
-let insideRange = false
+// Partial node at line 1 < endLine 45 → doesn't reset
+// No node at line 45 exists anymore (removed) → doesn't reset
+// insideRange stays true FOREVER
+// Line 46+ gets removed as "partial nodes"!
+```
 
-for (let i = 0; i < nodes.length; i++) {
-  const node = nodes[i]
+**Root Cause 3 - Nested END Comments:**
 
-  if (hasPosition) {
-    // Mark when we enter the range (BEGIN comment)
-    if (nodeStart >= startLine && nodeEnd <= endLine && !insideRange) {
-      insideRange = true
+Remark can parse END comments as **children** of other nodes:
+
+```markdown
+- List item content
+<!-- END: TFC:only -->  ← Becomes child of listItem!
+```
+
+The AST structure becomes:
+```javascript
+{
+  type: 'list',
+  children: [{
+    type: 'listItem',
+    children: [
+      { type: 'paragraph', ... },
+      { type: 'jsx', value: '<!-- END: TFC:only -->' } // ← Nested!
+    ]
+  }]
+}
+```
+
+**The Complete Fix - Three-Part Solution:**
+
+**1. Comment-Node-Only Boundaries**
+Only `jsx` and `html` nodes can be BEGIN/END comments (prevents false matches):
+
+```javascript
+const isCommentNode = node.type === 'jsx' || node.type === 'html'
+
+if (!insideRange && isCommentNode && nodeStart >= startLine && nodeEnd <= endLine) {
+  insideRange = true  // Only comment nodes can start ranges
+}
+```
+
+**2. Recurse-First Algorithm**
+Process children BEFORE deciding parent's fate (finds nested END comments):
+
+```javascript
+function removeNodesInRange(nodes, depth = 0, parentInsideRange = false) {
+  let insideRange = parentInsideRange
+
+  for (let i = 0; i < nodes.length; i++) {
+    const wasInsideRange = insideRange
+
+    // STEP 1: Recurse into children FIRST
+    if (node.children) {
+      insideRange = removeFromNodes(node.children, depth + 1, insideRange)
+
+      // If parent was in range, remove it (unless it's a comment)
+      if (wasInsideRange && !isCommentNode) {
+        remove(node)
+        continue
+      }
     }
 
-    // Normal case: node fully in range
-    if (nodeStart >= startLine && nodeEnd <= endLine) {
-      indicesToRemove.push(i)
-    }
-    // Edge case: inside range but position is outside (partial node)
-    else if (insideRange && nodeStart < startLine) {
-      indicesToRemove.push(i)  // Remove it anyway
-    }
-
-    // Mark when we exit the range (END comment)
-    if (nodeEnd === endLine) {
-      insideRange = false
-    }
-  } else {
-    // Node without position - remove if inside range
-    if (insideRange) {
-      indicesToRemove.push(i)
-    }
+    // STEP 2: Check if this node is a range boundary
+    // ... boundary logic
   }
+
+  return insideRange  // Propagate state back to parent
 }
 ```
 
-**Key Logic:**
-- If we're between BEGIN and END (`insideRange = true`)
-- And a node has position data that doesn't match the expected range (like line 1 when range is 65-69)
-- It's a partial node that needs to be removed
+**3. State Propagation Through Recursion**
+Pass and return `insideRange` state (maintains state across recursion):
+
+```javascript
+// Pass state down to children
+insideRange = removeFromNodes(node.children, depth + 1, insideRange)
+
+// Return state back to parent
+return insideRange
+```
+
+**Complete Algorithm:**
+
+```javascript
+export function removeNodesInRange(tree, startLine, endLine) {
+  function removeFromNodes(nodes, depth = 0, parentInsideRange = false) {
+    let insideRange = parentInsideRange
+    const indicesToRemove = []
+
+    for (let i = 0; i < nodes.length; i++) {
+      const node = nodes[i]
+      const wasInsideRange = insideRange
+
+      // STEP 1: Recurse first to find nested END comments
+      if (node.children) {
+        insideRange = removeFromNodes(node.children, depth + 1, insideRange)
+
+        // If parent was in excluded range, remove it
+        const isCommentNode = node.type === 'jsx' || node.type === 'html'
+        if (wasInsideRange && !isCommentNode) {
+          indicesToRemove.push(i)
+          continue
+        }
+      }
+
+      // STEP 2: Check boundaries (only for comment nodes with position)
+      if (hasPosition) {
+        const isCommentNode = node.type === 'jsx' || node.type === 'html'
+
+        // Only comment nodes can start ranges
+        if (!insideRange && isCommentNode &&
+            nodeStart >= startLine && nodeEnd <= endLine) {
+          insideRange = true
+          indicesToRemove.push(i)
+        }
+        // Only comment nodes can end ranges
+        else if (insideRange && isCommentNode &&
+                 nodeStart >= startLine && nodeEnd === endLine) {
+          insideRange = false
+          indicesToRemove.push(i)
+        }
+        // Everything else inside range is a partial node
+        else if (insideRange) {
+          indicesToRemove.push(i)
+        }
+      }
+      // STEP 3: Nodes without position (from partials)
+      else if (insideRange) {
+        indicesToRemove.push(i)
+      }
+    }
+
+    // Remove marked nodes
+    for (let i = indicesToRemove.length - 1; i >= 0; i--) {
+      nodes.splice(indicesToRemove[i], 1)
+    }
+
+    return insideRange
+  }
+
+  removeFromNodes(tree.children)
+}
+```
+
+**Edge Cases Handled:**
+
+✅ Partial content with mismatched position data
+✅ Content after exclusion blocks preserved
+✅ END comments nested in list items
+✅ END comments nested in any node type
+✅ Single-line and multi-line partial nodes
+✅ Multiple exclusion blocks in sequence
+✅ Empty parent nodes after children removed
+✅ Parent nodes containing BEGIN comments as children (state transition detection)
 
 **Testing:**
 
-Added integration test in `build-mdx-transforms.test.mjs`:
+Integration tests in `build-mdx-transforms.test.mjs`:
 ```javascript
-test('should remove TFC:only block wrapping @include in terraform-enterprise')
+test('should preserve content after Vault:>=v1.21.x wrapping partial in v1.20.x')
+test('should preserve content after TFC:only wrapping partial in terraform-enterprise')
 ```
 
-This test creates the exact scenario: TFC:only wrapping an @include statement in a terraform-enterprise file, and verifies the partial content is removed.
+Unit test in `index.test.mjs`:
+```javascript
+test('should remove TFEnterprise:only with name parameter from terraform product')
+// Tests END comment nested in list item structure
+```
+
+**Detailed Reference:**
+
+For a complete deep-dive into this bug, the investigation process, and key learnings, see:
+**[BUG_FIX_REFERENCE.md](./BUG_FIX_REFERENCE.md)**
+
+This reference document includes:
+- Visual AST representations
+- Step-by-step debugging process
+- Key insights about position data and recursion
+- How to debug similar issues
+- Common pitfalls to avoid
+
+#### Multi-line Partial Bug Fix
+
+**Additional Issue Discovered:**
+
+After the initial fix, multi-line partial content was still not being removed in some cases:
+
+- **Affected Files**: `notification-configurations.mdx` in terraform-enterprise v202301-1 through v202402-1
+- **Problem**: The `ephemeral-workspaces.mdx` partial (spanning 2 lines) remained after exclusion processing
+- **Example Partial Content**:
+  ```markdown
+  -> **Note:** Ephemeral workspace (automatic destroy runs) functionality is available in Terraform Cloud **Plus** Edition. Refer to [Terraform Cloud pricing](https://www.hashicorp.com/products/terraform/pric
+  ing) for details.
+  ```
+
+**Root Cause:**
+
+The initial fix had an overly restrictive condition requiring single-line nodes:
+
+```javascript
+// OLD CODE (too restrictive)
+else if (insideRange && nodeStart === nodeEnd && nodeStart < startLine) {
+    indicesToRemove.push(i)
+}
+```
+
+This required `nodeStart === nodeEnd` (single-line only), so multi-line partials failed the check.
+
+**Solution:**
+
+Removed the single-line restriction:
+
+```javascript
+// NEW CODE (handles all partial nodes)
+else if (insideRange) {
+    // Node from partial - has position data from partial file, not parent
+    indicesToRemove.push(i)
+}
+```
+
+**Why This Is Safe:**
+
+1. Nodes are processed sequentially in document order
+2. `insideRange` is only `true` after encountering the BEGIN comment
+3. `insideRange` is set to `false` after the END comment
+4. Any node between BEGIN and END that doesn't match the normal range is from a partial
+
+**Comprehensive Edge Case Tests Added:**
+
+Added 5 integration tests covering all multi-line partial scenarios:
+
+1. **Multi-line partial (2 lines)** - The actual bug case with line break in URL
+2. **Multiple paragraphs** - Partial with 3 separate paragraph nodes
+3. **Nested markdown** - Partial with lists, code blocks, and complex structures
+4. **High line numbers** - Partial spanning 20+ lines to test upper bounds
+5. **Preservation test** - Multi-line partial correctly kept in terraform-docs-common
+
+All tests verify both removal in incorrect contexts and preservation in correct contexts.
+
+#### Parent Nodes Containing BEGIN Comments Bug Fix
+
+**Additional Issue Discovered:**
+
+After implementing the recurse-first algorithm, a new edge case was discovered where parent nodes containing BEGIN comments as children were being incorrectly removed:
+
+**Scenario:**
+```markdown
+-   First list item content
+    <!-- BEGIN: TFC:only name:premium -->
+-   Content to exclude (this list item)
+    <!-- END: TFC:only name:premium -->
+-   Third list item content (keep this)
+```
+
+**Problem:**
+- First list item was removed entirely (BUG - it only contains the BEGIN comment as a child)
+- Should keep the list item, only remove the BEGIN comment child
+
+**Root Cause:**
+
+The recurse-first algorithm correctly removes the BEGIN comment child during recursion. This sets `insideRange = true`. When control returns to the parent:
+- `wasInsideRange = false` (wasn't in range before recursing)
+- `insideRange = true` (became true during recursion because BEGIN was found)
+
+The existing code didn't distinguish between "parent was already inside range" vs "range started inside children". The parent contains the BEGIN boundary but isn't excluded content.
+
+**Solution (ast-utils.mjs:143-149):**
+
+Added state transition detection after recursion:
+
+```javascript
+// If range STARTED inside this node's children (BEGIN found in children),
+// the parent node CONTAINS the range start and should NOT be removed.
+// Example: listItem containing [paragraph, BEGIN comment] - keep the listItem, only BEGIN removed
+if (!wasInsideRange && insideRange) {
+    if (debug) console.log(`${indent}  → KEEP ${node.type} (contains BEGIN comment)`)
+    continue
+}
+```
+
+**Logic:**
+- Detect when `insideRange` transitions from `false` → `true` during recursion
+- This means the BEGIN comment was found in children, not before the parent
+- Parent CONTAINS the boundary and should be preserved
+- Only the BEGIN comment child (already removed during recursion) needs to go
+
+**Test Added:**
+
+Unit test in `index.test.mjs`:
+```javascript
+test('should remove TFC:only content from terraform-enterprise but when wrapped in list item/special text')
+// Tests BEGIN/END comments as children of list items - parent should be preserved
+```
+
+**Result:**
+✅ Parent nodes containing BEGIN comments are now correctly preserved
+✅ Only the BEGIN comment child is removed, maintaining parent structure
+✅ Handles any parent node type (list items, blockquotes, etc.)
 
 ### build-mdx-transforms.mjs Integration
 ```javascript
@@ -509,6 +768,7 @@ The unit test suite (`index.test.mjs`) covers:
 - Cross-product behavior (ignore vs remove vs keep)
 - Error handling for malformed directives
 - Configuration edge cases
+- BEGIN/END comments as children of parent nodes (list items, etc.)
 
 ### Integration Tests
 
@@ -527,6 +787,13 @@ The integration test suite (`build-mdx-transforms.test.mjs`) covers the full MDX
 - Exclusion directives inside global partials work correctly
 - Exclusion directives wrapping `@include` statements
 - Multiple exclusion blocks in the same partial
+
+**Multi-line Partial Edge Cases:**
+- Multi-line partial content (2+ lines) wrapped in exclusion directives
+- Partials with multiple paragraphs
+- Partials with nested markdown structures (lists, code blocks)
+- Partials with high line numbers (20+ lines)
+- Multi-line partials preserved in correct product contexts
 
 **Global Partials Skip Logic:**
 - Files in `*/global/partials/` directories skip content exclusion
