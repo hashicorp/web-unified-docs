@@ -10,6 +10,23 @@ const BEGIN_RE = /^(\s+)?<!--\s+BEGIN:\s+(?<block>.*?)\s+-->(\s+)?$/
 const END_RE = /^(\s+)?<!--\s+END:\s+(?<block>.*?)\s+-->(\s+)?$/
 
 /**
+ * Helper to check if a node is a comment node (jsx, html, or code containing HTML comment)
+ * Remark sometimes parses indented HTML comments as code nodes instead of jsx nodes
+ */
+function isCommentNode(node) {
+	if (node.type === 'jsx' || node.type === 'html') {
+		return true
+	}
+	// Check if it's a code node containing an HTML comment
+	if (node.type === 'code' && node.value) {
+		return (
+			node.value.trim().startsWith('<!--') && node.value.trim().endsWith('-->')
+		)
+	}
+	return false
+}
+
+/**
  * Parse all directive blocks from AST in a single pass
  * Simple, explicit error handling for malformed blocks
  *
@@ -107,8 +124,9 @@ export function removeNodesInRange(tree, startLine, endLine) {
 
 		const indicesToRemove = []
 		let insideRange = parentInsideRange
+		let lastEndLine = null // Track the line number where we last found an END comment
 
-		const debug = false // Set to true for debugging: process.env.DEBUG_AST_REMOVAL === 'true'
+		const debug = process.env.DEBUG_AST_REMOVAL === 'true'
 		const indent = '  '.repeat(depth)
 
 		for (let i = 0; i < nodes.length; i++) {
@@ -130,18 +148,39 @@ export function removeNodesInRange(tree, startLine, endLine) {
 				}
 				insideRange = removeFromNodes(node.children, depth + 1, insideRange)
 
-				// If we were inside range before recursing, the parent node should be removed
-				// in two cases:
-				// 1. We're still inside after (no END found, all children removed)
-				// 2. We found an END comment inside (insideRange reset, but parent was in range)
-				// Exception: don't remove comment nodes themselves
-				const isCommentNode = node.type === 'jsx' || node.type === 'html'
-				if (wasInsideRange && !isCommentNode) {
+				// After recursion, children have already been removed.
+				// Determine whether to remove the parent node:
+				const nodeIsComment = isCommentNode(node)
+
+				// If we were inside range and still are, remove the parent (fully in range)
+				if (wasInsideRange && insideRange && !nodeIsComment) {
 					indicesToRemove.push(i)
 					if (debug) {
 						console.log(
-							`${indent}  → REMOVE ${node.type} (was in excluded range)`,
+							`${indent}  → REMOVE ${node.type} (fully in excluded range)`,
 						)
+					}
+					continue
+				}
+
+				// If range ENDED inside this node's children (END found in children),
+				// only remove parent if it's now empty (all children were removed).
+				// Example: list containing [listItem1 (removed), listItem2 with END (removed), listItem3 (kept)]
+				// → Keep the list since listItem3 remains
+				if (wasInsideRange && !insideRange) {
+					if (!node.children || node.children.length === 0) {
+						indicesToRemove.push(i)
+						if (debug) {
+							console.log(
+								`${indent}  → REMOVE ${node.type} (empty after exclusion)`,
+							)
+						}
+					} else {
+						if (debug) {
+							console.log(
+								`${indent}  → KEEP ${node.type} (has remaining children after exclusion)`,
+							)
+						}
 					}
 					continue
 				}
@@ -170,12 +209,12 @@ export function removeNodesInRange(tree, startLine, endLine) {
 				}
 
 				// Check if we've moved past the end of the range
-				// Only check this for comment nodes (jsx/html), as content nodes
+				// Only check this for comment nodes (jsx/html/code), as content nodes
 				// from partials can have any line numbers
-				const isCommentNode = node.type === 'jsx' || node.type === 'html'
+				const nodeIsComment = isCommentNode(node)
 				if (
 					insideRange &&
-					isCommentNode &&
+					nodeIsComment &&
 					nodeStart >= startLine &&
 					nodeStart > endLine
 				) {
@@ -187,10 +226,24 @@ export function removeNodesInRange(tree, startLine, endLine) {
 
 				// If we're NOT inside a range, check if this node starts one
 				if (!insideRange) {
+					// Special case: if we just found an END comment on this same line (lastEndLine),
+					// do NOT start a new range. This prevents removing unrelated BEGIN comments
+					// that happen to be on the same line as the END comment (e.g., line 24 has both
+					// "<!-- END: TFC:only -->" and "<!-- BEGIN: TFEnterprise:only -->")
+					if (lastEndLine !== null && nodeEnd === lastEndLine) {
+						if (debug && nodeIsComment) {
+							console.log(
+								`${indent}  → SKIP comment (on same line ${nodeEnd} as END comment we just processed)`,
+							)
+						}
+					}
 					// Check if this node marks the start of the range
-					// Only jsx/html nodes can be BEGIN comments
-					const isCommentNode = node.type === 'jsx' || node.type === 'html'
-					if (isCommentNode && nodeStart >= startLine && nodeEnd <= endLine) {
+					// Only jsx/html/code nodes can be BEGIN comments
+					else if (
+						nodeIsComment &&
+						nodeStart >= startLine &&
+						nodeEnd <= endLine
+					) {
 						insideRange = true
 						indicesToRemove.push(i)
 						if (debug) {
@@ -203,14 +256,14 @@ export function removeNodesInRange(tree, startLine, endLine) {
 				// If we're inside a range, all nodes are from the partial (except the END comment)
 				else {
 					// Check if this is the END comment
-					// END comments are jsx/html nodes with position data from the parent file
-					const isCommentNode = node.type === 'jsx' || node.type === 'html'
-					if (isCommentNode && nodeStart >= startLine && nodeEnd === endLine) {
+					// END comments are jsx/html/code nodes with position data from the parent file
+					if (nodeIsComment && nodeStart >= startLine && nodeEnd === endLine) {
 						indicesToRemove.push(i)
 						insideRange = false
+						lastEndLine = nodeEnd // Remember the line where we found the END comment
 						if (debug) {
 							console.log(
-								`${indent}  → REMOVE (END comment), reset insideRange`,
+								`${indent}  → REMOVE (END comment), reset insideRange, remember lastEndLine=${nodeEnd}`,
 							)
 						}
 					}
