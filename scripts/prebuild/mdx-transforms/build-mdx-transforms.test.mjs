@@ -1169,6 +1169,86 @@ Regular content.
 				expect(output).toContain('partial content for TFC')
 				expect(output).toContain('Regular content')
 			})
+
+			test('should keep TFEnterprise:only content wrapping partial in terraform-enterprise', async () => {
+				vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({
+					'terraform-enterprise': {
+						contentDir: 'docs',
+						versionedDocs: true,
+						supportsExclusionDirectives: true,
+					},
+				})
+
+				// Partial content from api-code-blocks/authentication.mdx
+				const partialContent = `Requests to the [\`/api/v1/ping\`](/terraform/enterprise/api-docs/ping) and [\`/api/v1/usage/bundle\`](/terraform/enterprise/api-docs/usage-bundle) endpoints must be authenticated with a bearer token generated specifically for them using the \`tfectl admin api-token generate\` command. For more information on the token creation, and management, refer to the [tfectl documentation](/terraform/enterprise/deploy/reference/cli).
+
+Use the HTTP Header \`Authorization\` with the value \`Bearer <token>\`.
+`
+
+				const mainContent = `---
+page_title: API documentation for Terraform Enterprise
+---
+
+Before planning an API integration, consider whether the [HCP Terraform and Terraform Enterprise provider](https://registry.terraform.io/providers/hashicorp/tfe/latest/docs) meets your needs.
+
+The [HashiCorp API stability policy](/terraform/enterprise/api-docs/stability-policy) ensures backward compatibility for stable endpoints.
+
+<!-- BEGIN: TFEnterprise:only name:api-overview -->
+
+## System endpoints
+
+The API includes endpoints for system-level operations, such as health checks and usage reporting. System endpoints have different authentication and rate limiting requirements than application endpoints. Refer to the following documentation for details about system endpoints:
+
+-   [\`/api/v1/ping\`](/terraform/enterprise/api-docs/ping). Call this endpoint to verify system operation.
+-   [\`/api/v1/usage/bundle\`](/terraform/enterprise/api-docs/usage-bundle). Call this endpoint to retrieve a usage data bundle.
+
+<!-- END: TFEnterprise:only name:api-overview  -->
+
+## Authentication
+
+-   [Organization tokens](/terraform/enterprise/users-teams-organizations/api-tokens#organization-api-tokens) — each organization can have one API token at a time.
+    <!-- BEGIN: TFC:only -->
+-   [Audit trails token](/terraform/enterprise/users-teams-organizations/api-tokens#audit-trails-tokens) - each organization can have a single token.    <!-- END: TFC:only -->    <!-- BEGIN: TFEnterprise:only name:system-endpoints-auth -->
+
+### System endpoints
+
+@include "api-code-blocks/authentication.mdx"
+
+<!-- END: TFEnterprise:only name:system-endpoints-auth -->
+
+### Blob storage authentication
+`
+
+				vol.fromJSON({
+					'/content/terraform-enterprise/v202507-1/docs/enterprise/api-docs/index.mdx':
+						mainContent,
+					'/content/terraform-enterprise/v202507-1/docs/partials/api-code-blocks/authentication.mdx':
+						partialContent,
+				})
+
+				await buildMdxTransforms('/content', '/output', {
+					'terraform-enterprise': [
+						{ version: 'v202507-1', releaseStage: 'stable', isLatest: true },
+					],
+				})
+
+				const output = fs.readFileSync(
+					'/output/terraform-enterprise/v202507-1/docs/enterprise/api-docs/index.mdx',
+					'utf8',
+				)
+
+				// TFEnterprise:only blocks should be KEPT in terraform-enterprise
+				expect(output).toContain('## System endpoints')
+				expect(output).toContain('Requests to the [`/api/v1/ping`]')
+				expect(output).toContain('tfectl admin api-token generate')
+				expect(output).toContain('### Blob storage authentication')
+
+				// TFC:only content should be REMOVED in terraform-enterprise
+				expect(output).not.toContain('Audit trails token')
+
+				// Should not contain the @include directive
+				expect(output).not.toContain('@include')
+			})
 		})
 	})
 })
