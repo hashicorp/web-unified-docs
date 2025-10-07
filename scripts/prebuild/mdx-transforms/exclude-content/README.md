@@ -375,6 +375,9 @@ export function removeNodesInRange(tree, startLine, endLine) {
 ✅ Multiple exclusion blocks in sequence
 ✅ Empty parent nodes after children removed
 ✅ Parent nodes containing BEGIN comments as children (state transition detection)
+✅ END comments indented in list items (parent nodes with remaining children preserved)
+✅ Indented comments parsed as code nodes (isCommentNode helper recognizes all types)
+✅ Overlapping directive comments on the same line (skip adjacent BEGIN comments after END)
 
 **Testing:**
 
@@ -519,6 +522,161 @@ test('should remove TFC:only content from terraform-enterprise but when wrapped 
 ✅ Parent nodes containing BEGIN comments are now correctly preserved
 ✅ Only the BEGIN comment child is removed, maintaining parent structure
 ✅ Handles any parent node type (list items, blockquotes, etc.)
+
+#### Additional Edge Cases: Indented Comments in List Items
+
+**Two critical bugs were discovered in real content files:**
+
+**Bug 1: END Comment Indented Inside List Item**
+
+When an END comment is indented as a child of a list item, content after the exclusion block was being removed:
+
+```markdown
+### 2022-06-23
+
+<!-- BEGIN: TFC:only name:health-assessments -->
+
+-   Added the [Assessments](/terraform/enterprise/api-docs/assessment-results).
+
+-   Updated [Workspace](/terraform/enterprise/api-docs/workspaces#create-a-workspace) and
+    [Notification Configurations](/terraform/enterprise/api-docs/notification-configurations#notification-triggers) to account for assessments.
+    <!-- END: TFC:only name:health-assessments -->
+
+-   Added new query parameter(s) to [List Runs endpoint](/terraform/enterprise/api-docs/run#list-runs-in-a-workspace).  ← This was being removed!
+```
+
+**Root Cause:** When the range ended inside a parent node's children, the algorithm removed the parent regardless of whether it had remaining children.
+
+**Fix (ast-utils.mjs:152-167):**
+
+```javascript
+// If range ENDED inside this node's children (END found in children),
+// only remove parent if it's now empty (all children were removed).
+if (wasInsideRange && !insideRange) {
+    if (!node.children || node.children.length === 0) {
+        indicesToRemove.push(i)  // Parent is empty, remove it
+    } else {
+        // Parent has remaining children, keep it
+    }
+    continue
+}
+```
+
+**Bug 2: Indented Comments Parsed as Code Nodes**
+
+When exclusion comments are heavily indented inside list items, remark sometimes parses them as `code` nodes instead of `jsx` nodes:
+
+```markdown
+-   Add documentation for configuring retention policies.
+    <!-- BEGIN: TFC:only name:explorer -->
+
+## 2024-2-8
+
+-   Add [Explorer API documentation]
+    <!-- END: TFC:only name:explorer -->  ← Parsed as code node, not jsx!
+```
+
+**Root Cause:** The algorithm only checked for `jsx` and `html` node types, so indented comments parsed as `code` nodes were ignored. This caused `insideRange` to never reset, removing all subsequent content.
+
+**Fix (ast-utils.mjs:16-25):**
+
+Created a helper function to recognize HTML comments regardless of how remark parses them:
+
+```javascript
+/**
+ * Helper to check if a node is a comment node (jsx, html, or code containing HTML comment)
+ * Remark sometimes parses indented HTML comments as code nodes instead of jsx nodes
+ */
+function isCommentNode(node) {
+    if (node.type === 'jsx' || node.type === 'html') {
+        return true
+    }
+    // Check if it's a code node containing an HTML comment
+    if (node.type === 'code' && node.value) {
+        return node.value.trim().startsWith('<!--') && node.value.trim().endsWith('-->')
+    }
+    return false
+}
+```
+
+This helper is now used throughout `removeNodesInRange` instead of checking `node.type === 'jsx' || node.type === 'html'`.
+
+**Result:**
+✅ Content after exclusion blocks properly preserved when END is in list item
+✅ Indented comments recognized as comment nodes regardless of parse type
+✅ List parent nodes with remaining children after exclusion are preserved
+
+#### Overlapping Directive Comments on Same Line
+
+**Issue Discovered:**
+
+When two directive comments from different blocks appeared on the same line, the algorithm would incorrectly start processing the second block after completing the first one.
+
+**Real-world scenario:**
+```markdown
+-   [Organization tokens] — each organization can have one API token at a time.
+    <!-- BEGIN: TFC:only -->
+-   [Audit trails token] - each organization can have a single token.    <!-- END: TFC:only -->    <!-- BEGIN: TFEnterprise:only name:system-endpoints-auth -->
+
+### System endpoints
+
+Requests to the [`/api/v1/ping`] and [`/api/v1/usage/bundle`] endpoints must be authenticated...
+<!-- END: TFEnterprise:only name:system-endpoints-auth -->
+```
+
+Line 24 contains both `<!-- END: TFC:only -->` and `<!-- BEGIN: TFEnterprise:only name:system-endpoints-auth -->`.
+
+**Problem:**
+
+When `removeNodesInRange(tree, 23, 24)` was called to remove the TFC:only block, it would:
+1. ✓ Remove the TFC BEGIN comment (line 23)
+2. ✓ Remove the TFC END comment (line 24) and set `insideRange = false`
+3. ✗ Continue processing and encounter the TFEnterprise BEGIN comment (also on line 24)
+4. ✗ Start a new range because the BEGIN was within the target range (24 <= 24)
+5. ✗ Remove all content until the TFEnterprise END comment, including the partial content
+
+**Root Cause:**
+
+`removeNodesInRange()` is designed to remove ONE specific range. When it encounters a BEGIN comment on the same line as the END comment it just processed, it shouldn't start processing a new unrelated range.
+
+**Fix (ast-utils.mjs:125, 231-236, 257):**
+
+Track the line number where we find an END comment and skip BEGIN comments on that same line:
+
+```javascript
+let lastEndLine = null  // Track the line number where we last found an END comment
+
+// When we find an END comment, remember its line
+if (nodeIsComment && nodeStart >= startLine && nodeEnd === endLine) {
+    indicesToRemove.push(i)
+    insideRange = false
+    lastEndLine = nodeEnd  // Remember the line where we found the END comment
+}
+
+// When checking if we should start a new range
+if (!insideRange) {
+    // Skip BEGIN comments on the same line as the END comment we just processed
+    if (lastEndLine !== null && nodeEnd === lastEndLine) {
+        // Skip this comment - it's from a different directive block
+        continue
+    }
+    // Normal BEGIN comment processing...
+}
+```
+
+**Test Added:**
+
+Integration test in `build-mdx-transforms.test.mjs`:
+```javascript
+test('should keep TFEnterprise:only content wrapping partial in terraform-enterprise')
+// Tests TFC:only and TFEnterprise:only on the same line
+// Verifies that partial content is preserved in terraform-enterprise
+```
+
+**Result:**
+✅ TFEnterprise:only partial content now correctly preserved
+✅ TFC:only content correctly removed
+✅ Multiple directive blocks can coexist on the same line without interfering
 
 ### build-mdx-transforms.mjs Integration
 ```javascript
@@ -769,6 +927,10 @@ The unit test suite (`index.test.mjs`) covers:
 - Error handling for malformed directives
 - Configuration edge cases
 - BEGIN/END comments as children of parent nodes (list items, etc.)
+- **Real-world edge cases:**
+  - END comments indented inside list items (content after exclusion preserved)
+  - BEGIN comments indented inside list items (all subsequent exclusion blocks work)
+  - Comments parsed as code nodes by remark
 
 ### Integration Tests
 
@@ -807,8 +969,23 @@ The integration test suite (`build-mdx-transforms.test.mjs`) covers the full MDX
 
 **Cross-Product Support:**
 - TFC:only and TFEnterprise:only directives in global partials
+- **TFEnterprise:only content wrapping partials** (real-world test from v202507-1)
+- **Overlapping directive comments on same line** (TFC:only END and TFEnterprise:only BEGIN on line 24)
 
 **Multi-File Processing:**
 - Processing multiple files with shared and versioned partials
 
 All tests use mock filesystem data (`memfs`) and do not rely on real files in the repository.
+
+**Test Summary:**
+- ✅ **24 unit tests** covering core exclusion logic and edge cases
+- ✅ **20 integration tests** covering full MDX pipeline with partials
+- ✅ **44 total tests** all passing
+
+**Key Test Coverage:**
+- Partial content with mismatched position data (from included partials)
+- Content preservation after exclusion blocks
+- Nested and indented END comments in list items
+- Comments parsed as code nodes by remark
+- Parent nodes with remaining children after exclusion
+- Multiple directive blocks on the same line
