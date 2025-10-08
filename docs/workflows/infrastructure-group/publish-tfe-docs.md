@@ -121,7 +121,7 @@ You can also exclude content mid-sentence, but pay extra attention to your spaci
 Project-level permissions apply to all workspaces<!-- BEGIN: TFC:only name:stacks-tfe --> and Stacks<!-- END: TFC:only name:stacks-tfe --> within a specific project.
 ```
 
-##### Exclude an entire MDX file
+#### Exclude an entire MDX file
 
 To exclude an entire file from Terraform Enterprise, add `tfc_only: true` to the page's front matter. For example:
 
