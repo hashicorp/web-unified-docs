@@ -1246,4 +1246,155 @@ The API includes endpoints for system-level operations, such as health checks an
 			})
 		})
 	})
+
+	describe('Real Product Config Integration', () => {
+		test('should work with actual vault product config', async () => {
+			// Clear any existing mocks to use real PRODUCT_CONFIG
+			vi.restoreAllMocks()
+
+			const mockVersionMetadata = {
+				vault: [{ version: 'v1.22.x', releaseStage: 'stable', isLatest: true }],
+			}
+
+			const partialContent = `---
+page_title: New Feature
+---
+
+This is always visible.
+
+<!-- BEGIN: Vault:>=v1.21.x -->
+This content requires v1.21.x or later.
+<!-- END: Vault:>=v1.21.x -->`
+
+			const mainContent = `---
+page_title: Test Page
+---
+
+# Test Page
+
+@include 'new-feature.mdx'
+
+Regular content.
+`
+
+			vol.fromJSON({
+				'/content/vault/v1.22.x/docs/test.mdx': mainContent,
+				'/content/vault/v1.22.x/docs/partials/new-feature.mdx': partialContent,
+			})
+
+			await buildMdxTransforms('/content', '/output', mockVersionMetadata)
+
+			const output = fs.readFileSync(
+				'/output/vault/v1.22.x/docs/test.mdx',
+				'utf8',
+			)
+
+			// Should include v1.21.x content since we're on v1.22.x
+			expect(output).toContain('This is always visible')
+			expect(output).toContain('This content requires v1.21.x or later')
+			expect(output).toContain('Regular content')
+			expect(output).not.toContain('@include')
+		})
+
+		test('should work with actual terraform-enterprise product config', async () => {
+			// Clear any existing mocks to use real PRODUCT_CONFIG
+			vi.restoreAllMocks()
+
+			const mockVersionMetadata = {
+				'terraform-enterprise': [
+					{ version: 'v202409-2', releaseStage: 'stable', isLatest: true },
+				],
+			}
+
+			const partialContent = `-> **Note:** This feature is only available in HCP Terraform Plus Edition.`
+
+			const mainContent = `---
+page_title: Test Page
+---
+
+# Test Page
+
+<!-- BEGIN: TFC:only -->
+@include 'tfc-feature.mdx'
+<!-- END: TFC:only -->
+
+Available in both products.
+`
+
+			vol.fromJSON({
+				'/content/terraform-enterprise/v202409-2/docs/test.mdx': mainContent,
+				'/content/terraform-enterprise/v202409-2/docs/partials/tfc-feature.mdx':
+					partialContent,
+			})
+
+			await buildMdxTransforms('/content', '/output', mockVersionMetadata)
+
+			const output = fs.readFileSync(
+				'/output/terraform-enterprise/v202409-2/docs/test.mdx',
+				'utf8',
+			)
+
+			// TFC:only content should be removed in terraform-enterprise
+			expect(output).not.toContain(
+				'This feature is only available in HCP Terraform',
+			)
+			expect(output).toContain('Available in both products')
+			expect(output).not.toContain('@include')
+		})
+
+		// NOTE: terraform-docs-common has versionedDocs: false in real config,
+		// so we need to use non-versioned paths for this test.
+		test('should work with actual terraform-docs-common product config', async () => {
+			// Clear any existing mocks to use real PRODUCT_CONFIG
+			vi.restoreAllMocks()
+
+			// Real terraform-docs-common has versionedDocs: false, so no version directories
+			const mockVersionMetadata = {
+				'terraform-docs-common': [
+					{ version: 'v0.0.x', releaseStage: 'stable', isLatest: true },
+				],
+			}
+
+			const partialContent = `This is shared content between TFC and TFE.
+
+<!-- BEGIN: TFC:only -->
+TFC-specific information.
+<!-- END: TFC:only -->
+
+<!-- BEGIN: TFEnterprise:only -->
+TFE-specific information.
+<!-- END: TFEnterprise:only -->`
+
+			const mainContent = `---
+page_title: Test Page
+---
+
+# Test Page
+
+@include 'shared-content.mdx'
+
+Common documentation.
+`
+
+			vol.fromJSON({
+				'/content/terraform-docs-common/docs/test.mdx': mainContent,
+				'/content/terraform-docs-common/docs/partials/shared-content.mdx':
+					partialContent,
+			})
+
+			await buildMdxTransforms('/content', '/output', mockVersionMetadata)
+
+			const output = fs.readFileSync(
+				'/output/terraform-docs-common/docs/test.mdx',
+				'utf8',
+			)
+
+			// In terraform-docs-common, TFC:only should be kept, TFEnterprise:only should be removed
+			expect(output).toContain('This is shared content')
+			expect(output).toContain('TFC-specific information')
+			expect(output).not.toContain('TFE-specific information')
+			expect(output).toContain('Common documentation')
+			expect(output).not.toContain('@include')
+		})
+	})
 })
