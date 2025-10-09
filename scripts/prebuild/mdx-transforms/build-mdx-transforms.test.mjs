@@ -450,8 +450,7 @@ AppRole is designed for machine authentication.
 			expect(output).not.toContain('auth "ldap"')
 			expect(output).not.toContain('POST /auth/ldap/config')
 
-			// CRITICAL: Content after Vault:>=v1.21.x block should be preserved
-			// This is the bug - when all nodes in range are removed, insideRange stays true
+			// Content after Vault:>=v1.21.x block should be preserved
 			expect(output).toContain('## AppRole Authentication')
 			expect(output).toContain('AppRole is designed for machine authentication')
 			expect(output).toContain('### Configuration Steps')
@@ -660,8 +659,6 @@ page_title: Test Page
 		})
 	})
 
-	// we don't need cross product support right now since this product doesn't have global partials
-	// but ill keep it around just in case
 	describe('Terraform Product Exclusions', () => {
 		test('should remove TFC:only block wrapping @include in terraform-enterprise', async () => {
 			vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({
@@ -766,7 +763,6 @@ page_title: Test Page
 				},
 			})
 
-			// Realistic partial content matching actual changelog structure
 			const partialContent = `### 2022-10-06
 
 -   Updated the [Policies API](/enterprise/api-docs/policies) with support for Open Policy Agent (OPA) policies.
@@ -833,8 +829,7 @@ Keep track of changes to the API for Terraform Cloud and Terraform Enterprise.
 			expect(output).not.toContain('Open Policy Agent (OPA)')
 			expect(output).not.toContain('policy_evaluations')
 
-			// CRITICAL: Content after TFC:only block should be preserved
-			// This is the bug - when all nodes in range are removed, insideRange stays true
+			// Content after TFC:only block should be preserved
 			expect(output).toContain('### 2022-09-21')
 			expect(output).toContain(
 				'Update State Versions with optional json-state-outputs',
@@ -916,7 +911,7 @@ page_title: File 2
 					},
 				})
 
-				// Multi-line partial (2 lines) - this was the bug case
+				// Multi-line partial (2 lines) - this was a bug case
 				const partialContent = `-> **Note:** Ephemeral workspace (automatic destroy runs) functionality is available in Terraform Cloud **Plus** Edition. Refer to [Terraform Cloud pricing](https://www.hashicorp.com/products/terraform/pric
 ing) for details.
 `

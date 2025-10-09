@@ -142,7 +142,9 @@ async function applyMdxTransforms(entry, versionMetadata = {}) {
 			// This ensures exclusion directives in global partials are properly evaluated
 			.use(remarkIncludePartialsPlugin, { partialsDir, filePath })
 
-		// Only apply content exclusion if this is NOT a global partial
+		// Make sure the content exclusion process skips looking through
+		// the global partial filepath (it should only be processed once the global
+		// partial is written to the file)
 		if (!isGlobalPartial) {
 			processor.use(transformExcludeContent, {
 				filePath,

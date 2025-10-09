@@ -92,6 +92,5 @@ function getComparisonFunction(operator) {
 	if (!fn) {
 		throw new Error(`Invalid comparison operator: ${operator}`)
 	}
-
 	return fn
 }

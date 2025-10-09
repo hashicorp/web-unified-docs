@@ -38,7 +38,6 @@ export function transformExcludeContent(options = {}) {
 			blocks.reverse().forEach((block) => {
 				routeAndProcessBlock(block, tree, options)
 			})
-
 			return tree
 		} catch (error) {
 			// Add file context to any errors

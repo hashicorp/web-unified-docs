@@ -211,7 +211,8 @@ This content should stay.
 -   You can now revoke, and revert the revocation of, module versions. Learn more about [Managing module versions](/terraform/enterprise/api-docs/private-registry/manage-module-versions).`)
 	})
 
-	// This is a good test in case partials are used and write to multiple unintended product directories
+	// This is fine in case partials are used and write to multiple unintended product directories in terraform
+	// But update/remove this test and add in specific functionality if the opposite of this cross product behavior is needed
 	it('should remove both TFC:only and TFEnterprise:only from terraform product', async () => {
 		const options = {
 			filePath: 'terraform/some-file.md',
@@ -234,27 +235,34 @@ This content should stay.
 		expect(result.trim()).toBe('This content should stay.')
 	})
 
-	it('should remove TFEnterprise:only with name parameter from terraform product', async () => {
+	it('should remove TFEnterprise:only from terraform-docs-common but when wrapped in list item/special text', async () => {
 		const options = {
-			filePath: 'terraform/some-file.md',
+			filePath: 'terraform-docs-common/cloud-docs/some-file.md',
 			version: 'v1.20.x',
-			repoSlug: 'terraform',
-			productConfig: { supportsExclusionDirectives: true },
+			repoSlug: 'terraform-docs-common',
+			productConfig: terraformDocsCommonConfig,
 		}
 
 		const markdown = `
-<!-- BEGIN: TFC:only -->
-This content should be removed.
-<!-- END: TFC:only -->
-<!-- BEGIN: TFEnterprise:only name:revoke -->
+
+## 2025-05-1
+
+-   Add \`agent-pool\` relationship to the [run task API](/terraform/enterprise/api-docs/run-tasks/run-tasks), which you can use to assign a run task to an agent pool.		
+	<!-- BEGIN: TFEnterprise:only name:revoke -->
 -   You can now revoke, and revert the revocation of, module versions. Learn more about [Managing module versions](/terraform/enterprise/api-docs/private-registry/manage-module-versions).
-<!-- END: TFEnterprise:only name:revoke -->
+	<!-- END: TFEnterprise:only name:revoke -->
+-   You can now revoke, and revert the revocation of, module versions. Learn more about [Managing module versions](/terraform-docs-common/api-docs/private-registry/manage-module-versions).
 
 This content should stay.
 `
 
 		const result = await runTransform(markdown, options)
-		expect(result.trim()).toBe('This content should stay.')
+		expect(result.trim()).toBe(`## 2025-05-1
+
+-   Add \`agent-pool\` relationship to the [run task API](/terraform/enterprise/api-docs/run-tasks/run-tasks), which you can use to assign a run task to an agent pool.		
+-   You can now revoke, and revert the revocation of, module versions. Learn more about [Managing module versions](/terraform-docs-common/api-docs/private-registry/manage-module-versions).
+
+This content should stay.`)
 	})
 
 	it('should remove TFC:only with name parameter from terraform-enterprise', async () => {
@@ -452,8 +460,6 @@ describe('transformExcludeContent - Real World Edge Cases (Bug Fixes)', () => {
 		const result = await runTransform(markdown, options)
 		expect(result.trim()).toBe(expected.trim())
 	})
-
-	// Bug 3 moved to build-mdx-transforms.test.mjs since it involves partials
 })
 
 describe('transformExcludeContent - Configuration', () => {

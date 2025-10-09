@@ -95,10 +95,12 @@ export async function applyFileMdxTransforms(entry, versionMetadata = {}) {
 		const processor = remark()
 			.use(remarkMdx)
 			// Process partials first, then content exclusion
-			// This ensures exclusion directives in global partials are properly evaluated
+			// This ensures exclusion directives in global
 			.use(remarkIncludePartialsPlugin, { partialsDir, filePath })
 
-		// Only apply content exclusion if this is NOT a global partial
+		// Make sure the content exclusion process skips looking through
+		// the global partial filepath (it should only be processed once the global
+		// partial is written to the file)
 		if (!isGlobalPartial) {
 			processor.use(transformExcludeContent, {
 				filePath,
