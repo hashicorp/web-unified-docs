@@ -256,7 +256,7 @@ Navigate to `/admin/settings` in your Terraform Enterprise instance.
 
 ## Error Handling
 
-Clear, contextual error messages:
+Example error messages:
 
 ```
 Unknown directive product: "InvalidProduct" in block "InvalidProduct:only" at lines 5-7. Expected: Vault, TFC, or TFEnterprise
@@ -302,12 +302,3 @@ Coverage:
 - **Single AST Traversal**: All directive blocks are parsed in one pass
 - **Reverse Processing**: Blocks are processed in reverse order for safe node removal
 - **Early Returns**: Products without exclusion support skip processing entirely
-
-## Debugging
-
-Set environment variables to enable debug logging:
-
-```bash
-DEBUG_AST_REMOVAL=true node script.mjs    # Log AST node removal decisions
-DEBUG_PROCESSOR=true node script.mjs      # Log processor routing decisions
-```
