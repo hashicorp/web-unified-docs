@@ -17,28 +17,13 @@ import { removeNodesInRange } from './ast-utils.mjs'
 export function processTFCBlock(directive, block, tree, options) {
 	const { repoSlug } = options
 
-	if (process.env.DEBUG_PROCESSOR === 'true') {
-		console.log(`\n>>> processTFCBlock called:`)
-		console.log(`    Directive: ${directive}`)
-		console.log(`    Block lines: ${block.start}-${block.end}`)
-		console.log(`    repoSlug: ${repoSlug}`)
-	}
-
 	// Handle "only" or "only name:something" format
 	if (directive === 'only' || directive.startsWith('only ')) {
 		// TFC:only should be kept ONLY in terraform-docs-common, removed everywhere else
 		if (repoSlug !== 'terraform-docs-common') {
-			if (process.env.DEBUG_PROCESSOR === 'true') {
-				console.log(
-					`    → Calling removeNodesInRange(${block.start}, ${block.end})`,
-				)
-			}
 			removeNodesInRange(tree, block.start, block.end)
-		} else {
-			if (process.env.DEBUG_PROCESSOR === 'true') {
-				console.log(`    → Keeping block (in terraform-docs-common)`)
-			}
 		}
+		// else keeping block in terraform-docs-common
 		return
 	}
 
@@ -61,28 +46,13 @@ export function processTFCBlock(directive, block, tree, options) {
 export function processTFEnterpriseBlock(directive, block, tree, options) {
 	const { repoSlug } = options
 
-	if (process.env.DEBUG_PROCESSOR === 'true') {
-		console.log(`\n>>> processTFEnterpriseBlock called:`)
-		console.log(`    Directive: ${directive}`)
-		console.log(`    Block lines: ${block.start}-${block.end}`)
-		console.log(`    repoSlug: ${repoSlug}`)
-	}
-
 	// Handle "only" and "only name:something" format
 	if (directive === 'only' || directive.startsWith('only ')) {
 		// TFEnterprise:only kept only in terraform-enterprise, removed everywhere else
 		if (repoSlug !== 'terraform-enterprise') {
-			if (process.env.DEBUG_PROCESSOR === 'true') {
-				console.log(
-					`    → Calling removeNodesInRange(${block.start}, ${block.end})`,
-				)
-			}
 			removeNodesInRange(tree, block.start, block.end)
-		} else {
-			if (process.env.DEBUG_PROCESSOR === 'true') {
-				console.log(`    → Keeping block (in terraform-enterprise)`)
-			}
 		}
+		// else keeping block (in terraform-enterprise)`)
 		return
 	}
 

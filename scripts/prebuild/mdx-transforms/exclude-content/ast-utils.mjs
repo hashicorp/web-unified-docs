@@ -9,10 +9,8 @@ import visit from 'unist-util-visit'
 const BEGIN_RE = /^(\s+)?<!--\s+BEGIN:\s+(?<block>.*?)\s+-->(\s+)?$/
 const END_RE = /^(\s+)?<!--\s+END:\s+(?<block>.*?)\s+-->(\s+)?$/
 
-/**
- * Helper to check if a node is a comment node (jsx, html, or code containing HTML comment)
- * Remark sometimes parses indented HTML comments as code nodes instead of jsx nodes
- */
+// Helper to check if a node is a comment node (jsx, html, or code containing HTML comment)
+// Remark sometimes parses indented HTML comments as code nodes instead of jsx nodes
 function isCommentNode(node) {
 	if (node.type === 'jsx' || node.type === 'html') {
 		return true
@@ -28,7 +26,6 @@ function isCommentNode(node) {
 
 /**
  * Parse all directive blocks from AST in a single pass
- * Simple, explicit error handling for malformed blocks
  *
  * @param {Object} tree Remark AST
  * @returns {Array} Array of block objects with start, end, and content
@@ -126,9 +123,6 @@ export function removeNodesInRange(tree, startLine, endLine) {
 		let insideRange = parentInsideRange
 		let lastEndLine = null // Track the line number where we last found an END comment
 
-		const debug = process.env.DEBUG_AST_REMOVAL === 'true'
-		const indent = '  '.repeat(depth)
-
 		for (let i = 0; i < nodes.length; i++) {
 			const node = nodes[i]
 			const hasPosition = node.position?.start?.line && node.position?.end?.line
@@ -138,14 +132,6 @@ export function removeNodesInRange(tree, startLine, endLine) {
 			// const hadChildren = !!node.children
 			const wasInsideRange = insideRange
 			if (node.children) {
-				if (debug && hasPosition) {
-					const nodeStart = node.position.start.line
-					const nodeEnd = node.position.end.line
-					console.log(
-						`${indent}[${i}] ${node.type} @ ${nodeStart}-${nodeEnd}, insideRange=${insideRange}`,
-					)
-					console.log(`${indent}  → Recursing into children`)
-				}
 				insideRange = removeFromNodes(node.children, depth + 1, insideRange)
 
 				// After recursion, children have already been removed.
@@ -155,11 +141,6 @@ export function removeNodesInRange(tree, startLine, endLine) {
 				// If we were inside range and still are, remove the parent (fully in range)
 				if (wasInsideRange && insideRange && !nodeIsComment) {
 					indicesToRemove.push(i)
-					if (debug) {
-						console.log(
-							`${indent}  → REMOVE ${node.type} (fully in excluded range)`,
-						)
-					}
 					continue
 				}
 
@@ -170,17 +151,6 @@ export function removeNodesInRange(tree, startLine, endLine) {
 				if (wasInsideRange && !insideRange) {
 					if (!node.children || node.children.length === 0) {
 						indicesToRemove.push(i)
-						if (debug) {
-							console.log(
-								`${indent}  → REMOVE ${node.type} (empty after exclusion)`,
-							)
-						}
-					} else {
-						if (debug) {
-							console.log(
-								`${indent}  → KEEP ${node.type} (has remaining children after exclusion)`,
-							)
-						}
 					}
 					continue
 				}
@@ -189,11 +159,6 @@ export function removeNodesInRange(tree, startLine, endLine) {
 				// the parent node CONTAINS the range start and should NOT be removed.
 				// Example: listItem containing [paragraph, BEGIN comment] - keep the listItem, only BEGIN removed
 				if (!wasInsideRange && insideRange) {
-					if (debug) {
-						console.log(
-							`${indent}  → KEEP ${node.type} (contains BEGIN comment)`,
-						)
-					}
 					continue
 				}
 			}
@@ -201,12 +166,6 @@ export function removeNodesInRange(tree, startLine, endLine) {
 			if (hasPosition) {
 				const nodeStart = node.position.start.line
 				const nodeEnd = node.position.end.line
-
-				if (debug && !node.children) {
-					console.log(
-						`${indent}[${i}] ${node.type} @ ${nodeStart}-${nodeEnd}, insideRange=${insideRange}`,
-					)
-				}
 
 				// Check if we've moved past the end of the range
 				// Only check this for comment nodes (jsx/html/code), as content nodes
@@ -219,9 +178,6 @@ export function removeNodesInRange(tree, startLine, endLine) {
 					nodeStart > endLine
 				) {
 					insideRange = false
-					if (debug) {
-						console.log(`${indent}  → Reset insideRange (moved past range)`)
-					}
 				}
 
 				// If we're NOT inside a range, check if this node starts one
@@ -231,11 +187,7 @@ export function removeNodesInRange(tree, startLine, endLine) {
 					// that happen to be on the same line as the END comment (e.g., line 24 has both
 					// "<!-- END: TFC:only -->" and "<!-- BEGIN: TFEnterprise:only -->")
 					if (lastEndLine !== null && nodeEnd === lastEndLine) {
-						if (debug && nodeIsComment) {
-							console.log(
-								`${indent}  → SKIP comment (on same line ${nodeEnd} as END comment we just processed)`,
-							)
-						}
+						// This is a BEGIN comment on the same line as the last END - skip it
 					}
 					// Check if this node marks the start of the range
 					// Only jsx/html/code nodes can be BEGIN comments
@@ -246,11 +198,6 @@ export function removeNodesInRange(tree, startLine, endLine) {
 					) {
 						insideRange = true
 						indicesToRemove.push(i)
-						if (debug) {
-							console.log(
-								`${indent}  → Set insideRange, REMOVE (BEGIN comment)`,
-							)
-						}
 					}
 				}
 				// If we're inside a range, all nodes are from the partial (except the END comment)
@@ -261,33 +208,17 @@ export function removeNodesInRange(tree, startLine, endLine) {
 						indicesToRemove.push(i)
 						insideRange = false
 						lastEndLine = nodeEnd // Remember the line where we found the END comment
-						if (debug) {
-							console.log(
-								`${indent}  → REMOVE (END comment), reset insideRange, remember lastEndLine=${nodeEnd}`,
-							)
-						}
 					}
 					// Otherwise, it's a partial node - remove it
 					else {
 						indicesToRemove.push(i)
-						if (debug) {
-							console.log(`${indent}  → REMOVE (partial node)`)
-						}
 					}
 				}
 			} else {
 				// Node without position (e.g., from included partial)
 				// Remove it if we're currently inside the range
-				if (debug) {
-					console.log(
-						`${indent}[${i}] ${node.type} @ no-pos, insideRange=${insideRange}`,
-					)
-				}
 				if (insideRange) {
 					indicesToRemove.push(i)
-					if (debug) {
-						console.log(`${indent}  → REMOVE (no position, insideRange)`)
-					}
 				}
 			}
 		}
