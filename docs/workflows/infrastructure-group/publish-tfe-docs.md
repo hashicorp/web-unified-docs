@@ -89,7 +89,7 @@ Content to exclude from Terraform Enterprise.
 <!-- END:   TFC:only name:<feature-name>  -->
 ```
 
-You can alternatively exclude content from displaying on the HCP Terraform docs using `BEGIN: TFEnterprise:only` and `END: TFEnterprise:only` exclusion directives:
+Conversely, you can exclude content from displaying on the HCP Terraform docs using `BEGIN: TFEnterprise:only` and `END: TFEnterprise:only` exclusion directives:
 
 ```mdx
 <!-- BEGIN: TFEnterprise:only name:<feature-name> -->
