@@ -18,7 +18,8 @@ import {
 	rewriteInternalRedirectsPlugin,
 	loadRedirects,
 } from './rewrite-internal-redirects/rewrite-internal-redirects.mjs'
-import { transformExcludeTerraformContent } from './exclude-terraform-content/index.mjs'
+import { transformExcludeContent } from './exclude-content/index.mjs'
+import { PRODUCT_CONFIG } from '#productConfig.mjs'
 
 const CWD = process.cwd()
 const VERSION_METADATA_FILE = path.join(CWD, 'app/api/versionMetadata.json')
@@ -86,10 +87,30 @@ export async function applyFileMdxTransforms(entry, versionMetadata = {}) {
 
 		const { data, content } = grayMatter(fileString)
 
-		const remarkResults = await remark()
+		// Check if this file is in a global/partials directory
+		// Global partials should not have content exclusion applied to them
+		// as they are version-agnostic and shared across all versions
+		const isGlobalPartial = filePath.includes('/global/partials/')
+
+		const processor = remark()
 			.use(remarkMdx)
-			.use(transformExcludeTerraformContent, { filePath })
+			// Process partials first, then content exclusion
+			// This ensures exclusion directives in global
 			.use(remarkIncludePartialsPlugin, { partialsDir, filePath })
+
+		// Make sure the content exclusion process skips looking through
+		// the global partial filepath (it should only be processed once the global
+		// partial is written to the file)
+		if (!isGlobalPartial) {
+			processor.use(transformExcludeContent, {
+				filePath,
+				version,
+				repoSlug: entry.repoSlug,
+				productConfig: PRODUCT_CONFIG[entry.repoSlug],
+			})
+		}
+
+		const remarkResults = await processor
 			.use(paragraphCustomAlertsPlugin)
 			.use(rewriteInternalRedirectsPlugin, {
 				redirects,
