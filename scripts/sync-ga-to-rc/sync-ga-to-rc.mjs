@@ -1,4 +1,7 @@
 /**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: BUSL-1.1
+ *
  * Sync GA change to RC docset
  *
  * The GA -> RC sync script helps with maintenance of long-lived release branches
