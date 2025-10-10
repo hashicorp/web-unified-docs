@@ -1,0 +1,422 @@
+---
+page_title: Sentinel CLI Configuration File Syntax
+sidebar_current: docs-configuration
+description: >-
+  The Sentinel CLI's configuration file can be used to control the
+  behavior of the simulator during apply and test operations.
+layout: docs
+---
+
+# Sentinel CLI Configuration File Syntax
+
+The Sentinel CLI's configuration file can be used to control the behavior
+of the simulator during [`apply`](/sentinel/commands/apply) and
+[`test`](/sentinel/commands/test) operations.
+
+## Usage
+
+The configuration file is used in different ways depending on what operation you
+are trying to execute.
+
+### Apply
+
+When using `sentinel apply`, configuration files that have the `.hcl`
+extension are loaded into a single configuration. This allows for configuration
+to be split across multiple files, which is useful for large policy sets. To
+supply a single configuration file, the `-config=FILE` flag can be used, where
+`FILE` is the path to the configuration file. This argument also allows for a
+`.json` configuration file to be supplied. The default is `sentinel.[hcl|json]`.
+
+See the [apply command](/sentinel/commands/apply) reference for more details.
+
+### Test
+
+When using `sentinel test`, each file matching `test/<policy>/*.[hcl|json]` is a
+configuration file representing a single test case, where `<policy>` is the name
+of the policy being tested. Configure assertions for each [test
+case](#test-cases) using the test section.
+
+See the [test command](/sentinel/commands/test) reference for more details.
+
+#### Remote sources
+
+When declaring a `policy` or `module` block within the configuration, a
+`source` attribute must be supplied. This `source` should declare the location
+of the resource, which can be either a local file or a URL pointing to a remote
+file. Examples of local `source` attributes are detailed both in the
+[Policies](#policies) and [Modules](#modules) sections of this page. Below
+are a few examples of remote `source` attributes.
+
+Example:
+
+```hcl
+policy "foo" {
+  source = "git::https://github.com/hashicorp/sentinel-example.git//main.sentinel"
+  enforcement_level = "hard-mandatory"
+}
+```
+
+The above example will fetch the policy from the provided URL and place it into
+the cache ready for use. Be sure to read the
+[Remote Sources](/sentinel/configuration/remote-sources) page for an
+in-depth overview.
+
+## Configuration File Reference
+
+The format of the configuration file is either JSON or HCL. The available
+blocks are:
+
+- [`mock`](#mock-imports) - A mock import specification.
+- [`policy`](#policies) - Configuration for a [policy](/sentinel/writing).
+- [`import`](#imports) - Configuration for a [module](/sentinel/extending/modules), [standard import](/sentinel/imports), [plugin](/sentinel/extending/plugins) or
+  [static import](/sentinel/extending/static-imports).
+- [`global`](#globals) - Data that is inserted into the global scope.
+- [`param`](#parameters) - Values for [parameters](/sentinel/language/parameters) defined in the policy.
+- [`test`](#test-cases) - Test cases for the [test command](/sentinel/commands/test).
+- [`sentinel`](#sentinel) - Configuration to manage the Sentinel runtime
+
+### Mock Imports
+
+Mock imports allow running a policy with an
+[import](/sentinel/concepts/imports) that you may not have access to or is
+too difficult to run. For example, it can be easier to mock data for [Terraform
+Enterprise](https://www.terraform.io/docs/enterprise/sentinel/index.html)
+locally instead of having to run a workspace through a plan/policy check cycle.
+
+Mock imports are specified using the `mock` block, labelled by the import
+name that you want to mock. For example, if you wanted to mock the `time`
+import, you could create an entry with the `time` label pointing to the data
+you want to mock.
+
+The data can take one of two forms:
+
+#### Mocking static data
+
+Static data can be mocked directly via HCl using the `data` attribute on the
+`mock` block.
+
+Example:
+
+```hcl
+mock "time" {
+  data = {
+    now = {
+      hour = 9
+      minute = 42
+    }
+  }
+}
+```
+
+With the above configuration, the following policy would pass:
+
+```json sentinel
+{
+  "policy": "import \"time\"\n\nmain = rule { time.now.hour is 9 }",
+  "mocks": {
+    "time": "now = { \"hour\": 9, \"minute\": 42 }"
+  }
+}
+```
+
+#### Mocking with Sentinel code
+
+There are some Sentinel types that raw data cannot mock, such as functions,
+and maps that don't have string keys. To mock this data, you can use
+a Sentinel file itself. In this case, you can set the `module` attribute to
+a file with the Sentinel code in it, relative to the current working directory in
+the event of `apply`, or relative to the configuration file location in the
+event of `test`.
+
+Note that `main` is not required in a mock data file.
+
+Example:
+
+```hcl
+mock "foo" {
+  module {
+    source = "mock-foo.sentinel"
+  }
+}
+```
+
+`mock-foo.sentinel` would contain:
+
+```sentinel
+bar = func() {
+	return "baz"
+}
+```
+
+With the above configuration, the following policy would pass:
+
+```json sentinel
+{
+  "policy": "import \"foo\"\n\nmain = rule { foo.bar() is \"baz\" }",
+  "mocks": {
+    "foo": "bar = func() { return \"baz\" }"
+  }
+}
+```
+
+### Policies
+
+The `policy` block allows for the the configuration of policies to assist
+with integrating into other commands.
+
+Each `policy` block has a label to identify the policy, with the block
+providing configuration of the policy. The available configuration options for
+policy are `source`, `enforcement_level` and an optional `params` attribute. The
+`source` key provides the location of the policy, while `enforcement_level` is
+currently used by integrations such as [HCP Terraform](/terraform/cloud-docs/policy-enforcement/manage-policy-sets#enforcement-levels).
+For more information on the `source` value, see [Policy and Module Sources](#policy-and-module-sources).
+
+The optional `params` attribute is used to provide values to [parameters](/sentinel/language/parameters)
+defined within the policy file.
+
+```hcl
+policy "foo" {
+  source = "foo.sentinel"
+  enforcement_level = "hard-mandatory"
+  params = {
+    "name" = "Sample"
+  }
+}
+```
+
+If `enforcement_level` is not supplied, it will fallback to the `advisory` level.
+
+### Imports
+
+Import configuration allows you to configure [modules](/sentinel/extending/modules),
+[standard imports](/sentinel/imports) and [import plugins](/sentinel/extending/plugins).
+
+The `import` is a multi-label block, with the first label determining the kind of import
+being configured. Currently the supported values for this label are:
+
+* [`"module"`](#import-modules) for configuring import modules
+* [`"plugin"`](#import-plugins) for configuring standard imports and import plugins
+* [`"static"`](#static-imports) for configuring static data files as imports
+
+#### Import Modules
+
+The `import "module"` block allows you to map a Sentinel import to a
+[module](/sentinel/extending/modules). The Sentinel CLI will parse the module
+source and make it available for evaluation with the policy.
+
+Each block has a label aligning to the name of the import, with
+the block set to the configuration object for the module. Currently, the only
+value within the configuration object is `source`, which points to the
+location of the module. For more information on the `source` value, see
+[Policy and Module Sources](#policy-and-module-sources).
+
+```hcl
+import "module" "foo" {
+  source = "modules/foo.sentinel"
+}
+
+import "module" "bar" {
+  source = "modules/bar.sentinel"
+}
+```
+
+Note when using [`sentinel test`](/sentinel/commands/test), module paths must be
+specified relative to the location of the configuration file.
+
+```hcl
+import "module" "foo" {
+  source = "../../modules/foo.sentinel"
+}
+
+import "module" "bar" {
+  source = "../../modules/bar/sentinel"
+}
+```
+
+See [Writing and Using a
+Module](/sentinel/extending/modules#writing-and-using-a-module) for more details
+on using a module with this configuration.
+
+### Import Plugins
+
+Import `"plugin"` configuration allows you to configure both [standard imports](/sentinel/imports)
+as well as [import plugins](/sentinel/extending/plugins) that can be used within
+a policy. If defining a custom import plugin, the Sentinel CLI will launch the
+plugin, connect to it, configure it, and execute it as needed by the policy.
+
+The available configuration attributes for an `import "plugin"` are:
+
+- `source` (string, required) - Path to the import plugin executable.
+- `args` (list of string, optional) - A list of arguments to pass to the
+  executable when starting it.
+- `env` (map of string to string, optional) - A set of environmental variables
+  to set when launching the plugin.
+- `config` (map, optional) - Configuration for the plugin itself. This is
+  specific to each individual plugin. Please reference the documentation for
+  the plugin for more information.
+
+Standard import example:
+
+```hcl
+import "plugin" "time" {
+  config = { "timezone": "Australia/Brisbane" }
+}
+```
+
+With the above configuration, the following policy would pass:
+
+```json sentinel
+{
+  "policy": "import \"time\"\n\nmain = time.now.zone_string is \"+10:00\"",
+  "mocks": {
+    "time": "now = { \"zone_string\": \"+10:00\" }"
+  }
+}
+```
+
+Custom plugin example:
+
+```hcl
+# flipper receives a boolean and returns the opposite
+import "plugin" "flipper" {
+  source = "/path/to/flipper"
+}
+```
+
+```json sentinel
+{
+  "policy": "import \"flipper\"\n\nmain = flipper.flip(false)",
+  "mocks": {
+    "flipper": "flip = func(input) { return not input }"
+  }
+}
+```
+
+#### Static Imports
+
+Static import configuration allows you to supply a data file and make
+it available to a policy via an import statement.
+
+The available configuration attributes for an `import "static"` are:
+
+- `source` (string, required) - Path to the static data file.
+- `format` (string, required) - The format of the static data. Currently, only
+  the "json" value is supported.
+
+Static import example:
+
+```hcl
+import "static" "people" {
+  source = "./data/people.json"
+  format = "json"
+}
+```
+
+```json sentinel
+{
+  "policy": "import \"people\"\n\nmain = length(people.names) > 0",
+  "mocks": {
+    "people": "names = [\"John Smith\", \"Jane Smith\"]"
+  }
+}
+```
+
+### Globals
+
+Global data is injected directly into the global scope of the policy.
+This can be used to simulate global data that may be injected by a
+Sentinel-enabled application.
+
+Global data is specified by the `global` key. The value is a map of
+variables to inject directly into the running policy.
+
+Example:
+
+```hcl
+global "time" {
+  value = {
+    now = {
+      day = 31
+    }
+  }
+}
+```
+
+With the above configuration, the following policy would pass. Notice
+that we don't have to do any `import`. The values of `global` are
+injected directly into the global scope.
+
+```json sentinel
+{
+  "policy": "main = time.now.day == 31",
+  "globals": {
+    "time": {
+      "now": {
+        "day": 31
+      }
+    }
+  }
+}
+```
+
+### Parameters
+
+The `param` section allows you to supply values for the
+[parameters](/sentinel/language/parameters) found in a policy. Values
+entered here will satisfy required parameters in a policy, in addition to
+override any defaults. Note that any of the manual parameter value methods
+supported by `sentinel apply` will override the values set here.
+
+```hcl
+param "foo" {
+  value = "bar"
+}
+```
+
+### Test Cases
+
+Test cases specify the test cases for the [test command](/sentinel/commands/test).
+
+Tests are specified by the `test` key. The value of this is a map of
+string to boolean. The key is the name of a rule and the value is the
+expected value of that rule. If a rule is not specified, than any value is
+allowed.
+
+Example:
+
+```hcl
+test {
+  rules = {
+    main = true
+    days = []
+  }
+}
+```
+
+For the policy:
+
+```json sentinel
+{
+  "policy": "valid_days = rule {\n\tfilter days as d {\n\td is \"monday\"\n\t}\n}\n\nmain = rule { valid_days is empty }",
+  "globals": {
+    "days": []
+  }
+}
+```
+
+For more information, read about the [test command](/sentinel/commands/test).
+
+### Sentinel
+
+The `sentinel` block provides configuration specific to the Sentinel runtime.
+
+An example of how the `sentinel` block can be used to enable the [terraform](/sentinel/features/terraform)
+feature is as follows:
+
+```hcl
+sentinel {
+  features = {
+    terraform = true
+  }
+}
+```

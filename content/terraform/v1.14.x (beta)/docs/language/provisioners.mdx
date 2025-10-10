@@ -1,0 +1,416 @@
+---
+page_title: Perform post-apply operations using provisioners
+description: Learn how to run commands and scripts and upload files to prepare resources for service after applying the configuration with provisioners, config-init, and configuration management software.
+---
+
+# Perform post-apply operations
+
+You may need to upload files, run commands and scripts, and perform other operations to prepare resources you create and manage with Terraform for service. Terraform is primarily designed for immutable infrastructure operations, so we strongly recommend using purpose-built solutions to perform post-apply operations. When you are unable to use a purpose-built solution, you can use functionality built into Terraform called provisioners.
+
+> **Hands-on:** Try the [Provision Infrastructure Deployed with Terraform](/terraform/tutorials/provision?utm_source=WEBSITE&utm_medium=WEB_IO&utm_offer=ARTICLE_PAGE&utm_content=DOCS) tutorials to learn how to use provisioners.
+
+## Overview
+
+You can use the following methods to prepare a resource for service after applying the configuration:
+
+- Pass data to the resource using the provider's `cloud-init` implementation.
+- Use the `cloudinit-config` data source.
+- Provision machine images with the necessary tools and packages.
+- Use configuration management tools.
+- Use provisioners built into Terraform.
+
+You should exercise extreme caution when using provisioners. Terraform cannot predictably model provisioner behaviors represented in the configuration. Additionally, most provisioners require direct network access to your servers and credentials to install and configure external software, which introduces complexity and potential security issues.
+
+## Requirements
+
+If you are using third-party software to set resources up for service, such as configuration management or automation software, refer to your vendor's documentation for specific requirements.
+
+### Provisioner requirements
+
+- Terraform v0.9 is required to use provisioners.
+- Terraform v1.10 and later is required to use ephemeral values in `provisioner` and  `connection` blocks.
+- Many provisioners require access to the remote resource. Refer to [Connect to remote resources](#connect-to-remote-resources) for instructions on configuring connection settings.
+- To use provisioners that upload files over SSH, the `scp` service program must be installed on the remote system.
+
+## Pass data into compute resources
+
+When deploying virtual machines or other similar compute resources, you can pass data to the resource. Most cloud computing platforms provide mechanisms to pass data to instances at the time of their creation. This makes the data immediately available on system boot.
+
+### Cloud-init
+
+Many Linux distribution disk images include [cloud-init](https://cloudinit.readthedocs.io/en/latest/), which lets you run scripts and configure systems on system boot up. Some providers let you configure cloud-init on the virtual machine's guest operating system. For providers that support cloud-init, the `user_data` and `custom_data` arguments are common methods for passing data. Refer to the provider documentation for details.
+
+In the following example, the `custom_data` argument in the `azurerm_linux_virtual_machine` resource specifies a file containing the data to pass to the resource on startup:
+
+```hcl
+resource "azurerm_linux_virtual_machine" "example" {
+  # . . .
+  custom_data = base64encode(file("custom-data.sh"))
+}
+```
+
+If you build custom machine images, you may be able to access the data passed to the resource using `user_data` or `metadata` at runtime. Refer to your vendor's documentation for more information.
+
+This approach is required when you use your cloud provider to automatically launch and destroy servers in a group because individual servers will launch unattended when Terraform is not available to provision them.
+
+Even if you're deploying individual servers directly with Terraform, using `user_data` or `metadata` to pass data allows for faster boot times. It also simplifies deployment by avoiding the need for direct network access from Terraform to the new server and for remote access credentials to be provided.
+
+### Input arguments
+
+Refer to the following provider resources for instructions on how to pass data to respective compute resources. Note that you can also specify cloud-config files as values. You can use the `cloudinit_config` data source to render cloud-config files. Refer to the [cloudinit_config documentation](https://registry.terraform.io/providers/hashicorp/cloudinit/latest/docs/data-sources/config) for more information.
+
+| Cloud service | Argument | Resource type |
+| --- | --- | --- |
+| Alibaba Cloud | `user_data` | [`alicloud_instance`](https://registry.terraform.io/providers/aliyun/alicloud/latest/docs/resources/instance), [`alicloud_launch_template`](https://registry.terraform.io/providers/aliyun/alicloud/latest/docs/resources/launch_template) |
+| Amazon EC2 | `user_data`, `user_data_base64` | [`aws_instance`](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/instance), [`aws_launch_template`](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/launch_template), [`aws_launch_configuration`](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/launch_configuration) |
+| Amazon Lightsail | `user_data` | [`aws_lightsail_instance`](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lightsail_instance) |
+| Microsoft Azure | `custom_data` | [`azurerm_virtual_machine`](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/virtual_machine), [`azurerm_virtual_machine_scale_set`](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/virtual_machine_scale_set) |
+| Google Cloud Platform | `metadata` | [`google_compute_instance`](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/compute_instance), [`google_compute_instance_group`](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/compute_instance_group) |
+| Oracle Cloud Infrastructure | `metadata`, `extended_metadata` |  [`oci_core_instance`](https://registry.terraform.io/providers/oracle/oci/), [`oci_core_instance_configuration`](https://registry.terraform.io/providers/oracle/oci/) |
+| VMware vSphere | `cdrom` block | Attach a virtual CDROM to [`vsphere_virtual_machine`](https://registry.terraform.io/providers/hashicorp/vsphere/latest/docs/resources/virtual_machine) using the `cdrom` block and specify a file called `user-data.txt` |
+
+> **Hands-on:** Try the [Provision Infrastructure with Cloud-Init](/terraform/tutorials/provision/cloud-init) tutorial.
+
+## Use the `cloud-config` data source to pass data
+
+You can add the [`cloudinit_config`](https://registry.terraform.io/providers/hashicorp/cloudinit/latest/docs) data source to your Terraform configuration and specify the files you want to provision as `text/cloud-config` content. The `cloudinit_config` data source renders multi-part MIME configurations for use with [cloud-init](https://cloudinit.readthedocs.io/en/latest/). Pass the files in the `content` field as YAML-encoded configurations using the `write_files` block.
+
+In the following example, the `my_cloud_config` data source specifies a `text/cloud-config` MIME part named `cloud.conf`. The `part.content` field is set to [`yamlencode`](/terraform/language/functions/yamlencode), which encodes the `write_files` JSON object as YAML so that the system can provision the referenced files.
+
+```hcl
+data "cloudinit_config" "my_cloud_config" {
+  gzip          = false
+  base64_encode = false
+
+  part {
+    content_type = "text/cloud-config"
+    filename     = "cloud.conf"
+    content = yamlencode(
+      {
+        "write_files" : [
+          {
+            "path" : "/etc/foo.conf",
+            "content" : "foo contents",
+          },
+          {
+            "path" : "/etc/bar.conf",
+            "content" : file("bar.conf"),
+          },
+          {
+            "path" : "/etc/baz.conf",
+            "content" : templatefile("baz.tpl.conf", { SOME_VAR = "qux" }),
+          },
+        ],
+      }
+    )
+  }
+}
+```
+
+## Build configuration into machine images
+
+You can use [HashiCorp Packer](/packer) or similar systems to build system configuration steps into custom images. Packer uses configuration management provisioners that can run installation steps during the build process before creating a system disk image that you can reuse.
+
+Configuration management software that uses a centralized server component may require you to register the software as part of the configuration process. You must delay the registration step until the final system is booted from your custom image. You can [pass the necessary information to the resource](#pass-data-into-compute-resources) to delay registration so that the configuration management software can register itself with the centralized server immediately on boot without requiring the resource to accept commands from Terraform over SSH or WinRM.
+
+> **Hands-on:** Try the [Provision Infrastructure with Packer](/terraform/tutorials/provision/packer) tutorial.
+
+## Run CLI commands
+
+The provider may support executing CLI commands on the resource. Refer to the resource provider documentation for instructions on how to invoke the CLI on your target system. If the provider does not include a mechanism for interacting with the resource CLI, we recommend opening a feature request ticket with the provider.
+
+As a workaround, you can use a Terraform provisioner to run commands on the machine where Terraform or on a remote resource. Refer to [Use a provisioner](#use-a-provisioner) for instructions on adding provisioners to the resource configuration.
+
+### Commands on the local machine
+
+To run commands on the machine where Terraform is installed, add the `provisioner "local-exec"` block to your `resource` block and specify commands to run in the `command` argument. The following example configures an `aws_instance` resource named `web` to run a local command that prints its IP address:
+
+```hcl
+resource "aws_instance" "web" {
+  # ...
+
+  provisioner "local-exec" {
+    command = "echo The server's IP address is ${self.private_ip}"
+  }
+}
+```
+
+Refer to the [`provisioner` block reference](/terraform/language/block/resource#provisioner) for details about the available arguments.
+
+### Commands on a remote resource
+
+To run commands on a remote resource, add the `remote-exec` provisioner type. This provisioner lets you run the CLI for your target system in order to create, update, or otherwise interact with remote objects in that system. You must include [a `connection` block](/terraform/language/block/resource#connection) for Terraform to connect to the server.
+
+## Execute remote scripts
+
+ If the provider does not include a mechanism for executing scripts, we recommend opening a feature request ticket with the provider.
+
+As a workaround, you can use a Terraform provisioner to execute scripts. Refer to [Use a provisioner](#use-a-provisioner) for instructions on adding provisioners to the resource configuration.
+
+When provisioners execute scripts on a remote system over SSH, they usually upload the script file to the remote system then use the default shell to execute it. Provisioners use this strategy because it allows you to use all of the typical scripting techniques supported by that shell, including preserving environment variable values and other context between script statements.
+
+### Remote system paths
+
+Terraform requires a suitable location in the remote filesystem where the provisioner can create the script file. By default, Terraform chooses a path containing a random number using the following patterns depending on how `target_platform` is set:
+
+- `"unix"`: `/tmp/terraform_%RAND%.sh`
+- `"windows"`: `C:/windows/temp/terraform_%RAND%.cmd`
+
+In both cases, the provisioner replaces the sequence `%RAND%` with randomly-chosen decimal digits.
+
+Provisioners cannot react directly to remote environment variables, such as `TMPDIR`, or use functions such as `mktemp` because they run on the system where Terraform is running, not on the remote system. As a result, you can configure the `script_path` argument in your `connection` block to override the path when your remote system doesn't use the filesystem layout expected by these default paths.
+
+```hcl
+connection {
+  # ...
+  script_path = "H:/terraform-temp/script_%RAND%.sh"
+}
+```
+
+Provisioners replace the `%RAND%` sequence with randomly-selected decimal digits to reduce the likelihood of collisions between multiple provisioners running concurrently.
+
+For Windows systems, we recommend using forward slashes instead of backslashes, despite the typical convention on Windows, because the Terraform language uses backslash as the quoted string escape character.
+
+### Execute scripts using SCP over SSH
+
+<Warning>
+
+When using Terraform v1.0 and earlier, avoid using untrusted external values as part of the `script_path` argument.
+
+</Warning>
+
+Provisioners pass the specified script path, after `%RAND%` expansion, directly to the remote `scp` process, which interprets the path. With the default configuration of `scp` as distributed with OpenSSH, you can place temporary scripts in the home directory of the remote user by specifying a relative path:
+
+```hcl
+connection {
+  type = "ssh"
+  # ...
+  script_path = "terraform_provisioner_%RAND%.sh"
+}
+```
+
+## Use a provisioner
+
+Terraform includes several built-in provisioners for helping you prepare resources for service when you cannot use machine images or configuration management. You should exhaust all alternatives before using provisioners in your configurations.
+
+### Add a provisioner to your resource
+
+Add one or more `provisioner "<TYPE>"` blocks to the `resource` block you want to perform operations on. You can specify the following types:
+
+  - `file`: Copies files or directories from the machine where Terraform is running to the new resource.
+  - `local-exec`: Invokes an executable on the local machine after Terraform creates the resource.
+  - `remote-exec`: Invokes an executable on the remote resource after Terraform creates the resource.
+
+For details about each provisioner type and its arguments, refer to the [`provisioner` block reference](/terraform/language/block/resource#provisioner).
+
+You can use ephemeral values and sensitive values in `provisioner` blocks. Refer to the following topics for more information:
+
+- [Ephemeral values](#ephemeral-values)
+- [Sensitive values](#sensitive-values)
+
+Expressions in the `provisioner` block cannot refer to their parent resource name. Instead, use the `self` object. Refer to [References to the parent `resource`](#references-to-the-parent-resource) for more information.
+
+All provisioners support the `when` and `on_failure` meta-arguments, which help you control when provisioners run and how they should behave when the Terraform operation fails. Refer to the following topics for more information:
+
+- [Determine when provisioners perform tasks](#determine-when-provisioners-perform-tasks)
+- [Configure provisioner failure behavior](#configure-provisioner-failure-behavior)
+
+### Connect to remote resources
+
+You can configure provisioners to connect to remote resources over SSH or using WinRM. Add a `connection` block to either the `provisioner` block or to the `resource` block. All provisioners in the configuration can use connection settings defined in the `resource` block. Connection settings defined in the `provisioner` block are specific to that provisioner. Refer to the [`connection` block reference](/terraform/language/block/resource#connection) for details.
+
+Because the SSH connection type is most often used with newly-created remote resources, SSH host key validation is disabled by default. If this is not acceptable, you can establish a separate mechanism for key distribution and explicitly set the `host_key` argument to verify against a specific key or signing CA.
+
+You can use ephemeral values in `connection` blocks. Refer to [Ephemeral values](#ephemeral-values) for more information.
+
+Expressions in the `connection` block cannot refer to their parent resource name. Instead, you can use the `self` object. Refer to [References to the parent `resource`](#references-to-the-parent-resource) for more information.
+
+In the following example, the `provisioner "file"` block connects to the resource as the root user over SSH and copies the `myapp.conf` file to the resource. A second `provisioner "file"` block connects to the resource as an administrator user using WinRM to copy a file to the resource's `C:/App` directory.
+
+```hcl
+provisioner "file" {
+  source      = "conf/myapp.conf"
+  destination = "/etc/myapp.conf"
+
+  connection {
+    type     = "ssh"
+    user     = "root"
+    password = var.root_password
+    host     = var.host
+  }
+}
+
+
+provisioner "file" {
+  source      = "conf/myapp.conf"
+  destination = "C:/App/myapp.conf"
+
+  connection {
+    type     = "winrm"
+    user     = "Administrator"
+    password = var.admin_password
+    host     = var.host
+  }
+}
+```
+
+The `connection` block supports connecting to different kinds of hosts. Refer to the following topics for additional argument configurations:
+
+- [Connect to a remote resource through a bastion host](#connect-to-a-remote-resource-through-a-bastion-host)
+- [Connect to a remote resource through a proxy](#connect-to-a-remote-resource-through-a-proxy)
+
+### Connect to a remote resource through a bastion host
+
+Configure the following arguments in your `connection` block to establish an indirect connection with a bastion host over SSH. Refer to the [`connection` block reference](/terraform/language/block/resource#connection) for additional details:
+
+- `bastion_host`: Set to `true` to enable the bastion host connection.
+- `bastion_host_key`: Specifies the public key from the remote host or the signing CA to verify the host connection.
+- `bastion_port`:  Specifies the port number to connect to.
+- `bastion_user`: Specifies the user for the connection.
+- `bastion_password`:	Specifies the password to use for authentication.
+- `bastion_private_key`: Specifies the contents of an SSH key file. You can load keys from a file on disk using the [`file` function](/terraform/language/functions/file).
+- `bastion_certificate`: Specifies the contents of a signed CA certificate.
+
+### Connect to a remote resource through a proxy
+
+Configure the following arguments in your `connection` block to establish a connection through an HTTP or SOCKS5 proxy over SSH. Refer to the [`connection` block reference](/terraform/language/block/resource#connection) for additional details:
+
+- `proxy_scheme`: Specify an `http`, `https`, or `socks5` proxy.
+- `proxy_host`: Specifies the proxy host name. Terraform connects to the proxy host first, then to the host specified in the  `host` or `bastion_host` arguments.
+- `proxy_port`:  Specifies the port number to the proxy host.
+- `proxy_user_name`: Specifies the user name to use for the connection. You only need to include this argument when authentication is required for an HTTP proxy server.
+- `proxy_user_password`: Specifies the password to use for the connection. You only need to include this argument when authentication is required for the HTTP proxy server.
+
+### References to the parent `resource`
+
+Expressions in `provisioner` blocks and `connection` blocks cannot refer to their parent resource by name. Instead, use the special `self` object, which represents the parent `resource` block. You can use the `self` object to access all of the resource attributes. For example, use `self.public_ip` to reference an `aws_instance`'s `public_ip` attribute.
+
+You must use the `self` object to reference the resource because using references in the configuration creates dependencies, and referring to a resource by name within its own
+block would create a dependency cycle.
+
+## Sensitive values
+
+You can use sensitive values in `provisioner` blocks. Terraform suppresses sensitive values in all log output. Refer to [Manage sensitive data](/terraform/language/manage-sensitive-data) for more information about using sensitive values in your configurations.
+
+### Ephemeral values
+
+You can use ephemeral values in `provisioner` blocks and `connection` blocks that enable provisioners to connect to remote resources. Terraform does not store ephemeral values in your plan or state or output them in logs. Refer to the following topics for more information about using ephemeral values in your configurations:
+
+- [`ephemeral` resources](/terraform/language/block/ephemeral)
+- [`ephemeral` variables](/terraform/language/block/variable#ephemeral)
+- [`ephemeral` output values](/terraform/language/block/output#ephemeral)
+
+### Determine when provisioners perform tasks
+
+By default, Terraform runs provisioners immediately after it finishes creating the resource, but you can set the `when` argument a Terraform stage control when provisioners perform their configured actions.
+
+### Creation-time provisioners
+
+If a provisioner that runs during resource creation fails, Terraform marks the resource as tainted so that it can destroy and recreate the tainted resource on the next `terraform apply`. Terraform taints resources when a creation-time provisioner fails because a failed provisioner can leave a resource in a semi-configured state. Because Terraform cannot model the provisioner behavior, the only way to ensure proper creation of a resource is to recreate it.
+
+You can change the default tainting behavior by setting the `on_failure` attribute to `continue`. Refer to [`on_failure` argument reference](/terraform/language/block/resource#on_failure) for more information.
+
+### Destroy-time provisioners
+
+To change the default behavior, set the  `when` argument to `destroy`, which configures the provisioner to run when Terraform destroys the parent resource. The following example configures Terraform to run the `echo` command after destroying the `web`:
+
+
+```hcl
+resource "aws_instance" "web" {
+  # ...
+
+  provisioner "local-exec" {
+    when    = destroy
+    command = "echo 'Destroy-time provisioner'"
+  }
+}
+```
+
+Destroy provisioners run before the resource is destroyed. If the provisioner fails, Terraform returns an error and reruns the provisioners on the next `terraform apply`. You should ensure that the destroy-time provisioners are safe to run multiple times.
+
+Enabling the [`create_before_destroy` argument](/terraform/language/block/resource#create_before_destroy) on the resource prevents destroy-time provisioners from running.
+
+#### Remove a `resource` block containing a destroy-time provisioner
+
+Destroy-time provisioners can only run if they remain in the configuration at the time a resource is destroyed. If a `resource` block with a destroy-time provisioner is removed entirely from the configuration, its provisioner configurations are removed along with it. The destroy provisioner won't run as a result. To work around this, configure a multi-step process to safely remove a resource with a destroy-time provisioner:
+
+1. Update the resource configuration to include `count = 0`.
+1. Apply the configuration to destroy any existing instances of the resource, including running the destroy provisioner.
+1. Remove the resource block entirely from configuration, along with its `provisioner` blocks.
+1. Apply the configuration again. No further action is necessary because the resources were already destroyed.
+
+Because of this limitation, you should use destroy-time provisioners sparingly and with care.
+
+#### Tainted resources
+
+A destroy-time provisioner within a resource that is tainted will not run. This includes resources that are marked tainted from a failed creation-time provisioner or tainted manually using `terraform taint`.
+
+### Configure multiple provisioners
+
+You can specify multiple provisioners within a `resource` block. Terraform executes provisioners in the order they are defined in the configuration file.
+
+You can add creation and destruction provisioners to the same `resource` block, but Terraform only runs the provisioners that are valid for a given operation. Terraform runs valid provisioners in the order they're defined in the configuration file.
+
+The following example contains two `local-exec` provisioners that run in order:
+
+```hcl
+resource "aws_instance" "web" {
+  # ...
+
+  provisioner "local-exec" {
+    command = "echo first"
+  }
+
+  provisioner "local-exec" {
+    command = "echo second"
+  }
+}
+```
+
+### Configure provisioner failure behavior
+
+By default, provisioners that fail also cause the `terraform apply` command to fail. To configure Terraform to continue its operation, set the `on_failure` argument to `continue`. Terraform ignores the error and continues the operation. Refer to the [`on_failure` argument reference](/terraform/language/block/resource#define-provisioner-failure-behaviors) for more information.
+
+In the following, Terraform continues to create the `web` resource even if the `echo` command fails:
+
+```hcl
+resource "aws_instance" "web" {
+  # ...
+
+  provisioner "local-exec" {
+    command    = "echo The server's IP address is ${self.private_ip}"
+    on_failure = continue
+  }
+}
+```
+
+### Install third-party provisioners
+
+We recommend using only provisioners built into Terraform, but you can use third-party provisioners as plugins when no other alternative is available. Place third-party provisioners into the `%APPDATA%\terraform.d\plugins` directory, `~/.terraform.d/plugins` directory, or in the directory where the Terraform binary is installed.
+
+## Run provisioners without a resource
+
+If you need to run provisioners that aren't directly associated with a specific resource, you can associate them with the [`terraform_data`](/terraform/language/resources/terraform-data) resource. Instances of the `terraform_data` resource implement the standard resource lifecycle, but do not manage a real infrastructure object. You can configure add `provisioner` and `connection` blocks to perform operations. You can also use its `input` argument, `triggers_replace` argument, and any meta-arguments to control exactly where in the dependency graph its provisioners run.
+
+In the following example, the `terraform_data` resource contains a `triggers_replace` argument, which instructs Terraform to reprovision the resource when any instance of the `cluster` is replaced. Because the bootstrap script can run on any instance of the cluster, the `connection` block connects to `aws_instance.cluster[0]`, which is the first instance provisioned:
+
+```hcl
+resource "aws_instance" "cluster" {
+  count = 3
+
+  # ...
+}
+
+resource "terraform_data" "cluster" {
+  triggers_replace = aws_instance.cluster[*].id
+
+  connection {
+    host = aws_instance.cluster[0].public_ip
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "bootstrap-cluster.sh ${join(" ", aws_instance.cluster[*].private_ip)}",
+    ]
+  }
+}

@@ -2,6 +2,7 @@
  * Copyright (c) HashiCorp, Inc.
  * SPDX-License-Identifier: BUSL-1.1
  */
+import { readFile } from 'node:fs/promises'
 
 import grayMatter from 'gray-matter'
 import { parse as jsoncParse } from 'jsonc-parser'
@@ -27,6 +28,9 @@ const headers = process.env.VERCEL_URL
 export const findFileWithMetadata = async (
 	filePath: string[],
 	versionMetaData: ProductVersionMetadata,
+	options: {
+		loadFromContentDir?: boolean
+	} = { loadFromContentDir: false },
 ) => {
 	const newFilePath = ifNeededAddReleaseStageToPath(
 		filePath,
@@ -34,6 +38,12 @@ export const findFileWithMetadata = async (
 	)
 
 	try {
+		if (options.loadFromContentDir) {
+			const filePathString = joinFilePath(newFilePath)
+			const fileContent = await readFile(filePathString, 'utf-8')
+			return Ok(fileContent)
+		}
+
 		const res = await fetch(`${SELF_URL}/${newFilePath.join('/')}`, {
 			cache: 'no-cache',
 			headers,
@@ -47,7 +57,9 @@ export const findFileWithMetadata = async (
 
 		return Ok(text)
 	} catch {
-		return Err(`Failed to read file at path: ${newFilePath.join('/')}`)
+		return Err(
+			`Failed to read file at path: ${newFilePath.join('/')}, with options: ${JSON.stringify(options, null, 2)}`,
+		)
 	}
 }
 
@@ -105,6 +117,7 @@ export const parseJsonc = (jsonString: string) => {
 		})
 
 		if (parserError.length > 0) {
+			console.log(`JSONC parse errors: ${JSON.stringify(parserError, null, 2)}`)
 			return Err(`Failed to parse JSONC: ${parserError}`)
 		}
 
@@ -135,4 +148,11 @@ function ifNeededAddReleaseStageToPath(
 	}
 
 	return newFilePath
+}
+
+export const joinFilePath = (path: string[] = []): string => {
+	return path
+		.filter(Boolean)
+		.join('/')
+		.replace(/\/{2,}/g, '/')
 }

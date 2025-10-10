@@ -3,10 +3,10 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-import { PRODUCT_CONFIG } from '../../../app/utils/productConfig.mjs'
+import { PRODUCT_CONFIG } from '#productConfig.mjs'
 import { collectHeadings } from './headings/collect-headings.mjs'
 import { collectCodeListItems } from './code-list-items/collect-code-list-items.mjs'
-import { getProductDirectoryFromFilePath } from '../../utils/file-path/product-directory/index.mjs'
+import { getProductDirectoryFromFilePath } from '#scriptUtils/file-path/product-directory/index.mjs'
 
 /**
  * @typedef {Object} FrontMatter

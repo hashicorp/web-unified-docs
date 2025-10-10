@@ -3,10 +3,10 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-import { findFileWithMetadata, parseJson } from '@utils/file'
-import { getProductVersionMetadata } from '@utils/contentVersions'
-import { errorResultToString } from '@utils/result'
-import { VersionedProduct } from '@api/types'
+import { findFileWithMetadata, parseJson } from '#utils/file'
+import { getProductVersionMetadata } from '#utils/contentVersions'
+import { errorResultToString } from '#utils/result'
+import { VersionedProduct } from '#api/types'
 
 /**
  * Parameters expected by `GET` route handler

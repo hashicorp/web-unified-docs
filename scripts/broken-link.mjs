@@ -12,7 +12,7 @@
  *   npm run broken-link dir1 dir2 dir3      # Checks multiple directories
  */
 
-import { execSync } from 'child_process'
+import { execSync } from 'node:child_process'
 
 // Get command line arguments (skip the first two which are node and script path)
 const args = process.argv.slice(2)
@@ -35,7 +35,8 @@ console.log(`\n🔍 Checking for broken links in: ${pathsToCheck}\n`)
 
 try {
 	// Build the Docker command
-	const dockerCmd = `docker run --init -it --rm -w /input -v $(pwd):/input lycheeverse/lychee ${pathsToCheck} -b https://developer.hashicorp.com/ --exclude-all-private --exclude '\\.(svg|gif|jpg|png)' --accept 200,429 --timeout=60 --max-concurrency 24`
+	// const dockerCmd = `docker run --init -it --rm -w /input -v $(pwd):/input lycheeverse/lychee ${pathsToCheck} -b https://developer.hashicorp.com/ --exclude-all-private --exclude '\\.(svg|gif|jpg|png)' --accept 200,429 --timeout=60 --max-concurrency 24`
+	const dockerCmd = `docker run --init -it --rm -w /input -v $(pwd):/input lycheeverse/lychee ${pathsToCheck} -b http://localhost:3000 --exclude-all-private --exclude '\\.(svg|gif|jpg|png)' --accept 200,429 --timeout=60 --max-concurrency 24`
 
 	// Execute the command
 	execSync(dockerCmd, { stdio: 'inherit' })
