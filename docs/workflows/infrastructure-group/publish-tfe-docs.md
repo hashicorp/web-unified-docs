@@ -47,7 +47,7 @@ If you need to update any existing documentation, or if you need to apply exclus
 
 Review and merge any other PRs opened against the release branch.
 
-Review and merge the `TFE Release <milestone>.<major>.x` release notes PR. The release engineer is responsible for merging the PR. The release engineer also prepares the release notes section of the docs.
+Review and merge the `TFE Release <milestone>.<major>.x` release notes PR. The release engineer is responsible for merging the PR. The release engineer also prepares the release notes section of the docs. Refer to [Release notes guidance](#release-notes-guidance) for assistance.
 
 ## On the day of the release
 
@@ -134,3 +134,92 @@ description: >-
 tfc_only: true
 ---
 ```
+
+### Release notes guidance
+
+Releasen notes should help readers understand what has changed, why, and what actions they need to take as a result. It's rarely ever appropriate to include a changelog entry without any edits in the release notes. 
+
+#### Include important and impactful updates
+
+The release notes are an opportunity to explain and advertise changes that significantly impact the user experience. Our changelog records every single change, but the release notes should only contain updates that do the following:
+
+- Address a salient user concern, such as security fixes
+- Let users do something new 
+- Significantly improve the user experience, such as major UI updates and performance improvements
+- Require or recommend that users take action, such as deprecated functionality and recommended upgrades 
+
+Omit minor UI changes and internal changes that don't directly affect the experience. 
+
+#### Focus on features 
+
+Start the update with a complete sentence that describes what part of the system has been changed. Don’t start with "Added", "Fixed", or "Changed", which is implied by the section title. 
+
+**Needs work**: 
+
+```
+Added Prometheus format for usage metrics.
+```
+
+**Better**: 
+
+```
+Usage metrics are available in Prometheus format.
+```
+
+#### Explain what and why 
+
+Practitioners may not understand new Terraform-specific feature names or internal jargon. Newer users may also need help understanding the impact of a new feature. Explain new features and their value in plain language. If you must include Terraform-specific jargon, explain the terminology. 
+
+For bug fixes, you may need to compare the fix to pain points in the previous version. Where possible, link to related documentation or tutorials. 
+
+**Needs work**:
+
+```mdx
+Added support for cloud integration when using the CLI.
+```
+
+**Better**: 
+
+```
+You can now use the [Terraform CLI integration](/terraform/cli/cloud) to run Terraform Enterprise from the command line. We recommend using this native integration for Terraform versions 1.1 or later because it provides an improved user experience and various enhancements.
+```
+
+
+**Needs Work**: 
+
+```
+Added variable sets.
+```
+
+**Better**: 
+
+```
+You can now define sets of variables and reuse them across multiple workspaces. For example, you could define a set of variables that contain  provider credentials and automatically apply it to all of the workspaces that use the provider. Refer to [Variable sets](/terraform/cloud-docs/workspaces/variables) for more information. 
+```
+
+
+#### Group related updates
+
+When applicable, combine content about the same part of the system into a single entry. Chunking related updates makes it easier for users to understand everything that has changed in components they care about.
+
+**Needs work**: 
+
+```
+Added warning to notify users of older provider documentation.
+Added an outline to the public provider documentation page.
+```
+
+**Better**: 
+
+```
+The private registry UI now displays a warning message for old versions of provider documentation with a link to the latest version. The UI includes an outline for provider documentation that lets you navigate more quickly between sections.
+```
+ 
+#### Refer to the reader as "you"
+
+Per the style guide, [address the reader as "you"](../../style-guide/general/point-of-view.md#address-the-reader-as-you). 
+
+
+#### Format single updates as a paragraph
+
+A list with one item isn’t a list. If there is only one update in a section, format it as a paragraph.
