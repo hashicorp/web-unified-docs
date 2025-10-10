@@ -361,4 +361,19 @@ describe('transformRewriteInternalLinks', () => {
 		)
 		expect(result).toBe(expectedOutput)
 	})
+
+	it('should rewrite definitions that include links', async () => {
+		const content = `[definition]: /terraform/language/some-page`
+		const entry = {
+			filePath: 'content/terraform/v1.5.x/docs/language/some-file.mdx',
+		}
+		const expectedOutput =
+			'[definition]: /terraform/language/v1.5.x/some-page\n'
+		const result = await transformRewriteInternalLinks(
+			content,
+			entry,
+			versionMetadata,
+		)
+		expect(result).toBe(expectedOutput)
+	})
 })
