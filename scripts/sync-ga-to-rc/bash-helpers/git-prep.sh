@@ -1,6 +1,12 @@
+# 
+# Copyright (c) HashiCorp, Inc.
+# SPDX-License-Identifier: BUSL-1.1
+# 
+# ------------------------------------------------------------------------------
+#
 # Git prep
 #
-# Syncing the GA and RC branches and create a new branch for the update PR.
+# Sync the GA or RC branches and create a new branch for the update PR.
 #
 # Expected usage: git-prep.sh <productKey> <gaBranch> <rcBranch>
 # For example:    git-prep.sh vault main vault/1.21.x

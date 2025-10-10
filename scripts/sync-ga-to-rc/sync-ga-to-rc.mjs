@@ -18,14 +18,6 @@
  * @param {String} gaBranch     Name of the GA branch, typically "main"
  * @param {String} overrideDate Optional local cutoff date and time in "YYYY-MM-DD HH:MM:SS" format
  *
- * Expected use:
- *   node sync-ga-to-rc.mjs product gaVersion rcVersion docTag gaBranch [overrideDate]
- *
- * Example:
- *   node sync-ga-to-rc.mjs vault 1.20.x 1.21.x rc main
- *
- * Example with override date:
- *   node sync-ga-to-rc.mjs vault 1.20.x 1.21.x rc main '2025-07-31 17:10:27'
  */
 
 import { readFileSync, writeFileSync } from 'node:fs'

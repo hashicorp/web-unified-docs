@@ -1,3 +1,9 @@
+# 
+# Copyright (c) HashiCorp, Inc.
+# SPDX-License-Identifier: BUSL-1.1
+# 
+# ------------------------------------------------------------------------------
+#
 # Only in GA
 #
 # Find files that exist in the GA directory but not the RC directory

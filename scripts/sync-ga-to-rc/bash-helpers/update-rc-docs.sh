@@ -1,5 +1,15 @@
-# Expected usage: push-to-rc-docs.sh <productKey> <gaFolder> <rcFolder> <safeListFile>
-# Example:        push-to-rc-docs.sh vault '1.20.x' '1.21.x (rc)' '../output/safe-list.txt'
+# 
+# Copyright (c) HashiCorp, Inc.
+# SPDX-License-Identifier: BUSL-1.1
+# 
+# ------------------------------------------------------------------------------
+# Update RC docs
+#
+# For every relative path in the input list, replace the RC version with the GA
+# version
+#
+# Expected usage: update-rc-docs.sh <productKey> <gaFolder> <rcFolder> <safeListFile>
+# Example:        update-rc-docs.sh vault '1.20.x' '1.21.x (rc)' '../output/safe-list.txt'
 
 # Pull in the common variable definitions
 currDir="$(dirname "$0")"

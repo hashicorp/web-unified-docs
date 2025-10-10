@@ -1,8 +1,15 @@
-# Git prep
+# 
+# Copyright (c) HashiCorp, Inc.
+# SPDX-License-Identifier: BUSL-1.1
+# 
+# ------------------------------------------------------------------------------
 #
-# Syncing the GA and RC branches and create a new branch for the update PR.
+# Local file/log prep
 #
-# Usage: log-prep.sh <logDir> <recordDir>
+# Reset or create the output directory and associated files
+#
+# Usage:   log-prep.sh <logDir> <recordDir>
+# Example: log-prep.sh '/home/web-unified-repo/scripts/sync-ga-to-rc/output' '/home/web-unified-repo/scripts/sync-ga-to-rc/data/run-records'
 
 # Pull in the common variable definitions
 currDir="$(dirname "$0")"

@@ -1,9 +1,17 @@
-# Create GitHub PR
+# 
+# Copyright (c) HashiCorp, Inc.
+# SPDX-License-Identifier: BUSL-1.1
+# 
+# ------------------------------------------------------------------------------
 #
-# Create a PR with the local changes
+# Get file delta
 #
-# Expected usage: get-file-delta.sh <produc> <gaFolder> <cutoff>
-# Example:        get-file-delta.sh vault vault/1.20.x ''
+# Look through every file in the target folder and check if the latest commit is
+# after the cutoff. If so, echo the details so the script can add it to the
+# result array
+#
+# Expected usage: get-file-delta.sh <product> <targetFolder> <cutoff>
+# Example:        get-file-delta.sh vault vault/1.20.x '2025-10-01 12:34:21'
 
 # Pull in the common variable definitions
 currDir="$(dirname "$0")"

@@ -1,8 +1,15 @@
-# Create GitHub PR
+# 
+# Copyright (c) HashiCorp, Inc.
+# SPDX-License-Identifier: BUSL-1.1
+# 
+# ------------------------------------------------------------------------------
 #
-# Create a PR with the local changes
+# Get branch creation date
 #
-# Expected usage: get-cutoff.sh <rcBranch>
+# Query the git logs to find the creation date (or oldest commit) for the target
+# branch.
+#
+# Expected usage: get-cutoff.sh <targetBranch>
 # Example:        get-cutoff.sh vault/1.21.x
 
 # Pull in the common variable definitions
@@ -10,14 +17,14 @@ currDir="$(dirname "$0")"
 . "${currDir}/definitions.sh"
 
 # Set variables from command line argument
-rcBranch="${1}"  # git branch name for RC docs
+targetBranch="${1}"  # git branch name for RC docs
 
 # Bail if any of the command line parameters were omitted
-if [[ -z ${rcBranch} ]] ; then exit ; fi
+if [[ -z ${targetBranch} ]] ; then exit ; fi
 
 cd "${repoRoot}"
 
-if [[ "" == "main" ]] ; then
+if [[ "${targetBranch}" == "main" ]] ; then
   # Find the earliest commit we can as the "creation" date; since git log
   # entries expire based on the setting for reflogexpire on the repo/branch
   branchDate=$(
@@ -25,7 +32,7 @@ if [[ "" == "main" ]] ; then
       --pretty=format:%ad               \
       --date=iso                        \
       --date=format:'%Y-%m-%d %H:%M:%S' \
-      "${rcBranch}"                     \
+      "${targetBranch}"                     \
       | tail -1
   )
 else
@@ -35,7 +42,7 @@ else
       --pretty=format:%ad               \
       --date=iso                        \
       --date=format:'%Y-%m-%d %H:%M:%S' \
-      "${rcBranch}" 
+      "${targetBranch}" 
   )
 fi
 

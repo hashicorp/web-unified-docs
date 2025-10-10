@@ -1,6 +1,13 @@
+# 
+# Copyright (c) HashiCorp, Inc.
+# SPDX-License-Identifier: BUSL-1.1
+# 
+# ------------------------------------------------------------------------------
+#
+# Common values used by the bash helper files
 
-#currDir=$(pwd)
-myDir="/home/goblin/repos/web-unified-docs/"
+#myDir=$(pwd)
+myDir="/home/goblin/repos/web-unified-docs/"  # temp line for testing
 localReposDir=${myDir%"/web-unified-docs"*}
 
 repoRoot="${localReposDir}/web-unified-docs" # Local root directory of the repo

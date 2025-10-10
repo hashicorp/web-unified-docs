@@ -1,3 +1,8 @@
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: BUSL-1.1
+ */
+
 import { createReadStream, readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 

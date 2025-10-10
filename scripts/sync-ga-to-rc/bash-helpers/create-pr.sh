@@ -1,9 +1,15 @@
-# Create GitHub PR
+# 
+# Copyright (c) HashiCorp, Inc.
+# SPDX-License-Identifier: BUSL-1.1
+# 
+# ------------------------------------------------------------------------------
+#
+# Create GitHub PR -- Currently disabled
 #
 # Create a PR with the local changes
 #
-# Expected usage: create-pr.sh <produc> <rcFolder> <rcBranch>
-# Example:        create-pr.sh 'vault' 'v1.21.x (rc)' 'vault/1.21.x'
+# Expected usage: create-pr.sh <produc> <rcFolder> <rcBranch> <prBranch>
+# Example:        create-pr.sh 'vault' 'v1.21.x (rc)' 'vault/1.21.x' 'bot/vault-ga-to-rc-sync-20251002'
 
 exit # PR creation currently buggy
 
