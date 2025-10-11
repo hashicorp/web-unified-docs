@@ -12,11 +12,12 @@ const END_RE = /^(\s+)?<!--\s+END:\s+(?<block>.*?)\s+-->(\s+)?$/
 // Helper to check if a node is a comment node (jsx, html, or code containing HTML comment)
 // Remark sometimes parses indented HTML comments as code nodes instead of jsx nodes
 function isCommentNode(node) {
-	if (node.type === 'jsx' || node.type === 'html') {
-		return true
-	}
 	// Check if it's a code node containing an HTML comment
-	if (node.type === 'code' && node.value) {
+	if (
+		(node.type === 'code' && node.value) ||
+		node.type === 'jsx' ||
+		node.type === 'html'
+	) {
 		return (
 			node.value.trim().startsWith('<!--') && node.value.trim().endsWith('-->')
 		)
