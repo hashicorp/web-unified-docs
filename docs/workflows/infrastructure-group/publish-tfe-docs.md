@@ -43,11 +43,12 @@ Apply any exclusion tags to prevent HCP Terraform-specifc content from publishin
 
 Review and merge the `HCP TF changes for TFE release <milestone>.<major>.x` PR into the `tfe-release/<milestone>.<major>.x` branch. During your review, verify that all of the changes are appropriate for Terraform Enterprise. If you’re unsure about an item, you can also ask in `#proj-tfe-releases`.
 
-If you need to update any existing documentation, or if you need to apply exclusion tags, you must also apply the changes to the corresponding files in the public `web-unified-docs` repository so that the next synchronization doesn't overwrite your changes.
+If you need to update any existing documentation or apply exclusion tags, you must also apply the changes to the corresponding files in the `terraform-docs-common` so that the next synchronization doesn't overwrite your changes.
 
+It's rare, but if you edit a file in the `terraform-docs-common` folder as part of your review, someone may edit and merge the same file in the public repository, resulting in collisions when merging to `main`. You may need to track down the author or reach out to one of the development teams to resolve merge conflicts that emerge in this scenario.   
 Review and merge any other PRs opened against the release branch.
 
-Review and merge the `TFE Release <milestone>.<major>.x` release notes PR. The release engineer is responsible for merging the PR. The release engineer also prepares the release notes section of the docs. Refer to [Release notes guidance](#release-notes-guidance) for assistance.
+Review the `TFE Release <milestone>.<major>.x` release notes PR. The release engineer is responsible for merging the PR. The release engineer also prepares the release notes section of the docs. Refer to [Release notes guidance](#release-notes-guidance) for assistance.
 
 ## On the day of the release
 
