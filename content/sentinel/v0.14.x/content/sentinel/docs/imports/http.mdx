@@ -1,0 +1,305 @@
+---
+page_title: 'Import: http'
+sidebar_title: 'http'
+sidebar_current: docs-imports-http
+description: The http import enables the use of HTTP-accessible data from outside the runtime in Sentinel policy rules.
+layout: docs
+---
+
+# Import: http
+
+The http import enables the use of HTTP-accessible data from outside
+the runtime in Sentinel policy rules.
+
+At the center of the import is the [`get()`](#clientgeturl_or_request) function, which issues a GET
+request and returns a `response` type:
+
+```sentinel
+import "http"
+
+resp = http.get("https://example.hashicorp.com")
+main = rule { resp.body contains "something" }
+```
+
+By default, any request response that is not a successful "200 OK" HTTP
+response causes a policy error. See
+[`accept_status_codes`](#clientaccept_status_codeslist) for more information and
+how to customize this behavior.
+
+For more advanced requests which require setting request headers, use a
+[`request` type](#type-request):
+
+```sentinel
+import "http"
+import "json"
+
+param token
+
+req = http.request("https://example.hashicorp.com").with_header("Authorization", "token "+token)
+resp = json.unmarshal(http.get(req).body)
+main = rule { resp["some_key"] is true }
+```
+
+The `with_header` function above returns the `request` object with the
+`Authorization` HTTP header set to value of the variable `some_value`. Many
+of the methods within the http import API are designed around this concept
+of method chaining, allowing for complex building of HTTP requests
+encapsulated in functions. The following is an idiomatic example further
+demonstrating this pattern:
+
+```sentinel
+import "http"
+import "json"
+
+param github_user
+param github_token
+
+client = func(req) {
+  return http.with_timeout(5).with_retries(3)
+}
+
+github_request = func(path) {
+  full_url = "https://api.github.com" + path
+  return http.request(full_url).
+    with_basic_auth(github_user, github_token).
+    with_header("Accept", "application/vnd.github.v3+json").
+    with_header("Custom", "foo"),
+}
+
+default_response = client.get(github_request("/example"))
+
+# Override the Custom header for this single request
+custom_header_response = json.unmarshal(
+  client.get(
+    github_request("/example").with_header("Custom", "bar"),
+  ),
+)
+
+# Override the timeout value for a known slower request
+slow_response = json.unmarshal(
+  client.with_timeout(15).get(github_request("/slow-endpoint")),
+)
+
+some_key_is_true = rule { json.unmarshal(default_response.body)["some_key"] is true }
+body_contains_text = rule { custom_header_response.body contains "something" }
+response_is_ok = rule { slow_response.status_code is 200 }
+
+main = rule { some_key_is_true and body_contains_text and response_is_ok }
+```
+
+### http.client
+
+Retrieve the base HTTP client with default settings. The returned client may be
+configured by calling configuration functions on it; all of these configuration
+functions on are also aliased as top-level functions in this namespace. See
+[`client`](#type-client) below.
+
+### http.request(url)
+
+Create a new [`request`](#type-request) to the specified `url` (string). A
+`request` type enables customization of headers and other concerns before then
+providing the constructed `request` to [`get()`](#clientgeturl_or_request).
+
+```sentinel
+req = http.request("example.hashicorp.com/foo").with_header("Foo", "bar")
+resp = http.get(req)
+```
+
+## Type: client
+
+All of the following configuration functions on the default client are also
+aliased as top-level functions in the import. This allows a short-hand (and
+idiomatic) way of configuring a new client without having to directly access
+`http.client` each time:
+
+```sentinel
+# The following two lines are semantically the same:
+resp = http.client.with_timeout(5).get(url)
+resp = http.with_timeout(5).get(url)
+```
+
+### client.get(url_or_request)
+
+Issue a GET request with a URL string or a `request` type. Returns a `response`
+type.
+
+When `url_or_request` is a string, a GET request is made with the URL
+specified by the string. To customize HTTP headers and other settings, pass
+a request. By default, a request has a timeout value of 10 seconds and 1
+retry. These settings can be adjusted with [`with_timeout()`](#clientwith_timeoutinteger) and
+[`with_retries()`](#clientwith_retriesinteger), respectively.
+
+If the response is one of the following redirect codes, `get()` follows the
+redirect, up to a maximum of 10 redirects:
+
+301 (Moved Permanently)  
+302 (Found)  
+303 (See Other)  
+307 (Temporary Redirect)  
+308 (Permanent Redirect)
+
+If the redirect limit is exceeded, the result is a policy error.
+
+By default, after any redirects are followed (up to the maximum), any request
+response that is not a successful "200 OK" response causes a policy error. See
+[`accept_status_codes`](#clientaccept_status_codeslist) for more information
+and how to customize this behavior.
+
+### client.accept_status_codes(list)
+
+Configures a client to not automatically cause a policy failure if
+the resulting response's status code is in `list`. Any status code received
+that is not present in this list will trigger a runtime error.
+
+By default, any request response that is not a successful "200 OK" response
+causes a policy error. This is for convenience, as the most common scenario
+by far is to receive a response and immediately signal a policy error if the
+status code is not 200. Use this scoping to specify a list of non-redirect
+HTTP codes that you wish to accept without error and evaluate the response
+yourself.
+
+Redirects are not considered final status codes in this context. That is,
+redirects are always followed up to the maximum allowed value (see [`get()`](#clientgeturl_or_request))
+and the final response code in the redirect chain is validated against
+`list`.
+
+```sentinel
+resp = http.accept_status_codes([200, 404]).get(url)
+main = rule { resp.status_code is 404 }
+```
+
+### client.accepted_status_codes
+
+Returns a list of the client's accepted status codes.
+
+```sentinel
+client = http.accept_status_codes([200, 404])
+main = rule { client.accepted_status_codes contains 404 }
+```
+
+### client.with_retries(integer)
+
+Sets the maximum number of retries, specified by `integer`, that should be
+attempted on an unsuccessful request. An unsuccessful request is considered
+to be any 5xx response except `501 (Not Implemented)` or a request timeout.
+By default, one retry is attempted.
+
+The maximum number of retries is 10, for a total of 11 request attempts.
+When a request exceeds the maximum number of retries without a response, the
+result is a policy error. Specifying a number larger than this will result
+in a runtime error.
+
+Between each retry, an exponentially increasing delay is observed, allowing
+time for the server to recover. This delay starts at 1 second for the first
+retry and increases each attempt thereafter. The maximum delay for a single
+attempt is 30 seconds.
+
+Retries can be disabled by specifying 0.
+
+### client.retries
+
+Returns the client's configured number of retries as an integer.
+
+### client.with_timeout(integer)
+
+Sets the request timeout to the number of seconds indicated by `integer`.
+
+Each individual request performed by the HTTP client will be limited by the
+given request timeout. This timeout includes connection time, any redirects,
+and reading the response body.
+
+A maximum of 30 seconds is allowed. Specifying a number larger than this
+will result in a runtime error.
+
+By default, requests will time out after 10 seconds.
+
+### client.timeout
+
+Returns the client's configured timeout in whole seconds as an integer.
+
+### client.without_certificate_verification()
+
+Skips verification of TLS certificates during secure HTTP operations,
+allowing for requests to `https://` endpoints which are secured with a TLS
+certificate signed by an untrusted certificate authority. Takes no arguments.
+
+By default, the HTTP client will trigger a runtime error if a TLS certificate
+presented by a server is from an untrusted certificate authority.
+
+Do not change this setting unless you are aware of the risks involved.
+Without verification, TLS accepts any certificate presented by the server
+and any host name in that certificate. In this mode, TLS is susceptible to
+man-in-the-middle attacks. This option should only be used for testing or in
+trusted networks with self-signed certificates.
+
+```sentinel
+http.without_certificate_verification().get(url)
+```
+
+### client.certificate_verification
+
+Returns true if the client requires TLS certificates to be verifiable.
+
+## Type: request
+
+### request.url
+
+Returns the request URL as a string.
+
+### request.headers
+
+Returns the configured request headers as a string-keyed map of strings.
+
+### request.with_header(key, value)
+
+Returns a `request` with the header `key` (string) set to `value` (string).
+
+Values are overridden on subsequent calls to the same `key`. To specify
+multiple values, use the existing value when setting the new one.
+
+```sentinel
+original = http.request("http://example.hashicorp.com").with_header("Foo", "bar")
+overridden = original.with_header("Foo", "baz")
+multi_value = original.with_header("Foo", original.headers["Foo"] + ",baz")
+
+main = rule {
+  original.headers["Foo"] is "bar" and
+  overridden.headers["Foo"] is "baz" and
+  multi_value.headers["Foo"] is "bar,baz"
+}
+```
+
+### request.with_basic_auth(username, password)
+
+Returns a `request` with the `Authorization` header set to use HTTP Basic
+Authentication with the provided username and password.
+
+Note that with HTTP Basic Authentication the provided username and password
+are encoded, but not encrypted.
+
+## Type: response
+
+### response.status_code
+
+The response status code as an integer, e.g. `200`.
+
+### response.headers
+
+The response headers as a map.
+
+### response.body
+
+The response body as a string. Callers should unmarshal the content to a useful
+representation as necessary based on the content type. For example, if the
+response is in JSON:
+
+```sentinel
+import "http"
+import "json"
+
+# This example endpoint returns {"some_key": true}
+req = http.request("https://example.hashicorp.com/some-json")
+
+resp = json.unmarshal(http.get(req).body)
+main = rule { keys(resp) contains "some_key" and resp["some_key"] is true }
+```

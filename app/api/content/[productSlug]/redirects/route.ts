@@ -3,11 +3,11 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-import { getProductVersionMetadata } from '@utils/contentVersions'
-import { findFileWithMetadata, parseJsonc } from '@utils/file'
-import { errorResultToString } from '@utils/result'
-import { ProductParam } from '@api/types'
-import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
+import { getProductVersionMetadata } from '#utils/contentVersions'
+import { findFileWithMetadata, parseJsonc } from '#utils/file'
+import { errorResultToString } from '#utils/result'
+import { ProductParam } from '#api/types'
+import { PRODUCT_CONFIG } from '#productConfig.mjs'
 
 /**
  * Parameters expected by `GET` route handler
@@ -39,7 +39,9 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 		'redirects.jsonc',
 	]
 
-	const readFileResult = await findFileWithMetadata(filePath, versionMetadata)
+	const readFileResult = await findFileWithMetadata(filePath, versionMetadata, {
+		loadFromContentDir: process.env.NODE_ENV === 'development',
+	})
 	if (!readFileResult.ok) {
 		return new Response('Not found', { status: 404 })
 	}

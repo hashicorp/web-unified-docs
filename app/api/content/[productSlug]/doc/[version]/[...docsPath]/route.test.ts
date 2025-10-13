@@ -13,13 +13,13 @@ import {
 	MockInstance,
 } from 'vitest'
 import { GET } from './route'
-import { Err, Ok } from '@utils/result'
-import { getProductVersionMetadata } from '@utils/contentVersions'
+import { Err, Ok } from '#utils/result'
+import { getProductVersionMetadata } from '#utils/contentVersions'
 import { PRODUCT_CONFIG } from '__fixtures__/productConfig.mjs'
-import { parseMarkdownFrontMatter, findFileWithMetadata } from '@utils/file'
-import { mockRequest } from '@utils/mockRequest'
+import { parseMarkdownFrontMatter, findFileWithMetadata } from '#utils/file'
+import { mockRequest } from '#utils/mockRequest'
 
-vi.mock(import('@utils/contentVersions'), async (importOriginal: any) => {
+vi.mock('#utils/contentVersions', async (importOriginal: any) => {
 	const mod = await importOriginal()
 	return {
 		...mod,
@@ -27,7 +27,7 @@ vi.mock(import('@utils/contentVersions'), async (importOriginal: any) => {
 	}
 })
 
-vi.mock(import('@utils/file'), async (importOriginal: any) => {
+vi.mock('#utils/file', async (importOriginal: any) => {
 	const mod = await importOriginal()
 	return {
 		...mod,
@@ -38,14 +38,14 @@ vi.mock(import('@utils/file'), async (importOriginal: any) => {
 })
 
 // Mock the versionMetadata json import in the route file
-vi.mock('@api/versionMetadata.json', () => {
+vi.mock('#api/versionMetadata.json', () => {
 	return {
 		default: {},
 	}
 })
 
 // Mock the docsPathsAllVersions json import in the route file
-vi.mock('@api/docsPathsAllVersions.json', () => {
+vi.mock('#api/docsPathsAllVersions.json', () => {
 	return {
 		default: {
 			'terraform-plugin-framework': {},
@@ -55,7 +55,7 @@ vi.mock('@api/docsPathsAllVersions.json', () => {
 })
 
 // Mock the product config import in the route file
-vi.mock('@utils/productConfig.mjs', () => {
+vi.mock('#productConfig.mjs', () => {
 	return {
 		PRODUCT_CONFIG: {
 			'terraform-enterprise': { contentDir: 'docs', versionedDocs: true },

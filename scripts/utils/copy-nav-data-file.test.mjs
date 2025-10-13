@@ -2,16 +2,16 @@
  * Copyright (c) HashiCorp, Inc.
  * SPDX-License-Identifier: BUSL-1.1
  */
+import fs from 'node:fs'
+import path from 'node:path'
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import fs from 'fs'
-import path from 'path'
 import { copyNavDataFile } from './copy-nav-data-file.mjs'
-import { addVersionToNavData } from '../add-version-to-nav-data.mjs'
+import { addVersionToNavData } from '../prebuild/add-version-to-nav-data.mjs'
 
 vi.mock('node:fs')
-vi.mock('path')
-vi.mock('../add-version-to-nav-data.mjs')
+vi.mock('node:path')
+vi.mock('../prebuild/add-version-to-nav-data.mjs')
 
 describe('copyNavDataFile', () => {
 	beforeEach(() => {

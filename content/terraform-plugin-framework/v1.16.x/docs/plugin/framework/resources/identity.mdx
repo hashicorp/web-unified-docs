@@ -1,0 +1,257 @@
+---
+page_title: Identify resources
+description: >-
+  Learn how to implement resource identity in the Terraform plugin framework.
+---
+
+# Resource Identity
+
+A resource identity is a data object, determined by the provider, that is stored alongside the resource state to uniquely identify a remote object. Resource identity is supported in Terraform 1.12 and later.
+
+A resource identity should have the following properties:
+- The resource identity must correspond to at most one remote object per provider, across all instances of that provider.
+- Given a resource identity (during `import`), the provider must be able to determine whether the corresponding remote object exists, and if so, return the resource state.
+- The identity data for a remote object must not change during its lifecycle from creation to deletion, or until the provider [upgrades](/terraform/plugin/framework/resources/identity-upgrade) the resource identity schema.
+
+
+
+## Schema
+
+To define the identity object for a managed resource, a resource identity [schema](/terraform/plugin/framework/handling-data/schemas) is provided that consists of a map of attribute names and associated behaviors.
+
+The resource identity schema is similar to the resource state schema, but with the following differences:
+- The identity schema only supports primitive types and list types, which are represented by the following attributes:
+
+| Attribute                                                                          | ElementType                                                                    |
+|------------------------------------------------------------------------------------|--------------------------------------------------------------------------------|
+| [`BoolAttribute`](/terraform/plugin/framework/handling-data/attributes/bool)       | N/A                                                                            |
+| [`Float32Attribute`](/terraform/plugin/framework/handling-data/attributes/float32) | N/A                                                                            |
+| [`Float64Attribute`](/terraform/plugin/framework/handling-data/attributes/float64) | N/A                                                                            |
+| [`Int32Attribute`](/terraform/plugin/framework/handling-data/attributes/int32)     | N/A                                                                            |
+| [`Int64Attribute`](/terraform/plugin/framework/handling-data/attributes/int64)     | N/A                                                                            |
+| [`NumberAttribute`](/terraform/plugin/framework/handling-data/attributes/number)   | N/A                                                                            |
+| [`StringAttribute`](/terraform/plugin/framework/handling-data/attributes/string)   | N/A                                                                            |
+| [`ListAttribute`](/terraform/plugin/framework/handling-data/attributes/list)       | [`types.BoolType`](/terraform/plugin/framework/handling-data/types/bool)       |
+| [`ListAttribute`](/terraform/plugin/framework/handling-data/attributes/list)       | [`types.Float32Type`](/terraform/plugin/framework/handling-data/types/float32) |
+| [`ListAttribute`](/terraform/plugin/framework/handling-data/attributes/list)       | [`types.Float64Type`](/terraform/plugin/framework/handling-data/types/float64) |
+| [`ListAttribute`](/terraform/plugin/framework/handling-data/attributes/list)       | [`types.Int32Type`](/terraform/plugin/framework/handling-data/types/int32)     |
+| [`ListAttribute`](/terraform/plugin/framework/handling-data/attributes/list)       | [`types.Int64Type`](/terraform/plugin/framework/handling-data/types/int64)     |
+| [`ListAttribute`](/terraform/plugin/framework/handling-data/attributes/list)       | [`types.NumberType`](/terraform/plugin/framework/handling-data/types/number)   |
+| [`ListAttribute`](/terraform/plugin/framework/handling-data/attributes/list)       | [`types.StringType`](/terraform/plugin/framework/handling-data/types/string)   |
+
+- Unlike the resource state schema, the resource identity schema does not support behaviors such as `Required` and `Computed`. All identity data is set by the provider, so the entire object is treated as `Computed`. Two behaviors are allowed for each identity schema to assist with importing a resource by identity, `RequiredForImport` and `OptionalForImport`.
+    - `RequiredForImport` only: A practitioner must configure the attribute to a known value (not `null`) during import, otherwise Terraform automatically raises an error diagnostic for the missing value.
+    - `OptionalForImport` only: A practitioner must configure the value to a known value or `null` during import.
+
+It is expected that exactly one of `RequiredForImport` or `OptionalForImport` is set to true. Regardless of which option is chosen, the provider can decide exactly what data is stored in the identity during import, similar to `Computed` attributes in resource state.
+
+## Defining Identity
+
+The identity schema can be set in a new `IdentitySchema` method, which is defined in the `resource.ResourceWithIdentity` interface:
+
+```go
+var _ resource.ResourceWithIdentity = ThingResource{} // new interface
+
+func (r ThingResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+  resp.TypeName = "examplecloud_thing"
+}
+
+func (r ThingResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
+  resp.Schema = schema.Schema{
+    // .. resource schema for examplecloud_thing
+  }
+}
+
+// Struct model for identity data handling
+type ThingResourceIdentityModel struct {
+  ID        types.String `tfsdk:"id"`
+  Region    types.String `tfsdk:"region"`
+}
+
+func (r ThingResource) IdentitySchema(_ context.Context, _ resource.IdentitySchemaRequest, resp *resource.IdentitySchemaResponse) {
+  resp.IdentitySchema = identityschema.Schema{
+    Attributes: map[string]identityschema.Attribute{
+      "id": identityschema.StringAttribute{
+        RequiredForImport: true, // must be set during import by the practitioner
+      },
+      "region": identityschema.StringAttribute{
+        OptionalForImport: true, // can be defaulted by the provider configuration
+      },
+    },
+  }
+}
+```
+
+## Handling Identity Data
+
+Identity data, similar to resource state data, can be set or retrieved during the resource [`Create`](/terraform/plugin/framework/resources/create),
+[`Read`](/terraform/plugin/framework/resources/read), [`Update`](/terraform/plugin/framework/resources/update), [`Delete`](/terraform/plugin/framework/resources/delete)
+and [`ImportState`](/terraform/plugin/framework/resources/import) methods. Unlike resource state data, identity data is expected to be immutable after it is set during
+[`Create`](/terraform/plugin/framework/resources/create), so typically the only locations a provider should need to write identity data is during [`Create`](/terraform/plugin/framework/resources/create) and
+[`Read`](/terraform/plugin/framework/resources/read).
+
+[`Read`](/terraform/plugin/framework/resources/read) should return identity data so that the managed resource can support [importing](/terraform/plugin/framework/resources/import),
+especially if not all of the identity attributes are provided by the practitioner during import (like provider configuration values and remote API data).
+
+### Writing Identity
+
+Typically, identity data should be set during [`Create`](/terraform/plugin/framework/resources/create) and [`Read`](/terraform/plugin/framework/resources/read).
+The same data model for [writing data](/terraform/plugin/framework/handling-data/writing-state) to state is used for identity, for example:
+
+```go
+// .. rest of resource implementation
+
+type ThingResourceModel struct {
+  // state data model
+}
+
+// identity data model
+type ThingResourceIdentityModel struct {
+  ID        types.String `tfsdk:"id"`
+  Region    types.String `tfsdk:"region"`
+}
+
+func (r ThingResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+  // Read plan data
+
+  // Call remote API to create resource (i.e. apiResp)
+
+  // Set data returned by API in state
+  data.ID = types.StringValue(apiResp.ID)
+  resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+
+  // Set data returned by API in identity
+  identity := ThingResourceIdentityModel{
+    ID:     types.StringValue(apiResp.ID),
+    Region: types.StringValue(apiResp.Region),
+  }
+  resp.Diagnostics.Append(resp.Identity.Set(ctx, identity)...)
+}
+```
+
+### Reading Identity
+
+The same data model for [reading data](/terraform/plugin/framework/handling-data/accessing-values) from state is used for identity, for example:
+
+```go
+// .. rest of resource implementation
+
+type ThingResourceModel struct {
+  // state data model
+}
+
+// identity data model
+type ThingResourceIdentityModel struct {
+  ID        types.String `tfsdk:"id"`
+  Region    types.String `tfsdk:"region"`
+}
+
+func (r ThingResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+  // Read state data
+  var stateData ThingResourceModel
+  resp.Diagnostics.Append(req.State.Get(ctx, &stateData)...)
+  if resp.Diagnostics.HasError() {
+    return
+  }
+
+  // Read identity data
+  var identityData ThingResourceIdentityModel
+  resp.Diagnostics.Append(req.Identity.Get(ctx, &identityData)...)
+  if resp.Diagnostics.HasError() {
+    return
+  }
+
+  // Call remote API to read resource
+
+  // Set data returned by API in state
+  // Set data returned by API in identity
+}
+```
+
+## Importing by Identity
+
+Managed resources that [define an identity](/terraform/plugin/framework/resources/identity#defining-identity) can be imported by either the `id` or the resource identity.
+The user must set either `id` or `identity` and not both. Supplying both or none will result in a validation error. For example, the identity presented in the
+["Define Identity"](/terraform/plugin/framework/resources/identity#defining-identity) section, can be imported via the following methods:
+
+- `terraform import` CLI command with ID string
+```bash
+terraform import examplecloud_thing.test id-123
+```
+- `import` block with `id` argument
+```terraform
+import {
+  to = examplecloud_thing.test
+  id = "id-123"
+}
+```
+- `import` block with `identity` argument
+```terraform
+import {
+  to = examplecloud_thing.test
+  identity = {
+    id = "id-123" # required for import
+    region = "us-east-1" # optional for import
+  }
+}
+```
+
+
+If identity data is present in the request, the provider is expected to ignore anything in the [`resource.ImportStateRequest.ID` field](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/resource#ImportStateRequest) (which Core will set to `""`). To maintain compatibility with the `terraform import` CLI command and the `import` block with `id` field, providers must continue to support importing via import ID if the identity data is not present.
+
+For resources that only need to support Terraform v1.12+, providers may choose not to support an import ID at all. In this case, if the user supplies an import ID (via the `terraform import` CLI command or in an `import` block), Terraform will send an import request to the provider including a non-empty [`resource.ImportStateRequest.ID` field](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/resource#ImportStateRequest), and the provider can choose to return an error with the [`resource.ImportStateResponse.Diagnostics` field](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/resource#ImportStateResponse) saying that it is not supported.
+
+An example [`ImportState`](/terraform/plugin/framework/resources/import) implementation that accounts for both importing by `id` and importing by `identity`:
+
+```go
+func (r ThingResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+  // If importing by ID, we just set the ID field to state, allowing the read to fill in the rest of the data.
+  if req.ID != "" {
+    resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), req.ID)...)
+    return
+  }
+
+  // Otherwise, we're importing by identity. We can either let identity passthrough
+  // to Read, or we can read the identity and use it to set data to state to be used in Read.
+
+  var identityData ThingResourceIdentityModel
+  resp.Diagnostics.Append(req.Identity.Get(ctx, &identityData)...)
+  if resp.Diagnostics.HasError() {
+    return
+  }
+
+  resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), identityData.ID)...)
+}
+```
+
+If the identity is a single attribute that is passed through to a single attribute in state, the `resource.ImportStatePassthroughWithIdentity`
+helper method can be used, which will set the same state attribute with either identity data or the ID string field:
+
+```go
+func (r ThingResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+  resource.ImportStatePassthroughWithIdentity(ctx, path.Root("id"), path.Root("id"), req, resp)
+}
+```
+
+## Mutable Identities
+
+By default, if identity data unexpectedly changes during the resource's lifecycle, an error will be raised by the framework:
+```bash
+Error: Unexpected Identity Change
+
+During the <update/read/planning> operation, the Terraform Provider unexpectedly returned a
+different identity then the previously stored one. 
+```
+
+If the remote object has an identity that can be changed without being destroyed/re-created, this validation
+can be disabled by setting the [`resource.ResourceBehavior`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/resource#ResourceBehavior)
+`MutableIdentity` field to `true`, which is set in the `Metadata` method on a resource:
+
+```go
+func (r ThingResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+  resp.TypeName = "examplecloud_thing"
+  resp.ResourceBehavior = resource.ResourceBehavior{
+    MutableIdentity: true,
+  }
+}
+```

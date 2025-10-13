@@ -3,11 +3,11 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-import { getAssetData } from '@utils/file'
-import { getProductVersionMetadata } from '@utils/contentVersions'
-import { errorResultToString } from '@utils/result'
-import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
-import { VersionedProduct } from '@api/types'
+import { getAssetData, joinFilePath } from '#utils/file'
+import { getProductVersionMetadata } from '#utils/contentVersions'
+import { errorResultToString } from '#utils/result'
+import { PRODUCT_CONFIG } from '#productConfig.mjs'
+import { VersionedProduct } from '#api/types'
 
 export type GetParams = VersionedProduct & {
 	/**
@@ -35,7 +35,7 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 
 	const { value: versionMetadata } = productVersionResult
 
-	const parsedAssetPath = assetPath.join('/')
+	const parsedAssetPath = joinFilePath(assetPath)
 
 	const assetLoc = [
 		`assets`,

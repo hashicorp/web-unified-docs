@@ -3,12 +3,16 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-import { findFileWithMetadata, parseMarkdownFrontMatter } from '@utils/file'
-import { getProductVersionMetadata } from '@utils/contentVersions'
-import { errorResultToString } from '@utils/result'
-import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
-import docsPathsAllVersions from '@api/docsPathsAllVersions.json'
-import { VersionedProduct } from '@api/types'
+import {
+	findFileWithMetadata,
+	joinFilePath,
+	parseMarkdownFrontMatter,
+} from '#utils/file'
+import { getProductVersionMetadata } from '#utils/contentVersions'
+import { errorResultToString } from '#utils/result'
+import { PRODUCT_CONFIG } from '#productConfig.mjs'
+import docsPathsAllVersions from '#api/docsPathsAllVersions.json'
+import { VersionedProduct } from '#api/types'
 
 /**
  * Parameters expected by `GET` route handler
@@ -41,7 +45,7 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 
 	const { value: versionMetadata } = productVersionResult
 
-	let parsedDocsPath = docsPath.join('/')
+	let parsedDocsPath = joinFilePath(docsPath)
 	if (parsedDocsPath.endsWith('.mdx')) {
 		parsedDocsPath = parsedDocsPath.slice(0, -4)
 	}
@@ -109,7 +113,7 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 	if (!foundContent) {
 		const locationsString = possibleContentLocations.map(
 			(location: string[]) => {
-				return `* ${location.join('/')}`
+				return `* ${joinFilePath(location)}`
 			},
 		)
 		console.error(
