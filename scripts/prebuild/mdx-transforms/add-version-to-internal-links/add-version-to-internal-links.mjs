@@ -72,7 +72,10 @@ export const rewriteInternalLinksPlugin = ({ entry, versionMetadata }) => {
 		// Transforms the syntax tree by rewriting internal links to include the version.
 		return flatMap(tree, (node) => {
 			// Check if the node is a link and matches the pattern for links to rewrite
-			if (node.type === 'link' && isLinkToRewritePattern.test(node.url)) {
+			if (
+				(node.type === 'link' || node.type === 'definition') &&
+				isLinkToRewritePattern.test(node.url)
+			) {
 				const splitUrl = node.url.split('/')
 				const hasVersionInPath = splitUrl.find((el) => {
 					return (
