@@ -191,33 +191,34 @@ export const PRODUCT_CONFIG = {
 		versionedDocs: true,
 		websiteDir: 'website',
 	},
-	// sentinel: {
-	// 	/**
-	// 	 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
-	// 	 *
-	// 	 * Fails for v0.16.x (and likely earlier) with error:
-	// 	 * `sentinel/website/content: No such file or directory`
-	// 	 * This likely indicates that older versions of docs have a different
-	// 	 * directory structure that needs to be accounted for. Need to confirm.
-	// 	 * See note at top of this document on `pages` directories for details.
-	// 	 */
-	// 	assetDir: 'public',
-	// 	/**
-	// 	 * TODO: consider implications of Sentinel's `contentDir`.
-	// 	 *
-	// 	 * Sentinel content is located in `website/content/sentinel`.
-	// 	 * Copying over the content is easy enough, but for internal links,
-	// 	 * and search object IDs, and other concerns that involve the content file
-	// 	 * path, it's a bit of an outlier, so will probably present some
-	// 	 * interesting challenges.
-	// 	 */
-	// 	contentDir: 'content/sentinel',
-	// 	dataDir: 'data',
-	//  productSlug: 'sentinel',
-	// 	semverCoerce: semver.coerce,
-	//  versionedDocs: true,
-	// 	websiteDir: 'website',
-	// },
+	sentinel: {
+		/**
+		 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
+		 *
+		 * Fails for v0.16.x (and likely earlier) with error:
+		 * `sentinel/website/content: No such file or directory`
+		 * This likely indicates that older versions of docs have a different
+		 * directory structure that needs to be accounted for. Need to confirm.
+		 * See note at top of this document on `pages` directories for details.
+		 */
+		assetDir: 'public/images',
+		basePaths: ['sentinel'],
+		/**
+		 * TODO: consider implications of Sentinel's `contentDir`.
+		 *
+		 * Sentinel content is located in `website/content/sentinel`.
+		 * Copying over the content is easy enough, but for internal links,
+		 * and search object IDs, and other concerns that involve the content file
+		 * path, it's a bit of an outlier, so will probably present some
+		 * interesting challenges.
+		 */
+		contentDir: 'content/sentinel',
+		dataDir: 'data',
+		productSlug: 'sentinel',
+		semverCoerce: semver.coerce,
+		versionedDocs: true,
+		websiteDir: 'website',
+	},
 	terraform: {
 		/**
 		 * ✅ Initial migration attempt: SEEMS TO WORK
@@ -242,6 +243,17 @@ export const PRODUCT_CONFIG = {
 		basePaths: ['cli', 'internals', 'intro', 'language'],
 		contentDir: 'docs',
 		dataDir: 'data',
+		productSlug: 'terraform',
+		semverCoerce: semver.coerce,
+		versionedDocs: true,
+		websiteDir: 'website',
+	},
+	'terraform-mcp-server': {
+		assetDir: '',
+		basePaths: ['mcp-server'],
+		contentDir: 'docs',
+		dataDir: 'data',
+		navDataPath: 'mcp-server',
 		productSlug: 'terraform',
 		semverCoerce: semver.coerce,
 		versionedDocs: true,
@@ -444,6 +456,7 @@ export const PRODUCT_CONFIG = {
 		 * See note at top of this document on `pages` directories for details.
 		 */
 		assetDir: 'public/img',
+		basePaths: ['api-docs', 'docs'],
 		contentDir: 'content',
 		dataDir: 'data',
 		productSlug: 'vault',
