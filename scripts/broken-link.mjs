@@ -12,7 +12,7 @@
  *   npm run broken-link dir1 dir2 dir3      # Checks multiple directories
  */
 
-import { execSync } from 'child_process'
+import { execSync } from 'node:child_process'
 
 // Get command line arguments (skip the first two which are node and script path)
 const args = process.argv.slice(2)
