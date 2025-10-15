@@ -1,0 +1,259 @@
+---
+page_title: Define Open Policy Agent policies for Terraform Enterprise
+description: >-
+  Use the Rego policy language to define Open Policy Agent (OPA) policies for
+  Terraform Enterprise.
+source: terraform-docs-common
+---
+
+# Define Open Policy Agent policies for HCP Terraform
+
+This topic describes how to create and manage custom policies using the open policy agent (OPA) framework. Refer to the following topics for instructions on using HashiCorp Sentinel policies:
+
+-   [Define custom Sentinel policies](/terraform/enterprise/policy-enforcement/define-policies/custom-sentinel)
+-   [Copy pre-written Sentinel policies](/terraform/enterprise/policy-enforcement/prewritten-sentinel)
+
+<!-- BEGIN: TFC:only name:pnp-callout -->
+
+@include 'tfc-package-callouts/policies.mdx'
+
+<!-- END: TFC:only name:pnp-callout -->
+
+## Overview
+
+> **Hands-on:** Try the [Detect Infrastructure Drift and Enforce OPA Policies](/terraform/tutorials/cloud/drift-and-policy) tutorial.
+
+You can write OPA policies using the Rego policy language, which is the native query language for the OPA framework. Refer to the following topics in the [OPA documentation](https://www.openpolicyagent.org/docs/latest/policy-language/) for additional information:
+
+-   [How Do I Write Rego Policies?](https://www.openpolicyagent.org/docs/v0.13.5/how-do-i-write-policies/)
+-   [Rego Policy Playground](https://play.openpolicyagent.org/)
+
+## OPA query
+
+You must write a query to identify a specific policy rule within your Rego code. The query may evaluate code from multiple Rego files.
+
+The result of each query must return an array, which HCP Terraform uses to determine whether the policy has passed or failed. If the array is empty, HCP Terraform reports that the policy has passed.
+
+The query is typically a combination of the policy package name and rule name, such as `data.terraform.deny`.
+
+## OPA input
+
+HCP Terraform combines the output from the Terraform run and plan into a single JSON file and passes that file to OPA as input. Refer to the [OPA Overview documentation](https://www.openpolicyagent.org/docs/latest/#the-input-document) for more details about how OPA uses JSON input data.
+
+The run data contains information like workspace details and the organization name. To access the properties from the Terraform plan data in your policies, use  `input.plan`. To access properties from the Terraform run, use  `input.run`.
+
+The following example shows sample OPA input data.
+
+```json
+{
+"plan": {
+ "format_version": "1.1",
+ "output_changes": {
+ },
+ "planned_values": {
+  },
+  "resource_changes": [
+ ],
+ "terraform_version": "1.2.7"
+},
+
+"run": {
+  "organization": {
+  "name": "hashicorp"
+  },
+  "workspace": {
+  }
+}
+}
+```
+
+Use the [Retrieve JSON Execution Plan endpoint](/terraform/enterprise/api-docs/plans#retrieve-the-json-execution-plan) to retrieve Terraform plan output data for testing. Refer to [Terraform Run Data](#terraform-run-data) for the properties included in Terraform run output data.
+
+## Example Policies
+
+The following example policy parses a Terraform plan and checks whether it includes security group updates that allow ingress traffic from all CIDRs (`0.0.0.0/0`).
+
+The OPA query for this example policy is `data.terraform.policies.public_ingress.deny`.
+
+```rego
+package terraform.policies.public_ingress
+
+import input.plan as plan
+
+deny[msg] {
+  r := plan.resource_changes[_]
+  r.type == "aws_security_group"
+  r.change.after.ingress[_].cidr_blocks[_] == "0.0.0.0/0"
+  msg := sprintf("%v has 0.0.0.0/0 as allowed ingress", [r.address])
+}
+```
+
+The following example policy ensures that databases are no larger than 128 GB.
+
+The OPA query for this policy is `data.terraform.policies.fws.database.fws_db_001.rule`.
+
+```rego
+package terraform.policies.fws.database.fws_db_001
+
+import future.keywords.in
+import input.plan as tfplan
+
+actions := [
+	["no-op"],
+	["create"],
+	["update"],
+]
+
+db_size := 128
+
+resources := [resource_changes |
+	resource_changes := tfplan.resource_changes[_]
+	resource_changes.type == "fakewebservices_database"
+	resource_changes.mode == "managed"
+	resource_changes.change.actions in actions
+]
+
+violations := [resource |
+	resource := resources[_]
+	not resource.change.after.size == db_size
+]
+
+violators[address] {
+	address := violations[_].address
+}
+
+rule[msg] {
+	count(violations) != 0
+  msg := sprintf(
+    "%d %q severity resource violation(s) have been detected.",
+		[count(violations), rego.metadata.rule().custom.severity]
+	)
+}
+```
+
+## Test policies
+
+You can write tests for your policies by [mocking](https://www.openpolicyagent.org/docs/latest/policy-testing/#data-and-function-mocking) the input data the policies use during Terraform runs.
+
+The following example policy called `block_auto_apply_runs` checks whether or not an HCP Terraform workspace has been configured to automatically apply a successful Terraform plan.
+
+```rego
+package terraform.tfc.block_auto_apply_runs
+
+import input.run as run
+
+deny[msg] {
+	run.workspace.auto_apply != false
+	msg := sprintf(
+		"HCP Terraform workspace %s has been configured to automatically provision Terraform infrastructure. Change the workspace Apply Method settings to 'Manual Apply'",
+		[run.workspace.name],
+	)
+}
+```
+
+The following test validates `block_auto_apply_runs`. The test is written in rego and uses the OPA [test format](https://www.openpolicyagent.org/docs/latest/policy-testing/#test-format) to check that the workspace [apply method](/terraform/enterprise/workspaces/settings#apply-method) is not configured to auto apply. You can run this test with the `opa test` CLI command. Refer to [Policy Testing](https://www.openpolicyagent.org/docs/latest/policy-testing/) in the OPA documentation for more details.
+
+```rego
+package terraform.tfc.block_auto_apply_runs
+
+import future.keywords
+
+test_run_workspace_auto_apply if {
+	deny with input as {"run": {"workspace": {"auto_apply": true}}}
+}
+```
+
+## Terraform run data
+
+Each [Terraform run](/terraform/docs/glossary#run) outputs data describing the run settings and the associated workspace.
+
+### Schema
+
+The following code shows the schema for Terraform run data.
+
+    run
+    ├── id (string)
+    ├── created_at (string)
+    ├── created_by (string)
+    ├── message (string)
+    ├── commit_sha (string)
+    ├── is_destroy (boolean)
+    ├── refresh (boolean)
+    ├── refresh_only (boolean)
+    ├── replace_addrs (array of strings)
+    ├── speculative (boolean)
+    ├── target_addrs (array of strings)
+    └── project
+    │    ├── id (string)
+    │    └── name (string)
+    ├── variables (map of keys)
+    ├── organization
+    │   └── name (string)
+    └── workspace
+        ├── id (string)
+        ├── name (string)
+        ├── created_at (string)
+        ├── description (string)
+        ├── execution_mode (string)
+        ├── auto_apply (bool)
+        ├── tags (array of strings)
+        ├── working_directory (string)
+        └── vcs_repo (map of keys)
+
+### Properties
+
+The following sections contain details about each property in Terraform run data.
+
+#### Run namespace
+
+The following table contains the attributes for the `run` namespace.
+
+| Properties Name | Type                                                                                             | Description                                                                                                                                                                                                                                                                                                                                                                                        |
+| --------------- | ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`            | String                                                                                           | The ID associated with the current Terraform run                                                                                                                                                                                                                                                                                                                                                   |
+| `created_at`    | String                                                                                           | The time Terraform created the run. The timestamp follows the [standard timestamp format in RFC 3339](https://datatracker.ietf.org/doc/html/rfc3339).                                                                                                                                                                                                                                              |
+| `created_by`    | String                                                                                           | A string that specifies the user name of the HCP Terraform user for the specific run.                                                                                                                                                                                                                                                                                                              |
+| `message`       | String                                                                                           | The message associated with the Terraform run. The default value is "Queued manually via the Terraform Enterprise API".                                                                                                                                                                                                                                                                            |
+| `commit_sha`    | String                                                                                           | The checksum hash (SHA) that identifies the commit                                                                                                                                                                                                                                                                                                                                                 |
+| `is_destroy`    | Boolean                                                                                          | Whether the plan is a destroy plan that destroys all provisioned resources                                                                                                                                                                                                                                                                                                                         |
+| `refresh`       | Boolean                                                                                          | Whether the state refreshed prior to the plan                                                                                                                                                                                                                                                                                                                                                      |
+| `refresh_only`  | Boolean                                                                                          | Whether the plan is in refresh-only mode. In refresh-only mode, Terraform ignores configuration changes and updates state with any changes made outside of Terraform.                                                                                                                                                                                                                              |
+| `replace_addrs` | An array of strings representing [resource addresses](/terraform/cli/state/resource-addressing)  | The targets specified using the [`-replace`](/terraform/cli/commands/plan#replace-address) flag in the CLI or the `replace-addrs` property in the API. Undefined if there are no specified resource targets.                                                                                                                                                                                       |
+| `speculative`   | Boolean                                                                                          | Whether the plan associated with the run is a [speculative plan](/terraform/enterprise/workspaces/run/remote-operations#speculative-plans) only                                                                                                                                                                                                                                                    |
+| `target_addrs`  | An array of strings representing [resource addresses](/terraform/cli/state/resource-addressing). | The targets specified using the [`-target`](/terraform/cli/commands/plan#resource-targeting) flag in the CLI or the `target-addrs` property in the API. Undefined if there are no specified resource targets.                                                                                                                                                                                      |
+| `variables`     | A string-keyed map of values.                                                                    | Provides the variables configured within the run. Each variable `name` maps to two properties: `category` and `sensitive`.  The `category` property is a string indicating the variable type, either "input" or "environment". The `sensitive` property is a boolean, indicating whether the variable is a [sensitive value](/terraform/enterprise/variables/managing-variables#sensitive-values). |
+
+#### Project Namespace
+
+The following table contains the properties for the `project` namespace.
+
+| Property Name | Type   | Description                                                                             |
+| ------------- | ------ | --------------------------------------------------------------------------------------- |
+| `id`          | String | The ID associated with the Terraform project                                            |
+| `name`        | String | The name of the project, which can only include letters, numbers, spaces, `-`, and `_`. |
+
+#### Organization namespace
+
+The `organization` namespace has one property called `name`. The `name` property is a string that specifies the name of the HCP Terraform organization for the run.
+
+#### Workspace namespace
+
+The following table contains the properties for the `workspace` namespace.
+
+| Property Name       | Type                          | Description                                                                                                                                                                                                                                                                                                                                                       |
+| ------------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                | String                        | The ID associated with the Terraform workspace                                                                                                                                                                                                                                                                                                                    |
+| `name`              | String                        | The name of the workspace, which can only include letters, numbers, `-`, and `_`                                                                                                                                                                                                                                                                                  |
+| `created_at`        | String                        | The time of the workspace's creation. The timestamp follows the [standard timestamp format in RFC 3339](https://datatracker.ietf.org/doc/html/rfc3339).                                                                                                                                                                                                           |
+| `description`       | String                        | The description for the workspace. This value can be `null`.                                                                                                                                                                                                                                                                                                      |
+| `auto_apply`        | Boolean                       | The workspace's [auto-apply](/terraform/enterprise/workspaces/settings#apply-method) setting                                                                                                                                                                                                                                                                      |
+| `tags`              | Array of strings              | The list of tag names for the workspace                                                                                                                                                                                                                                                                                                                           |
+| `working_directory` | String                        | The configured [Terraform working directory](/terraform/enterprise/workspaces/settings#terraform-working-directory) of the workspace. This value can be `null`.                                                                                                                                                                                                   |
+| `execution_mode`    | String                        | The configured Terraform execution mode of the workspace. The default value is `remote`.                                                                                                                                                                                                                                                                          |
+| `vcs_repo`          | A string-keyed map to objects | Data associated with a VCS repository connected to the workspace. The map contains `identifier` (string), ` display_identifier` (string), `branch` (string), and  `ingress_submodules` (boolean). Refer to the HCP Terraform [Workspaces API documentation](/terraform/enterprise/api-docs/workspaces) for details about each property. This value can be `null`. |
+
+## Next steps
+
+-   Group your policies into sets and apply them to your workspaces. Refer to [Create policy sets](/terraform/enterprise/policy-enforcement/manage-policy-sets#create-policy-sets) for additional information.
+-   View results and address Terraform runs that do not comply with your policies. Refer to [View results](/terraform/enterprise/policy-enforcement/view-results) for additional information.
+-   You can also view Sentinel policy results in JSON format. Refer to [View Sentinel JSON results](/terraform/enterprise/policy-enforcement/view-results/json) for additional information.

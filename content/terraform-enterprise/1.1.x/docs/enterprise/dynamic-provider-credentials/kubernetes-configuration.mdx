@@ -1,0 +1,177 @@
+---
+page_title: >-
+  Use dynamic credentials with the Kubernetes and Helm providers in Terraform
+  Enterprise
+description: >-
+  Use OpenID Connect to get short-term credentials for the Kubernetes and Helm
+  Terraform providers in your Terraform Enterprise runs.
+source: terraform-docs-common
+---
+
+# Use dynamic credentials with the Kubernetes and Helm providers
+
+~> **Important:** If you are self-hosting [HCP Terraform agents](/terraform/cloud-docs/agents), ensure your agents use [v1.13.1](/terraform/cloud-docs/agents/changelog#1-13-1-10-25-2023) or above. To use the latest dynamic credentials features, [upgrade your agents to the latest version](/terraform/cloud-docs/agents/changelog).
+
+You can use HCP Terraform’s native OpenID Connect integration with Kubernetes to use [dynamic credentials](/terraform/enterprise/dynamic-provider-credentials) for the Kubernetes and Helm providers in your HCP Terraform runs. Configuring the integration requires the following steps:
+
+1.  **[Configure Kubernetes](#configure-kubernetes):** Set up a trust configuration between Kubernetes and HCP Terraform. Next, create Kubernetes role bindings for your HCP Terraform identities.
+2.  **[Configure HCP Terraform](#configure-hcp-terraform):** Add environment variables to the HCP Terraform workspaces where you want to use dynamic credentials.<!-- BEGIN: TFC:only name:stacks-tfe --> If you are configuring a Stack, refer to [Authenticate a Stack](/terraform/language/stacks/deploy/authenticate).<!-- END: TFC:only name:stacks-tfe -->
+3.  **[Configure the Kubernetes or Helm provider](#configure-the-provider)**: Set the required attributes on the provider block.
+
+Once you complete the setup, HCP Terraform automatically authenticates to Kubernetes during each run. The Kubernetes and Helm providers' authentication is valid for the length of a plan or apply operation.
+
+## Configure Kubernetes
+
+You must enable and configure an OIDC identity provider in the Kubernetes API. This workflow changes based on the platform hosting your Kubernetes cluster. HCP Terraform only supports dynamic credentials with Kubernetes in AWS and GCP.
+
+### Configure an OIDC identity provider
+
+Refer to the AWS documentation for guidance on [setting up an EKS cluster for OIDC authentication](https://docs.aws.amazon.com/eks/latest/userguide/authenticate-oidc-identity-provider.html). You can also refer to our [example configuration](https://github.com/hashicorp-education/learn-terraform-dynamic-credentials/tree/main/eks/trust).
+
+Refer to the GCP documentation for guidance on [setting up a GKE cluster for OIDC authentication](https://cloud.google.com/kubernetes-engine/docs/how-to/oidc). You can also refer to our [example configuration](https://github.com/hashicorp-education/learn-terraform-dynamic-credentials/tree/main/gke/trust).
+
+When inputting an "issuer URL", use the address of HCP Terraform (`https://app.terraform.io` _without_ a trailing slash) or the URL of your Terraform Enterprise instance. The value of "client ID" is your audience in OIDC terminology, and it should match the value of the `TFC_KUBERNETES_WORKLOAD_IDENTITY_AUDIENCE` environment variable in your workspace.
+
+The OIDC identity resolves authentication to the Kubernetes API, but it first requires authorization to interact with that API. So, you must bind RBAC roles to the OIDC identity in Kubernetes.
+
+You can use both "User" and "Group" subjects in your role bindings. For OIDC identities coming from TFC, the "User" value is formatted like so: `organization:<MY-ORG-NAME>:project:<MY-PROJECT-NAME>:workspace:<MY-WORKSPACE-NAME>:run_phase:<plan|apply>`.
+
+You can extract the "Group" value from the token claim you configured in your cluster OIDC configuration. For details on the structure of the HCP Terraform token, refer to [Workload Identity](/terraform/enterprise/dynamic-provider-credentials/workload-identity-tokens).
+
+Below, we show an example of a `RoleBinding` for the HCP Terraform OIDC identity.
+
+```hcl
+resource "kubernetes_cluster_role_binding_v1" "oidc_role" {
+  metadata {
+    name = "odic-identity"
+  }
+
+  role_ref {
+    api_group = "rbac.authorization.k8s.io"
+    kind      = "ClusterRole"
+    name      = var.rbac_group_cluster_role
+  }
+
+  // Option A - Bind RBAC roles to groups
+  //
+  // Groups are extracted from the token claim designated by 'rbac_group_oidc_claim'
+  //
+  subject {
+    api_group = "rbac.authorization.k8s.io"
+    kind      = "Group"
+    name      = var.tfc_organization_name
+  }
+
+  // Option B - Bind RBAC roles to user identities
+  //
+  // Users are extracted from the 'sub' token claim.
+  // Plan and apply phases get assigned different users identities.
+  // For HCP Terraform tokens, the format of the user id is always the one described bellow.
+  //
+  subject {
+    api_group = "rbac.authorization.k8s.io"
+    kind      = "User"
+    name      = "${var.tfc_hostname}#organization:${var.tfc_organization_name}:project:${var.tfc_project_name}:workspace:${var.tfc_workspace_name}:run_phase:plan"
+  }
+
+  subject {
+    api_group = "rbac.authorization.k8s.io"
+    kind      = "User"
+    name      = "${var.tfc_hostname}#organization:${var.tfc_organization_name}:project:${var.tfc_project_name}:workspace:${var.tfc_workspace_name}:run_phase:apply"
+  }
+}
+```
+
+If binding with "User" subjects, be aware that plan and apply phases are assigned different identities, each requiring specific bindings. Meaning you can tailor permissions for each Terraform operation. Planning operations usually require "read-only" permissions, while apply operations also require "write" access.
+
+!> **Warning**:  Always check, at minimum, the audience and the organization's name to prevent unauthorized access from other HCP Terraform organizations.
+
+## Configure HCP Terraform
+
+<!-- BEGIN: TFC:only name:stacks-tfe -->
+
+If you are configuring a Stack, refer to [Authenticate a Stack](/terraform/language/stacks/deploy/authenticate) to learn how to use the `identity_token` block to authenticate your Stack deployments with dynamic credentials.
+
+<!-- END: TFC:only name:stacks-tfe -->
+
+You must set certain environment variables in your HCP Terraform workspace to configure HCP Terraform to authenticate with Kubernetes or Helm using dynamic credentials. You can set these as workspace variables, or if you’d like to share one Kubernetes role across multiple workspaces, you can use a variable set. When you configure dynamic provider credentials with multiple provider configurations of the same type, use either a default variable or a tagged alias variable name for each provider configuration. Refer to [Specifying Multiple Configurations](#specifying-multiple-configurations) for more details.
+
+### Required Environment Variables
+
+| Variable                                                                                                                                                    | Value                                                                         | Notes                                                                                                                                                      |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TFC_KUBERNETES_PROVIDER_AUTH`<br />`TFC_KUBERNETES_PROVIDER_AUTH[_TAG]`<br />_(Default variable not supported)_                                            | `true`                                                                        | Requires **v1.14.0** or later if self-managing agents. Must be present and set to `true`, or HCP Terraform will not attempt to authenticate to Kubernetes. |
+| `TFC_KUBERNETES_WORKLOAD_IDENTITY_AUDIENCE`<br />`TFC_KUBERNETES_WORKLOAD_IDENTITY_AUDIENCE[_TAG]`<br />`TFC_DEFAULT_KUBERNETES_WORKLOAD_IDENTITY_AUDIENCE` | The audience name in your cluster's OIDC configuration, such as `kubernetes`. | Requires **v1.14.0** or later if self-managing agents.                                                                                                     |
+
+## Configure the provider
+
+The Kubernetes and Helm providers share the same schema of configuration attributes for the provider block. The example below illustrates using the Kubernetes provider but the same configuration applies to the Helm provider.
+
+Make sure that you are not using any of the other arguments or methods listed in the [authentication](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs#authentication) section of the provider documentation as these settings may interfere with dynamic provider credentials. The only allowed provider attributes are `host` and `cluster_ca_certificate`.
+
+### Single provider instance
+
+HCP Terraform automatically sets the `KUBE_TOKEN` environment variable and includes the workload identity token.
+
+The provider needs to be configured with the URL of the API endpoint using the `host` attribute (or `KUBE_HOST` environment variable). In most cases, the `cluster_ca_certificate` (or `KUBE_CLUSTER_CA_CERT_DATA` environment variable) is also required.
+
+#### Example Usage
+
+```hcl
+provider "kubernetes" {
+  host                   = var.cluster-endpoint-url
+  cluster_ca_certificate = base64decode(var.cluster-endpoint-ca)
+}
+```
+
+### Multiple aliases
+
+You can add additional variables to handle multiple distinct Kubernetes clusters, enabling you to use multiple [provider aliases](/terraform/language/providers/configuration#alias-multiple-provider-configurations) within the same workspace. You can configure each set of credentials independently, or use default values by configuring the variables prefixed with `TFC_DEFAULT_`.
+
+For more details, see [Specifying Multiple Configurations](/terraform/enterprise/dynamic-provider-credentials/specifying-multiple-configurations).
+
+#### Required Terraform Variable
+
+To use additional configurations, add the following code to your Terraform configuration. This lets HCP Terraform supply variable values that you can then use to map authentication and configuration details to the correct provider blocks.
+
+```hcl
+variable "tfc_kubernetes_dynamic_credentials" {
+  description = "Object containing Kubernetes dynamic credentials configuration"
+  type = object({
+    default = object({
+      token_path = string
+    })
+    aliases = map(object({
+      token_path = string
+    }))
+  })
+}
+```
+
+#### Example Usage
+
+```hcl
+provider "kubernetes" {
+  alias                  = "ALIAS1"
+  host                   = var.alias1-endpoint-url
+  cluster_ca_certificate = base64decode(var.alias1-cluster-ca)
+  token                  = file(var.tfc_kubernetes_dynamic_credentials.aliases["ALIAS1"].token_path)
+}
+
+provider "kubernetes" {
+  alias                  = "ALIAS2"
+  host                   = var.alias1-endpoint-url
+  cluster_ca_certificate = base64decode(var.alias1-cluster-ca)
+  token                  = file(var.tfc_kubernetes_dynamic_credentials.aliases["ALIAS2"].token_path)
+}
+```
+
+The `tfc_kubernetes_dynamic_credentials` variable is also available to use for single provider configurations, instead of the `KUBE_TOKEN` environment variable.
+
+```hcl
+provider "kubernetes" {
+  host                   = var.cluster-endpoint-url
+  cluster_ca_certificate = base64decode(var.cluster-endpoint-ca)
+  token                  = file(var.tfc_kubernetes_dynamic_credentials.default.token_path)
+}
+```
