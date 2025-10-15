@@ -1,131 +1,233 @@
 # Web Unified Docs
 
-This repository contains HashiCorp [product documentation and best
-practices](https://developer.hashicorp.com). We publish content from the `main`
-branch.
+> [!IMPORTANT]
+> This README is for developers working on the documentation website. If you
+> want to contribute docs content, refer to the [Contribute to HashiCorp
+> documentation](./docs/contribute.md) guide.
 
-Note that the information in this file is generic and applies to documentation
-for most products. Refer to individual product README files for product-specific
-conventions and processes.
+---
 
-## Repository structure
+The project in this repository, `hashicorp/web-unified-docs`, aims to implement [[DEVDOT-023] Unified Product Documentation Repository](https://docs.google.com/document/d/1p8kOqySttvWUVfn7qiC4wGBR73LMBGMelwLt69pM3FQ/edit). The RFC for this project was intentionally light on implementation details, in order to foster consensus on the broad direction.
 
-Documentation content is written in Markdown. You can find product folders
-in the `content` directory.
+- **PR previews**: Show broken links in comments for awareness (informational only, don't block PRs)
+- **Production monitoring**: Weekly scans create GitHub issues and send critical alerts to Datadog when users are affected
 
-### Versioned content
+The weekly [`broken-link-check-full`](https://github.com/hashicorp/web-unified-docs/blob/main/.github/workflows/broken-link-check-full.yml) workflow generates comprehensive broken link reports with prioritization guidance. When contributors create PRs that modify content, the link checker shows any broken links in PR comments with actionable guidance without blocking development.
 
-Documentation for specific product versions is in folders within the
-`content/<product>` directory.
+**Quick tips for contributors**:
 
-Note that HCP documentation does not have versions.
+- **Fix internal HashiCorp links** (high priority)
+- **Check external docs/API links** (medium priority)
+- **Consider removing unreliable external links** (low priority)
 
-### Branch naming conventions
+For detailed information about the monitoring system, see [Broken Link
+Monitoring Documentation](./.github/BROKEN_LINK_MONITORING.md). The [Unified Product Documentation
+Repository RFC](https://docs.google.com/document/d/1p8kOqySttvWUVfn7qiC4wGBR73LMBGMelwLt69pM3FQ/edit)
+for this project was intentionally light on implementation details, in order
+to foster consensus on the broad direction.
 
-Tech writers create upcoming release branches using these conventions:
+The existing API (`content.hashicorp.com`) has endpoints that serve documentation content. You can find the source code in [hashicorp/mktg-content-workflows](https://github.com/hashicorp/mktg-content-workflows/blob/main/api/content.ts).
 
-- Upcoming major release branch: `<product>/<exact_release_number>`
-- Upcoming minor release branch:  Most products use the
-  `<product>/<exact_release_number>` format, but Vault uses `vault/<YYYYMMDD>`
+The goal of the unified docs API is to host all of HashiCorp's product documentation. The unified docs API will eventually replace the existing content API.
 
-Individual contributors should create working branches using one of the following:
+## Local development
 
-- Community contributors:
-  `<github_username>-<product_name>-<github_issue_number>`, such as
-  `aimeeu-nomad-12345`.
-- HashiCorp employees: `<name, initials, or GitHub username>-<ticket_number>`,
-    such as `aimeeu-ce1001`.
+### Requirements
 
-## HashiCorp employee contributor guide
+- [Docker](https://www.docker.com/) and [Docker Compose](https://docs.docker.com/compose/) (for managing containers)
 
-### Before you begin
+### Quick start
 
-- Your Github username must be a member of the HashiCorp GitHub [core team](https://github.com/orgs/hashicorp/teams/core). You can open a request to join `hashicorp/core` using using [Doormat](https://doormat.hashicorp.services/applications/access/github/role/doormat-github-access-core/options).
-- You must have a valid [SSH key for your Github account](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/generating-a-new-ssh-key-and-adding-it-to-the-ssh-agent#adding-your-ssh-key-to-the-ssh-agent).
+To get a migration preview running, run `make` from the root of this repo. The `make` command starts the `unified-docs` Docker profile that spins up a local instance of `unified-devdot-api` and `dev-portal`.
 
-If you want to preview your changes locally, we recommend installing
-[Docker](https://www.docker.com/) and [Docker
-Compose](https://docs.docker.com/compose/).
+Once this command completes, you can access the following endpoints:
 
-### Update published documentation
+- http://localhost:3000 - An instance of the `dev-portal` container configured to pull from the experimental docs API (this repo). This image depends on the unified docs API (`unified-devdot-api`).
 
-Use this workflow when you want to update published documentation.
+- http://localhost:8080 - An instance of the unified docs API container (this repo - `unified-devdot-api`) that serves content from the `content` directory. On startup, this container processes the content and assets in `/content` into `public/assets` and `public/content`. In addition, the container also generates `app/api/docsPaths.json` and `app/api/versionMetadata.json` from the contents within `/content`.
 
-1. Clone the repo. We recommend cloning only `main` branch and not downloading the history of other branches. This means that you cannot locally check out other branches.
+  Use the following example to test this endpoint: http://localhost:8080/api/content/terraform-plugin-framework/doc/latest/plugin/framework
 
-   ```shell-session
-   git clone --single-branch git@github.com:hashicorp/web-unified-docs.git
-   ```
+> [!NOTE]
+> The unified docs API container takes time to process the content and assets. You must wait for both the `unified-devdot-api` and `dev-portal` containers to complete before you can successfully test content in the `dev-portal` preview environment (`localhost:3000`). Visit http://localhost:8080/api/all-docs-paths to verify the `unified-devdot-api` container is complete.
 
-1. Create your local working branch.
+To spin this down gracefully, run `make clean` in a separate terminal.
 
-   ```shell-session
-   git checkout -b <working_branch_name>
-   ```
+If you wish to remove the local Docker images as well, run `make clean CLEAN_OPTION=full`.
 
-   Be sure to follow the individual contributor branch naming convention.
+### More commands
 
-1. Make your changes.Fix in folder for current release.
+The `makefile` serves as a convenience tool start the local preview. If you need more granular control, the `package.json` file contains a full list of available commands.
 
-Update content in prior release folders as needed.
+To use these, you will need to intentionally run `npm install` and `npm run prebuild` before anything else.
 
-Create PR against main.
+Use `npm run coverage` to run coverage tests.
 
-Incorporate reviewer feedback as needed.
+### Preview environments for unified-docs and dev-portal
 
-Merge to main for immediate publication.
+Unified docs API serves as one of the content APIs for `dev-portal` (frontend application for DevDot). As a result, when implementing new features, you may need to modify both the backend (this repo) and the frontend (`dev-portal`).
 
- 
+If you are working on a ticket that requires changes to both the unified docs API and `dev-portal`, please set [custom environment variables for your branch](https://vercel.com/hashicorp/dev-portal/settings/environment-variables) in Vercel to simplify testing instructions.
 
+For example, in Vercel, for your `dev-portal` branch, you can set the following environment variables:
 
+| Environment variable | Value                  |
+| -------------------- | ---------------------- |
+| `HASHI_ENV`          | `unified-docs-sandbox` |
+| `UNIFIED_DOCS_API`   | `<UDR-Preview-URL>`    |
 
+Vercel will use these values to create deploy previews.
 
+### API development
 
+Reach out to team #team-web-presence if you need to do local API development
 
+## Background
 
+### Project Rationale
 
+- Storing documentation in one branch of one repo dramatically simplifies the workflow for contributing documentation.
+- Publishing changes to multiple versions can be done in a single PR, as opposed to multiple PRs which is required by the current setup.
+- Finding and making the same change across multiple versions is as simple as doing a find-and-replace since all the versioned docs are on the filesystem at the same time.
+- Adding a new product is as easy as making a new folder, as opposed to the current process which requires code-changes on the API side and the installation of a GitHub App to monitor for events.
+- Sourcing from one branch in one repo eliminates the situation where a missed GitHub event can result in out-of-date documentation. If something goes wrong in the publishing process, simply run it again instead of relying on incoming commit/release events from the GitHub API.
+- Since we can make edits to all docs for all products and versions from a single PR, making platform-level changes is dramatically simplified (such as updating to MDX v2, or rewriting URLs).
+- Adding new features like content conformance (basically linting for docs) can be done for the entire codebase at once.
+- Removes the ability for docs to break the release workflow in product repos.
+- Enables us to support fully versioned deployment previews, whereas current previews are limited to the branch being modified.
 
+### [Architectural Decision Records](https://github.com/hashicorp/web-unified-docs/tree/main/docs/decisions)
 
+## Update product repo documentation
 
+This script helps with product documentation migration to the web-unified-docs repository. When migrating documentation:
 
+1. The `web-unified-docs` repository becomes the source of truth
+2. Original documentation may remain temporarily as a fallback
+3. Users should be directed to make future changes in `web-unified-docs` only
 
+This script automatically adds a prominent notice to all MDX files in the original location, informing contributors where to make future changes.
 
-## Community contributor guide
+```
+./scripts/update-mdx-files.sh ~/Desktop/hashicorp/terraform-plugin-framework/website/docs
+```
 
-### Before you begin
+Example output:
 
-- You must have a GitHub account and be logged into GitHub.
-- [Fork this
-  repository](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/working-with-forks/fork-a-repo).
+```
+Progress:
 
-### Clone your fork
+Files processed: 135
+Files updated: 135
+Files with no frontmatter: 0
+Files with errors: 0
 
-1. Clone your fork.
+Completed! All MDX files have been processed.
+```
 
-   ```shell
-   git clone git@github.com:<github_username>/web-unified-docs
-   ```
+## Run broken link checker locally
 
-2. Set the upstream repository.
+The repository uses a focused broken link monitoring system:
 
-   ```shell
-   git remote add upstream https://github.com/hashicorp/web-unified-docs.git
-   ```
+- **PR previews**: Show broken links in comments for awareness (informational only, don't block PRs)
+- **Production monitoring**: Weekly scans create GitHub issues and Datadog alerts for user-facing problems
 
-### Update published documentation
+The weekly [`broken-link-check-full`](https://github.com/hashicorp/web-unified-docs/blob/main/.github/workflows/broken-link-check-full.yml) workflow generates comprehensive broken link reports. When contributors create PRs that modify content, the link checker shows any broken links in PR comments without blocking development.
 
+For detailed information about the monitoring system, see [Broken Link Monitoring Documentation](./.github/BROKEN_LINK_MONITORING.md).
 
-1. Create your working branch off of `main`.
+### UDR Migration Link Check
 
-   ```shell
-   git checkout -b 
+For teams migrating products to UDR (Unified Docs Renderer), use the dedicated migration workflow:
 
-Fix in folder for current release.
+1. Go to [Actions → UDR Product Link Check](https://github.com/hashicorp/web-unified-docs/actions/workflows/udr-product-link-check.yml)
+2. Click "Run workflow" and select your product
+3. Review migration-specific broken link analysis in the generated GitHub issue
 
-Update content in prior release folders as needed.
+This workflow provides targeted link checking with migration-focused reporting and prioritization.
 
-Create PR against main.
+### Local Testing
 
-Incorporate reviewer feedback as needed.
+You can also run the broken link checker locally. The following commands launch a lychee Docker container to check the content directories you specify.
 
-Merge to main for immediate publication.
+Run the broken link checker on all content.
+
+```
+npm run broken-link
+```
+
+Check a specific directory within content.
+
+```
+npm run broken-link terraform-plugin-framework
+```
+
+Check multiple directories.
+
+```
+npm run broken-link terraform-plugin-framework-log terraform-plugin-mux
+```
+
+## Architecture
+
+The following diagram illustrates the relationships between the unified docs API (this repo), `dev-portal`, and the existing content API:
+
+```mermaid
+graph LR
+    subgraph "Content sources (non-migrated)"
+        BDY[boundary]
+        CSL[consul]
+        HCP[hcp-docs]
+        NMD[nomad]
+        PKR[packer]
+        SNT[sentinel]
+        TF[terraform]
+        TFC[terraform-cdk]
+        TFA[terraform-docs-agents]
+        TFD[terraform-docs-common]
+        VGT[vagrant]
+        VLT[vault]
+        WPT[waypoint]
+
+        CURALL["/content or /website"]
+        BDY & CSL & HCP & NMD & PKR & SNT & TF & TFC & TFA & TFD & VGT & VLT & WPT --> CURALL
+    end
+
+    subgraph "Migrated content repo"
+        TPF[terraform-plugin-framework]
+        TPL[terraform-plugin-log]
+        TPM[terraform-plugin-mux]
+        TPS[terraform-plugin-sdk]
+        TPT[terraform-plugin-testing]
+        TFE[terraform-enterprise]
+
+        MIGALL["/content"]
+        TPF & TPL & TPM & TPS & TPT & TFE --> MIGALL
+    end
+
+    subgraph "APIs"
+        CP[Content API<br>content.hashicorp.com]
+        UDR[Unified Docs Repository<br>web-unified-docs]
+    end
+
+    subgraph "Frontend"
+        DP[Dev Portal<br>dev-portal]
+    end
+
+    %% BDY & CSL & HCP & NMD & PKR & PTF & SNT & TF & TFC & TFA & TFD & VGT & VLT & WPT --> CP
+    %% TPF & TPL & TPM & TPS & TPT --> UDR
+
+    CURALL -->|Current content flow| CP
+    MIGALL -->|Migrated content| UDR
+
+    CP -->|Serves most content| DP
+    UDR -->|Serves unified/content content| DP
+
+    class TPF,TPL,TPM,TPS,TPT,BDY,CSL,HCP,NMD,PKR,PTF,SNT,TF,TFC,TFA,TFD,VGT,VLT,WPT productRepo
+```
+
+The diagram shows:
+
+- The content API — the existing system that sources product documentation content from product repositories
+- The unified docs API — the new system that sources product documentation from this repo's `/content` directory. The migrated repos will use a directory approach to versioning (rather than the historic branch and tag strategy)
+- The Dev Portal — the frontend that serves the main DevDot interface. Dev Portal sources its content from both the existing content API and unified docs API.

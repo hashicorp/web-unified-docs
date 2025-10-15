@@ -1,7 +1,8 @@
 # Tech writer processes
 
-Note that you can see this page's outline by clicking the GitHub UI's **Outline**
-button, which is next to the **Edit this file** button.
+> [!NOTE]
+> Click the GitHub UI's **Outline** button, which is next to the **Edit this file** button,
+> to toggle this page's outline.
 
 ## Repo workflows
 
