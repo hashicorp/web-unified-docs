@@ -129,7 +129,7 @@ export async function main(
 	}
 
 	core.info(
-		`Latest terraform-enterprise version found in versionMetadata.json: ${currentTfeRelease}`,
+		`Info: Latest terraform-enterprise version found in versionMetadata.json: ${currentTfeRelease}`,
 	)
 
 	const HCPsourceDir = path.join(sourcePath, 'content/terraform-docs-common')
