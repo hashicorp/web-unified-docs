@@ -31,22 +31,30 @@ EOF
 TOTAL_COUNT=0
 UPDATED_COUNT=0
 NO_FRONTMATTER_COUNT=0
+ALREADY_UPDATED_COUNT=0
 ERROR_COUNT=0
 
 # Save the current position for updating the stats in place
 echo -e "Progress:\n"
-echo -e "Files processed: 0\nFiles updated: 0\nFiles with no frontmatter: 0\nFiles with errors: 0"
+echo -e "Files processed: 0\nFiles updated: 0\nFiles with no frontmatter: 0\nFiles already updated: 0\nFiles with errors: 0"
 STATS_LINE=$(tput lines)
-STATS_LINE=$((STATS_LINE - 5))
+STATS_LINE=$((STATS_LINE - 6))
 
 update_stats() {
   tput cup $STATS_LINE 0
-  echo -e "Files processed: $TOTAL_COUNT\nFiles updated: $UPDATED_COUNT\nFiles with no frontmatter: $NO_FRONTMATTER_COUNT\nFiles with errors: $ERROR_COUNT"
+  echo -e "Files processed: $TOTAL_COUNT\nFiles updated: $UPDATED_COUNT\nFiles with no frontmatter: $NO_FRONTMATTER_COUNT\nFiles already updated: $ALREADY_UPDATED_COUNT\nFiles with errors: $ERROR_COUNT"
 }
 
 # Find all .mdx files in the provided directory (recursively)
 find "$DIR_PATH" -type f -name "*.mdx" | while read -r FILE; do
   ((TOTAL_COUNT++))
+  
+  # Check if the file already contains the notification
+  if grep -q "Documentation Update:" "$FILE" 2>/dev/null; then
+    ((ALREADY_UPDATED_COUNT++))
+    update_stats
+    continue
+  fi
   
   # Check if the file contains frontmatter (marked by ---)
   if grep -q "^---" "$FILE" 2>/dev/null; then
@@ -85,5 +93,5 @@ done
 rm "$NOTIFICATION_FILE"
 
 # Move cursor past the stats for the final message
-tput cup $((STATS_LINE + 5)) 0
+tput cup $((STATS_LINE + 6)) 0
 echo -e "\nCompleted! All MDX files have been processed."
