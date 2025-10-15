@@ -10,7 +10,7 @@ Follow these steps to create a new content page:
 ## Decide content type
 
 Decide if your content is a concept, guide, or reference. Refer to the [Content
-types](./docs/content-guide/content-types.md) guide for detailed explanations. If you
+types](content-types.md) guide for detailed explanations. If you
 have questions, reach out to your product's tech writer team for help.
 
 ## Create the page file
@@ -38,9 +38,9 @@ have questions, reach out to your product's tech writer team for help.
 
 Use the appropriate page content type as a template for your new content. Refer
 to the Page templates section in the [Content
-types](./docs/content-guide/content-types.md) guide for examples.
+types](./content-types.md) guide for examples.
 
-Follow the Education style guide's [top 12 guidelines](./docs/style-guide/top-12.md) when you create your content.
+Follow the Education style guide's [top 12 guidelines](../style-guide/top-12.md) when you create your content.
 
 ## Add your page to the navigation sidebar
 
@@ -108,7 +108,7 @@ explanation of how the filesystem maps to entries in the sidebar file.
 
 The structure of the sidebars is controlled by files in the
 `content/<product>/<version>/data` directory. For example,
-[content/vault/v1.20.x/data/docs-nav-data.json](./content/vault/v1.20.x/data/docs-nav-data.json)
+`web-unified-docs/content/vault/v1.20.x/data/docs-nav-data.json`
 controls the Vault docs v1.20.x sidebar. Within the `data` folder, any file with
 `-nav-data` after it controls the navigation for the given section.
 

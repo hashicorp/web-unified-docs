@@ -87,9 +87,9 @@ Use this workflow when you want to update published documentation.
    the current release folder. Update content in prior release folders as
    needed.
 
-   Content should adhere to the [Education style guide](./docs/style-guide/index.md).
+   Content should adhere to the [Education style guide](./style-guide/index.md).
 
-   If you need to create a new page, refer to the [How to create a new page](./docs/content-guide/create-new-page.md) guide for instructions.
+   If you need to create a new page, refer to the [How to create a new page](./content-guide/create-new-page.md) guide for instructions.
 
 1. Preview your changes locally (optional).
 
@@ -158,9 +158,9 @@ Check with your team for name of the branch.
 
 1. Make your changes in current release folder.
 
-   Content should adhere to the [Education style guide](./docs/style-guide/index.md).
+   Content should adhere to the [Education style guide](./style-guide/index.md).
 
-   If you need to create a new page, refer to the [How to create a new page](./docs/content-guide/create-new-page.md) guide for instructions.
+   If you need to create a new page, refer to the [How to create a new page](./content-guide/create-new-page.md) guide for instructions.
 
 1. Preview your changes locally (optional).
 
@@ -234,7 +234,7 @@ the name of the branch and folder.
 
 1. Make your changes in upcoming release folder.
 
-   Content should adhere to the [Education style guide](./docs/style-guide/index.md).
+   Content should adhere to the [Education style guide](./style-guide/index.md).
 
    If you need to create a new page, refer to the [How to create a new
    page](./docs/content-guide/create-new-page.md) guide for instructions.
