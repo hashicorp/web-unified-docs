@@ -87,9 +87,9 @@ Use this workflow when you want to update published documentation.
    the current release folder. Update content in prior release folders as
    needed.
 
-   Content should adhere to the [Education style guide](./style-guide/index.md).
+   Content should adhere to the [Education style guide][edu-style-guide].
 
-   If you need to create a new page, refer to the [How to create a new page](./content-guide/create-new-page.md) guide for instructions.
+   If you need to create a new page, refer to the [How to create a new page][new-page-guide] guide for instructions.
 
 1. Preview your changes locally (optional).
 
@@ -158,9 +158,9 @@ Check with your team for name of the branch.
 
 1. Make your changes in current release folder.
 
-   Content should adhere to the [Education style guide](./style-guide/index.md).
+   Content should adhere to the [Education style guide][edu-style-guide].
 
-   If you need to create a new page, refer to the [How to create a new page](./content-guide/create-new-page.md) guide for instructions.
+   If you need to create a new page, refer to the [How to create a new page][new-page-guide] guide for instructions.
 
 1. Preview your changes locally (optional).
 
@@ -234,10 +234,9 @@ the name of the branch and folder.
 
 1. Make your changes in upcoming release folder.
 
-   Content should adhere to the [Education style guide](./style-guide/index.md).
+   Content should adhere to the [Education style guide][edu-style-guide].
 
-   If you need to create a new page, refer to the [How to create a new
-   page](./docs/content-guide/create-new-page.md) guide for instructions.
+   If you need to create a new page, refer to the [How to create a new page][new-page-guide] guide for instructions.
 
 1. Preview your changes locally (optional).
 
@@ -314,3 +313,7 @@ local images and then rebuild with `make`.
 
   Reach out to one of the approvers on your pull request or contact your
   product's tech writing team.
+
+
+[edu-style-guide]: ./style-guide/index.md
+[new-page-guide]: ./content-guide/create-new-page.md
