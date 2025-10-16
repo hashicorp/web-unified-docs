@@ -175,6 +175,7 @@ export const PRODUCT_CONFIG = {
 		contentDir: 'docs',
 		dataDir: 'data',
 		productSlug: 'terraform',
+		supportsExclusionDirectives: true,
 		/**
 		 * Note: we need to sort versions for various reasons. Nearly all
 		 * our documentation is semver-versioned. PTFE is not. Rather than
@@ -202,6 +203,7 @@ export const PRODUCT_CONFIG = {
 		 * See note at top of this document on `pages` directories for details.
 		 */
 		assetDir: 'public/images',
+		basePaths: ['sentinel'],
 		/**
 		 * TODO: consider implications of Sentinel's `contentDir`.
 		 *
@@ -242,6 +244,17 @@ export const PRODUCT_CONFIG = {
 		basePaths: ['cli', 'internals', 'intro', 'language'],
 		contentDir: 'docs',
 		dataDir: 'data',
+		productSlug: 'terraform',
+		semverCoerce: semver.coerce,
+		versionedDocs: true,
+		websiteDir: 'website',
+	},
+	'terraform-mcp-server': {
+		assetDir: '',
+		basePaths: ['mcp-server'],
+		contentDir: 'docs',
+		dataDir: 'data',
+		navDataPath: 'mcp-server',
 		productSlug: 'terraform',
 		semverCoerce: semver.coerce,
 		versionedDocs: true,
@@ -310,6 +323,7 @@ export const PRODUCT_CONFIG = {
 		semverCoerce: semver.coerce,
 		versionedDocs: false,
 		websiteDir: 'website',
+		supportsExclusionDirectives: true,
 	},
 	'terraform-plugin-framework': {
 		/**
@@ -444,12 +458,14 @@ export const PRODUCT_CONFIG = {
 		 * See note at top of this document on `pages` directories for details.
 		 */
 		assetDir: 'public/img',
+		basePaths: ['api-docs', 'docs'],
 		contentDir: 'content',
 		dataDir: 'data',
 		productSlug: 'vault',
 		semverCoerce: semver.coerce,
 		versionedDocs: true,
 		websiteDir: 'website',
+		supportsExclusionDirectives: true,
 	},
 	'well-architected-framework': {
 		/**
