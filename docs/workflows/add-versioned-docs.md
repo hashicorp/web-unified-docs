@@ -77,10 +77,10 @@ Before merging these changes, make changes to the `web-unified-docs` API. Refer 
 
    ```yaml
    <string-for-your-label>:
-  any:
-    changed-files:
-      any-glob-to-any-file: [
-        'content/<dir-for-your-collection>/**'
+     any:
+      changed-files:
+        any-glob-to-any-file: [
+          'content/<dir-for-your-collection>/**'
       ]
    ```
 
