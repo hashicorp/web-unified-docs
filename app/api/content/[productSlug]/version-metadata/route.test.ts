@@ -13,12 +13,12 @@ import {
 	MockInstance,
 } from 'vitest'
 import { GET } from './route'
-import { PRODUCT_CONFIG } from '@utils/productConfig.mjs'
-import { Err, Ok } from '@utils/result'
-import { getProductMetadata } from '@utils/contentVersions'
-import { mockRequest } from '@utils/mockRequest'
+import { PRODUCT_CONFIG } from '#productConfig.mjs'
+import { Err, Ok } from '#utils/result'
+import { getProductMetadata } from '#utils/contentVersions'
+import { mockRequest } from '#utils/mockRequest'
 
-vi.mock(import('@utils/contentVersions'), async (importOriginal: any) => {
+vi.mock('#utils/contentVersions', async (importOriginal: any) => {
 	const mod = await importOriginal()
 	return {
 		...mod,
@@ -26,7 +26,7 @@ vi.mock(import('@utils/contentVersions'), async (importOriginal: any) => {
 	}
 })
 
-vi.mock('@api/versionMetadata.json', () => {
+vi.mock('#api/versionMetadata.json', () => {
 	return {
 		default: {},
 	}

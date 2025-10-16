@@ -1,0 +1,154 @@
+---
+page_title: Resources - List
+description: Implementing List on an SDKv2 resource.
+---
+
+# Resources - List
+
+Whilst `list` isn't supported natively in SDKv2 there are compatibility implementations available to support the use of the framework interface on SDKv2 resources.
+
+The following pre-requisites are required to implement `list` for an SDKv2 resource:
+
+1. The provider must be able to access framework functionality, this can be achieved by [combining providers](/terraform/plugin/mux/combining-protocol-version-5-providers)
+1. The list resource type needs to be added to the provider so that it is available to practitioners
+
+In addition to the pre-requisites above we recommend reading the [list resource documentation for framework](/terraform/plugin/framework/resources/list-resources) to understand the concepts and requirements of implementing a list resource.
+
+## Implement the RawV5Schemas Method
+
+The [`list.ListResourceWithRawV5Schemas` interface `RawV5Schemas` method](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/list#ListResourceWithRawV5Schemas.RawV5Schemas) allows practitioners to provide the necessary resource and identity schema information upfront.
+
+To facilitate the use of this method, the [`ProtoSchema` and `ProtoIdentitySchema` methods](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema#Resource.ProtoSchema) are available on the SDKv2 [`schema.Resource`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema#Resource) type and will return the protocol V5 representations of the resource and identity schemas.
+
+In this example, the resource `examplecloud_thing` implements the `RawV5Schemas` method:
+
+```go
+// Some list.ListResource interface methods are omitted for brevity
+type ThingListResource struct {}
+
+func (r *ThingListResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+	resp.TypeName = "examplecloud_thing"
+}
+
+func (r *ThingListResource) RawV5Schemas(ctx context.Context, req list.RawV5SchemaRequest, resp *list.RawV5SchemaResponse) {
+    // Where `resourceThing` returns the `schema.Resource` instance
+	thingResource := resourceThing()
+
+	resp.ProtoV5Schema = thingResource.ProtoSchema(ctx)()
+	resp.ProtoV5IdentitySchema = thingResource.ProtoIdentitySchema(ctx)()
+}
+```
+
+## Implement the List Method
+
+The [`list.ListResource` interface `List` method](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/list#ListResource.List) is where the actual list API call is made and the resulting resource state is returned to the framework.
+
+The results that are returned must be framework types. To simplify the conversion of identity and resource data on SDKv2 objects to framework types, the following two methods were added on `schema.ResourceData`:
+
+- [`TfTypeIdentityState()`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema#ResourceData.TfTypeIdentityState) - Converts the identity data on the `ResourceData` to a `tftypes.Value`.
+- [`TfTypeResourceState()`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema#ResourceData.TfTypeResourceState) - Converts the resource state on the `ResourceData` to a `tftypes.Value`.
+
+In this example, the list method on the resource `examplecloud_thing` is defined:
+
+```go
+// Some list.ListResource interface methods are omitted for brevity.
+type ThingListResource struct{}
+
+func (r *ThingListResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+	resp.TypeName = "examplecloud_thing"
+}
+
+func (r *ThingListResource) RawV5Schemas(ctx context.Context, req list.RawV5SchemaRequest, resp *list.RawV5SchemaResponse) {
+	thingResource := resourceThing()
+
+	resp.ProtoV5Schema = thingResource.ProtoSchema(ctx)()
+	resp.ProtoV5IdentitySchema = thingResource.ProtoIdentitySchema(ctx)()
+}
+
+func (r *ThingListResource) List(ctx context.Context, req list.ListRequest, stream *list.ListResultsStream) {
+	var data ThingListResourceModel
+
+	// Read list config data into the model
+	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Typically lists will make external calls here using data from the config
+	// as input. For brevity, we assume the `things` slice below was returned by an
+	// API call here
+
+	// Define the function that will push results into the stream
+	stream.Results = func(push func(list.ListResult) bool) {
+        for _, thing := range things {
+			// Initialize a new result object for each thing
+			result := req.NewListResult(ctx)
+
+			// Set the user-friendly name of this thing
+			result.DisplayName = thing.Name
+
+			// Create an instance of the SDKv2 resource
+			thingResource := resourceThing()
+
+			// Create a new ResourceData object to hold the state of this thing
+			rd := thingResource.Data(&terraform.InstanceState{})
+
+			// Set the ID of the resource for the ResourceData object
+			rd.SetId("a_unique_id_related_to_the_thing")
+
+			// Get the existing identity data from ResourceData and set relevant identity attributes
+			identity, err := rd.Identity()
+			if err != nil {
+				result.Diagnostics.AddError(
+                    "Retrieving identity data",
+                    "An error was encountered when retrieving the identity data: "+err.Error(),
+                )
+			}
+
+			identity.Set("an_identity_attribute", thing.IdentityAttribute)
+
+			// Set the attributes of interest into the resource state
+			rd.Set("name", thing.Name)
+			rd.Set("attribute_one", thing.AttributeOne)
+			rd.Set("attribute_two", thing.AttributeTwo)
+
+			// Convert and set the identity and resource state into the result
+			tfTypeIdentity, err := rd.TfTypeIdentityState()
+			if err != nil {
+				result.Diagnostics.AddError(
+                    "Converting identity data",
+                    "An error was encountered when converting the identity data: "+err.Error(),
+                )
+			}
+
+			if err := result.Identity.Set(ctx, *tfTypeIdentity); err != nil {
+				result.Diagnostics.AddError(
+                    "Setting identity data",
+                    "An error was encountered when setting the identity data: "+err.Error(),
+                )
+			}
+
+			// Convert and set the resource state into the result
+			tfTypeResource, err := rd.TfTypeResourceState()
+			if err != nil {
+				result.Diagnostics.AddError(
+                    "Converting resource state",
+                    "An error was encountered when converting the resource state: "+err.Error(),
+                )
+			}
+
+			if err := result.Resource.Set(ctx, *tfTypeResource); err != nil {
+				result.Diagnostics.AddError(
+                    "Setting resource state",
+                    "An error was encountered when setting the resource state: "+err.Error(),
+                )
+			}
+
+            // Send the result to the stream.
+            if !push(result) {
+                return
+            }
+        }
+    }
+}
+```
