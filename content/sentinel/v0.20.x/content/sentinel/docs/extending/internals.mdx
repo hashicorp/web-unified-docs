@@ -1,0 +1,252 @@
+---
+page_title: >-
+  Extending Sentinel: Internals
+sidebar_current: docs-extending-internals
+description: This Section covers some details about Sentinel's import internals.
+layout: docs
+---
+
+# Extending Sentinel: Internals
+
+-> **Advanced Topic!** This page covers low-level technical details of Sentinel.
+You don't need to understand these details to effectively use Sentinel. The
+details are documented here for those who wish to learn about them.
+
+This section covers some of the internal details of Sentinel's import system.
+The goal of this section is to help remove notion of "magic" from Sentinel, to
+allow you to trust and understand what Sentinel is doing with imports, and also
+to help practitioners and developers alike understand the differences between
+the ways that imports can be loaded into Sentinel.
+
+## Language and Runtime
+
+Understanding the import system in Sentinel generally requires understanding of
+two key concepts within Sentinel: the _language_, and the _runtime
+implementation_ of the language.
+
+The Sentinel language and the rules governing it are detailed in the [Sentinel
+Language Specification](/sentinel/language/spec). A runtime implementation must
+conform to the rules laid out in the specification at a minimum. However, to
+meet the design goals of a particular implementation, the runtime may implement
+features on top of the language. The subtle implementation details within the
+runtime may also vary while still being compliant with the specification.
+
+The core runtime included within the [Sentinel CLI](/sentinel/commands) is
+sometimes referred to as the _reference implementation_ of the Sentinel
+language. This runtime is also the main runtime embedded within each
+Sentinel-enabled HashiCorp product such as Terraform Cloud and Enterprise, Vault
+Enterprise, Nomad Enterprise, and Consul Enterprise. The runtime includes an API
+to allow these integrations implement Sentinel in as robust or as restrictive of
+a way as possible, so depending on the implementation, your experience may vary.
+
+## Sentinel's Import Model
+
+The concept of Imports within Sentinel is a _language_ feature. You can see the
+exact rules governing imports within the
+[Imports](/sentinel/language/spec#imports) section of the specification.
+
+Within the runtime, there are currently two major classifications of imports:
+
+- **Modules:** The mapping of Sentinel code to an import, essentially mapping a
+  scope of values to a particular package.
+- **Binary Imports:** A grouping of embedded and external plugins written using
+  the Sentinel SDK. These are comprised of internal or embedded imports (usually
+  the [standard imports](/sentinel/imports) and imports included by an
+  integration) and import plugins.
+
+Below is a diagram explaining in brief the relationship between the langauge
+and runtime features.
+
+![Sentinel Import Topology](/img/sentinel-import-topology.svg)
+
+This kind of topology ultimately minimizes the visibility of implementation
+internals to the actual policy language. This allows us to keep the Sentinel
+language itself simple and keep concerns such as module or plugin management,
+validation, and configuration out of the language. These kinds of things would
+impact the readability of a policy, possibly present security challenges, and
+would ultimately be of no use to more minimal embedded applications.
+
+### Implementation Differences Between Import Types
+
+As one would imagine, both modules and binary imports are loaded in much
+different ways, and the methods that they expose data to Sentinel differ as
+well. The effect is generally the same however across both, and we take care to
+ensure that both modules and binary imports behave as close as possible to each
+other, however there are some subtle differences:
+
+- Modules currently support the exporting of rules, but do not support function
+  calls with object receiver data (as seen in some standard imports such as
+  [`decimal`](/sentinel/imports/decimal), [`http`](/sentinel/imports/http), and
+  [`time`](/sentinel/imports/time)). This will be coming in a later release.
+- Binary imports cannot export rules. However, they do support object receiver
+  data (see [`framework.New`](/sentinel/extending/plugins#framework-new) in
+  [Extending Sentinel: Plugins](/sentinel/extending/plugins)).
+
+## Modules
+
+_Modules_ are essentially Sentinel code that is intended to be re-used in multiple
+policies as an import.
+
+The mechanism of module loading is fairly straightforward: during initialization
+of the Sentinel runtime, modules are parsed along with policies. The parsed
+_abstract syntax tree_ (AST) for each module is loaded into the runtime under
+the specified _import path_. These are then passed to the lower-level
+interpreter during the evaluation of each policy.
+
+As with policy code, during evaluation, a module's AST is walked to execute the
+code within that specific module. The module data is then stored within an
+specific scope mapped to the import name. The module data can then be accessed
+through the import via selector expressions and function calls (e.g.,
+`foo.some_map` or `foo.some_func()` for a module loaded via `import "foo"`).
+
+The AST for a module is only walked if a policy imports it, and it is _only
+walked once_. That means if a policy and a module import the same module, or a
+policy imports the same module twice (using [import
+aliases](/sentinel/language/imports#aliases)), those instances will share state.
+If you call a function that alters a singleton variable within the module, that
+singleton will be modified for all instances of the import.
+
+-> **Fun fact!** When you [mock an import with Sentinel
+code](/sentinel/configuration#mocking-with-sentinel-code), you are actually
+using a module. The module is loaded with a flag that allows it to override an
+existing import, which would normally give a runtime error.
+
+### Map and List Cloning for Module Calls
+
+It's also worthwhile noting that map and list values are cloned for modules.
+
+Consider the case where you have a module with a map singleton.
+
+```sentinel
+// modules/foo.sentinel
+a_map = {"a": "b"}
+```
+
+Normally, assignment to the singleton, even when using an index expression, is
+blocked, so `foo.a_map["c"] = "d"` would not pass semantic checking.
+
+However, even when you try to do assignment via an intermediary, you will still
+be only modifying the copy, and the original will not be affected:
+
+```sentinel
+// policy.sentinel
+import "foo"
+
+a_map_copy      = foo.a_map
+a_map_copy["c"] = "d"  // Only modifies copy, does not modify module singleton
+print(foo.a_map)       // Still only prints {"a": "b"}
+```
+
+This is to ensure that modules are consistent with binary imports in how return
+data is handled, and the expectation that most non-object data within an import
+is read-only, with the exception of modification of singleton data via
+functions. As return of complex object and collection data in a binary import is
+always via copy, it's not possible to modify any value elements within the
+import in a similar fashion.
+
+There are also some other implications of this cloning that are of note:
+
+- Rules are not cloned, either within a list or map, or by themselves. This is
+  to ensure that [memoization](/sentinel/language/rules#lazy-and-memoized)
+  functions correctly. As only a module can export rules at this time, there is no
+  parity for this in binary imports.
+- Functions are _not_ cloned. This mainly has implications for scope - for
+  example, if you assign a function to another value, or assign an object to a
+  value that has a method that utilizes a global module variable, those calls will
+  reference and/or modify those values.
+
+Functions, while represented differently in binary imports, generally follow the
+same logic here - as they would be invoked in the same package within the binary
+import, any singleton values they accessed there would be affected in a similar
+fashion. As rules are pseudo-functions, this generally makes sense here too.
+
+## Binary Imports
+
+_Binary imports_ is a grouping referring to all imports that are designed with
+the [Sentinel SDK](https://github.com/hashicorp/sentinel-sdk). These can be
+either internally embedded, or executed via a plugin.
+
+All imports found in the [standard library](/sentinel/imports) are binary
+imports, embedded internally.
+
+The main difference between internally embedded imports and external plugins is
+whether or not the runtime needs to execute a plugin binary as part of
+[lifecycle management](#lifecycle), and whether or not it needs to
+[communicate](#communication) over RPC. Internal binary imports do not require
+these steps, so their execution model is somewhat simpler; however, technically,
+they still are the same as external plugins in terms of design model and value
+conversion. Most standard imports are even tested using the [SDK test
+suite](/sentinel/extending/plugins#testing), which builds the import as an
+external plugin.
+
+The remainder of this section discusses topics mostly relevant to external
+plugins. A large amount of technical detail regarding binary import development
+(also applicable to embedded binary imports) can be seen on the
+[Plugins](/sentinel/extending/plugins) page.
+
+-> **NOTE:** At this time, plugins can only be written for the Sentinel CLI, and
+cannot be used with any of Sentinel's integrations.
+
+### Plugin Basics
+
+Sentinel plugins are built on top of the HashiCorp [go-plugin
+system](https://github.com/hashicorp/go-plugin). This is the same plugin system
+powering all pluggable HashiCorp tools such as
+[Terraform](https://www.terraform.io), [Vault](https://www.vaultproject.io), and
+more. go-plugin is a system that has been used in production for millions of
+users for over 5 years.
+
+Plugins are executable binaries. Sentinel is responsible for launching and
+managing the lifecycle of plugins. Once a plugin is running, Sentinel
+communicates with the plugin via [gRPC](https://grpc.io/). The [protocol is open
+source](https://github.com/hashicorp/sentinel-sdk/blob/master/proto/import.proto)
+to allow anyone to write a Sentinel plugin.
+
+### Lifecycle
+
+Sentinel launches plugins and is responsible for plugin lifecycle.
+
+The runtime optimizes for latency by launching the plugin as soon as it is
+configured, rather than when a policy requires it. This ensures that the plugin
+is ready to be used immediately. A plugin is only closed when Sentinel is
+reconfigured to no longer allow that plugin or if the Sentinel-enabled
+application is closing.
+
+When a plugin is removed from the configuration, Sentinel may wait to shut down
+the plugin until all currently executing policies that are using that plugin
+complete. New policy executions will not be allowed to use the old plugins.
+
+Plugins are automatically restarted if they shut down unexpectedly. Policies
+that were executing while this happens may fail. The Sentinel system is
+improving to more gracefully understand locations where it is safe to retry an
+execution.
+
+### Communication
+
+An [initial
+handshake](https://github.com/hashicorp/go-plugin/blob/master/docs/internals.md)
+is done via stdout to determine the main communication location. Following the
+handshake, communication will either occur on a local Unix domain socket or via
+a local-only TCP socket. This communication is done mostly over the low-level
+[`Get`](https://github.com/hashicorp/sentinel-sdk/blob/2b4db07dd12b55142f0c016f301af80aa4422520/proto/import.proto#L12)
+RPC call.
+
+#### Value Conversion
+
+As can generally be seen in [Developing an Import
+Plugin](/sentinel/extending/plugins#developing-an-import-plugin), the Sentinel
+type system is not exposed to binary imports. While explicit values for null and
+undefined exist, values are mostly converted over the wire from their Go values
+to their Sentinel equivalents.
+
+This has a few implications:
+
+- As discussed in [Map and List Cloning for Module
+  Calls](#map-and-list-cloning-for-module-calls), Map and list data returned from
+  binary import value lookups or function calls is always cloned. These can be
+  freely modified without affecting anything within the binary import.
+- It's currently impossible to represent certain Sentinel types such as
+  [rules](/sentinel/language/rules) within a binary import. This is not a major
+  issue at this point in time as practitioners generally do not look to binary
+  imports for rules; we may examine this as a later time if this situation
+  changes.

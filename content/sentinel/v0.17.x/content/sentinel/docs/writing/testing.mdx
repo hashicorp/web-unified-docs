@@ -1,0 +1,492 @@
+---
+page_title: Writing Sentinel Policy
+sidebar_title: Testing
+sidebar_current: docs-writing-testing
+description: >-
+  Sentinel has a built-in test framework to validate a policy behaves as
+  expected.
+layout: docs
+---
+
+# Testing
+
+Sentinel has a built-in test framework to validate a policy behaves as expected.
+
+With an ever-increasing amount of automation surrounding technology,
+the guardrails provided by policies are a critical piece towards ensuring
+expected behavior. As a reliance on correct policy increases, it is important
+to test and verify policies.
+
+Testing is a necessary step to fully realize
+[policy as code](/sentinel/concepts/policy-as-code). Just as good software
+is well tested, a good set of policies should be equally well tested.
+
+## Test Folder Structure
+
+Policies are tested by asserting that [rules](/sentinel/writing/rules)
+are the expected values given a pre-configured input. Tests are run
+by executing the [test command](/sentinel/commands/test).
+
+Sentinel is opinionated about the folder structure required for tests.
+This opinionated structure allows testing to be as simple as running
+`sentinel test` with no arguments. Additionally, it becomes simple to test
+in a CI or add new policies.
+
+The structure Sentinel expects is `test/<policy>/*.[hcl|json]` where `<policy>`
+is the name of your policy file without the file extension. Within that folder
+is a list of HCL or JSON files. Each file represents a single test case.
+Therefore, each policy can have multiple tests associated with it.
+
+-> Note that the primary configuration file format for Sentinel is HCL. While
+you can write configuration files in a HCL-equivalent JSON, we only discuss the
+use of HCL on this page.
+
+## Test Case Format
+
+Each HCL file within the test folder for a policy is a single test case.
+
+The file is the same configuration format as the [CLI configuration
+file](/sentinel/configuration). The format lets you define mock data, imports to
+use, and more. This mock data is the key piece in being able to test policies:
+you craft a specific scenario and assert your policy behaves as you expect.
+
+Test cases also use the `test` block within the configuration file to assert the
+value of [rules](/sentinel/writing/rules). If the `test` key is omitted, the
+policy is expected to pass. If the test key is specified, only the rules
+specified in the map will be asserted. This means if you omit `main`, then the
+final policy result is not asserted.
+
+Example with assertions:
+
+```hcl
+param "day" {
+  value = "monday"
+}
+
+param "hour" {
+  value = 7
+}
+
+test {
+  rules = {
+    main          = false
+    is_open_hours = false
+    is_weekday    = true
+  }
+}
+```
+
+The configuration above specifies some parameter data, and asserts the result of
+some rules. This is the same configuration used in the example section below.
+
+## Example
+
+Lets use the following file as an example. Save this file to a directory
+and name it `policy.sentinel`. It can be named anything with the `sentinel`
+extension, but by naming it `policy.sentinel` your output should match
+the example output on this page.
+
+```sentinel
+// The day of the week.
+param day
+
+// The hour of the day.
+param hour
+
+is_weekday = rule { day not in ["saturday", "sunday"] }
+is_open_hours = rule { hour > 8 and hour < 17 }
+main = rule { is_open_hours and is_weekday }
+```
+
+### A Passing Test
+
+Next, let's define a single test case. Relative to where you saved
+the policy, create a file at the path `test/policy/good.hcl`.
+
+```hcl
+param "day" {
+  value = "monday"
+}
+
+param "hour" {
+  value = 14
+}
+```
+
+Now run `sentinel test`:
+
+```
+$ sentinel test
+PASS - policy.sentinel
+  PASS - test/policy/good.hcl
+```
+
+This passed because the policy passed. We didn't assert any specific
+rules. By not specifying any assertions, `test` expects the policy itself
+to fully pass.
+
+### A Failing Test
+
+Define another test case to fail. We want to verify our policy fails when expected, too.
+
+Save the following as `test/policy/7-am.hcl`:
+
+```hcl
+param "day" {
+  value = "monday"
+}
+
+param "hour" {
+  value = 7
+}
+```
+
+Now run `sentinel test`:
+
+```
+$ sentinel test
+FAIL - policy.sentinel
+  FAIL - test/policy/7-am.hcl
+    expected "main" to be true, got: false
+
+    trace:
+      policy.sentinel:9:1 - Rule "main"
+        bool: false
+
+      policy.sentinel:8:1 - Rule "is_open_hours"
+        bool: false
+
+  PASS - test/policy/good.hcl
+```
+
+As you can see, the test fails because "main" is false. This is good
+because the policy _should_ have failed since we specified an invalid
+hour. But, we expect main to be false and don't want our test to fail!
+Update `7-am.hcl` to add test assertions:
+
+```hcl
+param "day" {
+  value = "monday"
+}
+
+param "hour" {
+  value = 7
+}
+
+test {
+  rules = {
+    main          = false
+    is_open_hours = false
+  }
+}
+```
+
+And when we run the tests:
+
+```
+$ sentinel test
+PASS - policy.sentinel
+  PASS - test/policy/7-am.hcl
+  PASS - test/policy/good.hcl
+```
+
+The test passes. We asserted that we expect the `main` rule to be false,
+the `is_open_hours` rule to be false, and the `is_weekday` rule to be
+true. By asserting some rules are true, we can verify that our policy
+is failing for reasons we expect.
+
+## Mocking
+
+The above example demonstrates how to test by supplying different
+[parameters](/sentinel/language/parameters). Parameters in a policy can be
+specifically useful when you want to control user-defined input values to a
+policy.
+
+However, generally, when testing, you will need mimic the conditions you will
+see in production. Production implementations of Sentinel will supply data using
+one of two methods:
+
+- **Global data:** Data is injected directly into the policy's scope and is
+  accessible using normal identifiers, similar to variables.
+- **Imports:** Data is stored behind an [import](/sentinel/language/imports)
+  and loaded on demand as needed by the policy author.
+
+Proper testing of a policy requires that these values be able to be _mocked_ -
+or, in other words, simulated in a way that allows the accurate testing of the
+scenarios that a policy could reasonably pass or fail under.
+
+Mocking both globals and imports can be done by setting various parts of the
+configuration file.
+
+### Mocking Globals
+
+Demonstrating the mocking of globals can be seen by making a few modifications to
+our example policy, removing the `param` declarations:
+
+```sentinel
+is_weekday = rule { day not in ["saturday", "sunday"] }
+is_open_hours = rule { hour > 8 and hour < 17 }
+main = rule { is_open_hours and is_weekday }
+```
+
+Then, change the `param` section in the configuration file to
+[`global`](/sentinel/configuration#global).
+
+```json
+global "day" {
+  value = "monday"
+}
+
+global "hour" {
+  value = 14
+}
+```
+
+This test should still pass, as if nothing had happened, although what we've
+done is shifted our parameters to globals, simulating an environment where `day`
+and `hour` are already defined for us.
+
+### Mocking Imports
+
+To mock imports, we need to use the
+[`mock`](/sentinel/configuration#mock-imports) section of the
+configuration file.
+
+Let's say the above example is behind an import named `time`.
+
+-> **NOTE:** [`time`](/sentinel/imports/time) is a valid standard import.
+This example may not be accurate to the
+import's syntax.
+
+The code now looks like this:
+
+```sentinel
+import "time"
+
+is_weekday = rule { time.now.weekday_name not in ["Saturday", "Sunday"] }
+is_open_hours = rule { time.now.hour > 8 and time.now.hour < 17 }
+main = rule { is_open_hours and is_weekday }
+```
+
+To mock this import, we can [mock it as static
+data](/sentinel/configuration#mocking-static-data). The configuration
+file now looks like, without assertions:
+
+```hcl
+mock "time" {
+  data = {
+    now = {
+      weekday_name = "Monday"
+      hour         = 14
+    }
+  }
+}
+```
+
+The policy will now pass, with the `time` import mocked.
+
+Data can also be [mocked as Sentinel
+code](/sentinel/configuration#mocking-with-sentinel-code). In this case,
+the above configuration file would look like:
+
+```hcl
+mock "time" {
+  module = {
+    source = "mock-time.sentinel"
+  }
+}
+```
+
+And a file named `mock-time.sentinel` would now hold your mock values:
+
+```sentinel
+day = "monday"
+hour = 14
+```
+
+Mocking as Sentinel code allows more complex details to be mocked as well, such
+as functions. Say we wanted to mock the `time.load()` function. To mock this,
+just add it to the `mock-time.sentinel` file:
+
+```sentinel
+load = func(_) {
+	return {
+		"weekday_name":  "Monday",
+		"hour": 14,
+	}
+}
+```
+
+Your code can now be written as:
+
+```sentinel
+import "time"
+
+t = time.load("a_mock_timestamp")
+
+is_weekday = rule { t.weekday_name not in ["Saturday", "Sunday"] }
+is_open_hours = rule { t.hour > 8 and t.hour < 17 }
+main = rule { is_open_hours and is_weekday }
+```
+
+To see more details, see the [Mock
+Imports](/sentinel/configuration#mock-imports) section in the
+configuration file.
+
+## Asserting Non-Boolean Rules
+
+Non-boolean rules can also be asserted by `sentinel test`.
+
+To assert non-boolean values, simply enter the expected value into the rule
+contents:
+
+```hcl
+param "maintenance_days" {
+  value = [
+    {
+      day  = "wednesday"
+      hour = 9
+    },
+    {
+      day  = "friday"
+      hour = 1
+    },
+    {
+      day  = "sunday"
+      hour = 1
+    },
+  ]
+}
+
+test {
+  rules = {
+    main = [
+      {
+        day  = "wednesday"
+        hour = 9
+      },
+    ]
+  }
+}
+```
+
+This would assert a policy checking for violations of a maintenance policy,
+saying that maintenance hours should happen before 6AM on any given day:
+
+```sentinel
+param maintenance_days
+
+main = rule {
+	filter maintenance_days as d {
+		d.hour >= 6
+	}
+}
+```
+
+## Test JSON Output
+
+Running `sentinel test` with the `-json` flag will give you the test results in
+a JSON output format, suitable for parsing by reporting software.
+
+-> **Note:** The JSON output format is currently under development and the
+format may change at a later time. Additionally, support for other well-known
+formats, such as JUnit, may become available in the future.
+
+The current format is an object with the only top-level key being `policies`,
+with each test grouped up by policy being run.
+
+The policy result fields are:
+
+- `path`: The path of the policy and the index of the test result in the
+  `policies` field in the root object.
+- `status`: A string representation of the policy's test status as a whole. Can
+  be one of `PASS`, `FAIL`, `ERROR`, or `?`. The final status, `?`, represents a
+  policy that has no tests to process, and acts like a passing test.
+- `errors`: An array of any error messages encountered during processing the
+  policy for testing. Usually reserved for policy file or parser-related errors.
+  For case-specific errors, see the error field for the particular case.
+- `cases`: A map of case results, indexed by case path.
+
+The case result fields are:
+
+- `path`: The path of the test case and the result's index in the `cases` field
+  in the policy object.
+- `status`: A string representation of the case's test status. Can be one of
+  `PASS`, `FAIL` or `ERROR`.
+- `errors`: An array of any error messages encountered during running this test
+  case.
+- `trace`: The trace for this policy in JSON format. See the
+  [tracing](/sentinel/writing/tracing) page for more details.
+- `rule_detail`: When the `status` of this test case is `FAIL`, contains an
+  object of assertion failure detail, indexed by rule. Only failures are counted
+  here; any rules not found here can be assumed to have passed or not asserted.
+- `config_warnings`: An array of strings denoting any configuration warnings
+  found while processing the configuration for this test case.
+- `config_legacy`: Denotes whether or not the configuration is a legacy JSON
+  configuration and needs to be modernized. This field may be removed in future
+  releases.
+
+A passing example is shown below:
+
+```json
+{
+  "policies": {
+    "policy.sentinel": {
+      "path": "policy.sentinel",
+      "status": "PASS",
+      "errors": null,
+      "cases": {
+        "test/policy/pass.hcl": {
+          "path": "test/policy/pass.hcl",
+          "status": "PASS",
+          "errors": null,
+          "trace": {
+            "description": "A very basic policy to determine if a run is within working hours.",
+            "error": null,
+            "print": "",
+            "result": true,
+            "rules": {
+              "is_open_hours": {
+                "desc": "Passes if run during business hours.",
+                "ident": "is_open_hours",
+                "position": {
+                  "filename": "policy.sentinel",
+                  "offset": 290,
+                  "line": 13,
+                  "column": 1
+                },
+                "value": true
+              },
+              "is_weekday": {
+                "desc": "Passes if the day does not fall on the weekend.",
+                "ident": "is_weekday",
+                "position": {
+                  "filename": "policy.sentinel",
+                  "offset": 193,
+                  "line": 10,
+                  "column": 1
+                },
+                "value": true
+              },
+              "main": {
+                "desc": "",
+                "ident": "main",
+                "position": {
+                  "filename": "policy.sentinel",
+                  "offset": 338,
+                  "line": 14,
+                  "column": 1
+                },
+                "value": true
+              }
+            }
+          },
+          "rule_detail": {},
+          "config_warnings": null,
+          "config_legacy": false
+        }
+      }
+    }
+  }
+}
+```

@@ -97,23 +97,23 @@ export const PRODUCT_CONFIG = {
 	// 	versionedDocs: true,
 	// 	websiteDir: 'website',
 	// },
-	// 'hcp-docs': {
-	// 	/**
-	// 	 * ✅ Initial migration attempt: SEEMS TO WORK
-	// 	 *
-	// 	 * Maybe worth noting: versioned docs is not enabled for `hcp-docs`.
-	// 	 * `branchForLatest` is set to `main`. We treat the single version
-	// 	 * as `v0.0.x` in our version metadata in the current content API:
-	// 	 * https://content.hashicorp.com/api/content/hcp-docs/version-metadata?partial=true
-	// 	 */
-	// 	assetDir: 'public',
-	// 	contentDir: 'content',
-	// 	dataDir: 'data',
-	//  productSlug: 'hcp',
-	// 	semverCoerce: semver.coerce,
-	//  versionedDocs: false,
-	// 	websiteDir: '.',
-	// },
+	'hcp-docs': {
+		/**
+		 * ✅ Initial migration attempt: SEEMS TO WORK
+		 *
+		 * Maybe worth noting: versioned docs is not enabled for `hcp-docs`.
+		 * `branchForLatest` is set to `main`. We treat the single version
+		 * as `v0.0.x` in our version metadata in the current content API:
+		 * https://content.hashicorp.com/api/content/hcp-docs/version-metadata?partial=true
+		 */
+		assetDir: 'public/img',
+		contentDir: 'content',
+		dataDir: 'data',
+		productSlug: 'hcp',
+		semverCoerce: semver.coerce,
+		versionedDocs: false,
+		websiteDir: '.',
+	},
 	// nomad: {
 	// 	/**
 	// 	 *  🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
@@ -175,6 +175,7 @@ export const PRODUCT_CONFIG = {
 		contentDir: 'docs',
 		dataDir: 'data',
 		productSlug: 'terraform',
+		supportsExclusionDirectives: true,
 		/**
 		 * Note: we need to sort versions for various reasons. Nearly all
 		 * our documentation is semver-versioned. PTFE is not. Rather than
@@ -191,33 +192,34 @@ export const PRODUCT_CONFIG = {
 		versionedDocs: true,
 		websiteDir: 'website',
 	},
-	// sentinel: {
-	// 	/**
-	// 	 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
-	// 	 *
-	// 	 * Fails for v0.16.x (and likely earlier) with error:
-	// 	 * `sentinel/website/content: No such file or directory`
-	// 	 * This likely indicates that older versions of docs have a different
-	// 	 * directory structure that needs to be accounted for. Need to confirm.
-	// 	 * See note at top of this document on `pages` directories for details.
-	// 	 */
-	// 	assetDir: 'public',
-	// 	/**
-	// 	 * TODO: consider implications of Sentinel's `contentDir`.
-	// 	 *
-	// 	 * Sentinel content is located in `website/content/sentinel`.
-	// 	 * Copying over the content is easy enough, but for internal links,
-	// 	 * and search object IDs, and other concerns that involve the content file
-	// 	 * path, it's a bit of an outlier, so will probably present some
-	// 	 * interesting challenges.
-	// 	 */
-	// 	contentDir: 'content/sentinel',
-	// 	dataDir: 'data',
-	//  productSlug: 'sentinel',
-	// 	semverCoerce: semver.coerce,
-	//  versionedDocs: true,
-	// 	websiteDir: 'website',
-	// },
+	sentinel: {
+		/**
+		 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
+		 *
+		 * Fails for v0.16.x (and likely earlier) with error:
+		 * `sentinel/website/content: No such file or directory`
+		 * This likely indicates that older versions of docs have a different
+		 * directory structure that needs to be accounted for. Need to confirm.
+		 * See note at top of this document on `pages` directories for details.
+		 */
+		assetDir: 'public/images',
+		basePaths: ['sentinel'],
+		/**
+		 * TODO: consider implications of Sentinel's `contentDir`.
+		 *
+		 * Sentinel content is located in `website/content/sentinel`.
+		 * Copying over the content is easy enough, but for internal links,
+		 * and search object IDs, and other concerns that involve the content file
+		 * path, it's a bit of an outlier, so will probably present some
+		 * interesting challenges.
+		 */
+		contentDir: 'content/sentinel',
+		dataDir: 'data',
+		productSlug: 'sentinel',
+		semverCoerce: semver.coerce,
+		versionedDocs: true,
+		websiteDir: 'website',
+	},
 	terraform: {
 		/**
 		 * ✅ Initial migration attempt: SEEMS TO WORK
@@ -242,6 +244,17 @@ export const PRODUCT_CONFIG = {
 		basePaths: ['cli', 'internals', 'intro', 'language'],
 		contentDir: 'docs',
 		dataDir: 'data',
+		productSlug: 'terraform',
+		semverCoerce: semver.coerce,
+		versionedDocs: true,
+		websiteDir: 'website',
+	},
+	'terraform-mcp-server': {
+		assetDir: '',
+		basePaths: ['mcp-server'],
+		contentDir: 'docs',
+		dataDir: 'data',
+		navDataPath: 'mcp-server',
 		productSlug: 'terraform',
 		semverCoerce: semver.coerce,
 		versionedDocs: true,
@@ -310,6 +323,7 @@ export const PRODUCT_CONFIG = {
 		semverCoerce: semver.coerce,
 		versionedDocs: false,
 		websiteDir: 'website',
+		supportsExclusionDirectives: true,
 	},
 	'terraform-plugin-framework': {
 		/**
@@ -444,12 +458,14 @@ export const PRODUCT_CONFIG = {
 		 * See note at top of this document on `pages` directories for details.
 		 */
 		assetDir: 'public/img',
+		basePaths: ['api-docs', 'docs'],
 		contentDir: 'content',
 		dataDir: 'data',
 		productSlug: 'vault',
 		semverCoerce: semver.coerce,
 		versionedDocs: true,
 		websiteDir: 'website',
+		supportsExclusionDirectives: true,
 	},
 	'well-architected-framework': {
 		/**
