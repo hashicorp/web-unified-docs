@@ -23,7 +23,8 @@ import {
 	rewriteInternalRedirectsPlugin,
 	loadRedirects,
 } from './rewrite-internal-redirects/rewrite-internal-redirects.mjs'
-import { transformExcludeTerraformContent } from './exclude-terraform-content/index.mjs'
+
+import { transformExcludeContent } from './exclude-content/index.mjs'
 
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
 
@@ -78,11 +79,9 @@ export async function buildMdxTransforms(
 		)
 		const redirectsDir = path.join(targetDir, repoSlug, verifiedVersion)
 		const outPath = path.join(outputDir, relativePath)
-		return { filePath, partialsDir, outPath, version, redirectsDir }
+		return { repoSlug, filePath, partialsDir, outPath, version, redirectsDir }
 	})
-	/**
-	 * Apply MDX transforms to each file entry, in batches
-	 */
+
 	console.log(`Running MDX transforms on ${mdxFileEntries.length} files...`)
 	const results = await batchPromises(
 		'MDX transforms',
@@ -132,10 +131,30 @@ async function applyMdxTransforms(entry, versionMetadata = {}) {
 		const fileString = fs.readFileSync(filePath, 'utf8')
 		const { data, content } = grayMatter(fileString)
 
-		const remarkResults = await remark()
+		// Check if this file is in a global/partials directory
+		// Global partials should not have content exclusion applied to them
+		// as they are version-agnostic and shared across all versions
+		const isGlobalPartial = filePath.includes('/global/partials/')
+
+		const processor = remark()
 			.use(remarkMdx)
-			.use(transformExcludeTerraformContent, { filePath })
+			// Process partials first, then content exclusion
+			// This ensures exclusion directives in global partials are properly evaluated
 			.use(remarkIncludePartialsPlugin, { partialsDir, filePath })
+
+		// Make sure the content exclusion process skips looking through
+		// the global partial filepath (it should only be processed once the global
+		// partial is written to the file)
+		if (!isGlobalPartial) {
+			processor.use(transformExcludeContent, {
+				filePath,
+				version,
+				repoSlug: entry.repoSlug,
+				productConfig: PRODUCT_CONFIG[entry.repoSlug],
+			})
+		}
+
+		const remarkResults = await processor
 			.use(paragraphCustomAlertsPlugin)
 			.use(rewriteInternalRedirectsPlugin, {
 				redirects,
