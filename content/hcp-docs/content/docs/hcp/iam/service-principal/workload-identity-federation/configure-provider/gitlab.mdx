@@ -1,0 +1,174 @@
+---
+page_title: Federate workload identity with GitLab
+description: |-
+    Workload identity federation enables external workloads to access HCP services through an external identity provider. Learn how to configure the GitLab identity provider and the HCP platform so that external workloads can authenticate with the HCP identity service.
+---
+
+# Federate workload identity with GitLab
+
+This page describes how to set up workload identity federation to authenticate from a [GitLab CI/CD Pipeline](https://docs.gitlab.com/ee/ci/index.html) using a [GitLab ID token](https://docs.gitlab.com/ee/ci/secrets/id_token_authentication.html). Authenticated workloads can interact with HCP services without storing any HCP service principal keys.
+
+## Prerequisites
+
+You must complete the following steps before configuring a workload identity provider for GitLab:
+
+- You must have the `Admin` role on the HCP project.
+- [Create a service principal in the desired project](/hcp/docs/hcp/iam/service-principal#project-level-service-principals) and grant it access to the HCP resources your workload requires.
+- Have access to the GitLab CI/CD Pipeline to federate access to HCP from.
+- Install the [HCP CLI](/hcp/docs/cli/install) or use the [HCP Terraform Provider](https://registry.terraform.io/providers/hashicorp/hcp/latest/docs) based on your desired configuration workflow.
+
+## Configure an external workload identity provider for GitLab
+
+To create an HCP workload identity provider for GitLab CI/CD, you need a conditional access statement.
+
+### Conditional access statement
+
+When federating workload identity, one of the requirements is a [conditional access statement](/hcp/docs/hcp/iam/service-principal/workload-identity-federation/conditional-access-statement). This statement is a boolean expression that has access to the identity claims and restricts which external identities are allowed.
+
+When exchanging an identity token for access to HCP, the conditional access statement has access to all the claims in the token with the `jwt_claims.` prefix. For more information, refer to the [token claim reference in the GitLab documentation](https://docs.gitlab.com/ee/ci/secrets/id_token_authentication.html#token-payload).
+
+The following example conditional access statement restricts access to HCP services to jobs that originate from `acme-group/acme-project` repository.
+
+```text
+`jwt_claims.project_path == "acme-group/acme-project"`
+```
+
+To restrict access further so that only requests from the Git branch `main` are authenticated, you can add an additional selector and value.
+
+```text
+`jwt_claims.sub == "project_path:acme-group/acme-project:ref_type:branch:ref:main"`
+```
+
+For more information about using selectors and values to create compound conditional access statements, refer to [conditional access statements](/hcp/docs/hcp/iam/service-principal/workload-identity-federation/conditional-access-statement).
+
+## Create the workload identity provider
+
+After you gather the information you need, create the workload identity provider for GitLab.
+
+<Tabs>
+<Tab heading="HCP CLI" group="cli">
+
+Use the [`hcp iam workload-identity-providers create-oidc` command](/hcp/docs/cli/commands/iam/workload-identity-providers/create-oidc).
+
+```shell-session
+$ hcp iam workload-identity-providers create-oidc <PROVIDER_NAME> \
+  --service-principal=<SP_RESOURCE_NAME> \
+  --issuer=https://gitlab.com \
+  --conditional-access=<CONDITION> \
+  --description=<DESCRIPTION>
+```
+
+This command requires the following information that is specific to your HCP and GitLab accounts:
+
+- `<PROVIDER_NAME>`: The name of workload identity provider to create.
+- `<SP_RESOURCE_NAME>`:The service principal’s resource name, in the format `iam/project/<PROJECT_ID>/service-principal/<NAME>`.
+- `<CONDITION>`: The conditional access statement that restricts access to the specified repository and branch.
+- `<DESCRIPTION>`: An optional description for the provider.
+
+The following example creates a workload identity provider named `gitlab-example`. This provider configures HCP to restrict access to GitLab by requiring that the JWT token identifies the action as originating from the `main` branch of `acme-group/acme-project`. Workloads that are granted access to HCP services use the `my-app-deployer` service principal.
+
+```shell-session
+$ hcp iam workload-identity-providers create-oidc gitlab-example \
+  --service-principal=iam/project/dcffbc8c-0873-4acc-bf96-4c79a4c3fd1a/service-principal/my-app-deployer \
+  --issuer=https://gitlab.com \
+  --conditional-access='jwt_claims.sub == "project_path:acme-group/acme-project:ref_type:branch:ref:main"' \
+  --description="Allow acme-repo deploy job to access my-app-deployer service principal"
+```
+
+</Tab>
+
+<Tab heading="Terraform" group="tf">
+
+Use the [`hcp_iam_workload_identity_provider` resource](https://registry.terraform.io/providers/hashicorp/hcp/latest/docs/resources/iam_workload_identity_provider).
+
+```hcl
+# Replace with an existing service principal if created ahead of time.
+resource "hcp_service_principal" "deployment_sp" {
+  name = "my-app-deployer"
+}
+
+resource "hcp_iam_workload_identity_provider" "example" {
+  name              = "gitlab-example"
+  service_principal = hcp_service_principal.deployment_sp.resource_name
+  description       = "Allow acme-project deploy job to access my-app-runtime service principal"
+
+  oidc {
+    issuer_uri = "https://gitlab.com"
+  }
+
+  conditional_access = "<CONDITION>"
+}
+```
+
+This configuration requires the following information that is specific to your GitLab account:
+
+- `<CONDITION>`: The conditional access statement that restricts access to the specified repository and branch.
+
+The following example creates a workload identity provider named `gitlab-example`. This provider configures HCP to restrict access to GitLab by requiring that the JWT token identifies the workload as originating from the `main` branch of `acme-group/acme-project`. Workloads that are granted access to HCP services use the `my-app-deployer` service principal.
+
+```hcl
+# Replace with an existing service principal if created ahead of time.
+resource "hcp_service_principal" "deployment_sp" {
+  name = "my-app-deployer"
+}
+
+resource "hcp_iam_workload_identity_provider" "example" {
+  name              = "gitlab-example"
+  service_principal = hcp_service_principal.deployment_sp.resource_name
+  description       = "Allow acme-repo deploy workflow to access my-app-deployer service principal"
+
+  oidc {
+    issuer_uri = "https://gitlab.com"
+  }
+
+  conditional_access = "jwt_claims.sub == `project_path:acme-group/acme-project:ref_type:branch:ref:main`"
+}
+```
+
+</Tab>
+</Tabs>
+
+## Configure the CI/CD job
+
+You can use the [HCP CLI](/hcp/docs/cli/install) to automatically retrieve external credentials and exchange them for an HCP access token. These instructions use the [`hashicorp/hcp` Docker container](https://hub.docker.com/r/hashicorp/hcphttps://hub.docker.com/r/hashicorp/hcp), but any runtime that has the HCP CLI installed can follow these steps.
+
+Add the following to your CI/CD job YAML configuration.
+
+```yaml
+hcp:
+  image: hashicorp/hcp
+  id_tokens:
+    WORKLOAD_IDENTITY_TOKEN:
+      aud: <PROVIDER_NAME>
+  script:
+    - hcp iam workload-identity-providers create-cred-file <PROVIDER_NAME>
+      --output-file=creds.json
+      --source-env=WORKLOAD_IDENTITY_TOKEN
+    - hcp auth login --cred-file=creds.json
+    - MY_SECRET=$(hcp vault-secrets secrets open --app=my-app --format=json my-secret |
+          jq -r '.static_version.value')
+```
+
+This command requires the following information that is specific to your HCP account:
+
+- `<PROVIDER_NAME>`: The name of workload identity provider to exchange credentials with, in the format `iam/project/<PROJECT_ID>/service-principal/<SP_NAME>/workload-identity-provider/<PROVIDER_NAME>`.
+
+The following example creates a job named `hcp`. It configures the job to have an [ID token](https://docs.gitlab.com/ee/ci/yaml/#id_tokens) that identifies the `gitlab-test` workload identity provider in the `aud` claims. Then the job runs a script that creates a `credentials.json` file referencing the ID token. Finally, it uses the the HCP CLI to read a secret from [HCP Vault Secrets](/hcp/docs/vault-secrets) and store it in an environmental variable
+
+```yaml
+hcp:
+  image: hashicorp/hcp
+  id_tokens:
+    WORKLOAD_IDENTITY_TOKEN:
+      aud: iam/project/dcffbc8c-0873-4acc-bf96-4c79a4c3fd1a/service-principal/my-app-deployer/workload-identity-provider/gitlab-test
+  script:
+    - hcp iam workload-identity-providers create-cred-file
+      iam/project/dcffbc8c-0873-4acc-bf96-4c79a4c3fd1a/service-principal/my-app-deployer/workload-identity-provider/gitlab-test
+      --output-file=credentials.json
+      --source-env=WORKLOAD_IDENTITY_TOKEN
+    - hcp auth login --cred-file=credentials.json
+    - MY_SECRET=$(hcp vault-secrets secrets open --app=my-app --format=json my-secret |
+          jq -r '.static_version.value')
+```
+
+Refer to the [HCP CLI command reference](/hcp/docs/cli/commands) for more information on commands you can use in your CI/CD pipelines.
