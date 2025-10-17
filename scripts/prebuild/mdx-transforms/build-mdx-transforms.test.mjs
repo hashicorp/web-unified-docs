@@ -1396,5 +1396,69 @@ Common documentation.
 			expect(output).toContain('Common documentation')
 			expect(output).not.toContain('@include')
 		})
+
+		test('should remove TFEnterprise:only block with JSX/MDX element partial (Note component)', async () => {
+			// Clear any existing mocks to use real PRODUCT_CONFIG
+			vi.restoreAllMocks()
+
+			// Real terraform-docs-common has versionedDocs: false, so no version directories
+			const mockVersionMetadata = {
+				'terraform-docs-common': [
+					{ version: 'v0.0.x', releaseStage: 'stable', isLatest: true },
+				],
+			}
+
+			// Partial containing MDX/JSX element (Note component) - matches beta/explorer.mdx
+			const partialContent = `<Note>
+
+This feature is in beta. We recommend only using it non-production environments because updates during the beta phase may require you to destroy the explorer database. Running the explorer may increase the load on the Terraform Enterprise server in unexpected ways, resulting in slowdowns or outages.
+
+Explorer on Terraform Enterprise only has access to the information available in the runs from Terraform Enterprise 1.0.0 and later.
+You can provide feedback on this feature by selecting **Give Feedback** from the **Actions** menu or by contacting your account team.
+
+</Note>
+`
+
+			const mainContent = `---
+page_title: HCP Terraform explorer for workspace visibility
+description: >-
+  Learn how to find data about your resource, module, and provider usage across
+  workspaces and projects in HCP Terraform with the explorer for workspace
+  visibility.
+---
+# Explorer for workspace visibility
+
+<!-- BEGIN: TFEnterprise:only name:explorer -->
+@include 'beta/explorer.mdx'
+<!-- END: TFEnterprise:only name:explorer -->
+
+As your organization grows, keeping track of your sprawling infrastructure estate can get increasingly more complicated. The explorer for workspace visibility helps surface a wide range of valuable information from across your organization.
+`
+
+			vol.fromJSON({
+				'/content/terraform-docs-common/docs/cloud-docs/workspaces/explorer.mdx':
+					mainContent,
+				'/content/terraform-docs-common/docs/partials/beta/explorer.mdx':
+					partialContent,
+			})
+
+			await buildMdxTransforms('/content', '/output', mockVersionMetadata)
+
+			const output = fs.readFileSync(
+				'/output/terraform-docs-common/docs/cloud-docs/workspaces/explorer.mdx',
+				'utf8',
+			)
+
+			// TFEnterprise:only content should be completely removed in terraform-docs-common
+			expect(output).not.toContain('<Note>')
+			expect(output).not.toContain('</Note>')
+			expect(output).not.toContain('This feature is in beta')
+			expect(output).not.toContain('Explorer on Terraform Enterprise')
+			expect(output).not.toContain('TFEnterprise:only')
+
+			// Content after the block should be preserved
+			expect(output).toContain('As your organization grows')
+			expect(output).toContain('infrastructure estate')
+		})
 	})
 })
