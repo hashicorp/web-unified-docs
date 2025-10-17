@@ -1,0 +1,498 @@
+---
+page_title: Configure private DNS forwarding
+sidebar_title: Configure private DNS forwarding
+description: >-
+  Integrate your private DNS to allow resolution with HCP Vault Dedicated.
+---
+
+# Configure private DNS
+
+You can bring your own DNS server(s) to allow name resolution between your
+private DNS and a HashiCorp Virtual Network (HVN).
+
+All HCP Vault Dedicated tiers support private DNS.
+
+![Diagram displaying the DNS resolver on the HashiCorp Cloud Platform HVN
+forwarding request to the private DNS resolver](/img/docs/hcp-core/diagram-private-dns-light.png#light-theme-only)
+![Diagram displaying the DNS resolver on the HashiCorp Cloud Platform HVN
+forwarding request to the private DNS resolver](/img/docs/hcp-core/diagram-private-dns-dark.png#dark-theme-only)
+
+## Limitations 
+
+<Note title="Beta feature">
+
+Private DNS forwarding is in beta and available for Amazon Web Services (AWS).
+
+</Note>
+
+During the beta period, private DNS forwarding works with the following
+limitation:
+
+- TLS certificates from a private certificate authority (CA) are not supported
+
+### Default limits
+
+Private DNS forwarding has the following default limits:
+
+- **DNS Forwarding configurations**: 1 per HVN
+- **DNS Forwarding rules**: 5 per DNS forwarding configuration  
+- **Inbound endpoint IPs**: 2 per rule
+
+To request higher limits based on your use case, [create a support ticket](https://support.hashicorp.com/hc/en-us/requests/new).
+
+## Prerequisites
+
+The prerequisites listed are specific to the beta period. Check back at general
+availability for a list of supported providers and prerequisites.
+
+- Access to the [HCP Portal](https://portal.cloud.hashicorp.com/sign-in)
+- AWS HVN created with a unique [address
+  space](/hcp/docs/hcp/network/hvn-aws/hvn-aws).
+- AWS VPC exists and configured with its address space DNS support and
+  DNS hostnames enabled for the VPC to allow DNS lookups of records in the
+  network.
+- A valid connection between the AWS HVN and the target VPC must exist, using one of the following methods:
+  - [VPC peering connection](/hcp/docs/hcp/network/hvn-aws/hvn-peering) exists between
+    the target VPC and the HVN, configured with the required routes to enable
+    network traffic between the two networks.
+  - [Transit Gateway Attachment](/hcp/docs/hcp/network/hvn-aws/tgw-attach) is established between the HVN 
+    and the target AWS transit gateway, with valid routes to enable network traffic between the two networks. 
+    Note: A valid hvn [route](/hcp/docs/hcp/network/hvn-aws/routes) specifying the target VPC CIDR must be created in the HVN route table 
+    for the Private DNS feature to function properly when using a transit gateway.
+- Target VPC's private hosted zone is associated with the VPC connected to the HVN via peering or TGW. 
+- Security group exists in the target VPC, which allows inbound traffic on port
+  53 (both UDP and TCP) from the HVN CIDR block to your self-managed DNS server
+  or AWS Route 53 VPC endpoint.
+- If using AWS Route 53, ensure an [inbound resolver endpoint
+  exists](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/resolver.html)
+  that allows DNS queries from the HVN to be routed to the target VPC endpoint.
+  Select Do53 protocol and choose a Security Group for which you have 
+  configured the inbound rules to allow DNS (TCP and UDP) traffic on port 53
+  from the HVN CIDR block for the resolver endpoint.
+- [HCP service principal user
+  created](/vault/tutorials/manage-hcp-vault-dedicated/terraform-hcp-provider-vault#create-a-service-principal-and-key)
+  with a client ID and secret.
+
+## Retrieve HCP API token
+
+<Tabs>
+<Tab heading="HCP API">
+
+Request a HCP API token using the HCP API.
+
+1. Set environment variables for the HCP organization, HCP project, HVN, and
+   peering ID.
+
+   ```shell-session
+   $ export HCP_ORG_ID=<HCP_ORG_ID> \
+       HCP_PROJ_ID=<HCP_PROJ_ID> \
+       HCP_NETWORK_ID=<HCP_NETWORK_ID> \
+       PEERING_ID=<PEERING_ID>
+   ```
+
+1. Set environment variables for the HCP service principal user
+   `HCP_CLIENT_ID` and `HCP_CLIENT_SECRET`:
+
+   ```shell-session
+   $ export HCP_CLIENT_ID=<HCP_CLIENT_ID> HCP_CLIENT_SECRET=<HCP_CLIENT_SECRET>
+   ```
+
+1. Retrieve a HCP API token using a HCP service principal user HCP_CLIENT_ID,
+   and HCP_CLIENT_SECRET and store it in the `HCP_API_TOKEN` variable.
+
+   ```shell-session
+   $ HCP_API_TOKEN=$(curl --location "https://auth.idp.hashicorp.com/oauth2/token" \
+       --header "Content-Type: application/x-www-form-urlencoded" \
+       --data-urlencode "client_id=$HCP_CLIENT_ID" \
+       --data-urlencode "client_secret=$HCP_CLIENT_SECRET" \
+       --data-urlencode "grant_type=client_credentials" \
+       --data-urlencode "audience=https://api.hashicorp.cloud" | jq -r .access_token)
+   ```
+
+</Tab>
+<Tab heading="HCP CLI">
+
+Request a HCP API token using the HCP CLI. These steps assume you [configured the
+HCP CLI using](/hcp/docs/cli/commands/profile/init) `hcp profile init` and
+selected the HCP organization and project where you created the HVN.
+
+1. Set environment variables for the HCP service principal user
+   `HCP_CLIENT_ID` and `HCP_CLIENT_SECRET`.
+
+   ```shell-session
+   $ export HCP_CLIENT_ID=<HCP_CLIENT_ID> HCP_CLIENT_SECRET=<HCP_CLIENT_SECRET>
+   ```
+
+   The HCP service principal client secret is not available after you initially
+   create the secret.
+
+1. Set environment variables for the HVN, and peering ID.
+
+   ```shell-session
+   $ export HCP_NETWORK_ID=<HCP_NETWORK_ID> \
+       PEERING_ID=<PEERING_ID>
+   ```
+
+1. Authenticate to HCP.
+
+   ```shell-session
+   $ hcp auth login
+   ```
+
+1. Complete the browser-based authentication workflow.
+
+1. Set an environment variable for the HCP organization, and project ID.
+
+   ```shell-session
+   $ export HCP_ORG_ID=$(hcp profile display --format json | jq -r .OrganizationID) \
+        HCP_PROJ_ID=$(hcp profile display --format json | jq -r .ProjectID)
+   ```
+
+1. Retrieve a HCP API token using a HCP CLI and store it in the `HCP_API_TOKEN`
+   variable.
+
+   ```shell-session
+   $ HCP_API_TOKEN=$(hcp auth print-access-token)
+   ```
+
+</Tab>
+</Tabs>
+
+## Create DNS forwarding
+
+<Note>
+
+You can configure private DNS forwarding using the HCP Portal UI or the HCP API.
+This guide shows the API method.
+
+</Note>
+
+For a full list of all private DNS forwarding API endpoints, see the
+[HCP API documentation](/hcp/api-docs/hvn#CreateDNSForwarding).
+
+1. Verify you have the required environment variables configured.
+
+   ```shell-session
+   $ echo $HCP_API_TOKEN $HCP_ORG_ID $HCP_PROJ_ID $HCP_NETWORK_ID $PEERING_ID
+   ```
+
+1. Use the `dnsforwardings` endpoint to create DNS forwarding. Update
+   highlighted items in the `data` block with the values for your environment.
+
+   <Note>
+
+   - The `inbound_endpoint_ips` is the IP address of your self-managed DNS
+     servers, or the AWS Route 53 VPC endpoint IP addresses.
+   - DNS forwarding ID and rule ID must be unique across your HCP account.
+   - DNS forwarding ID and rule ID cannot exceed 32 characters.
+   - The `region` must match your HVN's hosted region.
+   - Set `connection_type` to `hvn-peering` or `tgw-attachment` based on your connection type.
+   - Add additional rules after DNS forwarding is in the `ACTIVE` state.
+
+   </Note>
+
+   Choose the appropriate example below based on your connection type:
+
+   #### HVN Peering Connection
+
+   Use this example if you connect your HVN to your VPC using HVN peering
+   (`connection_type: "hvn-peering"`).
+
+   <CodeBlockConfig highlight="7-8, 10-12, 17-18">
+
+   ```shell-session
+   $ curl --location "https://api.cloud.hashicorp.com/network/2020-09-07/organizations/$HCP_ORG_ID/projects/$HCP_PROJ_ID/networks/$HCP_NETWORK_ID/dnsforwardings" \
+     --request POST \
+     --header 'Content-Type: application/json' \
+     --header "Authorization: Bearer $HCP_API_TOKEN" \
+     --data '{ 
+         "dnsForwarding": {
+             "id": "dnsforwarding-byod", 
+             "peering_id": "your-peering-connection-id", 
+             "connection_type": "hvn-peering", 
+             "rule": {
+                 "id": "staging-rule",
+                 "domain_name": "staging.byod.com",
+                 "inbound_endpoint_ips": ["10.0.0.12", "10.0.0.9"]
+             },
+             "hvn": { 
+                 "location": {
+                     "region": {
+                         "region": "us-west-2",
+                         "provider": "aws"
+                     }
+                 }
+             }
+         }
+     }'
+   ```
+
+   </CodeBlockConfig>
+
+   #### Transit Gateway Attachment
+
+   Use this example if you connect your HVN to your VPC using a Transit Gateway
+   (`connection_type: "tgw-attachment"`).
+
+   <CodeBlockConfig highlight="7-8, 10-12, 17-18">
+
+   ```shell-session
+   $ curl --location "https://api.cloud.hashicorp.com/network/2020-09-07/organizations/$HCP_ORG_ID/projects/$HCP_PROJ_ID/networks/$HCP_NETWORK_ID/dnsforwardings" \
+     --request POST \
+     --header 'Content-Type: application/json' \
+     --header "Authorization: Bearer $HCP_API_TOKEN" \
+     --data '{ 
+         "dnsForwarding": {
+             "id": "dnsforwarding-tgw", 
+             "peering_id": "your-tgw-attachment-id", 
+             "connection_type": "tgw-attachment", 
+             "rule": {
+                 "id": "staging-rule",
+                 "domain_name": "staging.internal.com",
+                 "inbound_endpoint_ips": ["10.0.0.12", "10.0.0.9"]
+             },
+             "hvn": { 
+                 "location": {
+                     "region": {
+                         "region": "us-east-1",
+                         "provider": "aws"
+                     }
+                 }
+             }
+         }
+     }'
+   ```
+
+   </CodeBlockConfig>
+
+   **Example output:**
+
+   <CodeBlockConfig hideClipboard>
+
+   ```json
+   {
+     "dns_forwarding": {
+       "id": "dnsforwarding-byod",
+       "hvn": {
+         "type": "hashicorp.network.hvn",
+         "id": "HCP_NETWORK_ID",
+         "uuid": "HCP_NETWORK_ID",
+         "location": {
+           "organization_id": "HCP_ORG_ID",
+           "project_id": "HCP_PROJ_ID",
+           "region": {
+             "provider": "aws",
+             "region": "us-west-2"
+           }
+         },
+         "description": ""
+       },
+       "state": "CREATING",
+       "peering_id": "HCP_NETWORK_PEERING_ID",
+       "connection_type": "hvn-peering", 
+       "rules": [
+         {
+           "hvn": {
+             "type": "hashicorp.network.hvn",
+             "id": "hvn-aws-latest-test-1",
+             "uuid": "hvn-aws-latest-test-1",
+             "location": {
+               "organization_id": "c1597488-1053-4cc8-a536-e84cfef0ea7f",
+               "project_id": "b1e20b0d-2411-47e6-adb0-88f39563fbec",
+               "region": {
+                 "provider": "aws",
+                 "region": "us-west-2"
+               }
+             },
+             "description": ""
+           },
+           "dns_forwarding_id": "dnsforwarding-byod",
+           "state": "CREATING",
+           "rule": {
+             "id": "staging-rule",
+             "domain_name": "staging.byod.com",
+             "inbound_endpoint_ips": [
+               "10.0.0.12",
+               "10.0.0.9"
+             ]
+           },
+           "created_at": "2025-05-14T12:49:52.457815118Z",
+           "updated_at": "2025-05-14T12:49:52.457815118Z"
+         }
+       ],
+       "created_at": "2025-05-14T12:49:52.457815118Z",
+       "updated_at": "2025-05-14T12:49:52.457815118Z"
+     },
+     "operation": {
+       "id": "OPERATION_ID",
+       "state": "PENDING",
+       "location": {
+         "organization_id": "HCP_ORG_ID",
+         "project_id": "HCP_PROJ_ID",
+         "region": {
+           "provider": "aws",
+           "region": "us-west-2"
+         }
+       },
+       "link": {
+         "type": "hashicorp.network.dnsforwarding",
+         "id": "dnsforwarding-byod",
+         "uuid": "dnsforwarding-byod",
+         "location": {
+           "organization_id": "HCP_ORG_ID",
+           "project_id": "HCP_PROJ_ID",
+           "region": {
+             "provider": "aws",
+             "region": "us-west-2"
+           }
+         },
+         "description": "DNS Forwarding (\"dnsforwarding-byod\")"
+       },
+       "created_at": "2025-05-14T12:49:52.464766Z",
+       "updated_at": "2025-05-14T12:49:52.464766Z"
+     }
+   }
+   ```
+
+   </CodeBlockConfig>
+
+   You have completed the private DNS forwarding configuration.
+
+## Add additional forwarding rules
+
+<Note>
+
+You can add additional forwarding rules after the initial DNS forwarding
+configuration is in the `ACTIVE` state.
+
+</Note>
+
+To add more forwarding rules for additional domains:
+
+1. Set the `HCP_NETWORK_DNS_FORWARDING_ID` environment variable using the DNS
+   forwarding ID from the previous step.
+
+   ```shell-session
+   $ export HCP_NETWORK_DNS_FORWARDING_ID=<DNS_FORWARDING_ID>
+   ```
+
+   Replace `<DNS_FORWARDING_ID>` with the ID you used when creating the DNS
+   forwarding configuration (e.g., `dnsforwarding-byod` or `dnsforwarding-tgw`).
+
+1. Create the additional forwarding rule.
+
+   <CodeBlockConfig highlight="8-10, 16-17">
+   
+   ```shell-session
+   $ curl --location "https://api.cloud.hashicorp.com/network/2020-09-07/organizations/$HCP_ORG_ID/projects/$HCP_PROJ_ID/networks/$HCP_NETWORK_ID/dnsforwardings/$HCP_NETWORK_DNS_FORWARDING_ID/rules" \
+     --request POST \
+     --header 'Content-Type: application/json' \
+     --header "Authorization: Bearer $HCP_API_TOKEN" \
+     --data '{
+         "dnsForwardingRule": {
+             "rule": {
+                 "id": "prod-rule",
+                 "domain_name": "prod.byod.com",
+                 "inbound_endpoint_ips": [
+                     "10.0.0.13",
+                     "10.0.0.14"
+                 ]
+             },
+             "hvn": {
+                 "location": {
+                     "region": {
+                         "region": "us-west-2",
+                         "provider": "aws"
+                     }
+                 }
+             }
+         }
+     }' | jq
+   ```
+   
+   </CodeBlockConfig>
+   
+   <Note>
+   
+   The `dns_forwarding_id` must match the ID of the DNS forwarding configuration
+   created in the previous step (e.g., `"dnsforwarding-byod"` or
+   `"dnsforwarding-tgw"`).
+   
+   </Note>
+   
+   **Example output:**
+   
+   <CodeBlockConfig hideClipboard>
+   
+   ```json
+   {
+     "dns_forwarding_rule": {
+       "hvn": {
+         "type": "hashicorp.network.hvn",
+         "id": "HCP_NETWORK_ID",
+         "uuid": "HCP_NETWORK_ID",
+         "location": {
+           "organization_id": "HCP_ORG_ID",
+           "project_id": "HCP_PROJ_ID",
+           "region": {
+             "provider": "aws",
+             "region": "us-west-2"
+           }
+         },
+         "description": ""
+       },
+       "dns_forwarding_id": "HCP_NETWORK_DNS_FORWARDING_ID",
+       "state": "CREATING",
+       "rule": {
+         "id": "prod-rule",
+         "domain_name": "prod.byod.com",
+         "inbound_endpoint_ips": [
+           "10.0.0.12",
+           "10.0.0.11"
+         ]
+       },
+       "created_at": "2025-05-14T13:40:59.044410083Z",
+       "updated_at": "2025-05-14T13:40:59.044410143Z"
+     },
+     "operation": {
+       "id": "OPERATION_ID",
+       "state": "PENDING",
+       "location": {
+         "organization_id": "HCP_ORG_ID",
+         "project_id": "HCP_PROJ_ID",
+         "region": {
+           "provider": "aws",
+           "region": "us-west-2"
+         }
+       },
+       "link": {
+         "type": "hashicorp.network.dnsforwarding.rule",
+         "id": "prod-rule",
+         "uuid": "prod-rule",
+         "location": {
+           "organization_id": "HCP_ORG_ID",
+           "project_id": "HCP_PROJ_ID",
+           "region": {
+             "provider": "aws",
+             "region": "us-west-2"
+           }
+         },
+         "description": "DNS Forwarding Rule (\"prod-rule\")"
+       },
+       "created_at": "2025-05-14T13:40:59.053776Z",
+       "updated_at": "2025-05-14T13:40:59.053776Z"
+     }
+   }
+   ```
+   
+   </CodeBlockConfig>
+
+## API
+
+- [Create DNS forwarding](/hcp/api-docs/hvn#CreateDNSForwarding)
+- [Get DNS forwarding](/hcp/api-docs/hvn#GetDNSForwarding)
+- [List DNS forwarding](/hcp/api-docs/hvn#ListDNSForwardings)
+- [Create DNS forwarding rule](/hcp/api-docs/hvn#CreateDNSForwardingRule)
+- [Delete DNS forwarding rule](/hcp/api-docs/hvn#DeleteDNSForwardingRule)
+- [Get DNS forwarding rule](/hcp/api-docs/hvn#GetDNSForwardingRule)
+- [List DNS forwarding rules](/hcp/api-docs/hvn#ListDNSForwardingRules)
