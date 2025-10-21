@@ -2,10 +2,10 @@
  * Copyright (c) HashiCorp, Inc.
  * SPDX-License-Identifier: BUSL-1.1
  */
+import { readFile } from 'node:fs/promises'
 
 import grayMatter from 'gray-matter'
 import { parse as jsoncParse } from 'jsonc-parser'
-import { readFile } from 'fs/promises'
 
 import { Err, Ok, Result } from './result'
 import type { ProductVersionMetadata } from './contentVersions'

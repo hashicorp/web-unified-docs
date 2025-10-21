@@ -2,6 +2,19 @@
 
 The project in this repository, `hashicorp/web-unified-docs`, aims to implement [[DEVDOT-023] Unified Product Documentation Repository](https://docs.google.com/document/d/1p8kOqySttvWUVfn7qiC4wGBR73LMBGMelwLt69pM3FQ/edit). The RFC for this project was intentionally light on implementation details, in order to foster consensus on the broad direction.
 
+- **PR previews**: Show broken links in comments for awareness (informational only, don't block PRs)
+- **Production monitoring**: Weekly scans create GitHub issues and send critical alerts to Datadog when users are affected
+
+The weekly [`broken-link-check-full`](https://github.com/hashicorp/web-unified-docs/blob/main/.github/workflows/broken-link-check-full.yml) workflow generates comprehensive broken link reports with prioritization guidance. When contributors create PRs that modify content, the link checker shows any broken links in PR comments with actionable guidance without blocking development.
+
+**Quick tips for contributors**:
+
+- **Fix internal HashiCorp links** (high priority)
+- **Check external docs/API links** (medium priority)
+- **Consider removing unreliable external links** (low priority)
+
+For detailed information about the monitoring system, see [Broken Link Monitoring Documentation](./.github/BROKEN_LINK_MONITORING.md). Unified Product Documentation Repository](https://docs.google.com/document/d/1p8kOqySttvWUVfn7qiC4wGBR73LMBGMelwLt69pM3FQ/edit). The RFC for this project was intentionally light on implementation details, in order to foster consensus on the broad direction.
+
 The existing API (`content.hashicorp.com`) has endpoints that serve documentation content. You can find the source code in [hashicorp/mktg-content-workflows](https://github.com/hashicorp/mktg-content-workflows/blob/main/api/content.ts).
 
 The goal of the unified docs API is to host all of HashiCorp's product documentation. The unified docs API will eventually replace the existing content API.
@@ -22,7 +35,7 @@ Once this command completes, you can access the following endpoints:
 
 - http://localhost:8080 - An instance of the unified docs API container (this repo - `unified-devdot-api`) that serves content from the `content` directory. On startup, this container processes the content and assets in `/content` into `public/assets` and `public/content`. In addition, the container also generates `app/api/docsPaths.json` and `app/api/versionMetadata.json` from the contents within `/content`.
 
-   Use the following example to test this endpoint: http://localhost:8080/api/content/terraform-plugin-framework/doc/latest/plugin/framework
+  Use the following example to test this endpoint: http://localhost:8080/api/content/terraform-plugin-framework/doc/latest/plugin/framework
 
 > [!NOTE]
 > The unified docs API container takes time to process the content and assets. You must wait for both the `unified-devdot-api` and `dev-portal` containers to complete before you can successfully test content in the `dev-portal` preview environment (`localhost:3000`). Visit http://localhost:8080/api/all-docs-paths to verify the `unified-devdot-api` container is complete.
@@ -74,7 +87,6 @@ Reach out to team #team-web-presence if you need to do local API development
 
 ### [Architectural Decision Records](https://github.com/hashicorp/web-unified-docs/tree/main/docs/decisions)
 
-
 ## Update product repo documentation
 
 This script helps with product documentation migration to the web-unified-docs repository. When migrating documentation:
@@ -104,9 +116,28 @@ Completed! All MDX files have been processed.
 
 ## Run broken link checker locally
 
-Every week, the [`broken-link-check`](https://github.com/hashicorp/web-unified-docs/blob/main/.github/workflows/broken-link-check.yml) generates a broken link report for all the content in this repo. In addition, whenever contributors create a PR that touches the `content` repo, the broken link checker will also run on changed files.
+The repository uses a focused broken link monitoring system:
 
-You can also run the broken link checker locally. The following commands will launch a lychee Docker container to check the content directories you specify.
+- **PR previews**: Show broken links in comments for awareness (informational only, don't block PRs)
+- **Production monitoring**: Weekly scans create GitHub issues and Datadog alerts for user-facing problems
+
+The weekly [`broken-link-check-full`](https://github.com/hashicorp/web-unified-docs/blob/main/.github/workflows/broken-link-check-full.yml) workflow generates comprehensive broken link reports. When contributors create PRs that modify content, the link checker shows any broken links in PR comments without blocking development.
+
+For detailed information about the monitoring system, see [Broken Link Monitoring Documentation](./.github/BROKEN_LINK_MONITORING.md).
+
+### UDR Migration Link Check
+
+For teams migrating products to UDR (Unified Docs Renderer), use the dedicated migration workflow:
+
+1. Go to [Actions → UDR Product Link Check](https://github.com/hashicorp/web-unified-docs/actions/workflows/udr-product-link-check.yml)
+2. Click "Run workflow" and select your product
+3. Review migration-specific broken link analysis in the generated GitHub issue
+
+This workflow provides targeted link checking with migration-focused reporting and prioritization.
+
+### Local Testing
+
+You can also run the broken link checker locally. The following commands launch a lychee Docker container to check the content directories you specify.
 
 Run the broken link checker on all content.
 
