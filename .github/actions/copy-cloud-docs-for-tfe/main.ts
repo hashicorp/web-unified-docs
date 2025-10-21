@@ -259,6 +259,9 @@ export async function main(
 			)
 
 			const destAbsolutePath = path.join(dest, relPath)
+			const directoryPath = path.dirname(destAbsolutePath);
+
+			fs.mkdirSync(directoryPath, { recursive: true });
 			fs.writeFileSync(destAbsolutePath, contents)
 		}
 	}
