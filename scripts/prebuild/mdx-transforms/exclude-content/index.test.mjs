@@ -129,14 +129,14 @@ Final content.`)
 	})
 
 	it('should handle situations when the folder name includes extra text', async () => {
-		vaultOptions.version = 'v1.21.x (rc)'
+		const modifiedOptions = { ...vaultOptions, version: 'v1.21.x (rc)' }
 		const markdown = `
 <!-- BEGIN: Vault:=v1.21.x -->
 This content should stay.
 <!-- END: Vault:=v1.21.x -->
 Other content.
 `
-		const result = await runTransform(markdown, vaultOptions)
+		const result = await runTransform(markdown, modifiedOptions)
 		expect(result.trim()).toBe(`<!-- BEGIN: Vault:=v1.21.x -->
 
 This content should stay.
