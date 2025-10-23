@@ -130607,6 +130607,8 @@ Please specify the "importAttributesKeyword" generator option, whose value can b
 						item.path,
 					)
 					const destAbsolutePath = external_path_.join(dest, relPath)
+					const directoryPath = external_path_.dirname(destAbsolutePath)
+					external_fs_.mkdirSync(directoryPath, { recursive: true })
 					external_fs_.writeFileSync(destAbsolutePath, contents)
 				}
 			}
