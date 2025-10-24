@@ -72,6 +72,9 @@ function processVaultVersionDirective(versionMatch, block, tree, options) {
  * Normalize version string for semver comparison
  */
 function normalizeSemver(version) {
+	// To normalize this for versions that include extra text like "v1.21.x (rc)",
+	// just split by white space and take the first part
+	version = version.split(' ')[0]
 	const normalized = version.replace(/^v/, '').replace(/\.x$/, '.0')
 	return new SemVer(normalized)
 }
