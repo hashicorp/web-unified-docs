@@ -1,0 +1,146 @@
+---
+layout: docs
+page_title: Vault Secrets Operator CSI driver troubleshooting
+description: >-
+  Understand why your installation of the 
+  Vault Secrets Operator CSI driver might not be working properly.
+---
+
+# Troubleshooting the Vault Secrets Operator CSI driver
+
+## Driver not appearing in cluster
+
+Verify that you have enabled it with the `csi.enabled` field on the Vault Secrets Operator Helm chart. You can do this by either adding the field to your `values.yaml` file, 
+or by passing it directly with the `--set` flag:
+
+```shell
+helm upgrade --install \
+    --set "csi.enabled=true" \
+    --namespace vault-secrets-operator-system \
+    vault-secrets-operator hashicorp/vault-secrets-operator
+```
+
+## Application won't start
+
+If your application Pod won't start up after mounting a secret from the CSI driver, check your Pod events for a `FailedMount` message:
+
+```shell
+Warning  FailedMount  7s (x8 over 71s)  kubelet            
+MountVolume.SetUp failed for volume "csi-secrets" : 
+...
+```
+
+The next line shows the specific error.
+
+### Not found
+
+If you see the following error message:
+```shell
+rpc error: code = Internal desc = csisecrets.secrets.hashicorp.com "csi-secrets" not found
+```
+
+This likely means that you didn't reference the `CSISecrets` volume correctly.
+Check that you have specified the correct name and namespace for your CSISecrets volume in your application Pod spec.
+
+```yaml
+    volumes:
+    - name: csi-secrets
+      csi:
+        driver: csi.vso.hashicorp.com
+        volumeAttributes:
+          csiSecretsName: csi-secrets
+          csiSecretsNamespace: admin
+
+```
+
+The `csiSecretsName` field should match the one in the `metadata.name` field of the CSISecrets resource that you have deployed.
+The `csiSecretsNamespace` field should match the one in the `metadata.namespace` field of the CSISecrets resource. 
+Confirm that you are not accidentally setting it to the value in the `spec.namespace` field, which refers to a Vault namespace.
+
+### Not authorized
+
+If you see the following error message:
+
+```shell
+rpc error: code = PermissionDenied desc = not authorized for secret sync
+```
+
+This likely means that your requesting application Pod name, namespace, service account does not 
+match the regex pattern defined in the CSISecrets resource `accessControl` stanza, or that 
+your container name does not match the pattern defined in the `containerState` stanza.
+
+```yaml
+accessControl:
+  serviceAccountPattern: "default"
+  namespacePatterns:
+    - "default"
+  podNamePatterns:
+    - "^csi-test-app-"
+syncConfig:
+  containerState:
+    namePattern: "^(app|sidecar)$"
+```
+
+These values should be [Go regular expressions](https://pkg.go.dev/regexp/syntax).
+
+### Incorrect auth configuration
+
+If you see one of the following error messages:
+
+```shell
+rpc error: code = Internal desc = vaultauths.secrets.hashicorp.com "default" not found
+```
+
+or
+
+```shell
+rpc error: code = Internal desc = failed getting default/default, err= │
+│ vaultauthglobals.secrets.hashicorp.com "default" not found
+```
+
+you may have set up your authentication incorrectly.
+
+
+The Vault Secrets Operator CSI driver requires a VaultAuth and a VaultConnection to authenticate.
+For more detailed information about these resources, refer to the Vault Secrets Operator guide for
+[Vault authentication](/vault/docs/deploy/kubernetes/vso/sources/vault/auth).
+
+Verify that the following statements about your authentication setup are true:
+- The CSISecrets is referencing the correct name and namespace for a VaultAuth in its `vaultAuthRef`.
+- The VaultAuth is able to find the VaultAuthGlobal in the right namespace. (Try explicitly setting `namespace` rather than relying on defaults.)
+- The VaultAuthGlobal has allowedNamespaces set to include the namespace of the VaultAuth.
+- The VaultAuthGlobal references a valid VaultConnection.
+- The auth method used by the VaultAuth has been set up in Vault with a valid policy.
+
+## Application can't interact with Vault
+
+Application Pods do not need to connect to Vault for KV secrets; the Vault Secrets Operator CSI driver does this on behalf of the requesting Pod at container startup.
+
+However, if your application Pod is using the Vault Secrets Operator CSI driver to generate an AppRole secret ID for subsequent logins to Vault, you have 
+to set up the [AppRole auth method](/vault/docs/auth/approle) in Vault ahead of time.
+
+If you see errors when logging into Vault with your secret ID, verify the following:
+- If using response-wrapping, the wrapping token's TTL has not expired.
+- If using response-wrapping, you did not already unwrap the wrapping token, which may have been set to one-time use.
+
+If you are able to log in, but cannot perform expected actions after that, verify the following:
+- The AppRole role has a Vault policy that would allow it to do whatever Vault operations the application needs to do next, like read from a certain KV mount.
+- You have some method for renewing your tokens after you've logged into Vault with AppRole, 
+such as a [lifetime watcher](https://pkg.go.dev/github.com/hashicorp/vault/api#LifetimeWatcher) or short-lived [periodic tokens](/vault/docs/concepts/tokens#periodic-tokens). 
+If the token is truly expired, you must restart the pod to have the CSI driver regenerate a new secret ID to log in with.
+
+You should also verify that your Vault policy for the CSI driver contains the following permissions, so that it can generate secret IDs:
+
+```hcl
+path "auth/approle/role/my-role/secret-id" {
+    capabilities = ["update"]
+}
+
+path "auth/approle/role/my-role/role-id" {
+    capabilities = ["read"]
+}
+
+path "sys/license/status" {
+    capabilities = ["read"]
+} 
+```
