@@ -10,7 +10,7 @@ import { removeNodesInRange } from './ast-utils.mjs'
  * Implements cross-product behavior based on your test requirements
  *
  * @param {string} directive The directive part (e.g., "only")
- * @param {Object} block Block information with start, end, content
+ * @param {Object} block Block information with startNode, endNode, content
  * @param {Object} tree Remark AST
  * @param {Object} options Processing options
  */
@@ -21,7 +21,7 @@ export function processTFCBlock(directive, block, tree, options) {
 	if (directive === 'only' || directive.startsWith('only ')) {
 		// TFC:only should be kept ONLY in terraform-docs-common, removed everywhere else
 		if (repoSlug !== 'terraform-docs-common') {
-			removeNodesInRange(tree, block.start, block.end)
+			removeNodesInRange(tree, block)
 		}
 		// else keeping block in terraform-docs-common
 		return
@@ -29,7 +29,7 @@ export function processTFCBlock(directive, block, tree, options) {
 
 	// If we get here, it's an invalid TFC directive
 	throw new Error(
-		`Invalid TFC directive: "${directive}" at lines ${block.start}-${block.end}. ` +
+		`Invalid TFC directive: "${directive}" at lines ${block.startLine}-${block.endLine}. ` +
 			`Expected format: TFC:only`,
 	)
 }
@@ -39,7 +39,7 @@ export function processTFCBlock(directive, block, tree, options) {
  * Implements cross-product behavior based on your test requirements
  *
  * @param {string} directive The directive part (e.g., "only")
- * @param {Object} block Block information with start, end, content
+ * @param {Object} block Block information with startNode, endNode, content
  * @param {Object} tree Remark AST
  * @param {Object} options Processing options
  */
@@ -50,7 +50,7 @@ export function processTFEnterpriseBlock(directive, block, tree, options) {
 	if (directive === 'only' || directive.startsWith('only ')) {
 		// TFEnterprise:only kept only in terraform-enterprise, removed everywhere else
 		if (repoSlug !== 'terraform-enterprise') {
-			removeNodesInRange(tree, block.start, block.end)
+			removeNodesInRange(tree, block)
 		}
 		// else keeping block (in terraform-enterprise)`)
 		return
@@ -58,6 +58,7 @@ export function processTFEnterpriseBlock(directive, block, tree, options) {
 
 	// If we get here, it's an invalid TFEnterprise directive
 	throw new Error(
-		`Invalid TFEnterprise directive: "${directive}" at lines ${block.start}-${block.end}. Expected format: TFEnterprise:only`,
+		`Invalid TFEnterprise directive: "${directive}" at lines ${block.startLine}-${block.endLine}. ` +
+			`Expected format: TFEnterprise:only`,
 	)
 }
