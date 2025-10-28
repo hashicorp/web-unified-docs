@@ -1,0 +1,186 @@
+---
+page_title: Security Model
+description: |-
+  Security model of HCP Boundary and the security controls available to end users.
+---
+
+# Security Model
+
+This document explains the security model of HCP Boundary and the security
+controls available to end users. Additionally, it provides best practices for
+HCP Boundary-specific features such as self-managed workers, identity
+integration with HCP, and describes the multi-tenant architecture and
+mitigations to address known threats.
+
+-> **NOTE:** Boundary and HCP Boundary are still under active development, and the security model content will be updated over time.
+
+## Key Terms 
+
+Definition of commonly used acronyms and terms. 
+
+| Term/Acronym  | Definition                                                   |
+|---------------|--------------------------------------------------------------|
+| HCP           | HashiCorp Cloud Platform                                     |
+| HCPb          | HCP Boundary                                                 |
+| Identity      | Principles such as users and groups                          |
+
+For more information about the HCP platform, refer to the [HCP
+documentation](/hcp/docs/hcp). Other Boundary-specific
+concepts can be found in the [Boundary’s
+documentation](/boundary/docs/concepts).
+
+## Personas
+
+- **SRE Operators:** Site reliability engineers and infrastructure operators
+  charged with deploying Boundary and managing the availability of the service.
+  In HCP Boundary, operators are HashiCorp employees. 
+
+- **Administrators:** Security administrators, or “admins”, are responsible for
+  defining and enabling their organization’s digital security posture. They
+  define access policies to critical targets and prove compliance. These admins
+  may already be administrators in their HCP organization and  expect to have
+  default permissions in Boundary without needing to reconfigure a
+  Boundary-specific user profile.
+
+- **Users:** Human users that need to connect to infrastructure targets, but
+  typically do so outside of programmatic interfaces. For HCP Boundary GA, this
+  is emphatically a technical user and not a standard corporate/business user.
+  This will primarily be personas that require infrastructure access, such as
+  systems administrators, IT admins, database analysts, developers, and devops
+  engineers. End-users may not have an HCP identity profile prior to deployment
+  of HCP Boundary.
+
+- **Anonymous or unauthenticated users:** Human users who can reach available
+  auth methods and use the auth method to attempt login to Boundary. This user
+  can list scopes, but cannot read them.
+
+## High-level Architecture
+
+HCP Boundary is deployed onto a single AWS region across three availability
+zones in that region. Each customer cluster is deployed as a Nomad job of Docker
+containers. The Nomad jobs are controlled by an external service that accesses
+the Nomad cluster through the VPC’s PrivateLink. 
+
+![HCP Boundary Architecture Diagram](/img/docs/boundary/boundary-architecture.png)
+
+### Public-facing URLs
+
+For a given HCP Boundary cluster, the only user-accessible endpoints are the
+controllers, which have a randomly-generated, 32-character cluster UUID (e.g.,
+`https://<cluster_id>.boundary.hashicorp.cloud`). These machine-generated URLs
+provide no discernable patterns, guarding against enumeration of controllers.
+
+![HCP Portal - Cluster ID](/img/docs/boundary/cluster-id.png)
+
+## Storage
+
+Boundary controller and worker infrastructure is stateless, whereby all state
+lives in the RDBMS. Each Boundary cluster is provided with a separate database
+inside of an Aurora Postgres cluster. Access to the database is provided by the
+[Vault database engine](/vault/docs/secrets/databases) and
+with dynamic credentials that are regularly rotated.
+
+![High level view of components used HCP Boundary](/img/docs/boundary/data-at-rest.png)
+
+### Tenancy Model
+
+HCP Boundary uses a multi-tenant RDS Postgres cluster with a separate database
+per tenant. This architecture allows us to use security controls inherent to
+Postgres's database isolation. All secret and sensitive row data is encrypted
+with scope specific per-tenant keys (more information in the
+[Data Encryption](#data-encryption) section). This is commonly
+[referred](https://aws.amazon.com/blogs/database/multi-tenant-data-isolation-with-postgresql-row-level-security/)
+to as a _Siloed_ multi-tenant database, as opposed to _Bridging_ or _Pooling_. A
+silo model allows us to maintain the strictest security while simplifying the
+architecture. 
+
+### Data Encryption
+
+HCP Boundary clusters use the [Vault Transit secrets
+engine](/vault/docs/secrets/transit) for their KMS keys
+(root, recovery, worker-auth). Boundary controllers are provided access to the
+Vault transit keys with a token that is assigned a policy that allows them to
+access only their individual keys. These tokens are regularly rotated.
+
+Administrators may also use an external Key Management System, including Vault
+and HCP Vault, to manage the key-encrypting (root) key. More information about
+supported external KMS systems is available at the [Boundary documentation
+page](/boundary/docs/configuration/kms).
+
+
+## Self-Managed Worker
+
+Self-managed workers are workers that are managed by
+administrators outside of HCP infrastructure, in their cloud or on-premise
+environment. Just like all Boundary worker-to-controller and client-to-worker
+communication, self-managed workers connect to the controller and clients
+over mutually-authenticated TLS. More information about authentication of
+self-managed workers to the HCP Boundary controller can be found at the
+[Boundary documentation
+page](/boundary/docs/concepts/security/connections-tls#worker-led-pki-based-registration).
+
+!> **Caution:** A compromised worker may result in the compromise of the targets
+assigned to this worker, as well as the integrity of the log data provided by
+the compromised worker.
+
+## Data in Transit
+
+![High-level diagram of Boundary](/img/docs/boundary/data-in-transit.png)
+
+### Boundary Session Traffic
+
+All User-to-Controller communications are done over TLS. TLS configuration
+options are available at the [Boundary documentation
+page](/boundary/docs/configuration/listener/tcp#tls). All
+other communication (worker-to-controller and client-to-worker are done over
+mutually-authenticated TLS). These keys are automatically generated and managed
+by Boundary. More information about the use of TLS in Boundary, refer to the
+[TLS in
+Boundary](/boundary/docs/concepts/security/connections-tls#tls-in-boundary)
+documentation.
+
+## Identity
+
+### HashiCorp Cloud Platform 
+
+The HCP Platform allows administrators to perform high-level cluster lifecycle
+operations such as cluster creation and deletion. HCP users and their
+permissions can be managed through [the HCP Portal](https://portal.cloud.hashicorp.com/). 
+
+![IAM navigation](/img/docs/iam-nav.png)
+
+-> **NOTE:** Once an HCP Boundary cluster is created, [Boundary users and
+permissions](/boundary/tutorials/oss-administration/oss-manage-users-groups)
+are managed directly within Boundary itself.
+
+### Boundary
+
+Boundary provides its own identity multiple authentication methods (auth
+methods) as well as a fine-grained RBAC model:
+
+- Users are authenticated to Boundary Controllers using a Boundary-configured
+  [authentication
+  method](/boundary/docs/concepts/domain-model/auth-methods).
+- [Boundary’s permission
+  model](/boundary/docs/concepts/security/permissions)
+  provides administrators the ability to granularly define role-based access
+  control to Boundary’s resources, including explicitly assigning permissions to
+  anonymous users.
+- Authentication and authorization of all internal Boundary traffic is managed
+  using mutually-authenticated TLS as described in the [TLS in
+  Boundary](/boundary/docs/concepts/security/connections-tls)
+  documentation.
+
+### Cluster Creation
+
+When an HCP cluster tenant is created by an Organization’s administrator, they
+will be prompted to create administrative credentials to bootstrap the cluster.
+They may then use Boundary-specific authentication methods to connect directly
+to the controller and perform administrative tasks.
+
+## Audit
+
+Boundary provides the ability to log all events. More information about the
+supported log sinks is available in the [events configuration
+documentation](/boundary/docs/configuration/events).
+HCP Boundary logs can be sent to [external log ingestion systems](/hcp/docs/boundary/audit-logging).
