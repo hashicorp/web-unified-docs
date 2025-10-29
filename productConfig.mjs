@@ -64,22 +64,23 @@ import semver from 'semver'
  */
 
 export const PRODUCT_CONFIG = {
-	// boundary: {
-	// 	/**
-	// 	 * ✅ Initial migration attempt: SEEMS TO WORK
-	// 	 *
-	// 	 * Boundary content seems to be successfully copied into `content` and
-	// 	 * `public/assets` as expected. Further investigation and testing is
-	// 	 * of course needed, we've only confirmed that the migration script works.
-	// 	 */
-	// 	assetDir: 'public',
-	// 	contentDir: 'content',
-	// 	dataDir: 'data',
-	//  productSlug: 'boundary',
-	// 	semverCoerce: semver.coerce,
-	//  versionedDocs: true,
-	// 	websiteDir: 'website',
-	// },
+	boundary: {
+		/**
+		 * ✅ Initial migration attempt: SEEMS TO WORK
+		 *
+		 * Boundary content seems to be successfully copied into `content` and
+		 * `public/assets` as expected. Further investigation and testing is
+		 * of course needed, we've only confirmed that the migration script works.
+		 */
+		assetDir: 'public/img',
+		basePaths: ['api-docs', 'docs'],
+		contentDir: 'content',
+		dataDir: 'data',
+		productSlug: 'boundary',
+		semverCoerce: semver.coerce,
+		versionedDocs: true,
+		websiteDir: 'website',
+	},
 	// consul: {
 	// 	/**
 	// 	 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
@@ -97,23 +98,23 @@ export const PRODUCT_CONFIG = {
 	// 	versionedDocs: true,
 	// 	websiteDir: 'website',
 	// },
-	// 'hcp-docs': {
-	// 	/**
-	// 	 * ✅ Initial migration attempt: SEEMS TO WORK
-	// 	 *
-	// 	 * Maybe worth noting: versioned docs is not enabled for `hcp-docs`.
-	// 	 * `branchForLatest` is set to `main`. We treat the single version
-	// 	 * as `v0.0.x` in our version metadata in the current content API:
-	// 	 * https://content.hashicorp.com/api/content/hcp-docs/version-metadata?partial=true
-	// 	 */
-	// 	assetDir: 'public',
-	// 	contentDir: 'content',
-	// 	dataDir: 'data',
-	//  productSlug: 'hcp',
-	// 	semverCoerce: semver.coerce,
-	//  versionedDocs: false,
-	// 	websiteDir: '.',
-	// },
+	'hcp-docs': {
+		/**
+		 * ✅ Initial migration attempt: SEEMS TO WORK
+		 *
+		 * Maybe worth noting: versioned docs is not enabled for `hcp-docs`.
+		 * `branchForLatest` is set to `main`. We treat the single version
+		 * as `v0.0.x` in our version metadata in the current content API:
+		 * https://content.hashicorp.com/api/content/hcp-docs/version-metadata?partial=true
+		 */
+		assetDir: 'public/img',
+		contentDir: 'content',
+		dataDir: 'data',
+		productSlug: 'hcp',
+		semverCoerce: semver.coerce,
+		versionedDocs: false,
+		websiteDir: '.',
+	},
 	// nomad: {
 	// 	/**
 	// 	 *  🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
@@ -175,6 +176,7 @@ export const PRODUCT_CONFIG = {
 		contentDir: 'docs',
 		dataDir: 'data',
 		productSlug: 'terraform',
+		supportsExclusionDirectives: true,
 		/**
 		 * Note: we need to sort versions for various reasons. Nearly all
 		 * our documentation is semver-versioned. PTFE is not. Rather than
@@ -202,6 +204,7 @@ export const PRODUCT_CONFIG = {
 		 * See note at top of this document on `pages` directories for details.
 		 */
 		assetDir: 'public/images',
+		basePaths: ['sentinel'],
 		/**
 		 * TODO: consider implications of Sentinel's `contentDir`.
 		 *
@@ -242,6 +245,17 @@ export const PRODUCT_CONFIG = {
 		basePaths: ['cli', 'internals', 'intro', 'language'],
 		contentDir: 'docs',
 		dataDir: 'data',
+		productSlug: 'terraform',
+		semverCoerce: semver.coerce,
+		versionedDocs: true,
+		websiteDir: 'website',
+	},
+	'terraform-mcp-server': {
+		assetDir: '',
+		basePaths: ['mcp-server'],
+		contentDir: 'docs',
+		dataDir: 'data',
+		navDataPath: 'mcp-server',
 		productSlug: 'terraform',
 		semverCoerce: semver.coerce,
 		versionedDocs: true,
@@ -310,6 +324,7 @@ export const PRODUCT_CONFIG = {
 		semverCoerce: semver.coerce,
 		versionedDocs: false,
 		websiteDir: 'website',
+		supportsExclusionDirectives: true,
 	},
 	'terraform-plugin-framework': {
 		/**
@@ -444,12 +459,14 @@ export const PRODUCT_CONFIG = {
 		 * See note at top of this document on `pages` directories for details.
 		 */
 		assetDir: 'public/img',
+		basePaths: ['api-docs', 'docs'],
 		contentDir: 'content',
 		dataDir: 'data',
 		productSlug: 'vault',
 		semverCoerce: semver.coerce,
 		versionedDocs: true,
 		websiteDir: 'website',
+		supportsExclusionDirectives: true,
 	},
 	'well-architected-framework': {
 		/**
