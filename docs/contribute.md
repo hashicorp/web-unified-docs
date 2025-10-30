@@ -59,7 +59,11 @@ flowchart LR
 
 ### Before you begin
 
-- Your Github username must be a member of the HashiCorp GitHub [core team](https://github.com/orgs/hashicorp/teams/core). You can open a request to join `hashicorp/core` using using [Doormat](https://doormat.hashicorp.services/applications/access/github/role/doormat-github-access-core/options).
+- Your Github username must be a member of the HashiCorp GitHub [core
+  team](https://github.com/orgs/hashicorp/teams/core). You can open a request to
+  join `hashicorp/core` in
+  [Doormat](https://doormat.hashicorp.services/applications/access/github/role/doormat-github-access-core/options).
+- Use Doormat to request `write` access to the `web-unified-docs` repository.
 - You must have a valid [SSH key for your Github account](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/generating-a-new-ssh-key-and-adding-it-to-the-ssh-agent#adding-your-ssh-key-to-the-ssh-agent).
 
 If you want to preview your changes locally, install
@@ -67,7 +71,7 @@ If you want to preview your changes locally, install
 
 ### Update published documentation
 
-Use this workflow when you want to update published documentation. 
+Use this workflow when you want to update published documentation.
 
 1. Clone the repo. We recommend cloning only `main` branch and not downloading the history of other branches. This means that you cannot locally check out other branches.
 
