@@ -1,0 +1,119 @@
+name: Sync Cloud Docs For TFE
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'The TFE version for the upcoming TFE release, format is either vYYYYMM-# or MAJOR.MINOR.PATCH (without a "v" prefix).'
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      version:
+        description: 'The TFE version for the upcoming TFE release, format is either vYYYYMM-# or MAJOR.MINOR.PATCH (without a "v" prefix).'
+        required: true
+        type: string
+    outputs:
+      release_branch_name:
+        description: 'The name of the branch created for the new TFE version docs.'
+        value: ${{ jobs.sync-docs.outputs.release_branch_name }}
+      release_branch_pr_url:
+        description: 'The URL of the release branch created for the new TFE version docs.'
+        value: ${{ jobs.sync-docs.outputs.release_branch_pr_url }}
+      diff_branch_pr_url:
+        description: 'The URL of the diff branch created for the new TFE version docs.'
+        value: ${{ jobs.sync-docs.outputs.diff_branch_pr_url }}
+
+jobs:
+  sync-docs:
+    name: Sync Cloud Docs
+    runs-on: ubuntu-latest
+    outputs:
+      release_branch_name: ${{ steps.check-docs-pr.outputs.docs_branch_name }}
+      release_branch_pr_url: ${{ steps.check-docs-pr.outputs.release_branch_pr_url }}
+      diff_branch_pr_url: ${{ steps.update-diff-branch.outputs.diff_branch_pr_url }}
+    steps:
+      - name: Series/Release Summary
+        run: |
+          echo "# Summary"                                                                            >> $GITHUB_STEP_SUMMARY
+          echo "**Workflow ref**: ${{github.ref_name}}"                                               >> $GITHUB_STEP_SUMMARY
+          echo ""                                                                                     >> $GITHUB_STEP_SUMMARY
+          echo "Triggered by branch creation (or manual workflow):"                                   >> $GITHUB_STEP_SUMMARY
+          echo ""                                                                                     >> $GITHUB_STEP_SUMMARY
+          echo ""                                                                                     >> $GITHUB_STEP_SUMMARY
+          echo "---"                                                                                  >> $GITHUB_STEP_SUMMARY
+
+      - name: Checkout main for new docs version
+        uses: actions/checkout@0ad4b8fadaa221de15dcec353f45205ec38ea70b # v4.1.4
+        with:
+          path: '${{github.workspace}}/new-docs'
+
+      - name: Check if new TFE version docs branch already exist
+        id: check-docs-pr
+        working-directory: '${{github.workspace}}/new-docs'
+        env:
+          docs_branch_name: tfe-release/${{inputs.version}}
+          diff_branch_name: HCPTF-diff/${{inputs.version}}
+        run: |
+          echo ${{ secrets.TFE_GITHUB_TOKEN }} | gh auth login --with-token
+          git config --global user.email "team-rel-eng@hashicorp.com"
+          git config --global user.name "tfe-release-bot"
+
+          if [ "$(git ls-remote --heads origin ${{env.docs_branch_name}})" == "" ]; then
+            echo "❌ branch name ${{env.docs_branch_name}} does not exists, please run copy cloud docs for tfe workflow first to create the branch."
+
+            echo "❌ branch name ${{env.docs_branch_name}} does not exists, please run copy cloud docs for tfe workflow first to create the branch." >> $GITHUB_STEP_SUMMARY
+
+            exit 1
+          fi
+
+          if [ "$(git ls-remote --heads origin ${{env.diff_branch_name}})" == "" ]; then
+            echo "❌ branch name ${{env.diff_branch_name}} does not exists, please run copy cloud docs for tfe workflow first to create the branch."
+
+            echo "❌ branch name ${{env.diff_branch_name}} does not exists, please run copy cloud docs for tfe workflow first to create the branch." >> $GITHUB_STEP_SUMMARY
+
+            exit 1
+          fi
+
+          echo "docs_branch_name=${{env.docs_branch_name}}" >> $GITHUB_OUTPUT
+          docs_pr_url=$(gh pr view ${{env.docs_branch_name}} --json url --jq '.url')
+          echo "release_branch_pr_url=${docs_pr_url}" >> $GITHUB_OUTPUT
+          echo "**TFE Release PR URL**: ${docs_pr_url}" >> $GITHUB_STEP_SUMMARY
+
+      - name: Generate version-metadata for workflow
+        working-directory: '${{github.workspace}}/new-docs'
+        run: |
+          npm i
+          npm run prebuild -- --only-build-version-metadata
+
+      - name: Checkout HCPTF-diff for new docs version DIFF PR
+        uses: actions/checkout@0ad4b8fadaa221de15dcec353f45205ec38ea70b # v4.1.4
+        with:
+          path: '${{github.workspace}}/new-docs-diff-pr'
+          ref: 'HCPTF-diff/${{inputs.version}}'
+
+      - name: Copy files for new docs version DIFF PR
+        uses: ./new-docs/.github/actions/copy-cloud-docs-for-tfe
+        with:
+          source_path: '${{github.workspace}}/new-docs'
+          target_path: '${{github.workspace}}/new-docs-diff-pr'
+          new_TFE_version: ${{inputs.version}}
+
+      - name: Update existing docs version DIFF branch
+        id: update-diff-branch
+        working-directory: '${{github.workspace}}/new-docs-diff-pr'
+        env:
+          diff_branch_name: HCPTF-diff/${{inputs.version}}
+        run: |
+          echo ${{ secrets.TFE_GITHUB_TOKEN }} | gh auth login --with-token
+          git config --global user.email "team-rel-eng@hashicorp.com"
+          git config --global user.name "tfe-release-bot"
+
+          git add .
+          git commit -m "HCP TF changes for TFE release" --no-verify || echo "No changes to commit"
+          git push origin HEAD
+
+          diff_pr_url=$(gh pr view --json url --jq '.url')
+          echo "diff_branch_pr_url=${diff_pr_url}" >> $GITHUB_OUTPUT
+          echo "**Updated DIFF branch**: ${{env.diff_branch_name}}" >> $GITHUB_STEP_SUMMARY
+          echo "**TFE DIFF PR URL**: ${diff_pr_url}" >> $GITHUB_STEP_SUMMARY
