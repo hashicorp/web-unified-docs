@@ -1,34 +1,68 @@
 # Contribute to HashiCorp documentation
 
-> [!NOTE]
-> Click the GitHub UI's **Outline** button, which is next to the **Edit this file** button,
-> to toggle this page's outline.
+This repository contains the content for the [HashiCorp product documentation on developer.hashicorp.com](https://developer.hashicorp.com).
 
-This repository contains HashiCorp [product documentation and best
-practices](https://developer.hashicorp.com).
+The information in this file applies generally to all product documentation in the `hashicorp/web-unified-docs` public repository.
 
-The information in this file is generic and applies to documentation
-for products that use versioned docs and create all content in the
-`web-unified-docs` public repository.
+For more specific guidance about contributing to an individual product's docs, refer to the `README` in the product's directory.
 
-Refer to individual product content README files for product-specific
-conventions and processes.
+## Table of Contents
 
-@TODO list out which products this file applies to. Should HCP have its own
-contributing file? What about Terraform (or point to internal wiki pages)?
+- [We welcome contributions](#we-welcome-contributions)
+- [Repository structure](#repository-structure)
+  - [Versioned content](#versioned-content)
+  - [Upcoming releases](#upcoming-releases)
+- [Contributor workflows](#contributor-workflows)
+  - [Update existing documentation](#update-published-documentation)
+  - [Upcoming minor release](#upcoming-minor-release-documentation)
+  - [Upcoming major release](#upcoming-major-release-documentation)
+- [Edit markdown content](#edit-markdown-content)
+   - [Markdown enhancements](#markdown-enhancements)
+- [Edit navigation sidebars](#edit-navigation-sidebars)
+  - [Custom or external links](#custom-or-external-links)
+- [Run the site locally](#run-the-site-locally)
+- [Redirects](#redirects)
+- [Troubleshooting](#troubleshooting)
+  - [I cannot see my local changes](#i-cannot-see-my-local-changes)
+
+## We welcome contributions
+
+Documention takes a village. If you find a typo or you feel like you can improve the HTML, CSS, or JavaScript, we welcome contributions. Feel free to open issues or pull requests like any normal GitHub project.
 
 ## Repository structure
 
-Documentation content is written in Markdown. You can find product folders
-in the `content` directory. We publish content from the `main`
-branch.
+Documentation content is written in Markdown. You can find product folders in this repo's `content` directory. Updates to the repo's `main` branch appear on [https://developer.hashicorp.com](https://developer.hashicorp.com), usually within 10 minutes.
+
+The following table lists the content directories for products currently available in this repo.
+
+| Product                    | Directory                              | Versioned? |
+| :------------------------- | :------------------------------------- | :--------: |
+| Consul                     | `./content/consul`                     | &#9989;    |
+| HCP                        | `./content/hcp-docs`                   | &#10060;   |
+| HCP Vault Dedicated        | `./content/hcp-docs`                   | &#10060;   |
+| HCP Vault Secrets          | `./content/hcp-docs`                   | &#10060;   |
+| HCP Packer                 | `./content/hcp-docs`                   | &#10060;   |
+| Nomad                      | `./content/nomad`                      | &#9989;    |
+| Sentinel                   | `./content/sentinel`                   | &#9989;    |
+| Terraform                  | `./content/terraform`                  | &#9989;    |
+| Terraform                  | `./content/terraform-cdk`              | &#9989;    |
+| HCP Terraform agents       | `./content/terraform-docs-agents`      | &#9989;    |
+| Terraform                  | `./content/terraform-docs-common`      | &#9989;    |
+| Terraform                  | `./content/terraform-enterprise`       | &#9989;    |
+| Terraform                  | `./content/terraform-mcp-server`       | &#9989;    |
+| Terraform                  | `./content/terraform-migrate`          | &#9989;    |
+| Terraform                  | `./content/terraform-plugin-framework` | &#9989;    |
+| Terraform                  | `./content/terraform-plugin-log`       | &#9989;    |
+| Terraform                  | `./content/terraform-plugin-mux`       | &#9989;    |
+| Terraform                  | `./content/terraform-sdk`              | &#9989;    |
+| Terraform                  | `./content/terraform-plugin-testing`   | &#9989;    |
+| Vault                      | `./content/vault`                      | &#9989;    |
+| Waypoint                   | `./content/hcp-docs`                   | &#10060;   |
+| Well-architected framework | `./content/well-architected-framework` | &#10060;   |
 
 ### Versioned content
 
-Documentation for specific product versions is in folders within the
-`content/<product>` directory.
-
-Note that HCP documentation does not have versions.
+This repository contains documentation for specific versions of some products. For these products, the `./content/<product>` directory contains several sub-directories, each corresponding to a specific version.
 
 ### Branch naming conventions
 
@@ -46,33 +80,21 @@ Individual contributors should create working branches using one of the followin
 - HashiCorp employees: `<name, initials, or GitHub username>-<ticket_number>`,
     such as `aimeeu-ce1001`.
 
-## HashiCorp employee contributor guide
+### Upcoming releases
 
-> [!IMPORTANT]
-> You must create documentation for embargoed content, including product or
-> conference announcements, in the `web-unified-docs-internal` repository. Contact
-> your team's technical writer for guidance.
+Internal employees may be asked to contribute to documentation to support future releases.
 
-### Workflows
+If you need to create documentation for embargoed content, including product or
+conference announcements, use the private `web-unified-docs-internal` repository instead. Contact
+your team's technical writer for guidance.
 
-@TODO use which presentation??
+## Contributor workflows
 
-The workflow you use depends on the content you want to update.
+The workflow to follow depends on the product version of the content you want to update.
 
-- **Current release and/or prior releases**: Use the [Update published
-  documentation](#update-published-documentation) workflow.
-- **Upcoming minor release**: Use the [Upcoming minor
-  release](#upcoming-minor-release-documentation) workflow.
-- **Upcoming major release**: Use the [Upcoming major
-  release](#upcoming-major-release-documentation) workflow.
-
----
-
-| Content for which version?              | Workflow                                                   | Publishes when                                     |
-|-----------------------------------------|---------------------------------------------------------------|-------------------------------------------------------|
-| Current release and/or prior release(s) | [Update published documentation](#update-published-documentation)  | PR merges                    |
-| Upcoming minor release(s)               | [Upcoming minor release](#upcoming-minor-release-documentation) | Minor release branch merges on release date |
-| Upcoming major release                  | [Upcoming major release](#upcoming-major-release-documentation) | Major release branch merges on release date |
+- [Current or previous product release](#update-published-documentation)
+- [Upcoming minor release](#upcoming-minor-release-documentation)
+- [Upcoming major release](#upcoming-major-release-documentation)
 
 ### Before you begin
 
@@ -86,11 +108,11 @@ The workflow you use depends on the content you want to update.
 If you want to preview your changes locally, install
 [Docker](https://www.docker.com/) and [Docker Compose](https://docs.docker.com/compose/).
 
-### Update published documentation
+### Update existing documentation
 
-Use this workflow when you want to update published documentation.
+Use this workflow when you want to update existing documentation that is already published on [https://developer.hashicorp.com](https://developer.hashicorp.com).
 
-1. Clone the repo. We recommend cloning only `main` branch and not downloading the history of other branches. This means that you cannot locally check out other branches.
+1. Clone the repo. To save space and speed up contributions, we recommend cloning only the `main` branch and not downloading the history of other branches. This method is ideal when you want to edit published content, although it prevents checking out other remote branches.
 
    ```shell-session
    git clone --single-branch git@github.com:hashicorp/web-unified-docs.git
@@ -110,9 +132,9 @@ Use this workflow when you want to update published documentation.
 
    Content should adhere to the [Education style guide][edu-style-guide].
 
-   If you need to create a new page, refer to the [How to create a new page][new-page-guide] guide for instructions.
+   If you need to create a new page, refer to [How to create a new page][new-page-guide] for instructions.
 
-1. Preview your changes locally (optional).
+1. Optionally, preview your changes locally.
 
    From the `web-unified-docs` directory, run `make`. This command uses Docker
    to create the documentation website locally. The creation process takes time
@@ -122,8 +144,8 @@ Use this workflow when you want to update published documentation.
    creation process has finished, access the local preview at
    `http://localhost:3000`.
 
-   Run `make clean` in a separate terminal window to gracefully shut down the
-   preview environment. Alternately, run `make clean CLEAN_OPTION=full` to
+   To gracefully shut down the
+   preview environment, run `make clean` in a separate terminal window. You can also run `make clean CLEAN_OPTION=full` to
    shutdown the environment and remove the local Docker images.
 
 1. Commit your changes.
@@ -132,20 +154,19 @@ Use this workflow when you want to update published documentation.
    git commit -a -m "<short description about the changes>"
    ```
 
-1. When you are happy with your updates, push your local changes to the repo.
+1. When you are satisfied with your updates, push your local changes to the repo.
 
    ```shell-session
    git push origin <working_branch_name>
    ```
 
-1. Create a pull request against `main`. Refer to GitHub's [Creating a pull
-   request](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request)
+1. Create a pull request against `main`. Refer to GitHub's [Creating a pull request](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request)
    guide for instructions.
 
    Pull requests are automatically labeled and assigned to the product's
    documentation team for review.
 
-1. Incorporate reviewer feedback.
+1. A technical writer will review your PR and provide feedback. Incorporate the reviewer's feedback and then re-request review.
 
 1. Merge your pull request after it has been approved.
 
@@ -157,7 +178,7 @@ request is merged.
 Use this workflow when you want to create or update content for an upcoming
 minor or patch release. You want to publish this content when the release is cut.
 
-Each product's tech writer team creates a branch for the upcoming minor or patch release.
+Each product's tech writer team creates an assembly branch for the upcoming minor or patch release.
 Check with your team for name of the branch.
 
 1. Clone the repo. We recommend cloning only the upcoming minor release branch and not downloading the history of other branches. This means that you cannot locally check out other branches.
@@ -183,7 +204,7 @@ Check with your team for name of the branch.
 
    If you need to create a new page, refer to the [How to create a new page][new-page-guide] guide for instructions.
 
-1. Preview your changes locally (optional).
+1. Optionally, preview your changes locally.
 
    From the `web-unified-docs` directory, run `make`. This command uses Docker
    to create the documentation website locally. The creation process takes time
@@ -193,8 +214,8 @@ Check with your team for name of the branch.
    creation process has finished, access the local preview at
    `http://localhost:3000`.
 
-   Run `make clean` in a separate terminal window to gracefully shut down the
-   preview environment. Alternately, run `make clean CLEAN_OPTION=full` to
+   To gracefully shut down the
+   preview environment, run `make clean` in a separate terminal window. You can also run `make clean CLEAN_OPTION=full` to
    shutdown the environment and remove the local Docker images.
 
 1. Commit your changes.
@@ -220,7 +241,7 @@ Check with your team for name of the branch.
    Pull requests are automatically labeled and assigned to the product's
    documentation team for review.
 
-1. Incorporate reviewer feedback.
+1. A technical writer will review your PR and provide feedback. Incorporate the reviewer's feedback and then re-request review.
 
 1. Merge your pull request after it has been approved.
 
@@ -259,7 +280,7 @@ the name of the branch and folder.
 
    If you need to create a new page, refer to the [How to create a new page][new-page-guide] guide for instructions.
 
-1. Preview your changes locally (optional).
+1. Optionally, preview your changes locally.
 
    From the `web-unified-docs` directory, run `make`. This command uses Docker
    to create the documentation website locally. The creation process takes time
@@ -269,8 +290,8 @@ the name of the branch and folder.
    creation process has finished, access the local preview at
    `http://localhost:3000`.
 
-   Run `make clean` in a separate terminal window to gracefully shut down the
-   preview environment. Alternately, run `make clean CLEAN_OPTION=full` to
+   To gracefully shut down the
+   preview environment, run `make clean` in a separate terminal window. You can also run `make clean CLEAN_OPTION=full` to
    shutdown the environment and remove the local Docker images.
 
 1. Commit your changes.
@@ -285,31 +306,157 @@ the name of the branch and folder.
    git push origin <working_branch_name>
    ```
 
-1. Create a pull request against the upcoming minor release branch, which is the
+1. Create a pull request against the upcoming majorrelease branch, which is the
    branch you cloned in step one.
 
    Make sure you choose the upcoming minor release branch in the GitHub web UI's **base:**
-   drop down list. Refer to GitHub's [Creating a pull
-   request](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request)
+   drop down list. Refer to GitHub's [Creating a pull request](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request)
    guide for instructions.
 
    Pull requests are automatically labeled and assigned to the product's
    documentation team for review.
 
-1. Incorporate reviewer feedback.
+1. A technical writer will review your PR and provide feedback. Incorporate the reviewer's feedback and then re-request review.
 
 1. Merge your pull request after it has been approved.
 
 The product tech writer team is responsible for merging the upcoming major
 release branch as part of the major version release process.
 
+## Edit content
+
+Documentation content is written in [Markdown](https://www.markdownguide.org/cheat-sheet/).
+
+To create a new page with Markdown, create a file ending in `.mdx` in the desired `./content/<product>/<subdirectory>`. The file path in the content directory becomes the content's URL route. For example, `content/docs/hello.mdx` will be served from the `/docs/hello` URL.
+
+> **Important**: Files and directories will only be rendered and published to the website if they are [included in sidebar data](#edit-navigation-sidebars). Any file not included in sidebar data will not be rendered or published.
+
+In order to render, pages require [YAML frontmatter](https://middlemanapp.com/basics/frontmatter/) that provide the content's title and description.
+
+```yaml
 ---
-
-## Publication
-
-Changes to `main` show up approximately ten minutes after the PR merges.  
-
+title: 'My Title'
+description: "A thorough, yet succinct description of the page's contents"
 ---
+```
+
+This repository's content guide includes detailed instructions on how to [create a new page and add it to the navigation sidebar](/content--guide/create-new-page).
+
+### Markdown enhancements
+
+In our documentation, you can use custom markdown enhancements to produce pages with tabs, named code blocks, badges, and alert boxes.
+
+Correct usage of these enhancements is documented in this repo's [content style guide](/style-guide). The custom components and additional configuration options are avaialble using the `dev-portal` repo.
+
+## Navigation sidebars
+
+The structure of the sidebars are controlled by files in the `./content/<product>/<version>/<data>` directory. Each file contains a configuration for a section of product documentation. For example, `docs-nav-data.json` controls navigation in the product's `Documentation` section on developer.hashicorp.com.
+
+The `.json` file must list all files in a directory and follow the same nested hierarchy. For example, given a directory with the following structure:
+
+```text
+.
+├── docs
+│   └── directory
+│       ├── index.mdx
+│       ├── file.mdx
+│       ├── another-file.mdx
+│       └── nested-directory
+│           ├── index.mdx
+│           └── nested-file.mdx
+```
+
+The navigation data should be formatted so that it aligns exactly.
+
+```json
+[
+  {
+    "title": "Directory",
+    "routes": [
+      {
+        "title": "Overview",
+        "path": "directory"
+      },
+      {
+        "title": "File",
+        "path": "directory/file"
+      },
+      {
+        "title": "Another File",
+        "path": "directory/another-file"
+      },
+      {
+        "title": "Nested Directory",
+        "routes": [
+          {
+            "title": "Overview",
+            "path": "directory/nested-directory"
+          },
+          {
+            "title": "Nested File",
+            "path": "directory/nested-directory/nested-file"
+          }
+        ]
+      }
+    ]
+  }
+]
+```
+
+Within this data structure, ordering is flexible, but hierarchy is not. The structure of the sidebar must correspond to the structure of the content directory. So while you could put `file` and `another-file` in any order in the sidebar, or even leave one or both of them out, you could not decide to un-nest the `nested-directory` object without also un-nesting it in the filesystem.
+
+In addition: 
+
+- The `title` property on each node in the `nav-data` tree is the human-readable name in the navigation.
+- The `path` property on each leaf node in the `nav-data` tree is the URL path where the `.mdx` document will be rendered.
+- An `index.mdx` file is not required for each subdirectory.
+- If you use `index.mdx` files: you must add the file to the navigation `.json`, but the `.json` file can resolve it from the name of the directory. In the example, notice that it uses the `directory` path rather than `directory/index`. A common convention is to set the `title` of an index node to be `"Overview"`.
+
+### Custom or external links
+
+Sometimes you may have a need to include a link that is not directly to a file within the docs hierarchy. This can also be supported using a different pattern. For example:
+
+```json
+[
+  {
+    "name": "Directory",
+    "routes": [
+      {
+        "title": "File",
+        "path": "directory/file"
+      },
+      {
+        "title": "Another File",
+        "path": "directory/another-file"
+      },
+      {
+        "title": "Tao of HashiCorp",
+        "href": "https://www.hashicorp.com/tao-of-hashicorp"
+      }
+    ]
+  }
+]
+```
+
+If the link provided in the `href` property is external, it will display a small icon indicating this. If it's internal, it will appear the same way as any other direct file link.
+
+## Preview the site locally
+
+From the `web-unified-docs` directory, run `make`. This command uses Docker
+   to create the documentation website locally. The creation process takes time
+   to gather the required elements. You must wait for both the
+   `unified-devdot-api` and `dev-portal` containers to complete before you can
+   successfully test content in the preview environment. Once the website
+   creation process has finished, access the local preview at
+   `http://localhost:3000`.
+
+   To gracefully shut down the
+   preview environment, run `make clean` in a separate terminal window. You can also run `make clean CLEAN_OPTION=full` to
+   shutdown the environment and remove the local Docker images.
+
+## Redirects
+
+Detailed guidance on redirects and formatting is available in the [content guide](/content-guide/redirects).
 
 ## Troubleshooting
 
@@ -320,8 +467,6 @@ preview specific doc versions, you may be using an older/cached Docker image of
 `web-unified-docs` or `dev-portal` with an unfixed build error. To force a
 refresh of the Docker images, run `make clean CLEAN_OPTION=full` to purge the
 local images and then rebuild with `make`.
-
----
 
 ## FAQs
 
