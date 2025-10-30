@@ -53,13 +53,15 @@ Individual contributors should create working branches using one of the followin
 > conference announcements, in the `web-unified-docs-internal` repository. Contact
 > your team's technical writer for guidance.
 
+### Workflows
+
 ```mermaid
 flowchart LR
   C{What content do you want to update?}
-    C -->|Current release - publish now| D['Update published documentation' workflow]
-     C -->|Current & prior releases - publish now| E['Update published documentation' workflow]
-    C -->|Upcoming minor release| F['Upcoming minor release' workflow]
-    C -->|Upcoming major release| G['Upcoming major release' workflow]
+    C -->|Current release - publish now| D[<a href='#update-published-documentation'>Update published documentation workflow</a>]
+     C -->|Current & prior releases - publish now| E[<a href='#update-published-documentation'>Update published documentation workflow</a>]
+    C -->|Upcoming minor release| F[<a href='#upcoming-minor-release-documentation'>Upcoming minor release workflow</a>]
+    C -->|Upcoming major release| G[<a href='#upcoming-major-release-documentation'>Upcoming major release workflow</a>]
 ```
 
 ### Before you begin
