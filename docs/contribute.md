@@ -48,6 +48,11 @@ Individual contributors should create working branches using one of the followin
 
 ## HashiCorp employee contributor guide
 
+> [!IMPORTANT]
+> You must create documentation for embargoed content, including product or
+> conference announcements, in the `web-unified-docs-internal` repository. Contact
+> your team's technical writer for guidance.
+
 ```mermaid
 flowchart LR
   C{What content do you want to update?}
