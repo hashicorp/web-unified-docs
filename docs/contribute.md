@@ -57,17 +57,6 @@ Individual contributors should create working branches using one of the followin
 
 @TODO use which presentation??
 
-```mermaid
-flowchart LR
-  C{What content do you want to update?}
-    C -->|Current release - publish now| D[<a href='#update-published-documentation'>Update published documentation workflow</a>]
-     C -->|Current and/or prior releases - publish now| E[<a href='#update-published-documentation'>Update published documentation workflow</a>]
-    C -->|Upcoming minor release| F[<a href='#upcoming-minor-release-documentation'>Upcoming minor release workflow</a>]
-    C -->|Upcoming major release| G[<a href='#upcoming-major-release-documentation'>Upcoming major release workflow</a>]
-```
-
----
-
 The workflow you use depends on the content you want to update.
 
 - **Current release and/or prior releases**: Use the [Update published
