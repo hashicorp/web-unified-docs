@@ -55,14 +55,35 @@ Individual contributors should create working branches using one of the followin
 
 ### Workflows
 
+@TODO use which presentation??
+
 ```mermaid
 flowchart LR
   C{What content do you want to update?}
     C -->|Current release - publish now| D[<a href='#update-published-documentation'>Update published documentation workflow</a>]
-     C -->|Current & prior releases - publish now| E[<a href='#update-published-documentation'>Update published documentation workflow</a>]
+     C -->|Current and/or prior releases - publish now| E[<a href='#update-published-documentation'>Update published documentation workflow</a>]
     C -->|Upcoming minor release| F[<a href='#upcoming-minor-release-documentation'>Upcoming minor release workflow</a>]
     C -->|Upcoming major release| G[<a href='#upcoming-major-release-documentation'>Upcoming major release workflow</a>]
 ```
+
+---
+
+The workflow you use depends on the content you want to update.
+
+- **Current release and/or prior releases**: Use the [Update published
+  documentation](#update-published-documentation) workflow.
+- **Upcoming minor release**: Use the [Upcoming minor
+  release](#upcoming-minor-release-documentation) workflow.
+- **Upcoming major release**: Use the [Upcoming major
+  release](#upcoming-major-release-documentation) workflow.
+
+---
+
+| Content for which version?              | Workflow                                                   | Publishes when                                     |
+|-----------------------------------------|---------------------------------------------------------------|-------------------------------------------------------|
+| Current release and/or prior release(s) | [Update published documentation](#update-published-documentation)  | PR merges                    |
+| Upcoming minor release(s)               | [Upcoming minor release](#upcoming-minor-release-documentation) | Minor release branch merges on release date |
+| Upcoming major release                  | [Upcoming major release](#upcoming-major-release-documentation) | Major release branch merges on release date |
 
 ### Before you begin
 
