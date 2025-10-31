@@ -59,20 +59,17 @@ Pull request:
 
 - [ ] Verify that all status checks have passed
 - [ ] Verify that preview environment has successfully deployed
-- [ ] Add all required reviewers
+- [ ] Add all required reviewers if they are not part of assigned groups
 
 Content:
 
 - [ ] Add redirects for any moved or removed pages
 - [ ] Follow the [Education style guide](https://github.com/hashicorp/web-unified-docs/tree/main/docs/style-guide)
-- [ ] Look at the local or Vercel build to make sure the content renders
-  correctly
+- [ ] Look at the local or Vercel build to make sure the content renders correctly
 
 ## Reviewers
 
-Technical reviewers should verify that the content is technically correct.
-
-Education reviewers should ensure the following:
-
-- Content adheres to the Education style and content guides
-- Guides work as written
+- [ ] PR is against the correct base branch
+- [ ] Content is technically correct
+- [ ] Guides work and step order makes sense
+- [ ] Content follows the Education content and style guides
