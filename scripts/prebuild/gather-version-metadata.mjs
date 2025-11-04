@@ -27,21 +27,32 @@ export async function gatherVersionMetadata(contentDir) {
 	 * Note that "product" and "content source repo" are used interchangeably.
 	 * Some products, such as Terraform, have multiple content source repos.
 	 */
-	const products = fs.readdirSync(contentDir).filter((file) => {
-		return fs.statSync(path.join(contentDir, file)).isDirectory()
-	})
+	const allDirectories = fs.readdirSync(contentDir)
+
+	const products = allDirectories
+		.filter((file) => {
+			return fs.statSync(path.join(contentDir, file)).isDirectory()
+		})
+		.filter((product) => {
+			if (!PRODUCT_CONFIG[product]) {
+				console.warn(
+					`Skipping directory "${product}" as it is not defined in PRODUCT_CONFIG.`,
+				)
+				return false
+			}
+			return true
+		})
 
 	// Iterate over each product directory, adding to `versionMetadata`
 	for (const product of products) {
-		// Initialize the product array
 		versionMetadata[product] = []
 
-		/**
-		 * If the product is not versioned, we add a single entry for the
-		 * "v0.0.x" version, which is a placeholder for non-versioned products.
-		 * This is useful for products that do not have versioned documentation,
-		 * such as the HashiCorp Cloud Platform.
-		 */
+		if (!PRODUCT_CONFIG[product]) {
+			throw new Error(
+				`Missing PRODUCT_CONFIG entry for product: "${product}". Please add it to productConfig.mjs.`,
+			)
+		}
+
 		if (PRODUCT_CONFIG[product].versionedDocs === false) {
 			versionMetadata[product].push({
 				version: 'v0.0.x',

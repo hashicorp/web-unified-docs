@@ -1,0 +1,100 @@
+#
+# This GitHub action runs Packer's acceptance tests every night.
+# Failures are reported to slack.
+#
+
+name: "Acceptance Test"
+
+on:
+  # workflow_dispatch allows manual triggering of the workflow
+  workflow_dispatch:
+  schedule:
+  # Runs against the default branch every day at midnight
+  - cron: "0 0 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  get-go-version:
+    runs-on: ubuntu-latest
+    outputs:
+      go-version: ${{ steps.get-go-version.outputs.go-version }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: 'Determine Go version'
+        id: get-go-version
+        # We use .go-version as our source of truth for current Go
+        # version, because "goenv" can react to it automatically.
+        run: |
+          echo "Building with Go $(cat .go-version)"
+          echo "go-version=$(cat .go-version)" >> $GITHUB_OUTPUT
+  acceptance-test:
+    runs-on: ubuntu-latest
+    name: Acceptance Test
+    needs: get-go-version
+    env: 
+      # AWS Creds for Assume Role
+      AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.TESTACC_AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.TESTACC_AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ secrets.TESTACC_AWS_REGION }}
+      # Packer GH Token for API Rate Limiting
+      PACKER_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5.3.0
+        with:
+          go-version: ${{ needs.get-go-version.outputs.go-version }}
+      - name: IAM Assume Role
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
+          role-duration-seconds: 3600
+      - name: Install gotestsum
+        run: go install gotest.tools/gotestsum@latest
+      
+    # we set the ACC_TEST_BUILDERS="amazon-ebs" since we want to test against the amazon-ebs tests (e.g. Powershell 
+    # provisioner acceptance tests)
+      - name: Run acceptance tests per module
+        run: |
+          mkdir -p /tmp/test-results
+          make dev
+          ACC_TEST_BUILDERS="amazon-ebs" PACKER_ACC=1 gotestsum --format=short-verbose --junitfile /tmp/test-results/gotestsum-report.xml -- -timeout=120m -p 2 $(go list ./... | grep -v inspec | grep -v profitbricks | grep -v oneandone)
+  # Send a slack notification if either job defined above fails
+  slack-notify:
+    permissions:
+      contents: none
+    needs: 
+      - get-go-version
+      - acceptance-test
+    if: always() && (needs.get-go-version.result == 'failure' || needs.acceptance-test.result == 'failure')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send slack notification on failure
+        uses: slackapi/slack-github-action@37ebaef184d7626c5f204ab8d3baff4262dd30f0 # v1.27.0
+        with:
+          payload: |
+            {
+              "text": ":alert: Packer Nightly Acceptance Tests *FAILED* :alert:",
+              "attachments": [
+                {
+                  "color": "#C41E3A",
+                  "blocks": [
+                    {
+                      "type": "section",
+                      "text": {
+                        "type": "mrkdwn",
+                        "text": "Branch: `${{ github.ref_name }}`\nRef: ${{ github.event.pull_request.html_url || github.event.head_commit.url }}\nWorkflow: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK

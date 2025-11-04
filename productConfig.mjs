@@ -132,31 +132,31 @@ export const PRODUCT_CONFIG = {
 	//  versionedDocs: true,
 	// 	websiteDir: 'website',
 	// },
-	// packer: {
-	// 	/**
-	// 	 *  🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
-	// 	 *
-	// 	 * Fails for v1.5.6 (and likely earlier) with error:
-	// 	 * `packer/website/content: No such file or directory`
-	// 	 * This likely indicates that older versions of docs have a different
-	// 	 * directory structure that needs to be accounted for. Need to confirm.
-	// 	 */
-	// 	/**
-	// 	 * TODO: for Packer, will probably need to do _something_ to sort out
-	// 	 * the Packer plugin documentation. We didn't fully complete the migration
-	// 	 * to Packer integrations, so I think there might still be plugin docs
-	// 	 * we need to fetch from third-party repos?
-	// 	 *
-	// 	 * Or this may be a non-issue, I'm not actually sure.
-	// 	 */
-	// 	assetDir: 'public',
-	// 	contentDir: 'content',
-	// 	dataDir: 'data',
-	//  productSlug: 'packer',
-	// 	semverCoerce: semver.coerce,
-	//  versionedDocs: true,
-	// 	websiteDir: 'website',
-	// },
+	packer: {
+		/**
+		 *  🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
+		 *
+		 * Fails for v1.5.6 (and likely earlier) with error:
+		 * `packer/website/content: No such file or directory`
+		 * This likely indicates that older versions of docs have a different
+		 * directory structure that needs to be accounted for. Need to confirm.
+		 */
+		/**
+		 * TODO: for Packer, will probably need to do _something_ to sort out
+		 * the Packer plugin documentation. We didn't fully complete the migration
+		 * to Packer integrations, so I think there might still be plugin docs
+		 * we need to fetch from third-party repos?
+		 *
+		 * Or this may be a non-issue, I'm not actually sure.
+		 */
+		assetDir: 'public',
+		contentDir: 'docs',
+		dataDir: 'data',
+		productSlug: 'packer',
+		semverCoerce: semver.coerce,
+		versionedDocs: false,
+		websiteDir: 'website',
+	},
 	'terraform-enterprise': {
 		/**
 		 * ✅ Initial migration attempt: SEEMS TO WORK
