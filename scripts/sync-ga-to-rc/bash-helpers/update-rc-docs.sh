@@ -15,6 +15,22 @@
 currDir="$(dirname "$0")"
 . "${currDir}/definitions.sh"
 
+function buildDirs {
+
+  local dirName="${1}"
+
+  if [ -z "${dirName}" ] ; then return ; fi
+  if [ -d "${dirName}" ] ; then return ; fi
+
+  local parentDir=$(dirname "${dirName}")
+
+  # If the parent directory does not exist, call buildDir on the parent
+  if [ ! -d "${parentDir}" ] ; then buildDirs "${parentDir}" ; fi
+
+  # Create the directory if it doesn't already exist
+  mkdir "${dirName}"
+}
+
 # Set variables from command line argument
 productKey="${1}"  # root folder for product docs (product key)
 gaFolder="${2}"    # GA doc folder name
@@ -33,6 +49,9 @@ while read line; do
 
   gaPath=$(echo "$line" | awk -F " " '{print $3}')
   rcPath=${gaPath/${gaFolder}/${rcFolder}}
+  parent=$(dirname "${rcPath}")
+
+  buildDirs "${parent}"
 
   # Skip any file that may have ended up in the list from a different product
   if [[ "${gaPath}" != *"/content/${productKey}/"* ]]; then continue ; fi

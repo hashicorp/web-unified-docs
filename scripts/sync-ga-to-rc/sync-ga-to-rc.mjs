@@ -285,7 +285,7 @@ for (const key in gaOnly) {
 		console.log('      - Excluding ' + key)
 	} else {
 		// Add the file to the safe list
-		pushtoRC[key] = gaDelta[key]
+		pushtoRC[key] = gaOnly[key]
 	}
 }
 
@@ -348,7 +348,7 @@ writeConflictList(
 // Only update things locally if the user provided the update or pr flag
 if (updateFiles) {
 	console.log('    Updating RC files')
-	bashOutput = await runBashCmdAsync(updateRCDocs)
+	bashOutput = await runBashCmdAsync(updateRCDocs, true)
 
 	if (Object.keys(manualReview).length > 0) {
 		console.log(

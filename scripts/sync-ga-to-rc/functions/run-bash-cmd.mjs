@@ -14,7 +14,7 @@ import { spawn } from 'node:child_process'
  * @param {Object} cmdString bash command or path to a bash script
  */
 
-export async function runBashCmdAsync(cmdString) {
+export async function runBashCmdAsync(cmdString, debug = false) {
 	var bashOutput = []
 	const bash = spawn(`bash`)
 	bash.stdin.setDefaultEncoding('utf-8')
@@ -26,6 +26,9 @@ export async function runBashCmdAsync(cmdString) {
 
 	// Push info from stdout to an array
 	bash.stdout.on(`data`, (data) => {
+		if (debug) {
+			console.log(data.toString())
+		}
 		bashOutput.push(data.toString())
 	})
 
