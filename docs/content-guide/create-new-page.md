@@ -10,7 +10,7 @@ Follow these steps to create a new content page:
 ## Decide content type
 
 Decide if your content is a concept, guide, or reference. Refer to the [Content
-types](content-types.md) guide for detailed explanations. If you
+types](content-types.md) guide for detailed explanations and templates. If you
 have questions, reach out to your product's tech writer team for help.
 
 ## Create the page file
