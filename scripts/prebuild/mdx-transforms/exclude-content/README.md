@@ -79,6 +79,8 @@ exclude-content/
 
 1. **Early Return**: If `productConfig.supportsExclusionDirectives` is false, skip processing
 2. **Single AST Pass**: Parse all directive blocks in one traversal (`parseDirectiveBlocks`)
+   - Stores **node references** (not line numbers) for BEGIN/END comments
+   - Returns blocks with `{ startNode, endNode, startLine, endLine, content }`
 3. **Explicit Routing**: For each block, route to appropriate processor:
    ```javascript
    const directiveProcessingFuncs = {
@@ -139,25 +141,59 @@ if (!isGlobalPartial) {
 
 ## Implementation Details
 
+### parseDirectiveBlocks() Function
+
+Parses all directive blocks from the AST in a single pass and returns block objects containing:
+
+- `startNode`: Reference to the BEGIN comment node
+- `endNode`: Reference to the END comment node  
+- `startLine`: Line number where BEGIN comment appears (for error messages)
+- `endLine`: Line number where END comment appears (for error messages)
+- `content`: The directive content (e.g., "TFEnterprise:only name:project-remote-state")
+
+**Why node references instead of line numbers?**
+
+When multiple partials are included in a file, each partial's AST nodes retain their original line numbers from the source file. This means multiple partials can have overlapping line ranges (e.g., both starting at line 1). Using actual node object references ensures we match the exact BEGIN/END pair, not just any nodes at those line numbers.
+
 ### removeNodesInRange() Function
 
-This is the core function that removes content between BEGIN/END comments. Key behaviors:
+This is the core function that removes content between BEGIN/END comments using node identity matching.
+
+**Key Algorithm:**
+```javascript
+// Check if this is the START node
+if (node === startNode) {
+  insideRange = true
+  nodesToRemove.add(node)
+}
+
+// Check if this is the END node  
+if (node === endNode) {
+  nodesToRemove.add(node)
+  insideRange = false
+}
+
+// If inside range, mark for removal
+if (insideRange) {
+  nodesToRemove.add(node)
+}
+```
+
+**Why node identity matching?**
+
+Using `node === startNode` comparison ensures we match the exact node objects that were identified during parsing. This is critical when:
+- Multiple partials contain the same directive name (e.g., both have `TFEnterprise:only name:project-remote-state`)
+- Partial AST nodes have overlapping line numbers from their source files
+- Same directive appears multiple times in sequence
 
 **Handles Partial Content:**
-- Nodes from included partials may have position data from the partial file (e.g., lines 1-20), not the parent file (e.g., lines 37-45)
-- Tracks an `insideRange` state: once a BEGIN comment is found, all subsequent nodes are removed until the END comment
-- Nodes without position data or with mismatched position data are treated as partial content and removed when `insideRange` is true
+- Once BEGIN node is found, all subsequent nodes are marked for removal until END node
+- Recurses into children to handle nested structures
 
 **Recurse-First Algorithm:**
 - Processes children BEFORE deciding parent's fate
 - Finds nested END comments even when parent is marked for removal
 - Parent nodes that contained removed children are also removed (if empty)
-
-**Critical Edge Case - Same-Line Directive Comments:**
-- When two directive blocks have comments on the same line (e.g., `<!-- END: TFC:only --> <!-- BEGIN: TFEnterprise:only -->`), the function tracks `lastEndLine`
-- After finding an END comment, it skips any BEGIN comments on that same line
-- This prevents starting a new unrelated range removal operation
-- **Why**: `removeNodesInRange()` is designed to remove ONE specific range, not multiple overlapping ranges
 
 **Helper Function:**
 ```javascript
@@ -208,7 +244,7 @@ export function processConsulBlock(directive, block, tree, options) {
   if (directive === 'only') {
     // Consul:only kept ONLY in consul, removed elsewhere
     if (repoSlug !== 'consul') {
-      removeNodesInRange(tree, block.start, block.end)
+      removeNodesInRange(tree, block)
     }
     return
   }
@@ -217,9 +253,11 @@ export function processConsulBlock(directive, block, tree, options) {
   const versionMatch = directive.match(/^(<=|>=|<|>|=)v(\d+\.\d+\.x)$/)
   if (versionMatch) {
     // Process version comparison...
+    // If content should be removed:
+    // removeNodesInRange(tree, block)
   }
 
-  throw new Error(`Invalid Consul directive: "${directive}" at lines ${block.start}-${block.end}`)
+  throw new Error(`Invalid Consul directive: "${directive}" at lines ${block.startLine}-${block.endLine}`)
 }
 ```
 
@@ -279,7 +317,7 @@ Coverage:
 - "Only" directive processing (Terraform products)
 - Cross-product behavior
 - Error handling for malformed directives
-- Edge cases (nested comments, indented comments, same-line directives)
+- Edge cases (nested comments, indented comments, multiple partials with same directive name)
 
 ### Integration Tests
 

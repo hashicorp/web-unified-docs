@@ -1,0 +1,433 @@
+---
+page_title: Configure AWS PrivateLink
+sidebar_title: Configure AWS PrivateLink
+description: >-
+  Connect privately and securely to your HCP Vault Dedicated clusters with AWS PrivateLink.
+---
+
+# Configure AWS PrivateLink
+
+@include 'vault/non-dev-callout.mdx'
+
+You can establish a connection to private HCP Vault Dedicated clusters using AWS
+PrivateLink. This feature allows you to avoid exposing the cluster to the public
+internet and reduces the attack surface.
+
+![Diagram displaying the Consumer VPC privately connecting to HCP Vault Dedicated Cluster via PrivateLink](/img/docs/hcp-core/diagram-privatelink-light.png#light-theme-only)
+![Diagram displaying the Consumer VPC privately connecting to HCP Vault Dedicated Cluster via PrivateLink](/img/docs/hcp-core/diagram-privatelink-dark.png#dark-theme-only)
+
+## Limitations
+
+- Supports production tier HCP Vault Dedicated clusters on the Essentials and Standard tier.
+- Supports inbound connections from a customer's VPC to a HCP Vault Dedicated cluster. 
+- Requires the consumer endpoint type set to **Endpoint services that use NLBs and GWLBS**.
+- Peering or transit gateway not configured for the target HashiCorp Virtual Network (HVN).
+- Does not support transitive routing between VPCs. Use a transit gateway for this use case.
+- PrivateLink connections must be deleted before deleting the HCP Vault Dedicated cluster.
+
+### Default limits
+
+PrivateLink has the following default limits:
+
+- **PrivateLink services**: 1 per HCP Vault Dedicated Cluster
+- **Consumer accounts **: 10 per PrivateLink service
+- **Consumer IP ranges**: 15 per PrivateLink service
+- **PrivateLink endpoint connections**: 20 per PrivateLink service
+
+To request higher limits, [create a support ticket](https://support.hashicorp.com/hc/en-us/requests/new).
+
+## Prerequisites
+
+- Access to the [HCP Portal](https://portal.cloud.hashicorp.com/sign-in).
+- AWS [HVN created](/hcp/docs/hcp/network/hvn-aws/hvn-aws) with a unique address space.
+- AWS HCP Vault Dedicated Cluster created in the configured AWS HVN.
+- Target/consumer AWS VPC exists and configured with its address space.
+- Peering/TGW and PrivateLink are not used concurrently.
+- [HCP service principal user](/vault/tutorials/manage-hcp-vault-dedicated/terraform-hcp-provider-vault#create-a-service-principal-and-key) created with a client ID and secret.
+
+## PrivateLink Provisioning
+
+Establishing a PrivateLink connection is a multi-step process that involves
+actions from two different personas - the _consumer_ (customer) and the
+_provider_ (Hashicorp).
+
+### Initiate PrivateLink Service Creation
+
+_Persona: Consumer_
+
+The consumer initiates the VPC PrivateLink Service creation process by making an
+API call to create a new VPC Endpoint Service for a given HCP Vault Dedicated
+cluster. 
+
+The [CreatePrivateLink API](/hcp/api-docs/hvn#CreatePrivateLinkService) creates
+a new HCP PrivateLink service, granting permission to specified customer AWS
+account ARNS, VPC CIDRs and VPC regions, while controlling who can
+create an inbound connection to the HCP Vault Dedicated Cluster via PrivateLink.
+
+This API returns a unique `external_name` required for the next step.
+
+Wait until the service transitions to the `AVAILABLE` state then proceed to the
+next section.
+
+Refer to the [GetPrivateLink API
+documentation](/hcp/api-docs/hvn#GetPrivateLinkService) for details of the
+PrivateLink Service `state` and `external_name`.
+
+### Create VPC Endpoint
+
+_Persona: Consumer_
+
+Once the PrivateLink Service is in the `AVAILABLE` state, the consumer can use the
+`external_name` returned from the previous step to create the VPC Endpoint
+within their
+[VPC](https://docs.aws.amazon.com/vpc/latest/privatelink/create-interface-endpoint.html#create-interface-endpoint-aws).
+
+Select the `Endpoint services that use NLBs and GWLBS` endpoint type.
+
+This is the action that sends a connection request to the HCP VPC Endpoint
+Service for the HCP Vault Dedicated cluster.
+
+### Connection acceptance & endpoint provisioning
+
+_Persona: Provider_
+
+This is an automated step performed by our platform. Upon successful
+verification of the request, our service accepts the connection request 
+
+<Highlight>
+
+The connection acceptance process takes 5 to 10 minutes to complete.
+
+</Highlight>
+
+The PrivateLink connection is established, and traffic can flow privately from
+the consumer VPC to the linked HCP Vault Dedicated cluster on port 8200.
+
+## Retrieve HCP API token
+
+_Persona: Consumer_
+
+<Tabs>
+<Tab heading="HCP API">
+
+Request a HCP API token using the HCP API.
+
+1. Set environment variables for the HCP organization, HCP project and HashiCorp
+   Virtual Network (HVN).
+
+   ```shell-session
+   $ export HCP_ORG_ID=<HCP_ORG_ID> \
+       HCP_PROJ_ID=<HCP_PROJ_ID> \
+       HCP_NETWORK_ID=<HCP_NETWORK_ID>
+   ```
+
+1. Set environment variables for the HCP service principal user
+   `HCP_CLIENT_ID` and `HCP_CLIENT_SECRET`:
+
+   ```shell-session
+   $ export HCP_CLIENT_ID=<HCP_CLIENT_ID> HCP_CLIENT_SECRET=<HCP_CLIENT_SECRET>
+   ```
+
+1. Retrieve a HCP API token using a HCP service principal user HCP_CLIENT_ID,
+   and HCP_CLIENT_SECRET and store it in the `HCP_API_TOKEN` variable.
+
+   ```shell-session
+   $ HCP_API_TOKEN=$(curl --location "https://auth.idp.hashicorp.com/oauth2/token" \
+       --header "Content-Type: application/x-www-form-urlencoded" \
+       --data-urlencode "client_id=$HCP_CLIENT_ID" \
+       --data-urlencode "client_secret=$HCP_CLIENT_SECRET" \
+       --data-urlencode "grant_type=client_credentials" \
+       --data-urlencode "audience=https://api.hashicorp.cloud" | jq -r .access_token)
+   ```
+
+</Tab>
+<Tab heading="HCP CLI">
+
+Request a HCP API token using the HCP CLI. These steps assume you [configured the
+HCP CLI using](/hcp/docs/cli/commands/profile/init) `hcp profile init` and
+selected the HCP organization and project where you created the HashiCorp
+Virtual Network(HVN).
+
+1. Set environment variables for the HCP service principal user
+   `HCP_CLIENT_ID` and `HCP_CLIENT_SECRET`.
+
+   ```shell-session
+   $ export HCP_CLIENT_ID=<HCP_CLIENT_ID> HCP_CLIENT_SECRET=<HCP_CLIENT_SECRET>
+   ```
+
+   The HCP service principal client secret is not available after you initially
+   create the secret.
+
+1. Set environment variables for the HashiCorp Virtual Network (HVN).
+
+   ```shell-session
+   $ export HCP_NETWORK_ID=<HCP_NETWORK_ID>
+   ```
+
+1. Authenticate to HCP.
+
+   ```shell-session
+   $ hcp auth login
+   ```
+
+1. Complete the browser-based authentication workflow.
+
+1. Set an environment variable for the HCP organization, and project ID.
+
+   ```shell-session
+   $ export HCP_ORG_ID=$(hcp profile display --format json | jq -r .OrganizationID) \
+        HCP_PROJ_ID=$(hcp profile display --format json | jq -r .ProjectID)
+   ```
+
+1. Retrieve a HCP API token using a HCP CLI and store it in the `HCP_API_TOKEN`
+   variable.
+
+   ```shell-session
+   $ HCP_API_TOKEN=$(hcp auth print-access-token)
+   ```
+
+</Tab>
+</Tabs>
+
+## Create PrivateLink Service
+
+_Persona: Consumer_
+
+<Note>
+
+You can configure PrivateLink using the HCP Portal UI or the HCP API.
+This guide shows the API method.
+
+</Note>
+
+For a full list of all PrivateLink API endpoints, see the
+[HCP API documentation](/hcp/api-docs/hvn#CreatePrivateLinkService).
+
+1. Verify you have the required environment variables configured.
+
+   ```shell-session
+   $ echo $HCP_API_TOKEN $HCP_ORG_ID $HCP_PROJ_ID $HCP_NETWORK_ID
+   ```
+
+1. Use the `private-link-services` endpoint to create PrivateLink Service. Update
+   highlighted items in the `data` block with the values for your environment.
+
+   <Note>
+
+   - The `consumer_accounts` is the list of ARNs of your account that need to be added as Allowed Principals in order to allow access to the created PrivateLink Service
+   - The `consumer_ip_ranges` is the list of IP Ranges/CIDR for your VPCs that need to access the PrivateLink Service
+   - The `consumer_regions` is the list of cloud provider regions to be supported in PrivateLink Service
+   - The `vault_cluster_id` is the ID of the Hashicorp Vault Dedicated Cluster to be linked with PrivateLink Service. This should be a valid ID corresponding to a Essentials/Standard tier Hashicorp Vault Dedicated Cluster
+   - PrivateLink Service ID must be unique within HCP Project.
+   - PrivateLink Service ID cannot exceed 36 characters.
+   - Create the VPC Endpoint in your VPC after the PrivateLink moves to `AVAILABLE` state.
+
+   </Note>
+
+   **Example:**
+   
+   <CodeBlockConfig highlight="7-11, 15">
+
+   ```shell-session
+   $ curl --location "https://api.cloud.hashicorp.com/network/2020-09-07/organizations/$HCP_ORG_ID/projects/$HCP_PROJ_ID/networks/$HCP_NETWORK_ID/private-link-services" \
+    --request POST \
+    --header 'Content-Type: application/json' \
+    --header "Authorization: Bearer $HCP_API_TOKEN" \
+    --data '{
+        "private_link_service": {
+            "id": "privatelink-service",
+            "vault_cluster_id": "vault-cluster-id",
+            "consumer_accounts": ["ARN-1", "ARN-2"],
+            "consumer_ip_ranges": ["IP-Range-1", "IP-Range-2"],
+            "consumer_regions": ["us-east-1"],
+            "hvn": {
+                "location": {
+                    "region": {
+                        "region": "us-west-2",
+                        "provider": "aws"
+                    }
+                }
+            }
+        }
+    }'| jq
+   ```
+
+   </CodeBlockConfig>
+   
+   **Example output:**
+
+   <CodeBlockConfig hideClipboard>
+
+   ```json
+   {
+      "private_link_service": {
+        "id": "privatelink-service",
+        "external_name": "PRIVATE_LINK_SERVICE_NAME",
+        "hvn": {
+          "type": "hashicorp.network.hvn",
+          "id": "HCP_NETWORK_ID",
+          "uuid": "HCP_NETWORK_ID",
+          "location": {
+            "organization_id": "HCP_ORG_ID",
+            "project_id": "HCP_PROJ_ID",
+            "region": {
+              "provider": "aws",
+              "region": "us-west-2"
+            }
+          },
+          "description": "Description"
+        },
+        "state": "CREATING",
+        "created_at": "2025-09-02T11:27:12.011Z",
+        "updated_at": "2025-09-02T11:27:12.011Z",
+        "vault_cluster_id": "vault-cluster-id",
+        "consumer_regions": [
+          "us-east-1"
+        ],
+        "default_region": "us-west-2",
+        "consumer_accounts": [
+          "ARN-1", "ARN-2"
+        ],
+        "consumer_ip_ranges": [
+          "IP-Range-1", "IP-Range-2"
+        ]
+      },
+      "operation": {
+        "id": "OPERATION_ID",
+        "state": "PENDING",
+        "location": {
+          "organization_id": "HCP_ORG_ID",
+          "project_id": "HCP_PROJ_ID",
+          "region": {
+            "provider": "aws",
+            "region": "us-west-2"
+          }
+        },
+        "link": {
+          "type": "hashicorp.network.private-link",
+          "id": "privatelink-service",
+          "uuid": "privatelink-service",
+          "location": {
+            "organization_id": "HCP_ORG_ID",
+            "project_id": "HCP_PROJ_ID",
+            "region": {
+              "provider": "aws",
+              "region": "us-west-2"
+            }
+          },
+          "description": "PrivateLink Service (\"private-link-service\")"
+        },
+        "created_at": "2025-09-02T11:27:12.011Z",
+        "updated_at": "2025-09-02T11:27:12.011Z"
+      }
+    }
+   ```
+   </CodeBlockConfig>
+   
+   You have triggered the PrivateLink Service creation for your HCP Vault Dedicated cluster.
+
+## Update PrivateLink service
+
+You can update an existing PrivateLink Service to change consumer accounts,
+consumer IP ranges, and consumer regions once the service is in the `AVAILABLE`
+state.
+
+1. Set the `HCP_NETWORK_PRIVATELINK_SERVICE_ID` environment variable using the
+   PrivateLink Service ID from the previous step.
+
+   ```shell-session
+   $ export HCP_NETWORK_PRIVATELINK_SERVICE_ID=<PRIVATELINK_SERVICE_ID>
+   ```
+
+   Replace `<PRIVATELINK_SERVICE_ID>` with the ID you used when creating the
+   PrivateLink Service (e.g., `privatelink-service`).
+
+1. Update the PrivateLink service.
+  
+   <Note>
+
+   - The `add_consumer_accounts` is the list of new ARNs of your account that need to be added as Allowed Principals in order to allow access to the created PrivateLink Service
+   - The `remove_consumer_accounts` is the list of ARNs of your account that need to be removed from the Allowed Principals in order to revoke access to the created PrivateLink Service
+   - The `add_consumer_ip_ranges` is the list of new IP Ranges/CIDR for your VPCs that need to access the PrivateLink Service
+   - The `remove_consumer_ip_ranges` is the list of IP Ranges/CIDR for your VPCs that need to be removed from accessing the PrivateLink Service
+   - The `add_consumer_regions` is the list of new cloud provider regions to be supported in PrivateLink Service
+   - The `remove_consumer_regions` is the list of cloud provider regions to be removed from the PrivateLink Service
+   - PrivateLink Service ID must match the ID of the PrivateLink Service created in the previous step (e.g., `"privatelink-service"`).
+   - PrivateLink must be in `AVAILABLE` state to perform an update operation
+
+   </Note>
+
+   <CodeBlockConfig highlight="6-12, 16">
+  
+   ```shell-session
+   $ curl --location "https://api.cloud.hashicorp.com/network/2020-09-07/organizations/$HCP_ORG_ID/projects/$HCP_PROJ_ID/networks/$HCP_NETWORK_ID/private-link-services/$HCP_NETWORK_PRIVATELINK_SERVICE_ID" \
+     --request PATCH \
+     --header 'Content-Type: application/json' \
+     --header "Authorization: Bearer $HCP_API_TOKEN" \
+     --data '{
+       "id": "privatelink-service",
+       "add_consumer_accounts": ["ARN3", "ARN4"],
+       "remove_consumer_accounts": ["ARN1"],
+       "add_consumer_regions": ["us-east-2"],
+       "remove_consumer_regions": ["us-east-1"],
+       "add_consumer_ip_ranges": ["10.0.0.0/24"],
+       "remove_consumer_ip_ranges": ["IP-Range-3"],
+       "hvn": {
+           "location": {
+               "region": {
+                   "region": "us-west-2",
+                   "provider": "aws"
+               }
+           }
+       }
+   }'| jq
+   ```
+
+   </CodeBlockConfig>
+   
+   **Example output:**
+   
+   <CodeBlockConfig hideClipboard>
+   
+   ```json
+   {
+        "operation": {
+            "id": "OPERATION_ID",
+            "state": "PENDING",
+            "location": {
+                "organization_id": "HCP_ORG_ID",
+                "project_id": "HCP_PROJ_ID",
+                "region": {
+                    "provider": "aws",
+                    "region": "us-west-2"
+                }
+            },
+            "link": {
+                "type": "hashicorp.network.private-link",
+                "id": "private-link-service",
+                "uuid": "private-link-service",
+                "location": {
+                    "organization_id": "HCP_ORG_ID",
+                    "project_id": "HCP_PROJ_ID",
+                    "region": {
+                        "provider": "aws",
+                        "region": "us-west-2"
+                    }
+                },
+                "description": "PrivateLink Service (\"private-link-service\")"
+            },
+            "created_at": "2025-09-01T18:53:48.930351Z",
+            "updated_at": "2025-09-01T18:53:48.930351Z"
+        }
+   }
+   ```
+   
+   </CodeBlockConfig>
+
+## API
+
+- [Create PrivateLink service](/hcp/api-docs/hvn#CreatePrivateLinkService)
+- [Get PrivateLink service](/hcp/api-docs/hvn#GetPrivateLinkService)
+- [List PrivateLink services](/hcp/api-docs/hvn#ListPrivateLinkService)
+- [Update PrivateLink service](/hcp/api-docs/hvn#UpdatePrivateLinkService)
+- [Delete PrivateLink service](/hcp/api-docs/hvn#DeletePrivateLinkService)
