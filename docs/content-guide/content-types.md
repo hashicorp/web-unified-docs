@@ -30,7 +30,7 @@ HashiCorp product documentation uses the following content types:
 
 - **Reference**: Reference pages are configuration, CLI, and API content. 
 
-HashiCorp employees may refer to the internal [Technical Writing
+HashiCorp employees may refer to the [internal Technical Writing
 wiki](https://hashicorp.atlassian.net/wiki/x/eYBVnw) for detailed explanations.
 
 ## Page templates
