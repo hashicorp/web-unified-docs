@@ -1,34 +1,19 @@
 # Content types
 
-HashiCorp product documentation uses the following content types:
+The content we create and host on developer.hashicorp.com follows the principles of the [Diátaxis method for structured documentation](https://diataxis.fr/), which use the following basic content types:
 
-- **Usage (how-to guide)**: Usage pages describe a single procedure or a
-  tightly-coupled set of procedures that enable you to perform a unit of work.
-  Unlike tutorials, usage pages do not provide code or instructions for creating
-  an operating environment.
+- Explanation
+- Usage
+- Reference
+- Tutorials
 
-  Example:
+Because tutorials are hosted in a separate repository, this README focuses on the first three content types.
 
-  - [HCP Consul secure cluster access with IP allowlist](https://developer.hashicorp.com/hcp/docs/consul/secure/ip-allowlist)
+Within the "Explanation" category, we use three different types of pages, each of which has a distinct purpose.
 
-- **Concept**: Concept pages describe constructs and abstractions associated
-  with the product. For the purpose of segmenting information into types,
-  internals, subjects, and features are synonymous with concepts.
-
-  Example:
-
-  - [HCP Consul cluster management](https://developer.hashicorp.com/hcp/docs/consul/concepts/cluster-management)
-
-- **Overview**:  Overview pages are section landing pages that funnel users to
-  more detailed usage, reference, or concept pages. Overviews bridge the gap
-  between usage and concept pages by describing workflows and introducing
-  vocabulary that help users understand a topic area more broadly.
-
-  Example:
-
-  - [HCP Consul Dedicated cluster overview](https://developer.hashicorp.com/hcp/docs/consul/dedicated)
-
-- **Reference**: Reference pages are configuration, CLI, and API content. 
+- **Index** pages provide lists of links to supporting documentation on a subject. [Example: Deploy Consul](https://developer.hashicorp.com/consul/docs/deploy)
+- **Overview** pages provide an introduction to a subject and serve as a central information point. [Example: Expand service network east/west](https://developer.hashicorp.com/consul/docs/east-west)
+- **Concept** pages provide discursive explanations of Consul's underlying systems and their operations. [Example: Consul catalog](https://developer.hashicorp.com/consul/docs/concept/catalog)
 
 HashiCorp employees may refer to the [internal Technical Writing
 wiki](https://hashicorp.atlassian.net/wiki/x/eYBVnw) for detailed explanations.
