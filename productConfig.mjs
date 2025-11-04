@@ -150,7 +150,7 @@ export const PRODUCT_CONFIG = {
 		 * Or this may be a non-issue, I'm not actually sure.
 		 */
 		assetDir: 'public',
-		contentDir: 'docs',
+		contentDir: 'content',
 		dataDir: 'data',
 		productSlug: 'packer',
 		semverCoerce: semver.coerce,
