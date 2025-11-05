@@ -59,6 +59,7 @@ export async function gatherVersionMetadata(contentDir) {
 				releaseStage: 'stable',
 				isLatest: true,
 			})
+			continue
 		}
 
 		/**
