@@ -161,7 +161,6 @@ export async function gatherVersionMetadata(contentDir) {
 			})
 		}
 	}
-	// Return the version metadata
 	return versionMetadata
 }
 
