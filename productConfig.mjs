@@ -81,23 +81,23 @@ export const PRODUCT_CONFIG = {
 		versionedDocs: true,
 		websiteDir: 'website',
 	},
-	// consul: {
-	// 	/**
-	// 	 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
-	// 	 *
-	// 	 * Fails for v1.8.x (and likely earlier) with error:
-	// 	 * `consul/website/content: No such file or directory`
-	// 	 * This likely indicates that older versions of docs have a different
-	// 	 * directory structure that needs to be accounted for. Need to confirm.
-	// 	 */
-	// 	assetDir: 'public',
-	// 	contentDir: 'content',
-	// 	dataDir: 'data',
-	//  productSlug: 'consul',
-	// 	semverCoerce: semver.coerce,
-	// 	versionedDocs: true,
-	// 	websiteDir: 'website',
-	// },
+	consul: {
+		/**
+		 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
+		 *
+		 * Fails for v1.8.x (and likely earlier) with error:
+		 * `consul/website/content: No such file or directory`
+		 * This likely indicates that older versions of docs have a different
+		 * directory structure that needs to be accounted for. Need to confirm.
+		 */
+		assetDir: 'public/img',
+		contentDir: 'content',
+		dataDir: 'data',
+		productSlug: 'consul',
+		semverCoerce: semver.coerce,
+		versionedDocs: true,
+		websiteDir: 'website',
+	},
 	'hcp-docs': {
 		/**
 		 * ✅ Initial migration attempt: SEEMS TO WORK
