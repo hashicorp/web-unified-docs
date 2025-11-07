@@ -64,39 +64,40 @@ import semver from 'semver'
  */
 
 export const PRODUCT_CONFIG = {
-	// boundary: {
-	// 	/**
-	// 	 * ✅ Initial migration attempt: SEEMS TO WORK
-	// 	 *
-	// 	 * Boundary content seems to be successfully copied into `content` and
-	// 	 * `public/assets` as expected. Further investigation and testing is
-	// 	 * of course needed, we've only confirmed that the migration script works.
-	// 	 */
-	// 	assetDir: 'public',
-	// 	contentDir: 'content',
-	// 	dataDir: 'data',
-	//  productSlug: 'boundary',
-	// 	semverCoerce: semver.coerce,
-	//  versionedDocs: true,
-	// 	websiteDir: 'website',
-	// },
-	// consul: {
-	// 	/**
-	// 	 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
-	// 	 *
-	// 	 * Fails for v1.8.x (and likely earlier) with error:
-	// 	 * `consul/website/content: No such file or directory`
-	// 	 * This likely indicates that older versions of docs have a different
-	// 	 * directory structure that needs to be accounted for. Need to confirm.
-	// 	 */
-	// 	assetDir: 'public',
-	// 	contentDir: 'content',
-	// 	dataDir: 'data',
-	//  productSlug: 'consul',
-	// 	semverCoerce: semver.coerce,
-	// 	versionedDocs: true,
-	// 	websiteDir: 'website',
-	// },
+	boundary: {
+		/**
+		 * ✅ Initial migration attempt: SEEMS TO WORK
+		 *
+		 * Boundary content seems to be successfully copied into `content` and
+		 * `public/assets` as expected. Further investigation and testing is
+		 * of course needed, we've only confirmed that the migration script works.
+		 */
+		assetDir: 'public/img',
+		basePaths: ['api-docs', 'docs'],
+		contentDir: 'content',
+		dataDir: 'data',
+		productSlug: 'boundary',
+		semverCoerce: semver.coerce,
+		versionedDocs: true,
+		websiteDir: 'website',
+	},
+	consul: {
+		/**
+		 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
+		 *
+		 * Fails for v1.8.x (and likely earlier) with error:
+		 * `consul/website/content: No such file or directory`
+		 * This likely indicates that older versions of docs have a different
+		 * directory structure that needs to be accounted for. Need to confirm.
+		 */
+		assetDir: 'public/img',
+		contentDir: 'content',
+		dataDir: 'data',
+		productSlug: 'consul',
+		semverCoerce: semver.coerce,
+		versionedDocs: true,
+		websiteDir: 'website',
+	},
 	'hcp-docs': {
 		/**
 		 * ✅ Initial migration attempt: SEEMS TO WORK
