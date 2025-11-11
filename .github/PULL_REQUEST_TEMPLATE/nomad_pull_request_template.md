@@ -1,11 +1,8 @@
 <!--
-## Imporant Information
-
 **Merge branch**
 
-Make sure you create your PR against the correct **base** branch. Refer to
-GitHub's [Change the branch range and destination repository guide](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request#changing-the-branch-range-and-destination-repository) for how to
-select the base branch when creating a pull request.
+Make sure you create your PR against the correct **base** branch. For instructions, refer to
+GitHub's **Change the branch range and destination repository guide** (https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request).
 
 If your content is an update to:
 
@@ -35,7 +32,7 @@ in the v1.10.x, v1.9.x, and v1.8.x folders.
 <!-- Please describe why you're making this change and point out any important details the reviewers
 should be aware of. 
 
-Include the target release and prior versions if applicable.
+Include the target release as well as prior versions if applicable.
 -->
 
 ## Links
@@ -43,37 +40,40 @@ Include the target release and prior versions if applicable.
 Please include links to GitHub issues, documentation, or similar which is relevant to this PR. If
 this is a bug fix, please ensure related issues are linked so they will close when this PR is
 merged.
-Jira: [<jira-ticket-number>]
-GitHub Issue: <issue-link>
 
-The bot does publish a root-level link to the deploy preview, but it's nice to include a direct link to your content so the reviewers don't have to navigate to your pages.
+Jira: [<jira-ticket-number>]  // for example, Jira: [CE-1001] GH-Jira integration generates the link and updates the Jira ticket.
+GitHub Issue: <issue-link>
+Deploy previews:
+
+The bot does publish a root-level link to the deploy preview, 
+but it's nice to include a direct link to your content so the reviewers don't have to navigate to your pages.
 -->
 
 ## Contributor checklists
 
 Review urgency:
 
-- [ ] ASAP (bug fixes, broken content, imminent releases)
-- [ ] 3 days (small changes, easy reviews)
-- [ ] 1 week (default)
-- [ ] Best effort (very non-urgent)
+- [ ] ASAP: Bug fixes, broken content, imminent releases
+- [ ] 3 days: Small changes, easy reviews
+- [ ] 1 week: Default expectation
+- [ ] Best effort: No urgency
 
 Pull request:
 
-- [ ] Opened against the correct base branch
-- [ ] Verify that all status checks have passed
-- [ ] Verify that preview environment has successfully deployed
-- [ ] Add all required reviewers if they are not part of assigned groups
+- [ ] Verify that the PR is set to merge into the correct base branch
+- [ ] Verify that all status checks passed
+- [ ] Verify that the preview environment deployed successfully
+- [ ] Add additional reviewers if they are not part of assigned groups
 
 Content:
 
-- [ ] Add redirects for any moved or removed pages
-- [ ] Follow the [Education style guide](https://github.com/hashicorp/web-unified-docs/tree/main/docs/style-guide)
-- [ ] Look at the local or Vercel build to make sure the content renders correctly
+- [ ] I added redirects for any moved or removed pages
+- [ ] I followed the [Education style guide](https://github.com/hashicorp/web-unified-docs/tree/main/docs/style-guide)
+- [ ] I looked at the local or Vercel build to make sure the content rendered correctly
 
 ## Reviewer checklist
 
-- [ ] PR is against the correct base branch
-- [ ] Content is technically correct
-- [ ] Guides work and step order makes sense
-- [ ] Content follows the Education content and style guides
+- [ ] This PR is set to merge into the correct base branch.
+- [ ] The content does not contain technical inaccuracies.
+- [ ] The content follows the Education content and style guides.
+- [ ] I have verified and tested changes to instructions for end users.
