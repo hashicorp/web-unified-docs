@@ -340,7 +340,7 @@ description: "A thorough, yet succinct description of the page's contents"
 ---
 ```
 
-This repository's content guide includes detailed instructions on how to [create a new page and add it to the navigation sidebar](/content--guide/create-new-page).
+This repository's content guide includes detailed instructions on how to [create a new page and add it to the navigation sidebar](/content-guide/create-new-page).
 
 ### Markdown enhancements
 
