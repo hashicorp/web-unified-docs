@@ -346,11 +346,11 @@ This repository's content guide includes detailed instructions on how to [create
 
 In our documentation, you can use custom markdown enhancements to produce pages with tabs, named code blocks, badges, and alert boxes.
 
-Correct usage of these enhancements is documented in this repo's [content style guide](/style-guide). The custom components and additional configuration options are avaialble using the `dev-portal` repo.
+Correct usage of these enhancements is documented in this repo's [content style guide](/style-guide). 
 
 ## Navigation sidebars
 
-The structure of the sidebars are controlled by files in the `./content/<product>/<version>/<data>` directory. Each file contains a configuration for a section of product documentation. For example, `docs-nav-data.json` controls navigation in the product's `Documentation` section on developer.hashicorp.com.
+The structure of the sidebars is controlled by files in the `./content/<product>/<version>/<data>` directory. Each file contains a configuration for a section of product documentation. For example, `docs-nav-data.json` controls navigation in the product's `Documentation` section on developer.hashicorp.com.
 
 The `.json` file must list all files in a directory and follow the same nested hierarchy. For example, given a directory with the following structure:
 
@@ -456,7 +456,7 @@ From the `web-unified-docs` directory, run `make`. This command uses Docker
 
 ## Redirects
 
-Detailed guidance on redirects and formatting is available in the [content guide](/content-guide/redirects).
+Find detailed guidance on redirects and formatting in the [content guide](/content-guide/redirects).
 
 ## Troubleshooting
 
