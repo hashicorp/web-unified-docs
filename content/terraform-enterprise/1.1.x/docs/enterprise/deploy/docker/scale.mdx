@@ -1,0 +1,152 @@
+---
+page_title: Scale Terraform Enterprise instances hosted on Docker
+description: >-
+  Learn how to migrate Terraform Enterprise instances hosted on Docker to `active-active` mode so that you can scale your deployment.
+---
+
+# Scale Terraform Enterprise instances hosted on Docker
+
+This topic describes how to migrate Terraform Enterprise instances hosted on Docker to `active-active` mode so that you can scale your deployment.
+
+## Introduction
+
+When your organization requires increased reliability or performance from Terraform Enterprise that your current single application instance cannot provide, we recommend switching to `active-active` mode. In this mode, Terraform Enterprise connects to external systems that store and manage application and state data.
+
+Operating Terraform Enterprise in `active-active` mode improves application scalability, but it also increases operational complexity. Consider the following aspects of operating Terraform Enterprise in `active-active` mode:
+
+- Observability concerns when monitoring multiple instances
+- Custom automation required to manage the lifecycle of application nodes
+- [CLI-based commands](/terraform/enterprise/deploy/reference/cli) for administration
+
+-> **Note**: Contact your Customer Success Manager before attempting to follow this guide. They can walk you through the process and make it as seamless as possible.
+
+## Prerequisite
+
+The primary requirement for `active-active` is an auto-scaling group or equivalent with a single instance running Terraform Enterprise. This auto-scaling group (ASG) should be behind a load balancer, and you can expose it to the public Internet, depending on your requirements.
+
+As mentioned earlier, your Terraform Enterprise application installation should be completely automated to ensure the auto-scaling group can scale down to zero and back up to one without human intervention.
+
+-> **Note**: Operating Terraform Enterprise in `active-active` mode on VMware infrastructure requires configuring a load balancer to route traffic across Terraform Enterprise servers. This documentation does not cover that setup. While auto-scaling groups are unavailable via native vCenter options, you must still configure a fully automated deployment. You must also reduce the available servers to one for upgrades, maintenance, and support.
+
+Your Terraform Enterprise application must be configured to run in [`external` operational mode](/terraform/enterprise/deploy/reference/configuration#external) to connect to an external PostgreSQL database and object storage.
+
+## Step 1: Prepare to Externalize Redis
+
+Prior to reconfiguring Terraform Enterprise, Redis must be externalized. Redis is used for background work scheduling across multiple nodes in an `active-active` installation.
+
+### Prepare Network
+
+There are new access requirements involving ingress and egress:
+
+- **Port 6379** (or the port the external Redis uses) must be open between the nodes and the Redis service.
+- **Port 8201** must be open between the nodes to allow Vault to run in [High Availability](/vault/docs/internals/high-availability) mode.
+
+### Provision Redis
+
+Externalizing Redis allows multiple active application nodes. Terraform Enterprise installs as a standard product on VMware machines and validated to work with the native Redis services from AWS, Azure, and GCP. 
+The Redis deployment must satify the [requirements](/terraform/enterprise/deploy/configuration/storage/connect-redis#requirements) of Terraform Enterprise. 
+
+Refer to the [cloud-specific configuration guides for more details](#redis-server).
+
+## Step 2: Update your Configuration File Templates
+
+Before installing, you must change the templates for the configuration files mentioned in the [prerequisites](#prerequisite).
+
+### Update Application Settings
+
+Your existing Terraform Enterprise application settings are still necessary, but must be expanded. Refer to [Configuration Reference](/terraform/enterprise/deploy/reference/configuration) for a full list of configuration options.
+
+#### Enable `active-active` mode
+
+Update the Terraform Enterprise configuration to reflect the `active-active` operational mode:
+
+| **Key**              | **Required Value** | **Specific Format Required** |
+| -------------------- | ------------------ | ---------------------------- |
+| `TFE_OPERATIONAL_MODE` | `active-active`    | **Yes**, string.             |
+
+#### Configure External Redis
+
+You must also expand your Terraform Enterprise application settings to support an external Redis instance:
+
+| **Key**                               | **Required Value**                                                                          | **Specific Format Required** |
+| --------------------------------------| --------------------------------------------------------------------------------------------| ---------------------------- |
+| TFE_REDIS_HOST                        | Hostname in `host:port` format of an external Redis instance.                               | **Yes**, string.             |
+| TFE_REDIS_USE_AUTH\*                  | Set to `true`, if you are using a Redis service that requires a password.                   | **Yes**, boolean.            |
+| TFE_REDIS_USER\*                      | User used to authenticate to Redis.                                                         | **Yes**, string.             |
+| TFE_REDIS_PASSWORD\*                  | User used to authenticate to Redis.                                                         | **Yes**, string.             |
+| TFE_REDIS_USE_TLS\*                   | Set to `true` if you are using a Redis service that requires TLS.                           | **Yes**, boolean.            |
+| TFE_REDIS_USE_MTLS\*                  | To use mtls with Redis standalone or Sentinel?                                              | **Yes**, boolean.            |
+| TFE_REDIS_CLIENT_CERT_PATH\*          | Path to the client certificate file to be used for mTLS authentication with Redis server    | **Yes**, file path           |
+| TFE_REDIS_CA_CERT_PATH\*              | Path to the Certificate Authority file user to validate the certificate                     | **Yes**, file path           |
+| TFE_REDIS_CLIENT_KEY_PATH\*           | Path to the private key file corresponding to the client certificate                        | **Yes**, file path           |
+| TFE_REDIS_SIDEKIQ_USE_MTLS\*          | To use mtls with Redis Enterprise?                                                          | **Yes**, boolean.            |
+| TFE_REDIS_SIDEKIQ_CLIENT_CERT_PATH\*  | Path to the client certificate file to be used for mTLS authentication with Redis Enterprise| **Yes**, file path           |
+| TFE_REDIS_SIDEKIQ_CA_CERT_PATH\*      | Path to the Certificate Authority file user to validate the certificate                     | **Yes**, file path           |
+| TFE_REDIS_SIDEKIQ_CLIENT_KEY_PATH\*   | Path to the private key file corresponding to the client certificate                        | **Yes**, file path           |
+| TFE_REDIS_SENTINEL_ENABLED            | Set to `true` if you are using Redis Sentinel                                               | **Yes**, boolean.            |
+| TFE_REDIS_SENTINEL_HOSTS              | Hostnames in `host:port` format of Redis Sentinel hosts                                      | **Yes**, string.             |
+| TFE_REDIS_SENTINEL_LEADER_NAME        | Name of the Redis Sentinel leader                                                           | **Yes**, string.             |
+
+_\* Fields marked with an asterisk are only necessary if your particular external Redis instance requires them._
+
+To use in-transit encryption with GCP Memorystore for Redis, you must [download the CA certificate](https://cloud.google.com/memorystore/docs/redis/enabling-in-transit-encryption#downloading_the_certificate_authority) for your Redis instance and configure it within the `ca_certs` Terraform Enterprise application setting. Additionally, ensure to configure the `redis_port` and `redis_use_tls` settings correctly.
+
+#### Add Encryption Password
+
+Add the encryption password value to your configuration. The password must be identical between node instances for the `active-active` architecture to function:
+
+| **Key**      | **Description**                           | **Value can change between deployments?**                       | **Specific Format Required** |
+| ------------ | ----------------------------------------- | --------------------------------------------------------------- | ---------------------------- |
+| `TFE_ENCRYPTION_PASSWORD` | Used to encrypt sensitive data | **No.** Changing makes decrypting existing data impossible. | No                           |
+
+
+## Step 3: Connect to External Redis
+
+Once you are prepared to include the modified configuration options in your configuration files, you must connect a single node to your newly provisioned Redis service by rebuilding your node instance with the new settings.
+
+### Re-provision Terraform Enterprise Instance
+
+Terminate the existing instance by scaling down to zero. Once terminated, you can scale back up to one instance using your revised configuration.
+
+### Wait for Terraform Enterprise to Install
+
+It can take up to 15 minutes for the node to provision and install the Terraform Enterprise application. You can monitor the provisioning status by watching your auto scaling group in your cloud’s web console. To confirm the successful implementation of the Terraform Enterprise application you can use the `tfectl` CLI tool in the Terraform Enterprise container to monitor the application status:
+
+```bash
+tfectl app status
+```
+
+Refer to the [CLI reference](/terraform/enterprise/deploy/reference/cli) for more status and troubleshooting commands.
+
+### Validate Application
+
+With installation complete, it is time to validate the new Redis connection. Terraform Enterprise uses Redis both as a cache for API requests and a queue for long running jobs (e.g., Terraform runs). Test the queue for long running jobs by running real Terraform operations through the system.
+
+Once you are satisfied the application is running as expected, you can move on to step 4 to scale up to two nodes.
+
+## Step 4: Scale to Two Nodes
+
+You can now safely change the number of instances in your auto scaling group (or equivalent) to two.
+
+### Scale Down to Zero Nodes
+
+Scale down to zero nodes to fully disable the admin dashboard. Wait until the the existing instance is terminated.
+
+### Scale Up to Two Nodes
+
+Now that you have tested your external Redis connection change the min and max instance count of your Auto Scaling Group to two nodes.
+
+### Wait for Terraform Enterprise to Install
+
+You need to wait up to 15 minutes for the application to respond as healthy on both nodes. Monitor the status of the install [using the same methods](#validate-application).
+
+Note that you must check each node _independently_.
+
+### Validate Application
+
+Finally, confirm the application is functioning as expected when running multiple nodes by running Terraform plans and applying them through the system (and any other tests specific to your environment).
+
+Confirm the general functionality of the Terraform Enterprise user interface to validate [the tokens you added in Step 2 are set correctly](#step-2-update-your-configuration-file-templates). Browse the `Run` interface and your organization's private registry to confirm your application functions as expected.
+
+
+@include "replicated-and-fdo/admin/active-active-scaling-partial.mdx"

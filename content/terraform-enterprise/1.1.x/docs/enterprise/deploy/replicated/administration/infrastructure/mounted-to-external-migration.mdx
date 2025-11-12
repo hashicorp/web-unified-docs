@@ -1,0 +1,139 @@
+---
+page_title: Migrating from Mounted Disk Mode to External Services Mode - Infrastructure Administration - Terraform Enterprise
+description: >-
+  Migrating from Mounted Disk Mode to External Services Mode
+---
+
+# Migrating from `disk` to `external` mode
+
+You must choose an operational mode before you install and deploy Terraform Enterprise. To change the operational mode, you must backup the data of your Terraform Enterprise installation and restore it to a new one. If you currently use the [`disk` operational mode](/terraform/enterprise/deploy/reference/configuration#disk) and are migrating to a [non-Replicated runtime](/terraform/enterprise/deploy) other than `disk` mode on Docker, you must first migrate to `external` mode.
+
+## Create a Backup
+
+To create a backup, retrieve the backup API token from your Terraform Enterprise installation's settings page. Store this token in an environment variable.
+
+```shell-session
+$ export TOKEN=<BACKUP_API_TOKEN>
+```
+
+Next, create a file named `payload.json` that includes your Terraform Enterprise encryption password.
+
+```json 
+{ 
+    "password": "<TFE_ENCRYPTION_PASSWORD>" 
+}
+```
+
+Optionally, if you have a large number of objects in storage which is causing your backup to become very large, you can skip the backup of the object storage by adding the `skip_object_storage` field to the `payload.json` file.
+
+```json 
+{ 
+    "password": "<TFE_ENCRYPTION_PASSWORD>",
+    "skip_object_storage": true
+}
+```
+
+Finally, create the an encrypted backup file named `backup.blob` in the current directory. 
+
+```shell-session
+$ curl \
+  --header "Authorization: Bearer ${TOKEN}" \
+  --request POST \
+  --data @payload.json \
+  --output backup.blob \
+  https://<OLD_TFE_HOSTNAME>/_backup/api/v1/backup
+```
+
+## Prepare the New environment
+
+Create a new Terraform Enterprise installation. The new installation must meet the following requirements:
+
+1. The [`TFE_OPERATIONAL_MODE`](/terraform/enterprise/deploy/reference/configuration#tfe_operational_mode) configuration must be set to `external` or `active-active`.
+1. It is configured with the same encryption password as the instance that you created the backup from.
+1. The PostgreSQL database version matches the version your mounted disk installation uses.
+
+## Restore the Backup
+
+Retrieve the backup API token from your new Terraform Enterprise installation's settings page. Store this token in an environment variable.
+
+```shell-session
+$ export TOKEN=<BACKUP_API_TOKEN>
+```
+
+Use the same `payload.json` and `backup.blob` files to restore the backup.
+
+```shell-session
+$ curl \
+  --header "Authorization: Bearer ${TOKEN}" \
+  --request POST \
+  --form config=@payload.json \
+  --form snapshot=@backup.blob \
+  https://<NEW_TFE_HOSTNAME>/_backup/api/v1/restore
+  ```
+
+## Upload to Object Store (Optional)
+
+If you set `skip_object_storage` to true in your `payload.json` file, you must separately upload your local disk storage to your S3-compatible object store. 
+
+SSH into the old Terraform Enterprise instance and navigate to the configured mounted disk path. If you do not know the mounted disk path, you can retrieve it using the `replicatedctl` command.
+
+```shell-session
+$ replicatedctl app-config export | grep "disk_path" -A1
+```
+
+Navigate to the mounted disk path.
+
+```shell-session
+$ cd <disk_path>
+```
+
+Next, set your AWS credentials as environment variables. These credentials must have access to write to S3.
+
+```shell-session
+export AWS_ACCESS_KEY_ID=<your_access_key_id>
+export AWS_SECRET_ACCESS_KEY=<your_secret_access_key>
+export REGION=<your_region>
+export BUCKET=<your_bucket>
+```
+
+Next, upload the contents of each directory in the `<DISK_PATH>/aux/archivist` directory.
+
+~> NOTE: Some directories may not exist in your installation. Ensure that you upload all contents of the `archivist` directory to your object storage and that you prefix each directory with `archivist`.
+
+```shell-session
+aws s3 cp --recursive terraform s3://${BUCKET}/archivistterraform
+
+aws s3 cp --recursive sentinel s3://${BUCKET}/archivistsentinel 
+
+aws s3 cp --recursive plan-export s3://${BUCKET}/archivistplan-export 
+
+aws s3 cp --recursive policy-set-versions s3://${BUCKET}/archivistpolicy-set-versions
+```
+
+## Restart Terraform Enterprise
+
+SSH into the new Terraform Enterprise instance and stop the Terraform Enterprise application.
+
+```shell-session
+$ replicatedctl app stop
+```
+
+Watch the status of the Terraform Enterprise application until the `State` is `stopped`.
+
+```shell-session
+$ watch replicatedctl app status
+```
+
+Once it has stopped, start Terraform Enterprise application.
+
+```shell-session
+$ replicatedctl app start
+```
+
+Watch the status of the Terraform Enterprise application until the `State` is `started`.
+
+```shell-session
+$ watch replicatedctl app status
+```
+
+Once the Terraform Enterprise application is started, you have successfully migrated to external services.
