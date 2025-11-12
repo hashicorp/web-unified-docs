@@ -1,0 +1,514 @@
+---
+page_title: VPN access from GCP
+description: |-
+  This topic describes how to create a VPN between HCP and GCP using AWS as a transit network.
+---
+
+# VPN access from GCP
+
+<Highlight title="Example configuraiton">
+
+The concepts and steps described in this documentation show an example of how to
+connect services running in a cloud provider that does not support native
+connectivity with the HashiCorp Cloud Platform (HCP).
+
+The steps assume an advanced understanding on network topology and
+configuration.
+
+</Highlight>
+
+The HashiCorp Cloud Platform (HCP) supports native connectivity solutions with multiple public cloud providers.
+Through the supported cloud providers, customers can enable common hybrid cloud networking models to support
+workloads with providers not yet natively supported by HCP using a concept known as a transit network.
+
+A transit network acts as a bridge between multiple networks. Commonly, this may be used to connect different
+VLAN or VXLAN networks.
+
+When running workloads in multiple public cloud providers, you can extend this model by connecting
+the public cloud providers through their supported networking services.
+
+Compute resources running in the Google Cloud Platform can access private HCP
+resources such as an HCP
+Vault Dedicated cluster by creating a VPN between GCP and a transit AWS VPC, then connecting the HCP HashiCorp
+Virtual Network (HVN) with the transit AWS VPC and configuring the necessary routing to direct traffic
+between the networks.
+
+![diagram-hcp-aws-gcp-transit-network](/img/docs/diagram-hcp-aws-gcp-transit-network.png)
+
+By following this documentation, you will create a Virtual Private Network (VPN) between AWS and GCP, create a transit
+gateway connection between HCP and AWS, and configure routing between each of the three platforms. When
+the network connectivity is complete, you will deploy a private instance of HCP Vault Dedicated and access it
+from a GCP VM instance to verify connectivity.
+
+The majority of the instructions on this page is guided through user interface (UI)
+of AWS, GCP, and HCP.
+
+<Note>
+
+ It is recommended to follow this documentation using test accounts for GCP, AWS, and HCP.
+ Changes will be made that may impact connectivity of existing services. Be sure to validate the
+ configuration changes will be supported in a production environment.
+
+</Note>
+
+## Prerequisites
+
+- An AWS and GCP account with the default configurations
+- An [HCP Account](https://portal.cloud.hashicorp.com/sign-in?utm_source=learn)
+- Non-overlapping network CIDR ranges for HCP HVN, AWS and GCP VPCs.
+- An HCP user assigned the contributor role (or higher) to perform the following actions:
+  - Create an HVN, HCP Vault Dedicated cluster, transit gateway attachment
+  - Update the HVN route table
+- AWS permissions to perform the following actions:
+  - Create a transit gateway, customer gateway, site to site VPN, and shared shared resource access manager
+  - Accept a transit gateway connections
+- GCP permissions to perform the following actions
+  - Create a cloud router, VPN, and VM instance
+
+## Create GCP VPN
+
+You will start the configuration of the GCP side of the VPN tunnel. When you have enough information from the GCP
+side you will then configure the AWS side of the VPN before switching back to complete the setup in GCP.
+
+1. Open a web browser and log into your GCP account.
+
+1. From the Google Cloud console click the hamburger menu and navigate to **Networking >> Hybrid Connectivity >> VPN**.
+
+1. Click **Create VPN Connection**.
+
+1. Select **High-availability (HA) VPN** and click **Continue**.
+
+1. Enter the following information:
+
+   - **VPN Gateway name:** `gcp-vpn-to-aws`
+   - **Network:** Select **default**
+   - **Region:** Select **us-east1**
+   - **VPN tunnel inner IP stack type:** - Select **IPv4 (single stack)**
+
+1. Click **Create & Continue**.
+
+1. Make note of the provided IP addresses for the new VPN gateway.
+
+1. Remain logged into your GCP account. You will return to this page to continue with
+the configuration.
+
+## Create AWS VPN
+
+Now that you have the IP addresses for the GCP VPN gateway, you can begin the setup of the AWS side
+of the VPN.
+
+1. Open a new browser (or browser tab) and log into your AWS account.
+
+1. Verify you are in us-east-1 (**N.Virginia**).
+
+1. From the AWS console click the **Services** menu and navigate to **Networking & Content Delivery >> VPC**.
+
+1. Click **Customer gateways** in the left navigation menu.
+
+1. Click **Create customer gateway** and enter the following information:
+
+   - **Name tag - optional:** `cgw-in-gcp`
+   - **BGP ASN:** `65100`
+   - **IP address:** Enter the IP address for interface 0 from the GCP VPN gateway
+
+1. Click **Create customer gateway**.
+
+1. Click **Transit gateways** in the left navigation menu.
+
+1. Click **Create transit gateway** and enter the following information:
+
+   - **Name tag:** `tgw-for-hcp`
+   - **Amazon side Autonomous System Number (ASN):** `64512`
+
+1. Click **Create transit gateway**.
+
+1. Click **Site-to-Site VPN connections** in the left navigation menu.
+
+1. Click **Create VPN connection** and enter the following information:
+
+   - **Name tag - optional:** `aws-vpn-to-gcp`
+   - **Target gateway type:** Select **Transit gateway**
+   - **Transit gateway:** Select the **tgw-for-hcp**
+   - **Customer gateway:** Select **Existing**
+   - **Customer gateway ID:** Select **cgw-in-gcp**
+
+1. Click **Create VPN connection**.
+
+1. Wait for the **State** to change from **Pending** to **Available** then select **aws-vpn-to-gcp**.
+
+1. Click **Download configuration**.
+
+1. In the **Vendor** pulldown menu, select **Generic** and then click **Download**.
+
+   You will use the values provided in the configuration file to complete the VPN and routing setup on the GCP side.
+
+## Review the AWS configuration file
+
+To complete the VPN setup you need to get the relevant VPN configuration from the downloaded configuration file.
+
+1. Open the configuration file in your preferred text editor.
+
+1. Locate the **IPSec Tunnel #1** section.
+
+1. In section **#1: Internet Key Exchange Configuration**, make note of the **Pre-Shared Key**.
+
+   <CodeBlockConfig hideClipboard highlight="7">
+
+   ```plaintext
+   #1: Internet Key Exchange Configuration
+
+   ...snip...
+
+     - IKE version              : IKEv1
+     - Authentication Method    : Pre-Shared Key
+     - Pre-Shared Key           : CJ.ykyfeSOr61oWvjk2C5dbecuAW2wVs
+     - Authentication Algorithm : sha1
+     - Encryption Algorithm     : aes-128-cbc
+     - Lifetime                 : 28800 seconds
+     - Phase 1 Negotiation Mode : main
+     - Diffie-Hellman           : Group 2
+      ```
+
+   </CodeBlockConfig>
+
+1. Locate section **#3: Tunnel Interface Configuration**.
+
+1. Make note of the **Outside IP Addresses** and **Inside IP Addresses**.
+
+   <CodeBlockConfig hideClipboard highlight="5-11">
+
+   ```plaintext
+   #3: Tunnel Interface Configuration
+
+   ...snip...
+
+   Outside IP Addresses:
+     - Customer Gateway 		        : 35.242.15.66
+     - Virtual Private Gateway	        : 3.212.197.15
+
+   Inside IP Addresses
+     - Customer Gateway         	       : 169.254.221.74/30
+     - Virtual Private Gateway            : 169.254.221.73/30
+
+   Configure your tunnel to fragment at the optimal size:
+     - Tunnel interface MTU     : 1436 bytes
+
+   ```
+
+   </CodeBlockConfig>
+
+1. Remain logged into your AWS account. You will return to this page to continue with
+   the configuration.
+
+## Connect VPN between GCP and AWS
+
+1. Return to the GCP console.
+
+   <Note>
+
+   You should return to the [create GCP VPN](#create-gcp-vpn) section.
+
+   </Note>
+
+1. Under **Peer VPN gateway** select **On-prem or Non Google Cloud**.
+
+1. In the **Peer VPN gateway name** pulldown menu, select **Create new peer VPN gateway**.
+
+1. Enter the following information:
+
+   - **Name:** `cgw-in-aws`
+   - **Interfaces:** Select **one interface**
+   - **Interface 0 IP address:** Enter the outside IP address for the **Virtual Private Gateway**
+     from the downloaded AWS configuration file. For example, using the sample configuration above enter `3.212.197.15`.
+
+1. Click **Create**. You will be returned to the **Create a VPN** wizard.
+
+   **Create a single VPN tunnel** will be automatically selected for you.
+
+1. Under **Routing options** click the **Cloud Router** pulldown menu and select **Create new router**.
+
+1. Enter the following information:
+
+   - **Name**: `gcp-default-cr`
+   - **Google ASN:** `65100`
+
+   <Note>
+
+   **Advertise all subnets visible to the Cloud Router (Default)** is used in
+   this example.
+   For production configurations, you should follow your organizations network and security practices to
+   choose between advertising all routes, or creating custom routes.
+
+   </Note>
+
+1. Click **Create**. You will be returned to the **Create a VPN** wizard.
+
+1. In the **Name** text box enter `aws-vpn-tunnel-1`.
+
+1. In the **IKE pre-shared key** text box, enter the pre-shared key from the [AWS configuration file](#review-the-aws-configuration-file).
+   For example, using the sample configuration above enter `CJ.ykyfeSOr61oWvjk2C5dbecuAW2wVs`.
+
+1. Click **Create & continue**.
+
+1. Under **Configure BGP sessions**, click **Configure BGP session**.
+
+1. Enter the following information:
+
+   - **Name:** `aws-bgp-peer`
+   - **Peer ASN:** `64512`
+
+1. Click **Save and continue**. You will be returned to the **Create a VPN** wizard.
+
+1. Click **Save BGP configuration**.
+
+1. Under **Summary and reminder** click **OK**.
+
+1. From the **Cloud VPN Tunnels** tab, click **aws-vpn-tunnel-1**.
+
+1. Click **Edit BGP session**.
+
+1. Change the **Cloud Router BGP IPv4 address** to inside IP address for the
+   **Customer Gateway** from the downloaded [AWS configuration
+   file](#review-the-aws-configuration-file).
+   For example, using the sample configuration above enter the Inside IP Address for the Customer Gateway, `169.254.221.74`.
+
+1. Change the **BGP peer Router BGP IPv4 address** to inside IP address for the
+   **Virtual Private Gateway** from the downloaded [AWS configuration
+   file](#review-the-aws-configuration-file).
+   For example, using the sample configuration above enter the Inside IP Address for the Virtual Private Gateway, `169.254.221.73`.
+
+1. Click **Save and continue**.
+
+1. The **BPG session** status should change to **BGP established**.
+
+   <Tip>
+
+   If the status does not change, refresh the browser page (or browser tab).
+
+   </Tip>
+
+## Create and connect HCP resources
+
+Now that you have established a connection from your GCP account to the AWS account being used as a transit network, you will
+deploy and configure a HashiCorp Virtual Network (HVN) and connect the HVN to the AWS transit gateway.
+
+### Create HVN and transit gateway attachment
+
+<Note>
+
+Each HashiCorp Virtual Network (HVN) is created in a project based on a user selected region.
+The HVN hosts other HCP resources such as HCP Vault Dedicated clusters.
+
+</Note>
+
+1. Open a new browser (or browser tab) and log into your HCP account.
+
+1. Click **HashiCorp Virtual Networks** in the left navigation menu.
+
+1. Click **Create network** and enter the following information:
+
+   - **Network name:** `hvn`
+   - **Provider:** Select **Amazon Web Services**
+   - **Region selection:** Select **N. Virginia (us-east-1)**.
+
+1. Click **Create network**.
+
+   Wait for the HVN to be available with a status of **Stable** before proceeding.
+
+1. Click **Transit gateway attachments** in the left navigation menu.
+
+1. Click **Create attachment** and click the **Web console** tab.
+
+1. Enter `tgw-attach-hcp` in the **Attachment ID** field.
+
+1. Copy the **AWS Account ID**.
+
+1. Remain logged into your HCP account. You will return to this page to continue with
+the configuration.
+
+### Create AWS resource share
+
+1. Return to the AWS console and navigate to **Resource Access Manager**.
+
+1. Click **Create a resource share**.
+
+1. In the **Name** field enter `hcp-tgw-ram`.
+
+1. Under **Resources - optional** select **Transit Gateways**.
+
+1. Click the checkbox for **tgw-for-hcp**.
+
+1. Click **Next** and then click **Next** again.
+
+1. Under **Principals** paste the AWS account ID you copied from [the HCP Portal](https://portal.cloud.hashicorp.com/) and click **Add**.
+
+1. Click **Next**.
+
+1. Click **Create resource share**.
+
+1. Copy the **ARN** for the resource share.
+
+1. Navigate back to the VPC console and click **Transit gateways** in the left navigation menu.
+
+1. Copy the transit gateway ID for **tgw-for-hcp**.
+
+### Complete transit gateway attachment
+
+1. Return to [the HCP Portal](https://portal.cloud.hashicorp.com/).
+
+1. Enter the following information:
+
+   - **Transit gateway ID:** ID for the transit gateway created previously in this tutorial.
+   - **Resource share ARN:** ARN for the resource share created previously in this tutorial.
+
+1. Click **Create attachment**.
+
+1. Return to the AWS VPC console and click **Transit gateway attachments** in the left navigation menu.
+
+1. Click the checkbox for the attachment with a resource type of **VPC** (it should be in the **Pending Acceptance** state).
+
+1. Click the **Actions** pulldown menu and select **Accept transit gateway attachment**.
+
+1. Click **Accept**.
+
+1. Wait for the state to change from **Pending** to **Available**.
+
+### Update HCP route table
+
+1. Switch back to [the HCP Portal](https://portal.cloud.hashicorp.com/).
+
+1. Click **Route table** in the left navigation menu.
+
+1. Click **Create route** and enter the following information:
+
+   - **Route ID:** `route-aws-vpc`
+   - **Destinations:** Enter the subnet for your AWS VPC (You can retrieve this by clicking **Your VPCs** in the AWS console)
+   - **Target:** Select **tgw-attach-hcp**
+
+1. Click **Create route**.
+
+1. Click **Create route** again and enter the following information:
+
+   - **Route ID:** `route-gcp-vpc`
+   - **Destinations:** Enter the subnet for your GCP VPC (You can retrieve this by clicking **VPC network >> VPC networks** in the GCP console)
+   - **Target:** Select **tgw-attach-hcp**
+
+1. Click **Create route**.
+
+   <Note>
+
+   For simplicity you created routes for the entire VPC in AWS and GCP.
+   For production configurations, you should follow your organizations network and security practices to
+   choose between creating routes for the entire VPC, or specific subnets.
+
+   </Note>
+
+## Validate networking configuration
+
+You have created all the necessary resources in your AWS, GCP, and HCP accounts. To validate the configuration, you will
+now deploy a private Vault Dedicated cluster and create a VM instance in GCP to test access across the AWS transit VPC.
+
+1. While still logged into [the HCP Portal](https://portal.cloud.hashicorp.com/), click **Back to Networks** and click **Vault** in the left navigation menu.
+
+1. Under **Start from scratch**, click **Create cluster**.
+
+1. Keep all defaults and verify the HVN you connected to the AWS transit gateway is selected.
+
+1. Click the slider for **Allow public connections from outside your selected network** to disable public access.
+
+1. Click **Create cluster**.
+
+1. While the cluster is being created, switch back to the GCP console.
+
+1. Click the hamburger menu and navigate to **Compute Engine >> VM instances**.
+
+1. Click **Create instance** and enter the following information:
+
+   - **Name:** `test-hcp`
+   - **Region:** Select **us-east1**
+
+1. Keep all other defaults and click **Create**.
+
+1. When the instance becomes available, click **SSH**. A new window will open and log you into the VM.
+
+1. From [the HCP Portal](https://portal.cloud.hashicorp.com/), click **Generate token** then click **Copy** to copy the token.
+
+1. In the SSH session for your GCP VM instance, create an environment variable named `VAULT_TOKEN`.
+
+   ```shell-session
+   $ export VAULT_TOKEN=<copied-token-value>
+   ```
+
+1. From [the HCP Portal](https://portal.cloud.hashicorp.com/), under **Cluster URLs** click **Private** to copy the
+   private Vault Dedicated address.
+
+1. In the SSH session for your GCP VM instance, create an environment variable named `VAULT_ADDR`.
+
+   ```shell-session
+   $ export VAULT_ADDR=<copied-address-value>
+   ```
+
+1. Create an environment variable named `VAULT_NAMESPACE` with a value of `admin`.
+
+   ```shell-session
+   $ export VAULT_NAMESPACE=admin
+   ```
+
+1. Validate the connection to the private Vault Dedicated cluster by looking up your token information using cURL.
+
+   ```shell-session
+   $ curl \
+    --header "X-Vault-Token: $VAULT_TOKEN" \
+    --header "X-Vault-Namespace: $VAULT_NAMESPACE" \
+    --request LIST \
+    $VAULT_ADDR/v1/auth/token/accessors
+    ```
+
+1. The lookup will return information about the provided token.
+
+   **Example output:**
+
+   <CodeBlockConfig hideClipboard>
+
+   ```shell-session
+   $ curl \
+    --header "X-Vault-Token: $VAULT_TOKEN" \
+    --header "X-Vault-Namespace: $VAULT_NAMESPACE" \
+    --request LIST \
+    $VAULT_ADDR/v1/auth/token/accessors
+
+   {"request_id":"36116197-e3f1-17c0-1b63-b7b0cb1c7f9a","lease_id":"","renewable":false,"lease_duration":0,"data":{"keys":["7G9uBnJW08zEwjnQBs73b0q8.BZD6Q"]},"wrap_info":null,"warnings":null,"auth":null}
+   ```
+
+   </CodeBlockConfig>
+
+   You have successfully made a request to a private HCP Vault Dedicated cluster from your GCP VM instance through a transit AWS VPC.
+
+## Cleanup
+
+To avoid unnecessary charges, you should clean up any resources you created during this tutorial.
+
+### GCP
+
+- Delete the test-hcp VM instance
+- Delete the Cloud VPN tunnel
+- Delete the Cloud VPN gateway
+- Delete the peer VPN gateway
+- Delete the cloud router
+
+### AWS
+
+- Delete the site-to-site VPN
+- Delete the transit gateway attachments
+- Delete the transit gateway
+- Delete the customer gateway
+
+### HCP
+
+- Delete the Vault Dedicated cluster
+- Delete the HVN
+
+## Help and reference
+
+- [Build HA VPN connections between Google Cloud and AWS](https://cloud.google.com/architecture/build-ha-vpn-connections-google-cloud-aws)
+- [Connect an Amazon Transit Gateway to your HashiCorp Virtual Network](/hcp/docs/hcp/network/hvn-aws/tgw-attach)
