@@ -6,6 +6,17 @@ This page describes the process for publishing Terraform Enterprise documentatio
 
 The team releases a milestone or major version once a quarter and releases patches as they become available.
 
+## Artifacts for next major release
+
+After the release of a major verson, the release engineer runs a GitHub [workflow]((https://github.com/hashicorp/web-unified-docs-internal/actions/workflows/copy-cloud-docs-for-tfe.yml)) in the `web-unified-docs-internal` repository that creates the following artifacts:
+
+- A branch named `tfe-release/<milestone>.<major>.x` for assembling the release notes and documentation updates. This is the branch that you merge into `main` to publish the docs.
+- A branch named `HCPTF-diff/<milestone>.<major>.x` that contains a diff of all of the new content from HCP TF slated for the next Terraform Enterprise release. This branch will be updated with latest changes before next release.
+- A PR named `HCP TF changes for TFE release <milestone>.<major>.x` for merging content updates into the release notes into the assembly branch. Review this PR and merge into the assembly branch.
+- A PR named `TFE Release <milestone>.<major>.x` for merging the release notes into the assembly branch.
+
+Refer to the [TFE Release 1.0.0](https://github.com/hashicorp/web-unified-docs-internal/pull/299) to see examples of the app deadline artifacts.
+
 ## Get the release date
 
 Check the `#proj-tfe-releases` channel for a message from the team manager about important dates. For example:
@@ -20,14 +31,7 @@ More details -
 
 Ask for the dates in the channel if it has been more than six weeks since the last milestone or major version and the manager hasn't posted the dates yet. You should also verify that the dates haven't changed closer to the standing date.
 
-**Application Code Deadline**: Also called **app deadline**, this is the Terraform Enterprise code freeze and occurs 1.5 to 2 weeks before the release date. App deadline is also when the release engineer runs a GitHub workflow in the `web-unified-docs-internal` repository that creates the following artifacts:
-
-- A branch named `tfe-release/<milestone>.<major>.x` for assembling the release notes and documentation updates. This is the branch that you merge into `main` to publish the docs.
-- A branch named `HCPTF-diff/<milestone>.<major>.x` that contains a diff of all of the new content from HCP TF slated for the next Terraform Enterprise release.
-- A PR named `HCP TF changes for TFE release <milestone>.<major>.x` for merging content updates into the release notes into the assembly branch. Review this PR and merge into the assembly branch.
-- A PR named `TFE Release <milestone>.<major>.x` for merging the release notes into the assembly branch.
-
-Refer to the [TFE Release 1.0.0](https://github.com/hashicorp/web-unified-docs-internal/pull/299) to see examples of the app deadline artifacts.
+**Application Code Deadline**: Also called **app deadline**, this is the Terraform Enterprise code freeze and occurs 1.5 to 2 weeks before the release date. App deadline is also when the release engineer runs a GitHub [workflow]((https://github.com/hashicorp/web-unified-docs-internal/actions/workflows/create-tfe-release-notes.yml)) in the `web-unified-docs-internal` repository. The workkflow creates the release notes and updates the `HCPTF-diff/<milestone>.<major>.x` branch with latest changes from terraform common docs.
 
 **Backport Deadline**: This is an engineering deadline and isn't actionable for IPG team members.
 
@@ -62,7 +66,19 @@ This section contains supplementary information for publishing Terraform Enterpr
 
 ### Manually create docs artifacts for the release
 
-The [Create TFE Release Notes](https://github.com/hashicorp/web-unified-docs-internal/actions/workflows/create-tfe-release-notes.yml) action creates the release notes PR and triggers the [Copy Cloud Docs For TFE](https://github.com/hashicorp/web-unified-docs-internal/actions/workflows/copy-cloud-docs-for-tfe.yml) action. These actions create the branches and PRs necessary for publishing a new version of the Terraform Enterprise documenation. Complete the following steps to manually run the actions:
+#### Create the artifacts for next release
+
+The [Copy Cloud Docs For TFE](https://github.com/hashicorp/web-unified-docs-internal/actions/workflows/copy-cloud-docs-for-tfe.yml) action creates the branches and PRs necessary for publishing a new version of the Terraform Enterprise documenation. Complete the following steps to manually run the actions:
+
+1. Log into GitHub and navigate to the `web-unified-docs-internal` repository.
+1. Click **Actions**, then choose **Copy Cloud Docs For TFE** from the **Actions** sidebar.
+1. Open the **Run workflow** dropdown and choose the branch to use to run the workflow. This is `main` in almost all cases.
+1. Specify the following values:
+   - Enter the upcoming version of the TFE release.
+
+#### Create the release notes PR
+
+The [Create TFE Release Notes](https://github.com/hashicorp/web-unified-docs-internal/actions/workflows/create-tfe-release-notes.yml) action creates the release notes PR. Complete the following steps to manually run the actions:
 
 1. Log into GitHub and navigate to the `web-unified-docs-internal` repository.
 1. Click **Actions**, then choose **Create TFE Release Notes** from the **Actions** sidebar.
