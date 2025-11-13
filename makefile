@@ -4,7 +4,7 @@ all: unified-docs
 .PHONY: unified-docs
 unified-docs:
 	@echo "Starting up the unified-docs Docker container"
-	docker compose up unified-docs-api
+	docker compose --profile unified-docs up
 
 .PHONY: clean
 clean:
