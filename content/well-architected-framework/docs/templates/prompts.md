@@ -1,4 +1,7 @@
 Before proceeding, add style-guide directory to chat context.
+Note: This is a WIP. Any suggestions are welcome. 
+
+## Content prompts
 
 1. Are there any spelling errors in this document?
 
@@ -18,3 +21,13 @@ Before proceeding, add style-guide directory to chat context.
    inconsistent formatting for links, lists, etc?
 
 1. Are there any sentances that start with `this`?
+
+
+## SEO prompts
+
+1. Check this document for how well it will do in SEO. Give suggestions for, title, description, first paragraph, and H2. Anything else that's major.
+Rules: 
+- I can’t put a tool in the main title (such as Terraform or AWS). 
+- Can’t use passive voice
+- Use sentence case
+- Give me three options for the title.
