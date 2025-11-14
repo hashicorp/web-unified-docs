@@ -29,12 +29,9 @@ export function getUrlFromFilePath(
 	}
 
 	// Check for versionless products and use v0.0.x as the version key
-	let version
-	if (productConfig[repoDir].versionedDocs === false) {
-		version = 'v0.0.x'
-	} else {
-		version = getVersionFromFilePath(filePath)
-	}
+	const version = productConfig[repoDir].versionedDocs
+		? getVersionFromFilePath(filePath)
+		: 'v0.0.x'
 
 	// Check if the version exists in allDocsPaths
 	if (!allDocsPaths[repoDir]) {
