@@ -173,3 +173,31 @@ A couple more important notes:
 - The `title` property on each node in the `nav-data` tree is the human-readable name in the navigation.
 - The `path` property on each leaf node in the `nav-data` tree is the URL path where the `.mdx` document will be rendered, and the
 - Note that "index" files must be explicitly added. These will be automatically resolved, so the `path` value should be, as above, `directory` rather than `directory/index`. A common convention is to set the `title` of an "index" node to be `"Overview"`.
+
+### Custom or external links
+
+Sometimes you may have a need to include a link that is not directly to a file within the docs hierarchy. This can also be supported using a different pattern. For example:
+
+```json
+[
+  {
+    "name": "Directory",
+    "routes": [
+      {
+        "title": "File",
+        "path": "directory/file"
+      },
+      {
+        "title": "Another File",
+        "path": "directory/another-file"
+      },
+      {
+        "title": "Tao of HashiCorp",
+        "href": "https://www.hashicorp.com/tao-of-hashicorp"
+      }
+    ]
+  }
+]
+```
+
+If the link provided in the `href` property is external, it will display a small icon indicating this. If it's internal, it will appear the same way as any other direct file link.

@@ -19,7 +19,6 @@ For more specific guidance about contributing to an individual product's docs, r
 - [Edit markdown content](#edit-markdown-content)
    - [Markdown enhancements](#markdown-enhancements)
 - [Edit navigation sidebars](#edit-navigation-sidebars)
-  - [Custom or external links](#custom-or-external-links)
 - [Run the site locally](#run-the-site-locally)
 - [Redirects](#redirects)
 - [Troubleshooting](#troubleshooting)
@@ -405,40 +404,12 @@ The navigation data should be formatted so that it aligns exactly.
 
 Within this data structure, ordering is flexible, but hierarchy is not. The structure of the sidebar must correspond to the structure of the content directory. So while you could put `file` and `another-file` in any order in the sidebar, or even leave one or both of them out, you could not decide to un-nest the `nested-directory` object without also un-nesting it in the filesystem.
 
-In addition: 
+In addition:
 
 - The `title` property on each node in the `nav-data` tree is the human-readable name in the navigation.
 - The `path` property on each leaf node in the `nav-data` tree is the URL path where the `.mdx` document will be rendered.
 - An `index.mdx` file is not required for each subdirectory.
 - If you use `index.mdx` files: you must add the file to the navigation `.json`, but the `.json` file can resolve it from the name of the directory. In the example, notice that it uses the `directory` path rather than `directory/index`. A common convention is to set the `title` of an index node to be `"Overview"`.
-
-### Custom or external links
-
-Sometimes you may have a need to include a link that is not directly to a file within the docs hierarchy. This can also be supported using a different pattern. For example:
-
-```json
-[
-  {
-    "name": "Directory",
-    "routes": [
-      {
-        "title": "File",
-        "path": "directory/file"
-      },
-      {
-        "title": "Another File",
-        "path": "directory/another-file"
-      },
-      {
-        "title": "Tao of HashiCorp",
-        "href": "https://www.hashicorp.com/tao-of-hashicorp"
-      }
-    ]
-  }
-]
-```
-
-If the link provided in the `href` property is external, it will display a small icon indicating this. If it's internal, it will appear the same way as any other direct file link.
 
 ## Preview the site locally
 
