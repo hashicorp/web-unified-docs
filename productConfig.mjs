@@ -115,23 +115,24 @@ export const PRODUCT_CONFIG = {
 		versionedDocs: false,
 		websiteDir: '.',
 	},
-	// nomad: {
-	// 	/**
-	// 	 *  🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
-	// 	 *
-	// 	 * Fails for v0.12.x (and likely earlier) with error:
-	// 	 * `nomad/website/content: No such file or directory`
-	// 	 * This likely indicates that older versions of docs have a different
-	// 	 * directory structure that needs to be accounted for. Need to confirm.
-	// 	 */
-	// 	assetDir: 'public',
-	// 	contentDir: 'content',
-	// 	dataDir: 'data',
-	//  productSlug: 'nomad',
-	// 	semverCoerce: semver.coerce,
-	//  versionedDocs: true,
-	// 	websiteDir: 'website',
-	// },
+	nomad: {
+		/**
+		 *  🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
+		 *
+		 * Fails for v0.12.x (and likely earlier) with error:
+		 * `nomad/website/content: No such file or directory`
+		 * This likely indicates that older versions of docs have a different
+		 * directory structure that needs to be accounted for. Need to confirm.
+		 */
+		assetDir: 'public/img',
+		basePaths: ['api-docs', 'docs', 'commands', 'plugins', 'tools'],
+		contentDir: 'content',
+		dataDir: 'data',
+		productSlug: 'nomad',
+		semverCoerce: semver.coerce,
+		versionedDocs: true,
+		websiteDir: 'website',
+	},
 	packer: {
 		/**
 		 *  🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
