@@ -9,21 +9,23 @@
 - PR labeler  
   - [Code](https://github.com/hashicorp/web-unified-docs/blob/main/.github/workflows/label-content-prs.yml) by Sarah Chavis  
   - Automatic labeling when PR created  
-- Issue labeler  
-  - Not yet merged; code done in fork by Aimee but need more input from each product on where that product’s community users should open docs issues.  
+- Issue form and labeler  
+  - [Code](https://github.com/hashicorp/web-unified-docs/blob/main/.github/workflows/label-issues.yml) by Aimee Ukasick. Lengthly explanation in the [merged PR description](https://github.com/hashicorp/web-unified-docs/pull/1028). 
 - Create release PR  
   - [Code](https://github.com/hashicorp/web-unified-docs/blob/main/.github/workflows/create-release-pr.yml) by Sarah Chavis  
-  - From Sarah: The action creates a PR to merge the release branch into main, but having a robot create the PR means you can (hopefully) create and approve the publication PR on your own the same way we used to approve backports in the product repos. It's a strictly manual workflow, so you need to open it on the actions page to run it.  
+  - From Sarah: The action creates a PR to merge the release branch into main, but having a robot create the PR means you can (hopefully) create and approve the publication PR on your own the same way we used to approve backports in the product repos. It's a strictly manual workflow, so you need to open it on the actions page to run it.
+- Preview to GA toggle (folder rename) action by Sarah Chavis
+  - [Code](https://github.com/hashicorp/web-unified-docs/actions/workflows/create-ga-pr.yml)
+- Sync GA to RC branch script by Sarah Chavis
+  - [Script folder](https://github.com/hashicorp/web-unified-docs/tree/main/scripts/sync-ga-to-rc)
+  - Lengthly explanation in the folder README
 - Broken link monitoring system  
   - [BROKEN_LINK_MONITORING.md](./BROKEN_LINK_MONITORING.md)  
 - How to use redirects  
   - [redirects.md](./redirects.md)  
-- Sarah is working on a workflow to add a specific informational comment to Vault PRs. We can expand this to other products as needed.  
-- Sarah is working on workflows to merge PR content to upcoming release branches when PR merges.  
-- Sarah is working on a workflow to compare current release folder with next major release folder so we don’t have to do a manual compare  
 - PR templates  
-  - Jonathan Frappier has a PR for this.  
-  - Expand PR templates: Put publication target in PR template for individual product.
+  - Jonathan Frappier created the PR template links.  
+  - You may create product-based PR templates. Refer to the [PULL_REQUEST_TEMPLATE folder](https://github.com/hashicorp/web-unified-docs/tree/main/.github/PULL_REQUEST_TEMPLATE) for examples.
 
 ## Repo structure
 
