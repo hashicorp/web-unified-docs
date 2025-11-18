@@ -50,8 +50,7 @@
 
 ## Tech writer workflows
 
-This is generic, based on Nomad. @TODO If other products have different
-workflows, we can link to them from this section.
+These are generic workflows for major and minor releases. 
 
 ### Upcoming major release
 
