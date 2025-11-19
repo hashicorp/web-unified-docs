@@ -1,0 +1,172 @@
+---
+page_title: identity_token block reference for Terraform Stack deployments
+description: Use the `identity_token` block to define JSON Web Tokens (JWT) that Terraform generates for OIDC authentication with cloud providers.
+---
+
+# `identity_token` block reference
+
+Use the `identity_token` block to define JSON Web Tokens (JWT) that Terraform generates for OIDC authentication with cloud providers and other services.
+
+## Background
+
+The `identity_token` block defines a JSON Web Token (JWT) that Terraform generates for a given deployment. You can reference these tokens in your deployment's `inputs` and pass them directly to provider configurations for OpenID Connect (OIDC) authentication.
+
+Identity tokens provide a secure way to authenticate your Stack deployments with cloud providers without storing long-lived credentials. For more information on authenticating a Stack using OIDC, refer to [Authenticate a Stack](/terraform/language/stacks/deploy/authenticate).
+
+## Configuration model
+
+The `identity_token` block supports the following arguments:
+
+- [`identity_token "<LABEL>"`](#identity_token) &nbsp; block
+  - [`audience`](#audience) &nbsp; set of strings
+
+## Complete configuration
+
+All available arguments are defined in the following `identity_token` block:
+
+```hcl
+identity_token "<LABEL>" {
+  audience = ["<AUDIENCE_VALUE>"]
+}
+```
+
+## Specification
+
+An `identity_token` block supports the following configuration.
+
+### `identity_token "<LABEL>"`
+
+The label after the `identity_token` keyword is a name for the identity token, which must be unique among all identity tokens in the same deployment configuration file. The name can be any valid [identifier](/terraform/language/syntax/configuration#identifiers).
+
+The `identity_token` block supports the following argument:
+
+| Argument | Description | Type | Required? |
+| --- | --- | --- | --- |
+| `audience` | The audience that this token is intended for. | Set of strings | Required |
+
+### `audience`
+
+The `audience` argument specifies the intended audience for the identity token. The audience represents the resource or service that uses this token after Terraform generates it.
+
+```hcl
+identity_token "<LABEL>" {
+  audience = ["<AUDIENCE_VALUE>"]
+}
+```
+
+The `AUDIENCE_VALUE` must match the audience that your provider or target service expects. For example, AWS workload identity typically expects `"aws.workload.identity"` as the audience value. For more information and examples, refer to [Authenticate a Stack](/terraform/language/stacks/deploy/authenticate).
+
+## Token attributes
+
+Once defined, you can reference an identity token's attributes in your deployment configuration:
+
+| Attribute | Description | Type |
+| --- | --- | --- |
+| `jwt` | The generated JSON Web Token that you can use for authentication. | String |
+
+## Identity token claim metadata
+
+Workload identity tokens contain other useful metadata in their payloads, known as claims. Once a cloud platform verifies a token using HCP Terraform’s public key, it can look at the identity token's claims to match it to the correct permissions or reject it.
+
+You do not need to understand the full token specification or what every claim means, but you can use the claims to adjust your trust relationship.
+
+Workload identity tokens commonly reference the following claims.
+
+| Claim | Explanation |
+| :---- | :---- |
+| `jti` (JWT ID) | A unique identifier for each token, which is a UUID. |
+| `iss` (issuer) | Full URL of the HCP Terraform  instance that signed the token. For example, “https://app.terraform.io”. |
+| `iat` (issued at) | Unix timestamp when the token was issued. May be required by certain relying parties. |
+| `nbf` (not before) | Unix Timestamp when the token can start being used. Should be the same as `iat` for your purposes and may be required by certain relying parties. |
+| `aud` (audience) | Intended audience for the token. For example, “api://AzureADTokenExchange” for Azure. |
+| `exp` (expiration)  | Unix timestamp based on the timeout of the operation phase that it was issued for.  |
+| `sub` (subject) | Limit of 127 characters. Fully qualified path to a Stack deployment, followed by the operation type:<br/>`organization:<ORG_NAME>:project:<PROJECT_NAME>:stack:<STACK_NAME>:deployment:<DEPLOYMENT_NAME>:operation:<OPERATION_TYPE>`<br/><br/>For example:<br/>`organization:My_Org_name:project:My_Project:stack:My_Stack:deployment:staging:operation:apply` |
+
+You can further customize your token’s permissions using the following custom claims.
+
+| Claim | Explanation |
+| :---- | :---- |
+| `terraform_operation` ("run phase") | The Terraform operation this token was issued for. For example, “plan” or “apply”. |
+| `terraform_stack_deployment_name` | Name of the deployment that the operation is for. |
+| `terraform_stack_id` (stack ID) | External ID of the Stack that the operation is for.  |
+| `terraform_stack_name` (stack name) | Name of the Stack that the operation is for. |
+| `terraform_project_id` (project ID) | External ID of the project that the operation is taking place in. Useful if you want to use the same role across Stacks in a given project. |
+| `terraform_project_name` (project name) | Name of the project that the operation is taking place in.  |
+| `terraform_organization_id` (organization ID) | External ID of the HCP Terraform organization that the operation is taking place in. Useful if you are in a large company that may have more than one organization or if you want to use the same role across your entire organization. |
+| `terraform_organization_name` (organization name) | Name of the HCP Terraform organization that the operation is taking place in. |
+| `terraform_plan_id` (plan ID) | External ID of the plan that this token is being used for creating or applying. This might be used to track down where a token has been leaked from or to block a specific token if it has been leaked. |
+
+## Examples
+
+The following examples demonstrate common use cases for `identity_token` blocks.
+
+### AWS OIDC authentication
+
+In the following example, the `aws` identity token configures an audience for AWS workload identity. The `production` deployment passes the token that the `identity_token` block generates, `identity_token.aws.jwt`, to the component configuration along with an IAM role ARN:
+
+<CodeBlockConfig filename="main.tfdeploy.hcl">
+
+```hcl
+identity_token "aws" {
+  audience = ["aws.workload.identity"]
+}
+
+deployment "production" {
+  inputs = {
+    role_arn   = "arn:aws:iam::123456789012:role/my-oidc-role"
+    aws_token  = identity_token.aws.jwt
+  }
+}
+```
+
+</CodeBlockConfig>
+
+In your component configuration, you can use the generated JWT token to configure your AWS provider:
+
+<CodeBlockConfig filename="main.tfcomponent.hcl">
+
+```hcl
+variable "aws_token" {
+  type      = string
+  ephemeral = true
+}
+
+variable "role_arn" {
+  type = string
+  sensitive = true
+}
+
+provider "aws" "main" {
+  config {
+    assume_role_with_web_identity {
+      role_arn           = var.role_arn
+      web_identity_token = var.aws_token
+    }
+  }
+}
+```
+
+</CodeBlockConfig>
+
+### Multiple cloud providers
+
+In the following example, separate identity tokens configure audiences for `aws` and `gcp` workload identities, and the `multi_cloud` deployment passes both JWT tokens along with their respective role configurations:
+
+```hcl
+identity_token "aws" {
+  audience = ["aws.workload.identity"]
+}
+
+identity_token "gcp" {
+  audience = ["gcp.workload.identity"]
+}
+
+deployment "multi_cloud" {
+  inputs = {
+    aws_token = identity_token.aws.jwt
+    gcp_token = identity_token.gcp.jwt
+    aws_role  = "arn:aws:iam::123456789012:role/terraform-role"
+    gcp_sa    = "terraform@my-project.iam.gserviceaccount.com"
+  }
+}
+```
