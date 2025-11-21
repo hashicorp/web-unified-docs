@@ -47,6 +47,8 @@ Analyze this document's SEO optimization and provide specific recommendations.
    - Tool-specific names (Terraform, AWS) are allowed in H2s only when the section content is tool-specific
    - Otherwise, keep headings generic and benefit-focused
 
+6. **Discription for images and videos** - Review the tags for images and videos:
+   - Review descriptions for videos and images
 5. **Other critical SEO elements** - Flag any major issues with:
    - Keyword usage and density
    - Content structure and readability
