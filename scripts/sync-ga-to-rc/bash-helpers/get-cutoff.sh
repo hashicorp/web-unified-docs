@@ -42,7 +42,7 @@ else
       --pretty=format:%ad               \
       --date=iso                        \
       --date=format:'%Y-%m-%d %H:%M:%S' \
-      "${targetBranch}" 
+      origin/${targetBranch}
   )
 fi
 
