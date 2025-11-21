@@ -39,7 +39,7 @@ IFS=$'\n'
 for file in $(find "${docFolder}" -type f); do
   
   lastCommit=$(
-    git log --date=iso -1 --format=%ai "${file}" |
+    git log -1 --format=%ai "${file}" |
     cut -d " " -f1,2
   )
   # If the last commit happened after the cutoff, add it to the results

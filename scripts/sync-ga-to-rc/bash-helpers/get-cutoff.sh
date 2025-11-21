@@ -28,9 +28,8 @@ cd "${repoRoot}"
 git fetch origin
 
 branchDate=$(
-  git reflog                          \
+  git reflog                        \
   --pretty=format:%ad               \
-  --date=iso                        \
   --date=format:'%Y-%m-%d %H:%M:%S' \
   origin/${targetBranch}            \
   | tail -1
