@@ -38,11 +38,11 @@ if [[ "${targetBranch}" == "main" ]] ; then
 else
   branchDate=$(
     git reflog                          \
-      --grep-reflog="storing head"      \
       --pretty=format:%ad               \
       --date=iso                        \
       --date=format:'%Y-%m-%d %H:%M:%S' \
-      origin/${targetBranch}
+      origin/${targetBranch}            \
+      | tail -1
   )
 fi
 
