@@ -32,13 +32,13 @@ if [[ "${targetBranch}" == "main" ]] ; then
       --pretty=format:%ad               \
       --date=iso                        \
       --date=format:'%Y-%m-%d %H:%M:%S' \
-      "${targetBranch}"                     \
+      "${targetBranch}"                 \
       | tail -1
   )
 else
   branchDate=$(
     git reflog                          \
-      --grep-reflog="Created from"      \
+      --grep-reflog="storing head"      \
       --pretty=format:%ad               \
       --date=iso                        \
       --date=format:'%Y-%m-%d %H:%M:%S' \
