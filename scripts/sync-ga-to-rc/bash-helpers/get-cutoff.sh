@@ -35,6 +35,7 @@ dateString=$(
 )
 
 snip1="${dateString%%\}*}"
-branchDate="${snip1#*{}"
+rawDate="${snip1#*{}"
+branchDate="$(getUTCDate "${rawDate}")"
 
 echo "${branchDate}"
