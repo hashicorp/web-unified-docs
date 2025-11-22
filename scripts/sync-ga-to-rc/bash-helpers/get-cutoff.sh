@@ -27,12 +27,14 @@ cd "${repoRoot}"
 # Find the earliest commit we can as the "creation" date
 git fetch origin
 
-branchDate=$(
-  git reflog                        \
-  --pretty=format:%ad               \
-  --date=format:'%Y-%m-%d %H:%M:%S' \
-  origin/${targetBranch}            \
+dateString=$(
+  git reflog              \
+  --date=iso              \
+  origin/${targetBranch}  \
   | tail -1
 )
+
+snip1="${dateString%%\}*}"
+branchDate="${snip1#*{}"
 
 echo "${branchDate}"
