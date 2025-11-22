@@ -38,10 +38,12 @@ git fetch origin
 IFS=$'\n'
 for file in $(find "${docFolder}" -type f); do
   
-  lastCommit=$(
-    git log -1 --format=%ai "${file}" |
-    cut -d " " -f1,2
+  rawCommitDate=$(
+    git log -1 --pretty=format:%ad --date=iso "${file}"
   )
+
+  lastCommit=$(getUTCDate "${rawCommitDate}")
+
   # If the last commit happened after the cutoff, add it to the results
   if [[ "${cutoff}" < "${lastCommit}" ]]; then
     shortName=${file/"${docFolder}"/""}
@@ -51,3 +53,5 @@ for file in $(find "${docFolder}" -type f); do
     echo ${jsonString}
   fi
 done
+
+
