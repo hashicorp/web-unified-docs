@@ -38,9 +38,9 @@ prBody="Draft PR created by \`sync-ga-to-rc.mjs\` to push recent GA updates to t
 
 
 function getUTCDate {
-
+ 
   local dateString="${1}"
-  local myShell=$(echo $0)
+  local myShell="$(echo $0)"
   local zBash="/bin/zsh"
   local uBash="-bash"
   local unixTime
