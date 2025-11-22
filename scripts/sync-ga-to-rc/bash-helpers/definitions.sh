@@ -18,6 +18,7 @@
 #    repoName="udr-fork"
 
 myDir=$(pwd)
+thisShell=$(echo $0)
 repoName="web-unified-docs"
 localReposDir=${myDir%"/${repoName}"*}
 
@@ -40,7 +41,7 @@ prBody="Draft PR created by \`sync-ga-to-rc.mjs\` to push recent GA updates to t
 function getUTCDate {
 
   local dateString="${1}"
-  local myShell="${2}"
+  local myShell="${thisShell}"
   local zBash="/bin/zsh"
   local uBash="-bash"
   local unixTime
