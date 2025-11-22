@@ -18,7 +18,6 @@
 #    repoName="udr-fork"
 
 myDir=$(pwd)
-thisShell=$(echo $0)
 repoName="web-unified-docs"
 localReposDir=${myDir%"/${repoName}"*}
 
@@ -41,14 +40,13 @@ prBody="Draft PR created by \`sync-ga-to-rc.mjs\` to push recent GA updates to t
 function getUTCDate {
 
   local dateString="${1}"
-  local myShell="${thisShell}"
+  local myShell=$(echo $0)
   local zBash="/bin/zsh"
   local uBash="-bash"
   local unixTime
 
   # Bail if any of the command line parameters were omitted
   if [[ -z "${dateString}" ]] ; then return; fi
-  if [[ -z "${myShell}" ]]    ; then return; fi
 
   if [[ $myShell == ${zBash} ]] ; then
     unixTime=$(date -j -f '%Y-%m-%d %H:%M:%S %z' "${dateString}" +'%s')
