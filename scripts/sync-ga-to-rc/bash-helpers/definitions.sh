@@ -48,7 +48,7 @@ function getUTCDate {
   # Bail if any of the command line parameters were omitted
   if [[ -z "${dateString}" ]] ; then return; fi
 
-  if [[ $myShell == ${zBash} ]] ; then
+  if [[ "${myShell}" == "${zBash}" ]] ; then
     unixTime=$(date -j -f '%Y-%m-%d %H:%M:%S %z' "${dateString}" +'%s')
     echo $(date -j -u -r ${unixTime} +'%Y-%m-%d %H:%M:%S')
   else
