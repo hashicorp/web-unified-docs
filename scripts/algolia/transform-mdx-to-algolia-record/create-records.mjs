@@ -46,8 +46,7 @@ export async function createAlgoliaRecordObject(
 	 * filePath: 'public/content/terraform-enterprise/v202410-1/docs/enterprise/application-administration/github-app-integration.mdx'
 	 * docsPath: 'enterprise/application-administration/github-app-integration'
 	 */
-
-	const docPath = filePath.split(`/${contentDir}/`)[1].replace('.mdx', '')
+	const docPath = filePath.split(`/${contentDir}/`).at(-1).replace('.mdx', '')
 
 	const objectID = `docs_${productSlug}/${docPath}`
 	const headings = await collectHeadings(markdownFile)
