@@ -1,3 +1,8 @@
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: BUSL-1.1
+ */
+
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAlgoliaRecordObject } from './create-records.mjs'
 import { collectHeadings } from './headings/collect-headings.mjs'
