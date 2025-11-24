@@ -125,7 +125,7 @@ export const PRODUCT_CONFIG = {
 		 * directory structure that needs to be accounted for. Need to confirm.
 		 */
 		assetDir: 'public/img',
-		basePaths: ['api-docs', 'docs', 'commands', 'plugins', 'tools'],
+		basePaths: ['api-docs', 'intro', 'docs', 'commands', 'plugins', 'tools'],
 		contentDir: 'content',
 		dataDir: 'data',
 		productSlug: 'nomad',
