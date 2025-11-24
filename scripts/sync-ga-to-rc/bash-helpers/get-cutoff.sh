@@ -24,26 +24,18 @@ if [[ -z ${targetBranch} ]] ; then exit ; fi
 
 cd "${repoRoot}"
 
-if [[ "${targetBranch}" == "main" ]] ; then
-  # Find the earliest commit we can as the "creation" date; since git log
-  # entries expire based on the setting for reflogexpire on the repo/branch
-  branchDate=$(
-    git log                             \
-      --pretty=format:%ad               \
-      --date=iso                        \
-      --date=format:'%Y-%m-%d %H:%M:%S' \
-      "${targetBranch}"                     \
-      | tail -1
-  )
-else
-  branchDate=$(
-    git reflog                          \
-      --grep-reflog="Created from"      \
-      --pretty=format:%ad               \
-      --date=iso                        \
-      --date=format:'%Y-%m-%d %H:%M:%S' \
-      "${targetBranch}" 
-  )
-fi
+# Find the earliest commit we can as the "creation" date
+git fetch origin
+
+dateString=$(
+  git reflog              \
+  --date=iso              \
+  origin/${targetBranch}  \
+  | tail -1
+)
+
+snip1="${dateString%%\}*}"
+rawDate="${snip1#*{}"
+branchDate="$(getUTCDate "${rawDate}")"
 
 echo "${branchDate}"
