@@ -1,0 +1,223 @@
+---
+page_title: Define deployment configuration
+description: Learn how to write Stack deployment configuration files to define how to deploy your Stack’s infrastructure.
+---
+
+# Define deployment configuration
+
+In Stacks, deployments let you replicate infrastructure across multiple environments, regions, or accounts. Each deployment has its own isolated state, ensuring that changes in one deployment do not affect others. Learn how to write a deployment configuration to define how HCP Terraform deploys your infrastructure.
+
+## Background
+
+<Note>
+
+HCP Terraform supports up to a maximum of 20 deployments for a Stack.
+
+</Note>
+
+The deployment configuration file (`tfdeploy.hcl`) defines how many times HCP Terraform should deploy a Stack’s infrastructure. Defining a `deployment` block  in a deployment configuration tells Terraform to redeploy a Stack’s infrastructure with that `deployment` block’s input values. A Stack must have at least one deployment.
+
+You can also create deployment groups to define rules that let you auto-approve deployment runs that match your specified criteria. To learn more, refer to [Set conditions for deployment runs](/terraform/language/stacks/deploy/conditions).
+
+
+## Write a deployment configuration file
+
+Deployment configuration files live at the top level of your repository and use the `.tfdeploy.hcl` file extension. You can organize your deployment configuration into multiple files, as in traditional Terraform configurations.
+
+You can define the following blocks in deployment configuration files to support setting up your Stack's deployments:
+
+- The [`deployment`](/terraform/language/block/stack/tfdeploy/deployment) block defines how many times you want to deploy your Stack's infrastructure and with what input values.
+- The [`deployment_group`](/terraform/language/block/stack/tfdeploy/deployment_group) block groups deployments together to configure shared settings and auto-approval rules.
+- The [`deployment_auto_approve`](/terraform/language/block/stack/tfdeploy/deployment_auto_approve) block defines rules that automatically approve deployment plans based on specific conditions.
+- The [`identity_token`](/terraform/language/block/stack/tfdeploy/identity_token) block defines JSON Web Tokens (JWT) that Terraform generates for OIDC authentication with cloud providers.
+- The [`store`](/terraform/language/block/stack/tfdeploy/store) block provides access to external secret stores and variable sets from your deployment configuration.
+- The [`publish_output`](/terraform/language/block/stack/tfdeploy/publish_output) block exports values from your Stack that other Stacks in the same project can consume.
+- The [`upstream_input`](/terraform/language/block/stack/tfdeploy/upstream_input) block consumes outputs from another Stack in the same project and uses them as inputs in your current Stack.
+- The [`locals`](/terraform/language/block/locals) block defines local values that you can reference within your deployment configuration.
+
+## Define deployments
+
+In your deployment configuration file, you can create a new `deployment` block for each environment or region where you want to deploy your Stack.
+
+The following defines a deployment for a production environment:
+
+<CodeBlockConfig filename="deployments.tfdeploy.hcl">
+
+```hcl
+deployment "production" {
+    inputs = {
+        aws_region     = "us-west-1"
+        instance_count = 2
+    }
+}
+```
+
+</CodeBlockConfig>
+
+
+The `deployment` block accepts a map of `inputs` where you can specify any unique configurations that deployment may need. In the following example, the `production` and `staging` deployments use the same Stack configuration, but input different values for each deployment:
+
+<CodeBlockConfig filename="deployments.tfdeploy.hcl">
+
+```hcl
+deployment "production" {
+  inputs = {
+    aws_region     = "us-west-1"
+    instance_count = 2
+  }
+}
+
+deployment "staging" {
+  inputs = {
+    aws_region     = "us-west-1"
+    instance_count = 1
+  }
+}
+```
+
+</CodeBlockConfig>
+
+With your deployments defined, you can move on to authenticating the providers your deployment uses.
+
+## Deployment authentication
+
+Use the following blocks to set up authentication for your deployment's providers:
+- The `store` block lets you reference values in an HCP Terraform [variable set](/terraform/cloud-docs/workspaces/variables/managing-variables#variable-sets).
+- The `identity_token` block generates a JSON Web Token (JWT) for OIDC authentication.
+
+The `store` block lets you access a variable set from your deployment configuration. In the following example, the `api_keys` store fetches API keys from a variable set named `api_keys_default_project`:
+
+<CodeBlockConfig filename="deployments.tfdeploy.hcl">
+
+```hcl
+store "varset" "api_keys" {
+  name       = "api_keys_default_project"
+  category = "terraform"
+}
+
+deployment "production" {
+  inputs = {
+    database_password = store.varset.api_keys.db_password
+    api_key           = store.varset.api_keys.external_api_key
+  }
+}
+```
+
+</CodeBlockConfig>
+
+The `production` deployment can now reference values from the variable set with the ID of `varset-abc123456`, making them available to that deployment’s components and providers. To learn more about the `store` block, refer to the [`store` block reference](/terraform/language/block/stack/tfdeploy/store).
+
+The `identity_token` block tells HCP Terraform to generate a JSON Web Token (JWT) for that deployment’s components to authenticate to providers using OIDC. For example, you can set up your deployment to authenticate with the AWS provider using a particular role ARN.
+
+<CodeBlockConfig filename="deployments.tfdeploy.hcl">
+
+```hcl
+identity_token "aws" {
+  audience = ["aws.workload.identity"]
+}
+
+deployment "staging" {
+  inputs = {
+    aws_region = "eu-west-1"
+    role_arn   = "arn:aws:iam::123456789101:role/my-oidc-role"
+    aws_token  = identity_token.aws.jwt
+  }
+}
+```
+
+</CodeBlockConfig>
+
+That deployment generates a JWT token named `aws_token`, which is available to that deployment’s components and providers.
+
+<CodeBlockConfig filename="providers.tfcomponent.hcl">
+
+```hcl
+provider "aws" "this" {
+  config {
+    region = var.aws_region
+    assume_role_with_web_identity {
+      role_arn           = var.aws_role
+      web_identity_token = var.aws_token
+    }
+  }
+}
+```
+
+</CodeBlockConfig>
+
+To learn more about the `identity_token` block, refer to the [`identity_token` block reference](/terraform/language/block/stack/tfdeploy/identity_token). For more details on authentication in Stacks, refer to [Authenticate a Stack](/terraform/language/stacks/deploy/authenticate).
+
+## Automatically approve deployment runs
+
+@include 'premium-deployment-groups.mdx'
+
+You can create deployment groups to define rules that let you auto-approve deployment runs that match your specified criteria.
+
+
+<Note>
+
+Deployment groups only support one deployment per group at this time.
+
+</Note>
+
+Define a `deployment_group` block to create a new group, and specify the auto-approve rules that deployment group enforces. In the following example, the `production` deployment group enforces the `no_destroys` rule:
+
+<CodeBlockConfig filename="deployments.tfdeploy.hcl">
+
+```hcl
+
+deployment_auto_approve "no_destroys" {
+  check {
+    condition = context.plan.changes.remove == 0
+    reason    = "Plan removes ${context.plan.changes.remove} resources."
+  }
+}
+
+deployment_group "production" {
+  auto_approve_checks = [
+    deployment_auto_approve.no_destroys
+  ]
+}
+```
+
+</CodeBlockConfig>
+
+The `no_destroys` rule automatically approves deployment runs that do not remove resources. After defining your deployment group and the rules it enforces, you can add a deployment to the group.
+
+The following example adds the `web` deployment to the `production` deployment group:
+
+<CodeBlockConfig highlight="20" filename="deployments.tfdeploy.hcl">
+
+```hcl
+deployment_auto_approve "no_destroys" {
+  check {
+    condition = context.plan.changes.remove == 0
+    reason    = "Plan removes ${context.plan.changes.remove} resources."
+  }
+}
+
+deployment_group "production" {
+  auto_approve_checks = [
+    deployment_auto_approve.no_destroys
+  ]
+}
+
+deployment "web" {
+  inputs = {
+    environment = "production"
+    region      = "us-west-2"
+  }
+
+  deployment_group = deployment_group.production
+}
+```
+
+</CodeBlockConfig>
+
+Now, whenever the `web` deployment generates a deployment run that does not destroy resources, HCP Terraform automatically approves that run.
+
+If you don't assign a deployment to a group, Terraform automatically creates a default deployment group for that deployment. To learn more about defining deployment groups, refer to the [`deployment_group` reference](/terraform/language/block/stack/tfdeploy/deployment_group). To learn more about setting up deployment group orchestration rules, refer to [Set conditions for deployment runs](/terraform/language/stacks/deploy/conditions).
+
+## Next steps
+
+Refer to [Create a Stack](/terraform/cloud-docs/stacks/create) to learn how to deploy your Stack’s infrastructure with HCP Terraform.
