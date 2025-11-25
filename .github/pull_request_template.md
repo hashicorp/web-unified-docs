@@ -4,7 +4,7 @@ Please go to the `Preview` tab and select the appropriate template:
 * [HCP services](?expand=1&template=hcp_pull_request_template.md)
 * [Nomad](?expand=1&labels=Nomad&title=Nomad+Docs&template=nomad_pull_request_template.md)
 
-## Terraform
+### Terraform
 
 * [HCP Terraform](?expand=1&labels=hcp,terraform&title=HCP+Terraform+Docs&template=hcp_terraform_pull_request_template.md)
 * [Terraform](?expand=1&labels=terraform&title=Terraform+Docs&template=terraform_pull_request_template.md)
