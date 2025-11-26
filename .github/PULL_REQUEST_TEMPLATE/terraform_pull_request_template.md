@@ -16,7 +16,7 @@ _If items do not apply to your changes, add (N/A) and mark them as complete._
 - [ ] Description links to related pull requests or issues, if any.
 
 #### Content
-- [ ] Redirects have been added to `content/terraform-docs-common/redirects.jsonc` for moved, renamed, or deleted pages. Refer to [Redirects](https://github.com/hashicorp/web-unified-docs/blob/main/docs/content-guide/redirects.md#example-redirects) for examples and guidance. 
+- [ ] You added redirects to `content/terraform-docs-common/redirects.jsonc` for moved, renamed, or deleted pages **across all affected versions**. Refer to [Redirects](https://github.com/hashicorp/web-unified-docs/blob/main/docs/content-guide/redirects.md#example-redirects) for examples and guidance. 
 - [ ] Links to related content where appropriate (e.g., CLI, language, API endpoints, permissions, etc.).
 - [ ] Pages with related content are updated and link to this content when appropriate.
 - [ ] Sidebar navigation files have been updated for added, deleted, reordered, or renamed pages.
