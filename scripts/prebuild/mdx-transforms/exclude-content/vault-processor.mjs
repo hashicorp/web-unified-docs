@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-import { SemVer, gt, gte, lt, lte, eq } from 'semver'
+import { gt, gte, lt, lte, eq, coerce } from 'semver'
 import { removeNodesInRange } from './ast-utils.mjs'
 
 /**
@@ -76,7 +76,7 @@ function normalizeSemver(version) {
 	// just split by white space and take the first part
 	version = version.split(' ')[0]
 	const normalized = version.replace(/^v/, '').replace(/\.x$/, '.0')
-	return new SemVer(normalized)
+	return coerce(normalized)
 }
 
 /**

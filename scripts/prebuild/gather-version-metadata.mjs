@@ -161,7 +161,14 @@ export async function gatherVersionMetadata(contentDir) {
  * @returns {string} The normalized version string
  */
 function normalizeVersion(version) {
-	return version
+	const TFE_VERSION_IN_PATH_REGEXP = /v[0-9]{6}-\d+/i
+	if (TFE_VERSION_IN_PATH_REGEXP.test(version)) {
+		return version
+	}
+	const newVersion = version
 		.replace(/\s*\([^)]+\)/, '') // Remove any release stage in parentheses
 		.replace(/\.x$/, '.0') // Replace trailing `.x` with `.0`
+	const normalized = semver.coerce(newVersion).version
+	console.log('### Normalized version:', version, newVersion, normalized)
+	return normalized
 }
