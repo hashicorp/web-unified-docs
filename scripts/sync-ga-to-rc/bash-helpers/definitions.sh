@@ -32,7 +32,7 @@ rcDocs=""   # Set in helper from command line arguments; for example, "${docRoot
 gaDocs=""   # Set in helper from command line arguments; for example, "${docRoot}/v1.20.x"
 
 jsonTemplate='{"file": "<FILENAME>", "shortname": "<SHORTNAME>", "commit": "<COMMIT>"}'
-prBranch="bot/<PRODUCT>-ga-to-rc-sync-$(date +%Y%m%d)"
+prBranch="bot/<PRODUCT>-ga-to-rc-sync-$(date +%Y%m%d-%H%M%S)"
 prTitle="<PRODUCT> GA to RC auto-sync"
 prBody="Draft PR created by \`sync-ga-to-rc.mjs\` to push recent GA updates to the RC release branch for <PRODUCT>"
 

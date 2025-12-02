@@ -28,14 +28,13 @@ cd "${repoRoot}"
 git fetch origin
 
 dateString=$(
-  git reflog              \
+  git log                 \
+  --pretty=format:%ad     \
   --date=iso              \
-  origin/${targetBranch}  \
-  | tail -1
+  main..${targetBranch} | \
+  tail -1
 )
 
-snip1="${dateString%%\}*}"
-rawDate="${snip1#*{}"
-branchDate="$(getUTCDate "${rawDate}")"
+branchDate="$(getUTCDate "${dateString}")"
 
 echo "${branchDate}"
