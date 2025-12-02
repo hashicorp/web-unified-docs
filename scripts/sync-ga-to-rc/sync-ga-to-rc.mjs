@@ -35,6 +35,7 @@ import {
 	printHelp,
 } from './functions/tools.mjs'
 import { getArgs, getExclusions } from './functions/init.mjs'
+import { exit } from 'node:process'
 
 // Figure out where the script lives so we can use absolute paths for things
 const __filename = fileURLToPath(import.meta.url)
@@ -113,6 +114,11 @@ const getGAOnly = `${helpersDir}/only-in-ga.sh '${product}' '${gaFolder}' '${rcF
 const updateRCDocs = `${helpersDir}/update-rc-docs.sh '${product}' '${gaFolder}' '${rcFolder}' '${safeListFile}'`
 const createPR = `${helpersDir}/create-pr.sh '${product}' '${rcFolder}' '${rcBranch}' '<PR_BRANCH>'`
 
+console.log('getGADelta = ' + getGADelta)
+console.log('getRCDelta = ' + getRCDelta)
+console.log('getGAOnly  = ' + getGAOnly)
+
+exit()
 // Initialize some variables
 var bashOutput = '' // Reusable variable used to catch the output from bash helpers
 var lastRunDate = '' // Last run date in the product record file
