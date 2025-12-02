@@ -40,9 +40,9 @@ prBody="Draft PR created by \`sync-ga-to-rc.mjs\` to push recent GA updates to t
 function getUTCDate {
  
   local dateString="${1}"
-  local myShell="$(echo $0)"
+  local myShell="${SHELL}"
   local zBash="/bin/zsh"
-  local uBash="-bash"
+  local uBash="/bin/bash"
   local unixTime
 
   # Bail if any of the command line parameters were omitted
@@ -52,6 +52,6 @@ function getUTCDate {
     unixTime=$(date -j -f '%Y-%m-%d %H:%M:%S %z' "${dateString}" +'%s')
     echo $(date -j -u -r ${unixTime} +'%Y-%m-%d %H:%M:%S')
   else
-    echo $(date -u  +%Y-%m-%d_%H:%M:%S -d "${dateString}")
+    echo $(date -u  +'%Y-%m-%d %H:%M:%S' -d "${dateString}")
   fi
 }
