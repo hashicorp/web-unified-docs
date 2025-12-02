@@ -23,8 +23,10 @@ export function processVaultBlock(directive, block, tree, options) {
 		return // Skip vault directive in a non-vault file
 	}
 
-	// Parse Vault version directive pattern: >=v1.21.x
-	const versionMatch = directive.match(/^(<=|>=|<|>|=)v(\d+\.\d+\.x)$/)
+	// Parse Vault version directive pattern: >=v1.21.x or >=v2.x
+	const versionMatch =
+		directive.match(/^(<=|>=|<|>|=)v(\d+\.\d+\.x)$/) ||
+		directive.match(/^(<=|>=|<|>|=)v(\d+\.x)$/)
 	if (versionMatch) {
 		processVaultVersionDirective(versionMatch, block, tree, options)
 		return
@@ -76,6 +78,7 @@ function normalizeSemver(version) {
 	// just split by white space and take the first part
 	version = version.split(' ')[0]
 	const normalized = version.replace(/^v/, '').replace(/\.x$/, '.0')
+	// Use semver.coerce to handle versions like "v2.x" for proper version sorting
 	return coerce(normalized)
 }
 
