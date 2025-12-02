@@ -35,3 +35,23 @@ jsonTemplate='{"file": "<FILENAME>", "shortname": "<SHORTNAME>", "commit": "<COM
 prBranch="bot/<PRODUCT>-ga-to-rc-sync-$(date +%Y%m%d)"
 prTitle="<PRODUCT> GA to RC auto-sync"
 prBody="Draft PR created by \`sync-ga-to-rc.mjs\` to push recent GA updates to the RC release branch for <PRODUCT>"
+
+
+function getUTCDate {
+ 
+  local dateString="${1}"
+  local myShell="${SHELL}"
+  local zBash="/bin/zsh"
+  local uBash="/bin/bash"
+  local unixTime
+
+  # Bail if any of the command line parameters were omitted
+  if [[ -z "${dateString}" ]] ; then return; fi
+
+  if [[ "${myShell}" == "${zBash}" ]] ; then
+    unixTime=$(date -j -f '%Y-%m-%d %H:%M:%S %z' "${dateString}" +'%s')
+    echo $(date -j -u -r ${unixTime} +'%Y-%m-%d %H:%M:%S')
+  else
+    echo $(date -u  +'%Y-%m-%d %H:%M:%S' -d "${dateString}")
+  fi
+}

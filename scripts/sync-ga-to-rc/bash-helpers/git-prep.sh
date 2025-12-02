@@ -27,6 +27,8 @@ if [[ -z ${rcBranch} ]] ;   then return ; fi
 
 cd "${repoRoot}"
 
+git fetch origin
+
 # Sync to git
 if [[ "${gaBranch}" == "${rcBranch}" ]] ; then
   # Sync to the latest updates in the GA branch if the branches are the same
