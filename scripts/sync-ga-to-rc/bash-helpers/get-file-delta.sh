@@ -28,7 +28,7 @@ if [[ -z "${verFolder}" ]] ; then exit ; fi
 if [[ -z "${cutoff}" ]] ; then exit ; fi
 
 # Set the absolute path to the local folder
-docFolder="${docRoot/'<PRODUCT>'/${productKey}/${verFolder}}"
+docFolder="${docRoot/'<PRODUCT>'/${productKey}}/${verFolder}"
 
 cd "${repoRoot}"
 
