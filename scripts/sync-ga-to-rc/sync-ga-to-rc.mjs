@@ -105,7 +105,7 @@ const safeListFile = `${logDir}/safe-list.txt`
 const manualReviewFile = `${logDir}/manual-review.txt`
 const productRecord = `${recordDir}/last-run-${product}.txt`
 const logPrep = `${helpersDir}/log-prep.sh '${logDir}' '${recordDir}'`
-const gitPrep = `${helpersDir}/git-prep.sh '${product}' '${gaBranch}' '${rcBranch}'`
+const gitPrep = `${helpersDir}/git-prep.sh '${product}' '${gaBranch}' '${rcBranch}' '${updateFiles}'`
 const getCutoff = `${helpersDir}/get-cutoff.sh '${rcBranch}'`
 const getGADelta = `${helpersDir}/get-file-delta.sh '${product}' '${gaFolder}' '<CUTOFF>'`
 const getRCDelta = `${helpersDir}/get-file-delta.sh '${product}' '${rcFolder}' '<CUTOFF>'`
@@ -134,23 +134,21 @@ await runBashCmdAsync(logPrep)
 const prBranch = await runBashCmdAsync(gitPrep)
 
 // Let folks know what information the script is working with
-console.log(
-	'\n    Syncing git data for GA and RC branches and creating PR branch',
-)
+console.log('\n    Syncing git data for GA and RC branches')
 if (updateFiles && makePR) {
-	console.log('      - Updating local files and creating PR')
+	console.log('      - Run mode:     Update local files and create PR')
 } else if (updateFiles) {
-	console.log('      - Updating local files')
+	console.log('      - Run mode:     Update local files')
 } else {
-	console.log('      - Data gathering only')
+	console.log('      - Run mode:     Data gathering only')
 }
 
 console.log('      - Product:     ' + product)
 console.log('      - GA branch:   ' + gaBranch)
-console.log('      - GA version:  ' + gaVersion)
+console.log('      - GA folder:   ' + gaVersion)
 console.log('      - RC branch:   ' + rcBranch)
-console.log('      - RC version:  ' + rcVersion)
-//console.log('      - Work branch: ' + prBranch)
+console.log('      - RC folder:   ' + rcVersion)
+console.log('      - Work branch: ' + prBranch)
 
 // Prep: Get the exclusion list
 console.log('\n    Loading exclusions for ' + product)
