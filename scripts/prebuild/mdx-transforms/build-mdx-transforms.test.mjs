@@ -24,6 +24,7 @@ describe('applyMdxTransforms - Integration Tests', () => {
 		],
 		'terraform-enterprise': [
 			{ version: 'v202409-2', releaseStage: 'stable', isLatest: true },
+			{ version: 'v1.1.x', releaseStage: 'stable', isLatest: true },
 		],
 	}
 
@@ -1244,6 +1245,324 @@ The API includes endpoints for system-level operations, such as health checks an
 				// Should not contain the @include directive
 				expect(output).not.toContain('@include')
 			})
+
+			test('should handle partial wrapped in json responses in TFC and TFEnterprise exclusions', async () => {
+				vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({
+					'terraform-enterprise': {
+						contentDir: 'docs',
+						versionedDocs: true,
+						supportsExclusionDirectives: true,
+					},
+				})
+
+				// This is the actual workspace-with-vcs.mdx partial content structure
+				const partialContent = `<!-- BEGIN: TFC:only -->
+
+\`\`\`json
+{
+  "data": {
+    "id": "ws-KTuq99JSzgmDSvYj",
+    "type": "workspaces",
+    "attributes": {
+      "global-remote-state": false,
+      "name": "workspace-2",
+      "vcs-repo": {
+        "branch": "",
+        "identifier": "example/terraform-test-proj"
+      }
+    }
+  }
+}
+\`\`\`
+
+<!-- END: TFC:only -->
+
+<!-- BEGIN: TFEnterprise:only name:project-remote-state -->
+
+\`\`\`json
+{
+  "data": {
+    "id": "ws-KTuq99JSzgmDSvYj",
+    "type": "workspaces",
+    "attributes": {
+      "global-remote-state": false,
+      "project-remote-state": false,
+      "name": "workspace-2",
+      "vcs-repo": {
+        "branch": "",
+        "identifier": "example/terraform-test-proj"
+      }
+    }
+  }
+}
+\`\`\`
+
+<!-- END: TFEnterprise:only name:project-remote-state -->
+`
+
+				const mainContent = `---
+page_title: Workspaces - API Docs
+---
+
+# Workspaces API
+
+## Sample Response
+
+@include 'api-code-blocks/workspace-with-vcs.mdx'
+
+Additional documentation content.
+`
+
+				vol.fromJSON({
+					'/content/terraform-enterprise/v1.1.x/docs/api-docs/workspaces.mdx':
+						mainContent,
+					'/content/terraform-enterprise/v1.1.x/docs/partials/api-code-blocks/workspace-with-vcs.mdx':
+						partialContent,
+				})
+
+				await buildMdxTransforms('/content', '/output', mockVersionMetadata)
+
+				const output = fs.readFileSync(
+					'/output/terraform-enterprise/v1.1.x/docs/api-docs/workspaces.mdx',
+					'utf8',
+				)
+
+				// TFC:only content should be removed in terraform-enterprise
+				expect(output).not.toContain('<!-- BEGIN: TFC:only -->')
+				expect(output).not.toContain('<!-- END: TFC:only -->')
+
+				// TFEnterprise:only content should be kept in terraform-enterprise
+				expect(output).toContain('"project-remote-state": false')
+				expect(output).toContain(
+					'<!-- BEGIN: TFEnterprise:only name:project-remote-state -->',
+				)
+				expect(output).toContain(
+					'<!-- END: TFEnterprise:only name:project-remote-state -->',
+				)
+
+				// Main content should be preserved
+				expect(output).toContain('# Workspaces API')
+				expect(output).toContain('## Sample Response')
+				expect(output).toContain('Additional documentation content')
+			})
+
+			test('should handle workspace-with-vcs partial in terraform-docs-common (keeps TFC:only)', async () => {
+				vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({
+					'terraform-docs-common': {
+						versionedDocs: true,
+						basePaths: ['docs'],
+						supportsExclusionDirectives: true,
+					},
+				})
+
+				const partialContent = `<!-- BEGIN: TFC:only -->
+
+\`\`\`json
+{
+  "data": {
+    "attributes": {
+      "global-remote-state": false,
+      "name": "workspace-2"
+    }
+  }
+}
+\`\`\`
+
+<!-- END: TFC:only -->
+
+<!-- BEGIN: TFEnterprise:only name:project-remote-state -->
+
+\`\`\`json
+{
+  "data": {
+    "attributes": {
+      "project-remote-state": false,
+      "name": "workspace-2"
+    }
+  }
+}
+\`\`\`
+
+<!-- END: TFEnterprise:only name:project-remote-state -->
+`
+
+				const mainContent = `---
+page_title: Workspaces - API Docs
+---
+
+# Workspaces API
+
+@include 'workspace-with-vcs.mdx'
+
+More content.
+`
+
+				vol.fromJSON({
+					'/content/terraform-docs-common/v1.20.x/docs/workspaces.mdx':
+						mainContent,
+					'/content/terraform-docs-common/v1.20.x/docs/partials/workspace-with-vcs.mdx':
+						partialContent,
+				})
+
+				await buildMdxTransforms('/content', '/output', mockVersionMetadata)
+
+				const output = fs.readFileSync(
+					'/output/terraform-docs-common/v1.20.x/docs/workspaces.mdx',
+					'utf8',
+				)
+
+				// TFC:only content should be kept in terraform-docs-common
+				expect(output).toContain('"global-remote-state": false')
+				expect(output).toContain('<!-- BEGIN: TFC:only -->')
+				expect(output).toContain('<!-- END: TFC:only -->')
+
+				// TFEnterprise:only content should be removed in terraform-docs-common
+				expect(output).not.toContain('"project-remote-state": false')
+				expect(output).not.toContain(
+					'<!-- BEGIN: TFEnterprise:only name:project-remote-state -->',
+				)
+
+				// Main content should be preserved
+				expect(output).toContain('# Workspaces API')
+				expect(output).toContain('More content')
+			})
+
+			test('should handle multiple partials with same directive name in sequence', async () => {
+				vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({
+					'terraform-enterprise': {
+						contentDir: 'docs',
+						versionedDocs: true,
+						supportsExclusionDirectives: true,
+					},
+				})
+
+				// First partial with TFEnterprise:only directive
+				const workspacePartial = `<!-- BEGIN: TFC:only -->
+
+\`\`\`json
+{
+  "data": {
+    "attributes": {
+      "name": "workspace-1-tfc"
+    }
+  }
+}
+\`\`\`
+
+<!-- END: TFC:only -->
+
+<!-- BEGIN: TFEnterprise:only name:project-remote-state -->
+
+\`\`\`json
+{
+  "data": {
+    "attributes": {
+      "name": "workspace-1-tfe",
+      "project-remote-state": false
+    }
+  }
+}
+\`\`\`
+
+<!-- END: TFEnterprise:only name:project-remote-state -->
+`
+
+				// Second partial with the SAME TFEnterprise:only directive name
+				const workspaceWithVcsPartial = `<!-- BEGIN: TFC:only -->
+
+\`\`\`json
+{
+  "data": {
+    "attributes": {
+      "name": "workspace-2-tfc",
+      "vcs-repo": {
+        "identifier": "org/repo"
+      }
+    }
+  }
+}
+\`\`\`
+
+<!-- END: TFC:only -->
+
+<!-- BEGIN: TFEnterprise:only name:project-remote-state -->
+
+\`\`\`json
+{
+  "data": {
+    "attributes": {
+      "name": "workspace-2-tfe",
+      "project-remote-state": false,
+      "vcs-repo": {
+        "identifier": "org/repo"
+      }
+    }
+  }
+}
+\`\`\`
+
+<!-- END: TFEnterprise:only name:project-remote-state -->
+`
+
+				const mainContent = `---
+page_title: Workspaces - API Docs
+---
+
+# Workspaces API
+
+## Sample Response
+
+_Without a VCS repository_
+
+@include 'api-code-blocks/workspace.mdx'
+
+_With a VCS repository_
+
+@include 'api-code-blocks/workspace-with-vcs.mdx'
+
+Additional documentation content.
+`
+
+				vol.fromJSON({
+					'/content/terraform-enterprise/v1.1.x/docs/api-docs/workspaces.mdx':
+						mainContent,
+					'/content/terraform-enterprise/v1.1.x/docs/partials/api-code-blocks/workspace.mdx':
+						workspacePartial,
+					'/content/terraform-enterprise/v1.1.x/docs/partials/api-code-blocks/workspace-with-vcs.mdx':
+						workspaceWithVcsPartial,
+				})
+
+				await buildMdxTransforms('/content', '/output', mockVersionMetadata)
+
+				const output = fs.readFileSync(
+					'/output/terraform-enterprise/v1.1.x/docs/api-docs/workspaces.mdx',
+					'utf8',
+				)
+
+				// TFC:only content should be removed in terraform-enterprise
+				expect(output).not.toContain('workspace-1-tfc')
+				expect(output).not.toContain('workspace-2-tfc')
+
+				// BOTH TFEnterprise:only blocks should be kept in terraform-enterprise
+				expect(output).toContain('workspace-1-tfe')
+				expect(output).toContain('workspace-2-tfe')
+				expect(output).toContain('"project-remote-state": false')
+
+				// Both TFEnterprise:only directive comments should be present
+				const beginDirective =
+					'<!-- BEGIN: TFEnterprise:only name:project-remote-state -->'
+				const endDirective =
+					'<!-- END: TFEnterprise:only name:project-remote-state -->'
+				const beginCount = output.split(beginDirective).length - 1
+				const endCount = output.split(endDirective).length - 1
+				expect(beginCount).toBe(2)
+				expect(endCount).toBe(2)
+
+				// Section headers should be preserved
+				expect(output).toContain('_Without a VCS repository_')
+				expect(output).toContain('_With a VCS repository_')
+				expect(output).toContain('Additional documentation content')
+			})
 		})
 	})
 
@@ -1395,6 +1714,70 @@ Common documentation.
 			expect(output).not.toContain('TFE-specific information')
 			expect(output).toContain('Common documentation')
 			expect(output).not.toContain('@include')
+		})
+
+		test('should remove TFEnterprise:only block with JSX/MDX element partial (Note component)', async () => {
+			// Clear any existing mocks to use real PRODUCT_CONFIG
+			vi.restoreAllMocks()
+
+			// Real terraform-docs-common has versionedDocs: false, so no version directories
+			const mockVersionMetadata = {
+				'terraform-docs-common': [
+					{ version: 'v0.0.x', releaseStage: 'stable', isLatest: true },
+				],
+			}
+
+			// Partial containing MDX/JSX element (Note component) - matches beta/explorer.mdx
+			const partialContent = `<Note>
+
+This feature is in beta. We recommend only using it non-production environments because updates during the beta phase may require you to destroy the explorer database. Running the explorer may increase the load on the Terraform Enterprise server in unexpected ways, resulting in slowdowns or outages.
+
+Explorer on Terraform Enterprise only has access to the information available in the runs from Terraform Enterprise 1.0.0 and later.
+You can provide feedback on this feature by selecting **Give Feedback** from the **Actions** menu or by contacting your account team.
+
+</Note>
+`
+
+			const mainContent = `---
+page_title: HCP Terraform explorer for workspace visibility
+description: >-
+  Learn how to find data about your resource, module, and provider usage across
+  workspaces and projects in HCP Terraform with the explorer for workspace
+  visibility.
+---
+# Explorer for workspace visibility
+
+<!-- BEGIN: TFEnterprise:only name:explorer -->
+@include 'beta/explorer.mdx'
+<!-- END: TFEnterprise:only name:explorer -->
+
+As your organization grows, keeping track of your sprawling infrastructure estate can get increasingly more complicated. The explorer for workspace visibility helps surface a wide range of valuable information from across your organization.
+`
+
+			vol.fromJSON({
+				'/content/terraform-docs-common/docs/cloud-docs/workspaces/explorer.mdx':
+					mainContent,
+				'/content/terraform-docs-common/docs/partials/beta/explorer.mdx':
+					partialContent,
+			})
+
+			await buildMdxTransforms('/content', '/output', mockVersionMetadata)
+
+			const output = fs.readFileSync(
+				'/output/terraform-docs-common/docs/cloud-docs/workspaces/explorer.mdx',
+				'utf8',
+			)
+
+			// TFEnterprise:only content should be completely removed in terraform-docs-common
+			expect(output).not.toContain('<Note>')
+			expect(output).not.toContain('</Note>')
+			expect(output).not.toContain('This feature is in beta')
+			expect(output).not.toContain('Explorer on Terraform Enterprise')
+			expect(output).not.toContain('TFEnterprise:only')
+
+			// Content after the block should be preserved
+			expect(output).toContain('As your organization grows')
+			expect(output).toContain('infrastructure estate')
 		})
 	})
 })

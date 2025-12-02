@@ -64,98 +64,102 @@ import semver from 'semver'
  */
 
 export const PRODUCT_CONFIG = {
-	// boundary: {
-	// 	/**
-	// 	 * ✅ Initial migration attempt: SEEMS TO WORK
-	// 	 *
-	// 	 * Boundary content seems to be successfully copied into `content` and
-	// 	 * `public/assets` as expected. Further investigation and testing is
-	// 	 * of course needed, we've only confirmed that the migration script works.
-	// 	 */
-	// 	assetDir: 'public',
-	// 	contentDir: 'content',
-	// 	dataDir: 'data',
-	//  productSlug: 'boundary',
-	// 	semverCoerce: semver.coerce,
-	//  versionedDocs: true,
-	// 	websiteDir: 'website',
-	// },
-	// consul: {
-	// 	/**
-	// 	 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
-	// 	 *
-	// 	 * Fails for v1.8.x (and likely earlier) with error:
-	// 	 * `consul/website/content: No such file or directory`
-	// 	 * This likely indicates that older versions of docs have a different
-	// 	 * directory structure that needs to be accounted for. Need to confirm.
-	// 	 */
-	// 	assetDir: 'public',
-	// 	contentDir: 'content',
-	// 	dataDir: 'data',
-	//  productSlug: 'consul',
-	// 	semverCoerce: semver.coerce,
-	// 	versionedDocs: true,
-	// 	websiteDir: 'website',
-	// },
-	// 'hcp-docs': {
-	// 	/**
-	// 	 * ✅ Initial migration attempt: SEEMS TO WORK
-	// 	 *
-	// 	 * Maybe worth noting: versioned docs is not enabled for `hcp-docs`.
-	// 	 * `branchForLatest` is set to `main`. We treat the single version
-	// 	 * as `v0.0.x` in our version metadata in the current content API:
-	// 	 * https://content.hashicorp.com/api/content/hcp-docs/version-metadata?partial=true
-	// 	 */
-	// 	assetDir: 'public',
-	// 	contentDir: 'content',
-	// 	dataDir: 'data',
-	//  productSlug: 'hcp',
-	// 	semverCoerce: semver.coerce,
-	//  versionedDocs: false,
-	// 	websiteDir: '.',
-	// },
-	// nomad: {
-	// 	/**
-	// 	 *  🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
-	// 	 *
-	// 	 * Fails for v0.12.x (and likely earlier) with error:
-	// 	 * `nomad/website/content: No such file or directory`
-	// 	 * This likely indicates that older versions of docs have a different
-	// 	 * directory structure that needs to be accounted for. Need to confirm.
-	// 	 */
-	// 	assetDir: 'public',
-	// 	contentDir: 'content',
-	// 	dataDir: 'data',
-	//  productSlug: 'nomad',
-	// 	semverCoerce: semver.coerce,
-	//  versionedDocs: true,
-	// 	websiteDir: 'website',
-	// },
-	// packer: {
-	// 	/**
-	// 	 *  🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
-	// 	 *
-	// 	 * Fails for v1.5.6 (and likely earlier) with error:
-	// 	 * `packer/website/content: No such file or directory`
-	// 	 * This likely indicates that older versions of docs have a different
-	// 	 * directory structure that needs to be accounted for. Need to confirm.
-	// 	 */
-	// 	/**
-	// 	 * TODO: for Packer, will probably need to do _something_ to sort out
-	// 	 * the Packer plugin documentation. We didn't fully complete the migration
-	// 	 * to Packer integrations, so I think there might still be plugin docs
-	// 	 * we need to fetch from third-party repos?
-	// 	 *
-	// 	 * Or this may be a non-issue, I'm not actually sure.
-	// 	 */
-	// 	assetDir: 'public',
-	// 	contentDir: 'content',
-	// 	dataDir: 'data',
-	//  productSlug: 'packer',
-	// 	semverCoerce: semver.coerce,
-	//  versionedDocs: true,
-	// 	websiteDir: 'website',
-	// },
+	boundary: {
+		/**
+		 * ✅ Initial migration attempt: SEEMS TO WORK
+		 *
+		 * Boundary content seems to be successfully copied into `content` and
+		 * `public/assets` as expected. Further investigation and testing is
+		 * of course needed, we've only confirmed that the migration script works.
+		 */
+		assetDir: 'public/img',
+		basePaths: ['api-docs', 'docs'],
+		contentDir: 'content',
+		dataDir: 'data',
+		productSlug: 'boundary',
+		semverCoerce: semver.coerce,
+		versionedDocs: true,
+		websiteDir: 'website',
+	},
+	consul: {
+		/**
+		 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
+		 *
+		 * Fails for v1.8.x (and likely earlier) with error:
+		 * `consul/website/content: No such file or directory`
+		 * This likely indicates that older versions of docs have a different
+		 * directory structure that needs to be accounted for. Need to confirm.
+		 */
+		assetDir: 'public/img',
+		basePaths: ['api-docs', 'docs', 'commands'],
+		contentDir: 'content',
+		dataDir: 'data',
+		productSlug: 'consul',
+		semverCoerce: semver.coerce,
+		versionedDocs: true,
+		websiteDir: 'website',
+	},
+	'hcp-docs': {
+		/**
+		 * ✅ Initial migration attempt: SEEMS TO WORK
+		 *
+		 * Maybe worth noting: versioned docs is not enabled for `hcp-docs`.
+		 * `branchForLatest` is set to `main`. We treat the single version
+		 * as `v0.0.x` in our version metadata in the current content API:
+		 * https://content.hashicorp.com/api/content/hcp-docs/version-metadata?partial=true
+		 */
+		assetDir: 'public/img',
+		contentDir: 'content',
+		dataDir: 'data',
+		productSlug: 'hcp',
+		semverCoerce: semver.coerce,
+		versionedDocs: false,
+		websiteDir: '.',
+	},
+	nomad: {
+		/**
+		 *  🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
+		 *
+		 * Fails for v0.12.x (and likely earlier) with error:
+		 * `nomad/website/content: No such file or directory`
+		 * This likely indicates that older versions of docs have a different
+		 * directory structure that needs to be accounted for. Need to confirm.
+		 */
+		assetDir: 'public/img',
+		basePaths: ['api-docs', 'intro', 'docs', 'commands', 'plugins', 'tools'],
+		contentDir: 'content',
+		dataDir: 'data',
+		productSlug: 'nomad',
+		semverCoerce: semver.coerce,
+		versionedDocs: true,
+		websiteDir: 'website',
+	},
+	packer: {
+		/**
+		 *  🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
+		 *
+		 * Fails for v1.5.6 (and likely earlier) with error:
+		 * `packer/website/content: No such file or directory`
+		 * This likely indicates that older versions of docs have a different
+		 * directory structure that needs to be accounted for. Need to confirm.
+		 */
+		/**
+		 * TODO: for Packer, will probably need to do _something_ to sort out
+		 * the Packer plugin documentation. We didn't fully complete the migration
+		 * to Packer integrations, so I think there might still be plugin docs
+		 * we need to fetch from third-party repos?
+		 *
+		 * Or this may be a non-issue, I'm not actually sure.
+		 */
+		assetDir: 'public/img',
+		basePaths: ['docs', 'guides'],
+		contentDir: 'content',
+		dataDir: 'data',
+		productSlug: 'packer',
+		semverCoerce: semver.coerce,
+		versionedDocs: true,
+		websiteDir: 'website',
+	},
 	'terraform-enterprise': {
 		/**
 		 * ✅ Initial migration attempt: SEEMS TO WORK
@@ -426,27 +430,28 @@ export const PRODUCT_CONFIG = {
 		versionedDocs: true,
 		websiteDir: 'website',
 	},
-	// vagrant: {
-	// 	/**
-	// 	 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
-	// 	 *
-	// 	 * Fails for v2.2.15 (and likely earlier) with error:
-	// 	 * `vagrant/website/content: No such file or directory`
-	// 	 * This likely indicates that older versions of docs have a different
-	// 	 * directory structure that needs to be accounted for. Need to confirm.
-	// 	 * See note at top of this document on `pages` directories for details.
-	// 	 *
-	// 	 * TODO: revisit `exact` patch setup for Vagrant. Is it necessary?
-	// 	 * See: https://gist.github.com/zchsh/f123819e5d0005f14fff3a518bcade35
-	// 	 */
-	// 	assetDir: 'public',
-	// 	contentDir: 'content',
-	// 	dataDir: 'data',
-	//  productSlug: 'vagrant',
-	// 	semverCoerce: semver.coerce,
-	//  versionedDocs: true,
-	// 	websiteDir: 'website',
-	// },
+	vagrant: {
+		/**
+		 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
+		 *
+		 * Fails for v2.2.15 (and likely earlier) with error:
+		 * `vagrant/website/content: No such file or directory`
+		 * This likely indicates that older versions of docs have a different
+		 * directory structure that needs to be accounted for. Need to confirm.
+		 * See note at top of this document on `pages` directories for details.
+		 *
+		 * TODO: revisit `exact` patch setup for Vagrant. Is it necessary?
+		 * See: https://gist.github.com/zchsh/f123819e5d0005f14fff3a518bcade35
+		 */
+		assetDir: 'public/img',
+		basePaths: ['docs', 'intro', 'vagrant-cloud', 'vmware'],
+		contentDir: 'content',
+		dataDir: 'data',
+		productSlug: 'vagrant',
+		semverCoerce: semver.coerce,
+		versionedDocs: true,
+		websiteDir: 'website',
+	},
 	vault: {
 		/**
 		 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions

@@ -1,0 +1,252 @@
+---
+page_title: Security model
+description: >-
+  Review the security model for HCP Vault Radar.
+---
+
+# Security model
+
+HCP Vault Radar helps DevOps and security teams tackle the risk of secret
+exposure by detecting unmanaged and leaked secrets.
+Information provided in this document is an extension of the [HashiCorp Cloud
+Platform (HCP) security model](/hcp/docs/hcp/security).
+
+## Identity model and personas
+
+HCP has general grouping of roles with pre-configured permissions to give access
+control management. Vault Radar uses various role types defined in [HCP's
+organization level role and permission
+definition](/hcp/docs/hcp/iam/access-management#organization). Different
+personas have different Vault Radar use cases; therefore, you should assign an
+appropriate HCP role to each persona.
+
+Broadly speaking, an `admin` can configure a Vault Radar project, including onboarding
+resources, changing configuration, enabling alerts, and viewing
+events. A `contributor` can view events and update the event remediation state. A
+`viewer` can view events. For more details see [Vault Radar permission
+configurations](/hcp/docs/vault-radar/get-started/configure-hcp-user-permissions).
+
+### Security operations
+
+The security operations (SecOps) team members onboard data sources, set up
+alerts, understand security sprawl, generate reports, and assign remediation
+tasks. To perform these tasks, assign each member to the [admin
+role](/hcp/docs/vault-radar/get-started/configure-hcp-user-permissions#add-a-user-for-vault-radar).
+The `admin` role grants broad read/write capabilities and provides the ability
+to onboard new users, delete projects, and configure platform level settings.
+
+### Developer
+
+Developers receive alerts when Vault Radar identifies a secret in a data source.
+They use Vault Radar to identify potential risks in their own workflows
+(such as committing a password or API token in a pull request). They are typically granted the
+[contributor
+role](/hcp/docs/vault-radar/get-started/configure-hcp-user-permissions#add-a-user-for-vault-radar),
+which allows them to view events and update remediation state.
+
+### Vault Radar agent and CLI
+
+The Vault Radar agent and the CLI communicate with Vault Radar in a machine-to-machine
+fashion, and use a [service principal](/hcp/docs/hcp/iam/service-principal) to
+authenticate with HCP. Assign this service principal a fine-grained role that
+provides appropriately-scoped API access. For more details see the [Vault Radar
+agent overview documentation](/hcp/docs/vault-radar/agent/overview).
+
+Agents use the **Vault Radar Agent** role within the **Vault Radar service**, and CLIs
+use the **Vault Radar CLI User** role within the **Vault Radar service**. If
+configured, Agents also have an internal role to enable access to the
+[connect on demand](#hybrid-agent-architecture) system.
+
+### Vault Radar IDE extension
+
+The Vault Radar IDE extension operates independently from the HCP Vault Radar service and does not
+communicate with the service. The extension executes locally from the IDE environment, whether
+on a developer's machine or in a remote development environment.
+
+The IDE extension integrates with HashiCorp Vault to perform two key
+functions:
+
+- Index KVv2 secrets for local correlation with detected risks.
+- Copy Radar-detected risks into Vault for remediation.
+
+#### Vault Indexing
+
+The generated Vault index is stored locally using the VS Code extension's global storage path. The index does
+not contain any credentials, instead it contains a hash of the credential which can be used to
+correlate locally found values from IDE's editor. The extension additionally stores some metadata
+about the location of any value indexed for display purposes. The extension does not send secret
+data to external services, other than to an optionally configured Vault cluster.
+
+#### Telemetry
+The extension reports anonymous usage data to Azure Application Insights following
+the VS Code telemetry guidelines. You can set the telemetry collection settings to
+`off` through the IDE settings. Refer to the [VS Code extension telemetry
+documentation](https://code.visualstudio.com/docs/configure/telemetry).
+
+#### GitHub Copilot Remediation
+The extension sends a prompt with metadata about the discovered secret to GitHub Copilot. This metadata
+includes the location of the secret within the document, along with the secret's location
+in Vault. It does not include the secret value.
+
+## High-level architecture
+
+Vault Radar is a multi-tenant software-as-a-service (SaaS) application, running
+in HCP, with appropriate security boundaries for scanning data from
+customer-provided third-party resources.
+
+### Vault Radar architecture
+
+All customer interactions first flow
+through a load balancer, which distributes the requests to an orchestrator running
+the Vault Radar service. Requests go through authentication and authorization
+process to receive a signed token before forwarded to the set of services that
+enable the scanning infrastructure.
+
+![Diagram showing the user flow for Vault Radar. The Vault Radar user
+accesses the HCP Portal from the public internet, and routes through a load
+balancer to the Vault Radar
+service.](/img/docs/vault-radar/digram-security-model.png)
+
+Users authenticate within the bounds of an [HCP
+project](/hcp/docs/hcp/admin/projects) (also referred to as a “tenant”). Vault
+Radar utilizes [HCP’s role-based access control
+(RBAC)](/hcp/docs/hcp/iam/access-management#roles-permissions) to constrain what
+users can access based on their assigned role.
+
+The Vault Radar product can scan publicly available data sources such as GitHub
+Cloud, Confluence, and other services for
+[risks](/hcp/docs/vault-radar#use-cases). It performs these scans using
+short-lived per-tenant-scoped workers, and stores only the metadata about the
+risks found per tenant, and never stores the risks themselves.
+
+When Vault Radar performs a scan of customer data, it assembles a configuration about how to
+perform the scan and places the scan into an appropriate pipeline. Vault Radar
+then provisions a scan worker to perform the job, and gives the worker the
+configuration. The configuration includes the access token/credentials from Vault Radar’s
+secrets manager. The worker will then pull the relevant content
+to scan from the appropriate customer data source.
+
+When scanning a source code repository, Vault Radar clones a minimal amount of data to a
+temporal directory. It deletes the cloned repository when the scan
+completes. Vault Radar scans other resources directly in memory when appropriate.
+
+### Hybrid agent architecture
+
+The hybrid agent architecture is generally similar to the [Vault Radar
+architecture](#vault-radar-architecture). The notable exception is that scanning
+operations occur inside of a customer’s network via an agent pool. The agent
+pool stores data source credentials locally (Vault Radar does not have
+access to them).
+
+The agent pool utilizes APIs that require special permissions. The Vault Radar
+service provisions a special service principal which provides the permissions
+for the agent pool. The service principal uses a fine-grained role that allows
+access to the Vault Radar agent APIs.
+
+Some tasks require an agent to act as a proxy for API requests from the Vault Radar
+service to third-party data sources within a customer’s network, such as GitHub
+Enterprise or Confluence. These API requests are subject to an allow list
+enforced locally by the agent, which HCP cannot override. Any requests
+not permitted by the allow list are automatically rejected. Since these requests
+often require authentication credentials, it is important to note that the Vault Radar
+service does not include or store authentication credentials in the requests it
+proxies. Instead, the agent injects the necessary credentials into the request
+locally before sending it to the target service.
+
+The agent uses two models for communicating with Vault Radar:
+
+- **Poll and report:** Agents poll the Vault Radar service for tasks to complete.
+  They perform these tasks, and upload results back to Vault Radar, where users
+  can interact with the data through the UI.
+
+  In this model Vault Radar tells agents what to do. The agents call out
+  from the customer’s network to gather tasks to perform, and then calling out
+  to report on results.
+
+  Vault Radar uses this model for all scan-type jobs.
+
+- **Connect on demand:** Agents form a persistent outbound connection to
+  Vault Radar. Requests route to the agent through this long-lived,
+  persistent connection. This model can have much less latency than the
+  poll and report model.
+
+  Connect on demand is useful for low-latency tasks that might block UI
+  interactions, such as datasource auto-discovery. This system has additional
+  safeguards built-in:
+
+     - In addition to TLS, each message is individually authenticated and authorized by the receiving agent
+     - Each message has a short time to live (TTL)
+
+## Resource scans
+
+Vault Radar scans resources, then analyzes and classifies all risks found.
+Vault Radar hashes each risk containing potentially sensitive material (e.g. a
+secret) using Argon2id, with a per-customer, N bit randomly-generated salt.
+Vault Radar then uploads metadata about where the risk was located, along with
+this initial Argon2id hash, to the Vault Radar service.
+
+While finalizing the scan, all Argon2id hashes are HMACed using a separate
+per-project private key. Thus, recovery of the original sensitive data is only
+available with access to the original source material. Vault Radar does
+not store raw secret values of scan findings.
+
+## Data storage
+
+As mentioned above, Vault Radar does not store raw secret values. It does,
+however, store various metadata about found risks.
+
+| Object                             | Storage location            | Encryption     |
+|------------------------------------|-----------------------------|----------------|
+| Version control system metadata    | Vault Radar database        | AES-256        |
+| Deep link URL                      | Vault Radar database        | AES-256        |
+| Secret context                     | Vault Radar database        | AES-256        |
+| Integration metadata               | Vault Radar database        | AES-256        |
+| Integration credentials            | HashiCorp Vault             | AES-256        |
+
+_This list is not intended to include all data stored by Vault Radar._
+
+## Threat model
+
+Confidentiality and integrity of communications between Vault Radar, agents,
+and 3rd party systems used by Vault Radar uses end-to-end TLS encryption.
+
+Authorization enforcement for data and actions through the Vault Radar UI or
+APIs (including the Vault Radar CLI) uses RBAC with fine grained roles, and
+every call is authorized.
+
+Vault Radar audits all user actions (and most automated actions). Vault Radar
+inherits platform-level logging through HCP’s audit log. Vault Radar agents provide
+local, detailed operational logs that are accessible via `kubectl` (or however
+you access logs for other deployment methods). Resource scan history is
+available in the Vault Radar UI (Radar >> Resources >> Select a resource >>
+Scans).
+
+Cloud scans run within per-project, ephemeral, and isolated containers.
+
+Vault Radar does not store discovered secrets, but a hashed and
+then HMAC hashed value as well as its metadata.
+
+Vault Radar stores data in a relational database and a secrets manager, with AES-256
+encryption at rest. Radar uses the secrets manager for secrets (such as data
+source credentials for HCP Radar), and the database for risk metadata, queued
+tasks, etc.
+
+Agent scans run locally, with all credentials local, and secrets
+are not sent to the Vault Radar service.
+
+<Note title="What is not a part of the threat model">
+
+Compromise, misconfiguration, or access to external systems such as resources
+scanned by Vault Radar or a secrets manager where secrets are remediated are
+not part of the threat model.
+
+</Note>
+
+## Recommendations for secure use
+
+- Enforce the principle of least privilege on both HCP accounts, upstream systems or downstream secret managers.
+- Implement network level allow list configurations (note that agent includes a
+  default allow list).
+- Enabling the Vault Radar pre-commit hook to avoid sending secrets to git repositories.
+- Sending HCP audit logs to a centralized location (see [audit log
+  streaming](/hcp/docs/hcp/audit-log)).
