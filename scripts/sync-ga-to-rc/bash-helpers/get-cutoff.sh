@@ -24,7 +24,8 @@ if [[ -z ${targetBranch} ]] ; then exit ; fi
 
 cd "${repoRoot}"
 
-# Find the earliest commit we can as the "creation" date
+# Find the earliest commit in the release branch that *is not* in main and use
+# that as the "creation" date
 git fetch origin
 
 dateString=$(

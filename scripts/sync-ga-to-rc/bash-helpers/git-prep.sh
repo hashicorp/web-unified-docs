@@ -41,6 +41,8 @@ else
   git pull > /dev/null 2>&1
 fi
 
+# Create a working branch if the run is meant to update files, otherwise we
+# can do everything in the current branch
 if [[ "${makeUpdate}" == "true" ]] ; then
   # Create a new branch for the changes
   git checkout -B ${prBranch/"<PRODUCT>"/"${productKey}"} > /dev/null 2>&1

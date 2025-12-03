@@ -20,8 +20,8 @@ currDir="$(dirname "$0")"
 
 # Set variables from command line argument
 productKey="${1}" # product slug
-gaFolder="${2}"   # folder for GA docs
-gaBranch="${3}"   # GA doc branch
+gaBranch="${2}"   # GA doc branch
+gaFolder="${3}"   # folder for GA docs
 cutoff="${4}"     # cutoff date
 
 # Bail if any of the command line parameters were omitted
@@ -30,33 +30,41 @@ if [[ -z "${gaFolder}" ]] ; then exit ; fi
 if [[ -z "${gaBranch}" ]] ; then exit ; fi
 if [[ -z "${cutoff}" ]] ; then exit ; fi
 
-# Set the relative path string
-docFolder="content/${productKey}/${gaFolder}"
+# Set the key path strings
+docFolder="${docRoot/'<PRODUCT>'/${productKey}}/${gaFolder}"  # Full path to the GA folder
+filePath="content/${productKey}/${gaFolder}"                  # Relative path to the GA folder
+pathPrefix=${docFolder/"${filePath}"/""}                      # Full path to the repo
 
 cd "${repoRoot}"
 
 git fetch origin 
 
-# Loop through each file in the version folder
+# Loop through the list of deleted files in the git log
 IFS=$'\n'
 for file in $(
     git log                 \
     --diff-filter=D         \
     --name-only             \
     --summary ${gaBranch} | \
-    grep "${docFolder}"
+    grep "${filePath}"
 ); do
 
+  # The git log provides the relative path as the "name" but we want to record
+  # the full path
+  fullFilePath="${pathPrefix}${file}"
   rawCommitDate=$(
-    git log --all -1 --pretty=format:%ad  --date=iso -- "${file}"
+    git log --all -1 --pretty=format:%ad  --date=iso -- "${fullFilePath}"
   )
 
   lastCommit=$(getUTCDate "${rawCommitDate}")
 
   # If the last commit happened after the cutoff, add it to the results
+  # We check the last commit time to avoid repeatedly deleting files that
+  # the user may have reinstated since the last run
+  
   if [[ "${cutoff}" < "${lastCommit}" ]]; then
-    shortName=${file/"${docFolder}"/""}
-    jsonString=${jsonTemplate/'<FILENAME>'/"${file}"}
+    shortName=${fullFilePath/"${filePath}"/""}
+    jsonString=${jsonTemplate/'<FILENAME>'/"${fullFilePath}"}
     jsonString=${jsonString/'<SHORTNAME>'/"${shortName}"}
     jsonString=${jsonString/'<COMMIT>'/"${lastCommit}"}
     echo ${jsonString}
