@@ -64,7 +64,10 @@ const product = flags['-slug']
 const gaVersion = flags['-ga']
 const rcVersion = flags['-rc']
 const docTag = flags['-tag']
-const gaBranch = flags['-branch']
+const targetBranch = flags['-branch']
+	? flags['-branch']
+	: product + '/' + rcVersion
+const gaBranch = flags['-gaBranch']
 const overrideDate = flags['-date']
 const rcMerged = flags['-merged']
 const makePR = flags['-pr'] && !flags['-merged']
@@ -87,7 +90,7 @@ const isoOverrideDate =
 // Build constants for the RC branch and the versioned folder names
 
 // If the RC docset is merged, use the GA branch as the RC branch
-const rcBranch = rcMerged ? gaBranch : product + '/' + rcVersion
+const rcBranch = rcMerged ? gaBranch : targetBranch
 
 // Ignore the doc tag if the flag value is empty
 const rcTag = docTag == '' ? docTag : ' (' + docTag + ')'
@@ -147,7 +150,7 @@ console.log('      - GA branch:   ' + gaBranch)
 console.log('      - GA version:  ' + gaVersion)
 console.log('      - RC branch:   ' + rcBranch)
 console.log('      - RC version:  ' + rcVersion)
-console.log('      - Work branch: ' + prBranch)
+//console.log('      - Work branch: ' + prBranch)
 
 // Prep: Get the exclusion list
 console.log('\n    Loading exclusions for ' + product)

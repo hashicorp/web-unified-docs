@@ -22,12 +22,43 @@ Note: This is a WIP. Any suggestions are welcome.
 
 1. Are there any sentances that start with `this`?
 
+1. Can you search HashiCorp documentation and tutorials for resources that will help users learn the content in this document?
+
 
 ## SEO prompts
 
-1. Check this document for how well it will do in SEO. Give suggestions for, title, description, first paragraph, and H2. Anything else that's major.
-Rules: 
-- I can’t put a tool in the main title (such as Terraform or AWS). 
-- Can’t use passive voice
-- Use sentence case
-- Give me three options for the title.
+Analyze this document's SEO optimization and provide specific recommendations.
+
+**Areas to evaluate and improve:**
+1. **Title** - Provide 3 options that:
+   - Use sentence case
+   - Avoid colons
+   - Exclude tool names (e.g., Terraform, AWS) from the main title
+   - Are compelling and clear
+   
+2. **Meta description** - Suggest an optimized version (150-160 characters)
+
+3. **First paragraph** - Recommend improvements for:
+   - Hook/engagement
+   - Keyword placement
+   - Clarity of value proposition
+
+4. **H2 headings** - Evaluate current headings and suggest improvements
+   - Tool-specific names (Terraform, AWS) are allowed in H2s only when the section content is tool-specific
+   - Otherwise, keep headings generic and benefit-focused
+
+6. **Discription for images and videos** - Review the tags for images and videos:
+   - Review descriptions for videos and images
+5. **Other critical SEO elements** - Flag any major issues with:
+   - Keyword usage and density
+   - Content structure and readability
+   - Internal linking opportunities
+   - Image alt text (if applicable)
+
+**Writing requirements:**
+- Eliminate all passive voice
+- Use sentence case throughout
+- Prioritize clarity and user intent
+
+**Output format:**
+For each recommendation, explain why the change improves SEO and provide specific before/after examples where helpful.
