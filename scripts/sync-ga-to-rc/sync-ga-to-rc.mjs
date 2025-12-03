@@ -102,6 +102,7 @@ const gaDeltaFile = `${logDir}/ga-delta.txt`
 const gaOnlyFile = `${logDir}/ga-only.txt`
 const rcDeltaFile = `${logDir}/rc-delta.txt`
 const safeListFile = `${logDir}/safe-list.txt`
+const gaDeletesFile = `${logDir}/delete-list.txt`
 const manualReviewFile = `${logDir}/manual-review.txt`
 const productRecord = `${recordDir}/last-run-${product}.txt`
 const logPrep = `${helpersDir}/log-prep.sh '${logDir}' '${recordDir}'`
@@ -110,7 +111,9 @@ const getCutoff = `${helpersDir}/get-cutoff.sh '${rcBranch}'`
 const getGADelta = `${helpersDir}/get-file-delta.sh '${product}' '${gaFolder}' '<CUTOFF>'`
 const getRCDelta = `${helpersDir}/get-file-delta.sh '${product}' '${rcFolder}' '<CUTOFF>'`
 const getGAOnly = `${helpersDir}/only-in-ga.sh '${product}' '${gaFolder}' '${rcFolder}'`
+const getGADeletes = `${helpersDir}/deleted-in-ga.sh '${product}' '${gaBranch}' '${gaFolder}' '<CUTOFF>'`
 const updateRCDocs = `${helpersDir}/update-rc-docs.sh '${product}' '${gaFolder}' '${rcFolder}' '${safeListFile}'`
+const deleteRCDocs = `${helpersDir}/delete-rc-docs.sh '${product}' '${gaFolder}' '${rcFolder}' '${gaDeletesFile}'`
 const createPR = `${helpersDir}/create-pr.sh '${product}' '${rcFolder}' '${rcBranch}' '<PR_BRANCH>'`
 
 // Initialize some variables
@@ -118,9 +121,10 @@ var bashOutput = '' // Reusable variable used to catch the output from bash help
 var lastRunDate = '' // Last run date in the product record file
 var rcCutoffDate = '' // Cutoff date for comparing file updates, either the RC branch creation or the provided override date
 var gaOnly = [] // Set of docs that only exist in the GA folder
+var gaDeletes = [] // Set of docs that were deleted in the GA folder
 var gaDelta = [] // GA docs with a last commit date after the cutoff
 var rcDelta = [] // RC docs with a last commit date after the cutoff
-var noDelta, noNewFiles
+var noDelta, noNewFiles, noDeletes
 const dateIndex = 0
 const fileIndex = 1
 
@@ -266,6 +270,27 @@ writeToFile(
 	noNewFiles ? 'No new GA files since ' + rcCutoffDate : gaOnly,
 )
 
+/*** GET FILE SETS: GA-deletes ************************************************/
+process.stdout.write('    Building GA delete list ')
+
+// Call helpers/deleted-in-ga.sh to build GA-deletes
+const gaDeletesRaw = flattenArray(
+	await runBashCmdAsync(getGADeletes.replace('<CUTOFF>', rcCutoffDate)),
+)
+
+gaDeletes = processJson(gaDeletesRaw)
+noDeletes = Object.keys(gaDeletes).length == 0
+console.log(
+	'[' +
+		Object.keys(gaDeletes).length.toString().padStart(2, 0) +
+		'] ' +
+		gaDeletesFile,
+)
+writeToFile(
+	gaDeletesFile,
+	noNewFiles ? 'No new GA deletions since ' + rcCutoffDate : gaDeletes,
+)
+
 /*** GET FILE SETS: Safe and conflict lists ***********************************/
 console.log('    Comparing GAΔ and RCΔ')
 
@@ -348,10 +373,23 @@ writeConflictList(
 
 // Only update things locally if the user provided the update or pr flag
 if (updateFiles) {
-	console.log('    Updating RC files')
-	bashOutput = await runBashCmdAsync(updateRCDocs, true)
+	console.log('    Running updates')
 
-	if (Object.keys(manualReview).length > 0) {
+	if (noUpdates) {
+		console.log('      - No safe files to update')
+	} else {
+		console.log('      - Updating RC files')
+		bashOutput = await runBashCmdAsync(updateRCDocs, true)
+	}
+
+	if (noDeletes) {
+		console.log('      - No deletions needed')
+	} else {
+		console.log('      - Deleting RC files')
+		bashOutput = await runBashCmdAsync(deleteRCDocs, true)
+	}
+
+	if (!noConflicts) {
 		console.log(
 			'    To make additional changes, review potential conflicts in: ' +
 				manualReviewFile,
