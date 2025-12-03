@@ -17,7 +17,7 @@ const acceptedReleaseStages = ['alpha', 'beta', 'rc']
  * based on the content directory structure, and return it.
  *
  * @param {string} contentDir
- * @returns {object} versionMetadata
+ * @returns {Promise<Record<string, unknown>} versionMetadata
  */
 export async function gatherVersionMetadata(contentDir) {
 	// Set up the version metadata object, this is what we'll return
