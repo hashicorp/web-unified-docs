@@ -97,3 +97,29 @@ export function getArgs() {
 
 	return flags
 }
+
+export function getFileNames() {
+	var outputFiles = {
+		gaDelta: 'ga-delta.txt',
+		gaOnly: 'ga-only.txt',
+		rcDelta: 'rc-delta.txt',
+		safeList: 'safe-list.txt',
+		deleteList: 'delete-list.txt',
+		conflictList: 'manual-review.txt',
+	}
+
+	var dataFiles = {
+		lastRun: 'last-run-<PRODUCT>.txt',
+	}
+
+	var markdownFiles = {
+		help: 'help.txt',
+		warning: 'warning.txt',
+	}
+
+	return {
+		output: outputFiles,
+		data: dataFiles,
+		markdown: markdownFiles,
+	}
+}

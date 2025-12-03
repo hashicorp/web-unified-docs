@@ -20,6 +20,7 @@
 myDir=$(pwd)
 repoName="web-unified-docs"
 localReposDir=${myDir%"/${repoName}"*}
+outputDir="${myDir}/output"
 
 repoRoot="${localReposDir}/${repoName}"  # Local root directory of the repo
 docRoot="${repoRoot}/content/<PRODUCT>"  # Root directory of product docs

@@ -54,4 +54,3 @@ for file in $(find "${docFolder}" -type f); do
   fi
 done
 
-
