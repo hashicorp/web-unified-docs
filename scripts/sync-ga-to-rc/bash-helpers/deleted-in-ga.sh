@@ -1,7 +1,7 @@
-# 
+#
 # Copyright (c) HashiCorp, Inc.
 # SPDX-License-Identifier: BUSL-1.1
-# 
+#
 # ------------------------------------------------------------------------------
 #
 # Get deleted files in GA
@@ -30,16 +30,16 @@ if [[ -z "${gaFolder}" ]] ; then exit ; fi
 if [[ -z "${gaBranch}" ]] ; then exit ; fi
 if [[ -z "${cutoff}" ]] ; then exit ; fi
 
-# Set the relative path string
-docFolder="${docRoot/'<PRODUCT>'/${productKey}}/${gaFolder}"
-filePath="content/${productKey}/${gaFolder}"
-pathPrefix=${docFolder/"${filePath}"/""}
+# Set the key path strings
+docFolder="${docRoot/'<PRODUCT>'/${productKey}}/${gaFolder}"  # Full path to the GA folder
+filePath="content/${productKey}/${gaFolder}"                  # Relative path to the GA folder
+pathPrefix=${docFolder/"${filePath}"/""}                      # Full path to the repo
 
 cd "${repoRoot}"
 
-git fetch origin 
+git fetch origin
 
-# Loop through each file in the version folder
+# Loop through the list of deleted files in the git log
 IFS=$'\n'
 for file in $(
     git log                 \
@@ -49,6 +49,8 @@ for file in $(
     grep "${filePath}"
 ); do
 
+  # The git log provides the relative path as the "name" but we want to record
+  # the full path
   fullFilePath="${pathPrefix}${file}"
   rawCommitDate=$(
     git log --all -1 --pretty=format:%ad  --date=iso -- "${fullFilePath}"
@@ -57,6 +59,9 @@ for file in $(
   lastCommit=$(getUTCDate "${rawCommitDate}")
 
   # If the last commit happened after the cutoff, add it to the results
+  # We check the last commit time to avoid repeatedly deleting files that
+  # the user may have reinstated since the last run
+
   if [[ "${cutoff}" < "${lastCommit}" ]]; then
     shortName=${fullFilePath/"${filePath}"/""}
     jsonString=${jsonTemplate/'<FILENAME>'/"${fullFilePath}"}

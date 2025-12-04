@@ -1,7 +1,7 @@
-# 
+#
 # Copyright (c) HashiCorp, Inc.
 # SPDX-License-Identifier: BUSL-1.1
-# 
+#
 # ------------------------------------------------------------------------------
 # Delete RC docs
 #
@@ -18,18 +18,19 @@ currDir="$(dirname "$0")"
 productKey="${1}"  # root folder for product docs (product key)
 gaFolder="${2}"    # GA doc folder name
 rcFolder="${3}"    # RC doc folder name
-deleteList="${4}"    # file of GA paths we can overwrite in RC
+deleteList="${4}"  # file of GA paths we can overwrite in RC
 
 # Bail if any of the command line parameters were omitted
 if [[ -z "${productKey}" ]] ; then exit ; fi
 if [[ -z "${gaFolder}" ]]   ; then exit ; fi
 if [[ -z "${rcFolder}" ]]   ; then exit ; fi
-if [[ -z "${deleteList}" ]]   ; then exit ; fi
+if [[ -z "${deleteList}" ]] ; then exit ; fi
 
 cd "${repoRoot}"
 
 while read line; do
 
+  # Grab the filename and generate the cooresponding RC path
   gaPath=$(echo "${line}" | awk -F " " '{print $3}')
   rcPath=${gaPath/${gaFolder}/${rcFolder}}
 
@@ -37,6 +38,7 @@ while read line; do
   if [[ "${gaPath}" != *"/content/${productKey}/"* ]]; then continue ; fi
   if [[ "${rcPath}" != *"/content/${productKey}/"* ]]; then continue ; fi
 
+  # If the file exists in the RC folder, delete it
   if [[ -f "${rcPath}" ]] ; then  rm -r "${rcPath}" ; fi
 
 done < "${outputDir}/${deleteList}"

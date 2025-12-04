@@ -98,8 +98,18 @@ export function getArgs() {
 	return flags
 }
 
+/**
+ * @method getFileNames
+ *
+ * The getArgs function returns a static map of file names for use elsewhere.
+ * I got tired of having to update hardcoded names to make sure everything
+ * stayed consistent so now it is easy to compare the names here against the
+ * names used in the definitions file for the bash helpers to make sure everyone
+ * is using the same file names
+ */
+
 export function getFileNames() {
-	var outputFiles = {
+	const outputFiles = {
 		gaDelta: 'ga-delta.txt',
 		gaOnly: 'ga-only.txt',
 		rcDelta: 'rc-delta.txt',
@@ -108,11 +118,12 @@ export function getFileNames() {
 		conflictList: 'manual-review.txt',
 	}
 
-	var dataFiles = {
+	const dataFiles = {
 		lastRun: 'last-run-<PRODUCT>.txt',
+		exclude: 'exclude.json',
 	}
 
-	var markdownFiles = {
+	const markdownFiles = {
 		help: 'help.txt',
 		warning: 'warning.txt',
 	}

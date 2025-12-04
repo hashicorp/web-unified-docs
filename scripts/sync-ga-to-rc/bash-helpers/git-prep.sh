@@ -1,7 +1,7 @@
-# 
+#
 # Copyright (c) HashiCorp, Inc.
 # SPDX-License-Identifier: BUSL-1.1
-# 
+#
 # ------------------------------------------------------------------------------
 #
 # Git prep
@@ -35,12 +35,14 @@ if [[ "${gaBranch}" == "${rcBranch}" ]] ; then
   # Sync to the latest updates in the GA branch if the branches are the same
   git checkout ${gaBranch} > /dev/null 2>&1
   git pull > /dev/null 2>&1
-else  
+else
   # Sync to the latest updates in the RC branch if the branches are different
   git checkout ${rcBranch} > /dev/null 2>&1
   git pull > /dev/null 2>&1
 fi
 
+# Create a working branch if the run is meant to update files, otherwise we
+# can do everything in the current branch
 if [[ "${makeUpdate}" == "true" ]] ; then
   # Create a new branch for the changes
   git checkout -B ${prBranch/"<PRODUCT>"/"${productKey}"} > /dev/null 2>&1
@@ -50,4 +52,4 @@ if [[ "${makeUpdate}" == "true" ]] ; then
 else
   # The run is read-only (dry run) so we do not bother with a new branch
   echo 'Dry run, no branch needed'
-fi 
+fi
