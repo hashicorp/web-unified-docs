@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-import { SemVer, gt, gte, lt, lte, eq } from 'semver'
+import { gt, gte, lt, lte, eq, coerce } from 'semver'
 import { removeNodesInRange } from './ast-utils.mjs'
 
 /**
@@ -23,8 +23,10 @@ export function processVaultBlock(directive, block, tree, options) {
 		return // Skip vault directive in a non-vault file
 	}
 
-	// Parse Vault version directive pattern: >=v1.21.x
-	const versionMatch = directive.match(/^(<=|>=|<|>|=)v(\d+\.\d+\.x)$/)
+	// Parse Vault version directive pattern: >=v1.21.x or >=v2.x
+	const versionMatch =
+		directive.match(/^(<=|>=|<|>|=)v(\d+\.\d+\.x)$/) ||
+		directive.match(/^(<=|>=|<|>|=)v(\d+\.x)$/)
 	if (versionMatch) {
 		processVaultVersionDirective(versionMatch, block, tree, options)
 		return
@@ -76,7 +78,8 @@ function normalizeSemver(version) {
 	// just split by white space and take the first part
 	version = version.split(' ')[0]
 	const normalized = version.replace(/^v/, '').replace(/\.x$/, '.0')
-	return new SemVer(normalized)
+	// Use semver.coerce to handle versions like "v2.x" for proper version sorting
+	return coerce(normalized)
 }
 
 /**
