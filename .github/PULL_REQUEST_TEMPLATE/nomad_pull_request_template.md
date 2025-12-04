@@ -36,7 +36,8 @@ no backport labels.  If you backported your code PR to previous branches, update
 the docs content in the corresponding folders. For example, if the current
 release is 1.10.x and you backported your code to 1.9.x and 1.8.x, update the docs content
 in the v1.10.x, v1.9.x, and v1.8.x folders. If you can't find the relevant files in previous versions,
-add a note in the description so that the tech writer can update previous versions.
+add a note to your PR description. The tech writer will help ensure that the previous versions
+receive the correct updates.
 -->
 
 ## Description
