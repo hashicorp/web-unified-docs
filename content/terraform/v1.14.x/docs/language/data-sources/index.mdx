@@ -1,0 +1,190 @@
+---
+page_title: Query data from external sources
+description: You can fetch data from APIs, external Terraform backends, function outputs, and other Terraform configurations. Learn how to query data sources.
+---
+
+# Query infrastructure data
+
+You can instruct Terraform to fetch data from a range of data sources, including APIs, external Terraform workspaces, and function outputs. Dynamically fetching data makes your configuration more flexible. 
+
+> **Hands-on:** Try the [Query Data Sources](/terraform/tutorials/configuration-language/data-sources) tutorial.
+
+## Introduction
+
+Many providers make data sources available when you install the provider. Data sources fetch data from the provider, but do not create or modify resources. To access data from a data source, configure the `data` block and specify its arguments. Refer to your provider's documentation for details about the arguments available for the data source. 
+
+The provider queries the data source according to the configuration. You can reference the your infrastructure's data using the data source's attributes in other parts of your configuration. 
+
+The `data` block supports expressions and other dynamic Terraform language features. You can also use many of the arguments built into Terraform that control how Terraform creates the data object. Refer to the following topics for details:
+
+- [`data` block reference](/terraform/language/block/data)
+- [Expressions](/terraform/language/expressions)
+- [Meta-arguments](/terraform/language/meta-arguments) 
+
+### Structure
+
+Each data block is associated with a single data source. Terraform can only perform read operations on data sources. 
+
+### Data source behavior
+
+Terraform attempts to query data sources during the planning phase, but depending on details in the configuration it may defer reading until the apply phase. When Terraform must defer reading data sources, it indicates it in the plan output.
+
+Terraform may defer reading the data source to the apply phase when at least one of the arguments refers to a resource attribute or other value that Terraform cannot predict during the plan phase. Terraform may not be able to predict values in the following scenarios:
+
+- The `data` block configuration directly depends on a Terraform-managed resource that is configured to change in the current plan.
+- The `data` block configuration has [custom conditions](#custom-condition-checks) that directly or indirectly depend on a Terraform-managed resource configured to change in the current plan.
+- Arguments in a `data` block refer to values that must be computed during the apply phase.
+
+When the data source depends on other objects, query results are unknown during the plan operation. As a result, Terraform can't provision resources that reference the fetched values until the apply phase. Refer to [Configure dependencies](#dependencies) for more information about dependencies. 
+
+#### References to computed values
+
+When data source arguments refer to computed values, Terraform cannot read from the data source until all of its arguments are defined. In this case, Terraform defers refreshing the data source until the apply phase and all interpolated data source attributes show as `computed` in the plan.
+
+#### References to non-computed values
+
+When arguments in a `data` block refer to values that don't have to be computed, Terraform reads the data source and updates its state during Terraform's refresh phase. By default, Terraform refreshes prior to creating a plan. This ensures that the fetched data is available for use during planning and that the diff shows the real values returned.
+
+### Specialized data sources
+
+Some data sources are specialized utilities that generate data that only exists during the Terraform operation. Terraform re-calculates the data on consecutive plan operations. The following data sources are examples of specialized, local-only data sources: 
+
+- The [`data "template_file"`](https://registry.terraform.io/providers/hashicorp/template/latest/docs/data-sources/file) data source renders a template from a template file. Install the HashiCorp `template` provider to query this data source.   
+- The 
+[`data "local_file"`](https://registry.terraform.io/providers/hashicorp/local/latest/docs/data-sources/file) data source reads local files. Install the HashiCorp `local` provider to query this data source. 
+- The [`data "iam_policy_document"`](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) data source renders AWS IAM policies. Install the `aws` provider to query this data source.
+
+## Requirements
+
+We recommend using Terraform 0.13 and newer to add `depends_on` arguments to `data` blocks. In Terraform 0.12 and earlier, adding `depends_on` arguments to `data` blocks forces Terraform to defer the read operation to the apply phase, which may result in unintended behavior.
+
+## Declare a data source
+
+Add a `data` block to your configuration and specify the necessary arguments per the provider documentation. You must include the type of data source and a label to use for the returned data. Refer to the provider documentation for the types of data sources available. The following example declares an `aws_ami` data source named `example`: 
+
+```hcl
+data "aws_ami" "example" {
+  # . . .
+}
+```
+
+The `data` block instructs Terraform to read from the `aws_ami` data source and export the result to an object named `example`. To reference the returned data, use the `data.<TYPE>.<LABEL>.<ATTRIBUTE>` syntax, for example, `data.aws_ami.example.id`. Refer to [Reference queried data](#reference-queried-data) for more information.
+
+## Configure query constraints
+
+Configure arguments in the body of the `data` block to define query constraints. Refer to your provider's documentation for available arguments. The following example instructs Terraform to query the [`aws_ami`](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/ami) data source. The query is constrained to the most recent AMI owned by the current user and has a `Name` tag key set to `app-server` and a `Tested` tag key set to `true`.
+
+
+```hcl
+data "aws_ami" "example" {
+  most_recent = true
+  owners = ["self"]
+  tags = {
+    Name   = "app-server"
+    Tested = "true"
+  }
+}
+```
+
+You can use expressions and other dynamic Terraform language features to configure constraints. Refer to [Expressions](/terraform/language/expressions) for more information
+
+## Configure how Terraform creates the data resource
+
+You can use many of the built-in Terrafrom arguments, referred to as [meta-arguments](/terraform/language/meta-arguments), to control how Terraform creates the data source. Refer to the [`data` block reference](/terraform/language/block/data) for information about all `data` block configuration options. 
+
+### Dependencies
+
+Terraform correctly detects dependencies in your configuration, even when indirectly reference a Terraform-managed resource values through a `local` value. There may be times when you want to ensure that Terraform creates resources in a specific order. In those cases, you can add a [`depends_on` argument](/terraform/language/block/data#depends_on) to a `data` block to modify the dependency graph. The `depends_on` argument configures Terraform to defer querying the data source until after it finishes operations for the specified dependency.
+
+### Custom condition checks 
+
+You can add `precondition` and `postcondition` blocks to `data` blocks to specify assumptions and guarantees about how the data source operates. In the following example, the `postcondition` ensures that the AMI data source is tagged with `nomad-server`:
+
+``` hcl
+data "aws_ami" "example" {
+  id = var.aws_ami_id
+
+  lifecycle {
+    postcondition {
+      condition     = self.tags["Component"] == "nomad-server"
+      error_message = "tags[\"Component\"] must be \"nomad-server\"."
+    }
+  }
+}
+```
+
+Custom conditions return useful information about errors earlier and in context so that you can more easily diagnose configuration issues. They also help future maintainers understand the configuration design and intent. Refer to [Custom Condition Checks](/terraform/language/expressions/conditionals#conditions) for more details.
+
+### Multiple instances
+
+You can add [`count`](/terraform/language/block/data#count) and [`for_each`](/terraform/language/block/data#for_each) meta-arguments to `data` blocks  to create multiple instances of the data source. 
+
+Terraform reads each instance of the data source and indexes the results separately. You can refer to the data returned by each data source independently using the `data.<NAME>[<KEY>]` syntax. The value for `<KEY>` is a number starting at `1` for the `count` meta argument. For the `for_each` argument, the `<KEY>` is the value for each item in the collection.
+
+For example, `data.azurerm_resource_group.rg["a_group"]` refers to an instance of the `data.azurrm_resource_group` data source named `rg` created off of the `a_group` key. Refer to the [`data` block reference](/terraform/language/block/data) for more information.  
+
+### Alternate provider configurations
+
+You can specify alternate provider configurations with an alias and refer to them in a `data` block. Terraform uses the specified provider configuration when querying the data source. Refer to the [`provider` meta-argument](/terraform/language/block/data#provider) for more information.
+
+In the following example, the `data` block uses a provider configuration named `aws.west`:
+
+```hcl
+provider "aws" {
+  region = "us-east-1"
+}
+
+provider "aws" {
+  alias  = "uswest1"
+  region = "us-west-1"
+}
+
+data "aws_ami" "web" {
+  provider = aws.uswest1
+
+  # ...
+}
+```
+
+## Reference queried data
+
+Use the `data.<TYPE>.<LABEL>.<ATTRIBUTE>` syntax to reference data resource attributes elsewhere in your configuration. In the following example, Terraform creates an AWS instance using the AMI ID fetched from `data.aws_ami.web.id`:
+
+```hcl
+resource "aws_instance" "web" {
+  ami           = data.aws_ami.web.id
+  instance_type = "t1.micro"
+}
+```
+
+## Complete example
+
+In the following example, the Terraform queries the data source for the latest available AMI that is tagged with `Component = web`:
+
+```hcl
+
+data "aws_ami" "web" {
+  filter {
+    name   = "state"
+    values = ["available"]
+  }
+
+  filter {
+    name   = "tag:Component"
+    values = ["web"]
+  }
+
+  most_recent = true
+}
+```
+
+The `data` block creates an `aws_ami` data source named `web`. The combination of type and name must be unique. You can use address prefix `data.aws_ami.web` to reference data fetched from the source. The address is based on the `data.<TYPE>.<NAME>.<ATTRIBUTE>` reference expression syntax. The following example `resource` block uses the ID retrieved from the `aws_ami` in the `ami` argument:
+
+```hcl
+resource "aws_instance" "web" {
+  ami           = data.aws_ami.web.id
+  instance_type = "t1.micro"
+}
+```
+
+The `filter` blocks, and the arguments within them, and the `most_recent` argument are specific to the `aws_ami` provider. Refer to the [AWS provider documenation](https://registry.terraform.io/providers/hashicorp/aws/latest) in the Terraform registry for details. 

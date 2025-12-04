@@ -91,6 +91,7 @@ export const PRODUCT_CONFIG = {
 		 * directory structure that needs to be accounted for. Need to confirm.
 		 */
 		assetDir: 'public/img',
+		basePaths: ['api-docs', 'docs', 'commands'],
 		contentDir: 'content',
 		dataDir: 'data',
 		productSlug: 'consul',
@@ -125,7 +126,7 @@ export const PRODUCT_CONFIG = {
 		 * directory structure that needs to be accounted for. Need to confirm.
 		 */
 		assetDir: 'public/img',
-		basePaths: ['api-docs', 'docs', 'commands', 'plugins', 'tools'],
+		basePaths: ['api-docs', 'intro', 'docs', 'commands', 'plugins', 'tools'],
 		contentDir: 'content',
 		dataDir: 'data',
 		productSlug: 'nomad',
@@ -429,27 +430,28 @@ export const PRODUCT_CONFIG = {
 		versionedDocs: true,
 		websiteDir: 'website',
 	},
-	// vagrant: {
-	// 	/**
-	// 	 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
-	// 	 *
-	// 	 * Fails for v2.2.15 (and likely earlier) with error:
-	// 	 * `vagrant/website/content: No such file or directory`
-	// 	 * This likely indicates that older versions of docs have a different
-	// 	 * directory structure that needs to be accounted for. Need to confirm.
-	// 	 * See note at top of this document on `pages` directories for details.
-	// 	 *
-	// 	 * TODO: revisit `exact` patch setup for Vagrant. Is it necessary?
-	// 	 * See: https://gist.github.com/zchsh/f123819e5d0005f14fff3a518bcade35
-	// 	 */
-	// 	assetDir: 'public',
-	// 	contentDir: 'content',
-	// 	dataDir: 'data',
-	//  productSlug: 'vagrant',
-	// 	semverCoerce: semver.coerce,
-	//  versionedDocs: true,
-	// 	websiteDir: 'website',
-	// },
+	vagrant: {
+		/**
+		 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
+		 *
+		 * Fails for v2.2.15 (and likely earlier) with error:
+		 * `vagrant/website/content: No such file or directory`
+		 * This likely indicates that older versions of docs have a different
+		 * directory structure that needs to be accounted for. Need to confirm.
+		 * See note at top of this document on `pages` directories for details.
+		 *
+		 * TODO: revisit `exact` patch setup for Vagrant. Is it necessary?
+		 * See: https://gist.github.com/zchsh/f123819e5d0005f14fff3a518bcade35
+		 */
+		assetDir: 'public/img',
+		basePaths: ['docs', 'intro', 'vagrant-cloud', 'vmware'],
+		contentDir: 'content',
+		dataDir: 'data',
+		productSlug: 'vagrant',
+		semverCoerce: semver.coerce,
+		versionedDocs: true,
+		websiteDir: 'website',
+	},
 	vault: {
 		/**
 		 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
