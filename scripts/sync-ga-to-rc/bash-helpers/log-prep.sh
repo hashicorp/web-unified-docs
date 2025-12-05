@@ -41,4 +41,5 @@ touch ${logDir}/ga-delta.txt
 touch ${logDir}/ga-only.txt
 touch ${logDir}/rc-delta.txt
 touch ${logDir}/safe-list.txt
+touch ${logDir}/delete-list.txt
 touch ${logDir}/manual-review.txt
