@@ -36,6 +36,7 @@ The following table lists the content directories for products currently availab
 
 | Product                    | Directory                              | Versioned? |
 | :------------------------- | :------------------------------------- | :--------: |
+| Boundary                   | `./content/boundary`                   | &#9989;    |
 | Consul                     | `./content/consul`                     | &#9989;    |
 | HCP                        | `./content/hcp-docs`                   | &#10060;   |
 | HCP Vault Dedicated        | `./content/hcp-docs`                   | &#10060;   |
