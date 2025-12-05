@@ -1,0 +1,265 @@
+---
+layout: docs
+page_title: Run Vault as zcx cluster
+description: >-
+  Step-by-step guide to deploying a secure 3-node Vault cluster inside zCX using HAProxy and TLS.
+---
+
+# Run Vault as zcx cluster
+
+This guide walks through deploying a fully secured 3-node HashiCorp Vault Enterprise cluster
+on IBM z/OS Container Extensions (zCX). The setup uses three independent zCX instances, 
+each running Vault with its own unique IP address. A Layer-4 HAProxy load balancer sits 
+in front to distribute traffic, and end-to-end TLS encryption is applied across all Vault nodes 
+and the load balancer to ensure secure communication throughout the cluster.
+
+![Vault zcx Cluster Deployment](/img/run-as-zcx-cluster.png)
+
+## Step 1: Container Image Deployment
+Pull the official Vault Enterprise container image on all three zCX nodes.
+   ```shell-session
+   $ docker pull hashicorp/vault-enterprise:1.19.12-ent
+   ```
+Verify image integrity
+   ```shell-session
+   $ docker images | grep vault-enterprise
+   ```
+
+## Step 2: Persistent Volume Creation
+Create Docker volumes for configuration and data persistence on each node.
+
+Create volume for Vault data storage (Raft backend, audit logs)
+   ```shell-session
+   $ docker volume create vault-data
+   ```
+Create volume for Vault configuration files
+   ```shell-session
+   $ docker volume create vault-config
+   ```
+Verify volume creation
+   ```shell-session
+   $ docker volume ls | grep vault
+   ```
+
+Volume Mount Points:
+- vault-data: /vault/data (stores Raft snapshots, encrypted storage backend)
+- vault-config: /vault/config.d (HCL configuration files)
+
+## Step 4: Vault Configuration File Setup
+Create Vault configuration on each node with node-specific parameters:
+
+Access config volume
+   ```shell-session
+   $ docker run --rm -it -v vault-config:/vault alpine sh
+   ```
+
+Create configuration file for Leader and follower vault
+```hcl
+   ui = true
+disable_mlock = true
+
+# --- Listener Configuration ---
+listener "tcp" {
+  address              = "0.0.0.0:8200"
+  tls_disable          = 0
+  tls_cert_file        = "/vault/vault.pem"
+  tls_key_file         = "/vault/vault.key"
+  tls_client_ca_file   = "/vault/ca.pem"
+}
+
+# --- Raft Storage (Leader Node) ---
+storage "raft" {
+  path    = "/vault/data"
+  node_id = "<LEADER_NODE_ID>"  # e.g., "node1"
+
+  # No retry_join block needed for leader
+}
+
+# --- Cluster Networking ---
+api_addr     = "https://<LEADER_IP>:8200"
+cluster_addr = "https://<LEADER_IP>:8201"
+```
+Exposes Vault on 8200 for API and UI traffic.
+
+- tls_disable = 0 → TLS is enabled (mandatory for secure cluster communication).
+
+### Certificates:
+
+- vault.pem → TLS certificate
+
+- vault.key → Private key
+
+- ca.pem → CA used to validate mutual TLS between nodes
+
+This ensures encrypted traffic between Vault clients, HAProxy, and other nodes.
+
+Similarly create configuration for Follower Vault Nodes
+
+```hcl
+ui = true
+disable_mlock = true
+
+# --- Listener Configuration ---
+listener "tcp" {
+  address            = "0.0.0.0:8200"
+  tls_disable        = 0
+  tls_cert_file      = "/vault/vault.pem"
+  tls_key_file       = "/vault/vault.key"
+  tls_client_ca_file = "/vault/ca.pem"
+}
+
+# --- Raft Storage (Follower Node) ---
+storage "raft" {
+  path    = "/vault/data"
+  node_id = "<FOLLOWER_NODE_ID>"   # e.g., "node2" or "node3"
+
+  retry_join {
+    leader_api_addr      = "https://<LEADER_IP>:8200"
+    leader_ca_cert_file  = "/vault/ca.pem"
+  }
+}
+
+# --- Cluster Networking ---
+api_addr     = "https://<FOLLOWER_IP>:8200"
+cluster_addr = "https://<FOLLOWER_IP>:8201"
+```
+
+## Step 5: Vault Container Deployment
+Deploy Vault container on each zCX node.
+
+Set Vault Enterprise license (export before running)
+```plaintext
+export VAULT_LICENSE="02MV4UU43BK5HGYYTOJZWFQMTMNNEWU33JJVVGC..."  # Replace with actual license
+```
+
+Deploying the Vault Enterprise Container on zCX
+```shell-session
+$ docker run -d \
+  --name vault-zcx \
+  --cap-add IPC_LOCK \
+  --user root \
+  -p 8200:8200 \
+  -p 8201:8201 \
+  -v vault-config:/vault/config.d \
+  -v vault-data:/vault/data \
+  -e VAULT_LICENSE="$VAULT_LICENSE" \
+  hashicorp/vault-enterprise:1.19.12-ent \
+  server -config=/vault/config.d/
+```
+Verify container status
+```shell-session
+docker ps | grep vault-zcx
+docker logs vault-zcx
+```
+
+## Cluster Initialization and Unsealing
+Initialize Vault Cluster (Run on ONE node only)
+
+Initialize the Leader Vault
+```shell-session
+docker exec -it vault-zcx vault operator init \
+  -format=json > /secure/location/vault-init.json
+```
+Extract unseal keys and root token
+```shell-session
+cat /secure/location/vault-init.json
+```
+Unseal Vault on All Nodes
+
+Unseal with 3 different keys (repeat on each node) 
+```shell-session
+docker exec -it vault-zcx vault operator unseal <UNSEAL_KEY_1>
+docker exec -it vault-zcx vault operator unseal <UNSEAL_KEY_2>
+docker exec -it vault-zcx vault operator unseal <UNSEAL_KEY_3>
+```
+Remember to unseal with same key that you got from leader
+Check seal status
+```shell-session
+ vault status
+``` 
+
+## HAProxy Load Balancer 
+
+In a Vault cluster, the load balancer plays a critical role in directing traffic to the active leader
+while maintaining full security. In this example, we are using an HAProxy Layer-4 (TCP) load balancer,
+but you can use other load balancers as well depending on your environment and requirements.
+
+- End-to-end TLS encryption: L4 simply forwards TCP connections, so Vault’s TLS traffic remains fully encrypted without terminating SSL at the load balancer.
+
+- Simpler configuration: No need to manage certificates on HAProxy or re-encrypt traffic.
+
+- Leader-aware routing: Vault handles leader redirects natively, so the load balancer doesn’t need to interpret HTTP or Vault protocols.
+
+- Better performance: Forwarding raw TCP reduces overhead, giving lower latency and higher throughput.
+
+### Configuration
+```plaintext
+global
+    maxconn 4096
+    log stdout format raw local0
+
+defaults
+    mode tcp                     # TCP mode for Layer-4 forwarding
+    timeout connect 5s
+    timeout client 1m
+    timeout server 1m
+    log global
+
+# --- Stats Page (HTTPS) ---
+frontend stats
+    bind *:8404 ssl crt /usr/local/etc/haproxy/haproxy.pem
+    mode http
+    stats enable
+    stats uri /stats
+    stats refresh 10s
+    stats admin if TRUE
+
+# --- Vault API Frontend (TLS Passthrough) ---
+frontend vault_api
+    bind *:8200                 # Listen on Vault API port
+    mode tcp                    # Layer-4 forwarding to preserve TLS
+    default_backend vault_nodes
+
+# --- Vault Nodes Backend ---
+backend vault_nodes
+    mode tcp
+    balance roundrobin          # Simple load distribution among nodes
+    option tcp-check            # Health check at TCP level
+    server node1 <NODE1_IP>:8200 check
+    server node2 <NODE2_IP>:8200 check
+    server node3 <NODE3_IP>:8200 check
+```
+Copy config to volume
+```shell-session
+docker cp haproxy.cfg haproxy-tmp:/usr/local/etc/haproxy/haproxy.cfg
+```
+Deploy haproxy load-balancer
+```shell-session
+docker run -d \
+  --name vault-lb \
+  -p 8300:8200 \
+  -p 8404:8404 \
+  -v haproxy-config:/usr/local/etc/haproxy \
+  ibmz-hc-registry.ngrok.dev/haproxy:3.2
+```
+
+## Verify Cluster
+List all the leader and follower nodes
+```shell-session
+vault operator raft list-peers
+```
+
+Test container health on browser using haproxy endpoint
+```plaintext
+https://<LOAD_BALANCER_IP>:<PORT>/stats
+```
+
+
+Test Secure Vault Connection and View Raft Configuration
+```shell-session
+curl \
+  --cacert <CA_CERT_FILE> \
+  --header "X-Vault-Token: <VAULT_TOKEN>" \
+  https://<LOAD_BALANCER_IP>:<PORT>/v1/sys/storage/raft/configuration \
+  | jq .
+```
