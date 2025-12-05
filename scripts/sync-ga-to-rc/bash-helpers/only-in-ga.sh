@@ -1,5 +1,5 @@
 # 
-# Copyright (c) HashiCorp, Inc.
+# Copyright IBM Corp. 2025
 # SPDX-License-Identifier: BUSL-1.1
 # 
 # ------------------------------------------------------------------------------
@@ -26,8 +26,8 @@ if [[ -z "${gaFolder}" ]] ; then exit ; fi
 if [[ -z "${rcFolder}" ]] ; then exit ; fi
 
 # Build the absolute path for the GA and RC folders
-gaPath="${docRoot/'<PRODUCT>'/"${productKey}"}/"${gaFolder}""
-rcPath="${docRoot/'<PRODUCT>'/"${productKey}"}/"${rcFolder}""
+gaPath="${docRoot/'<PRODUCT>'/${productKey}}/${gaFolder}"
+rcPath="${docRoot/'<PRODUCT>'/${productKey}}/${rcFolder}"
 
 cd "${repoRoot}"
 
