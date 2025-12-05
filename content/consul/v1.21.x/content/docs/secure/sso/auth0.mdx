@@ -10,6 +10,7 @@ description: >-
 This page describes the process to configure Consul to use Auth0 for single sign-on (SSO) in the Consul UI and CLI using OpenID Connect (OIDC).
 
 OIDC authentication is useful when you want to deploy SSO widely in your organization and do not want to manage access with individual Consul ACL tokens. Once implemented, SSO will enable an interactive login procedure that can be initiated from either the Consul UI or the command line.
+
 ## Introduction
 
 These instructions configure Auth0 as an identity provider, so that Consul can use data in Auth0 to automatically grant permissions for Consul ACL. This approach unifies the user permissions grants without creating individual user tokens or manually defining individual permissions for different users.
@@ -29,20 +30,26 @@ These instructions configure Auth0 as an identity provider, so that Consul can u
 
 ## Configure Auth0 application
 
-Open the **Settings** tab in the [Auth0 App dashboard](https://manage.auth0.com/#/).
+In order to configure an Auth0 application for Consul, you will first need to take note of your Consul agent address. This is the address that you use to access Consul, either via the UI or the CLI. To fetch it, run the following command:
+
+```shell-session
+$ echo $CONSUL_HTTP_ADDR
+http://localhost:8500
+```
+
+In this case, the Consul agent address is `localhost`, running on the default port `8500`. Next, open the **Settings** tab in the [Auth0 App dashboard](https://manage.auth0.com/#/).
 
 ![Auth0 UI configure application to set callback URLs](/img/sso/auth0-configure-callback-urls.png)
 
 In the **Allowed Callback URLs** field, enter the following:
 
 ```uri
-http://<consul_agent_address>:8550/oidc/callback,
-http://<consul_agent_address>:8500/ui/oidc/callback
+http://localhost:8550/oidc/callback,
+http://localhost:8500/ui/oidc/callback
 ```
 
-The `http://<consul_agent_address>:8550/oidc/callback` address is for logins with the CLI `consul login -type=oidc -method=oidc` command.
-
-The `http://<consul_agent_address>:8500/ui/oidc/callback` is for logins with the Consul UI.
+The `http://localhost:8550/oidc/callback` address is for logins with the CLI `consul login -type=oidc -method=oidc` command.
+The `http://localhost:8500/ui/oidc/callback` is for logins with the Consul UI.
 
 <Note>
 
@@ -52,22 +59,26 @@ The `http://<consul_agent_address>:8500/ui/oidc/callback` is for logins with the
 
 ## Create Auth0 users and metadata
 
-In the Auth0 dashboard for your app, on the sidebar, select **Users & Roles > Users** and click on _Create User_
+In the Auth0 dashboard for your app, on the sidebar, select **Users & Roles > Users** and click on _Create User_.
 
 ![Auth0 UI create user form](/img/sso/auth0-create-user.png)
 
-Create the user with username/password authentication. Then edit the user's record and assign `user_metadata` and `app_metadata` such as:
-
-```json
-{
 The data you associate with Auth0 may change depending on your existing configurations. This example uses `user_metadata` and `app_metadata` to configure Auth0.
 
 ```json
 {
-// user_metadata (end-user editable)
-"first_name": "Kara",
-"last_name": "Danvers"
+  // user_metadata (end-user editable)
+  "first_name": "Kara",
+  "last_name": "Danvers"
 }
+```
+
+```json
+{
+  // app_metadata (end-user not editable)
+  "roles": ["engineering"]
+}
+```
 
 In Auth0, create a new rule with the following javascript function:
 
@@ -89,24 +100,10 @@ This example uses `http://consul.internal` to namespace the claims that are not 
 
 ## Enable the OIDC auth method for Consul
 
-Retrieve the following application parameters from Auth0:
-
-- **Domain** 
-- **Client ID**
-- **Client Secret**
-
-Make sure you replace:
-
-- `<AUTH0_DOMAIN>`
-- `<AUTH0_CLIENT_ID>`
-- `<AUTH0_CLIENT_SECRET>`
-
-with the values you retrieved from the Auth0 dashboard.
+In order to enable the OIDC auth method for Consul, you need to create a new auth method configuration that points to your Auth0 application. The contents of this configuration file depend on which way you supply it to Consul. You can either use the Consul CLI or the HTTP API.
 
 <Tabs>
-<Tab heading="CLI command">
-
-Create a configuration file named `auth-method-config.json` for the new auth method.
+<Tab group="cli" heading="CLI command">
 
 <CodeBlockConfig filename="auth-method-config.json">
 
@@ -132,20 +129,8 @@ Create a configuration file named `auth-method-config.json` for the new auth met
 
 </CodeBlockConfig>
 
-Apply the configuration using the `consul acl auth-method` CLI command.
-
-```shell-session
-$ CONSUL_HTTP_TOKEN=root \
-  consul acl auth-method create -type oidc \
-    -name auth0 \
-    -max-token-ttl=5m \
-    -config=@auth-method-config.json
-```
-
 </Tab>
-<Tab heading="API call using cURL">
-
-Create a configuration file named`auth-method-config.json` for the new auth method.
+<Tab group="api" heading="API call using cURL">
 
 <CodeBlockConfig filename="auth-method-config.json">
 
@@ -176,11 +161,36 @@ Create a configuration file named`auth-method-config.json` for the new auth meth
 
 </CodeBlockConfig>
 
+</Tab>
+</Tabs>
+
+The configuration file above contains variables that you need to replace with the values from your Auth0 application. Make sure you replace:
+
+- `<AUTH0_DOMAIN>`
+- `<AUTH0_CLIENT_ID>`
+- `<AUTH0_CLIENT_SECRET>`
+
+After you create the configuration file, apply it to Consul for the new auth method to take effect. Note that the configuration file contents differ slightly depending on whether you use the CLI or the HTTP API.
+
+<Tabs>
+<Tab group="cli" heading="CLI command">
+
+Apply the configuration using the `consul acl auth-method` CLI command.
+
+```shell-session
+$ consul acl auth-method create -type oidc \
+    -name auth0 -max-token-ttl=5m \
+    -config=@auth-method-config.json
+```
+
+</Tab>
+<Tab group="api" heading="API call using cURL">
+
 Apply the configuration using the `acl/auth-method` API endpoint.
 
 ```shell-session
-$ curl -sL --header 'x-consul-token: root' --request PUT \
-   http://localhost:8500/v1/acl/auth-method \
+$ curl -sL --header "x-consul-token: $CONSUL_HTTP_TOKEN" \
+   --request PUT http://localhost:8500/v1/acl/auth-method \
    --data @auth-method-config.json
 ```
 
@@ -194,8 +204,7 @@ After you configure the auth method, you can automate permissions grants to user
 Next, create a Consul ACL role and token to associate with the Auth0 method. The following command creates an ACL role named `eng-ro` and assigns it to users in the Auth0 `engineering` group.
 
 ```shell-session
-$ CONSUL_HTTP_TOKEN=root \
-   consul acl binding-rule create \
+$ consul acl binding-rule create \
        -method=auth0 \
        -bind-type=role \
        -bind-name=eng-ro \
@@ -219,8 +228,7 @@ Every user with `engineering` in their `app_metadata` in Auth0 will be assigned 
 If you want to grant users permissions to register services, use a service type binding. The following example grants users in the `engineering` group the ability to register a service using a token that is dynamically generated from their own name.
 
 ```shell-session
-$ CONSUL_HTTP_TOKEN=root \
-   consul acl binding-rule create \
+$ consul acl binding-rule create \
        -method=auth0 \
        -bind-type=service \
        -bind-name='dev-${value.first_name}-${value.last_name}' \
