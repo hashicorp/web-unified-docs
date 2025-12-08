@@ -20,8 +20,8 @@ export async function batchPromises(
 	batchName,
 	arrayToBatch,
 	asyncMapFn,
-	{ batchSize = 16, loggingEnabled = true } = {
-		batchSize: 16,
+	{ batchSize = 64, loggingEnabled = true } = {
+		batchSize: 64,
 		loggingEnabled: true,
 	},
 ) {
