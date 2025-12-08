@@ -19,24 +19,26 @@ Use redirects for fun and profit!
 
 ## Background
 
-If you move an existing article in the documentation, you **must** add redirects. Otherwise, links break between versions, and users can't find the information they are looking for, even if it exists in the version they are viewing!
+If you move an existing article in the documentation, you **must** add redirects. Otherwise, links break between versions and users can't find the information they are looking for, even if it exists in the version they are viewing!
 
-If your product **is not** versioned (e.g., a cloud product), add **one** redirect to reroute any request from the old path to the new path:
+If your product **is not** versioned (e.g., a cloud product), add **one** redirect:
 
 ![Diagram showing a single path change and a single redirect](../images/single_redirect_diagram.png)
 
-This redirect ensures any requests to the old URL land on the new URL. We also recommend going into the content itself and fixing and static text references to use the new URL. To learn more, refer to [Example redirects](#example-redirects).
+This redirect ensures any requests to the old URL properly re-route to the new URL. To learn more, refer to [Example redirects](#example-redirects).
 
 If your product **is** versioned, add **three** redirects to reroute requests to the appropriate path in each version:
 
 ![Diagram showing three redirects for a versioned product move](../images/three_redirects_per_versioned_move.png)
 
 The three redirects cover the following use cases:
-1. The first redirect covers whatever the latest version URL. Every product's latest documentation version does not a version path (i.e., `/product/<path>`).
-1. The second redirect covers older versions. In previous versions, you need to ensure that the URL resolves to whatever the path used to be (i.e., `/product/:version/<old_path>`).
-1. The third redirects resolves the current and future versions. In newer versions, you need to ensure that the URL resolves to whatever the path is now (i.e., `/product/:version/<new_path>`).
+1. Redirects the latest version URL, which has no version path (i.e., `/product/<path>`).
+2. Redirects older versions to the old path (i.e., `/product/:version/<old_path>`).
+3. Redirects current and future versions to the new path (i.e., `/product/:version/<new_path>`).
 
 Refer to [Versioned redirects](#versioned-redirects) for a full example.
+
+We also recommend that you replace references to the old URL with the new URL in your documentation text.
 
 ## Definitions
 
@@ -289,32 +291,32 @@ In the following example, you want to update the URL `/terraform/state` to `/ter
 
 ![Diagram showing example of versioned redirects](../images/versioned_redirects_example.png)
 
-To properly redirect this URL change, you need three redirects:
-1. The first redirect is for the current version, you need `/terraform/state` to redirect to the new `/terraform/state/concepts` URL.
-1. The second redirect is backward-facing. In v1.9.x and below, you want users to land on the original URL `/terraform/<v1.9.x and below>/state`.
-1. The third redirect is forward-facing. In v1.10.x and above, you want users to land on the new URL `/terraform/<v1.10.x and above>/concepts/state`.
+To properly cover this URL change, you need three redirects:
+1. The first redirect is for the latest version, you want `/terraform/state` to redirect to the new `/terraform/state/concepts` URL.
+1. The second redirect is backward-facing. In v1.9.x and below, you want users to land on the original URL `/terraform/<v1.9.x_and_below>/state`.
+1. The third redirect is forward-facing. In v1.10.x and above, you want users to land on the new URL `/terraform/<v1.10.x_and_above>/concepts/state`.
 
 The following redirects would handle all of the changes between versions:
 
 ```json
-// Latest version of the documentation
+// Latest version of the documentation with no version in the path
 {
   "source": "/terraform/state",
   "destination": "/terraform/concepts/state",
   "permanent": true
 }
 
-// Back-facing redirect that redirects to the old path in v1.9.x and below:
+// Back-facing redirect that reroutes to the old path in v1.9.x and below:
 {
-  "source": "/terraform/:version(v1\\.[0-9]\\.x)/concepts/state",
-  "destination": "/terraform/:version/state",
+  "source": "/terraform/v:version(1\\.[0-9]\\.x)/concepts/state",
+  "destination": "/terraform/v:version/state",
   "permanent": true
 }
 
 // Forward-facing redirect that redirects to the new path v1.10 and above:
 {
-  "source": "/terraform/:version(v1\\.(?:1[0-9]|[2-9][0-9])\\.x)/state",
-  "destination": "/terraform/:version/concepts/state",
+  "source": "/terraform/v:version(v1\\.(?:1[0-9]|[2-9][0-9])\\.x)/state",
+  "destination": "/terraform/v:version/concepts/state",
   "permanent": true
 }
 ```
