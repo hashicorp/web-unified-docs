@@ -291,7 +291,7 @@ In the following example, you want to update the URL `/terraform/state` to `/ter
 
 ![Diagram showing example of versioned redirects](../images/versioned_redirects_example.png)
 
-To properly cover this URL change, you need three redirects:
+To properly cover the change to `terraform/concepts/state`, you need three redirects:
 1. A redirect for the latest version to map `/terraform/state` to the new
    `/terraform/state/concepts` URL.
 1. A backward-facing redirect to map URLs for v1.9.x and below so users land on
