@@ -1,5 +1,5 @@
 /**
- * Copyright (c) HashiCorp, Inc.
+ * Copyright IBM Corp. 2025
  * SPDX-License-Identifier: BUSL-1.1
  */
 
@@ -91,6 +91,7 @@ export const PRODUCT_CONFIG = {
 		 * directory structure that needs to be accounted for. Need to confirm.
 		 */
 		assetDir: 'public/img',
+		basePaths: ['api-docs', 'docs', 'commands'],
 		contentDir: 'content',
 		dataDir: 'data',
 		productSlug: 'consul',
@@ -125,7 +126,7 @@ export const PRODUCT_CONFIG = {
 		 * directory structure that needs to be accounted for. Need to confirm.
 		 */
 		assetDir: 'public/img',
-		basePaths: ['api-docs', 'docs', 'commands', 'plugins', 'tools'],
+		basePaths: ['api-docs', 'intro', 'docs', 'commands', 'plugins', 'tools'],
 		contentDir: 'content',
 		dataDir: 'data',
 		productSlug: 'nomad',
@@ -443,6 +444,7 @@ export const PRODUCT_CONFIG = {
 		 * See: https://gist.github.com/zchsh/f123819e5d0005f14fff3a518bcade35
 		 */
 		assetDir: 'public/img',
+		basePaths: ['docs', 'intro', 'vagrant-cloud', 'vmware'],
 		contentDir: 'content',
 		dataDir: 'data',
 		productSlug: 'vagrant',

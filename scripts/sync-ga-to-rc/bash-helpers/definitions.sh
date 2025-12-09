@@ -1,5 +1,5 @@
 # 
-# Copyright (c) HashiCorp, Inc.
+# Copyright IBM Corp. 2025
 # SPDX-License-Identifier: BUSL-1.1
 # 
 # ------------------------------------------------------------------------------
@@ -20,6 +20,7 @@
 myDir=$(pwd)
 repoName="web-unified-docs"
 localReposDir=${myDir%"/${repoName}"*}
+outputDir="${myDir}/output"
 
 repoRoot="${localReposDir}/${repoName}"  # Local root directory of the repo
 docRoot="${repoRoot}/content/<PRODUCT>"  # Root directory of product docs
@@ -32,6 +33,30 @@ rcDocs=""   # Set in helper from command line arguments; for example, "${docRoot
 gaDocs=""   # Set in helper from command line arguments; for example, "${docRoot}/v1.20.x"
 
 jsonTemplate='{"file": "<FILENAME>", "shortname": "<SHORTNAME>", "commit": "<COMMIT>"}'
-prBranch="bot/<PRODUCT>-ga-to-rc-sync-$(date +%Y%m%d)"
+prBranch="bot/<PRODUCT>-ga-to-rc-sync-$(date +%Y%m%d-%H%M%S)"
 prTitle="<PRODUCT> GA to RC auto-sync"
 prBody="Draft PR created by \`sync-ga-to-rc.mjs\` to push recent GA updates to the RC release branch for <PRODUCT>"
+
+
+# Helper function to convert an ISO time string to UTC
+#
+function getUTCDate {
+ 
+  local dateString="${1}"
+  local myShell="${SHELL}"
+  local zBash="/bin/zsh"
+  local uBash="/bin/bash"
+  local unixTime
+
+  # Bail if any of the command line parameters were omitted
+  if [[ -z "${dateString}" ]] ; then return; fi
+
+  # The date command in zbash (standard shell for MacOS) is wildly different
+  # from standard bash, so we convert differently based on the shell
+  if [[ "${myShell}" == "${zBash}" ]] ; then
+    unixTime=$(date -j -f '%Y-%m-%d %H:%M:%S %z' "${dateString}" +'%s')
+    echo $(date -j -u -r ${unixTime} +'%Y-%m-%d %H:%M:%S')
+  else
+    echo $(date -u  +'%Y-%m-%d %H:%M:%S' -d "${dateString}")
+  fi
+}
