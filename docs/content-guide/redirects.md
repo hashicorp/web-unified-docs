@@ -19,7 +19,7 @@ Use redirects for fun and profit!
 
 ## Background
 
-If you move an existing article in the documentation, you **must** add redirects. Otherwise, links break between versions and users cannot find the information they are looking for, even if it exists in the version they are viewing.
+If you move an existing article in the documentation, you **must** add redirects. Otherwise, links break between versions and users cannot find the information they are looking for, even if it exists in the version they are viewing. Additionally, we also recommend replacing references to the previous URL with your new URL in your documentation text.
 
 If your product **is not** versioned (e.g., a cloud product), add **one** redirect:
 
@@ -38,7 +38,6 @@ The three redirects cover the following use cases:
 
 Refer to [Versioned redirects](#versioned-redirects) for a full example.
 
-We also recommend that you replace references to the old URL with the new URL in your documentation text.
 
 ## Definitions
 
