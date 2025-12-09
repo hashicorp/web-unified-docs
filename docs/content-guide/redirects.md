@@ -33,8 +33,8 @@ If your product **is** versioned, add **three** redirects to reroute requests to
 
 The three redirects cover the following use cases:
 1. Redirects the latest version URL, which has no version path (i.e., `/product/<path>`).
-2. Redirects older versions to the old path (i.e., `/product/:version/<old_path>`).
-3. Redirects current and future versions to the new path (i.e., `/product/:version/<new_path>`).
+1. Redirects any requests of the new path to the previous path in older versions (i.e., `/product/:old_version/<old_path>`).
+1. Redirects any requests from the old path to the new URL in versions where that new path exists (i.e., `/product/:new_version/<old_path>`).
 
 Refer to [Versioned redirects](#versioned-redirects) for a full example.
 
