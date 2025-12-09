@@ -19,13 +19,13 @@ Use redirects for fun and profit!
 
 ## Background
 
-If you move an existing article in the documentation, you **must** add redirects. Otherwise, links break between versions and users can't find the information they are looking for, even if it exists in the version they are viewing!
+If you move an existing article in the documentation, you **must** add redirects. Otherwise, links break between versions and users cannot find the information they are looking for, even if it exists in the version they are viewing.
 
 If your product **is not** versioned (e.g., a cloud product), add **one** redirect:
 
 ![Diagram showing a single path change and a single redirect](../images/single_redirect_diagram.png)
 
-This redirect ensures any requests to the old URL properly re-route to the new URL. To learn more, refer to [Example redirects](#example-redirects).
+The single redirect ensures any requests to the old URL properly re-route to the new URL. To learn more, refer to [Example redirects](#example-redirects).
 
 If your product **is** versioned, add **three** redirects to reroute requests to the appropriate path in each version:
 
@@ -292,11 +292,15 @@ In the following example, you want to update the URL `/terraform/state` to `/ter
 ![Diagram showing example of versioned redirects](../images/versioned_redirects_example.png)
 
 To properly cover this URL change, you need three redirects:
-1. The first redirect is for the latest version, you want `/terraform/state` to redirect to the new `/terraform/state/concepts` URL.
-1. The second redirect is backward-facing. In v1.9.x and below, you want users to land on the original URL `/terraform/<v1.9.x_and_below>/state`.
-1. The third redirect is forward-facing. In v1.10.x and above, you want users to land on the new URL `/terraform/<v1.10.x_and_above>/concepts/state`.
+1. A redirect for the latest version to map `/terraform/state` to the new
+   `/terraform/state/concepts` URL.
+1. A backward-facing redirect to map URLs for v1.9.x and below so users land on
+   the original URL: `/terraform/<v1.9.x_and_below>/state`.
+1. A forward-facing redirect to map URLs for v1.10.x and above so users land on
+   the new URL `/terraform/<v1.10.x_and_above>/concepts/state`.
 
-The following redirects would handle all of the changes between versions:
+The following redirects handle all the situations as users change
+between content versions:
 
 ```json
 // Latest version of the documentation with no version in the path
