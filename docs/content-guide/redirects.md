@@ -38,7 +38,6 @@ The three redirects cover the following use cases:
 
 Refer to [Versioned redirects](#versioned-redirects) for a full example.
 
-
 ## Definitions
 
 - **Docset** - A collection of docs associated with a specific product and
