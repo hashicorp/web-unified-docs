@@ -6,23 +6,30 @@ The information in this file applies generally to all product documentation in t
 
 For more specific guidance about contributing to an individual product's docs, refer to the `README` in the product's directory.
 
+just a test change
+
 ## Table of Contents
 
-- [We welcome contributions](#we-welcome-contributions)
-- [Repository structure](#repository-structure)
-  - [Versioned content](#versioned-content)
-  - [Upcoming releases](#upcoming-releases)
-- [Contributor workflows](#contributor-workflows)
-  - [Update existing documentation](#update-published-documentation)
-  - [Upcoming minor release](#upcoming-minor-release-documentation)
-  - [Upcoming major release](#upcoming-major-release-documentation)
-- [Edit markdown content](#edit-markdown-content)
-   - [Markdown enhancements](#markdown-enhancements)
-- [Edit navigation sidebars](#edit-navigation-sidebars)
-- [Run the site locally](#run-the-site-locally)
-- [Redirects](#redirects)
-- [Troubleshooting](#troubleshooting)
-  - [I cannot see my local changes](#i-cannot-see-my-local-changes)
+- [Contribute to HashiCorp documentation](#contribute-to-hashicorp-documentation)
+  - [Table of Contents](#table-of-contents)
+  - [We welcome contributions](#we-welcome-contributions)
+  - [Repository structure](#repository-structure)
+    - [Versioned content](#versioned-content)
+    - [Branch naming conventions](#branch-naming-conventions)
+    - [Upcoming releases](#upcoming-releases)
+  - [Contributor workflows](#contributor-workflows)
+    - [Before you begin](#before-you-begin)
+    - [Update existing documentation](#update-existing-documentation)
+    - [Upcoming minor release documentation](#upcoming-minor-release-documentation)
+    - [Upcoming major release documentation](#upcoming-major-release-documentation)
+  - [Edit content](#edit-content)
+    - [Markdown enhancements](#markdown-enhancements)
+  - [Navigation sidebars](#navigation-sidebars)
+  - [Preview the site locally](#preview-the-site-locally)
+  - [Redirects](#redirects)
+  - [Troubleshooting](#troubleshooting)
+    - [I cannot see my local changes](#i-cannot-see-my-local-changes)
+  - [FAQs](#faqs)
 
 ## We welcome contributions
 
@@ -248,7 +255,7 @@ release branch as part of the minor/patch version release process.
 Use this workflow when you want to create or update content for an upcoming
 major release. You want to publish this content when the release is cut.
 
-Each product's tech writer team creates a branch for the upcoming major release with the `<product>/<exact_release_number>` format. 
+Each product's tech writer team creates a branch for the upcoming major release with the `<product>/<exact_release_number>` format.
 Additionally, the tech writer creates the upcoming release version folder. Check with your team for
 the name of the branch and folder.
 
@@ -341,7 +348,7 @@ This repository's content guide includes detailed instructions on how to [create
 
 In our documentation, you can use custom markdown enhancements to produce pages with tabs, named code blocks, badges, and alert boxes.
 
-Correct usage of these enhancements is documented in this repo's [content style guide](/style-guide). 
+Correct usage of these enhancements is documented in this repo's [content style guide](/style-guide).
 
 ## Navigation sidebars
 
