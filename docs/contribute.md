@@ -36,6 +36,7 @@ The following table lists the content directories for products currently availab
 
 | Product                    | Directory                              | Versioned? |
 | :------------------------- | :------------------------------------- | :--------: |
+| Boundary                   | `./content/boundary`                   | &#9989;    |
 | Consul                     | `./content/consul`                     | &#9989;    |
 | HCP                        | `./content/hcp-docs`                   | &#10060;   |
 | HCP Vault Dedicated        | `./content/hcp-docs`                   | &#10060;   |
@@ -64,12 +65,6 @@ The following table lists the content directories for products currently availab
 This repository contains documentation for specific versions of some products. For these products, the `./content/<product>` directory contains several sub-directories, each corresponding to a specific version.
 
 ### Branch naming conventions
-
-Tech writers create upcoming release branches using these conventions:
-
-- Upcoming major release branch: `<product>/<exact_release_number>`
-- Upcoming minor release branch:  Most products use the
-  `<product>/<exact_release_number>` format, but Vault uses `vault/<YYYYMM>`
 
 Individual contributors should create working branches using one of the following:
 
@@ -178,16 +173,17 @@ Use this workflow when you want to create or update content for an upcoming
 minor or patch release. You want to publish this content when the release is cut.
 
 Each product's tech writer team creates an assembly branch for the upcoming minor or patch release.
-Check with your team for name of the branch.
+Most products use the `<product>/<exact_release_number>` format, but Vault uses `vault/<YYYYMM>`
+Check with your team for the exact branch name.
 
 1. Clone the repo. We recommend cloning only the upcoming minor release branch and not downloading the history of other branches. This means that you cannot locally check out other branches.
 
    ```shell-session
-   git clone --single-branch <minor_branch_name> git@github.com:hashicorp/web-unified-docs.git
+   git clone --single-branch --branch <minor_branch_name> git@github.com:hashicorp/web-unified-docs.git
    ```
 
    For example, if the upcoming Vault minor release branch is `vault/202511`,
-   you would run `git clone --single-branch vault/202511 git@github.com:hashicorp/web-unified-docs.git`.
+   you would run `git clone --single-branch --branch vault/202511 git@github.com:hashicorp/web-unified-docs.git`.
 
 1. Create your local working branch.
 
@@ -252,18 +248,18 @@ release branch as part of the minor/patch version release process.
 Use this workflow when you want to create or update content for an upcoming
 major release. You want to publish this content when the release is cut.
 
-Each product's tech writer team creates a branch for the upcoming major release
-and also creates the upcoming release version folder. Check with your team for
+Each product's tech writer team creates a branch for the upcoming major release with the `<product>/<exact_release_number>` format. 
+Additionally, the tech writer creates the upcoming release version folder. Check with your team for
 the name of the branch and folder.
 
 1. Clone the repo. We recommend cloning only the upcoming major release branch and not downloading the history of other branches. This means that you cannot locally check out other branches.
 
    ```shell-session
-   git clone --single-branch <major_branch_name> git@github.com:hashicorp/web-unified-docs.git
+   git clone --single-branch --branch <major_branch_name> git@github.com:hashicorp/web-unified-docs.git
    ```
 
    For example, if the upcoming Nomad major release branch is `nomad/2.0.0`,
-   you would run `git clone --single-branch nomad/2.0.0 git@github.com:hashicorp/web-unified-docs.git`.
+   you would run `git clone --single-branch --branch nomad/2.0.0 git@github.com:hashicorp/web-unified-docs.git`.
 
 1. Create your local working branch.
 
