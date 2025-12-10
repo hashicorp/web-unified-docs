@@ -1,0 +1,122 @@
+---
+page_title: 'Plugin Development - Acceptance Testing: State Checks'
+description: >-
+  State Checks are test assertions that can inspect state during a TestStep. Custom State Checks can be implemented.
+---
+
+# Custom State Checks
+
+The package [`statecheck`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-testing/statecheck) also provides the [`StateCheck`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-testing/statecheck#StateCheck) interface, which can be implemented for a custom state check.
+
+The [`statecheck.CheckStateRequest`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-testing/statecheck#CheckStateRequest) contains the current state file, parsed by the [terraform-json package](https://pkg.go.dev/github.com/hashicorp/terraform-json#State).
+
+Here is an example implementation of a state check that asserts that a specific resource attribute has a known type and value:
+
+```go
+package example_test
+
+import (
+	"context"
+	"fmt"
+
+	tfjson "github.com/hashicorp/terraform-json"
+
+	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
+	"github.com/hashicorp/terraform-plugin-testing/statecheck"
+	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
+)
+
+var _ statecheck.StateCheck = expectKnownValue{}
+
+type expectKnownValue struct {
+	resourceAddress string
+	attributePath   tfjsonpath.Path
+	knownValue      knownvalue.Check
+}
+
+func (e expectKnownValue) CheckState(ctx context.Context, req statecheck.CheckStateRequest, resp *statecheck.CheckStateResponse) {
+	var resource *tfjson.StateResource
+
+	if req.State == nil {
+		resp.Error = fmt.Errorf("state is nil")
+	}
+
+	if req.State.Values == nil {
+		resp.Error = fmt.Errorf("state does not contain any state values")
+	}
+
+	if req.State.Values.RootModule == nil {
+		resp.Error = fmt.Errorf("state does not contain a root module")
+	}
+
+	for _, r := range req.State.Values.RootModule.Resources {
+		if e.resourceAddress == r.Address {
+			resource = r
+
+			break
+		}
+	}
+
+	if resource == nil {
+		resp.Error = fmt.Errorf("%s - Resource not found in state", e.resourceAddress)
+
+		return
+	}
+
+	result, err := tfjsonpath.Traverse(resource.AttributeValues, e.attributePath)
+
+	if err != nil {
+		resp.Error = err
+
+		return
+	}
+
+	if err := e.knownValue.CheckValue(result); err != nil {
+		resp.Error = err
+	}
+}
+
+func ExpectKnownValue(resourceAddress string, attributePath tfjsonpath.Path, knownValue knownvalue.Check) statecheck.StateCheck {
+	return expectKnownValue{
+		resourceAddress: resourceAddress,
+		attributePath:   attributePath,
+		knownValue:      knownValue,
+	}
+}
+```
+
+And example usage:
+
+```go
+package example_test
+
+import (
+	"testing"
+
+	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
+	"github.com/hashicorp/terraform-plugin-testing/statecheck"
+	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
+)
+
+func TestExpectKnownValue_CheckState_Bool(t *testing.T) {
+	t.Parallel()
+
+	resource.Test(t, resource.TestCase{
+		// Provider definition omitted.
+		Steps: []resource.TestStep{
+			{
+				// Example resource containing a computed boolean attribute named "computed_attribute"
+				Config: `resource "test_resource" "one" {}`,
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(
+						"test_resource.one",
+						tfjsonpath.New("computed_attribute"),
+						knownvalue.Bool(true),
+					),
+				},
+			},
+		},
+	})
+}
+```
