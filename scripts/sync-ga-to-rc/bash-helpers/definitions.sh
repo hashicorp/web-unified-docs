@@ -1,12 +1,12 @@
-# 
-# Copyright (c) HashiCorp, Inc.
+#
+# Copyright IBM Corp. 2025
 # SPDX-License-Identifier: BUSL-1.1
-# 
+#
 # ------------------------------------------------------------------------------
 #
 # Common values used by the bash helper files
 #
-# The script is meant to run under the scripts/ folder in a local clone of the 
+# The script is meant to run under the scripts/ folder in a local clone of the
 # hashicorp/web-unified-docs repo with the same name.
 #
 # 1. If you cloned the hashicorp/web-unified-docs with a different folder name,
@@ -38,8 +38,10 @@ prTitle="<PRODUCT> GA to RC auto-sync"
 prBody="Draft PR created by \`sync-ga-to-rc.mjs\` to push recent GA updates to the RC release branch for <PRODUCT>"
 
 
+# Helper function to convert an ISO time string to UTC
+#
 function getUTCDate {
- 
+
   local dateString="${1}"
   local myShell="${SHELL}"
   local zBash="/bin/zsh"
@@ -49,6 +51,8 @@ function getUTCDate {
   # Bail if any of the command line parameters were omitted
   if [[ -z "${dateString}" ]] ; then return; fi
 
+  # The date command in zbash (standard shell for MacOS) is wildly different
+  # from standard bash, so we convert differently based on the shell
   if [[ "${myShell}" == "${zBash}" ]] ; then
     unixTime=$(date -j -f '%Y-%m-%d %H:%M:%S %z' "${dateString}" +'%s')
     echo $(date -j -u -r ${unixTime} +'%Y-%m-%d %H:%M:%S')

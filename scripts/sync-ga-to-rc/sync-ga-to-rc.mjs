@@ -1,5 +1,5 @@
 /**
- * Copyright (c) HashiCorp, Inc.
+ * Copyright IBM Corp. 2025
  * SPDX-License-Identifier: BUSL-1.1
  *
  * Sync GA change to RC docset
@@ -9,10 +9,7 @@
  * against unpdates in an unreleased (RC) docset. The default cutoff date is the
  * last run date for the associated product when available and the creation date
  * of the RC release branch otherwise. The script standardizes timestamps to
- * ISO for simplicity but takes the optional override date as a local time.
- *
- * You can also use the script to sync existing docsets, but that is a seconary
- * use case.
+ * UTC for simplicity but takes the optional override date as a local time.
  *
  * @param {String} product      Slug used for the root product content folder
  * @param {String} gaVersion    Folder of the current docset, typically the GA version number
@@ -48,11 +45,12 @@ const resourceList = getFileNames()
 const outputDir = __dirname + '/' + 'output'
 const helpersDir = __dirname + '/' + 'bash-helpers'
 const dataDir = __dirname + '/' + 'data'
-const excludeFile = `${dataDir}/exclude.json`
 const logDir = `${outputDir}`
 const recordDir = `${dataDir}/run-records`
-const warningFile = `${dataDir}/markdown/warning.txt`
-const helpFile = `${dataDir}/markdown/help.txt`
+const markdownDir = `${dataDir}/markdown`
+const excludeFile = `${dataDir}/${resourceList['data']['exclude']}`
+const warningFile = `${markdownDir}/${resourceList['markdown']['warning']}`
+const helpFile = `${markdownDir}/${resourceList['markdown']['help']}`
 
 // If -help is true, print the help file and exit
 if (flags['-help']) {
@@ -98,15 +96,7 @@ const rcTag = docTag == '' ? docTag : ' (' + docTag + ')'
 const gaFolder = 'v' + gaVersion
 const rcFolder = 'v' + rcVersion + rcTag
 
-// Define the output files and bash script helpers
-//const gaDeltaFile = `${logDir}/ga-delta.txt`
-//const gaOnlyFile = `${logDir}/ga-only.txt`
-//const rcDeltaFile = `${logDir}/rc-delta.txt`
-//const safeListFile = `${logDir}/safe-list.txt`
-//const gaDeletesFile = `${logDir}/delete-list.txt`
-//const manualReviewFile = `${logDir}/manual-review.txt`
-//const productRecord = `${recordDir}/last-run-${product}.txt`
-
+// Define the output files
 const gaDeltaFile = `${logDir}/${resourceList['output']['gaDelta']}`
 const gaOnlyFile = `${logDir}//${resourceList['output']['gaOnly']}`
 const rcDeltaFile = `${logDir}/${resourceList['output']['rcDelta']}`
@@ -118,6 +108,7 @@ const productRecord = `${recordDir}/${resourceList['data']['lastRun']}`.replace(
 	product,
 )
 
+// Define the calls to bash script helpers
 const logPrep = `${helpersDir}/log-prep.sh '${logDir}' '${recordDir}'`
 const gitPrep = `${helpersDir}/git-prep.sh '${product}' '${gaBranch}' '${rcBranch}' '${updateFiles}'`
 const getCutoff = `${helpersDir}/get-cutoff.sh '${rcBranch}'`
@@ -195,6 +186,7 @@ try {
 	lastRunDate = readFileSync(productRecord, 'utf8')
 } catch (err) {
 	console.log('      Error reading last run date: ' + err)
+	console.log('      ' + err)
 	lastRunDate = null
 }
 
