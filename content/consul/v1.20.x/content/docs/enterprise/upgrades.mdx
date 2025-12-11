@@ -1,15 +1,13 @@
 ---
 layout: docs
-page_title: Automated Upgrades (Enterprise)
+page_title: Automated Upgrades
 description: >-
-  Automated upgrades simplify the process for updating Consul. Learn how Consul can gracefully transition from existing server agents to a new set of server agents without Consul downtime.
+  Automated Upgrades simplify the process for updating Consul. Learn how Consul can gracefully transition from existing server agents to a new set of server agents without Consul downtime.
 ---
 
-~> **Starting with Consul 1.14, and patch releases 1.13.3 and 1.12.6, Consul will disallow upgrades to new versions with a release date after license expiration**:
-   If you are looking to upgrade to a version of Consul that was released after your license expired, please be sure to renew your license before attempting an upgrade.
-
-
 # Automated Upgrades
+
+This page describes automated upgrades, a Consul Enterprise feature that helps you upgrade the version of Consul your servers are running.
 
 <EnterpriseAlert>
 
@@ -19,10 +17,375 @@ Refer to the [enterprise feature matrix](/consul/docs/enterprise#consul-enterpri
 
 </EnterpriseAlert>
 
-Consul Enterprise enables the capability of automatically upgrading a cluster of Consul servers to a new
-version as updated server nodes join the cluster. This automated upgrade will spawn a process which monitors the amount of voting members
-currently in a cluster. When an equal amount of new server nodes are joined running the desired version, the lower versioned servers
-will be demoted to non voting members. Demotion of legacy server nodes will not occur until the voting members on the new version match.
-Once this demotion occurs, the previous versioned servers can be removed from the cluster safely.
+## Introduction
 
-Review the [Consul operator autopilot](/consul/commands/operator/autopilot) documentation and complete the [Automated Upgrade](/consul/tutorials/datacenter-operations/autopilot-datacenter-operations#upgrade-migrations) tutorial to learn more about automated upgrades.
+One of the fundamental operations to be performed in any production environment is to upgrade Consul servers to a new version without experiencing downtime, while minimizing any risk factors that could lead to future outages.
+
+Consul autopilot monitors the amount of servers in the cluster. When a sufficient amount of new server nodes join, Consul promotes them to voters, elects a new leader among the new servers, and then demotes the servers running old versions to non-voters. Once this demotion occurs, the old servers can be safely removed from the cluster.
+
+Automated upgrades can help you in the following scenarios:
+
+- [Upgrade to a new Consul version](#upgrade-to-a-new-consul-version): When you want to upgrade Consul servers to a newer version without downtime.
+- [Migrate to different server nodes](#migrate-to-different-server-nodes): When you have a new Consul server image with security patches and want to replace the running Consul server instances automatically, without experiencing downtime.
+
+## Prerequisites
+
+To test the automated upgrades feature explained in this tutorial you will need:
+
+- A Consul Enterprise datacenter with three servers running Consul Enterprise.
+- Three extra nodes with the latest Consul Enterprise binary installed to replace the old servers.
+
+The different Consul versions need to be compatible for a direct upgrade. Check [Protocol Compatibility Promise](/consul/docs/upgrade/compatibility) and [Upgrade instructions](/consul/docs/upgrade/instructions) to make sure the versions you are using are compatible.
+
+## Upgrade to a new Consul version
+
+The process to upgrade Consul servers to a newer version with automated upgrades consists of the following steps:
+
+1. [Verify that automated upgrades is enabled](#verify-that-automated-upgrades-is-enabled)
+1. [Add new Consul servers](#add-new-consul-servers)
+1. [Verify upgrade](#verify-upgrade)
+1. [Stop old servers](#stop-old-servers)
+
+### Verify that automated upgrades is enabled
+
+The automated upgrades feature is enabled by default in Consul Enterprise. 
+
+To verify the configuration in your datacenter, use the `consul operator autopilot` command.
+
+```shell-session
+$ consul operator autopilot get-config
+```
+
+The command returns the entire autopilot configuration. When automated upgrades are enabled, `DisableUpgradeMigration` is set to `false`.
+
+<CodeBlockConfig hideClipboard highlight="8">
+
+```plaintext
+consul operator autopilot get-config
+CleanupDeadServers = true
+LastContactThreshold = 200ms
+MaxTrailingLogs = 250
+MinQuorum = 0
+ServerStabilizationTime = 10s
+RedundancyZoneTag = ""
+DisableUpgradeMigration = false
+UpgradeVersionTag = ""
+```
+
+</CodeBlockConfig>
+
+If the feature is disabled in your datacenter, enable it with the `consul operator autopilot set-config -disable-upgrade-migration=false` command.
+
+### Add new Consul servers
+
+The following example uses an existing Consul Enterprise `1.19.0` datacenter with three servers and `bootstrap_expect = 3`. 
+
+Use `consul members` to verify initial state of the cluster.
+
+```shell-session
+$ consul members
+Node             Address           Status  Type    Build       Protocol  DC   Partition  Segment
+consul-server-1  172.18.0.12:8301  alive   server  1.19.0+ent  2         dc1  default    <all>
+consul-server-2  172.18.0.8:8301   alive   server  1.19.0+ent  2         dc1  default    <all>
+consul-server-3  172.18.0.6:8301   alive   server  1.19.0+ent  2         dc1  default    <all>
+```
+
+For clarity, old server nodes are named using the `consul-server-<number>` scheme. New server nodes use `consul-server-<number-letter>` instead.
+
+```shell-session
+$consul operator raft list-peers
+Node              ID                                    Address           State     Voter  RaftProtocol  Commit Index  Trails Leader By
+consul-server-1   630ffcac-8f68-e9e0-5cca-54c3fa5f7290  172.18.0.12:8300  leader    true   3             85            -
+consul-server-2   bffdeec5-27f0-2116-99b1-68714679c2a0  172.18.0.8:8300   follower  true   3             85            0 commits
+consul-server-3   4aedd7d4-d5e4-109e-33dc-f6c2a2fd98c9  172.18.0.6:8300   follower  true   3             85            0 commits
+consul-server-1a  16a4ffeb-a8d4-b42d-edf1-cdec993fdcdc  172.18.0.17:8300  follower  false  3             85            0 commits
+consul-server-2a  73e267e5-f817-0577-bbe5-2f843adff357  172.18.0.4:8300   follower  false  3             85            0 commits
+```
+
+Consul will keep the added servers as `non-voter` members until enough servers running the new Consul version are part of the datacenter. When the number of new servers is enough to form a quorum and elect a new leader, autopilot promotes the new servers to voters and triggers a new leader election, before it finally demotes the old servers.
+
+### Verify upgrade
+
+After enough servers running the new version join the datacenter, Consul autopilot starts the upgrade process.
+
+First, new nodes are promoted to `voter` state.
+
+```shell-session
+$ consul operator raft list-peers
+Node              ID                                    Address           State     Voter  RaftProtocol  Commit Index  Trails Leader By
+consul-server-1   630ffcac-8f68-e9e0-5cca-54c3fa5f7290  172.18.0.12:8300  leader    true   3             106           -
+consul-server-2   bffdeec5-27f0-2116-99b1-68714679c2a0  172.18.0.8:8300   follower  true   3             106           0 commits
+consul-server-3   4aedd7d4-d5e4-109e-33dc-f6c2a2fd98c9  172.18.0.6:8300   follower  true   3             106           0 commits
+consul-server-1a  16a4ffeb-a8d4-b42d-edf1-cdec993fdcdc  172.18.0.17:8300  follower  true   3             106           0 commits
+consul-server-2a  73e267e5-f817-0577-bbe5-2f843adff357  172.18.0.4:8300   follower  true   3             106           0 commits
+consul-server-3a  626faa96-91af-53b1-da97-21435d4c5f62  172.18.0.15:8300  follower  true   3             106           0 commits
+```
+
+Then, `follower` nodes with the old Consul version are demoted as `non-voter` and a new leader election is triggered.
+
+```shell-session
+$ consul operator raft list-peers
+Node              ID                                    Address           State     Voter   RaftProtocol  Commit Index  Trails Leader By
+consul-server-1   630ffcac-8f68-e9e0-5cca-54c3fa5f7290  172.18.0.12:8300  leader    true    3             106           -
+consul-server-2   bffdeec5-27f0-2116-99b1-68714679c2a0  172.18.0.8:8300   follower  false   3             106           0 commits
+consul-server-3   4aedd7d4-d5e4-109e-33dc-f6c2a2fd98c9  172.18.0.6:8300   follower  false   3             106           0 commits
+consul-server-1a  16a4ffeb-a8d4-b42d-edf1-cdec993fdcdc  172.18.0.17:8300  follower  true    3             106           0 commits
+consul-server-2a  73e267e5-f817-0577-bbe5-2f843adff357  172.18.0.4:8300   follower  true    3             106           0 commits
+consul-server-3a  626faa96-91af-53b1-da97-21435d4c5f62  172.18.0.15:8300  follower  true    3             106           0 commits
+```
+
+After the new Consul servers elect a leader, autopilot demotes the old leader to `non-voter`.
+
+```shell-session
+$ consul operator raft list-peersrs
+Node              ID                                    Address           State     Voter  RaftProtocol  Commit Index  Trails Leader By
+consul-server-1   630ffcac-8f68-e9e0-5cca-54c3fa5f7290  172.18.0.12:8300  follower  false  3             117           0 commits
+consul-server-2   bffdeec5-27f0-2116-99b1-68714679c2a0  172.18.0.8:8300   follower  false  3             117           0 commits
+consul-server-3   4aedd7d4-d5e4-109e-33dc-f6c2a2fd98c9  172.18.0.6:8300   follower  false  3             117           0 commits
+consul-server-1a  16a4ffeb-a8d4-b42d-edf1-cdec993fdcdc  172.18.0.17:8300  leader    true   3             117           -
+consul-server-2a  73e267e5-f817-0577-bbe5-2f843adff357  172.18.0.4:8300   follower  true   3             117           0 commits
+consul-server-3a  626faa96-91af-53b1-da97-21435d4c5f62  172.18.0.15:8300  follower  true   3             117           0 commits
+```
+
+The process can also be observed from the leader's logs:
+
+<CodeBlockConfig hideClipboard>
+
+```log
+## ...
+[INFO]  agent.server.autopilot: Promoting server: id=16a4ffeb-a8d4-b42d-edf1-cdec993fdcdc address=172.18.0.17:8300 name=consul-server-1a
+## ...
+[INFO]  agent.server.autopilot: Promoting server: id=73e267e5-f817-0577-bbe5-2f843adff357 address=172.18.0.4:8300 name=consul-server-2a
+## ...
+[INFO]  agent.server.autopilot: Promoting server: id=626faa96-91af-53b1-da97-21435d4c5f62 address=172.18.0.15:8300 name=consul-server-3a
+## ...
+[INFO]  agent.server.autopilot: Demoting server: id=4aedd7d4-d5e4-109e-33dc-f6c2a2fd98c9 address=172.18.0.6:8300 name=consul-server-3
+## ...
+[INFO]  agent.server.autopilot: Demoting server: id=bffdeec5-27f0-2116-99b1-68714679c2a0 address=172.18.0.8:8300 name=consul-server-2
+## ...
+[INFO]  agent.server.autopilot: Transferring leadership to new server: id=16a4ffeb-a8d4-b42d-edf1-cdec993fdcdc address=172.18.0.17:8300
+## ...
+[INFO]  agent.server.raft: entering follower state: follower="Node at 172.18.0.12:8300 [Follower]" leader-address= leader-id=
+## ...
+[INFO]  agent.server: cluster leadership lost
+## ...
+[INFO]  agent.server: New leader elected: payload=consul-server-1a
+```
+
+</CodeBlockConfig>
+
+### Stop old servers
+
+Once the upgrade is rolled out, remove the old servers from the datacenter using the `consul leave` command. 
+
+## Migrate to different server nodes
+
+In some environments, Consul is not the only component that needs to be upgraded to ensure security or stability for the node. For example, you might
+need to roll out node updates to apply OS patches or new configuration settings.
+
+Consul autopilot includes a `UpgradeVersionTag` parameter to override the parameter that Consul uses for automated upgrades. Consul can use these tags to update the datacenter even when you do not upgrade Consul version.
+
+When `UpgradeVersionTag` is configured, Consul will use its value to look for a version in each server's specified [`node_meta`](/consul/docs/reference/agent/configuration-file/node#node_meta) tag.
+
+For example, if `UpgradeVersionTag` is set to `build`, and `node-meta.build` is set to `0.0.2` in server configuration, that server's version will be
+`0.0.2` when considered by autopilot for a migration. The upgrade logic will follow semantic versioning and the version string must be in the form of either `X`, `X.Y`, or `X.Y.Z`.
+
+To upgrade Consul servers using `UpgradeVersionTag`, complete the following steps:
+1. [Configure autopilot for existing servers](#configure-autopilot-for-existing-servers)
+1. [Add new Consul servers ](#add-new-consul-servers-1)
+1. [Verify upgrade](#verify-upgrade-1)
+1. [Stop old servers](#stop-old-servers-1)
+
+### Configure autopilot for existing servers
+
+The following example begins with three servers: `server-1a`, `server-2a`, and `server-3a`. Three additional servers are used, names `server-1b`, `server-2b`, amd `server-3b`.
+
+```shell-session
+$ consul members
+Node              Address            Status  Type    Build       Protocol  DC   Partition  Segment
+consul-server-1a  172.18.0.17:8301   alive   server  1.20.0+ent  2         dc1  default    <all>
+consul-server-2a  172.18.0.4:8301    alive   server  1.20.0+ent  2         dc1  default    <all>
+consul-server-3a  172.18.0.15:8301   alive   server  1.20.0+ent  2         dc1  default    <all>
+```
+
+Add the `node_meta` option to the existing server agent configurations.
+
+<CodeTabs heading="Consul server agent configuration">
+
+```hcl
+## ...
+node_meta {
+  build = "0.0.1"
+}
+## ...
+```
+
+```json
+## ...
+"node_meta": {
+    "build": "0.0.1"
+  },
+## ...
+```
+
+</CodeTabs>
+
+
+Reload the server configuration.
+
+```shell-session
+$ consul reload
+Configuration reload triggered
+```
+
+Modify the Consul autopilot configuration to track the `node_meta` configuration.
+
+```shell-session
+$ consul operator autopilot set-config -upgrade-version-tag=build
+Configuration updated!
+```
+
+Verify the autopilot configuration has been successfully updated.
+
+```shell-session
+$ consul operator autopilot get-config
+```
+
+Check that `UpgradeVersionTag` is set to `build`.
+
+<CodeBlockConfig hideClipboard highlight="8">
+
+```plaintext
+CleanupDeadServers = true
+LastContactThreshold = 200ms
+MaxTrailingLogs = 250
+MinQuorum = 0
+ServerStabilizationTime = 10s
+RedundancyZoneTag = ""
+DisableUpgradeMigration = false
+UpgradeVersionTag = "build"
+```
+
+</CodeBlockConfig>
+
+### Add new Consul servers
+
+For the new servers, define the `UpgradeVersionTag` directly in the configuration.
+
+<CodeTabs>
+
+<CodeBlockConfig highlight="6">
+
+```hcl
+## ...
+node_meta {
+  build = "0.0.2"
+}
+autopilot {
+  upgrade_version_tag = "build"
+}
+## ...
+```
+
+</CodeBlockConfig>
+
+<CodeBlockConfig highlight="6">
+
+```json
+# ...
+  "node_meta": {
+    "build": "0.0.2"
+  },
+  "autopilot":{
+    "upgrade_version_tag":"build"
+  },
+# ...
+```
+
+</CodeBlockConfig>
+
+</CodeTabs>
+
+### Verify upgrade
+
+After the third new server starts, autopilot detects the possibility of a quorum among the new servers, and promotes them to voters.
+
+New nodes are first promoted to `voter` state.
+
+```shell-session
+$ consul operator raft list-peers
+Node              ID                                    Address           State     Voter  RaftProtocol  Commit Index   Trails Leader By
+consul-server-1a  16a4ffeb-a8d4-b42d-edf1-cdec993fdcdc  172.18.0.17:8300  leader    true   3             157            0 commits
+consul-server-2a  73e267e5-f817-0577-bbe5-2f843adff357  172.18.0.4:8300   follower  true   3             157            0 commits
+consul-server-3a  626faa96-91af-53b1-da97-21435d4c5f62  172.18.0.15:8300  follower  true   3             157            0 commits
+consul-server-1b  c04510f4-4d6d-9b54-3ac8-8843b848b24a  172.18.0.9:8300   follower  true   3             157            0 commits
+consul-server-2b  7ba9deda-fd46-cb10-6341-b32eb2db87de  172.18.0.6:8300   follower  true   3             157            0 commits
+consul-server-3b  3908d249-3da3-2262-7405-da5b80337716  172.18.0.11:8300  follower  true   3             157            0 commits
+```
+
+Then, `follower` nodes with the old Consul `build` value are demoted as `non-voter` and a new leader election is triggered.
+
+```shell-session
+$ consul operator raft list-peers
+Node              ID                                    Address           State     Voter  RaftProtocol  Commit Index   Trails Leader By
+consul-server-1a  16a4ffeb-a8d4-b42d-edf1-cdec993fdcdc  172.18.0.17:8300  leader    true   3             157            0 commits
+consul-server-2a  73e267e5-f817-0577-bbe5-2f843adff357  172.18.0.4:8300   follower  false  3             157            0 commits
+consul-server-3a  626faa96-91af-53b1-da97-21435d4c5f62  172.18.0.15:8300  follower  false  3             157            0 commits
+consul-server-1b  c04510f4-4d6d-9b54-3ac8-8843b848b24a  172.18.0.9:8300   follower  true   3             157            0 commits
+consul-server-2b  7ba9deda-fd46-cb10-6341-b32eb2db87de  172.18.0.6:8300   follower  true   3             157            0 commits
+consul-server-3b  3908d249-3da3-2262-7405-da5b80337716  172.18.0.11:8300  follower  true   3             157            0 commits
+```
+
+Finally, when a new leader is elected among the new Consul servers, the old leader is demoted to `non-voter`.
+
+```shell-session
+$ consul operator raft list-peersrs
+Node              ID                                    Address           State     Voter  RaftProtocol  Commit Index   Trails Leader By
+consul-server-1a  16a4ffeb-a8d4-b42d-edf1-cdec993fdcdc  172.18.0.17:8300  follower  false  3             157            0 commits
+consul-server-2a  73e267e5-f817-0577-bbe5-2f843adff357  172.18.0.4:8300   follower  false  3             157            0 commits
+consul-server-3a  626faa96-91af-53b1-da97-21435d4c5f62  172.18.0.15:8300  follower  false  3             157            0 commits
+consul-server-1b  c04510f4-4d6d-9b54-3ac8-8843b848b24a  172.18.0.9:8300   leader    true   3             157            0 commits
+consul-server-2b  7ba9deda-fd46-cb10-6341-b32eb2db87de  172.18.0.6:8300   follower  true   3             157            0 commits
+consul-server-3b  3908d249-3da3-2262-7405-da5b80337716  172.18.0.11:8300  follower  true   3             157            0 commits
+```
+
+You can also observe this process in the leader's logs:
+
+<CodeBlockConfig hideClipboard>
+
+```log
+## ...
+[INFO]  agent.server.autopilot: Promoting server: id=c04510f4-4d6d-9b54-3ac8-8843b848b24a address=172.18.0.9:8300 name=consul-server-1b
+## ...
+[INFO]  agent.server.autopilot: Promoting server: id=7ba9deda-fd46-cb10-6341-b32eb2db87de address=172.18.0.6:8300 name=consul-server-2b
+## ...
+[INFO]  agent.server.autopilot: Promoting server: id=3908d249-3da3-2262-7405-da5b80337716 address=172.18.0.11:8300 name=consul-server-3b
+## ...
+[INFO]  agent.server.autopilot: Demoting server: id=626faa96-91af-53b1-da97-21435d4c5f62 address=172.18.0.15:8300 name=consul-server-3a
+## ...
+[INFO]  agent.server.autopilot: Demoting server: id=73e267e5-f817-0577-bbe5-2f843adff357 address=172.18.0.4:8300 name=consul-server-2a
+## ...
+[INFO]  agent.server.autopilot: Transferring leadership to new server: id=c04510f4-4d6d-9b54-3ac8-8843b848b24a address=172.18.0.9:8300
+## ...
+[INFO]  agent.server.raft: entering follower state: follower="Node at 172.18.0.17:8300 [Follower]" leader-address= leader-id=
+## ...
+[INFO]  agent.server: cluster leadership lost
+## ...
+[INFO]  agent.server: New leader elected: payload=consul-server-1b
+```
+
+</CodeBlockConfig>
+
+### Stop old servers
+
+Once the upgrade is rolled out, use the `consul leave ` command to remove the old servers from the datacenter. 
+
+## Next steps
+
+
+Before planning any Consul upgrade make sure to review version specific instructions provided by:
+
+- [Upgrading Consul](/consul/docs/upgrading)
+- [Upgrading specific Consul versions](/consul/docs/upgrading/upgrade-specific)
+
+To learn more about other Consul autopilot features, refer to [Consul autopilot](/consul/commands/operator/autopilot).
