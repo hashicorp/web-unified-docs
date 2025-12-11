@@ -1,5 +1,5 @@
 # 
-# Copyright (c) HashiCorp, Inc.
+# Copyright IBM Corp. 2025
 # SPDX-License-Identifier: BUSL-1.1
 # 
 # ------------------------------------------------------------------------------
@@ -9,7 +9,7 @@
 # version
 #
 # Expected usage: update-rc-docs.sh <productKey> <gaFolder> <rcFolder> <safeListFile>
-# Example:        update-rc-docs.sh vault '1.20.x' '1.21.x (rc)' '../output/safe-list.txt'
+# Example:        update-rc-docs.sh vault '1.20.x' '1.21.x (rc)' 'safe-list.txt'
 
 # Pull in the common variable definitions
 currDir="$(dirname "$0")"
@@ -58,4 +58,4 @@ while read line; do
   if [[ "${rcPath}" != *"/content/${productKey}/"* ]]; then continue ; fi
   cp -r "${gaPath}" "${rcPath}"
 
-done < "${safeList}"
+done < "${outputDir}/${safeList}"
