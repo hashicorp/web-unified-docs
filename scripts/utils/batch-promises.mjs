@@ -1,5 +1,5 @@
 /**
- * Copyright (c) HashiCorp, Inc.
+ * Copyright IBM Corp. 2025
  * SPDX-License-Identifier: BUSL-1.1
  */
 
@@ -20,8 +20,8 @@ export async function batchPromises(
 	batchName,
 	arrayToBatch,
 	asyncMapFn,
-	{ batchSize = 16, loggingEnabled = true } = {
-		batchSize: 16,
+	{ batchSize = 64, loggingEnabled = true } = {
+		batchSize: 64,
 		loggingEnabled: true,
 	},
 ) {
