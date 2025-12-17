@@ -1,0 +1,225 @@
+---
+layout: docs
+page_title: Load balance with Fabio
+description: >-
+  Create and deploy a load balancing Fabio job and use the native Consul
+  integration.
+---
+
+# Load balance with Fabio
+
+[Fabio] integrates natively with Consul and provides an optional Web UI to
+visualize routing. Fabio's primary use case is distributing incoming HTTP(S) and
+TCP requests from the Internet to front-end services that can handle these
+requests. This tutorial shows you one such example using the [Apache][apache] web
+server.
+
+## Problem
+
+A Nomad operator wants to make an Apache web server
+highly available behind an endpoint and distribute incoming traffic evenly. The
+Nomad configurations should be dynamic and self-healing in cases of application or
+node failure.
+
+## Solution
+
+Deploy fabio as a [system] job type so that it can route incoming traffic evenly
+to the Apache web server group regardless of which client nodes Apache is
+running on. Place all client nodes behind an [AWS load balancer][elb] to provide
+the end user with a single endpoint for access.
+
+## Prerequisites
+
+To perform the tasks described in this tutorial, you need to have a Nomad
+environment with Consul installed. You can use this [Terraform
+environment][nomad-tf] to provision a sandbox environment. This tutorial
+uses a cluster with one server node and three client nodes for simplicity.
+
+### Reference material
+
+- [Fabio]
+- [Load Balancing Strategies for Consul][lb-consul]
+- [Elastic Load Balancing][elb]
+
+<Note>
+
+ This tutorial is for demo purposes and only uses a single server
+node. Please consult the [reference architecture][reference-arch] for
+production configuration.
+
+</Note>
+
+## Create and run a Fabio job
+
+Create a job for Fabio and name it `fabio.nomad.hcl`
+
+```hcl
+job "fabio" {
+  datacenters = ["dc1"]
+  type = "system"
+
+  group "fabio" {
+    network {
+      port "lb" {
+        static = 9999
+      }
+      port "ui" {
+        static = 9998
+      }
+    }
+    task "fabio" {
+      driver = "docker"
+      config {
+        image = "fabiolb/fabio"
+        network_mode = "host"
+        ports = ["lb","ui"]
+      }
+
+      resources {
+        cpu    = 200
+        memory = 128
+      }
+    }
+  }
+}
+```
+
+Setting `type` to [system] ensures that Fabio is run on all clients. Note that
+the `network_mode` option is set to `host` so that Fabio can communicate with
+Consul on the client nodes.
+
+You can now register your Fabio job:
+
+```shell-session
+$ nomad job run fabio.nomad.hcl
+==> Monitoring evaluation "fba4f04a"
+    Evaluation triggered by job "fabio"
+    Allocation "6e6367d4" created: node "f3739267", group "fabio"
+    Allocation "d17573b4" created: node "28d7f859", group "fabio"
+    Allocation "f3ad9b16" created: node "510898b6", group "fabio"
+    Evaluation status changed: "pending" -> "complete"
+==> Evaluation "fba4f04a" finished with status "complete"
+```
+
+At this point, you should be able to visit any one of your client nodes at port
+`9998` and see the web interface for Fabio. The routing table should be empty
+since you have not yet deployed anything that Fabio can route to. Accordingly,
+if you visit any of the client nodes at port `9999` at this point, you get a
+`404` HTTP response. This is to be expected because there are no routes built
+yet.
+
+## Create and run an Apache web server job
+
+Create a job for Apache and name it `webserver.nomad.hcl`
+
+```hcl
+job "webserver" {
+  datacenters = ["dc1"]
+  type = "service"
+
+  group "webserver" {
+    count = 3
+    network {
+      port "http" {
+        to = 80
+      }
+    }
+
+    service {
+      name = "apache-webserver"
+      tags = ["urlprefix-/"]
+      port = "http"
+      check {
+        name     = "alive"
+        type     = "http"
+        path     = "/"
+        interval = "10s"
+        timeout  = "2s"
+      }
+    }
+
+    restart {
+      attempts = 2
+      interval = "30m"
+      delay = "15s"
+      mode = "fail"
+    }
+
+    task "apache" {
+      driver = "docker"
+      config {
+        image = "httpd:latest"
+        ports = ["http"]
+      }
+    }
+  }
+}
+```
+
+Notice the tag in the service stanza begins with `urlprefix-`. Fabio looks for
+services with that special tag and builds routes for them. In this case, the job
+registers the path '/' with Fabio. This routes incoming traffic to '/' to the
+default page for the Apache web server.
+
+You can now register your job for Apache:
+
+```shell-session
+$ nomad job run webserver.nomad.hcl
+==> Monitoring evaluation "c7bcaf40"
+    Evaluation triggered by job "webserver"
+    Evaluation within deployment: "e3603b50"
+    Allocation "20951ad4" created: node "510898b6", group "webserver"
+    Allocation "43807686" created: node "28d7f859", group "webserver"
+    Allocation "7b60eb24" created: node "f3739267", group "webserver"
+    Evaluation status changed: "pending" -> "complete"
+==> Evaluation "c7bcaf40" finished with status "complete"
+```
+
+You have now deployed and registered your web servers with Fabio. At this point,
+you should be able to visit any of the Nomad clients at port `9999` and see the
+default web page for Apache web server. If you visit Fabio's web interface by
+going to any of the client nodes at port `9998`, you can observe that the routing
+table has been populated as shown below. The destination IP addresses are unique
+to your infrastructure, so they are likely different than the image.
+
+[![Routing Table][routing-table]][routing-table]
+
+Feel free to reduce the `count` in `webserver.nomad.hcl` for testing purposes.
+Observe that you are still routed to the Apache home page by accessing any
+client node on port `9999`. Accordingly, the routing table in the web interface
+on port `9999` reflects the changes in the count of web server instances.
+
+## Place Nomad client nodes behind AWS load balancer
+
+At this point, you are ready to place your Nomad client nodes behind an AWS load
+balancer. Your Nomad client nodes may change over time, and it is important to
+provide your end users with a single endpoint to access your services. This
+tutorial refers to the [Classic Load Balancer][classic-lb].
+
+The AWS [documentation][classic-lb-doc] provides instruction on how to create a
+load balancer. The basic steps involve creating a load balancer, registering
+instances behind the load balancer (in this case, these should be the Nomad
+client nodes), creating listeners, and configuring health checks.
+
+Once you are done with this, you should be able to hit the DNS name of your load
+balancer at port 80 (or whichever port you configured in your listener) and see
+the home page of Apache web server. If you configured your listener to also
+forward traffic to the web interface at port `9998`, you should be able to
+access that as well.
+
+[![Home Page][lb-homepage]][lb-homepage]
+
+[![Routing Table][lb-routing-table]][lb-routing-table]
+
+[apache]: https://httpd.apache.org/
+[classic-lb-doc]: https://docs.aws.amazon.com/elasticloadbalancing/latest/classic/elb-getting-started.html
+[classic-lb]: https://docs.aws.amazon.com/elasticloadbalancing/latest/classic/introduction.html
+[elb]: https://aws.amazon.com/elasticloadbalancing/
+[fabio]: https://fabiolb.net/
+[lb-homepage]: /img/load-balance/lb-homepage.png
+[lb-routing-table]: /img/load-balance/lb-routing-table.png
+[lb-consul]: https://www.hashicorp.com/blog/load-balancing-strategies-for-consul
+[nomad-tf]: https://github.com/hashicorp/nomad/tree/master/terraform
+[reference-arch]: /nomad/tutorials/enterprise/production-reference-architecture-vm-with-consul#high-availability
+[routing-table]: /img/load-balance/routing-table.png
+[system]: /nomad/docs/concepts/scheduling/schedulers#system

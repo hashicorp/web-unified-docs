@@ -1,0 +1,263 @@
+---
+layout: docs
+page_title: Load balance with Traefik
+description: >-
+  Create and deploy a load balancing Traefik job that natively integrates
+  with the Consul catalog provider.
+---
+
+# Load balance with Traefik
+
+The main use case for Traefik in this scenario is to distribute incoming HTTP(S)
+and TCP requests from the Internet to front-end services that can handle these
+requests. This tutorial shows you one such example using a demo web
+application.
+
+Traefik can natively integrate with Consul using the [Consul Catalog
+Provider][traefik-consul-provider] and can use tags to route traffic.
+
+### Reference material
+
+- [Traefik][traefik]
+- [Traefik Consul Catalog Provider Documentation][traefik-consul-provider]
+
+### Prerequisites
+
+To perform the tasks described in this tutorial, you need to have a Nomad
+environment with Consul installed. You can use this [Terraform
+environment][nomad-tf] to provision a sandbox environment. This tutorial uses
+a cluster with one server node and three client nodes.
+
+<Note>
+
+ This tutorial is for demo purposes and only assumes a single server
+node. Please consult the [reference architecture][reference-arch] for
+production configuration.
+
+</Note>
+
+## Create and run a demo web app job
+
+Create a job for a demo web application and name the file `webapp.nomad.hcl`:
+
+```hcl
+job "demo-webapp" {
+  datacenters = ["dc1"]
+
+  group "demo" {
+    count = 3
+
+    network {
+      port  "http"{
+        to = -1
+      }
+    }
+
+    service {
+      name = "demo-webapp"
+      port = "http"
+
+      tags = [
+        "traefik.enable=true",
+        "traefik.http.routers.http.rule=Path(`/myapp`)",
+      ]
+
+      check {
+        type     = "http"
+        path     = "/"
+        interval = "2s"
+        timeout  = "2s"
+      }
+    }
+
+    task "server" {
+      env {
+        PORT    = "${NOMAD_PORT_http}"
+        NODE_IP = "${NOMAD_IP_http}"
+      }
+
+      driver = "docker"
+
+      config {
+        image = "hashicorp/demo-webapp-lb-guide"
+        ports = ["http"]
+      }
+    }
+  }
+}
+```
+
+- Note that this job deploys 3 instances of the demo web application which you
+  load balance with Traefik in the next few steps.
+
+- The job uses tags to configure routing to the web app. Even though the
+  application listens on `/`, it is possible to define `/myapp` as the route
+  because of the [`Path`][matchers] option.
+
+You can now deploy the demo web application:
+
+```shell-session
+$ nomad run webapp.nomad.hcl
+==> Monitoring evaluation "a2061ab7"
+    Evaluation triggered by job "demo-webapp"
+    Evaluation within deployment: "8ca6d358"
+    Allocation "1d14babe" created: node "2d6eea6e", group "demo"
+    Allocation "3abb950d" created: node "a62fa99d", group "demo"
+    Allocation "c65e14bf" created: node "a209a662", group "demo"
+    Evaluation status changed: "pending" -> "complete"
+==> Evaluation "a2061ab7" finished with status "complete"
+```
+
+## Create and run a Traefik job
+
+Create a job named `traefik.nomad.hcl`. This job starts an instance of Traefik and
+configures it to discover its configuration from Consul. This Traefik instance
+provides routing and load balancing to the sample web application.
+
+```hcl
+job "traefik" {
+  region      = "global"
+  datacenters = ["dc1"]
+  type        = "service"
+
+  group "traefik" {
+    count = 1
+
+    network {
+      port "http" {
+        static = 8080
+      }
+
+      port "api" {
+        static = 8081
+      }
+    }
+
+    service {
+      name = "traefik"
+
+      check {
+        name     = "alive"
+        type     = "tcp"
+        port     = "http"
+        interval = "10s"
+        timeout  = "2s"
+      }
+    }
+
+    task "traefik" {
+      driver = "docker"
+
+      config {
+        image        = "traefik:v2.2"
+        network_mode = "host"
+
+        volumes = [
+          "local/traefik.toml:/etc/traefik/traefik.toml",
+        ]
+      }
+
+      template {
+        data = <<EOF
+[entryPoints]
+    [entryPoints.http]
+    address = ":8080"
+    [entryPoints.traefik]
+    address = ":8081"
+
+[api]
+    dashboard = true
+    insecure  = true
+
+# Enable Consul Catalog configuration backend.
+[providers.consulCatalog]
+    prefix           = "traefik"
+    exposedByDefault = false
+
+    [providers.consulCatalog.endpoint]
+      address = "127.0.0.1:8500"
+      scheme  = "http"
+EOF
+
+        destination = "local/traefik.toml"
+      }
+
+      resources {
+        cpu    = 100
+        memory = 128
+      }
+    }
+  }
+}
+```
+
+- This configuration uses a static port for the load balancer to `8080`. This
+  allow you to query `traefik.service.consul:8080` at the appropriate paths (as
+  configured in the tags section of `webapp.nomad.hcl` from anywhere inside your
+  cluster so you can reach the web application.
+
+- The Traefik dashboard is configured at port `8081`.
+
+- Please note that although the job contains an [inline][inline] template, you
+  could alternatively use the template stanza [in conjunction with the artifact
+  stanza][remote-template] to download an input template from a remote source
+  such as an S3 bucket.
+
+Now, run the Traefik job:
+
+```shell-session
+$ nomad run traefik.nomad.hcl
+==> Monitoring evaluation "e22ce276"
+    Evaluation triggered by job "traefik"
+    Evaluation within deployment: "c6466497"
+    Allocation "695c5632" created: node "a62fa99d", group "traefik"
+    Evaluation status changed: "pending" -> "complete"
+==> Evaluation "e22ce276" finished with status "complete"
+```
+
+## Check the Traefik dashboard
+
+You can visit the dashboard for Traefik at
+`http://<Your-Traefik-IP-address>:8081`. You can use this page to verify your
+settings and for basic monitoring.
+
+[![Home Page][traefik_ui]][traefik_ui]
+
+## Make a request to the load balancer
+
+If you query the Traefik load balancer, you should be able to see a response
+similar to the one shown below (this command should be run from a node inside
+your cluster):
+
+```shell-session
+$ curl http://traefik.service.consul:8080/myapp
+Welcome! You are on node 172.31.28.103:28893
+```
+
+Note that your request has been forwarded to one of the several deployed
+instances of the demo web application (which is spread across 3 Nomad clients).
+The output shows the IP address of the host it is deployed on. If you repeat
+your requests, the IP address changes based on which backend web server instance
+received the request.
+
+<Note>
+
+ If you would like to access Traefik from outside your cluster, you
+can set up a load balancer in your environment that maps to an active port
+`8080` on your clients (or whichever port you have configured for Traefik to
+listen on). You can then send your requests directly to your external load
+balancer.
+
+</Note>
+
+[inline]: /nomad/docs/job-specification/template#inline-template
+[matchers]: https://docs.traefik.io/routing/routers/#rule
+[nomad-tf]: https://github.com/hashicorp/nomad/tree/master/terraform#provision-a-nomad-cluster-in-the-cloud
+[reference-arch]: /nomad/tutorials/enterprise/production-reference-architecture-vm-with-consul#high-availability
+[remote-template]: /nomad/docs/job-specification/template#remote-template
+[template-stanza]: /nomad/docs/job-specification/template
+[terraform-repo]: https://github.com/hashicorp/nomad/tree/master/terraform#provision-a-nomad-cluster-in-the-cloud
+[traefik]: https://traefik.io/
+[traefik_ui]: /img/load-balance/traefik_ui.png
+[traefik-consul-provider]: https://docs.traefik.io/providers/consul-catalog/
+[nomad-tf]: https://github.com/hashicorp/nomad/tree/master/terraform#provision-a-nomad-cluster-in-the-cloud
