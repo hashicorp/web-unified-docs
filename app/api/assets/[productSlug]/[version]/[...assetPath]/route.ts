@@ -97,7 +97,7 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 	}
 
 	// TODO: should we add caching headers?
-	return new Response(assetData.value.buffer, {
+	return new Response(new Uint8Array(assetData.value.buffer), {
 		headers: {
 			'Content-Type': assetData.value.contentType,
 			'X-Content-Source': 'preview',
