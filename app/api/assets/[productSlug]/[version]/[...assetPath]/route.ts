@@ -8,6 +8,12 @@ import { getProductVersionMetadata } from '#utils/contentVersions'
 import { errorResultToString } from '#utils/result'
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
 import { VersionedProduct } from '#api/types'
+import {
+	getQuickPreviewManifest,
+	fetchFromProduction,
+	isFileDeleted,
+	shouldFetchFromProduction,
+} from '#utils/quickPreview'
 
 export type GetParams = VersionedProduct & {
 	/**
@@ -19,6 +25,9 @@ export type GetParams = VersionedProduct & {
 export async function GET(request: Request, { params }: { params: GetParams }) {
 	// Grab the parameters we need to fetch content
 	const { productSlug, version, assetPath } = params
+
+	// Check if we're in quick preview mode
+	const quickPreviewManifest = await getQuickPreviewManifest()
 
 	if (!Object.keys(PRODUCT_CONFIG).includes(productSlug)) {
 		console.error(
@@ -46,6 +55,43 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 	const assetData = await getAssetData(assetLoc, versionMetadata)
 
 	if (!assetData.ok) {
+		// If in quick preview mode, try fetching from production
+		if (shouldFetchFromProduction(quickPreviewManifest)) {
+			const sourceFile = assetLoc.join('/')
+			if (isFileDeleted(quickPreviewManifest, sourceFile)) {
+				console.log(`[Quick Preview] Asset deleted in preview: ${sourceFile}`)
+				return new Response('Asset deleted in preview', {
+					status: 404,
+					headers: { 'X-Content-Source': 'deleted' },
+				})
+			}
+
+			try {
+				const productionPath = request.url.replace(
+					new URL(request.url).origin,
+					'',
+				)
+				const productionResponse = await fetchFromProduction(productionPath)
+
+				if (productionResponse.ok) {
+					const productionContent = await productionResponse.arrayBuffer()
+
+					return new Response(productionContent, {
+						status: productionResponse.status,
+						headers: {
+							'Content-Type':
+								productionResponse.headers.get('content-type') ||
+								'application/octet-stream',
+							'X-Content-Source': 'production',
+							'X-Preview-Fallback': 'true',
+						},
+					})
+				}
+			} catch (error) {
+				console.error('[Quick Preview] Production fetch failed:', error)
+			}
+		}
+
 		console.error(`API Error: No asset found at ${assetLoc}`)
 		return new Response('Not found', { status: 404 })
 	}
@@ -54,6 +100,7 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 	return new Response(assetData.value.buffer, {
 		headers: {
 			'Content-Type': assetData.value.contentType,
+			'X-Content-Source': 'preview',
 		},
 	})
 }

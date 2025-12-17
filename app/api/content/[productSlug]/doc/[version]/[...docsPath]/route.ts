@@ -13,6 +13,12 @@ import { errorResultToString } from '#utils/result'
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
 import docsPathsAllVersions from '#api/docsPathsAllVersions.json'
 import { VersionedProduct } from '#api/types'
+import {
+	getQuickPreviewManifest,
+	fetchFromProduction,
+	isFileDeleted,
+	shouldFetchFromProduction,
+} from '#utils/quickPreview'
 
 /**
  * Parameters expected by `GET` route handler
@@ -34,6 +40,9 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 		)
 		return new Response('Not found', { status: 404 })
 	}
+
+	// Check if we're in quick preview mode
+	const quickPreviewManifest = await getQuickPreviewManifest()
 
 	// Determine the content directory based on the "product" (actually repo) slug
 	const { contentDir } = PRODUCT_CONFIG[productSlug]
@@ -111,6 +120,55 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 	}
 
 	if (!foundContent) {
+		// If in quick preview mode, try fetching from production
+		if (shouldFetchFromProduction(quickPreviewManifest)) {
+			// Check if file was deleted in this preview
+			const sourceFile = `content/${productSlug}/${versionMetadata.version}/${contentDir}/${parsedDocsPath}.mdx`
+			if (isFileDeleted(quickPreviewManifest, sourceFile)) {
+				console.log(`[Quick Preview] File deleted in preview: ${sourceFile}`)
+				return new Response('Content deleted in preview', {
+					status: 404,
+					headers: {
+						'X-Content-Source': 'deleted',
+					},
+				})
+			}
+
+			// Try to fetch from production
+			try {
+				const productionPath = request.url.replace(
+					new URL(request.url).origin,
+					'',
+				)
+				const productionResponse = await fetchFromProduction(productionPath)
+
+				if (productionResponse.ok) {
+					const productionContent = await productionResponse.text()
+					// Parse and augment the response with quick preview metadata
+					const contentJson = JSON.parse(productionContent)
+					if (contentJson.meta) {
+						contentJson.meta.quick_preview = {
+							enabled: true,
+							mode: quickPreviewManifest?.mode || 'normal',
+							content_source: 'production',
+						}
+					}
+
+					return new Response(JSON.stringify(contentJson), {
+						status: productionResponse.status,
+						headers: {
+							'Content-Type': 'application/json',
+							'X-Content-Source': 'production',
+							'X-Preview-Fallback': 'true',
+						},
+					})
+				}
+			} catch (error) {
+				console.error('[Quick Preview] Production fetch failed:', error)
+				// Fall through to 404 below
+			}
+		}
+
 		const locationsString = possibleContentLocations.map(
 			(location: string[]) => {
 				return `* ${joinFilePath(location)}`
@@ -131,23 +189,38 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 
 	const { metadata, markdownSource } = markdownFrontMatterResult.value
 
-	return Response.json({
-		meta: {
-			status_code: 200,
-			status_text: 'OK',
+	return Response.json(
+		{
+			meta: {
+				status_code: 200,
+				status_text: 'OK',
+				// Include quick preview metadata in response for frontend to use
+				quick_preview: quickPreviewManifest
+					? {
+							enabled: true,
+							mode: quickPreviewManifest.mode || 'normal',
+							content_source: 'preview',
+						}
+					: undefined,
+			},
+			result: {
+				fullPath: parsedDocsPath,
+				product: productSlug,
+				version: PRODUCT_CONFIG[productSlug].versionedDocs
+					? versionMetadata.version
+					: 'v0.0.x',
+				metadata,
+				subpath: 'docs', // TODO: I guess we could grab the first part of the rawDocsPath? Is there something I am missing here?
+				markdownSource,
+				created_at: createdAt,
+				sha: '', // TODO: Do we really need this?
+				githubFile,
+			},
 		},
-		result: {
-			fullPath: parsedDocsPath,
-			product: productSlug,
-			version: PRODUCT_CONFIG[productSlug].versionedDocs
-				? versionMetadata.version
-				: 'v0.0.x',
-			metadata,
-			subpath: 'docs', // TODO: I guess we could grab the first part of the rawDocsPath? Is there something I am missing here?
-			markdownSource,
-			created_at: createdAt,
-			sha: '', // TODO: Do we really need this?
-			githubFile,
+		{
+			headers: {
+				'X-Content-Source': 'preview',
+			},
 		},
-	})
+	)
 }
