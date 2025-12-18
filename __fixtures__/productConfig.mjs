@@ -314,6 +314,7 @@ export const PRODUCT_CONFIG = {
 		 * we need to move both over (eg assetDirs could be an array?)
 		 */
 		assetDir: 'img',
+		basePaths: [''],
 		contentDir: 'docs',
 		dataDir: 'data',
 		productSlug: 'terraform',
