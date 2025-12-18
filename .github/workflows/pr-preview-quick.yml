@@ -17,61 +17,9 @@ permissions:
   contents: read # for embargoed content repos
 
 jobs:
-  get-changed-files:
-    name: Get Changed Files
-    runs-on: ubuntu-latest
-    outputs:
-      changed_markdown_content_files: ${{ steps.changed-files.outputs.markdown_content_all_changed_files }}
-      changed_content_files_count: ${{ steps.changed-files.outputs.content_all_changed_files_count }}
-      not_content_bad_boy_naughty_files_count: ${{ steps.changed-files.outputs.not_content_bad_boy_naughty_all_changed_files_count }}
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-
-      - name: Get changed files in the content/ subdirectories
-        id: changed-files
-        uses: tj-actions/changed-files@dcc7a0cba800f454d79fff4b993e8c3555bcc0a8 # v45.0.7
-        with:
-          files_yaml: |
-            content:
-              - 'content/**'
-            markdown_content:
-              - 'content/**/*.mdx'
-            not_content_bad_boy_naughty:
-              - '!content/**'
-          base_sha: ${{ github.event.pull_request.base.sha }}
-          sha: ${{ github.event.pull_request.head.sha }}
-
-  security-check:
-    name: Security Check
-    runs-on: ubuntu-latest
-    needs: [get-changed-files]
-    steps:
-      - name: If in a forked repo fail if any changes are outside of content/**
-        run: |
-          : # Cases:
-          : # 1. PR from forked repo, changes outside of content/**; fail
-          if [ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ] && [ ${{ needs.get-changed-files.outputs.not_content_bad_boy_naughty_files_count }} -gt 0 ]; then
-
-            echo "❌ This is a PR from a forked repo with changes outside of content/\*\*. **Please only edit files in the content/\*\* directory.**" >> $GITHUB_STEP_SUMMARY
-            exit 1
-
-          : # 2. PR from forked repo, changes only in content/**; pass
-          elif [ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ] && [ ${{ needs.get-changed-files.outputs.not_content_bad_boy_naughty_files_count }} -eq 0 ]; then
-
-            echo "✅ This is a PR from a forked repo with NO changes outside of content/\*\*. Proceeding with the workflow." >> $GITHUB_STEP_SUMMARY
-            exit 0
-
-          fi
-
-          : # 3. PR from internal repo, changes outside of content/**; pass
-          : # 4. PR from internal repo, changes only in content/**; pass
-          echo "✅ This is an internal PR. Proceeding with the workflow." >> $GITHUB_STEP_SUMMARY
-          exit 0
-
   deploy-unified-docs-api-preview:
     name: Deploy Unified Docs API Preview (Quick Preview)
     runs-on: ubuntu-latest
-    needs: [security-check]
     outputs:
       preview_url: ${{ steps.unified_docs_preview_url.outputs.preview_url }}
       preview_url_to_fetch_deployment: ${{ steps.unified_docs_preview_url.outputs.preview_url_to_fetch_deployment }}
@@ -94,15 +42,23 @@ jobs:
             | Dev Portal | 🔄 Building ([Inspect](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})) | --- | --- |
             | Unified Docs API | 🔄 Building ([Inspect](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})) | --- | --- |
 
+      - name: Security check for forked PRs
+        run: |
+          if [ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]; then
+            echo "⚠️ This is a PR from a forked repo. Checking for non-content changes..."
+            NON_CONTENT_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -v '^content/' || true)
+            if [ -n "$NON_CONTENT_FILES" ]; then
+              echo "❌ This is a PR from a forked repo with changes outside of content/**. Please only edit files in the content/** directory." >> $GITHUB_STEP_SUMMARY
+              exit 1
+            fi
+            echo "✅ Forked PR only modifies content/** - proceeding." >> $GITHUB_STEP_SUMMARY
+          fi
+
       - name: Checkout hashicorp/web-unified-docs
         uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0  # Full history needed for git diff
-
-      - name: Add commit link to summary
-        run: |
-          echo "[Built using commit $(echo ${{ github.event.pull_request.head.sha }} | cut -c -7)](https://github.com/${{ github.repository }}/pull/${{ github.event.pull_request.number }}/commits/${{ github.event.pull_request.head.sha }})" >> $GITHUB_STEP_SUMMARY
 
       - name: Setup Node.js
         uses: actions/setup-node@1d0ff469b7ec7b3cb9d8673fde0c81c44821de2a # v4.2.0
@@ -120,49 +76,29 @@ jobs:
         run: npm ci
 
       - name: Fetch base branch for git diff
-        run: |
-          git fetch origin ${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}
+        run: git fetch origin ${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}
 
-      - name: Detect changed files (Quick Preview)
+      - name: Detect changed files and generate manifest
         id: quick_preview_detect
         run: |
-          echo "🔍 Quick Preview: Detecting changes against origin/${{ github.base_ref }}"
-          
-          BUILD_START=$(date +%s)
           npm run quick-preview:detect
           
-          # Extract stats from manifest
+          # Extract and output stats
           STATS=$(cat public/changedfiles.json | jq -r '.stats')
-          CHANGED=$(echo $STATS | jq -r '.changed')
-          DELETED=$(echo $STATS | jq -r '.deleted')
-          DOCS=$(echo $STATS | jq -r '.docs')
-          NAV=$(echo $STATS | jq -r '.navData')
+          echo "changed_files=$(echo $STATS | jq -r '.changed')" >> $GITHUB_OUTPUT
+          echo "deleted_files=$(echo $STATS | jq -r '.deleted')" >> $GITHUB_OUTPUT
+          echo "changed_docs=$(echo $STATS | jq -r '.docs')" >> $GITHUB_OUTPUT
+          echo "changed_nav=$(echo $STATS | jq -r '.navData')" >> $GITHUB_OUTPUT
           
-          echo "changed_files=$CHANGED" >> $GITHUB_OUTPUT
-          echo "deleted_files=$DELETED" >> $GITHUB_OUTPUT
-          echo "changed_docs=$DOCS" >> $GITHUB_OUTPUT
-          echo "changed_nav=$NAV" >> $GITHUB_OUTPUT
-          
-          echo "📊 Quick Preview Changes:"
-          echo "  - Total changed: $CHANGED"
-          echo "  - Total deleted: $DELETED"
-          echo "  - Docs: $DOCS"
-          echo "  - Nav data: $NAV"
-          echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Quick Preview Statistics" >> $GITHUB_STEP_SUMMARY
-          echo "- Changed files: $CHANGED" >> $GITHUB_STEP_SUMMARY
-          echo "- Deleted files: $DELETED" >> $GITHUB_STEP_SUMMARY
-          echo "- Docs processed: $DOCS" >> $GITHUB_STEP_SUMMARY
-          echo "- Nav data processed: $NAV" >> $GITHUB_STEP_SUMMARY
+          echo "- Changed: $(echo $STATS | jq -r '.changed')" >> $GITHUB_STEP_SUMMARY
+          echo "- Deleted: $(echo $STATS | jq -r '.deleted')" >> $GITHUB_STEP_SUMMARY
+          echo "- Docs: $(echo $STATS | jq -r '.docs')" >> $GITHUB_STEP_SUMMARY
+          echo "- Nav data: $(echo $STATS | jq -r '.navData')" >> $GITHUB_STEP_SUMMARY
 
-      - name: Generate metadata files (required for Next.js build)
+      - name: Generate metadata files and run selective prebuild
         run: |
-          echo "📋 Generating metadata files (versionMetadata.json + docsPathsAllVersions.json)..."
           node scripts/prebuild/run-prebuild.mjs --only-metadata
-
-      - name: Run selective prebuild (Quick Preview)
-        run: |
-          echo "🚀 Quick Preview: Building only changed files..."
           npm run quick-preview:build
         env:
           BASE_BRANCH: ${{ github.base_ref }}
@@ -176,14 +112,12 @@ jobs:
       - name: Pull Vercel Environment Information
         run: vercel pull --yes --environment=preview --token=${{ secrets.VERCEL_TOKEN }}
 
-      - name: Temporarily rename prebuild script to prevent npm lifecycle
+      - name: Temporarily remove prebuild script to prevent npm lifecycle
         run: |
-          # Rename the prebuild script in package.json so npm won't run it
           jq '.scripts.prebuild_original = .scripts.prebuild | del(.scripts.prebuild)' package.json > package.json.tmp
           mv package.json.tmp package.json
-          echo "✅ Temporarily disabled prebuild lifecycle hook"
 
-      - name: Build project with Vercel CLI (prebuild disabled)
+      - name: Build with Vercel CLI
         run: vercel build --target=preview --token=${{ secrets.VERCEL_TOKEN }}
         env:
           QUICK_PREVIEW: true
@@ -193,24 +127,8 @@ jobs:
       - name: Restore prebuild script
         if: always()
         run: |
-          # Restore the prebuild script
           jq '.scripts.prebuild = .scripts.prebuild_original | del(.scripts.prebuild_original)' package.json > package.json.tmp
           mv package.json.tmp package.json
-          echo "✅ Restored prebuild script"
-
-      - name: Verify build output exists
-        run: |
-          echo "🔍 Checking for build output..."
-          if [ -d ".vercel/output" ]; then
-            echo "✅ .vercel/output directory exists"
-            ls -la .vercel/output/
-          else
-            echo "❌ .vercel/output directory NOT found"
-            echo "Directory contents:"
-            ls -la .vercel/ || echo "No .vercel directory"
-            ls -la .next/ || echo "No .next directory"
-            exit 1
-          fi
 
       - name: Deploy Project Artifacts and Set GitHub Outputs
         id: unified_docs_preview_url
@@ -355,25 +273,27 @@ jobs:
 
   check-links:
     name: Run Link Checker
-    needs: [get-changed-files, deploy-dev-portal-preview]
-    if: needs.get-changed-files.outputs.changed_content_files_count > 0
+    needs: [deploy-unified-docs-api-preview, deploy-dev-portal-preview]
+    if: needs.deploy-unified-docs-api-preview.outputs.changed_docs > 0
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.event.pull_request.head.sha }}
 
-      - name: Checking links in files
+      - name: Get list of changed markdown files
+        id: get-files
         run: |
-          echo "Checking links in files:"
-          echo "${{ needs.get-changed-files.outputs.changed_markdown_content_files }}" | tr ' ' '\n'
+          FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | grep '\.mdx$' | tr '\n' ' ')
+          echo "files=$FILES" >> $GITHUB_OUTPUT
+          echo "Checking links in files: $FILES"
 
       - name: Run lychee link checker
         id: lychee
         uses: lycheeverse/lychee-action@f613c4a64e50d792e0b31ec34bbcbba12263c6a6 # v2.3.0
         with:
           args: >-
-            ${{ needs.get-changed-files.outputs.changed_markdown_content_files }}
+            ${{ steps.get-files.outputs.files }}
             -b ${{ needs.deploy-dev-portal-preview.outputs.preview_url }}
             --exclude-all-private
             --exclude '\.(svg|gif|jpg|png)'
@@ -461,8 +381,8 @@ jobs:
 
   skip-check-links:
     name: Skip Link Checker
-    needs: [get-changed-files, deploy-dev-portal-preview]
-    if: needs.get-changed-files.outputs.changed_content_files_count == 0
+    needs: [deploy-unified-docs-api-preview, deploy-dev-portal-preview]
+    if: needs.deploy-unified-docs-api-preview.outputs.changed_docs == 0
     runs-on: ubuntu-latest
     steps:
       - name: Update PR comment
