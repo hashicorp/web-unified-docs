@@ -13,30 +13,30 @@ allocation running on the cluster at one time. You might need this if the
 workload needs exclusive access to a remote resource like a data store. Nomad
 does not support singleton deployments as a built-in feature. Your workloads
 continue to run even when the Nomad client agent has crashed, so ensuring
-there's at most one allocation for a given workload some cooperation from the
+there's at most one allocation for a given workload requires some cooperation from the
 job. This document describes how to implement singleton deployments.
 
 ## Design Goals
 
-The configuration described here meets two primary design goals:
+The configuration described here meets these primary design goals:
 
-* The design will prevent a specific process with a task from running if there
+- The design prevents a specific process with a task from running if there
   is another instance of that task running anywhere else on the Nomad cluster.
-* Nomad should be able to recover from failure of the task or the node on which
-  the task is running with minimal downtime, where "recovery" means that the
-  original task should be stopped and that Nomad should schedule a replacement
+- Nomad should be able to recover from failure of the task or the node on which
+  the task is running with minimal downtime, where "recovery" means that Nomad should stop the
+  original task and schedule a replacement
   task.
-* Nomad should minimize false positive detection of failures to avoid
+- Nomad should minimize false positive detection of failures to avoid
   unnecessary downtime during the cutover.
 
 There's a tradeoff between between recovery speed and false positives. The
 faster you make Nomad attempt to recover from failure, the more likely that a
-transient failure causes a replacement to be scheduled and a subsequent
+transient failure causes Nomad to schedule a replacement and a subsequent
 downtime.
 
 Note that it's not possible to design a perfectly zero-downtime singleton
-allocation in a distributed system. This design will err on the side of
-correctness: having 0 or 1 allocations running rather than the incorrect 1 or 2
+allocation in a distributed system. This design errs on the side of
+correctness: having zero or one allocations running rather than the incorrect one or two
 allocations running.
 
 ## Overview
@@ -44,46 +44,46 @@ allocations running.
 There are several options available for some details of the implementation, but
 all of them include the following:
 
-* You must have a distributed lock with a TTL that's refreshed from the
+- You must have a distributed lock with a TTL that's refreshed from the
   allocation. The process that sets and refreshes the lock must have its
   lifecycle tied to the main task. It can be either in-process, in-task with
   supervision, or run as a sidecar. If the allocation cannot obtain the lock,
-  then it must not start whatever process or operations is intended to be a
+  then it must not start whatever process or operation you intend to be a
   singleton. After a configurable window without obtaining the lock, the
   allocation must fail.
-* You must set the [`group.disconnect.stop_on_client_after`][] field. This
+- You must set the [`group.disconnect.stop_on_client_after`][] field. This
   forces a Nomad client that's disconnected from the server to stop the
   singleton allocation, which in turn releases the lock or allows its TTL to
   expire.
 
-The values for the three timers (the lock TTL, the time it takes the alloc to
-give up, and the `stop_on_client_after` duration) are the values that can be
-tuned to reduce the maximum amount of downtime the application can have.
+Tune the lock TTL, the time it takes the alloc to
+give up, and the `stop_on_client_after` duration timer values to reduce the
+maximum amount of downtime the application can have.
 
 The Nomad [Locks API][] can support the operations needed. In psuedo-code these
-operations are:
+operations are the following:
 
-* To acquire the lock, `PUT /v1/var/:path?lock-acquire`
-  * On success: start heartbeat every 1/2 TTL
-  * On conflict or failure: retry with backoff and timeout.
-    * Once out of attempts, exit the process with error code.
-* To heartbeat, `PUT /v1/var/:path?lock-renew`
-  * On success: continue
-  * On conflict: exit the process with error code
-  * On failure: retry with backoff up to TTL.
-    * If TTL expires, attempt to revoke lock, then exit the process with error code.
+- To acquire the lock, `PUT /v1/var/:path?lock-acquire`
+  - On success: start heartbeat every 1/2 TTL
+  - On conflict or failure: retry with backoff and timeout.
+    - Once out of attempts, exit the process with error code.
+- To heartbeat, `PUT /v1/var/:path?lock-renew`
+  - On success: continue
+  - On conflict: exit the process with error code
+  - On failure: retry with backoff up to TTL.
+    - If TTL expires, attempt to revoke lock, then exit the process with error code.
 
 The allocation can safely use the Nomad [Task API][] socket to write to the
 locks API, rather than communicating with the server directly. This reduces load
 on the server and speeds up detection of failed client nodes because the
 disconnected client cannot forward the Task API requests to the leader.
 
-The [`nomad var lock`][] command implements this logic and can be used to shim
+The [`nomad var lock`][] command implements this logic, so you can use it to shim
 the process being locked.
 
 ### ACLs
 
-Allocations cannot write to Variables by default. You must configure a
+Allocations cannot write to Nomad variables by default. You must configure a
 [workload-associated ACL policy][] that allows write access in the
 [`namespace.variables`][] block. For example, the following ACL policy allows
 access to write a lock on the path `nomad/jobs/example/lock` in the `prod`
@@ -102,11 +102,13 @@ namespace "prod" {
 You set this policy on the job with `nomad acl policy apply -namespace prod -job
 example example-lock ./policy.hcl`.
 
-### Using `nomad var lock`
+## Implementation
 
-The easiest way to implement the locking logic is to use `nomad var lock` as a
-shim in your task. The jobspec below assumes there's a Nomad binary in the
-container image.
+### Use `nomad var lock`
+
+We recommend implementing the locking logic with `nomad var lock` as a shim in
+your task. This example jobspec assumes there's a Nomad binary in the container
+image.
 
 ```hcl
 job "example" {
@@ -136,10 +138,12 @@ job "example" {
 }
 ```
 
-If you don't want to ship a Nomad binary in the container image you can make a
-read-only mount of the binary from a host volume. This will only work in cases
+If you don't want to ship a Nomad binary in the container image, make a
+read-only mount of the binary from a host volume. This only works in cases
 where the Nomad binary has been statically linked or you have glibc in the
 container image.
+
+<CodeBlockConfig lineNumbers highlight="8-12,30-33">
 
 ```hcl
 job "example" {
@@ -178,14 +182,15 @@ job "example" {
     }
   }
 }
-```
 
-### Sidecar Lock
+### Sidecar lock
 
-If cannot implement the lock logic in your application or with a shim such as
-`nomad var lock`, you'rll need to implement it such that the task you are
-locking is running as a sidecar of the locking task, which has
-[`task.leader=true`][] set.
+If you cannot implement the lock logic in your application or with a shim such
+as `nomad var lock`, you need to implement it such that the task you are locking
+is running as a sidecar of the locking task, which has [`task.leader=true`][]
+set.
+
+<CodeBlockConfig lineNumbers highlight="9">
 
 ```hcl
 job "example" {
@@ -221,21 +226,22 @@ job "example" {
     }
   }
 }
-```
 
 The locking task has the following requirements:
 
-* The locking task must be in the same group as the task being locked.
-* The locking task must be able to terminate the task being locked without the
-  Nomad client being up (i.e. they share the same PID namespace, or the locking
-  task is privileged).
-* The locking task must have a way of signalling the task being locked that it
-  is safe to start. For example, the locking task can write a sentinel file into
-  the /alloc directory, which the locked task tries to read on startup and
-  blocks until it exists.
+- Must be in the same group as the task being locked.
+- Must be able to terminate the task being locked without the Nomad client being
+  up. For example, they share the same PID namespace, or the locking task is
+  privileged.
+- Must have a way of signalling the task being locked that it is safe to start.
+  For example, the locking task can write a Sentinel file into the `/alloc`
+  directory, which the locked task tries to read on startup and blocks until it
+  exists.
 
-If the third requirement cannot be met, then you’ll need to split the lock
-acquisition and lock heartbeat into separate tasks:
+If you cannot meet the third requirement, then you need to split the lock
+acquisition and lock heartbeat into separate tasks.
+
+<CodeBlockConfig lineNumbers highlight="8-20,22-32">
 
 ```hcl
 job "example" {
@@ -284,11 +290,6 @@ job "example" {
     }
   }
 }
-```
-
-If the primary task is configured to [`restart`][], the task should be able to
-restart within the lock TTL in order to minimize flapping on restart. This
-improves availability but isn't required for correctness.
 
 [`group.disconnect.stop_on_client_after`]: /nomad/docs/job-specification/disconnect#stop_on_client_after
 [Locks API]: /nomad/api-docs/variables/locks
