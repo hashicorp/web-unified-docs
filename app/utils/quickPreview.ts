@@ -105,7 +105,8 @@ export async function fetchFromProduction(
 		return response
 	} catch (error) {
 		console.error(
-			`[Quick Preview] Failed to fetch from production: ${productionPath}`,
+			'[Quick Preview] Failed to fetch from production: %s',
+			productionPath,
 			error,
 		)
 		throw error
