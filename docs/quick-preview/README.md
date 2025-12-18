@@ -249,6 +249,92 @@ export async function GET(request: Request, { params }) {
 
 ---
 
+## How Vercel Builds Work (Critical Understanding)
+
+### Traditional PR Preview Build
+
+In the existing workflow ([build-pr-preview.yml](/.github/workflows/build-pr-preview.yml)):
+
+```yaml
+# Step 1: Build locally in GitHub Actions
+- name: Build Project Artifacts
+  run: vercel build --target=preview --token=${{ secrets.VERCEL_TOKEN }}
+  # This runs: npm run prebuild && npm run build
+  # Takes ~17 minutes to process 72,000+ files
+
+# Step 2: Deploy pre-built artifacts
+- name: Deploy
+  run: vercel deploy --prebuilt --target=preview --token=${{ secrets.VERCEL_TOKEN }} --archive=tgz
+  # --prebuilt flag tells Vercel: "Don't build anything, just deploy what I built"
+  # Uploads .next/ directory and other artifacts
+```
+
+**Key insight:** The `--prebuilt` flag prevents Vercel from running ANY build commands on their servers.
+
+### Quick Preview Build
+
+Quick Preview uses the **exact same pattern** but with selective prebuild:
+
+```yaml
+# Step 1: Detect changes
+- run: npm run quick-preview:detect
+
+# Step 2: Selective prebuild (only changed files)
+- run: npm run quick-preview:build
+  # Takes ~30 seconds instead of ~15 minutes
+
+# Step 3: Next.js build
+- run: vercel build --token=${{ secrets.VERCEL_TOKEN }}
+  env:
+    VERCEL_BUILD_COMMAND: npm run build  # CRITICAL: Override Vercel's build command
+  # Without this override, Vercel would run "npm run prebuild && npm run build" again!
+
+# Step 4: Deploy pre-built artifacts
+- run: vercel deploy --prebuilt --token=${{ secrets.VERCEL_TOKEN }} --archive=tgz
+```
+
+**Critical fix:** The `VERCEL_BUILD_COMMAND` environment variable override is essential because:
+1. Vercel projects often have a build command configured in their dashboard (e.g., `npm run prebuild && npm run build`)
+2. Even though we use `--prebuilt` for deployment, `vercel build` still respects the configured build command
+3. Without the override, the flow would be:
+   - ✅ Selective prebuild (~30s) ← Good!
+   - ❌ Full prebuild (~15 min) ← BAD! Vercel's build command runs this again
+   - Next.js build (~5 min)
+   - Total: ~20 minutes (SLOWER than original)
+4. With the override, the flow is:
+   - ✅ Selective prebuild (~30s)
+   - ✅ Next.js build ONLY (~5 min) ← Skip prebuild entirely
+   - Total: ~5.5 minutes (70% faster)
+
+### Prebuild Binaries
+
+Both workflows use precompiled Bun binaries for faster execution:
+
+**Files:**
+- `scripts/prebuild/prebuild-x64-linux-binary.gz` (41MB) - For GitHub Actions
+- `scripts/prebuild/prebuild-arm-mac-binary.gz` (25MB) - For Apple Silicon Macs
+- `scripts/prebuild/prebuild-arm-linux-binary.gz` (40MB) - For ARM Linux
+
+**Detection script:** `scripts/prebuild/run-prebuild.mjs`
+```javascript
+// Auto-detects platform and architecture
+if (platform === 'linux' && arch === 'x64') {
+  // Extract .gz file
+  // Make executable (chmod 0o755)
+  // Run binary (10x faster than Node.js)
+} else {
+  // Fallback to Node.js implementation
+}
+```
+
+**Used by both:**
+- `npm run prebuild` - Full prebuild (uses binary)
+- `npm run quick-preview:build` - Selective prebuild (uses same binary)
+
+The binaries are committed to the repo and automatically detected - no manual build step needed.
+
+---
+
 ## Usage
 
 ### Start Quick Preview Mode
@@ -260,9 +346,9 @@ npm run dev:quick-preview
 **What this does:**
 1. Runs `npm run quick-preview:detect` → Generates `public/changedfiles.json` with git diff
 2. Runs `npm run quick-preview:build` → Processes only changed files (~5-30 seconds)
-2. Starts watch-content in background
-3. Sets `QUICK_PREVIEW=true` environment variable
-4. Starts Next.js dev server on `http://localhost:8080`
+3. Starts watch-content in background
+4. Sets `QUICK_PREVIEW=true` environment variable
+5. Starts Next.js dev server on `http://localhost:8080`
 
 **Result:** Site runs with changed files built locally, unchanged files from production.
 
@@ -749,26 +835,97 @@ Return with X-Content-Source header
 }
 ```
 
+## GitHub Actions Integration
+
+Quick Preview is designed for PR preview builds to dramatically reduce build times.
+
+### Setup Required
+
+1. **GitHub Secrets** - Add to your repository:
+   - `VERCEL_TOKEN` - Vercel API token
+   - `VERCEL_ORG_ID` - Vercel organization ID
+   - `VERCEL_PROJECT_ID` - Vercel project ID
+
+2. **Workflow File** - Already created at `.github/workflows/pr-preview-quick.yml`
+
+### How PR Previews Work
+
+When a PR is opened or updated:
+
+1. **Detect Changes** - Git diff against base branch
+   ```bash
+   npm run quick-preview:detect
+   ```
+
+2. **Selective Build** - Process only changed files
+   ```bash
+   npm run quick-preview:build
+   ```
+
+3. **Deploy to Vercel** - With `QUICK_PREVIEW=true`
+   - Changed content served from preview deployment
+   - Unchanged content proxied from production
+
+4. **PR Comment** - Automatic comment with:
+   - Deployment URL
+   - Build time (target: 3-5 min vs ~17 min)
+   - Statistics on files processed
+
+### Expected Performance
+
+- **Traditional Build**: ~17 minutes (processes all 72,000+ files)
+- **Quick Preview Build**: 3-5 minutes (processes only changed files)
+- **Time Savings**: 70-85% reduction
+
+### Monitoring
+
+The workflow outputs detailed statistics:
+```
+📊 Changes detected:
+  - Total changed: 5
+  - Total deleted: 1
+  - Docs: 3
+  - Nav data: 2
+
+⏱️  Build completed in 187s (3.1 min)
+```
+
+### Workflow Triggers
+
+The workflow runs on:
+- Pull request opened
+- Pull request synchronized (new commits)
+- Pull request reopened
+
+Only when these paths change:
+- `content/**`
+- `app/**`
+- `scripts/**`
+- `package.json`
+
 ## FAQ
 
 **Q: Will this affect my regular development?**
 A: No. The `npm run dev` command is completely unchanged.
 
-**Q: Can I test with actual changed files?**
-A: Not yet. Phase 2 will add real change detection.
-
 **Q: Why is everything from production?**
 A: Git diff detects your changes and selective prebuild processes only those files. Unchanged content is served from production.
 
 **Q: Is this safe to use?**
-A: Yes, it's completely isolated. Only active when you run `dev:quick-preview`.
+A: Yes, it's completely isolated. Only active when `QUICK_PREVIEW=true` environment variable is set.
 
 **Q: What if production is down?**
-A: Pages will return 404. We'll add better error handling in future phases.
+A: Preview pages will fail to load unchanged content. Changed content will still work.
+
+**Q: Can I test the workflow locally?**
+A: Yes! Just run `npm run dev:quick-preview` - it uses the same logic.
+
+**Q: How do I verify GitHub Actions is set up correctly?**
+A: Check that secrets are configured and open a test PR with a small content change.
 
 ## Support
 
 Questions or issues? Check:
 1. This README
-2. `docs/.research/QUICK_PREVIEW_BUILDS.md` (full implementation plan)
+2. GitHub Actions logs in PR checks
 3. Terminal logs when running `dev:quick-preview`

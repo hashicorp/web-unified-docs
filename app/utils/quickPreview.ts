@@ -16,11 +16,30 @@ const CHANGED_FILES_MANIFEST = 'public/changedfiles.json'
 interface ChangedFilesManifest {
 	quickPreview: boolean
 	mode?: string
-	files: {
-		changed: string[]
-		deleted: string[]
+	baseBranch?: string
+	timestamp?: string
+	stats?: {
+		changed: number
+		deleted: number
+		docs: number
+		navData: number
+		redirects: number
+		assets: number
 	}
-	generated: string
+	changed: {
+		docs: string[]
+		navData: string[]
+		redirects: string[]
+		assets: string[]
+		other: string[]
+	}
+	deleted: {
+		docs: string[]
+		navData: string[]
+		redirects: string[]
+		assets: string[]
+		other: string[]
+	}
 }
 
 let manifestCache: ChangedFilesManifest | null = null
@@ -31,6 +50,11 @@ let manifestLoadTime = 0
  * Caches for 5 seconds to avoid repeated disk reads
  */
 export async function getQuickPreviewManifest(): Promise<ChangedFilesManifest | null> {
+	// Quick Preview must be explicitly enabled
+	if (process.env.QUICK_PREVIEW !== 'true') {
+		return null
+	}
+
 	try {
 		// Cache manifest for 5 seconds to avoid repeated reads
 		const now = Date.now()
@@ -95,11 +119,11 @@ export function isFileDeleted(
 	manifest: ChangedFilesManifest | null,
 	filePath: string,
 ): boolean {
-	if (!manifest?.quickPreview) {
+	if (!manifest?.quickPreview || !manifest?.deleted) {
 		return false
 	}
 
-	return manifest.files.deleted.includes(filePath)
+	return manifest.deleted.docs?.includes(filePath) ?? false
 }
 
 /**
