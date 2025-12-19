@@ -1,5 +1,5 @@
 /**
- * Copyright (c) HashiCorp, Inc.
+ * Copyright IBM Corp. 2025
  * SPDX-License-Identifier: BUSL-1.1
  */
 
@@ -144,6 +144,27 @@ This content should stay.
 <!-- END: Vault:=v1.21.x -->
 
 Other content.`)
+	})
+
+	it('should handle short versions correctly', async () => {
+		const markdown = `
+<!-- BEGIN: Vault:>=v2.x -->
+This should be removed.
+<!-- END: Vault:>=v2.x -->
+<!-- BEGIN: Vault:<=v2.x -->
+This should stay.
+<!-- END: Vault:<=v2.x -->
+Final content.
+`
+		const result = await runTransform(markdown, vaultOptions)
+
+		expect(result.trim()).toBe(`<!-- BEGIN: Vault:<=v2.x -->
+
+This should stay.
+
+<!-- END: Vault:<=v2.x -->
+
+Final content.`)
 	})
 })
 

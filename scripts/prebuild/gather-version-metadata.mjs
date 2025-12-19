@@ -1,5 +1,5 @@
 /**
- * Copyright (c) HashiCorp, Inc.
+ * Copyright IBM Corp. 2025
  * SPDX-License-Identifier: BUSL-1.1
  */
 
@@ -17,7 +17,7 @@ const acceptedReleaseStages = ['alpha', 'beta', 'rc']
  * based on the content directory structure, and return it.
  *
  * @param {string} contentDir
- * @returns {object} versionMetadata
+ * @returns {Promise<Record<string, unknown>} versionMetadata
  */
 export async function gatherVersionMetadata(contentDir) {
 	// Set up the version metadata object, this is what we'll return
@@ -161,7 +161,17 @@ export async function gatherVersionMetadata(contentDir) {
  * @returns {string} The normalized version string
  */
 function normalizeVersion(version) {
-	return version
+	const TFE_VERSION_IN_PATH_REGEXP = /v[0-9]{6}-\d+/i
+
+	const cleanVersion = version
 		.replace(/\s*\([^)]+\)/, '') // Remove any release stage in parentheses
 		.replace(/\.x$/, '.0') // Replace trailing `.x` with `.0`
+
+	if (TFE_VERSION_IN_PATH_REGEXP.test(cleanVersion)) {
+		return cleanVersion
+	}
+
+	// Use semver.coerce to handle versions like "v2.x" for proper version sorting
+	const normalized = semver.coerce(cleanVersion).version
+	return normalized
 }
