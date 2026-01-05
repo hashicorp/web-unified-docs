@@ -1,5 +1,5 @@
 /**
- * Copyright (c) HashiCorp, Inc.
+ * Copyright IBM Corp. 2025
  * SPDX-License-Identifier: BUSL-1.1
  */
 
@@ -22,14 +22,38 @@ export function getUrlFromFilePath(
 	productConfig = PRODUCT_CONFIG,
 ) {
 	const repoDir = getProductDirectoryFromFilePath(filePath)
-	const version = getVersionFromFilePath(filePath)
 	const isValidProduct = productConfig[repoDir]
 
 	if (!isValidProduct) {
 		throw new Error(`Product not found for ${repoDir}`)
-	} else {
-		return allDocsPaths[repoDir][version].find((path) => {
-			return filePath.endsWith(path.itemPath)
-		}).path
 	}
+
+	// Check for versionless products and use v0.0.x as the version key
+	const version = productConfig[repoDir].versionedDocs
+		? getVersionFromFilePath(filePath)
+		: 'v0.0.x'
+
+	// Check if the version exists in allDocsPaths
+	if (!allDocsPaths[repoDir]) {
+		throw new Error(`No docs paths found for product: ${repoDir}`)
+	}
+
+	if (!allDocsPaths[repoDir][version]) {
+		throw new Error(
+			`Version ${version} not found for product ${repoDir}. File path: ${filePath}`,
+		)
+	}
+
+	// Find the matching path
+	const matchedPath = allDocsPaths[repoDir][version].find((path) => {
+		return filePath.endsWith(path.itemPath)
+	})
+
+	if (!matchedPath) {
+		throw new Error(
+			`No matching path found for file: ${filePath} in version ${version} of ${repoDir}`,
+		)
+	}
+
+	return matchedPath.path
 }
