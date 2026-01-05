@@ -11,17 +11,23 @@ Amazon Elastic Kubernetes Service (EKS) can run and scale Vault in the Amazon We
 
 In this guide, you create an EKS cluster in AWS, deploy a MySQL server, install Vault in high-availability (HA) mode via the Helm chart. Then you configure the authentication between Vault and the cluster. 
 
-## Prerequisites
-
 This guide focuses on setting up HashiCorp Vault on Amazon EKS and assumes a understanding of both Amazon EKS concepts and terminology. The guide assumes the user is familiar with AWS accounts, EKS clusters, Kubernetes pods, service accounts, and manifests.
+
+## Before you start
 
 This guide requires:
 
-- [AWS account](https://aws.amazon.com/account/) 
-- [AWS command-line interface (CLI)](https://aws.amazon.com/cli/)
-- [Amazon EKS CLI](https://docs.aws.amazon.com/eks/latest/userguide/getting-started-eksctl.html) 
-- [Kubernetes CLI](https://kubernetes.io/docs/tasks/tools/install-kubectl/)
-- [Helm CLI](https://helm.sh/docs/helm/)
+- You should be familiar with Kubernetes concepts like pods, service accounts,
+  and manifests.
+- You should be comfortable working with:
+   - [Amazon EKS](https://docs.aws.amazon.com/eks/latest/userguide/what-is-eks.html).
+   - [Helm charts](https://helm.sh/docs/topics/charts).
+- You must have an [AWS account](https://aws.amazon.com/account/) 
+- You must haver the foollowing command-line tools installed and configured:
+   - [AWS command-line interface (CLI)](https://aws.amazon.com/cli/)
+   - [Amazon EKS CLI](https://docs.aws.amazon.com/eks/latest/userguide/getting-started-eksctl.html) 
+   - [Kubernetes CLI](https://kubernetes.io/docs/tasks/tools/install-kubectl/)
+   - [Helm CLI](https://helm.sh/docs/helm/)
 - [jq](https://jqlang.org/)
 
 In addition you need to have the Vault Helm chart. You can add the Helm repositories with the following commands:
@@ -33,7 +39,11 @@ $ helm repo add hashicorp https://helm.releases.hashicorp.com
 
 You will need a SSH key pair to access the nodes in your cluster. You can create a key pair using the AWS Management Console or the AWS CLI. For more information, see [Create a key pair for Amazon EC2 instances](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/create-key-pairs.html).
 
-## Step 1: Start cluster
+## Step 1: Add the Hashicorp repo to Helm
+
+@include 'how-tos/helm-repo.mdx'
+
+## Step 2: Start EKS cluster
 
 A high availability Vault cluster that requires a Kubernetes cluster with three nodes.
 
@@ -79,306 +89,46 @@ A high availability Vault cluster that requires a Kubernetes cluster with three 
        --service-account-role-arn arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):role/AmazonEKS_EBS_CSI_DriverRole
    ```
 
-   The cluster is ready.
+## Step 3: Install Vault using helm
 
-## Step 2: Install Vault
+@include 'how-tos/helm-install.mdx'
 
-The Vault Helm chart contains all the necessary components to run Vault in several different modes.
+## Step 4: Initialize and unseal the primary Vault pod
 
-1. Create a file named `helm-vault-raft-values.yml` with the following contents:
+@include 'how-tos/initialise.mdx'
 
-   ```shell-session
-   $ cat > helm-vault-raft-values.yml <<EOF
-   server:
-      affinity: ""
-      ha:
-         enabled: true
-         raft:
-            enabled: true
-            setNodeId: true
-            config: |
-               cluster_name = "vault-integrated-storage"
-               storage "raft" {
-                  path    = "/vault/data/"
-               }
+## Step 5: Join additional nodes to the Vault cluster
 
-               listener "tcp" {
-                  address = "[::]:8200"
-                  cluster_address = "[::]:8201"
-                  tls_disable = "true"
-               }
-               service_registration "kubernetes" {}
-   EOF
-   ```
+@include 'how-tos/join.mdx'
 
-   <Note title="Recommendation">
+## Step 6: Test your cluster deployment 
 
-   If you are using Prometheus for monitoring and alerting, we recommend to set the `cluster_name` in the HCL configuration.  use the `config` parameter in the Vault Helm chart.
+@include 'how-tos/test.mdx'
 
-   </Note>
+## Step 7: Create a Kubernetes service account for clients
 
-   Helm deploys the Vault pods and Vault Agent Injector pod in the default namespace.
+@include 'how-tos/kubernetes-sa.mdx'
 
-1. Install the latest version of the Vault Helm chart with Integrated Storage.
+## Step 8: Enable Kubernetes authentication
 
-   ```shell-session
-   $ helm install vault hashicorp/vault --values helm-vault-raft-values.yml
-   ```
+@include 'how-tos/kubernetes-auth.mdx'
 
-   This creates three Vault server instances with an Integrated Storage (Raft) backend. 
+## Step 9: Validate secret available to sample application
 
-   Helm installs the Vault pods and Vault Agent Injector pod in the default namespace.
+@include 'how-tos/validate.mdx'
 
-## Step 3: Initialize and unseal primary Vault pod
-
-Vault starts [uninitialized](/vault/docs/commands/operator/init) and in the [sealed](/vault/docs/concepts/seal#why) state. Prior to initialization the Integrated Storage backend is not prepared to receive data.
-
-1. Initialize Vault with one key share and one key threshold.
-
-   ```shell-session
-   $ kubectl exec vault-0 -- vault operator init \
-       -key-shares=1 \
-       -key-threshold=1 \
-       -format=json > cluster-keys.json
-   ```
-
-1. Display the unseal key found in `cluster-keys.json`.
-
-   ```shell-session
-   $ cat cluster-keys.json | jq -r ".unseal_keys_b64[]"
-   ```
-
-1. Create a variable named `VAULT_UNSEAL_KEY` to capture the Vault unseal key.
-
-   ```shell-session
-   $ VAULT_UNSEAL_KEY=$(cat cluster-keys.json | jq -r ".unseal_keys_b64[]")
-   ```
-
-1. Unseal Vault running on the `vault-0` pod.
-
-   ```shell-session
-   $ kubectl exec vault-0 -- vault operator unseal $VAULT_UNSEAL_KEY
-   ```
-
-## Step 4: Join the other Vaults to the Vault cluster
-
-The Vault server running on the `vault-0` pod is a Vault HA cluster with a
-single node. To display the list of nodes requires that you are logging in with
-the root token.
-
-1. Create a variable named `CLUSTER_ROOT_TOKEN` to capture the Vault unseal key.
-
-   ```shell-session
-   $ CLUSTER_ROOT_TOKEN=$(cat cluster-keys.json | jq -r ".root_token")
-   ```
-
-1. Login with the root token on the `vault-0` pod.
-
-   ```shell-session
-   $ kubectl exec vault-0 -- vault login $CLUSTER_ROOT_TOKEN
-   ```
-
-1. Join the Vault server on `vault-1` to the Vault cluster.
-
-   ```shell-session
-   $ kubectl exec vault-1 -- vault operator raft join http://vault-0.vault-internal:8200
-   ```
-
-   This Vault server joins the cluster sealed. To unseal the Vault server requires
-   the same unseal key, `VAULT_UNSEAL_KEY`, provided to the first Vault server.
-
-1. Unseal the Vault server on `vault-1` with the unseal key.
-
-   ```shell-session
-   $ kubectl exec vault-1 -- vault operator unseal $VAULT_UNSEAL_KEY
-   ```
-
-   The Vault server on `vault-1` is now a functional node within the Vault
-   cluster.
-
-1. Join the Vault server on `vault-2` to the Vault cluster.
-
-   ```shell-session
-   $ kubectl exec vault-2 -- vault operator raft join http://vault-0.vault-internal:8200
-   ```
-
-1. Unseal the Vault server on `vault-2` with the unseal key.
-
-   ```shell-session
-   $ kubectl exec vault-2 -- vault operator unseal $VAULT_UNSEAL_KEY
-   ```
-
-## Step 5: Set a secret in Vault
-
-The web application expects Vault to store a username and password at the path `secret/webapp/config`. Creating this secret requires you to login with the root token, enable the key-value secret engine](/vault/docs/secrets/kv/kv-v2), and store a secret username and password at that defined path.
-
-1. First, start an interactive shell session on the `vault-0` pod.
-
-   ```shell-session
-   $ kubectl exec --stdin=true --tty=true vault-0 -- /bin/sh
-   / $
-   ```
-
-   This replaces the system prompt with a new prompt `/ $`.
-
-1. Enable kv-v2 secrets at the path `secret`.
-
-   ```shell-session
-   $ vault secrets enable -path=secret kv-v2
-   ```
-
-1. Create a secret at path `secret/devwebapp/config` with a `username` and
-`password`.
-
-   ```shell-session
-   $ vault kv put secret/devwebapp/config username='giraffe' password='salsa'
-   ```
-
-1. Verify that the secret is defined at the path `secret/data/devwebapp/config`.
-
-   ```shell-session
-   $ vault kv get secret/devwebapp/config
-   ```
-
-   <Note title="Learn more">
-
-   For more information refer to the [Versioned Key/Value Secrets Engine](/vault/tutorials/secrets-management/versioned-kv) tutorial.
-
-   </Note>
-
-   You created the secret for the web application.
-
-## Step 7: Configure Kubernetes authentication
-
-The initial [root token](/vault/docs/concepts/tokens#root-tokens) is a privileged user that can perform any operation at any path. The web application only requires the ability to read secrets defined at a single path. This application should authenticate and Vault grants a token with limited access.
-
-<Note title="Best practice">
-
-We recommend that [root
-tokens](/vault/docs/concepts/tokens#root-tokens) are
-used only for initial setup of an authentication method and policies. Afterwards they should be revoked. This tutorial does not show you how to revoke the root token.
-
-</Note>
-
-Vault provides a [Kubernetes authentication](/vault/docs/auth/kubernetes) method that enables clients to authenticate with a Kubernetes Service Account Token.
-
-1. Enable the Kubernetes authentication method.
-
-   ```shell-session
-   $ vault auth enable kubernetes
-   Success! Enabled kubernetes auth method at: kubernetes/
-   ```
-
-   Vault accepts a service token from any client within the Kubernetes cluster. During authentication, Vault verifies that the service account token is valid by querying a token review Kubernetes endpoint.
-
-1. Configure the Kubernetes authentication method to use the location of the Kubernetes API. It will automatically use the pod's own identity to authenticate with Kubernetes when querying the token review API.
-
-   ```shell-session
-   $ vault write auth/kubernetes/config \
-      kubernetes_host="https://$KUBERNETES_PORT_443_TCP_ADDR:443"
-   ```
-
-1. Write out the policy named `devwebapp` that enables the `read` capability for secrets at path `secret/data/devwebapp/config`
-
-   ```shell-session
-   $ vault policy write devwebapp - <<EOF
-   path "secret/data/devwebapp/config" {
-   capabilities = ["read"]
-   }
-   EOF
-   ```
-
-1. Create a Kubernetes authentication role named `devweb-app`.
-
-   ```shell-session
-   $ vault write auth/kubernetes/role/devweb-app \
-         bound_service_account_names=internal-app \
-         bound_service_account_namespaces=default \
-         policies=devwebapp \
-         ttl=24h
-   ```
-
-   The role connects a Kubernetes service account, `internal-app` (created in the next step), and namespace, `default`, with the Vault policy, `devwebapp`. The tokens returned after authentication are valid for 24 hours.
-
-1. Lastly, exit the `vault-0` pod.
-
-   ```shell-session
-   $ exit
-   ```
-
-## Step 8: Deploy web application
-
-The web application pod requires the creation of the `internal-app` Kubernetes service account specified in the Vault Kubernetes authentication role created in the [Configure Kubernetes authentication](#configure-kubernetes-authentication)
-step.
-
-1. Create a Kubernetes service account named `internal-app`.
-
-   ```shell-session
-   $ kubectl create sa internal-app
-   ```
-
-1. Define a pod named `devwebapp` with the web application.
-
-   ```shell-session
-   $ cat > devwebapp.yaml <<EOF
-   ---
-   apiVersion: v1
-   kind: Pod
-   metadata:
-      name: devwebapp
-      labels:
-         app: devwebapp
-      annotations:
-         vault.hashicorp.com/agent-inject: "true"
-         vault.hashicorp.com/role: "devweb-app"
-         vault.hashicorp.com/agent-inject-secret-credentials.txt: "secret/data/devwebapp/config"
-   spec:
-   serviceAccountName: internal-app
-   containers:
-      - name: devwebapp
-         image: caddy
-   EOF
-   ```
-
-   This definition creates a pod with the specified container running with the `internal-app` Kubernetes service account. The container within the pod is unaware of the Vault cluster. The Vault Injector service reads the [annotations](/vault/docs/platform/k8s/injector#annotations) to find the secret path, stored within Vault at `secret/data/devwebapp/config` and the file location, `/vault/secrets/secret-credentials.txt`, to mount that secret with the pod.
-
-   <Note title="Learn more">
-
-   For more information about annotations refer to the
-   [Injecting Secrets into Kubernetes Pods via Vault Agent
-   Injector](/vault/tutorials/kubernetes/kubernetes-sidecar) tutorial.
-
-   </Note>
-
-1. Create the `devwebapp` pod.
-
-   ```shell-session
-   $ kubectl apply --filename devwebapp.yaml
-   ```
-
-1. Wait until the `devwebapp` pod reports that is running and ready (`2/2`).
-
-1. Display the secrets written to the file `/vault/secrets/secret-credentials.txt`
-on the `devwebapp` pod.
-
-   ```shell-session
-   $ kubectl exec --stdin=true --tty=true devwebapp -c devwebapp -- cat /vault/secrets/credentials.txt
-   data: map[password:salsa username:giraffe]
-   metadata: map[created_time:2020-12-11T19:14:05.170436863Z deletion_time: destroyed:false version:1]
-   ```
-
-   The result displays the unformatted secret data present on the container.
-
-<Tip title="Format data">
-
-Apply a [template](/vault/tutorials/kubernetes/kubernetes-sidecar#apply-a-template-to-the-injected-secrets) to this structure this data to meet the needs of the application.
-
-</Tip>
-
-## Step 9: Clean up
+## Step 10: Clean up
 
 Destroy the cluster.
 
 ```shell-session
 $ eksctl delete cluster --name learn-vault
 ```
+
+## Next steps
+
+@include 'how-tos/next-steps.mdx'
+
+## Additional resources
+
+@include 'how-tos/additional-resources.mdx'
