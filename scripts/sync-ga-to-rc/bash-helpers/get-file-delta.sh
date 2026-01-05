@@ -53,3 +53,4 @@ for file in $(find "${docFolder}" -type f); do
     echo ${jsonString}
   fi
 done
+
