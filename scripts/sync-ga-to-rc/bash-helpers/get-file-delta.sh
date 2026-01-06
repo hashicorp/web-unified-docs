@@ -1,5 +1,5 @@
 # 
-# Copyright (c) HashiCorp, Inc.
+# Copyright IBM Corp. 2025
 # SPDX-License-Identifier: BUSL-1.1
 # 
 # ------------------------------------------------------------------------------
@@ -53,3 +53,4 @@ for file in $(find "${docFolder}" -type f); do
     echo ${jsonString}
   fi
 done
+
