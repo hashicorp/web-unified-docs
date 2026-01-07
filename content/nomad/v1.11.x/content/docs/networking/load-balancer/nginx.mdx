@@ -2,8 +2,7 @@
 layout: docs
 page_title: Load balancing with NGINX
 description: >-
-  Create and deploy an NGINX job, generate a config with the template stanza,
-  and then dynamically reload it.
+  Create and deploy an NGINX job balance requests. Generate a config with the template stanza and then dynamically reload it.
 ---
 
 # Load balancing with NGINX
@@ -14,31 +13,28 @@ with your services.
 
 The main use case for NGINX in this scenario is to distribute incoming HTTP(S)
 and TCP requests from the Internet to front-end services that can handle these
-requests. This tutorial shows you one such example using a demo web application.
+requests.
 
-### Reference material
+Follow these steps to use NGINX as a load balancer:
 
-- [NGINX]
-- [Load Balancing Strategies for Consul][lb-strategies]
+1. Deploy your application.
+1. Configure and deploy NGINX.
 
-### Prerequisites
+This guide shows you how to deploy NGINX as a load balancer for a demo web application.
 
-**To perform the tasks described in this tutorial, you need to have a Nomad
-environment with Consul installed.** You can use this [Terraform
-environment][nomad-tf] to provision a sandbox environment. This tutorial uses
-a cluster with one server node and three client nodes.
+## Prerequisites
 
-<Note>
+You must configure your Nomad installation to use Consul. Refer to the
+[Consul integration](/nomad/docs/networking/consul) content for more
+information.
 
- This tutorial is for demo purposes and only uses a single server
-node. Please consult the [reference architecture][reference-arch] for
-production configuration.
+## Deploy the demo web application
 
-</Note>
+Create a job specification for a demo web application and name the file
+`webapp.nomad.hcl`. This job specification creates three instances of the demo
+web application for you to target in your HAProxy configuration.
 
-## Create and run a demo web app job
-
-Create a job for a demo web application and name the file `webapp.nomad.hcl`:
+<CodeBlockConfig filename="webapp.nomad.hcl" highlight="5">
 
 ```hcl
 job "demo-webapp" {
@@ -81,10 +77,9 @@ job "demo-webapp" {
 }
 ```
 
-This job specification creates three instances of the demo web application for
-you to target in your NGINX configuration.
+</CodeBlockConfig>
 
-Now, deploy the demo web application.
+Deploy the demo web application by running `nomad run webapp.nomad.hcl`.
 
 ```shell-session
 $ nomad run webapp.nomad.hcl
@@ -97,10 +92,31 @@ $ nomad run webapp.nomad.hcl
 ==> Evaluation "ea1e8528" finished with status "complete"
 ```
 
-## Create and run an NGINX job
+## Create and run the NGINX job
 
 Create a job for NGINX and name it `nginx.nomad.hcl`. This NGINX instance
 balances requests across the deployed instances of the web application.
+
+This job specification uses a static port of `8080` for NGINX, which lets you
+query `nginx.service.consul:8080` from anywhere inside your cluster to reach
+the demo web application.
+
+The `template` stanza uses a Consul template to configure NGINX. The template
+queries Consul for the address and port of services named `demo-webapp`, which
+is the service name configured in the demo web application's job specification.
+Refer to the [Consul Template Go language
+reference](/consul/docs/reference/consul-template/go) for syntax details. Consul
+notifies NGINX immediately when a change in the health of one of the service
+endpoints occurs. NGINX then re-renders a new load balancer configuration file
+that only includes healthy service instances.
+
+Although the job specification contains an inline template for HAProxy
+configuration, you could alternatively use the `task.template` stanza in
+conjunction with the `task.artifact` stanza to download an input template from a
+remote source such as an S3 bucket. Refer to the [`template`
+examples](/nomad/docs/job-specification/template#examples) for details.
+
+<CodeBlockConfig filename="nginx.nomad.hcl" highlight="9,32-47">
 
 ```hcl
 job "nginx" {
@@ -160,24 +176,9 @@ EOF
 }
 ```
 
-- This configuration uses Nomad's [template][template-stanza] to populate the
-  load balancer configuration for NGINX. It uses
-  [Consul Template][consul-template]. You can use Consul Template's
-  documentation to learn more about the [syntax][consul-temp-syntax] needed to
-  interact with Consul. In this case, the template queries Consul for the
-  address and port of services named `demo-webapp`, which are created in the
-  demo web application's job specification.
+</CodeBlockConfig>
 
-- This job specification uses a static port of `8080` for the load balancer. This
-  allows you to query `nginx.service.consul:8080` from anywhere inside your
-  cluster to reach the web application.
-
-- Please note that although the job contains an [inline][inline] template, you
-  could alternatively use the template stanza [in conjunction with the artifact
-  stanza][remote-template] to download an input template from a remote source
-  such as an S3 bucket.
-
-Now, run the NGINX job.
+Deploy NGINX by running `nomad run nginx.nomad.hcl`.
 
 ```shell-session
 $ nomad run nginx.nomad.hcl
@@ -188,99 +189,56 @@ $ nomad run nginx.nomad.hcl
 ==> Evaluation "45da5a89" finished with status "complete"
 ```
 
-## Verify load balancer configuration
+### Verify load balancer configuration
 
-Consul Template supports [blocking queries][ct-blocking-queries]. This means
-your NGINX deployment (which is using the [template][template-stanza] stanza)
-is notified immediately when a change in the health of one of the service
-endpoints occurs and re-render a new load balancer configuration file that
-only includes healthy service instances.
+Follow these steps to verify NGINX configuration.
 
-You can use the [`nomad alloc fs`][alloc-fs] command on your NGINX allocation to
-read the rendered load balancer configuration file.
+1. Run the [`nomad status nginx` command](/nomad/commands/status) to get the
+   allocation ID of your NGINX deployment.
 
-First, obtain the allocation ID of your NGINX deployment (output below is
-abbreviated). Keep in mind, allocation IDs are environment specific, so yours is
-expected to be different:
+   ```shell-session
+   $ nomad status nginx
+     ID            = nginx
+     Name          = nginx
+     ...
+     Summary
+     Task Group  Queued  Starting  Running  Failed  Complete  Lost
+     nginx       0       0         1        0       0         0
 
-```shell-session
-$ nomad status nginx
-ID            = nginx
-Name          = nginx
-...
-Summary
-Task Group  Queued  Starting  Running  Failed  Complete  Lost
-nginx       0       0         1        0       0         0
+     Allocations
+     ID        Node ID   Task Group  Version  Desired  Status   Created    Modified
+     76692834  f5fdf017  nginx       0        run      running  17m40s ago  17m25s ago
+  ```
 
-Allocations
-ID        Node ID   Task Group  Version  Desired  Status   Created     Modified
-76692834  f5fdf017  nginx       0        run      running  17m40s ago  17m25s ago
-```
+1. Run the [`nomad alloc fs` command](/nomad/commands/alloc/fs) to read the configuration.
 
-Next, use the `alloc fs` command to read the load balancer configuration:
-
-```shell-session
-$ nomad alloc fs 766 nginx/local/load-balancer.conf
-upstream backend {
-
-  server 172.31.48.118:21354;
-
-  server 172.31.52.52:25958;
-
-  server 172.31.52.7:29728;
-
-}
-
-server {
-   listen 80;
-
-   location / {
-      proxy_pass http://backend;
-   }
-}
-```
-
-At this point, you can change the count of your `demo-webapp` job and repeat the
-previous command to verify the load balancer configuration is dynamically
-changing.
+   ```shell-session
+   $ nomad alloc fs 766 nginx/local/load-balancer.conf
+     upstream backend {
+       server 172.31.48.118:21354;
+       server 172.31.52.52:25958;
+       server 172.31.52.7:29728;
+     }
+     server {
+       listen 80;
+       location / {
+        proxy_pass http://backend;
+      }
+    }
+   ```
 
 ## Make a request to the load balancer
 
-If you query the NGINX load balancer, you should be able to see a response
-similar to the one shown below (this command should be run from a node inside
-your cluster):
+If you access the NGINX load balancer, you should be able to see a response
+similar to the one shown in the following example. Run the `curl` command from a node inside your cluster.
 
 ```shell-session
 $ curl nginx.service.consul:8080
 Welcome! You are on node 172.31.48.118:21354
 ```
 
-Note that your request has been forwarded to one of the several deployed
-instances of the demo web application (which is spread across 3 Nomad clients).
-The output shows the IP address of the host it is deployed on. If you repeat
-your requests, the IP address changes based on which backend web server instance
+Note that NGINX forwarded your request to one of the deployed instances of the
+demo web application, which is spread across three Nomad clients. The output
+shows the IP address of the demo web application host. If you repeat your
+requests, the IP address changes based on which backend web server instance
 received the request.
-
-<Note>
-
- If you would like to access NGINX from outside your cluster, you
-can set up a load balancer in your environment that maps to an active port
-`8080` on your clients (or whichever port you have configured for NGINX to
-listen on). You can then send your requests directly to your external load
-balancer.
-
-</Note>
-
-[alloc-fs]: /nomad/commands/alloc/fs
-[consul-template]: https://github.com/hashicorp/consul-template#consul-template
-[consul-temp-syntax]: https://github.com/hashicorp/consul-template#service
-[ct-blocking-queries]: https://github.com/hashicorp/consul-template#key
-[inline]: /nomad/docs/job-specification/template#inline-template
-[lb-strategies]: https://www.hashicorp.com/blog/configuring-third-party-loadbalancers-with-consul-nginx-haproxy-f5/
-[nginx]: https://www.nginx.com/
-[nomad-tf]: https://github.com/hashicorp/nomad/tree/master/terraform#provision-a-nomad-cluster-in-the-cloud
-[reference-arch]: /nomad/tutorials/enterprise/production-reference-architecture-vm-with-consul#high-availability
-[remote-template]: /nomad/docs/job-specification/template#remote-template
-[template-stanza]: /nomad/docs/job-specification/template
-[terraform-repo]: https://github.com/hashicorp/nomad/tree/master/terraform#provision-a-nomad-cluster-in-the-cloud
-[nomad-tf]: https://github.com/hashicorp/nomad/tree/master/terraform#provision-a-nomad-cluster-in-the-cloud
