@@ -75,7 +75,7 @@ When reviewing for writing standards, the HashiCorp writing standards supersedes
     - items 2
 
     The exception to this rule is HashiCorp resources and External resources
-    
+
 - For titles of items, formate like this 
     **Eliminate configuration drift:** Manual configuration steps introduce inconsistencies between environments.
 
@@ -162,3 +162,8 @@ Analyze this document's SEO optimization and provide specific recommendations.
 
 **Output format:**
 For each recommendation, explain why the change improves SEO and provide specific before/after examples where helpful.
+
+
+## Resources
+
+Provide links to HashiCorp tutorials and documentation that users can use to implement the goals of the document.
