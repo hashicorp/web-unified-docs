@@ -30,6 +30,16 @@ Note: This is a WIP. Any suggestions are welcome.
 
 1. Can you search HashiCorp documentation and tutorials for resources that will help users learn and implement the content in this document? Provide the URLs.
 
+## Review prompts
+
+Please review the changes I'm about to commit and check:
+1. Do they follow our writing standards?
+2. Do they follow general technical writing best practices?
+3. Are code examples accurate?
+4. Is the frontmatter complete and correct?
+5. Are there any links that need testing?
+6. Do the docs make sense? Would a user be successful following them?
+
 ## CLI prompts
 
 1. To find supporting documents in the WAF (or other directories), you can run the following prompt:
@@ -74,3 +84,5 @@ Analyze this document's SEO optimization and provide specific recommendations.
 
 **Output format:**
 For each recommendation, explain why the change improves SEO and provide specific before/after examples where helpful.
+
+

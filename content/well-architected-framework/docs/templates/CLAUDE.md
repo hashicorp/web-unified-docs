@@ -73,6 +73,9 @@ When reviewing for writing standards, the HashiCorp writing standards supersedes
     You can install the following package with Packer:
     - item 1
     - items 2
+
+    The exception to this rule is HashiCorp resources and External resources
+    
 - For titles of items, formate like this 
     **Eliminate configuration drift:** Manual configuration steps introduce inconsistencies between environments.
 
