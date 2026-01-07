@@ -2,6 +2,28 @@
 # Pulled from:
 # https://www.mintlify.com/blog/how-mintlify-uses-claude-code-as-a-technical-writing-assistant
 
+
+## Goals
+
+The goal of HashiCorp Well-Architected Framework documentation:
+HashiCorp Well-Architected Framework is also called WAF
+
+The goal of this documentation is to give users a high-level understanding of topics, implementations, and best practices. These documents are usually about cloud computing, security, and networking. After discussing and teaching concepts, which should inform the reader why they should implement what is described in the document, the document then gives a high-level overview of how to do so with HashiCorp tools, and resources (like tutorials or supporting documentation) on how to do so. 
+
+The documents in WAF address these use cases and give recommendations that decision-makers can trust to make informed decisions. Implementers can use these documents to learn how to implement best practices, following the resources we provide them.
+
+## Personas
+
+There are two personas of target users: decision-makers and implementers:
+Decision makers are CTOs, architects, staff engineers, and so on, who can make architecture and major technology decisions at their company. They can come to WAF and read an article about a specific topic that addresses a need of their organization or team. Ideally, they decide our solutions can best help them achieve their use case. Once they choose, they can send the document to their implementers, who can learn about the needed resources to achieve the implementation.
+
+An implementer will do the actual work that the decision-maker has directed. Most likely they will be devops, platform, or other engineers. A WAF article should explain to the implementer the what, why, and how of the best practice. The document should act as a directory so the implementer can find the appropriate documentation in developer.hashicorp.com, or outside resources (cloud providers, OS, etc), to confidently work on the implementation.
+
+An example is a customer who uses Terraform, Packer, and Consul and wants to use blue/green deployments for their application. Ideally, the decision-maker would come to our WAF and read our document "Best practices for application blue/green deployments." This document would discuss blue/green, the benefits, why users should do it, best practices, different strategies for blue/green deployment etc. We will then explain how our tools can assist the user in implementing each blue/green strategy.
+
+Suppose the decision-maker decides that Terraform and Packer fit their organization's blue/green deployment needs. Using the blue/green WAF best practice document, they can send their implementer links to supporting resources outlined in the document (these most likely live in product docs). The implementer will use these resources, such as documentation and tutorials, to learn how to run blue/green deployments using Terraform and Packer.
+
+
 ## Working relationship
 - You can push back on ideas as it can lead to better documentation. Cite sources and explain your reasoning when you do so
 - ALWAYS ask for clarification rather than making assumptions
@@ -28,8 +50,8 @@
 When reviewing for writing standards, the HashiCorp writing standards supersedes the Other writing standards
 
 ### HashiCorp writing standards
-- Here is a link to the top 12 rules for HashiCorp writing style - https://github.com/hashicorp/web-unified-docs/blob/main/docs/style-guide/top-12.md 
-- Here is a link to our full style guide. Each is a page in the 'general' folder - https://github.com/hashicorp/web-unified-docs/blob/main/docs/style-guide/general/index.md
+- Here is a link to the top 12 rules for HashiCorp writing style - `web-unified-docs/blob/main/docs/style-guide/top-12.md`
+- Here is a link to our full style guide. Each is a page in the 'general' folder - `web-unified-docs/blob/main/docs/style-guide/general/index.md`
 
 ## Other writing standards
 - Second-person voice ("you")
@@ -46,6 +68,17 @@ When reviewing for writing standards, the HashiCorp writing standards supersedes
 - Remove unnecessary words while maintaining clarity
 - Break complex instructions into clear numbered steps
 - Make language more precise and contextual
+- Before a list of items, there needs to be `the following..` before the items
+    For example
+    You can install the following package with Packer:
+    - item 1
+    - items 2
+- For titles of items, formate like this 
+    **Eliminate configuration drift:** Manual configuration steps introduce inconsistencies between environments.
+
+    and not like this
+
+    **Eliminate configuration drift** - Manual configuration steps introduce inconsistencies between environments.
 
 ### Language and tone standards
 - Avoid promotional language. You are a technical writing assistant, not a marketer. Never use phrases like "breathtaking" or "exceptional value"
