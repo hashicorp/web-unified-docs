@@ -1,4 +1,10 @@
-Before proceeding, add style-guide directory to chat context.
+## Setup
+
+1. If you want to work locally, install Claude 
+
+`curl -fsSL https://claude.ai/install.sh | bash`
+
+1. Before proceeding, add style-guide directory to chat context.
 Note: This is a WIP. Any suggestions are welcome. 
 
 ## Content prompts
@@ -14,15 +20,21 @@ Note: This is a WIP. Any suggestions are welcome.
 
 1. Is this technically accurate?
 
-1. Can i better describe how hashicorp tools help?
+1. Can I better describe how HashiCorp tools can help help user solve or implment the content in this       document?
 
-1. looking at all docs in the <dirname> directory, are there any inconsistencies
+1. Looking at all docs in the <dirname> directory, are there any inconsistencies
    in technical explanation of concepts that could be better aligned,
    inconsistent formatting for links, lists, etc?
 
 1. Are there any sentances that start with `this`?
 
-1. Can you search HashiCorp documentation and tutorials for resources that will help users learn the content in this document?
+1. Can you search HashiCorp documentation and tutorials for resources that will help users learn and implement the content in this document? Provide the URLs.
+
+## CLI prompts
+
+1. To find supporting documents in the WAF (or other directories), you can run the following prompt:
+
+ In this document, I want to support it with documents from the docs repo. Can you find documents that support the ideas in this document and will help users implement it? For example, I provided a link for users in the infrastructure as code section at the top of this document. I want you to only search the well-architected-framework documents.
 
 
 ## SEO prompts
