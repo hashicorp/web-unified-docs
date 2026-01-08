@@ -1,5 +1,5 @@
 # HashiCorp Well-Architected Framework documentation
-# Pulled from:
+# Based on:
 # https://www.mintlify.com/blog/how-mintlify-uses-claude-code-as-a-technical-writing-assistant
 
 
