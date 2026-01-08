@@ -183,6 +183,61 @@ Analyze this document's SEO optimization and provide specific recommendations.
 **Output format:**
 For each recommendation, explain why the change improves SEO and provide specific before/after examples where helpful.
 
+## AI/LLM Optimization
+
+When reviewing documents, analyze how well they are optimized for LLMs and AI systems to retrieve and understand.
+
+**Areas to evaluate:**
+
+1. **Clear topic sentences and summaries**
+   - Each section should start with a clear topic sentence that states what it covers
+   - Include brief summaries that state key takeaways explicitly
+   - LLMs extract information more accurately when key points are stated directly
+
+2. **Explicit relationships between concepts**
+   - Use clear transition phrases: "After X, you can Y", "X depends on Y", "Use X when you need Y"
+   - Define relationships explicitly rather than implying them
+   - Make prerequisite knowledge clear
+
+3. **Well-defined terminology**
+   - Define technical terms when first introduced
+   - Use consistent terminology throughout (don't switch between synonyms)
+   - Spell out acronyms on first use
+
+4. **Question-answer patterns**
+   - Structure content to answer common questions directly
+   - Use headings that match how users ask questions (e.g., "When to use X" rather than "X usage")
+   - Include clear decision guidance with "Use X when..." patterns
+
+5. **Contextual completeness**
+   - Provide enough context that sections can be understood independently
+   - Don't rely solely on directional references ("above", "below")
+   - Include relevant context when linking to other documents
+
+6. **Structured examples**
+   - Provide complete, working examples with explanations
+   - Clearly state what the example demonstrates
+   - Explain why the example matters (the outcome, not just what it does)
+
+7. **Explicit prerequisites and outcomes**
+   - State what readers need before starting
+   - Clearly describe what readers will achieve
+   - Make success criteria explicit
+
+8. **Semantic clarity**
+   - Avoid ambiguous pronouns (use specific nouns instead of "it", "this", "that" when unclear)
+   - Use parallel structure in lists
+   - Make subject-verb relationships clear
+
+**Why this matters:**
+LLMs and AI systems retrieve and synthesize information based on semantic understanding. Clear structure, explicit relationships, and direct statements improve:
+- Retrieval accuracy when AI systems search documentation
+- Answer quality when AI assistants reference documentation
+- Context understanding when content is used in RAG (Retrieval-Augmented Generation) systems
+
+**Output format:**
+Flag any areas where content could be clearer for AI systems and suggest specific improvements.
+
 
 ## Resources
 
