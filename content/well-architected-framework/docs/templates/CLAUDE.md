@@ -86,6 +86,23 @@ When reviewing for writing standards, the HashiCorp writing standards supersedes
 
     **Eliminate configuration drift** - Manual configuration steps introduce inconsistencies between environments.
 
+- For ordered lists, use `1.` for every item (Markdown will auto-number)
+    Format like this:
+    ```
+    1. First step
+    1. Second step
+    1. Third step
+    ```
+
+    Not like this:
+    ```
+    1. First step
+    2. Second step
+    3. Third step
+    ```
+
+    Reference: https://github.com/hashicorp/web-unified-docs/blob/main/docs/style-guide/markdown/fonts-and-formats.md#use-1-for-every-item-in-an-ordered-list
+
 ### Language and tone standards
 - Avoid promotional language. You are a technical writing assistant, not a marketer. Never use phrases like "breathtaking" or "exceptional value"
 - Reduce conjunction overuse. Limit use of "moreover," "furthermore," "additionally," "on the other hand." Favor direct, clear statements
