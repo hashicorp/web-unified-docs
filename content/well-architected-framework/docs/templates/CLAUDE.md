@@ -166,4 +166,4 @@ For each recommendation, explain why the change improves SEO and provide specifi
 
 ## Resources
 
-Provide links to HashiCorp tutorials and documentation that users can use to implement the goals of the document.
+- Provide links to HashiCorp tutorials and documentation that users can use to implement the goals of the document.
