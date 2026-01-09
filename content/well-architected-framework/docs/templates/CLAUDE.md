@@ -1,5 +1,5 @@
 # HashiCorp Well-Architected Framework documentation
-# Pulled from:
+# Based on:
 # https://www.mintlify.com/blog/how-mintlify-uses-claude-code-as-a-technical-writing-assistant
 
 
@@ -68,20 +68,40 @@ When reviewing for writing standards, the HashiCorp writing standards supersedes
 - Remove unnecessary words while maintaining clarity
 - Break complex instructions into clear numbered steps
 - Make language more precise and contextual
-- Before a list of items, there needs to be `the following..` before the items
-    For example
-    You can install the following package with Packer:
-    - item 1
-    - items 2
+- Before a list of items, there needs to be `the following` somewhere in the introduction
+    Valid examples:
+    - You can install the following package with Packer:
+    - The following is an example of early design decisions:
+    - Consider the following approaches:
+    - HCP Terraform includes the following key features:
 
-    The exception to this rule is HashiCorp resources and External resources
+    All of these are correct as long as "the following" appears before the list.
 
-- For titles of items, formate like this 
+    The exception to this rule is HashiCorp resources and External resources at the end of documents
+
+- For titles of items, format like this
     **Eliminate configuration drift:** Manual configuration steps introduce inconsistencies between environments.
 
     and not like this
 
     **Eliminate configuration drift** - Manual configuration steps introduce inconsistencies between environments.
+
+- For ordered lists, use `1.` for every item (Markdown will auto-number)
+    Format like this:
+    ```
+    1. First step
+    1. Second step
+    1. Third step
+    ```
+
+    Not like this:
+    ```
+    1. First step
+    2. Second step
+    3. Third step
+    ```
+
+    Reference: https://github.com/hashicorp/web-unified-docs/blob/main/docs/style-guide/markdown/fonts-and-formats.md#use-1-for-every-item-in-an-ordered-list
 
 ### Language and tone standards
 - Avoid promotional language. You are a technical writing assistant, not a marketer. Never use phrases like "breathtaking" or "exceptional value"
@@ -97,21 +117,37 @@ When reviewing for writing standards, the HashiCorp writing standards supersedes
 ### Formatting discipline
 - Clean structure. Avoid excessive formatting. Never use emoji or decorative elements that don't add functional value
 
-### Component introductions
-- Start with action-oriented language: "Use [component] to..." rather than "The [component] component..."
-- Be specific about what components can contain or do
-- Make introductions practical and user-focused
-
-### Property descriptions
-- End all property descriptions with periods for consistency
-- Be specific and helpful rather than generic
-- Add scope clarification where needed (e.g., "For Font Awesome icons only:")
-- Use proper technical terminology ("boolean" not "bool")
-
 ### Code examples
 - Keep examples simple and practical
 - Use consistent formatting and naming
 - Provide clear, actionable examples rather than showing multiple options when one will do
+- Add a summary after code blocks explaining what the code does and why it matters
+
+### Document structure patterns
+Based on successful WAF documents, use these patterns:
+
+**"Why [topic]" section:**
+- Include early in the document (after intro, before implementation details)
+- Use bold title format with colons inside: `**Challenge name:** Description`
+- Present 3-4 strategic operational/security challenges that the topic addresses
+- Focus on business outcomes and consequences of not addressing the challenge
+- Example challenges: "Eliminate deployment inconsistencies:", "Reduce deployment time and risk:"
+
+**Workflow connections:**
+- Explicitly link related WAF documents to show how topics connect
+- Example: "After [packaging your application](/link) into images, deploy these artifacts using..."
+- Help users understand the end-to-end workflow across multiple documents
+
+**Decision guidance:**
+- When presenting multiple options (tools, approaches, strategies), clearly state when to use each
+- Use "Use X when you need..." format followed by specific criteria
+- Example: "Use Kubernetes when you need extensive ecosystem tooling, have complex networking requirements..."
+- Avoid comparative language ("simpler", "easier") - use neutral criteria instead
+
+**Code example summaries:**
+- After code blocks, add 1-2 sentences explaining what the configuration accomplishes
+- Connect to broader workflow (e.g., "This configuration uses an AMI built with Packer...")
+- Highlight key concepts like state management, team collaboration benefits
 
 ## Content organization
 - Structure content in the order users need it
@@ -147,9 +183,10 @@ Analyze this document's SEO optimization and provide specific recommendations.
    - Tool-specific names (Terraform, AWS) are allowed in H2s only when the section content is tool-specific
    - Otherwise, keep headings generic and benefit-focused
 
-6. **Discription for images and videos** - Review the tags for images and videos:
+5. **Description for images and videos** - Review the tags for images and videos:
    - Review descriptions for videos and images
-5. **Other critical SEO elements** - Flag any major issues with:
+
+6. **Other critical SEO elements** - Flag any major issues with:
    - Keyword usage and density
    - Content structure and readability
    - Internal linking opportunities
@@ -162,6 +199,61 @@ Analyze this document's SEO optimization and provide specific recommendations.
 
 **Output format:**
 For each recommendation, explain why the change improves SEO and provide specific before/after examples where helpful.
+
+## AI/LLM Optimization
+
+When reviewing documents, analyze how well they are optimized for LLMs and AI systems to retrieve and understand.
+
+**Areas to evaluate:**
+
+1. **Clear topic sentences and summaries**
+   - Each section should start with a clear topic sentence that states what it covers
+   - Include brief summaries that state key takeaways explicitly
+   - LLMs extract information more accurately when key points are stated directly
+
+2. **Explicit relationships between concepts**
+   - Use clear transition phrases: "After X, you can Y", "X depends on Y", "Use X when you need Y"
+   - Define relationships explicitly rather than implying them
+   - Make prerequisite knowledge clear
+
+3. **Well-defined terminology**
+   - Define technical terms when first introduced
+   - Use consistent terminology throughout (don't switch between synonyms)
+   - Spell out acronyms on first use
+
+4. **Question-answer patterns**
+   - Structure content to answer common questions directly
+   - Use headings that match how users ask questions (e.g., "When to use X" rather than "X usage")
+   - Include clear decision guidance with "Use X when..." patterns
+
+5. **Contextual completeness**
+   - Provide enough context that sections can be understood independently
+   - Don't rely solely on directional references ("above", "below")
+   - Include relevant context when linking to other documents
+
+6. **Structured examples**
+   - Provide complete, working examples with explanations
+   - Clearly state what the example demonstrates
+   - Explain why the example matters (the outcome, not just what it does)
+
+7. **Explicit prerequisites and outcomes**
+   - State what readers need before starting
+   - Clearly describe what readers will achieve
+   - Make success criteria explicit
+
+8. **Semantic clarity**
+   - Avoid ambiguous pronouns (use specific nouns instead of "it", "this", "that" when unclear)
+   - Use parallel structure in lists
+   - Make subject-verb relationships clear
+
+**Why this matters:**
+LLMs and AI systems retrieve and synthesize information based on semantic understanding. Clear structure, explicit relationships, and direct statements improve:
+- Retrieval accuracy when AI systems search documentation
+- Answer quality when AI assistants reference documentation
+- Context understanding when content is used in RAG (Retrieval-Augmented Generation) systems
+
+**Output format:**
+Flag any areas where content could be clearer for AI systems and suggest specific improvements.
 
 
 ## Resources
