@@ -1,0 +1,165 @@
+---
+page_title: Use dynamic credentials with the AWS provider in Terraform Enterprise
+description: >-
+  Use OpenID Connect to get short-term credentials for the AWS Terraform
+  provider in your Terraform Enterprise runs.
+source: terraform-docs-common
+---
+
+# Use dynamic credentials with the AWS provider
+
+~> **Important:** If you are self-hosting [HCP Terraform agents](/terraform/cloud-docs/agents), ensure your agents use [v1.7.0](/terraform/cloud-docs/agents/changelog#1-7-0-03-02-2023) or above. To use the latest dynamic credentials features, [upgrade your agents to the latest version](/terraform/cloud-docs/agents/changelog).
+
+You can use HCP Terraform’s native OpenID Connect integration with AWS to get [dynamic credentials](/terraform/enterprise/workspaces/dynamic-provider-credentials) for the AWS provider in your HCP Terraform runs. Configuring the integration requires the following steps:
+
+1.  **[Configure AWS](#configure-aws):** Set up a trust configuration between AWS and HCP Terraform. Then, you must create AWS roles and policies for your HCP Terraform workspaces.
+2.  **[Configure HCP Terraform](#configure-hcp-terraform):** Add environment variables to the HCP Terraform workspaces where you want to use Dynamic Credentials.
+
+Once you complete the setup, HCP Terraform automatically authenticates to AWS during each run. The AWS provider authentication is valid for the length of the plan or apply.
+
+## Configure AWS
+
+You must enable and configure an OIDC identity provider and accompanying role and trust policy on AWS. These instructions use the AWS console, but you can also use Terraform to configure AWS. Refer to our [example Terraform configuration](https://github.com/hashicorp/terraform-dynamic-credentials-setup-examples/tree/main/aws).
+
+### Create an OIDC Identity Provider
+
+AWS documentation for setting this up through the AWS console or API can be found here: [Creating OpenID Connect (OIDC) identity providers - AWS Identity and Access Management](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_create_oidc.html).
+
+The `provider URL` should be set to the address of HCP Terraform (e.g., <https://app.terraform.io> **without** a trailing slash), and the `audience` should be set to `aws.workload.identity` or the value of `TFC_AWS_WORKLOAD_IDENTITY_AUDIENCE`, if configured.
+
+### Configure a Role and Trust Policy
+
+You must configure a role and corresponding trust policy. Amazon documentation on setting this up can be found here: [Creating a role for web identity or OpenID Connect Federation (console) - AWS Identity and Access Management](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_create_for-idp_oidc.html).
+The trust policy will be of the form:
+
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Principal": {
+                "Federated": "OIDC_PROVIDER_ARN"
+            },
+            "Action": "sts:AssumeRoleWithWebIdentity",
+            "Condition": {
+                "StringEquals": {
+                    "SITE_ADDRESS:aud": "AUDIENCE_VALUE",
+                    "SITE_ADDRESS:sub": "organization:ORG_NAME:project:PROJECT_NAME:workspace:WORKSPACE_NAME:run_phase:RUN_PHASE"
+                }
+            }
+        }
+    ]
+}
+```
+
+with the capitalized values replaced with the following:
+
+-   **OIDC_PROVIDER_ARN**: The ARN from the OIDC provider resource created in the previous step
+-   **SITE_ADDRESS**: The address of HCP Terraform with `https://` stripped, (e.g., `app.terraform.io`)
+-   **AUDIENCE_VALUE**: This should be set to `aws.workload.identity` unless a non-default audience has been specified in TFC
+-   **ORG_NAME**: The organization name this policy will apply to, such as `my-org-name`
+-   **PROJECT_NAME**: The project name that this policy will apply to, such as `my-project-name`
+-   **WORKSPACE_NAME**: The workspace name this policy will apply to, such as `my-workspace-name`
+-   **RUN_PHASE**: The run phase this policy will apply to, currently one of `plan` or `apply`.
+
+-> **Note:** if different permissions are desired for plan and apply, then two separate roles and trust policies must be created for each of these run phases to properly match them to the correct access level.
+If the same permissions will be used regardless of run phase, then the condition can be modified like the below to use `StringLike` instead of `StringEquals` for the sub and include a `*` after `run_phase:` to perform a wildcard match:
+
+```json
+{
+    "Condition": {
+        "StringEquals": {
+            "SITE_ADDRESS:aud": "AUDIENCE_VALUE"
+        },
+        "StringLike": {
+            "SITE_ADDRESS:sub": "organization:ORG_NAME:project:PROJECT_NAME:workspace:WORKSPACE_NAME:run_phase:*"
+        }
+    }
+}
+```
+
+!> **Warning**: you should always check, at minimum, the audience and the name of the organization in order to prevent unauthorized access from other HCP Terraform organizations!
+
+A permissions policy needs to be added to the role which defines what operations within AWS the role is allowed to perform. As an example, the below policy allows for fetching a list of S3 buckets:
+
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "s3:ListBucket"
+            ],
+            "Resource": "*"
+        }
+    ]
+}
+```
+
+## Configure HCP Terraform
+
+You’ll need to set some environment variables in your HCP Terraform workspace in order to configure HCP Terraform to authenticate with AWS using dynamic credentials. You can set these as workspace variables, or if you’d like to share one AWS role across multiple workspaces, you can use a variable set. When you configure dynamic provider credentials with multiple provider configurations of the same type, use either a default variable or a tagged alias variable name for each provider configuration. Refer to [Specifying Multiple Configurations](#specifying-multiple-configurations) for more details.
+
+### Required Environment Variables
+
+| Variable                                                                                           | Value                                 | Notes                                                                                                                                                                                                                                                                                           |
+| -------------------------------------------------------------------------------------------------- | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TFC_AWS_PROVIDER_AUTH`<br />`TFC_AWS_PROVIDER_AUTH[_TAG]`<br />_(Default variable not supported)_ | `true`                                | Requires **v1.7.0** or later if self-managing agents. Must be present and set to `true`, or HCP Terraform will not attempt to authenticate to AWS.                                                                                                                                              |
+| `TFC_AWS_RUN_ROLE_ARN`<br />`TFC_AWS_RUN_ROLE_ARN[_TAG]`<br />`TFC_DEFAULT_AWS_RUN_ROLE_ARN`       | The ARN of the role to assume in AWS. | Requires **v1.7.0** or later if self-managing agents. Optional if `TFC_AWS_PLAN_ROLE_ARN` and `TFC_AWS_APPLY_ROLE_ARN` are both provided. These variables are described [below](/terraform/enterprise/workspaces/dynamic-provider-credentials/aws-configuration#optional-environment-variables) |
+
+### Optional Environment Variables
+
+You may need to set these variables, depending on your use case.
+
+| Variable                                                                                                                               | Value                                                                                        | Notes                                                                                                                        |
+| -------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `TFC_AWS_WORKLOAD_IDENTITY_AUDIENCE`<br />`TFC_AWS_WORKLOAD_IDENTITY_AUDIENCE[_TAG]`<br />`TFC_DEFAULT_AWS_WORKLOAD_IDENTITY_AUDIENCE` | Will be used as the `aud` claim for the identity token. Defaults to `aws.workload.identity`. | Requires **v1.7.0** or later if self-managing agents.                                                                        |
+| `TFC_AWS_PLAN_ROLE_ARN`<br />`TFC_AWS_PLAN_ROLE_ARN[_TAG]`<br />`TFC_DEFAULT_AWS_PLAN_ROLE_ARN`                                        | The ARN of the role to use for the plan phase of a run.                                      | Requires **v1.7.0** or later if self-managing agents. Will fall back to the value of `TFC_AWS_RUN_ROLE_ARN` if not provided. |
+| `TFC_AWS_APPLY_ROLE_ARN`<br />`TFC_AWS_APPLY_ROLE_ARN[_TAG]`<br />`TFC_DEFAULT_AWS_APPLY_ROLE_ARN`                                     | The ARN of the role to use for the apply phase of a run.                                     | Requires **v1.7.0** or later if self-managing agents. Will fall back to the value of `TFC_AWS_RUN_ROLE_ARN` if not provided. |
+
+## Configure the AWS Provider
+
+Make sure that you’re passing a value for the `region` argument into the provider configuration block or setting the `AWS_REGION` variable in your workspace.
+
+Make sure that you’re not using any of the other arguments or methods mentioned in the [authentication and configuration](https://registry.terraform.io/providers/hashicorp/aws/latest/docs#authentication-and-configuration) section of the provider documentation as these settings may interfere with dynamic provider credentials.
+
+### Specifying Multiple Configurations
+
+~> **Important:** If you are self-hosting [HCP Terraform agents](/terraform/cloud-docs/agents), ensure your agents use [v1.12.0](/terraform/cloud-docs/agents/changelog#1-12-0-07-26-2023) or above. To use the latest dynamic credentials features, [upgrade your agents to the latest version](/terraform/cloud-docs/agents/changelog).
+
+You can add additional variables to handle multiple distinct AWS setups, enabling you to use multiple [provider aliases](/terraform/language/providers/configuration#alias-multiple-provider-configurations) within the same workspace. You can configure each set of credentials independently, or use default values by configuring the variables prefixed with `TFC_DEFAULT_`.
+
+For more details, see [Specifying Multiple Configurations](/terraform/enterprise/workspaces/dynamic-provider-credentials/specifying-multiple-configurations).
+
+#### Required Terraform Variable
+
+To use additional configurations, add the following code to your Terraform configuration. This lets HCP Terraform supply variable values that you can then use to map authentication and configuration details to the correct provider blocks.
+
+```hcl
+variable "tfc_aws_dynamic_credentials" {
+  description = "Object containing AWS dynamic credentials configuration"
+  type = object({
+    default = object({
+      shared_config_file = string
+    })
+    aliases = map(object({
+      shared_config_file = string
+    }))
+  })
+}
+```
+
+#### Example Usage
+
+```hcl
+provider "aws" {
+  shared_config_files = [var.tfc_aws_dynamic_credentials.default.shared_config_file]
+}
+
+provider "aws" {
+  alias = "ALIAS1"
+  shared_config_files = [var.tfc_aws_dynamic_credentials.aliases["ALIAS1"].shared_config_file]
+}
+```
