@@ -26,11 +26,11 @@ For more specific guidance about contributing to an individual product's docs, r
 
 ## We welcome contributions
 
-Documention takes a village. If you find a typo or you feel like you can improve the HTML, CSS, or JavaScript, we welcome contributions. Feel free to open issues or pull requests like any normal GitHub project.
+Documentation takes a village. If you find a typo or you feel like you can improve the HTML, CSS, or JavaScript, we welcome contributions. Feel free to open issues or pull requests like any normal GitHub project.
 
 ## Repository structure
 
-Documentation content is written in Markdown. You can find product folders in this repo's `content` directory. Updates to the repo's `main` branch appear on [https://developer.hashicorp.com](https://developer.hashicorp.com), usually within 10 minutes.
+We write documentation content in Markdown. You can find product folders in this repo's `content` directory. Updates to the repo's `main` branch appear on [https://developer.hashicorp.com](https://developer.hashicorp.com), usually within 10 minutes.
 
 The following table lists the content directories for products currently available in this repo.
 
@@ -320,7 +320,7 @@ release branch as part of the major version release process.
 
 ## Edit content
 
-Documentation content is written in [Markdown](https://www.markdownguide.org/cheat-sheet/).
+We write documentation content in [Markdown](https://www.markdownguide.org/cheat-sheet/).
 
 To create a new page with Markdown, create a file ending in `.mdx` in the desired `./content/<product>/<subdirectory>`. The file path in the content directory becomes the content's URL route. For example, `content/docs/hello.mdx` will be served from the `/docs/hello` URL.
 
@@ -335,13 +335,14 @@ description: "A thorough, yet succinct description of the page's contents"
 ---
 ```
 
-This repository's content guide includes detailed instructions on how to [create a new page and add it to the navigation sidebar](/content-guide/create-new-page).
+This repository's content guide includes detailed instructions on how to [create a new page and add it to the navigation sidebar][new-page-guide].
 
 ### Markdown enhancements
 
 In our documentation, you can use custom markdown enhancements to produce pages with tabs, named code blocks, badges, and alert boxes.
 
-Correct usage of these enhancements is documented in this repo's [content style guide](/style-guide). 
+Correct usage of these enhancements is documented in this repo's [content style
+guide](.docs/style-guide/index.md). 
 
 ## Navigation sidebars
 
@@ -423,7 +424,7 @@ From the `web-unified-docs` directory, run `make`. This command uses Docker
 
 ## Redirects
 
-Find detailed guidance on redirects and formatting in the [content guide](/content-guide/redirects).
+Find detailed guidance on redirects and formatting in the [redirects guide][redirects-guide].
 
 ## Troubleshooting
 
@@ -448,5 +449,6 @@ local images and then rebuild with `make`.
   product's tech writing team.
 
 
-[edu-style-guide]: ./style-guide/index.md
-[new-page-guide]: ./content-guide/create-new-page.md
+[edu-style-guide]: ./docs/style-guide/index.md
+[new-page-guide]: ./docs/content-guide/create-new-page.md
+[redirects-guide]: ./docs/content-guide/redirects.md)
