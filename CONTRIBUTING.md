@@ -30,7 +30,7 @@ Documentation takes a village. If you find a typo or you feel like you can impro
 
 ## Repository structure
 
-We write documentation content in Markdown. You can find product folders in this repo's `content` directory. Updates to the repo's `main` branch appear on [https://developer.hashicorp.com](https://developer.hashicorp.com), usually within 10 minutes.
+We write documentation content in Markdown. You can find product folders in this repo's `content` directory. Updates to the repo's `main` branch appear on [https://developer.hashicorp.com](https://developer.hashicorp.com), usually within 30 minutes.
 
 The following table lists the content directories for products currently available in this repo.
 
@@ -339,10 +339,9 @@ This repository's content guide includes detailed instructions on how to [create
 
 ### Markdown enhancements
 
-In our documentation, you can use custom markdown enhancements to produce pages with tabs, named code blocks, badges, and alert boxes.
-
-Correct usage of these enhancements is documented in this repo's [content style
-guide](.docs/style-guide/index.md). 
+In our documentation, you can use custom markdown enhancements to produce pages
+with tabs, named code blocks, badges, and alert boxes. Refer to the [Education style
+guide](./docs/style-guide/index.md) for how to use these enhancements.
 
 ## Navigation sidebars
 
@@ -448,7 +447,6 @@ local images and then rebuild with `make`.
   Reach out to one of the approvers on your pull request or contact your
   product's tech writing team.
 
-
 [edu-style-guide]: ./docs/style-guide/index.md
 [new-page-guide]: ./docs/content-guide/create-new-page.md
-[redirects-guide]: ./docs/content-guide/redirects.md)
+[redirects-guide]: ./docs/content-guide/redirects.md
