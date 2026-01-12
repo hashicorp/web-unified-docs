@@ -132,6 +132,7 @@ export async function getProductPaths(
 					apiPaths.push({
 						path: path.join(productSlug, relativePath),
 						itemPath,
+						// add date metadata from frontmatter if it exists
 						created_at: frontmatter.created_at || null,
 						last_modified: frontmatter.last_modified || null,
 					})
@@ -141,6 +142,7 @@ export async function getProductPaths(
 				apiPaths.push({
 					path: path.join(productSlug, relativePath, itemName),
 					itemPath,
+					// add date metadata from frontmatter if it exists
 					created_at: frontmatter.created_at || null,
 					last_modified: frontmatter.last_modified || null,
 				})
