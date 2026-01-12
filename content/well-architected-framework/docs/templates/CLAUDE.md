@@ -40,6 +40,12 @@ Suppose the decision-maker decides that Terraform and Packer fit their organizat
 - Search for existing information before adding new content. Avoid duplication unless it is done for a strategic reason
 - Check existing patterns for consistency
 - Start by making the smallest reasonable changes
+- **Showcase the full HashiCorp toolset when it provides value:** When writing about automation, infrastructure, or workflows, consider the complete HashiCorp stack (Terraform, Packer, Vault, Consul, Nomad, Boundary, Waypoint, etc.) and include tools where they naturally fit the use case. Only include tools when they solve a real problem in the document's context - never force tools just to mention them. Each tool should address a specific challenge that implementers face. Examples:
+  - Vault when discussing secrets in automation scripts
+  - Consul when services need discovery or health checking
+  - Nomad when orchestrating application deployments
+  - Boundary when discussing secure access to infrastructure
+  - Waypoint when enabling developer self-service
 
 ## Frontmatter requirements for pages
 - title: Clear, descriptive page title
