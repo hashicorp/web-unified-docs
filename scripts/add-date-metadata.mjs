@@ -88,6 +88,12 @@ function addDateMetadata(filePath) {
 	let frontmatter = parts[1]
 	const body = parts.slice(2).join('---')
 
+	// TODO: if the frontmatter already has a created_at then skip adding it
+	// TODO: Maybe take into account the release stage file path?
+	// TODO: How should we deploy this? All at once? Or with only a specific product and version to make sure that the whole flow to dev-portal metadata works correctly
+	// TODO: Maybe a bug in scripts/prebuild/gather-all-versions-docs-paths.mjs?
+	// TODO: Check the flow of null values for when serving through the API
+
 	// Remove existing auto-generated metadata if present
 	const autoGenRegex =
 		/# auto generated metadata, do not change!\ncreated_at:.*\nlast_modified:.*\n# end of auto generated metadata\n/g
