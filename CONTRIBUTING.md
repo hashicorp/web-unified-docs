@@ -301,7 +301,7 @@ the name of the branch and folder.
    git push origin <working_branch_name>
    ```
 
-1. Create a pull request against the upcoming majorrelease branch, which is the
+1. Create a pull request against the upcoming major release branch, which is the
    branch you cloned in step one.
 
    Make sure you choose the upcoming minor release branch in the GitHub web UI's **base:**
