@@ -1,29 +1,246 @@
 ---
-page_title: Atomic deployments
-description: Implement small, frequent infrastructure deployments to reduce risk and enable faster rollback capabilities.
+page_title: Deploy atomic infrastructure components
+description: Deploy small, isolated infrastructure changes to reduce deployment risk, enable faster rollbacks, and improve troubleshooting with Terraform modules and state management.
 ---
 
 # Deploy atomic infrastructure components
 
-Cloud infrastructure can be large and complex. You should deploy small updates to your infrastructure on a frequent cadence. Small and frequent deployments lower the risk of bad deployments and increase the ability to roll back changes. 
+Atomic deployments deploy infrastructure as small, isolated units of change rather than deploying all infrastructure components together. Large, monolithic deployments that modify multiple systems simultaneously create risk, make troubleshooting difficult, and slow down rollback operations when issues occur. Deploy infrastructure atomically to reduce blast radius, enable independent team workflows, and accelerate your deployment velocity.
 
-You can deploy infrastructure more frequently when you couple them with CI/CD pipelines. These pipelines increase the speed and reliability of your deployments, allowing you to ship updates to your services faster.
+An atomic deployment modifies a single logical component of your infrastructure - for example, deploying networking changes separately from application changes, or deploying database updates independently from compute resources. Use Terraform modules with separate state files to create atomic deployment boundaries that teams can deploy, test, and rollback independently.
 
-Understanding the changes Terraform will apply to your infrastructure before you execute them is important. Terraform lets you preview changes with the `plan` command so you can understand the effects of your modifications on your infrastructure prior to deploying them. Many popular CI/CD products integrate with Terraform, allowing you to manage your infrastructure effectively.
+## Why deploy atomically
+
+Deploying infrastructure atomically addresses the following operational and security challenges:
+
+- **Reduce deployment risk and blast radius:** Monolithic deployments that change many infrastructure components simultaneously make it difficult to identify which change caused failures. A single failed resource blocks deployment of all other changes. Atomic deployments isolate changes to specific components, limiting the impact of failures and making rollbacks surgical rather than system-wide.
+
+- **Enable faster rollback capabilities:** When deployments fail, large change sets make it difficult to identify and revert the problematic changes without affecting working components. Atomic deployments allow you to rollback specific infrastructure components independently, reducing downtime and preserving working infrastructure.
+
+- **Improve troubleshooting and root cause analysis:** Deployments that modify dozens of resources across multiple systems create complex failure scenarios. Atomic deployments limit the scope of changes, making it easier to identify which specific modification caused issues. Smaller change sets reduce the variables you need to investigate.
+
+- **Accelerate deployment velocity:** Monolithic deployments require coordination across teams and force all changes to deploy together on the same schedule. Atomic deployments enable teams to deploy their infrastructure components independently, removing coordination bottlenecks and allowing faster iteration on specific components.
+
+## Organize Terraform modules for atomic deployments
+
+Structure your Terraform code into independent modules that define logical deployment boundaries. Each module manages a specific infrastructure component with its own lifecycle, enabling teams to deploy, test, and rollback components independently.
+
+Use separate modules when infrastructure components have different deployment schedules, ownership by different teams, or different rates of change. For example, networking infrastructure changes less frequently than application infrastructure, so separating them into different modules allows application teams to deploy without touching networking.
+
+The following example shows a Terraform directory structure organized for atomic deployments:
+
+```
+infrastructure/
+├── networking/
+│   ├── main.tf           # VPC, subnets, routing
+│   ├── variables.tf
+│   └── outputs.tf
+├── database/
+│   ├── main.tf           # RDS instances
+│   ├── variables.tf
+│   └── outputs.tf
+├── application/
+│   ├── main.tf           # EC2, ECS, or Kubernetes resources
+│   ├── variables.tf
+│   └── outputs.tf
+└── monitoring/
+    ├── main.tf           # CloudWatch, alerting
+    ├── variables.tf
+    └── outputs.tf
+```
+
+This structure creates four atomic deployment units. The networking team can deploy VPC changes independently, database administrators can deploy RDS updates separately, and application teams can deploy compute resources without coordinating with other teams. Each module contains only the resources it manages, creating clear boundaries.
+
+## Implement separate state management
+
+Use separate Terraform state files for each atomic module to enable independent deployments and reduce state lock contention. Separate state files allow different teams to deploy their modules simultaneously without waiting for state locks, and limit the blast radius of state corruption to a single component.
+
+Configure remote state backends with unique state file keys for each module. The following example shows backend configuration for atomic modules:
+
+```hcl
+# infrastructure/networking/main.tf
+terraform {
+  backend "s3" {
+    bucket = "company-terraform-state"
+    key    = "networking/terraform.tfstate"
+    region = "us-west-2"
+
+    dynamodb_table = "terraform-state-lock"
+    encrypt        = true
+  }
+}
+
+resource "aws_vpc" "main" {
+  cidr_block           = "10.0.0.0/16"
+  enable_dns_hostnames = true
+
+  tags = {
+    Name        = "main-vpc"
+    ManagedBy   = "terraform"
+    Component   = "networking"
+  }
+}
+```
+
+```hcl
+# infrastructure/application/main.tf
+terraform {
+  backend "s3" {
+    bucket = "company-terraform-state"
+    key    = "application/terraform.tfstate"  # Different state file
+    region = "us-west-2"
+
+    dynamodb_table = "terraform-state-lock"
+    encrypt        = true
+  }
+}
+
+# Reference networking outputs using remote state
+data "terraform_remote_state" "networking" {
+  backend = "s3"
+  config = {
+    bucket = "company-terraform-state"
+    key    = "networking/terraform.tfstate"
+    region = "us-west-2"
+  }
+}
+
+resource "aws_instance" "app" {
+  ami           = data.aws_ami.app.id
+  instance_type = "t3.micro"
+  subnet_id     = data.terraform_remote_state.networking.outputs.private_subnet_ids[0]
+
+  tags = {
+    Name        = "application-server"
+    ManagedBy   = "terraform"
+    Component   = "application"
+  }
+}
+```
+
+These configurations create separate state files for networking and application components. The application module uses `terraform_remote_state` data source to reference networking outputs, maintaining the dependency relationship while keeping deployments independent. Teams can deploy the application module without locking or modifying the networking state file.
+
+## Automate atomic deployments with CI/CD
+
+Integrate atomic deployments into CI/CD pipelines to automate testing and deployment of individual infrastructure components. Configure pipelines to detect changes in specific module directories and deploy only the affected modules, reducing deployment time and risk.
+
+The following example shows a GitHub Actions workflow that deploys atomic modules based on changed files:
+
+```yaml
+name: Deploy Infrastructure
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      networking: ${{ steps.changes.outputs.networking }}
+      database: ${{ steps.changes.outputs.database }}
+      application: ${{ steps.changes.outputs.application }}
+    steps:
+      - uses: actions/checkout@v3
+      - uses: dorny/paths-filter@v2
+        id: changes
+        with:
+          filters: |
+            networking:
+              - 'infrastructure/networking/**'
+            database:
+              - 'infrastructure/database/**'
+            application:
+              - 'infrastructure/application/**'
+
+  deploy-networking:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.networking == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Deploy networking
+        run: |
+          cd infrastructure/networking
+          terraform init
+          terraform plan
+          terraform apply -auto-approve
+
+  deploy-database:
+    needs: [detect-changes, deploy-networking]
+    if: needs.detect-changes.outputs.database == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Deploy database
+        run: |
+          cd infrastructure/database
+          terraform init
+          terraform plan
+          terraform apply -auto-approve
+
+  deploy-application:
+    needs: [detect-changes, deploy-networking, deploy-database]
+    if: needs.detect-changes.outputs.application == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Deploy application
+        run: |
+          cd infrastructure/application
+          terraform init
+          terraform plan
+          terraform apply -auto-approve
+```
+
+This workflow detects which modules changed, deploys only the affected components, and respects dependencies between modules. If only application code changes, the pipeline deploys only the application module, skipping networking and database. This reduces deployment time and limits the scope of changes in each deployment.
+
+## Identify atomic deployment boundaries
+
+Define atomic deployment boundaries based on infrastructure component lifecycles, team ownership, and dependency relationships. Components that change together should be deployed together, while components with independent lifecycles should be separated.
+
+Use the following criteria to identify atomic boundaries:
+
+**Separate modules when:**
+- Different teams own and maintain the infrastructure components
+- Components have different deployment schedules or change frequencies
+- Components can be tested and validated independently
+- Rollback of one component should not affect others
+- Components have different compliance or security requirements
+
+**Keep modules together when:**
+- Resources have tight coupling and always change together
+- Components share the same lifecycle and deployment schedule
+- Separating them creates excessive orchestration complexity
+- Dependencies between resources make independent deployment difficult
+
+For example, separate networking infrastructure (VPCs, subnets, routing) from application infrastructure (EC2 instances, load balancers) because they change at different frequencies and have different owners. Keep an EC2 instance and its security group together because they are tightly coupled and always deploy together.
+
+Avoid using the Terraform `-target` flag to deploy individual resources within a module, as this breaks dependency tracking and can create inconsistent state. Instead, organize resources into appropriately-sized modules that define your atomic boundaries.
 
 HashiCorp resources:
-- [Learn how to automate Terraform with GitHub Actions](/terraform/tutorials/automation/github-actions)
-- [Terraform plan](/terraform/cli/commands/plan)
+
+- [Terraform modules documentation](/terraform/language/modules) - Learn how to structure and use modules
+- [Organize Terraform configuration](/terraform/tutorials/modules/organize-configuration) - Tutorial on organizing code with modules
+- [Module composition](/terraform/language/modules/develop/composition) - Design patterns for composing modules
+- [Backend configuration](/terraform/language/settings/backends/configuration) - Configure remote state backends
+- [Remote state data source](/terraform/language/state/remote-state-data) - Reference outputs between modules
+- [Terraform workspaces](/terraform/language/state/workspaces) - Manage multiple environments with workspaces
+- [Automate Terraform with GitHub Actions](/terraform/tutorials/automation/github-actions) - CI/CD integration tutorial
+- [HCP Terraform run triggers](/terraform/cloud-docs/workspaces/settings/run-triggers) - Automate deployments across workspaces
+- [Terraform state locking](/terraform/language/state/locking) - Prevent concurrent modifications
 
 External resources:
-- [Infrastructure as Code with Terraform and GitLab](https://docs.gitlab.com/ee/user/infrastructure/iac/)
+
+- [Infrastructure as Code with Terraform and GitLab](https://docs.gitlab.com/ee/user/infrastructure/iac/) - GitLab CI/CD integration
 
 ## Next steps
 
-In this section of Deploy with confidence, you learned how to implement atomic deployments for infrastructure by deploying small, frequent updates to reduce risk and enable faster rollback capabilities. Atomic deployments is part of the [Define and automate processes pillar](/well-architected-framework/define-and-automate-processes).
+In this section of Deploy with confidence, you learned how to implement atomic deployments for infrastructure by organizing Terraform modules, managing separate state files, and automating deployments with CI/CD. Atomic deployments are part of the [Define and automate processes pillar](/well-architected-framework/define-and-automate-processes).
 
 Refer to the following documents to learn more about deployment strategies:
 
-- [Implement zero-downtime deployments with blue/green, canary, and rolling strategies](/well-architected-framework/define-and-automate-processes/deploy/zero-downtime-deployments)
-- [Automate deployments](/well-architected-framework/define-and-automate-processes/automate/deployments) to automate your deployment processes
-- [Automation maturity model](/well-architected-framework/define-and-automate-processes/process-automation) to understand your current automation level
+- Implement [zero-downtime deployments](/well-architected-framework/define-and-automate-processes/deploy/zero-downtime-deployments) with blue/green, canary, and rolling strategies
+- [Automate deployments](/well-architected-framework/define-and-automate-processes/automate/deployments) with Terraform and container orchestrators
+- [Test infrastructure](/well-architected-framework/define-and-automate-processes/automate/testing) with Terraform test and Sentinel before deploying
+- [Create reusable modules](/well-architected-framework/define-and-automate-processes/define/modules) to standardize infrastructure components

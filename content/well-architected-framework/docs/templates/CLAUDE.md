@@ -259,3 +259,337 @@ Flag any areas where content could be clearer for AI systems and suggest specifi
 ## Resources
 
 - Provide links to HashiCorp tutorials and documentation that users can use to implement the goals of the document.
+
+---
+
+## Common Pitfalls to Avoid
+
+Watch for these frequent issues when reviewing or creating documents:
+
+### Formatting Issues
+- **Missing bullet dashes** - Every list item in a "Why" section needs a dash, even after blank lines
+  - Wrong: `**Challenge:** Description` (no dash)
+  - Right: `- **Challenge:** Description` (has dash)
+
+- **Incorrect ordered list numbering** - Always use `1.` for every item, not sequential numbers
+  - Wrong: `1. First\n2. Second\n3. Third`
+  - Right: `1. First\n1. Second\n1. Third`
+
+- **Missing "the following" before lists** - Every list (except resource sections) needs "the following" in the introduction
+  - Wrong: "Follow this workflow to deploy changes:" or "Use this workflow:"
+  - Right: "Use the following workflow to deploy changes:" or "Follow the following steps:"
+  - Wrong: "Implement these best practices:"
+  - Right: "Implement the following best practices:"
+  - Exception: "HashiCorp resources:" and "External resources:" don't need "the following"
+
+### Content Gaps
+- **Empty base examples** - Code examples that don't show the actual use case
+  - Wrong: Packer template that creates empty Ubuntu image with no application
+  - Right: Packer template with provisioners that copy app files and install dependencies
+
+- **Missing workflow connections** - Not explaining how outputs connect to inputs
+  - Wrong: "ami = ami-12345678" with no context
+  - Right: Shows Packer outputs AMI ID, explains how to use data source to query it in Terraform
+
+- **Generic tool documentation** - Content that could apply to any tool, not HashiCorp-specific
+  - Wrong: "Test your infrastructure before deploying" (generic)
+  - Right: "Use Sentinel for policy-as-code and Terratest for infrastructure validation" (specific HashiCorp tools)
+
+### SEO/Clarity Issues
+- **Passive voice** - "resources were created", "changes are applied", "tests are run"
+  - Wrong: "before they're applied"
+  - Right: "before Terraform applies them"
+
+- **Ambiguous pronouns** - Using "it", "this", "that" without clear antecedents
+  - Wrong: "This prevents issues" (what is "this"?)
+  - Right: "Automated testing prevents production failures"
+
+- **Missing outcomes** - Not explaining what happens when you run the code
+  - Wrong: Just showing code with no explanation of results
+  - Right: "Running `packer build` produces AMI ami-0abc123 which you can reference in Terraform"
+
+### Document Length Red Flags
+- Document < 500 words likely lacks depth for implementers
+- No code examples means implementers won't be successful
+- < 3 resource links means implementers lack implementation guidance
+- Compare to similar existing documents - if yours is 1/3 the length, it's probably too shallow
+
+---
+
+## Code Example Patterns
+
+Use these patterns to ensure code examples are realistic and actionable:
+
+### Packer Examples Must Include
+```hcl
+# GOOD - Shows actual application packaging
+build {
+  sources = ["source.docker.ubuntu"]
+
+  # Copy application files
+  provisioner "file" {
+    source      = "dist/"
+    destination = "/app"
+  }
+
+  # Install dependencies
+  provisioner "shell" {
+    inline = [
+      "apt-get update",
+      "apt-get install -y nodejs npm",
+      "cd /app && npm install --production"
+    ]
+  }
+
+  # Tag for registry
+  post-processor "docker-tag" {
+    repository = "myregistry/myapp"
+    tags       = ["1.0.0"]
+  }
+}
+```
+
+### Terraform Examples Must Show
+- **Data sources** to query dynamic values (AMI IDs, image tags) instead of hardcoded values
+- **Realistic values** with context (not "ami-12345678" but "ami built by Packer with data source query")
+- **Connection to workflow** - explain where values come from and what happens next
+
+### Example Summaries Must Explain
+1. **What the code does** - "This template copies application files and installs dependencies"
+2. **What it produces** - "Running `packer build` produces AMI ami-0abc123"
+3. **How to use the output** - "Reference this AMI in Terraform using a data source"
+4. **Why it matters** - "This creates immutable infrastructure that deploys consistently"
+
+---
+
+## User Success Validation
+
+Before finalizing a document, ask these questions:
+
+### For Decision-Makers
+- [ ] Can they understand the strategic value in < 2 minutes?
+- [ ] Can they articulate why this matters to their organization?
+- [ ] Can they make an informed decision about which approach/tool to use?
+- [ ] Can they confidently send this to their implementers?
+
+### For Implementers
+- [ ] Can they understand what to build/implement?
+- [ ] Do they have concrete examples to adapt?
+- [ ] Can they find the resources to complete implementation?
+- [ ] Would they know what to do next after reading this?
+- [ ] Can they troubleshoot if something goes wrong?
+
+### Critical Test
+**The "Newcomer Test"**: If someone unfamiliar with HashiCorp tools reads this document, can they:
+1. Understand what problem it solves?
+2. Decide if it's right for their use case?
+3. Find enough information to start implementing?
+4. Know where to go for detailed implementation steps?
+
+If the answer to any is "no", the document needs more detail, examples, or resources.
+
+---
+
+## Document Depth Guidelines
+
+Use existing documents as benchmarks for depth:
+
+### Document Length Guidelines
+- **Target word count**: 700-1,200 words
+- **Content is more important than word count** - If a topic needs 1,500 words to properly serve both personas, use 1,500 words
+- **Quality indicators**: 1-2 code examples, clear "Why" section, actionable implementation guidance, 5-8 HashiCorp resource links
+- **Red flags**: Documents under 400 words likely lack depth; documents without code examples won't help implementers succeed
+
+### Complete Documents Should Include
+- **Sections**: Intro (2-3 paragraphs), Why (3-4 challenges), Implementation guidance with examples, Resources (5-8+ links)
+- **Code examples**: 1-2 detailed, realistic examples that show complete workflows (input → processing → output)
+- **Both personas served**: Strategic value for decision-makers, actionable guidance for implementers
+
+### When to Add More Detail
+- If you're documenting a NEW concept not covered elsewhere
+- If implementers need to make complex decisions (multiple tools, approaches)
+- If the topic connects multiple HashiCorp tools in a workflow
+- If there are security or compliance implications
+
+### When to Link Out Instead
+- For basic tool syntax (link to product docs)
+- For step-by-step tutorials (link to tutorials)
+- For detailed API references (link to API docs)
+- For platform-specific details (link to AWS/Azure/GCP docs)
+
+### The Balance
+WAF documents should be:
+- **Strategic enough** for decision-makers to understand value
+- **Tactical enough** for implementers to start working
+- **Connected enough** to guide users to detailed resources
+- **NOT step-by-step tutorials** (that's what tutorials are for)
+
+---
+
+## Tool-Specific Documentation Patterns
+
+Different HashiCorp tools need different documentation approaches:
+
+### Packer Documents Must Show
+- Complete build blocks with provisioners (not just source definitions)
+- How application code gets into images
+- How to tag/version images for tracking
+- How outputs connect to deployment tools (Terraform, Kubernetes, Nomad)
+
+### Terraform Documents Must Show
+- Backend configuration for state management
+- Data sources for querying dynamic values (not hardcoded IDs)
+- How to reference artifacts from other tools (Packer AMIs, container images)
+- Resource tags for organization and filtering
+
+### Sentinel Documents Must Show
+- Complete policies with imports and rules
+- How policies evaluate plans (what gets checked)
+- What happens when policies fail (blocks apply, shows violations)
+- How to test policies before deploying them
+
+### Integration Documents (Multi-Tool) Must Show
+- Clear workflow sequence (Tool A → Tool B → Tool C)
+- How outputs from one tool become inputs to the next
+- Example values that match across all tools
+- End-to-end example showing complete flow
+
+---
+
+## Review Process Recommendation
+
+Follow this order for efficient reviews:
+
+### 1. Structure Check (5 minutes)
+- Frontmatter present and correct?
+- "Why" section exists?
+- Code examples present?
+- Resources section exists?
+
+### 2. Persona Value (10 minutes)
+- Would decision-makers find strategic value?
+- Would implementers have actionable guidance?
+- Run through User Success Validation questions
+
+### 3. Content Quality (15 minutes)
+- Are code examples realistic and complete?
+- Do workflow steps connect explicitly?
+- Are there enough details for implementation?
+
+### 4. Writing Standards (10 minutes)
+- Check formatting (bullet dashes, ordered lists, bold titles)
+- Check "the following" before lists
+- Check for passive voice
+
+### 5. SEO/AI Optimization (10 minutes)
+- Meta description length
+- Active voice throughout
+- Explicit outcomes after examples
+- No ambiguous pronouns
+
+### 6. Resources and Links (5 minutes)
+- 5+ HashiCorp resources?
+- Links are specific, not generic?
+- Resources match the content?
+
+**Total: ~55 minutes for thorough review**
+
+For quick reviews, focus on steps 1-3. For publication-ready reviews, do all 6 steps.
+
+---
+
+## Review Checklist
+
+Use this checklist when reviewing or creating WAF documents to ensure all guidelines are followed.
+
+### Document Structure
+- [ ] Frontmatter includes `page_title` and `description`
+- [ ] Meta description is 150-160 characters
+- [ ] Document has a "Why [topic]" section after intro, before implementation
+- [ ] "Why" section presents 3-4 strategic challenges with bold title format: `**Challenge name:** Description`
+- [ ] H2 headings use sentence case ("Getting started", not "Getting Started")
+- [ ] Document includes workflow connections to related WAF documents
+- [ ] "Next steps" section at end references related documents
+- [ ] HashiCorp resources section with 5+ relevant links
+- [ ] External resources section if applicable
+
+### Content Quality
+- [ ] Content serves both decision-makers (strategic) and implementers (actionable)
+- [ ] Explains the "what", "why", and "how" of the topic
+- [ ] Code examples show realistic, complete implementations (not just empty base examples)
+- [ ] Examples demonstrate actual application/infrastructure packaging or deployment
+- [ ] Document provides enough detail for implementers to be successful
+- [ ] Workflow steps explicitly connect (e.g., Packer output → Terraform input)
+- [ ] Decision guidance uses "Use X when you need..." format with specific criteria
+- [ ] Avoids comparative language ("simpler", "easier") - uses neutral criteria
+
+### Writing Standards
+- [ ] Second-person voice ("you") throughout
+- [ ] Active voice preferred over passive voice
+- [ ] No promotional language or marketing phrases
+- [ ] No editorializing ("it's important to note", "in conclusion")
+- [ ] No excessive conjunctions ("moreover", "furthermore", "additionally")
+- [ ] Sentence case for all headings
+- [ ] Language tags on all code blocks
+- [ ] Alt text on all images (if applicable)
+- [ ] Relative paths for all internal links
+
+### Critical Formatting Rules (Check Every List!)
+- [ ] **"The following" before ALL lists** - "Use the following workflow:" NOT "Follow this workflow:" (Exception: resource sections)
+- [ ] **Bold titles with colons inside** - `**Title:** Description` NOT `**Title** - Description`
+- [ ] **Ordered lists use `1.` for every item** - NOT `1. 2. 3.`
+- [ ] **All bullet points have dashes** - Even after blank lines in "Why" sections
+
+### Code Examples
+- [ ] All code examples include language tags
+- [ ] Examples are complete and actionable (not placeholders or TODOs)
+- [ ] Each code block has 1-2 sentence summary explaining what it accomplishes
+- [ ] Summaries connect to broader workflow (e.g., "uses AMI built with Packer...")
+- [ ] Examples use realistic values (not "ami-12345678" without context)
+- [ ] Provisioners included in Packer examples to show actual app packaging
+- [ ] Terraform examples show how to reference Packer-built images
+- [ ] Examples demonstrate real-world scenarios relevant to both personas
+
+### SEO Optimization
+- [ ] Title uses sentence case, avoids colons, excludes tool names from main title
+- [ ] Meta description is optimized (150-160 chars, includes key concepts)
+- [ ] First paragraph has strong hook with keyword placement
+- [ ] First paragraph uses active voice and direct language
+- [ ] H2 headings are benefit-focused (tool names only when section is tool-specific)
+- [ ] No passive voice throughout document
+- [ ] Content structure supports readability and scanning
+- [ ] Internal linking opportunities identified and implemented
+
+### AI/LLM Optimization
+- [ ] Each section starts with clear topic sentence stating what it covers
+- [ ] Explicit relationships between concepts ("After X, you can Y", "X depends on Y")
+- [ ] Technical terms defined when first introduced
+- [ ] Acronyms spelled out on first use
+- [ ] Headings match how users ask questions ("Why automate testing" not "Testing rationale")
+- [ ] Decision guidance explicit: "Use X when..." patterns included
+- [ ] Sections can be understood independently with sufficient context
+- [ ] Avoids relying solely on directional references ("above", "below")
+- [ ] Examples clearly state what they demonstrate and the outcome
+- [ ] Prerequisites explicitly stated before instructions
+- [ ] Success criteria and outcomes clearly described
+- [ ] No ambiguous pronouns - specific nouns used instead of "it", "this", "that"
+- [ ] Parallel structure in all lists
+- [ ] Clear subject-verb relationships throughout
+- [ ] Explicit outcomes after code examples (what happens when you run this)
+- [ ] Workflow sequences numbered with clear prerequisites and results
+
+### Resources and Links
+- [ ] 5+ HashiCorp resource links (documentation, tutorials, references)
+- [ ] External resources section if relevant third-party tools mentioned
+- [ ] All links are specific (not generic dashboards)
+- [ ] Links direct users to exact pages needed for implementation
+- [ ] Resources organized logically (by tool, by task, or by workflow stage)
+
+### Persona Value Assessment
+- [ ] Decision-makers can understand strategic value and make informed decisions
+- [ ] Decision-makers see clear business outcomes and consequences
+- [ ] Implementers have actionable guidance to follow
+- [ ] Implementers can find resources to complete implementation
+- [ ] Examples bridge the gap between concepts and real implementation
+- [ ] Document acts as a directory to deeper implementation resources
+- [ ] Both personas will be successful after reading the document
