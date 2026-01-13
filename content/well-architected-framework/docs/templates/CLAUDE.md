@@ -75,6 +75,18 @@ When reviewing for writing standards, the HashiCorp writing standards supersedes
 - Remove unnecessary words while maintaining clarity
 - Break complex instructions into clear numbered steps
 - Make language more precise and contextual
+- Avoid vague pronouns at the start of sentences. Instead of starting with "This", "That", or "It", explicitly name what you're referring to.
+    Bad examples:
+    - "This Terraform configuration creates..." → "The Terraform configuration creates..."
+    - "This approach eliminates..." → "Using data sources eliminates..."
+    - "This enables rollbacks..." → "Immutable containers enable rollbacks..."
+
+    Good examples:
+    - "The Kubernetes Deployment creates three replicas..."
+    - "The data source queries AWS for the most recent AMI..."
+    - "Using data sources eliminates manual AMI ID updates..."
+
+    Why: Starting sentences with vague pronouns assumes the reader knows exactly what "this" refers to. Being explicit improves clarity, especially when sentences follow code blocks or complex concepts
 - Before a list of items, there needs to be `the following` somewhere in the introduction
     Valid examples:
     - You can install the following package with Packer:
@@ -160,6 +172,25 @@ Based on successful WAF documents, use these patterns:
 - After code blocks, add 1-2 sentences explaining what the configuration accomplishes
 - Connect to broader workflow (e.g., "This configuration uses an AMI built with Packer...")
 - Highlight key concepts like state management, team collaboration benefits
+
+**Document ending structure:**
+- Place resource sections before the "Next steps" section at the end of documents
+- Standard order at document end:
+  1. HashiCorp resources (links to tutorials, product docs, etc.)
+  2. External resources (optional, for third-party documentation)
+  3. Next steps (links to related WAF documents with context)
+- Example:
+  ```markdown
+  HashiCorp resources:
+  - Get started with [Packer tutorials](/packer/tutorials)
+  - Learn about [Terraform providers](...)
+
+  External resources:
+  - [Dockerfile reference](https://docs.docker.com/...)
+
+  ## Next steps
+  In this section of Define your processes, you learned...
+  ```
 
 ## Content organization
 - Structure content in the order users need it
