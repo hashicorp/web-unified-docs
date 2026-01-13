@@ -41,7 +41,7 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 		return new Response('Not found', { status: 404 })
 	}
 
-	// Check if we're in quick preview mode
+	// Check if we're in quick preview mode and get the changedfiles.json if so
 	const quickPreviewManifest = await getQuickPreviewManifest()
 
 	// Determine the content directory based on the "product" (actually repo) slug
@@ -189,38 +189,31 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 
 	const { metadata, markdownSource } = markdownFrontMatterResult.value
 
-	return Response.json(
-		{
-			meta: {
-				status_code: 200,
-				status_text: 'OK',
-				// Include quick preview metadata in response for frontend to use
-				quick_preview: quickPreviewManifest
-					? {
-							enabled: true,
-							mode: quickPreviewManifest.mode || 'normal',
-							content_source: 'preview',
-						}
-					: undefined,
-			},
-			result: {
-				fullPath: parsedDocsPath,
-				product: productSlug,
-				version: PRODUCT_CONFIG[productSlug].versionedDocs
-					? versionMetadata.version
-					: 'v0.0.x',
-				metadata,
-				subpath: 'docs', // TODO: I guess we could grab the first part of the rawDocsPath? Is there something I am missing here?
-				markdownSource,
-				created_at: createdAt,
-				sha: '', // TODO: Do we really need this?
-				githubFile,
-			},
+	return Response.json({
+		meta: {
+			status_code: 200,
+			status_text: 'OK',
+			// Include quick preview metadata in response for frontend to use
+			quick_preview: quickPreviewManifest
+				? {
+						enabled: true,
+						mode: quickPreviewManifest.mode || 'normal',
+						content_source: 'preview',
+					}
+				: undefined,
 		},
-		{
-			headers: {
-				'X-Content-Source': 'preview',
-			},
+		result: {
+			fullPath: parsedDocsPath,
+			product: productSlug,
+			version: PRODUCT_CONFIG[productSlug].versionedDocs
+				? versionMetadata.version
+				: 'v0.0.x',
+			metadata,
+			subpath: 'docs', // TODO: I guess we could grab the first part of the rawDocsPath? Is there something I am missing here?
+			markdownSource,
+			created_at: createdAt,
+			sha: '', // TODO: Do we really need this?
+			githubFile,
 		},
-	)
+	})
 }

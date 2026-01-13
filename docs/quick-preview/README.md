@@ -9,7 +9,7 @@ Quick Preview is a **development mode and CI/CD optimization** for the backend A
 - **PR Previews:** Deploy preview builds in ~5 minutes instead of ~17 minutes
 - **Validation:** Validate changes in CI/CD by building only what changed
 
-**Status:** ✅ **PRODUCTION READY** - Currently deployed and working in PR previews
+**Status:** ✅ **WORKING** - Successfully deploying PR previews with production fallback
 
 **Architecture Note:** This is a backend-only feature. The frontend (dev portal) remains completely separate and receives standard API responses with additional metadata indicating preview mode.
 
@@ -32,16 +32,61 @@ Quick Preview is a **development mode and CI/CD optimization** for the backend A
 - **Performance:** 95-99% time savings on typical PRs
 
 ### ✅ Phase 3: GitHub Actions Integration (COMPLETE)
-- Automated PR preview workflow (`.github/workflows/pr-preview-quick.yml`)
-- Security checks for forked PRs
-- Selective prebuild in CI/CD
-- **Critical fix:** Prevents duplicate prebuild by temporarily removing npm lifecycle hook
-- Vercel deployment with prebuilt artifacts
-- PR comments with deployment URLs and statistics
+
+**Implemented & Working:**
+- ✅ GitHub Actions workflow (`.github/workflows/pr-preview-quick.yml`)
+- ✅ Security checks for forked PRs
+- ✅ Selective prebuild in CI/CD
+- ✅ Vercel deployment configuration with runtime environment variables
+- ✅ PR comment automation with deployment URLs
+- ✅ Link checker integration
+- ✅ Production fallback for unchanged content
+
+**Critical Fix Applied (January 2026):**
+Environment variables must be passed to Vercel deployment at runtime, not just build time:
+```yaml
+vercel deploy \
+  --prebuilt \
+  --env QUICK_PREVIEW=true \
+  --env QUICK_PREVIEW_FALLBACK_URL=https://web-unified-docs-hashicorp.vercel.app
+```
+
+This enables the production fallback mechanism so unchanged content is proxied from production during preview builds.
 
 ### 🚧 Phase 4: Docker Integration (PENDING)
 - Local Docker development support
 - Will be added in future iteration
+
+---
+
+## Known Issues & TODO
+
+### 🚨 Critical: Partials Handling (Not Implemented)
+
+**Problem:**
+When a partial file is edited (e.g., `content/terraform/v1.14.x/docs/partials/common-header.mdx`), we currently:
+- ❌ Only process the partial file itself
+- ❌ Do NOT process the dependent files that use it (e.g., files with `@include 'partials/common-header.mdx'`)
+- ❌ Preview will show stale content for all files using that partial
+
+**What needs to happen:**
+The `selective-prebuild.mjs` needs to replicate the logic from `watch-content.mjs`:
+1. Check if any changed file is in a `/partials/` directory
+2. Find the parent `docs/` directory
+3. Scan all `.mdx` files in that directory
+4. Check which files contain `@include 'path/to/changed-partial.mdx'`
+5. Add those dependent files to the list of files to process
+
+**Reference Implementation:**
+See `scripts/watch-content.mjs` lines 17-42 for the working partials detection logic.
+
+**Special Case: Global Partials**
+Files in `/global/partials/` are version-agnostic and shared across all versions. When these change, we may need to:
+- Force a full rebuild, OR
+- Detect affected versions and rebuild them all, OR
+- Document as a known limitation
+
+**Impact:** HIGH - Incorrect preview content when partials change
 
 ---
 
@@ -110,6 +155,150 @@ Quick Preview mode changes the behavior:
 │     • meta.quick_preview: { enabled, mode, content_source } │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## File Inventory: What Each File Does
+
+Understanding which files run where is critical for debugging and extending the system.
+
+### 🔴 GitHub Actions ONLY
+
+| File | Purpose | When It Runs |
+|------|---------|--------------|
+| `.github/workflows/pr-preview-quick.yml` | Orchestration workflow | On PR creation/update |
+
+**What it does:**
+1. Detects changed files
+2. Generates version metadata
+3. Runs selective prebuild
+4. Deploys to Vercel with environment variables
+
+**NOT used in local development.**
+
+---
+
+### 🟢 Build Scripts (Used in BOTH Local + GitHub Actions)
+
+| File | Purpose | Used By |
+|------|---------|---------|
+| `scripts/quick-preview/detect-changes.mjs` | Git diff → manifest generation | Local dev & CI/CD |
+| `scripts/quick-preview/selective-prebuild.mjs` | Process only changed files | Local dev & CI/CD |
+| `scripts/prebuild/prebuild.mjs` (modified) | Generate metadata (added `--only-metadata` flag) | CI/CD only |
+
+**detect-changes.mjs:**
+- Detects changed/deleted files via git diff
+- Categorizes: docs, navData, redirects, assets
+- Outputs: `public/changedfiles.json`
+- Compares against base branch (default: `main`)
+
+**selective-prebuild.mjs:**
+- Reads manifest from `changedfiles.json`
+- Processes only listed files using same transform logic as full build
+- Calls `applyFileMdxTransforms` for MDX files
+- Copies nav-data, redirects, assets directly
+- ⚠️ **Missing:** Partials detection (see Known Issues)
+
+---
+
+### 🟡 Runtime Code (Deployed to Vercel, Runs in Preview Environment)
+
+| File | Purpose | Type |
+|------|---------|------|
+| `app/utils/quickPreview.ts` | API fallback utilities | TypeScript module |
+| `app/middleware/quickPreview.js` | Asset proxying middleware | JavaScript module |
+| `middleware.js` (root) | Middleware composition | JavaScript module |
+| 4 API route files | Content/asset serving with fallback | TypeScript modules |
+
+**app/utils/quickPreview.ts** - Shared utilities for API routes:
+- `getQuickPreviewManifest()` - Reads and caches changedfiles.json
+- `fetchFromProduction()` - HTTP fetch from production backend
+- `shouldFetchFromProduction()` - Checks if in Quick Preview mode
+- `isFileDeleted()` - Checks if file was deleted in this PR
+
+**app/middleware/quickPreview.js** - Static asset proxying:
+- Handles: `/assets/*`, `/_next/static/*`, `/content/*`, file extensions
+- Checks if file exists locally → if not, proxy from production
+- Streams binary data (images, fonts, CSS, JS)
+- **Different from quickPreview.ts:** Binary streaming vs JSON responses
+
+**middleware.js** (root):
+- Composes multiple middleware handlers
+- Calls `quickPreviewMiddleware()` when appropriate
+- Also handles existing ptfe-releases rewrite
+
+**4 API Routes** (all modified with same pattern):
+1. `app/api/content/[productSlug]/doc/[version]/[...docsPath]/route.ts` - MDX docs
+2. `app/api/content/[productSlug]/nav-data/[version]/[...section]/route.ts` - Navigation
+3. `app/api/content/[productSlug]/redirects/route.ts` - Redirects
+4. `app/api/assets/[productSlug]/[version]/[...assetPath]/route.ts` - Assets
+
+**Standard pattern:**
+```typescript
+// 1. Try to serve locally
+const data = await getOriginalFunction(...)
+
+// 2. If not found AND in Quick Preview mode
+if (!data.ok && shouldFetchFromProduction(manifest)) {
+  // 2a. Check if file was deleted
+  if (isFileDeleted(manifest, filePath)) {
+    return 404 with X-Content-Source: deleted
+  }
+  
+  // 2b. Fetch from production
+  const production = await fetchFromProduction(path)
+  return production with X-Content-Source: production
+}
+
+// 3. Return local content or 404
+```
+
+---
+
+### 🔵 Utilities & Testing (Manual/Optional)
+
+| File | Purpose | Usage |
+|------|---------|-------|
+| `scripts/quick-preview/validate-setup.mjs` | Setup validation | Run manually to verify all files exist |
+| `scripts/quick-preview/generate-mock-manifest.mjs` | Mock manifest for testing | Testing infrastructure without git diff |
+
+---
+
+### 📦 Configuration
+
+**package.json** (added 3 scripts):
+```json
+{
+  "scripts": {
+    "dev:quick-preview": "npm run quick-preview:detect && npm run quick-preview:build && npm run watch-content & QUICK_PREVIEW=true dotenvx run -- next dev",
+    "quick-preview:detect": "node scripts/quick-preview/detect-changes.mjs",
+    "quick-preview:build": "node scripts/quick-preview/selective-prebuild.mjs"
+  }
+}
+```
+
+---
+
+### 📋 Quick Reference: Which File Runs Where
+
+| File | Local Dev | GitHub Actions | Runtime (Vercel) | Can Be Removed? |
+|------|-----------|----------------|------------------|-----------------|
+| detect-changes.mjs | ✅ | ✅ | ❌ | ❌ Core detection |
+| selective-prebuild.mjs | ✅ | ✅ | ❌ | ❌ Core build |
+| app/utils/quickPreview.ts | ❌ | ❌ | ✅ | ❌ Core runtime |
+| app/middleware/quickPreview.js | ❌ | ❌ | ✅ | 🟡 Could consolidate |
+| 4 API routes (modified) | ❌ | ❌ | ✅ | ❌ Core runtime |
+| pr-preview-quick.yml | ❌ | ✅ | ❌ | ❌ Deployment |
+| middleware.js (modified) | ❌ | ❌ | ✅ | ❌ Core runtime |
+| validate-setup.mjs | Manual | ❌ | ❌ | ✅ Utility only |
+| generate-mock-manifest.mjs | Manual | ❌ | ❌ | ✅ Testing only |
+
+**Key Insights:**
+- **Clean separation:** Build scripts (detect/prebuild) vs runtime code (utils/middleware/routes)
+- **Duplication:** `quickPreview.ts` and `quickPreview.js` have similar logic but serve different purposes
+  - `.ts` = API routes (JSON responses, structured data)
+  - `.js` = Middleware (binary streaming, static assets)
+- **Could consolidate:** Convert `middleware.js` to TypeScript and use `quickPreview.ts` functions directly
 
 ---
 
@@ -679,30 +868,14 @@ if (response) return response
 
 **You can now:** Run the site with zero local content.
 
-### 🚧 Phase 2: Change Detection (NOT STARTED)
+### ✅ Phase 2: Change Detection (COMPLETE)
 
-**Goals:**
-- Detect which files changed via `git diff`
-- Generate real manifest with changed file list
-- Build only changed files in prebuild
-
-**Implementation:**
-- Script to run `git diff main...HEAD`
-- Filter for content files (`.mdx`, nav-data, etc.)
-- Update manifest with actual changed files
-- Modify prebuild to process only listed files
-
-### 🚧 Phase 3: PR Preview CI/CD (NOT STARTED)
-
-**Goals:**
-- GitHub Actions workflow for PR previews
-- Deploy only changed content to Vercel
-- Reduce preview build time from 17 min → 3-5 min
-
-**Implementation:**
-- `.github/workflows/build-pr-preview-quick.yml`
-- Vercel deployment configuration
-- Performance monitoring
+**Implemented:**
+- ✅ Git diff-based change detection (`scripts/quick-preview/detect-changes.mjs`)
+- ✅ Manifest generation with changed file list
+- ✅ Selective prebuild processing only changed files
+- ✅ Deleted file tracking
+- ✅ Statistics output (changed, deleted, docs, nav-data)
 
 ---
 
@@ -733,67 +906,10 @@ A: The infrastructure is ready, but you'd need to configure your CI to set `QUIC
 
 ## Support & Resources
 
-- **Full implementation plan:** `docs/.research/QUICK_PREVIEW_BUILDS.md`
+- **Testing Guide:** `docs/quick-preview/TESTING.md`
 - **Validation script:** `scripts/quick-preview/validate-setup.mjs`
-- **Example UI component:** `app/components/QuickPreviewBanner.tsx`
 
 **Questions?** Check terminal logs when running `npm run dev:quick-preview` - they show exactly what's happening.
-   - http://localhost:3000/vault/docs/what-is-vault
-   - http://localhost:3000/terraform/docs/language
-   
-   **Note:** You'll need to point your dev portal frontend to `localhost:3000` to see the actual pages.
-
-3. **Verify:**
-   - ✅ API responses include `quick_preview` metadata
-   - ✅ Pages load successfully (via frontend)
-   - ✅ Content is from production backend
-   - ✅ Response headers show `X-Content-Source: production`
-
-4. **Check the manifest:**
-   ```bash
-   cat public/changedfiles.json
-   ```
-
-## How to Verify It's Working
-
-### Option 1: Check API Response
-Make a direct API call:
-```bash
-curl http://localhost:3000/api/content/vault/doc/v1.18.x/docs/what-is-vault | jq '.meta.quick_preview'
-```
-
-Should return:
-```json
-{
-  "enabled": true,
-  "mode": "mock",
-  "content_source": "production"
-}
-```
-
-### Option 2: Check Response Headers
-Open browser DevTools → Network → Click any API request → Check headers:
-- Should see `X-Content-Source: production`
-- Should see `X-Preview-Fallback: true`
-
-### Option 3: Check Console Logs
-The terminal running the dev server will show:
-```
-[Quick Preview] Fetching from production: /api/content/...
-```
-
-### Option 4: Frontend Implementation
-Your dev portal frontend can check the response and display a banner:
-```typescript
-// In your frontend code
-const response = await fetch('/api/content/...')
-const data = await response.json()
-
-if (data.meta.quick_preview?.enabled) {
-  // Show banner: "Preview Mode - Content from production"
-  console.log('Content source:', data.meta.quick_preview.content_source)
-}
-```
 
 ## Performance Metrics
 
@@ -811,19 +927,7 @@ if (data.meta.quick_preview?.enabled) {
   - Next.js build: ~5 minutes
 - **Time saved:** 70%
 
-### Real-World Example (December 18, 2025)
-From actual PR preview logs:
-```
-Detect changes: 10s
-Generate metadata: 5s
-Selective prebuild: 30s (processed 0 changed files)
-Next.js build: 5m 15s
-Total: 6m 0s (vs 17m baseline = 65% faster)
-```
-
 ---
-
-## Next Steps (Future Enhancements)
 
 ## Troubleshooting
 
@@ -926,11 +1030,11 @@ Return with X-Content-Source header
 }
 ```
 
-## GitHub Actions Integration - PRODUCTION READY ✅
+## GitHub Actions Integration - ✅ WORKING
 
-Quick Preview is **currently deployed and working** in PR preview builds.
+Quick Preview workflow is **successfully deploying PR previews** with production fallback.
 
-### Setup (Already Complete)
+### Setup (Complete)
 
 1. **GitHub Secrets** - Configured in repository:
    - `VERCEL_TOKEN` - Vercel API token
@@ -974,10 +1078,14 @@ When a PR is opened or updated:
    jq '.scripts.prebuild = ...' package.json
    ```
 
-6. **Deploy** - Upload prebuilt artifacts to Vercel
+6. **Deploy** - Upload prebuilt artifacts to Vercel with runtime env vars
    ```bash
-   vercel deploy --prebuilt --target=preview
+   vercel deploy --prebuilt --target=preview \
+     --env QUICK_PREVIEW=true \
+     --env QUICK_PREVIEW_FALLBACK_URL=https://web-unified-docs-hashicorp.vercel.app
    ```
+   
+   **Critical:** The `--env` flags make environment variables available at runtime so the production fallback mechanism works.
 
 7. **Deploy Dev Portal** - Separate deployment that consumes unified docs API
 
@@ -986,11 +1094,13 @@ When a PR is opened or updated:
    - Build statistics
    - Quick Preview mode indicator
 
-### Actual Performance (December 2025)
+### Actual Performance (January 2026)
 
+**Working as designed:**
 - **Traditional Build**: ~17 minutes
 - **Quick Preview Build**: ~5.5 minutes
 - **Time Savings**: 70%
+- **Production Fallback**: ✅ Working - unchanged content proxied from production
 
 ### Build Statistics Output
 
@@ -1089,35 +1199,13 @@ The workflow runs on:
 - Pull request synchronized (new commits)
 - Pull request reopened
 
-Only when these paths change:
-- `content/**`
-- `app/**`
-- `scripts/**`
-- `package.json`
+**TODO:** Change to `pull_request_target` for production (security requirement)
 
-## FAQ
+---
 
-**Q: Will this affect my regular development?**
-A: No. The `npm run dev` command is completely unchanged.
+## Support & Resources
 
-**Q: Why is everything from production?**
-A: Git diff detects your changes and selective prebuild processes only those files. Unchanged content is served from production.
+- **Testing Guide:** `docs/quick-preview/TESTING.md`
+- **Validation script:** `scripts/quick-preview/validate-setup.mjs`
 
-**Q: Is this safe to use?**
-A: Yes, it's completely isolated. Only active when `QUICK_PREVIEW=true` environment variable is set.
-
-**Q: What if production is down?**
-A: Preview pages will fail to load unchanged content. Changed content will still work.
-
-**Q: Can I test the workflow locally?**
-A: Yes! Just run `npm run dev:quick-preview` - it uses the same logic.
-
-**Q: How do I verify GitHub Actions is set up correctly?**
-A: Check that secrets are configured and open a test PR with a small content change.
-
-## Support
-
-Questions or issues? Check:
-1. This README
-2. GitHub Actions logs in PR checks
-3. Terminal logs when running `dev:quick-preview`
+**Questions?** Check terminal logs when running `npm run dev:quick-preview` - they show exactly what's happening.

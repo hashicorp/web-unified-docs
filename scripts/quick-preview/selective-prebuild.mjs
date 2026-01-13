@@ -15,6 +15,7 @@ import { batchPromises } from '#scriptUtils/batch-promises.mjs'
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
 import semver from 'semver'
 
+// Some of these hardcoded values should change in the future
 const CWD = process.cwd()
 const MANIFEST_PATH = path.join(CWD, 'public/changedfiles.json')
 const CONTENT_DIR = path.join(CWD, 'content')

@@ -27,7 +27,7 @@ export type GetParams = VersionedProduct & {
 export async function GET(request: Request, { params }: { params: GetParams }) {
 	const { productSlug, version, section } = params
 
-	// Check if we're in quick preview mode
+	// Check if we're in quick preview mode and get the changedfiles.json if so
 	const quickPreviewManifest = await getQuickPreviewManifest()
 
 	const productVersionResult = getProductVersionMetadata(productSlug, version)
@@ -106,12 +106,5 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 		return new Response('Not found', { status: 404 })
 	}
 
-	return Response.json(
-		{ result: { navData: navDataResult.value } },
-		{
-			headers: {
-				'X-Content-Source': 'preview',
-			},
-		},
-	)
+	return Response.json({ result: { navData: navDataResult.value } })
 }

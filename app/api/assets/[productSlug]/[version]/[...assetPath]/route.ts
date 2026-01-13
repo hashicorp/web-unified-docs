@@ -26,7 +26,7 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 	// Grab the parameters we need to fetch content
 	const { productSlug, version, assetPath } = params
 
-	// Check if we're in quick preview mode
+	// Check if we're in quick preview mode and get the changedfiles.json if so
 	const quickPreviewManifest = await getQuickPreviewManifest()
 
 	if (!Object.keys(PRODUCT_CONFIG).includes(productSlug)) {
@@ -100,7 +100,6 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 	return new Response(new Uint8Array(assetData.value.buffer), {
 		headers: {
 			'Content-Type': assetData.value.contentType,
-			'X-Content-Source': 'preview',
 		},
 	})
 }

@@ -22,7 +22,7 @@ export type GetParams = ProductParam
 export async function GET(request: Request, { params }: { params: GetParams }) {
 	const { productSlug } = params
 
-	// Check if we're in quick preview mode
+	// Check if we're in quick preview mode and get the changedfiles.json if so
 	const quickPreviewManifest = await getQuickPreviewManifest()
 
 	if (!Object.keys(PRODUCT_CONFIG).includes(productSlug)) {
@@ -102,7 +102,6 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 	return new Response(JSON.stringify(redirects.value), {
 		headers: {
 			'content-type': 'application/json',
-			'X-Content-Source': 'preview',
 		},
 	})
 }
