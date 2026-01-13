@@ -38,6 +38,7 @@ Suppose the decision-maker decides that Terraform and Packer fit their organizat
 - Prioritize accuracy and usability of information
 - Make content evergreen when possible
 - Search for existing information before adding new content. Avoid duplication unless it is done for a strategic reason
+- **Link to existing documents instead of duplicating content:** When a topic is already covered comprehensively in another WAF document, link to that document rather than repeating the information. Provide brief context (1-2 sentences) explaining what the linked document covers and why it's relevant, then direct users there for complete details. This approach maintains a single source of truth, reduces maintenance burden, and helps users discover related content. Only duplicate content when there's a strategic reason, such as providing a different perspective or addressing a different persona's needs.
 - Check existing patterns for consistency
 - Start by making the smallest reasonable changes
 - **Showcase the full HashiCorp toolset when it provides value:** When writing about automation, infrastructure, or workflows, consider the complete HashiCorp stack (Terraform, Packer, Vault, Consul, Nomad, Boundary, Waypoint, etc.) and include tools where they naturally fit the use case. Only include tools when they solve a real problem in the document's context - never force tools just to mention them. Each tool should address a specific challenge that implementers face. Examples:
@@ -124,10 +125,15 @@ When reviewing for writing standards, the HashiCorp writing standards supersedes
 - Clean structure. Avoid excessive formatting. Never use emoji or decorative elements that don't add functional value
 
 ### Code examples
-- Keep examples simple and practical
-- Use consistent formatting and naming
-- Provide clear, actionable examples rather than showing multiple options when one will do
-- Add a summary after code blocks explaining what the code does and why it matters
+- Add code examples when they provide clear value to implementers - not as a checkbox requirement
+- Appropriate for implementation guides, technical how-tos, and documents showing specific tool usage
+- Not always necessary for strategic overviews, decision guides, or high-level concept documents
+- When you do include examples:
+  - Keep them simple and practical
+  - Use consistent formatting and naming
+  - Provide clear, actionable examples rather than showing multiple options when one will do
+  - Add a summary after code blocks explaining what the code does and why it matters
+  - Ensure examples are complete and realistic, not just empty base templates
 
 ### Document structure patterns
 Based on successful WAF documents, use these patterns:
@@ -316,7 +322,7 @@ Watch for these frequent issues when reviewing or creating documents:
 
 ### Document Length Red Flags
 - Document < 500 words likely lacks depth for implementers
-- No code examples means implementers won't be successful
+- Implementation guides without code examples may leave implementers unable to get started (evaluate if examples would add value)
 - < 3 resource links means implementers lack implementation guidance
 - Compare to similar existing documents - if yours is 1/3 the length, it's probably too shallow
 
@@ -403,12 +409,12 @@ Use existing documents as benchmarks for depth:
 ### Document Length Guidelines
 - **Target word count**: 700-1,200 words
 - **Content is more important than word count** - If a topic needs 1,500 words to properly serve both personas, use 1,500 words
-- **Quality indicators**: 1-2 code examples, clear "Why" section, actionable implementation guidance, 5-8 HashiCorp resource links
-- **Red flags**: Documents under 400 words likely lack depth; documents without code examples won't help implementers succeed
+- **Quality indicators**: Clear "Why" section, actionable implementation guidance, 5-8 HashiCorp resource links, code examples when they add value
+- **Red flags**: Documents under 400 words likely lack depth; implementation guides without actionable guidance or examples may leave implementers unable to get started
 
 ### Complete Documents Should Include
-- **Sections**: Intro (2-3 paragraphs), Why (3-4 challenges), Implementation guidance with examples, Resources (5-8+ links)
-- **Code examples**: 1-2 detailed, realistic examples that show complete workflows (input → processing → output)
+- **Sections**: Intro (2-3 paragraphs), Why (3-4 challenges), Implementation guidance, Resources (5-8+ links)
+- **Code examples (when valuable)**: 1-2 detailed, realistic examples that show complete workflows (input → processing → output) for implementation guides and technical how-tos
 - **Both personas served**: Strategic value for decision-makers, actionable guidance for implementers
 
 ### When to Add More Detail
@@ -469,7 +475,7 @@ Follow this order for efficient reviews:
 ### 1. Structure Check (5 minutes)
 - Frontmatter present and correct?
 - "Why" section exists?
-- Code examples present?
+- Code examples present when they would add value (implementation guides, technical how-tos)?
 - Resources section exists?
 
 ### 2. Persona Value (10 minutes)
@@ -478,7 +484,7 @@ Follow this order for efficient reviews:
 - Run through User Success Validation questions
 
 ### 3. Content Quality (15 minutes)
-- Are code examples realistic and complete?
+- Are code examples (if present) realistic and complete?
 - Do workflow steps connect explicitly?
 - Are there enough details for implementation?
 
@@ -522,8 +528,8 @@ Use this checklist when reviewing or creating WAF documents to ensure all guidel
 ### Content Quality
 - [ ] Content serves both decision-makers (strategic) and implementers (actionable)
 - [ ] Explains the "what", "why", and "how" of the topic
-- [ ] Code examples show realistic, complete implementations (not just empty base examples)
-- [ ] Examples demonstrate actual application/infrastructure packaging or deployment
+- [ ] Code examples (when present) show realistic, complete implementations (not just empty base examples)
+- [ ] Code examples (when present) demonstrate actual application/infrastructure packaging or deployment
 - [ ] Document provides enough detail for implementers to be successful
 - [ ] Workflow steps explicitly connect (e.g., Packer output → Terraform input)
 - [ ] Decision guidance uses "Use X when you need..." format with specific criteria
