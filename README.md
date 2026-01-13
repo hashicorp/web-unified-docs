@@ -3,7 +3,7 @@
 > [!IMPORTANT]
 > This README is for developers working on the documentation website. If you
 > want to contribute docs content, refer to the [Contribute to HashiCorp
-> documentation](./docs/contribute.md) guide.
+> documentation](CONTRIBUTING.md) guide.
 
 ---
 
