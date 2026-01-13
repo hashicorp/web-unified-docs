@@ -85,4 +85,17 @@ Analyze this document's SEO optimization and provide specific recommendations.
 **Output format:**
 For each recommendation, explain why the change improves SEO and provide specific before/after examples where helpful.
 
+## Batch prompt
+
+Here is a list of all the work we are working on (this in an example list)
+content/well-architected-framework/docs/docs/define-and-automate-processes/automate/deployments.mdx
+content/well-architected-framework/docs/docs/define-and-automate-processes/automate/packaging.mdx
+content/well-architected-framework/docs/docs/define-and-automate-processes/automate/testing.mdx
+
+1. Use the CLAUDE.md file located at content/well-architected-framework/docs/templates/CLAUDE.md
+2. Review all the documents and, if they relate to each other, add them in the HashiCorp Resources sections
+3. Review all the documents for the HashiCorp style guide located in the CLAUDE.md file
+4. Fact check all the documents
+5. Do the docs make sense? Would a user be successful following them?
+6. Review all the docs for SEO and AI/LLM optimization 
 
