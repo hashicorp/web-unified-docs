@@ -92,10 +92,13 @@ content/well-architected-framework/docs/docs/define-and-automate-processes/autom
 content/well-architected-framework/docs/docs/define-and-automate-processes/automate/packaging.mdx
 content/well-architected-framework/docs/docs/define-and-automate-processes/automate/testing.mdx
 
-1. Use the CLAUDE.md file located at content/well-architected-framework/docs/templates/CLAUDE.md
-2. Review all the documents and, if they relate to each other, add them in the HashiCorp Resources sections
-3. Review all the documents for the HashiCorp style guide located in the CLAUDE.md file
-4. Fact check all the documents
-5. Do the docs make sense? Would a user be successful following them?
-6. Review all the docs for SEO and AI/LLM optimization 
+
+$ Use the CLAUDE.md file located at content/well-architected-framework/docs/templates/CLAUDE.md
+$ Review all the documents and, if they relate to each other, add them in the HashiCorp Resources sections
+$ Review all the documents for the HashiCorp style guide located in the CLAUDE.md file
+$ Fact check all the documents
+$ Do the docs make sense? Would a user be successful following them?
+$ Review all the docs for SEO and AI/LLM optimization 
+$ Are link descriptions optimized? Do they clearly explain what the user will find (vs. generic "Learn more")?
+$ Do we have the right balance of "getting started" vs. "advanced" links? Are we overwhelming beginners or leaving advanced users without depth?
 

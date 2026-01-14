@@ -235,6 +235,12 @@ Analyze this document's SEO optimization and provide specific recommendations.
    - Internal linking opportunities
    - Image alt text (if applicable)
 
+7. **Link descriptions** - Are link descriptions optimized? Do they clearly explain what the user will find (vs. generic "Learn more")?
+   - Avoid generic link text like "click here" or "read more"
+   - Use descriptive text that tells users what they'll find: "Learn about Terraform state management" instead of "Learn more"
+   - Link descriptions should stand alone and make sense out of context
+   - Include key context in the link text itself when possible
+
 **Writing requirements:**
 - Eliminate all passive voice
 - Use sentence case throughout
@@ -302,6 +308,11 @@ Flag any areas where content could be clearer for AI systems and suggest specifi
 ## Resources
 
 - Provide links to HashiCorp tutorials and documentation that users can use to implement the goals of the document.
+- **Consider video tutorial links:** Some users learn better from videos than written documentation. When relevant video tutorials exist for HashiCorp tools, include them alongside written tutorials to serve different learning preferences. Video links are particularly valuable for:
+  - Complex visual workflows (UI-based tasks, architecture diagrams)
+  - Step-by-step implementation demonstrations
+  - Tool introductions and overviews
+  - Conference talks explaining use cases and patterns
 
 ---
 
