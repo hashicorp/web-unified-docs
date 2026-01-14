@@ -314,6 +314,225 @@ Flag any areas where content could be clearer for AI systems and suggest specifi
   - Tool introductions and overviews
   - Conference talks explaining use cases and patterns
 
+### HashiCorp Resources Section Patterns
+
+The "HashiCorp resources" section at the end of documents should follow these organization and writing patterns for consistency:
+
+#### Organization Structure
+
+**Balance beginner and advanced links** with clear progression:
+
+1. **WAF cross-references** - Links to related WAF documents (always first)
+2. **Get started section** - For beginners (tutorials, introductions, getting started guides)
+3. **Core concepts section** - For intermediate users (documentation, CLI, key features)
+4. **Advanced features section** - For advanced users (integrations, advanced configurations)
+5. **Tool-specific sections** - When covering multiple tools, organize by tool with clear headings
+
+**Example structure for single-tool documents:**
+```markdown
+HashiCorp resources:
+
+- [WAF cross-reference links]
+- [WAF cross-reference links]
+
+Get started with [Tool]:
+
+- Get started with [Tool tutorials] for hands-on examples
+- Read the [Tool introduction] to understand core concepts
+- [Basic getting started links]
+
+[Tool] core concepts:
+
+- Read the [Tool documentation] for comprehensive features
+- [Intermediate feature links]
+
+[Tool] advanced features:
+
+- [Advanced configuration links]
+- [Integration links]
+```
+
+**Example structure for multi-tool documents:**
+```markdown
+HashiCorp resources:
+
+- [WAF cross-reference links]
+
+Get started with automation tools:
+
+- Get started with [Terraform tutorials] and read the [Terraform introduction] for infrastructure as code
+- Get started with [Packer tutorials] and read the [Packer introduction] for image building
+- Get started with [Vault tutorials] and read the [Vault introduction] for secrets management
+
+Terraform for [use case]:
+
+- [Terraform-specific links]
+
+Packer for [use case]:
+
+- [Packer-specific links]
+
+Vault for [use case]:
+
+- [Vault-specific links]
+```
+
+#### Link Description Patterns
+
+**Always place verbs OUTSIDE the link brackets:**
+- ✅ "Read the [Terraform documentation] for comprehensive features"
+- ❌ "Read the [Terraform documentation for comprehensive features]"
+- ✅ "Get started with [Terraform tutorials] for hands-on examples"
+- ❌ "[Get started with Terraform tutorials] for hands-on examples"
+
+**Split combined documentation and tutorial links** into separate bullets:
+- ❌ "Learn X with the [documentation] and [tutorials]"
+- ✅ Two bullets:
+  - "Read the [documentation] for core concepts"
+  - "Follow hands-on [tutorials] for examples"
+
+**Add context directly in the sentence** (no dashes after links):
+- ✅ "Read the [Terraform Kubernetes provider documentation] for resource syntax and configuration options"
+- ❌ "Read the [Terraform Kubernetes provider documentation] - for resource syntax and configuration"
+- ✅ "Learn about [Nomad job specifications] for container workloads"
+- ❌ "Learn about [Nomad job specifications] - for containers"
+
+**Use specific, descriptive link text** that explains what users will find:
+- ✅ "Explore [Kubernetes tutorials] for deployment patterns and workflows"
+- ❌ "Browse [Kubernetes tutorials] for additional examples"
+- ✅ "Read the [Sentinel documentation] for policy as code concepts"
+- ❌ "Read the [Sentinel documentation] and learn more"
+
+**Standard patterns for common link types:**
+
+Documentation links:
+- "Read the [Tool documentation] for comprehensive features"
+- "Read the [Tool documentation] for [specific feature area]"
+- "Read the [Tool introduction] to understand [core concept]"
+
+Tutorial links:
+- "Get started with [Tool tutorials] for hands-on examples"
+- "Follow hands-on [Tool tutorials] for [specific use case]"
+- "Explore [Tool tutorials] for [deployment patterns/workflows/examples]"
+
+Feature-specific links:
+- "Learn about [Feature] for [specific benefit]"
+- "Use [Feature] to [accomplish specific task]"
+- "Configure [Feature] for [specific outcome]"
+
+Provider/Integration links:
+- "Read the [Provider documentation] for [resource type] and configuration"
+- "Use [Integration] for [specific purpose]"
+- "Manage [resources] with the [Provider]"
+
+#### Common Link Descriptions by Tool
+
+**Terraform:**
+- "Get started with [Terraform tutorials] for hands-on examples"
+- "Read the [Terraform documentation] for comprehensive features"
+- "Read the [Terraform introduction] to understand infrastructure as code concepts"
+- "Learn the [Terraform language] for writing configurations"
+- "Learn about [Terraform state] for infrastructure tracking"
+- "Configure [backends] for remote state storage"
+
+**Packer:**
+- "Get started with [Packer tutorials] for hands-on examples"
+- "Read the Packer [documentation] for core image building concepts"
+- "Follow hands-on [Packer tutorials] for image creation"
+- "Learn about [Packer builders] for different platforms"
+- "Use [Packer provisioners] to configure images"
+
+**Vault:**
+- "Get started with [Vault tutorials] for hands-on examples"
+- "Read the [Vault documentation] for secrets management features"
+- "Learn about [Vault dynamic secrets] for automation"
+- "Use [Vault with Terraform] for secure deployments"
+
+**Consul:**
+- "Get started with [Consul tutorials] for hands-on examples"
+- "Read the [Consul documentation] for service mesh concepts and features"
+- "Learn about [Consul service mesh] for traffic management"
+
+**Nomad:**
+- "Get started with [Nomad tutorials] for hands-on examples"
+- "Read the [Nomad documentation] for orchestration features"
+- "Learn about [Nomad job specifications] for container workloads"
+
+**Sentinel:**
+- "Get started with [Sentinel tutorials] for hands-on examples"
+- "Read the [Sentinel documentation] for policy as code concepts"
+- "Learn the [Sentinel language syntax] for writing policies"
+
+**HCP Products:**
+- "Get started with [HCP Terraform] for team collaboration"
+- "Learn about [HCP Packer] for image metadata tracking"
+- "Use [HCP Packer channels] for environment promotion"
+
+#### Section Naming Conventions
+
+Use clear, descriptive section headers that indicate the learning level or purpose:
+
+**Beginner sections:**
+- "Get started with [Tool]"
+- "Get started with automation tools"
+- "[Tool] foundations for [use case]"
+
+**Intermediate sections:**
+- "[Tool] core concepts"
+- "[Tool] documentation and tutorials"
+- "[Tool] for [specific use case]"
+
+**Advanced sections:**
+- "[Tool] advanced features"
+- "[Tool] integrations"
+- "Automating [use case]"
+- "[Tool] CI/CD automation"
+
+**Multi-tool sections:**
+- "[Tool] for [use case]" (e.g., "Terraform for GitOps", "Packer for containers")
+- "[Feature area]" (e.g., "Monitoring and observability", "Policy enforcement")
+
+#### Avoid These Anti-Patterns
+
+❌ **Generic verbs without context:**
+- "Browse [tutorials]"
+- "Learn more about [X]"
+- "Check out [X]"
+
+❌ **Dashes after links:**
+- "Read the [documentation] - comprehensive guide"
+- "Learn about [X] - for specific use case"
+
+❌ **Verbs inside brackets:**
+- "[Learn about Terraform state]"
+- "[Configure backends for state]"
+
+❌ **Combined links without separation:**
+- "Learn X with the [documentation] and [tutorials]"
+
+❌ **Missing context:**
+- "Read the [Terraform Kubernetes provider documentation]" (what will they learn?)
+- "Use [HCP Packer channels]" (for what purpose?)
+
+❌ **Tool name repetition:**
+- "Learn Packer with the Packer [documentation] and [tutorials]"
+- Better: "Read the Packer [documentation] for core concepts"
+
+#### Checklist for HashiCorp Resources Section
+
+- [ ] WAF cross-reference links appear first
+- [ ] Clear "Get started" section for beginners
+- [ ] Progressive organization from beginner to advanced
+- [ ] Verbs are outside link brackets
+- [ ] Documentation and tutorial links are separate bullets
+- [ ] Context is in the sentence, not after a dash
+- [ ] Link descriptions explain what users will find
+- [ ] Section names clearly indicate learning level
+- [ ] No generic verbs like "browse" or "learn more"
+- [ ] Tool-specific sections use consistent naming
+- [ ] 5-8+ links per document (more for multi-tool docs)
+- [ ] Links are specific, not generic dashboards
+
 ---
 
 ## Common Pitfalls to Avoid
