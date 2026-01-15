@@ -141,6 +141,62 @@ Main chat: *fixes 3 specific items* (5K tokens)
 
 ---
 
+## Credit Optimization Strategies
+
+### Batch Documents by Similarity
+
+**Inefficient:**
+- "Review all 18 docs across 3 different topics"
+- Agent loads massive context, reviews unrelated documents together
+
+**Efficient:**
+- "Review data/*.mdx (5 files)" → commit → "Review auth/*.mdx (4 files)" → commit
+- Smaller context windows, can stop early if patterns emerge
+
+### Skip Phases If Early Phases Fail
+
+**Inefficient:**
+- Run all 6 phases → find major user success gaps → need to redesign
+- Style compliance work wasted
+
+**Efficient:**
+```
+"Phase 1 only: User success review for these docs"
+[If major gaps found]
+"Fix Phase 1 issues first, we'll do style later"
+```
+- No point polishing unusable docs
+
+### Avoid Self-Verification Loops
+
+**Most expensive pattern:**
+- "Review these docs" (100K tokens)
+- Agent creates /tmp/review.md (50K tokens)
+- "Fix everything" (100K tokens)
+- "Verify your fixes" (100K tokens - RE-READS EVERYTHING)
+**Total: 350K tokens**
+
+**Efficient pattern:**
+- "Create review doc only: /tmp/review.md"
+- You review it yourself
+- "Apply fixes from review.md"
+- Trust the work, don't verify
+**Total: 150K tokens (2.3x cheaper)**
+
+### Separate Reviews from Edits
+
+**Combined (expensive):**
+- "Review these docs against AGENTS.md and fix all issues"
+- Single massive operation, can't stop mid-way
+
+**Separated (cheap):**
+- "Create AGENTS.md compliance review → /tmp/review.md"
+- You review findings
+- "Fix items 2, 5, 8, 12 from review.md"
+- You control what gets fixed
+
+---
+
 ## Best Practices for Your Documentation Work
 
 ### 1. Always Output to /tmp Files
@@ -171,7 +227,17 @@ Main chat: *fixes 3 specific items* (5K tokens)
 ```
 → Agent knows exact scope
 
-### 3. Use Explore for Quick Lookups
+### 3. Be Specific About What to Fix
+
+**Expensive:**
+- "Review and fix everything"
+- Agent decides what needs fixing, potentially over-optimizes
+
+**Cheap:**
+- "Fix only: meta descriptions and 'Why' sections from /tmp/review.md"
+- Agent does exactly what's needed, nothing more
+
+### 4. Use Explore for Quick Lookups
 
 **Instead of:**
 ```
@@ -185,7 +251,7 @@ Main chat: *runs glob* (uses your context)
 ```
 → Runs in separate context, returns just the list
 
-### 4. Batch Similar Work Together
+### 5. Batch Similar Work Together
 
 **Bad (separate agents for each file):**
 ```
@@ -199,7 +265,7 @@ Main chat: *runs glob* (uses your context)
 @task task: Review all data security .mdx files against REVIEW_PHASES.md Phase 1
 ```
 
-### 5. Let Task Agents Do Mechanical Work
+### 6. Let Task Agents Do Mechanical Work
 
 **Use task agents for:**
 - ✅ Phase 4-6 compliance checks (mechanical checklists)
@@ -414,3 +480,24 @@ When reviewing docs across different pillars:
 - Use explore agent for quick lookups
 
 **Result: 85-90% token reduction on documentation reviews**
+
+---
+
+## Cost Comparison by Approach
+
+| Approach | Token Cost | Time |
+|----------|-----------|------|
+| Main chat: review all + fix all + verify | 300-500K | High |
+| Task agent: review → you approve → main chat: fix | 50-100K | Medium |
+| Task agent: review → you approve → task agent: fix specific items | 30-60K | Low |
+
+## Recommended Complete Workflow
+
+```
+1. "Task agent: REVIEW_PHASES.md Phase 1 on [files] → /tmp/review.md"
+2. You review /tmp/review.md (0 tokens)
+3. "Fix these specific items: [list]" (cheap, targeted)
+4. Commit and move to next batch
+```
+
+**Never ask agent to verify its own work unless critical bugs suspected.**
