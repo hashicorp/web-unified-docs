@@ -23,49 +23,177 @@ Most cloud providers offer machine learning-based anomaly detection that learns 
 
 ## Set up anomaly detection in AWS
 
-The following is an example Terraform configuration that sets up cost anomaly detection with email alerts in AWS. Cost anomaly detection will detect scenarios like the EC2 spending increase described earlier.
+The following example shows a complete Terraform configuration that sets up cost anomaly detection with email alerts in AWS. The configuration includes provider setup, variables for customization, and outputs for integration with other systems.
 
 ```hcl
-resource "aws_ce_anomaly_monitor" "test" {
-  name              = "AWSServiceMonitor"
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+}
+
+provider "aws" {
+  region = var.aws_region
+}
+
+variable "aws_region" {
+  description = "AWS region for anomaly detection"
+  type        = string
+  default     = "us-east-1"
+}
+
+variable "alert_email" {
+  description = "Email address to receive anomaly alerts"
+  type        = string
+}
+
+variable "anomaly_threshold" {
+  description = "Minimum dollar amount to trigger anomaly alert"
+  type        = string
+  default     = "100"
+}
+
+variable "environment" {
+  description = "Environment name (e.g., production, staging)"
+  type        = string
+  default     = "production"
+}
+
+resource "aws_ce_anomaly_monitor" "service_monitor" {
+  name              = "service-anomaly-monitor-${var.environment}"
   monitor_type      = "DIMENSIONAL"
   monitor_dimension = "SERVICE"
 }
 
-resource "aws_ce_anomaly_subscription" "test" {
-  name      = "DAILYSUBSCRIPTION"
+resource "aws_ce_anomaly_subscription" "daily_alerts" {
+  name      = "daily-anomaly-subscription-${var.environment}"
   frequency = "DAILY"
 
   monitor_arn_list = [
-    aws_ce_anomaly_monitor.test.arn
+    aws_ce_anomaly_monitor.service_monitor.arn
   ]
 
   subscriber {
     type    = "EMAIL"
-    address = "abc@example.com"
+    address = var.alert_email
   }
 
   threshold_expression {
     dimension {
       key           = "ANOMALY_TOTAL_IMPACT_ABSOLUTE"
       match_options = ["GREATER_THAN_OR_EQUAL"]
-      values        = ["100"]
+      values        = [var.anomaly_threshold]
     }
   }
+
+  tags = {
+    Environment = var.environment
+    ManagedBy   = "terraform"
+  }
+}
+
+output "monitor_arn" {
+  description = "ARN of the anomaly monitor"
+  value       = aws_ce_anomaly_monitor.service_monitor.arn
+}
+
+output "subscription_arn" {
+  description = "ARN of the anomaly subscription"
+  value       = aws_ce_anomaly_subscription.daily_alerts.arn
 }
 ```
 
 The configuration includes the following key components:
 
-- **aws_ce_anomaly_monitor:** Tracks spending patterns across all AWS services including EC2, S3, and Lambda.
-- **frequency = "DAILY":** Sends a daily summary of detected anomalies.
-- **threshold_expression:** Alerts when the anomaly's financial impact meets or exceeds $100.
+- **aws_ce_anomaly_monitor:** Tracks spending patterns across all AWS services including EC2, S3, and Lambda using machine learning to establish baselines.
+- **monitor_dimension = "SERVICE":** Monitors costs at the service level to detect which AWS service shows unusual spending.
+- **frequency = "DAILY":** Sends a daily summary of detected anomalies rather than immediate alerts for each anomaly.
+- **threshold_expression:** Filters alerts to only notify when the anomaly's financial impact meets or exceeds the threshold amount.
+- **Variables:** Allow you to customize email address, threshold, and environment without modifying code.
+- **Environment-specific naming:** Resource names include environment variable for easier management across multiple environments.
+
+The monitor uses AWS machine learning to analyze spending patterns over time. When spending deviates significantly from the learned baseline, AWS generates an anomaly with a dollar impact value. The subscription only sends alerts when the impact exceeds your threshold.
+
+## Deploy and verify anomaly detection
+
+After creating your Terraform configuration, deploy anomaly detection with the following steps:
+
+1. **Initialize Terraform** to download the required providers:
+   ```bash
+   terraform init
+   ```
+
+1. **Preview the changes** to verify the configuration:
+   ```bash
+   terraform plan -var="alert_email=your-email@example.com"
+   ```
+
+1. **Apply the configuration** to create the anomaly monitor and subscription:
+   ```bash
+   terraform apply -var="alert_email=your-email@example.com"
+   ```
+
+1. **Verify the anomaly monitor in AWS Console:**
+   - Navigate to AWS Cost Management → Cost Anomaly Detection
+   - Locate your monitor (e.g., "service-anomaly-monitor-production")
+   - Confirm the monitor is active and tracking services
+
+1. **Confirm email alerts:**
+   - Check your email for an AWS Notifications verification message
+   - Click the verification link to enable anomaly alerts
+   - Note: AWS needs 10-14 days of spending history to establish accurate baselines
+
+The anomaly detection service begins learning your spending patterns immediately. However, accurate anomaly detection requires historical data to establish baselines. Expect the service to improve accuracy over the first two weeks as it collects more data.
+
+## Respond to anomaly alerts
+
+When you receive an anomaly alert, follow this workflow to investigate and resolve the issue:
+
+1. **Review the anomaly details:**
+   - Check the email alert for the affected service and dollar impact
+   - Note the detection date and spending period
+   - Identify whether the anomaly is a spike or sustained increase
+
+1. **Investigate the root cause:**
+   - Navigate to AWS Cost Anomaly Detection console
+   - Click on the anomaly to view detailed breakdown
+   - Use Cost Explorer to examine resource-level details
+   - Check for: new resource launches, configuration changes, usage pattern shifts, or data transfer increases
+
+1. **Determine if the anomaly is legitimate or problematic:**
+   - **Expected scaling:** Planned capacity increases or traffic growth
+   - **Forgotten resources:** Test environments or development instances left running
+   - **Misconfiguration:** Autoscaling policies triggering unnecessarily or incorrect instance types
+   - **Security incident:** Unauthorized resource creation or compromised credentials
+   - **Service outage recovery:** Catch-up processing after downtime
+
+1. **Take corrective action:**
+   - **Legitimate growth:** Document the change and adjust your [budget thresholds](/well-architected-framework/optimize-systems/manage-cost/create-cloud-budgets) if needed
+   - **Forgotten resources:** [Decommission unused infrastructure](/well-architected-framework/optimize-systems/lifecycle-management/decommission-infrastructure) following proper procedures
+   - **Misconfiguration:** Fix autoscaling policies, right-size instances, or optimize configurations
+   - **Security incident:** Terminate unauthorized resources and rotate credentials immediately
+
+1. **Update your cost management strategy:**
+   - Adjust anomaly thresholds if alerts are too sensitive
+   - Implement [resource tagging](/well-architected-framework/optimize-systems/lifecycle-management/tag-cloud-resources) for better cost attribution
+   - Set up additional monitors for specific services showing frequent anomalies
+   - Create runbooks for common anomaly scenarios
+
+## Multi-cloud anomaly detection
+
+For Azure environments, you can use the `azurerm_cost_anomaly_alert` resource to configure anomaly detection. Azure provides similar machine learning capabilities to identify unusual spending patterns.
+
+For Google Cloud Platform, anomaly detection capabilities are available through BigQuery for detailed cost analysis, though native anomaly alerting features differ from AWS and Azure.
 
 HashiCorp resources:
 
+- Terraform resource: [aws_ce_anomaly_monitor](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ce_anomaly_monitor)
 - Terraform resource: [aws_ce_anomaly_subscription](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ce_anomaly_subscription)
 - Terraform resource: [azurerm_cost_anomaly_alert](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/cost_anomaly_alert)
-- Start learning Terraform with the [Get started tutorials](/terraform/tutorials).
+- Start learning Terraform with the [Get started tutorials](/terraform/tutorials)
 
 External resources:
 
@@ -73,10 +201,20 @@ External resources:
 - [Azure identify anomalies and unexpected changes in cost](https://learn.microsoft.com/en-us/azure/cost-management-billing/understand/analyze-unexpected-charges)
 - [Google cloud anomaly detection overview](https://cloud.google.com/bigquery/docs/anomaly-detection-overview)
 
-In this section of Manage cost, you learned about detecting cloud spending anomalies using Terraform. Create cloud budgets is part of the [Optimize systems](/well-architected-framework/optimize-systems).
+## Next steps
 
-To learn more about managing resources with Terraform, view the following resources:
+In this section of Manage cost, you learned about detecting cloud spending anomalies using Terraform. You created an anomaly detection monitor, deployed it with Terraform, and learned how to investigate and respond to anomaly alerts. Detect cloud spending anomalies is part of the [Optimize systems](/well-architected-framework/optimize-systems).
+
+To build a complete cost management strategy, implement cost controls in the following order:
+
+1. **Create budgets first:** Establish [cloud budgets](/well-architected-framework/optimize-systems/manage-cost/create-cloud-budgets) to set spending limits and receive threshold alerts before implementing anomaly detection.
+
+1. **Implement tagging:** Maintain a consistent [cloud resource tagging strategy](/well-architected-framework/optimize-systems/lifecycle-management/tag-cloud-resources) to attribute costs accurately and identify which teams or projects trigger anomalies.
+
+1. **Optimize resource lifecycle:** Follow [infrastructure decommissioning best practices](/well-architected-framework/optimize-systems/lifecycle-management/decommission-infrastructure) to eliminate waste identified through anomaly detection.
+
+1. **Modularize for scale:** When managing anomaly detection across multiple accounts or environments, [create reusable infrastructure modules](/well-architected-framework/define-and-automate-processes/define/modules) to standardize configurations.
+
+Additional cost optimization resources:
 
 - [Reduce costs with Terraform Cloud ephemeral workspaces](https://www.youtube.com/watch?v=-woCmG8yGdA)
-- [Create and implement a cloud resource tagging strategy](/well-architected-framework/optimize-systems/lifecycle-management/tag-cloud-resources)
-- [Prevent cloud cost overruns with automated budgets and spending alerts](/well-architected-framework/optimize-systems/manage-cost/create-cloud-budgets)
