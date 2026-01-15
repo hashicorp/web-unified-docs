@@ -1,29 +1,71 @@
 ---
 page_title: Protect data at rest
-description: Protect stored data to ensure its confidentiality, integrity, and availability.
+description: Encrypt stored data with Vault's security barrier and access controls to protect databases, backups, and storage systems from unauthorized access.
 ---
 
 # Protect data at rest
 
-Data at rest represents any data you maintain in non-volatile storage in your environment. Encrypting data at rest and implementing secure access to your data are two ways you can protect your applications from security threats. Encrypting data at rest may include encrypting individual files using Pretty Good Privacy (PGP), using server side tools such as Transparent Data Encryption (TDE) in Microsoft SQL Server, or enabling encryption in your storage services such as Amazon S3 or on a physical storage array such as the IBM Storage FlashSystem.
+Data at rest represents any information stored in non-volatile storage such as databases, file systems, or backup media. After you [classify your data](/well-architected-framework/secure-systems/data/classify-data) into sensitivity levels, encrypt confidential and restricted data to protect against unauthorized access. Encryption methods include file-level encryption using Pretty Good Privacy (PGP), database encryption with Transparent Data Encryption (TDE) in Microsoft SQL Server, or storage-level encryption in services like Amazon S3.
 
-## Why should you protect data at rest?
+## Why protect data at rest
 
-Most people think of securing data while in transit or actively in use. However, data needs to be protected in all phases of the data life cycle, including when data is not actively in use. Data needs to be protected during the storage, and backup, stage of the data life cycle. While many people think backup tapes are a thing of the past, tape backup is still a common backup media. For example, a major bank lost an unencrypted backup tape containing customers' social security numbers and bank account information. Even modern backup processes are vulnerable, exposed datasets written to cloud storage are now a common industry headline.
+**Prevent unauthorized access to stored data:** Unencrypted backups and storage systems remain vulnerable even when you encrypt data in transit. A major bank lost an unencrypted backup tape containing customers' social security numbers and bank account information. Modern cloud storage misconfigurations continue to expose datasets, making storage-level security critical.
 
-Protecting data at rest, like protecting data in transit, requires a defense in-depth approach to ensure your sensitive data is not accessible unless a person or system is authorized to access the data. If encryption is only used in transit, or used on the storage backend, the data is still vulnerable. Many major online storage services offer encryption. The data, however, is generally unencrypted with a basic username and password authentication system, leaving the data readable using common attack vectors such as brute force attacks or phishing scams. Encrypting the data and encrypting the storage service are both critical steps to ensuring the data is secure.
+**Implement defense in depth:** Storage encryption alone is insufficient. Many storage services encrypt data but use basic authentication, leaving information vulnerable to brute force attacks and phishing. You must encrypt both the data itself and implement strong access controls to protect against multiple attack vectors.
 
-### Protect data at rest with Vault
+**Manage encryption keys securely:** Storing encryption keys alongside encrypted data defeats the purpose of encryption. Separating key management from data storage ensures attackers who compromise your storage systems cannot decrypt the data without also compromising your key management system.
 
-Vault uses a security barrier for all requests made to its API endpoints. This security barrier automatically encrypts all data leaving Vault using a 256-bit Advanced Encryption Standard (AES) cipher in the Galois Counter Mode (GCM) with 96-bit nonces. Vault's barrier encrypts your data and Vault stores only encrypted data regardless of configured storage type. Whenever you use a Vault secrets engine, such as the Key/Value (KV) secrets engine, you also gain the benefits of Vault's cryptographic barrier. You (or your application) must authenticate with Vault to receive a token with attached policies that authorize access to data stored in a secrets engine.
+## Protect data at rest with Vault
 
-You shouldn't store large volumes of secrets in Vault. Instead, you should store the secrets in a database, encrypt the database, and store the encryption key in Vault.
+Vault uses a security barrier that automatically encrypts all data using 256-bit AES-GCM encryption. Vault stores only encrypted data regardless of the backend storage type, and applications must authenticate to receive tokens with policies that authorize access.
 
-For example, when working with a Microsoft SQL Server using Transparent Data Encryption (TDE), your database already encrypts data using a Data Encryption Key (DEK). Rather than moving all that data to Vault, you should store the Key Encryption Key (KEK) in Vault's KV secrets engine. This KEK encrypts the DEK, which in turn encrypts your database content. This approach leverages Vault's strong security features for the most sensitive component (the encryption key) while enabling your database to efficiently manage the encrypted data.
+You shouldn't store large data volumes directly in Vault. Instead, store encryption keys in Vault and encrypt data in your primary storage system. For example, when using Microsoft SQL Server with Transparent Data Encryption (TDE), store the Key Encryption Key (KEK) in Vault's KV secrets engine rather than moving database contents to Vault. The KEK encrypts the Data Encryption Key (DEK), which encrypts your database content.
 
-When you control access to data, you gain another layer of data protection. Vault can secure access to your external data at rest through dynamic credentials. These dynamic credentials have a lifecycle attached to them, and Vault automatically revokes them after a predefined period of time. We recommend using dynamic secrets when accessing your external data.
+```hcl
+# Store the database encryption key in Vault's KV engine
+resource "vault_kv_secret_v2" "db_kek" {
+  mount = "secret"
+  name  = "database/mssql/kek"
+  
+  data_json = jsonencode({
+    key = var.database_kek
+  })
+}
 
-For example, you can use Vault to issue your CI/CD pipeline dynamic credentials to an external service, such as a PostgreSQL database. Dynamic secrets allows your CI/CD pipelines to access your data at rest, and then once the pipeline finishes, Vault revokes the credentials. The next time your pipeline runs, Vault issues your pipeline new credentials.
+# Reference the KEK for database TDE configuration
+data "vault_kv_secret_v2" "db_kek" {
+  mount = "secret"
+  name  = "database/mssql/kek"
+}
+```
+
+The Vault configuration stores the KEK securely while allowing your database to manage encrypted data efficiently. Only applications with proper Vault authentication can access the encryption key.
+
+Control access to stored data using dynamic credentials. Vault generates time-limited credentials that automatically expire, eliminating long-lived secrets. For example, when your CI/CD pipeline needs database access, Vault issues temporary PostgreSQL credentials that expire when the pipeline completes.
+
+```hcl
+# Configure Vault to generate dynamic PostgreSQL credentials
+resource "vault_database_secret_backend_connection" "postgres" {
+  backend       = vault_mount.db.path
+  name          = "production-db"
+  allowed_roles = ["pipeline"]
+
+  postgresql {
+    connection_url = "postgresql://{{username}}:{{password}}@postgres:5432/myapp"
+  }
+}
+
+resource "vault_database_secret_backend_role" "pipeline" {
+  backend             = vault_mount.db.path
+  name                = "pipeline"
+  db_name             = vault_database_secret_backend_connection.postgres.name
+  creation_statements = ["CREATE ROLE \"{{name}}\" WITH LOGIN PASSWORD '{{password}}' VALID UNTIL '{{expiration}}' IN ROLE readonly;"]
+  default_ttl         = 3600
+  max_ttl             = 7200
+}
+```
+
+The Vault database secrets engine generates unique credentials for each pipeline run, automatically revoking them after one hour. After encrypting data at rest, also [encrypt data in transit](/well-architected-framework/secure-systems/data/protect-data-in-transit) to protect information throughout its lifecycle.
 
 HashiCorp resources:
 
@@ -45,4 +87,4 @@ External resources:
 
 ## Next steps
 
-In this section of how to Secure data, you learned about how to secure and encrypt data at rest using HashiCorp Vault. Protect data at rest is part of the [Secure systems pillar](/well-architected-framework/secure-systems).
+In this section of how to Secure data, you learned how to encrypt data at rest using Vault's security barrier and dynamic credentials. After securing stored data, [encrypt data in transit](/well-architected-framework/secure-systems/data/protect-data-in-transit) to protect information as it moves between systems. Protect data at rest is part of the [Secure systems pillar](/well-architected-framework/secure-systems).

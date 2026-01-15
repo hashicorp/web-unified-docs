@@ -1,17 +1,21 @@
 ---
 page_title: Protect data in transit
-description: Protect data as it moves across the network.
+description: Encrypt data moving between systems using TLS, Vault's Transit engine, and Consul service mesh to protect sensitive information during transmission.
 ---
 
 # Protect data in transit
 
-Data in transit is any data moving between systems, such as passwords, secrets, and keys. In-transit data includes data moving between resources within your organization, and incoming and outgoing data with services outside your organization. By protecting your data in transit, you protect the confidentiality and integrity of the data within your organization.
+Data in transit includes any information moving between systems, such as passwords, secrets, API keys, and application data. After [classifying your data](/well-architected-framework/secure-systems/data/classify-data) and [encrypting data at rest](/well-architected-framework/secure-systems/data/protect-data-at-rest), protect confidential information during transmission to maintain security throughout the data lifecycle.
 
-## Why should you protect data in transit?
+## Why protect data in transit
 
-Protecting data in-transit is important because a malicious actor can intercept or alter data during transmission if not properly secured. Common security measures include using encryption protocols like TLS to ensure confidentiality and integrity while the data is being transferred.
+**Prevent man-in-the-middle attacks:** Unencrypted network traffic allows attackers to intercept passwords, API keys, and sensitive data during transmission. They can also inject malicious code before forwarding traffic to recipients, compromising both confidentiality and integrity.
 
-### TLS for client server communication
+**Verify identity of communication endpoints:** TLS certificates enable clients to verify server identity and vice versa, preventing attackers from impersonating legitimate services. Without mutual authentication, applications cannot confirm they're communicating with trusted systems.
+
+**Reduce encryption key management burden:** Managing encryption keys for data in transit creates operational overhead. Organizations need specific key types, rotation policies, and compliance requirements that demand dedicated key management systems to handle cryptographic operations at scale.
+
+## TLS for client server communication
 
 Human client-to-machine communication is the first hop of data in transit, most commonly by using HTTPS instead of HTTP with a certificate. TLS/SSL certificates encrypt traffic between web browsers, CLI tools like cURL, and API endpoints. You can also use TLS to secure FTP (FTPS, not to be confused with SFTP, which uses the SSH protocol), IMAP (IMAPS), POP3 (POP3S), and SMTP (SMTPS), among others.
 
@@ -19,23 +23,78 @@ HTTP is dangerous because an attacker can intercept the traffic and insert malic
 
 Protect yourself by verifying that your [browser supports TLS v1.3](https://caniuse.com/tls1-3). Additionally, you can identify whether a site supports HTTP Strict Transport Security (HSTS) to protect against man-in-the-middle attacks using the Qualys SSL Server Test. Most web browsers show if a website uses TLS encryption, usually with a lock icon on the address bar.
 
-### Encrypt data in-transit with Vault
+## Encrypt data in-transit with Vault
 
-Encrypting data sent across the public network is a common practice to protect highly sensitive data. However, managing the encryption key introduces operational overhead. An organization may require a specific type of encryption key. Vault's Transit secrets engine supports a number of key types to encrypt and decrypt your in-transit data. The Transit secrets engine can also manage the encryption key lifecycle to relieve the operational burden.
+Vault's Transit secrets engine provides cryptography as a service, handling encryption and decryption operations for data in transit without storing the data itself. The Transit engine supports multiple key types, manages encryption key lifecycles, and performs operations like signing, verification, hashing, and HMAC generation.
+
+```hcl
+# Enable and configure Vault Transit secrets engine
+resource "vault_mount" "transit" {
+  path = "transit"
+  type = "transit"
+}
+
+resource "vault_transit_secret_backend_key" "payment_data" {
+  backend = vault_mount.transit.path
+  name    = "payment-encryption"
+  
+  deletion_allowed = false
+  exportable       = false
+  type             = "aes256-gcm96"
+}
+
+# Application encrypts data before sending over network
+data "vault_generic_secret" "encrypted_payment" {
+  path = "${vault_mount.transit.path}/encrypt/${vault_transit_secret_backend_key.payment_data.name}"
+  
+  data_json = jsonencode({
+    plaintext = base64encode("4111111111111111")
+  })
+}
+```
+
+The Transit engine encrypts the credit card number before transmission, and only authorized applications with valid Vault tokens can decrypt the data. Vault manages key rotation automatically without requiring application changes.
+
+For sensitive data requiring specific output formats like credit card numbers, use Vault's Transform secrets engine with format-preserving encryption (FPE). The Transform engine, available in Vault Enterprise or HCP Vault Dedicated, maintains the original data format while encrypting, enabling compatibility with systems expecting specific data patterns. For detailed guidance, see [tokenize data](/well-architected-framework/secure-systems/data/tokenize-data).
 
 <VideoEmbed url="https://www.youtube.com/watch?v=fno3bvJuFSk"/>
-
-The Transit secrets engine handles cryptographic functions on in-transit data. Vault doesn't store any data sent to the Transit secrets engine. You can think of the Transit secrets engine as providing "cryptography as a service" or "encryption as a service". The Transit secrets engine can sign and verify data, generate hashes and HMACs of data, and act as a source of random bytes.
-
-For more advanced use cases, like encoding credit card numbers, data transformation and tokenization are more desirable data protection methods. Vault's Transform secrets engine, available in Vault Enterprise or [HCP Vault Dedicated](https://portal.cloud.hashicorp.com/sign-in), provides data encryption service similar to the Transit secrets engine. The key difference is that the users can specify the format of the resulting ciphertext using the Transform secrets engine's format-preserving encryption (FPE) feature.
 
 ## Encrypt data in-transit with Consul
 
 Unencrypted cross-application communications are susceptible to man-in-the-middle attacks. An application can protect itself against malicious activities by requiring mTLS (mutual TLS) on both ends of the application to application communications.
 
-HashiCorp Consul automatically enables mTLS for all communication between application services (machine-to-machine). Even legacy apps can use mTLS through local Consul proxies that intercept network traffic as parts of a service mesh. A service mesh architecture lets Consul enforce mTLS across clouds and platforms. Consul automatically generates signed certificates, and lets you rapidly and comprehensively upgrade TLS versions and cipher suites in the future. This process helps resolve the typical slow process of updating the TLS version in your application.
+Consul automatically enables mutual TLS (mTLS) for all service-to-service communication within the service mesh. Legacy applications can use mTLS through local Consul proxies that intercept network traffic without requiring application modifications. Consul generates and rotates certificates automatically, enabling rapid TLS version upgrades across your entire infrastructure.
 
-Consul automatically encrypts communications within the service mesh with mTLS. You should also secure outside traffic entering the service mesh. Two common entry points for traffic into the Consul Service mesh are the Ingress Gateway and the API Gateway. To secure inbound traffic to these gateways, you can enable TLS on ingress gateways, and enable TLS on the API gateway listeners.
+```hcl
+# Configure Consul service mesh with automatic mTLS
+resource "consul_config_entry" "service_defaults" {
+  name = "api-service"
+  kind = "service-defaults"
+
+  config_json = jsonencode({
+    Protocol = "http"
+    MeshGateway = {
+      Mode = "local"
+    }
+  })
+}
+
+resource "consul_config_entry" "proxy_defaults" {
+  kind = "proxy-defaults"
+  name = "global"
+
+  config_json = jsonencode({
+    Config = {
+      protocol = "http"
+    }
+    MeshGateway = {
+      Mode = "local"
+    }
+  })
+}
+```
+
+The Consul configuration enables mTLS automatically for services registered in the mesh. Consul also secures external traffic entering the service mesh through Ingress and API Gateways. Enable TLS on these gateways to encrypt traffic from external clients to your mesh services.
 
 HashiCorp resources:
 
@@ -58,4 +117,4 @@ External resources:
 
 ## Next steps
 
-In this section of how to Secure data, you learned about how to secure and encrypt data in transit using HashiCorp Vault to encrypt data before writing it to the applications primary storage service and how to use HashiCorp Consul to encrypt data between services using a service mesh. Protect data in transit is part of the [Secure systems pillar](/well-architected-framework/secure-systems).
+In this section of how to Secure data, you learned how to encrypt data in transit using TLS, Vault's Transit engine, and Consul service mesh. Combined with encrypting data at rest, these techniques protect sensitive information throughout its lifecycle. For highly sensitive data like credit card numbers, consider [tokenizing data](/well-architected-framework/secure-systems/data/tokenize-data) to replace sensitive values with secure tokens. Protect data in transit is part of the [Secure systems pillar](/well-architected-framework/secure-systems).
