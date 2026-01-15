@@ -1,0 +1,471 @@
+---
+layout: docs
+page_title: Using the http import in Sentinel policies
+description: |-
+  Create, install, test, and update Sentinel policies to express your policies
+  as code so that Nomad automatically enforces them.
+---
+
+# Using the `http` import in Sentinel policies
+
+The [`http`][] import is used to extend Sentinel policy enforcement with a
+custom validation service external to Nomad. You can send objects in the
+Sentinel [scope][] as JSON encoded HTTP requests to a service you create and
+deploy.
+
+In this guide, you create policies using the `http` import and enforce them with
+an example validation service. You also learn how to use Nomad's built-in
+[`nomad_var`][] plugin with the `http` import to securely provide credentials to
+policy evaluation.
+
+<EnterpriseAlert />
+
+## Prerequisites
+
+The following example demonstrates how to safely build a Sentinel policy using
+the `http` import. It assumes that ACLs have already been bootstrapped (refer to
+the [ACL guide][acls]), and that a `NOMAD_TOKEN` environment variable is set to
+a management token.
+
+## Allow the `http` module
+
+The built-in Sentinel `http` import is not enabled by default. In the Nomad
+agent configuration, add a [`sentinel`][] block:
+
+```hcl
+sentinel {
+  additional_enabled_modules = ["http"]
+}
+```
+
+Restart the agent to load the new Sentinel configuration.
+
+## Deploy the validation service
+
+A validation service is any HTTP service that can accept the JSON encoded
+requests sent by the policy. As the Sentinel policy author, you define the
+request body from objects in the scope of the policy. For example, in the
+`submit-job` Sentinel scope, you can reference the list of task groups for the
+submitted job via `job.task_groups`.
+
+In this example validator, the policy allows task groups to have a count of 1 in
+the `"dev"` namespace, and ignores any other namespace. Create the following job
+specification in the file `validator.nomad.hcl`.
+
+<details>
+<summary style={{ cursor: "pointer" }}>
+  Validator service job specification
+</summary>
+
+```hcl
+job "validator" {
+
+  group "group" {
+
+    network {
+      mode = "bridge"
+      port "www" {
+        to = 8001
+      }
+    }
+
+    service {
+      name     = "validator"
+      provider = "nomad"
+      port     = "www"
+    }
+
+    task "http" {
+
+      driver = "docker"
+
+      config {
+        image   = "python:3.11-alpine"
+        command = "python"
+        args    = ["local/server.py"]
+        ports   = ["www"]
+      }
+
+      template {
+        destination = "/secret/token"
+        env         = true
+        data        = <<EOT
+TOKEN={{ with nomadVar "nomad/jobs/validator" }}{{ .token }}{{ end }}
+EOT
+
+      }
+
+      template {
+        destination = "local/server.py"
+        once        = true
+        data        = <<EOT
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import json
+import os
+
+token = os.getenv("TOKEN")
+
+class RequestHandler(BaseHTTPRequestHandler):
+    def reply(self, code, msg):
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(msg)
+
+    def do_POST(self):
+        if self.path != "/validate.json":
+            self.reply(404, b'{"error": "not found"}')
+            return
+
+        if self.headers.get("Authorization", "") != f"token {token}":
+            self.reply(403, b'{"error": "forbidden"}')
+            return
+
+        content_length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(content_length)
+
+        try:
+            job = json.loads(body)
+            if job["namespace"] == "dev":
+                for tg in job["task_groups"]:
+                    if tg["count"] != 1:
+                        self.reply(400, b'{"message": "invalid task group count in dev"}')
+                        return
+        except (json.JSONDecodeError, KeyError):
+            self.reply(400, b'{"error": "invalid request"}')
+            return
+
+        self.reply(200, b'{"is_valid": true}')
+
+
+if __name__ == "__main__":
+    server_address = ("0.0.0.0", 8001)
+    httpd = HTTPServer(server_address, RequestHandler)
+    httpd.serve_forever()
+
+        EOT
+
+      }
+
+      resources {
+        cpu    = 100
+        memory = 100
+      }
+    }
+  }
+
+}
+
+```
+
+</details>
+
+This job is a Python script deployed as a single Docker task. It returns a JSON
+response body that indicates success or failure along with diagnostic messages.
+
+<Warning>
+
+Note that Nomad sends requests to your Sentinel validation service whenever a
+policy with the `http` import requires it. If the service is unavailable, this
+will prevent jobs from being submitted to Nomad. In production environments, you
+should deploy multiple instances of the validator, and consider whether it
+should be deployed as a local service on the same host as your Nomad servers.
+
+</Warning>
+
+The validator job requires an API token in its environment, and uses a
+`template` block to read from a Nomad variable into its environment. Create a
+random token and write it to a Nomad variable.
+
+```shell-session
+$ nomad var put nomad/jobs/validator token=xyzzy
+```
+
+Deploy the job.
+
+```shell-session
+$ nomad job run ./validator.nomad.hcl
+```
+
+Find the job's address and write it to a shell variable.
+
+```shell-session
+$ ADDR=$(nomad service info -t '{{ (index . 0).Address }}:{{ (index . 0).Port}}' validator)
+```
+
+## Create and install a policy
+
+Create a Sentinel policy file, named `job-policy.sentinel`.
+
+```sentinel
+import "http"
+import "json"
+import "nomad_var"
+
+# credentials
+validator = nomad_var.get("nomad/sentinel/validator@" + namespace.name)
+auth_token = validator.token
+url = validator.url
+
+# send to validator service
+reqBody = { "task_groups": job.task_groups, "namespace": namespace.name }
+req = http.request(url).
+    with_body(json.marshal(reqBody)).
+    with_header("Authorization", "token "+auth_token)
+
+resp = http.with_timeout(1).with_retries(3).post(req)
+body = json.unmarshal(resp.body)
+
+main = rule {
+  body["is_valid"] is defined and
+  body["is_valid"] is true }
+```
+
+The credentials section of the policy uses the built-in [`nomad_var`][] plugin
+to read a Nomad variable under the path `nomad/sentinel/validator`, in the
+request's namespace. You could ignore the namespace and have all policy
+evaluations use a variable in the default namespace by naming the path
+`"nomad/sentinel/validator"` without a `@` delimiter or appending the namespace.
+
+Next, the policy creates a request body made up of the job's task groups and
+namespace. This body is sent via HTTP POST, with a timeout of 1 second and 3
+retries in the event of a request failure.
+
+<Warning>
+
+Note that the scope of the policy includes objects that are controlled by the
+job author and not the policy author. For example, if you were to construct the
+URL by concatenating the job ID like `url + "?job=" +job.id`, this would allow
+the job author to add arbitrary query parameters to the URL by adding a `&` into
+the job ID. Only the namespace name should be considered "safe", because
+namespaces are created by the cluster administrator and the request is already
+authenticated and authorized for the namespace by the the time Sentinel policy
+evaluation happens.
+
+</Warning>
+
+Before installing the policy, you need to install the credentials as Nomad
+variables. First, create the `"dev"` namespace.
+
+```shell-session
+$ nomad namespace apply dev
+Successfully applied namespace "dev"!
+```
+
+Create the credentials in the `"dev"` namespace.
+
+```shell-session
+$ nomad var put -namespace dev nomad/sentinel/validator \
+    token=xyzzy url="http://${ADDR}/validate.json"
+```
+
+Create the credentials in the default namespace.
+
+```shell-session
+$ nomad var put nomad/sentinel/validator \
+    token=xyzzy url="http://${ADDR}/validate.json"
+```
+
+Install the policy at the "advisory" level which issues a warning on failure.
+
+```shell-session
+$ nomad sentinel apply -level=advisory -scope=submit-job test job-policy.sentinel
+Successfully wrote "test" Sentinel policy!
+```
+
+You should always install Sentinel policies in `advisory` level first and only
+increase to `soft-mandatory` or `hard-mandatory` once the policy has been
+tested.
+
+## Test the policy
+
+Create a new job specification file `example.nomad.hcl` with the following contents.
+
+<details>
+<summary style={{ cursor: "pointer" }}>
+  Example job specification
+</summary>
+
+```hcl
+job "example" {
+  group "group" {
+
+    count = 2
+
+    task "task" {
+      driver = "docker"
+      config {
+        image   = "busybox:1"
+        command = "httpd"
+        args    = ["-vv", "-f", "-p", "8001", "-h", "/local"]
+      }
+    }
+  }
+}
+```
+
+</details>
+
+Note that the namespace has been left unspecified so that it can be set in the
+CLI. And note that the task group has a count of 2.
+
+Plan the job in the default namespace.
+
+```shell-session
+$ nomad job plan ./example.nomad.hcl
++ Job: "example"
++ Task Group: "group" (2 create)
+  + Task: "task" (forces create)
+
+Scheduler dry-run:
+- All tasks successfully allocated.
+
+Job Modify Index: 0
+To submit the job with version verification run:
+
+nomad job run -check-index 0 ./jobs/example-count.nomad.hcl
+
+When running the job with the check-index flag, the job will only be run if the
+job modify index given matches the server-side version. If the index has
+changed, another user has modified the job and the plan's results are
+potentially invalid.
+```
+
+Plan the job in the `dev` namespace. This time, you'll see an advisory warning
+for the job indicating the failure of the request.
+
+<CodeBlockConfig highlight="9-14">
+
+```shell-session
+$ nomad job plan -namespace dev ./jobs/example-count.nomad.hcl
++ Job: "example"
++ Task Group: "group" (2 create)
+  + Task: "task" (forces create)
+
+Scheduler dry-run:
+- All tasks successfully allocated.
+
+Job Warnings:
+1 warning:
+
+* test : Result: false
+
+Error message: test:21:8: error calling function "post": expected status code to be one of [200], got 400
+
+Job Modify Index: 0
+To submit the job with version verification run:
+
+nomad job run -check-index 0 -namespace="dev" ./jobs/example-count.nomad.hcl
+
+When running the job with the check-index flag, the job will only be run if the
+job modify index given matches the server-side version. If the index has
+changed, another user has modified the job and the plan's results are
+potentially invalid.
+```
+
+</CodeBlockConfig>
+
+## Providing feedback for job authors
+
+The warning shown previously does not tell the job author why the policy
+rejected their job. You can provide feedback by printing any diagnostic messages
+returned from the validator service.
+
+Edit the `job-policy.sentinel` file to accept a HTTP400 status code and print
+out the message received.
+
+<CodeBlockConfig highlight="17,21-23">
+
+```sentinel
+import "http"
+import "json"
+import "nomad_var"
+
+# credentials
+validator = nomad_var.get("nomad/sentinel/validator@" + namespace.name)
+auth_token = validator.token
+url = validator.url
+
+# send to validator service
+reqBody = { "task_groups": job.task_groups, "namespace": namespace.name }
+req = http.request(url).
+    with_body(json.marshal(reqBody)).
+    with_header("Authorization", "token "+auth_token)
+
+resp = http.with_timeout(1).with_retries(3).
+    accept_status_codes([200, 400]).
+    post(req)
+body = json.unmarshal(resp.body)
+
+if body["message"] is defined {
+  print(body["message"])
+}
+
+main = rule {
+  body["is_valid"] is defined and
+  body["is_valid"] is true }
+```
+
+</CodeBlockConfig>
+
+<Warning>
+
+Note that the example validator has responses that distinguish between internal
+errors and messages meant for job diagnostics. Be careful not to expose internal
+errors to job authors.
+
+</Warning>
+
+Plan the job again in the `"dev"` namespace and note that the validator service
+message is shown in the response.
+
+<CodeBlockConfig highlight="16">
+
+```shell-session
+$ nomad job plan -namespace dev ./example.nomad.hcl
++ Job: "example"
++ Task Group: "group" (2 create)
+  + Task: "task" (forces create)
+
+Scheduler dry-run:
+- All tasks successfully allocated.
+
+Job Warnings:
+1 warning:
+
+* test : Result: false
+
+Print messages:
+
+invalid task group count in dev
+
+test:23:1 - Rule "main"
+  Value:
+    false
+
+Job Modify Index: 0
+To submit the job with version verification run:
+
+nomad job run -check-index 0 -namespace="dev" ./jobs/example-count.nomad.hcl
+
+When running the job with the check-index flag, the job will only be run if the
+job modify index given matches the server-side version. If the index has
+changed, another user has modified the job and the plan's results are
+potentially invalid.
+```
+
+</CodeBlockConfig>
+
+## Learn more about Sentinel
+
+For specific details about working with Sentinel, consult the [`nomad sentinel`
+sub-commands][], the [HTTP API][] documentation, and the [Sentinel policy reference][].
+
+[`http`]: /sentinel/docs/imports/http
+[scope]: /nomad/commands/sentinel/apply#scope
+[`nomad_var`]: /nomad/docs/reference/sentinel-policy#import-nomad-variables-with-nomad_var
+[acls]: /nomad/docs/secure/acl
+[`sentinel`]: /nomad/docs/configuration/sentinel
+[`nomad sentinel` sub-commands]: /nomad/commands/sentinel
+[HTTP API]: /nomad/api-docs/sentinel-policies
+[Sentinel policy reference]: /nomad/docs/reference/sentinel-policy
