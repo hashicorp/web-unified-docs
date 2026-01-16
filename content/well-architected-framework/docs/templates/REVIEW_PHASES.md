@@ -6,6 +6,27 @@ Use this template for comprehensive documentation reviews. Complete phases in or
 
 ---
 
+## How to Request Reviews
+
+**File relationships:**
+- **REVIEW_PHASES.md** (this file) = The review process (what to check)
+- **AGENTS.md** = The detailed rules and standards (what to check against)
+- **DOCUMENT_TEMPLATE.md** = Practical template for creating new documents
+
+A full review uses both files: REVIEW_PHASES.md provides the process, AGENTS.md provides the rules.
+
+**Quick commands:**
+
+| What you want | How to ask |
+|---------------|------------|
+| Full review with fixes | "Full review on [document]. Implement fixes." |
+| Full review, no edits | "Full review on [document]. Review only, don't edit." |
+| Style check only | "Phase 4 review on [document]." |
+| Specific phase | "Phase [1-6] review on [document]." |
+| Final polish | "Phases 4-6 review on [document]. Fix issues." |
+
+---
+
 ## Phase 1: User Success Evaluation (PRIORITY)
 **Goal:** Ensure users understand the problem/solution and can find resources to implement
 
