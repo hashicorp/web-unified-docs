@@ -202,6 +202,7 @@ Based on successful WAF documents, use these patterns:
 - Use absolute URLs for internal links
 - Include untested code examples
 - Make assumptions - always ask for clarification
+- Mention or reference HashiCorp Waypoint
 
 ## SEO
 
@@ -327,6 +328,28 @@ The "HashiCorp resources" section at the end of documents should follow these or
 4. **Advanced features section** - For advanced users (integrations, advanced configurations)
 5. **Tool-specific sections** - When covering multiple tools, organize by tool with clear headings
 
+#### When to Group Resources vs. Keep Flat
+
+**Use a single flat `HashiCorp resources:` section when:**
+- Links are similar in nature (mostly WAF cross-references)
+- Document focuses on a single tool
+- Total links are under 8
+- Grouping would not improve readability
+
+**Group resources under descriptive subheadings when:**
+- Document covers multiple HashiCorp products (Packer, Nomad, Kubernetes, Vault)
+- Links naturally fall into distinct categories by tool or purpose
+- Total links exceed 8-10 and organization helps readability
+- Users would benefit from quickly finding tool-specific resources
+
+**Grouped subheading format:** Use descriptive names with colon, no `##` or `###`
+- ✅ `Packer for containers:`
+- ✅ `Nomad deployment resources:`
+- ✅ `Kubernetes deployment resources:`
+- ❌ `### Packer for containers`
+
+Use your judgment. When in doubt, ask whether grouping helps the reader find what they need faster.
+
 **Example structure for single-tool documents:**
 ```markdown
 HashiCorp resources:
@@ -426,35 +449,40 @@ Provider/Integration links:
 
 #### Common Link Descriptions by Tool
 
+**Standard beginner format (combining tutorials and docs):**
+- "Learn Terraform with the [Terraform tutorials](/terraform/tutorials) and read the [Terraform documentation](/terraform/docs)"
+- "Learn Vault with the [Vault tutorials](/vault/tutorials) and read the [Vault documentation](/vault/docs)"
+- "Learn Packer with the [Packer tutorials](/packer/tutorials) and read the [Packer documentation](/packer/docs)"
+- "Learn Consul with the [Consul tutorials](/consul/tutorials) and read the [Consul documentation](/consul/docs)"
+- "Learn Nomad with the [Nomad tutorials](/nomad/tutorials) and read the [Nomad documentation](/nomad/docs)"
+- "Learn Boundary with the [Boundary tutorials](/boundary/tutorials) and read the [Boundary documentation](/boundary/docs)"
+
+**Cloud provider getting started:**
+- "Get started with [AWS](/terraform/tutorials/aws-get-started), [Azure](/terraform/tutorials/azure-get-started), or [GCP](/terraform/tutorials/gcp-get-started)"
+
 **Terraform:**
-- "Get started with [Terraform tutorials] for hands-on examples"
-- "Read the [Terraform documentation] for comprehensive features"
-- "Read the [Terraform introduction] to understand infrastructure as code concepts"
+- "Learn Terraform with the [Terraform tutorials](/terraform/tutorials) and read the [Terraform documentation](/terraform/docs)"
+- "Get started with [AWS](/terraform/tutorials/aws-get-started), [Azure](/terraform/tutorials/azure-get-started), or [GCP](/terraform/tutorials/gcp-get-started)"
 - "Learn the [Terraform language] for writing configurations"
 - "Learn about [Terraform state] for infrastructure tracking"
 - "Configure [backends] for remote state storage"
 
 **Packer:**
-- "Get started with [Packer tutorials] for hands-on examples"
-- "Read the Packer [documentation] for core image building concepts"
-- "Follow hands-on [Packer tutorials] for image creation"
+- "Learn Packer with the [Packer tutorials](/packer/tutorials) and read the [Packer documentation](/packer/docs)"
 - "Learn about [Packer builders] for different platforms"
 - "Use [Packer provisioners] to configure images"
 
 **Vault:**
-- "Get started with [Vault tutorials] for hands-on examples"
-- "Read the [Vault documentation] for secrets management features"
+- "Learn Vault with the [Vault tutorials](/vault/tutorials) and read the [Vault documentation](/vault/docs)"
 - "Learn about [Vault dynamic secrets] for automation"
 - "Use [Vault with Terraform] for secure deployments"
 
 **Consul:**
-- "Get started with [Consul tutorials] for hands-on examples"
-- "Read the [Consul documentation] for service mesh concepts and features"
+- "Learn Consul with the [Consul tutorials](/consul/tutorials) and read the [Consul documentation](/consul/docs)"
 - "Learn about [Consul service mesh] for traffic management"
 
 **Nomad:**
-- "Get started with [Nomad tutorials] for hands-on examples"
-- "Read the [Nomad documentation] for orchestration features"
+- "Learn Nomad with the [Nomad tutorials](/nomad/tutorials) and read the [Nomad documentation](/nomad/docs)"
 - "Learn about [Nomad job specifications] for container workloads"
 
 **Sentinel:**

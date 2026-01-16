@@ -2,22 +2,44 @@
 
 Use this template for comprehensive documentation reviews. Complete phases in order for best results.
 
+> **Key principle:** WAF docs explain the **why and what**, show a representative example, then direct users to tutorials and product docs for the **how**. They are directories, not tutorials.
+
+---
+
+## How to Request Reviews
+
+**File relationships:**
+- **REVIEW_PHASES.md** (this file) = The review process (what to check)
+- **AGENTS.md** = The detailed rules and standards (what to check against)
+- **DOCUMENT_TEMPLATE.md** = Practical template for creating new documents
+
+A full review uses both files: REVIEW_PHASES.md provides the process, AGENTS.md provides the rules.
+
+**Quick commands:**
+
+| What you want | How to ask |
+|---------------|------------|
+| Full review with fixes | "Full review on [document]. Implement fixes." |
+| Full review, no edits | "Full review on [document]. Review only, don't edit." |
+| Style check only | "Phase 4 review on [document]." |
+| Specific phase | "Phase [1-6] review on [document]." |
+| Final polish | "Phases 4-6 review on [document]. Fix issues." |
+
 ---
 
 ## Phase 1: User Success Evaluation (PRIORITY)
-**Goal:** Ensure users can actually implement what we're teaching
+**Goal:** Ensure users understand the problem/solution and can find resources to implement
 
 Review questions:
-- Can a beginner understand the prerequisites needed before starting?
-- Can an implementer follow the steps and succeed without external help?
-- Are there code examples showing real-world application integration (not just infrastructure)?
-- Is there troubleshooting guidance for common failures?
-- Do the docs provide end-to-end workflows, not just isolated pieces?
-- Is the implementation order clear when multiple topics are involved?
+- Does the doc clearly explain what problem it solves and when to use this approach?
+- Can an implementer understand what to build and find the resources to do it?
+- Is there a representative code example that illustrates the concept?
+- Does the doc connect to related WAF docs and external resources for the full workflow?
+- Are the resource links specific enough for implementers to take action?
 
 **Deliverable:** User success review document identifying gaps for:
 - Decision-maker persona (understands WHY and WHAT)
-- Implementer persona (can execute HOW)
+- Implementer persona (knows what to build and where to learn HOW)
 
 ---
 
@@ -50,20 +72,20 @@ Review questions:
 
 ---
 
-## Phase 4: AGENTS.md Style Guide Compliance
-**Goal:** Meet all formatting and structural requirements
+## Phase 4: AGENTS.md style guide compliance
+**Goal:** Meet all formatting and structural requirements from AGENTS.md
 
 Review checklist:
 - [ ] Meta descriptions are 150-160 characters
 - [ ] "Why" sections use **Bold challenge:** format with 3-4 challenges
 - [ ] Workflow connections in body text ("After classifying...")
-- [ ] Code examples have 1-2 sentence summaries
+- [ ] Code examples have 1-2 sentence summaries (when examples are included)
 - [ ] No vague pronouns at sentence start
 - [ ] Lists use "the following" introduction (except resource sections)
 - [ ] Heading capitalization follows sentence case
 - [ ] Second-person voice ("you configure", not "we configure")
 - [ ] Active voice preferred
-- [ ] Document structure matches pattern (intro, Why, implementation, resources)
+- [ ] Document structure matches pattern (intro, Why, representative example, resources)
 
 **Deliverable:** Style compliance fixes ready to commit
 
@@ -108,7 +130,7 @@ Run all 6 phases in order. Do NOT combine Phase 1 with other phases.
 
 **For quick style-only reviews:**
 ```
-Run Phase 4 (AGENTS.md compliance) only.
+Run Phase 4 (style guide compliance) only.
 ```
 
 **For new documentation:**
@@ -132,14 +154,14 @@ Only edit files after review documents are approved.
 Phase 1: Evaluate user success for these 5 docs. Create review document first.
 [After review] Phase 2: Fact-check all technical content.
 [After review] Phase 3: Add cross-document references.
-[After review] Phase 4: Fix AGENTS.md compliance issues.
+[After review] Phase 4: Fix style guide compliance issues.
 [After approval] Phase 5: Optimize SEO elements.
 [After approval] Phase 6: Enhance link quality and balance.
 ```
 
 ### Quick Fix Command:
 ```
-Phase 4 only: Review these docs for AGENTS.md compliance and fix all issues.
+Phase 4 only: Review these docs for style guide compliance and fix all issues.
 ```
 
 ---
