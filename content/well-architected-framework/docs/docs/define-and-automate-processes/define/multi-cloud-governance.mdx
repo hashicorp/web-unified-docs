@@ -1,0 +1,353 @@
+---
+page_title: Standardize multi-cloud governance with Terraform modules
+description: Create consistent infrastructure across AWS, Azure, and GCP with standardized Terraform modules. Enforce naming conventions, tagging, and security policies across all cloud providers.
+---
+
+# Standardize multi-cloud governance with Terraform
+
+Organizations using multiple cloud providers often develop inconsistent practices across platforms. Each cloud has different naming conventions, tagging capabilities, and security configurations, leading to governance gaps and operational complexity. Terraform lets you standardize multi-cloud governance by creating cloud-agnostic modules, enforcing consistent policies, and managing infrastructure uniformly regardless of the underlying provider.
+
+Standardized multi-cloud governance reduces operational complexity by establishing common patterns that work across all your cloud environments. When teams use consistent modules and follow uniform conventions, they can move between cloud providers without learning entirely new practices, and governance policies apply uniformly across your entire infrastructure.
+
+## Why standardize multi-cloud governance
+
+Standardizing your multi-cloud governance addresses the following operational challenges:
+
+- **Enforce consistent security across providers:** Each cloud provider has different security configuration options and defaults. Standardized modules encode security best practices for each provider, ensuring consistent security posture regardless of which cloud hosts the resource.
+- **Reduce cognitive load for platform teams:** Teams managing multiple clouds must remember different conventions, APIs, and configuration patterns for each provider. Standardized modules abstract provider differences, letting teams use familiar patterns across all environments.
+- **Enable workload portability:** Provider-specific infrastructure code locks you into particular clouds and makes migration difficult. Cloud-agnostic modules enable you to deploy similar workloads across providers and migrate between clouds when business needs change.
+- **Simplify compliance and auditing:** Auditing infrastructure across multiple clouds requires understanding each provider's configuration model. Standardized modules and tagging make compliance verification consistent and straightforward across all providers.
+
+## How multi-cloud governance works
+
+Multi-cloud governance uses Terraform's provider abstraction and module composition to create consistent infrastructure patterns that work across different cloud providers.
+
+The governance framework consists of the following key components:
+
+- **Cloud-agnostic interfaces:** Modules define consistent input variables and outputs regardless of which provider implements the underlying resources
+- **Provider-specific implementations:** Each cloud provider has implementation modules that translate common interfaces into provider-specific configurations
+- **Centralized policy enforcement:** Sentinel policies validate that all infrastructure meets governance requirements before deployment
+- **Unified tagging and naming:** Standard conventions apply across all providers for consistent resource identification and cost allocation
+
+## Create cloud-agnostic modules
+
+The following example shows a compute module with a consistent interface that works across AWS, Azure, and GCP.
+
+```hcl
+# modules/compute/variables.tf
+variable "name" {
+  description = "Name for the compute instance"
+  type        = string
+}
+
+variable "environment" {
+  description = "Environment name (dev, staging, prod)"
+  type        = string
+  validation {
+    condition     = contains(["dev", "staging", "prod"], var.environment)
+    error_message = "Environment must be dev, staging, or prod."
+  }
+}
+
+variable "instance_size" {
+  description = "Normalized instance size (small, medium, large)"
+  type        = string
+  default     = "small"
+  validation {
+    condition     = contains(["small", "medium", "large"], var.instance_size)
+    error_message = "Instance size must be small, medium, or large."
+  }
+}
+
+variable "cloud_provider" {
+  description = "Target cloud provider"
+  type        = string
+  validation {
+    condition     = contains(["aws", "azure", "gcp"], var.cloud_provider)
+    error_message = "Cloud provider must be aws, azure, or gcp."
+  }
+}
+
+variable "owner_team" {
+  description = "Team that owns this resource"
+  type        = string
+}
+
+variable "cost_center" {
+  description = "Cost center for billing allocation"
+  type        = string
+}
+```
+
+The module interface defines normalized inputs that abstract provider-specific details like instance types and region names.
+
+## Implement provider-specific resources
+
+Each cloud provider has different resource types and configuration options. Create provider-specific submodules that implement the common interface.
+
+<Tabs>
+<Tab heading="AWS" group="cloud-provider">
+
+```hcl
+# modules/compute/aws/main.tf
+locals {
+  instance_type_map = {
+    small  = "t3.small"
+    medium = "t3.medium"
+    large  = "t3.large"
+  }
+
+  standard_tags = {
+    Name        = var.name
+    Environment = var.environment
+    OwnerTeam   = var.owner_team
+    CostCenter  = var.cost_center
+    ManagedBy   = "terraform"
+    CloudProvider = "aws"
+  }
+}
+
+resource "aws_instance" "main" {
+  ami           = data.aws_ami.amazon_linux.id
+  instance_type = local.instance_type_map[var.instance_size]
+
+  tags = local.standard_tags
+
+  metadata_options {
+    http_tokens = "required"  # Enforce IMDSv2
+  }
+
+  root_block_device {
+    encrypted = true
+  }
+}
+
+output "instance_id" {
+  description = "Provider-agnostic instance identifier"
+  value       = aws_instance.main.id
+}
+
+output "private_ip" {
+  description = "Private IP address"
+  value       = aws_instance.main.private_ip
+}
+```
+
+The AWS implementation maps normalized instance sizes to AWS instance types, applies standard tags, and enforces security best practices like IMDSv2 and encrypted storage.
+
+</Tab>
+<Tab heading="Azure" group="cloud-provider">
+
+```hcl
+# modules/compute/azure/main.tf
+locals {
+  vm_size_map = {
+    small  = "Standard_B1s"
+    medium = "Standard_B2s"
+    large  = "Standard_B4ms"
+  }
+
+  standard_tags = {
+    Name          = var.name
+    Environment   = var.environment
+    OwnerTeam     = var.owner_team
+    CostCenter    = var.cost_center
+    ManagedBy     = "terraform"
+    CloudProvider = "azure"
+  }
+}
+
+resource "azurerm_linux_virtual_machine" "main" {
+  name                = var.name
+  resource_group_name = var.resource_group_name
+  location            = var.location
+  size                = local.vm_size_map[var.instance_size]
+  admin_username      = "adminuser"
+
+  admin_ssh_key {
+    username   = "adminuser"
+    public_key = var.ssh_public_key
+  }
+
+  os_disk {
+    caching              = "ReadWrite"
+    storage_account_type = "Premium_LRS"
+    disk_encryption_set_id = var.disk_encryption_set_id
+  }
+
+  source_image_reference {
+    publisher = "Canonical"
+    offer     = "0001-com-ubuntu-server-jammy"
+    sku       = "22_04-lts"
+    version   = "latest"
+  }
+
+  tags = local.standard_tags
+}
+
+output "instance_id" {
+  description = "Provider-agnostic instance identifier"
+  value       = azurerm_linux_virtual_machine.main.id
+}
+
+output "private_ip" {
+  description = "Private IP address"
+  value       = azurerm_linux_virtual_machine.main.private_ip_address
+}
+```
+
+The Azure implementation maps normalized sizes to Azure VM sizes, applies consistent tags, and enables disk encryption.
+
+</Tab>
+<Tab heading="GCP" group="cloud-provider">
+
+```hcl
+# modules/compute/gcp/main.tf
+locals {
+  machine_type_map = {
+    small  = "e2-small"
+    medium = "e2-medium"
+    large  = "e2-standard-4"
+  }
+
+  standard_labels = {
+    name           = lower(replace(var.name, "/[^a-z0-9-]/", "-"))
+    environment    = var.environment
+    owner-team     = lower(replace(var.owner_team, "/[^a-z0-9-]/", "-"))
+    cost-center    = lower(replace(var.cost_center, "/[^a-z0-9-]/", "-"))
+    managed-by     = "terraform"
+    cloud-provider = "gcp"
+  }
+}
+
+resource "google_compute_instance" "main" {
+  name         = var.name
+  machine_type = local.machine_type_map[var.instance_size]
+  zone         = var.zone
+
+  boot_disk {
+    initialize_params {
+      image = "ubuntu-os-cloud/ubuntu-2204-lts"
+    }
+    disk_encryption_key_raw = var.disk_encryption_key
+  }
+
+  network_interface {
+    network    = var.network
+    subnetwork = var.subnetwork
+  }
+
+  shielded_instance_config {
+    enable_secure_boot = true
+  }
+
+  labels = local.standard_labels
+
+  metadata = {
+    enable-oslogin = "TRUE"
+  }
+}
+
+output "instance_id" {
+  description = "Provider-agnostic instance identifier"
+  value       = google_compute_instance.main.instance_id
+}
+
+output "private_ip" {
+  description = "Private IP address"
+  value       = google_compute_instance.main.network_interface[0].network_ip
+}
+```
+
+The GCP implementation maps normalized sizes to GCP machine types, converts tags to GCP-compliant labels, and enables Shielded VM and OS Login for security.
+
+</Tab>
+</Tabs>
+
+Each provider implementation translates the common interface into provider-specific resources while maintaining consistent outputs. The modules encode security best practices and tagging standards for each provider.
+
+## Enforce governance with Sentinel policies
+
+Create Sentinel policies that validate multi-cloud governance requirements across all providers.
+
+```hcl
+# Sentinel policy: Enforce required tags across all providers
+import "tfplan/v2" as tfplan
+
+# Define required tags
+required_tags = ["Environment", "OwnerTeam", "CostCenter", "ManagedBy"]
+
+# Find all resources that support tags
+taggable_resources = filter tfplan.resource_changes as _, rc {
+  rc.mode is "managed" and
+  (rc.change.actions contains "create" or rc.change.actions contains "update") and
+  (rc.type contains "aws_" or rc.type contains "azurerm_" or rc.type contains "google_")
+}
+
+# Check AWS resources for tags
+aws_tagged = rule {
+  all filter taggable_resources as _, rc { rc.type contains "aws_" } as _, resource {
+    all required_tags as tag {
+      resource.change.after.tags contains tag
+    }
+  }
+}
+
+# Check Azure resources for tags
+azure_tagged = rule {
+  all filter taggable_resources as _, rc { rc.type contains "azurerm_" } as _, resource {
+    all required_tags as tag {
+      resource.change.after.tags contains tag
+    }
+  }
+}
+
+# Check GCP resources for labels (GCP equivalent of tags)
+gcp_labeled = rule {
+  all filter taggable_resources as _, rc { rc.type contains "google_" } as _, resource {
+    all required_tags as tag {
+      keys(resource.change.after.labels else {}) contains lower(replace(tag, "/[^a-z0-9-]/", "-"))
+    }
+  }
+}
+
+main = rule {
+  aws_tagged and azure_tagged and gcp_labeled
+}
+```
+
+The policy enforces required tags across AWS, Azure, and GCP resources, accounting for GCP's label naming restrictions. All infrastructure changes must include the required governance tags before deployment.
+
+## Respond to governance violations
+
+When multi-cloud governance policies detect violations, complete the following steps to maintain consistent standards:
+
+1. **Identify the non-compliant resource:** Review the Sentinel policy output to determine which resource violated governance requirements and which specific rule failed.
+1. **Update the resource configuration:** Add missing tags, correct naming conventions, or fix security configurations to meet governance standards.
+1. **Verify module usage:** Confirm the team is using the standardized modules rather than creating custom resources that bypass governance controls.
+1. **Update modules if needed:** If the governance violation reveals a gap in your standardized modules, update the module to include the missing requirement.
+1. **Document exceptions:** If a legitimate need requires deviation from standards, document the exception and obtain appropriate approvals.
+
+HashiCorp resources:
+
+- Learn Terraform with the [Terraform tutorials](/terraform/tutorials) and read the [Terraform documentation](/terraform/docs)
+- Create [reusable infrastructure modules](/well-architected-framework/define-and-automate-processes/define/modules) for team standardization
+- Implement [standardized workflows](/well-architected-framework/define-and-automate-processes/define/standardize-workflows) across teams
+- Establish a [cloud resource tagging strategy](/well-architected-framework/optimize-systems/lifecycle-management/tag-cloud-resources) for consistent resource identification
+- Explore [Terraform module registry](https://registry.terraform.io/browse/modules) for pre-built multi-cloud modules
+- Explore the [Terraform provider documentation](https://registry.terraform.io/browse/providers) for provider-specific configuration options
+
+External resources:
+
+- [AWS tagging best practices](https://docs.aws.amazon.com/general/latest/gr/aws_tagging.html) covers AWS tag naming and organization
+- [Azure naming conventions](https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/ready/azure-best-practices/naming-and-tagging) explains Azure resource naming and tagging strategies
+- [GCP labeling resources](https://cloud.google.com/resource-manager/docs/creating-managing-labels) describes GCP label requirements and limitations
+
+## Next steps
+
+In this section of Define and automate processes, you learned how to standardize multi-cloud governance with Terraform modules to create consistent infrastructure patterns across AWS, Azure, and GCP. Multi-cloud governance is part of the [Define and automate processes pillar](/well-architected-framework/define-and-automate-processes).
+
+Visit the following documents to continue building your infrastructure standards:
+
+- Create [reusable modules](/well-architected-framework/define-and-automate-processes/define/modules) that teams can share across your organization
+- Implement [centralized package management](/well-architected-framework/define-and-automate-processes/define/centralize-packages) for artifact and image governance

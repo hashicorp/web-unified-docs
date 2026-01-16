@@ -1,0 +1,332 @@
+---
+page_title: Automate disaster recovery testing to validate business continuity
+description: Validate your disaster recovery procedures with automated testing. Use Terraform to create test environments and verify recovery objectives before real disasters occur.
+---
+
+# Automate disaster recovery testing with Terraform
+
+Disaster recovery plans are only valuable if they work when you need them. Organizations often discover their recovery procedures are outdated, incomplete, or too slow during actual disasters when the stakes are highest. Terraform lets you automate disaster recovery testing by creating isolated test environments, simulating failures, and validating that your recovery procedures meet your Recovery Time Objectives (RTO) and Recovery Point Objectives (RPO).
+
+Automated DR testing transforms disaster recovery from an annual checkbox exercise into a continuous validation process. Regular automated tests catch configuration drift, identify process gaps, and build team confidence in recovery procedures before real incidents occur.
+
+## Why automate disaster recovery testing
+
+Automating your disaster recovery testing addresses the following operational and business challenges:
+
+- **Validate recovery procedures before disasters occur:** Manual DR testing happens infrequently due to cost and complexity, leaving organizations uncertain whether their procedures actually work. Automated testing validates recovery procedures regularly, ensuring you discover gaps during controlled tests rather than real emergencies.
+- **Verify RTO and RPO objectives are achievable:** Organizations set recovery objectives without validating they can actually achieve them. Automated tests measure actual recovery times and data loss, providing evidence that your objectives are realistic and identifying bottlenecks that slow recovery.
+- **Detect procedure drift and documentation gaps:** Recovery procedures become outdated as infrastructure evolves, but manual testing rarely keeps pace with changes. Automated testing catches procedure drift immediately when infrastructure changes break recovery workflows.
+- **Reduce recovery team stress and errors:** Teams performing disaster recovery under pressure make mistakes that extend outages. Regular automated testing builds muscle memory and confidence, reducing errors when real disasters occur.
+
+## How automated DR testing works
+
+Automated disaster recovery testing uses infrastructure as code to create isolated test environments that mirror production, simulate various failure scenarios, and validate that recovery procedures restore services within defined objectives.
+
+The testing workflow consists of the following key phases:
+
+1. **Provision test environment:** Terraform creates an isolated copy of your production infrastructure for testing
+1. **Simulate failure scenario:** Automated scripts trigger specific failure conditions like region outages or data corruption
+1. **Execute recovery procedures:** Your documented recovery runbooks execute automatically or with minimal manual intervention
+1. **Validate recovery success:** Automated checks verify services are restored and data integrity is maintained
+1. **Measure and report results:** Tests record recovery times and compare them against RTO/RPO objectives
+1. **Cleanup test resources:** Terraform destroys the test environment to avoid ongoing costs
+
+## Create DR test environments with Terraform
+
+The following example shows a Terraform module that creates an isolated disaster recovery test environment by cloning production infrastructure into a separate region.
+
+<Tabs>
+<Tab heading="AWS" group="cloud-provider">
+
+```hcl
+variable "test_environment_name" {
+  description = "Name for the DR test environment"
+  type        = string
+  default     = "dr-test"
+}
+
+variable "source_region" {
+  description = "Region to recover from"
+  type        = string
+  default     = "us-east-1"
+}
+
+variable "recovery_region" {
+  description = "Region to recover to"
+  type        = string
+  default     = "us-west-2"
+}
+
+# Create isolated VPC for DR testing
+resource "aws_vpc" "dr_test" {
+  provider   = aws.recovery
+  cidr_block = "10.99.0.0/16"
+
+  tags = {
+    Name        = "${var.test_environment_name}-vpc"
+    Environment = "dr-test"
+    Temporary   = "true"
+  }
+}
+
+# Restore RDS from cross-region snapshot
+data "aws_db_snapshot" "latest_production" {
+  provider               = aws.source
+  most_recent            = true
+  db_instance_identifier = "production-database"
+}
+
+resource "aws_db_instance" "dr_test_database" {
+  provider               = aws.recovery
+  identifier             = "${var.test_environment_name}-database"
+  instance_class         = "db.t3.medium"
+  snapshot_identifier    = data.aws_db_snapshot.latest_production.id
+  vpc_security_group_ids = [aws_security_group.dr_test_db.id]
+  db_subnet_group_name   = aws_db_subnet_group.dr_test.name
+  skip_final_snapshot    = true
+
+  tags = {
+    Environment = "dr-test"
+    Temporary   = "true"
+  }
+}
+
+# Validate recovery by checking database connectivity
+resource "terraform_data" "validate_database_recovery" {
+  depends_on = [aws_db_instance.dr_test_database]
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      echo "Validating database recovery..."
+      start_time=$(date +%s)
+
+      # Wait for database to be available
+      aws rds wait db-instance-available \
+        --db-instance-identifier ${aws_db_instance.dr_test_database.identifier} \
+        --region ${var.recovery_region}
+
+      end_time=$(date +%s)
+      recovery_time=$((end_time - start_time))
+
+      echo "Database recovery completed in $recovery_time seconds"
+
+      # Record metrics for RTO tracking
+      echo "{\"recovery_time_seconds\": $recovery_time, \"rto_target_seconds\": 3600}" > dr_test_results.json
+    EOT
+  }
+}
+```
+
+The configuration creates an isolated VPC for DR testing, restores the production database from the latest cross-region snapshot, and validates recovery by measuring the time to restore database connectivity.
+
+</Tab>
+<Tab heading="Azure" group="cloud-provider">
+
+```hcl
+variable "test_environment_name" {
+  description = "Name for the DR test environment"
+  type        = string
+  default     = "dr-test"
+}
+
+variable "source_region" {
+  description = "Region to recover from"
+  type        = string
+  default     = "eastus"
+}
+
+variable "recovery_region" {
+  description = "Region to recover to"
+  type        = string
+  default     = "westus2"
+}
+
+# Create isolated resource group for DR testing
+resource "azurerm_resource_group" "dr_test" {
+  name     = "${var.test_environment_name}-rg"
+  location = var.recovery_region
+
+  tags = {
+    Environment = "dr-test"
+    Temporary   = "true"
+  }
+}
+
+# Restore SQL Database from geo-redundant backup
+resource "azurerm_mssql_database" "dr_test_database" {
+  name                        = "${var.test_environment_name}-database"
+  server_id                   = azurerm_mssql_server.dr_test.id
+  create_mode                 = "Recovery"
+  recover_database_id         = data.azurerm_mssql_database.production.id
+  sku_name                    = "S1"
+
+  tags = {
+    Environment = "dr-test"
+    Temporary   = "true"
+  }
+}
+
+# Validate recovery timing
+resource "terraform_data" "validate_database_recovery" {
+  depends_on = [azurerm_mssql_database.dr_test_database]
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      echo "Recording DR test completion time..."
+      echo "{\"recovery_region\": \"${var.recovery_region}\", \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > dr_test_results.json
+    EOT
+  }
+}
+```
+
+The configuration creates an isolated resource group, restores the production SQL database using geo-redundant backup recovery, and records the recovery completion time for RTO validation.
+
+</Tab>
+<Tab heading="GCP" group="cloud-provider">
+
+```hcl
+variable "test_environment_name" {
+  description = "Name for the DR test environment"
+  type        = string
+  default     = "dr-test"
+}
+
+variable "source_region" {
+  description = "Region to recover from"
+  type        = string
+  default     = "us-east1"
+}
+
+variable "recovery_region" {
+  description = "Region to recover to"
+  type        = string
+  default     = "us-west1"
+}
+
+# Create isolated VPC for DR testing
+resource "google_compute_network" "dr_test" {
+  name                    = "${var.test_environment_name}-network"
+  auto_create_subnetworks = false
+}
+
+# Restore Cloud SQL from backup
+resource "google_sql_database_instance" "dr_test_database" {
+  name             = "${var.test_environment_name}-database"
+  database_version = "POSTGRES_14"
+  region           = var.recovery_region
+
+  settings {
+    tier = "db-f1-micro"
+  }
+
+  clone {
+    source_instance_name = "projects/${var.project_id}/instances/production-database"
+  }
+
+  deletion_protection = false
+}
+
+# Validate recovery
+resource "terraform_data" "validate_database_recovery" {
+  depends_on = [google_sql_database_instance.dr_test_database]
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      echo "Validating Cloud SQL recovery..."
+      gcloud sql instances describe ${google_sql_database_instance.dr_test_database.name} \
+        --format="json" > dr_test_results.json
+    EOT
+  }
+}
+```
+
+The configuration creates an isolated network, clones the production Cloud SQL instance to the recovery region, and validates recovery by capturing instance details.
+
+</Tab>
+</Tabs>
+
+Each configuration creates isolated test infrastructure, restores data from backups, and validates recovery success. Run these tests in CI/CD pipelines on a regular schedule to continuously validate your disaster recovery capabilities.
+
+## Schedule automated DR tests
+
+Integrate disaster recovery testing into your CI/CD pipeline to run tests automatically on a regular schedule. The following workflow runs DR tests weekly and reports results to your team.
+
+```yaml
+# .github/workflows/dr-test.yml
+name: Disaster Recovery Test
+
+on:
+  schedule:
+    - cron: '0 2 * * 0'  # Run weekly on Sunday at 2 AM
+  workflow_dispatch:      # Allow manual triggers
+
+jobs:
+  dr-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Initialize DR Test Environment
+        run: terraform init
+        working-directory: ./disaster-recovery/test
+
+      - name: Create DR Test Environment
+        run: |
+          start_time=$(date +%s)
+          terraform apply -auto-approve
+          end_time=$(date +%s)
+          echo "RECOVERY_TIME=$((end_time - start_time))" >> $GITHUB_ENV
+        working-directory: ./disaster-recovery/test
+
+      - name: Validate Recovery Objectives
+        run: |
+          if [ $RECOVERY_TIME -gt 3600 ]; then
+            echo "WARNING: Recovery time ($RECOVERY_TIME seconds) exceeds RTO target (3600 seconds)"
+            exit 1
+          fi
+          echo "Recovery completed within RTO target"
+
+      - name: Cleanup Test Environment
+        if: always()
+        run: terraform destroy -auto-approve
+        working-directory: ./disaster-recovery/test
+```
+
+The workflow creates a DR test environment, measures recovery time, validates against RTO targets, and cleans up resources regardless of test success or failure.
+
+## Respond to DR test failures
+
+When automated DR tests fail, complete the following steps to identify and resolve issues before they impact real recovery scenarios:
+
+1. **Review test logs and metrics:** Examine the test output to identify which phase failed and whether the issue is infrastructure-related, procedure-related, or caused by configuration drift.
+1. **Identify root cause:** Determine whether the failure stems from outdated recovery procedures, infrastructure changes that broke assumptions, or resource constraints in the recovery region.
+1. **Update recovery procedures:** Modify your disaster recovery runbooks and Terraform configurations to address the identified issues.
+1. **Re-run tests to validate fixes:** Execute the DR tests again to confirm your changes resolve the failure and meet recovery objectives.
+1. **Document lessons learned:** Record the failure cause and resolution in your DR documentation to improve future testing and actual recovery scenarios.
+
+HashiCorp resources:
+
+- Learn Terraform with the [Terraform tutorials](/terraform/tutorials) and read the [Terraform documentation](/terraform/docs)
+- Understand [disaster recovery concepts](/well-architected-framework/design-resilient-systems/principles/disaster-recovery) for RPO and RTO planning
+- Implement [zero-downtime deployments](/well-architected-framework/define-and-automate-processes/deploy/zero-downtime-deployments) for resilient application updates
+- Automate testing workflows through [CI/CD pipelines](/well-architected-framework/define-and-automate-processes/automate/cicd)
+- Explore [aws_db_instance](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/db_instance) for RDS snapshot restoration options
+- Explore [azurerm_mssql_database](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/mssql_database) for Azure SQL recovery modes
+
+External resources:
+
+- [AWS disaster recovery workloads](https://docs.aws.amazon.com/whitepapers/latest/disaster-recovery-workloads-on-aws/disaster-recovery-workloads-on-aws.html) covers AWS DR strategies and testing approaches
+- [Azure Site Recovery testing](https://learn.microsoft.com/en-us/azure/site-recovery/site-recovery-test-failover-to-azure) walks through Azure DR test failover procedures
+- [Google Cloud DR planning guide](https://cloud.google.com/architecture/dr-scenarios-planning-guide) explains GCP disaster recovery architectures
+
+## Next steps
+
+In this section of Design resilient systems, you learned how to automate disaster recovery testing with Terraform to validate your recovery procedures before real disasters occur. Automated DR testing is part of the [Design resilient systems pillar](/well-architected-framework/design-resilient-systems).
+
+Visit the following documents to continue building your resilience strategy:
+
+- Implement [failover mechanisms](/well-architected-framework/design-resilient-systems/failover) for automatic traffic redirection during failures
+- Plan comprehensive [resilience strategies](/well-architected-framework/design-resilient-systems/plan-for-resilience) for your critical systems
