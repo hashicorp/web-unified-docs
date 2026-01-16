@@ -327,6 +327,28 @@ The "HashiCorp resources" section at the end of documents should follow these or
 4. **Advanced features section** - For advanced users (integrations, advanced configurations)
 5. **Tool-specific sections** - When covering multiple tools, organize by tool with clear headings
 
+#### When to Group Resources vs. Keep Flat
+
+**Use a single flat `HashiCorp resources:` section when:**
+- Links are similar in nature (mostly WAF cross-references)
+- Document focuses on a single tool
+- Total links are under 8
+- Grouping would not improve readability
+
+**Group resources under descriptive subheadings when:**
+- Document covers multiple HashiCorp products (Packer, Nomad, Kubernetes, Vault)
+- Links naturally fall into distinct categories by tool or purpose
+- Total links exceed 8-10 and organization helps readability
+- Users would benefit from quickly finding tool-specific resources
+
+**Grouped subheading format:** Use descriptive names with colon, no `##` or `###`
+- ✅ `Packer for containers:`
+- ✅ `Nomad deployment resources:`
+- ✅ `Kubernetes deployment resources:`
+- ❌ `### Packer for containers`
+
+Use your judgment. When in doubt, ask whether grouping helps the reader find what they need faster.
+
 **Example structure for single-tool documents:**
 ```markdown
 HashiCorp resources:

@@ -214,6 +214,35 @@ Always use `1.` for every item - Markdown auto-numbers:
 - ✅ "Explore [aws_budgets_budget] for cost filters"
 - ❌ "[Explore aws_budgets_budget for cost filters]"
 
+**Grouping resources (optional):**
+
+When a document covers multiple tools or has many links (8+), group them under descriptive subheadings for better readability. Use your judgment - if links are similar or mostly WAF links, a single `HashiCorp resources:` section is fine.
+
+**When to group:**
+- Document covers multiple HashiCorp products (Packer, Nomad, Kubernetes, Vault)
+- Links naturally fall into distinct categories
+- Total links exceed 8-10 and would benefit from organization
+
+**Grouped format example:**
+```markdown
+HashiCorp resources:
+
+- Learn about [immutable infrastructure](/well-architected-framework/...) concepts
+- Create [immutable virtual machines](/well-architected-framework/...) with Packer
+
+Packer for containers:
+
+- Get started with the Packer [documentation](/packer/docs) for core concepts
+- Build a [Docker image with Packer](/packer/tutorials/docker-get-started/...)
+
+Nomad deployment resources:
+
+- Read the [Nomad documentation](/nomad/docs) for orchestration features
+- Manage Nomad jobs with the [Nomad Terraform provider](https://registry.terraform.io/...)
+```
+
+**Grouped subheading format:** Use descriptive names with colon, no `##` (e.g., `Packer for containers:`, `Nomad deployment resources:`)
+
 ### External resources section
 
 **Not a heading** - use `External resources:` (with colon, no ##)
