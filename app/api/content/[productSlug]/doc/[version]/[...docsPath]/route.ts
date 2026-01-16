@@ -145,7 +145,9 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 			metadata,
 			subpath: 'docs', // TODO: I guess we could grab the first part of the rawDocsPath? Is there something I am missing here?
 			markdownSource,
-			created_at: createdAt,
+			// check mdx frontmatter metadata first, if not then fallback to docsPathsAllVersions.json
+			created_at: metadata.created_at || createdAt,
+			last_modified: metadata.last_modified || null,
 			sha: '', // TODO: Do we really need this?
 			githubFile,
 		},
