@@ -1,0 +1,309 @@
+---
+page_title: Automate configuration drift remediation workflows
+description: Restore infrastructure to its desired state automatically when drift is detected. Use Terraform and CI/CD pipelines to remediate configuration drift before it causes incidents.
+---
+
+# Automate configuration drift remediation with Terraform
+
+Detecting drift is only half the solution. When infrastructure configurations deviate from their Terraform-defined state, organizations must decide whether to update the code to match reality or apply changes to restore the desired state. Manual remediation is slow, error-prone, and often delayed until drift accumulates into significant problems. Terraform lets you automate drift remediation workflows that restore infrastructure to its desired state quickly and consistently.
+
+Automated drift remediation transforms drift from an accumulating problem into a self-correcting system. When remediation workflows run automatically after drift detection, you maintain infrastructure consistency without manual intervention and prevent small deviations from compounding into major incidents.
+
+## Why automate drift remediation
+
+Automating your drift remediation workflows addresses the following operational challenges:
+
+- **Prevent drift from accumulating:** Manual remediation gets deprioritized, allowing drift to accumulate over time. Automated remediation addresses drift immediately when detected, preventing small deviations from growing into significant configuration problems.
+- **Reduce manual toil and errors:** Engineers manually remediating drift must investigate each deviation, decide on the correct action, and execute changes carefully. Automated workflows handle routine drift remediation consistently, freeing engineers for complex problems that require human judgment.
+- **Maintain security and compliance posture:** Configuration drift can introduce security vulnerabilities or compliance violations. Automated remediation restores security-critical configurations immediately, maintaining your security posture without waiting for manual intervention.
+- **Ensure consistent remediation decisions:** Different engineers make different decisions about whether to update code or apply changes, leading to inconsistent infrastructure state. Automated workflows apply consistent remediation logic based on defined policies.
+
+## How automated remediation works
+
+Automated drift remediation uses scheduled Terraform operations and policy-based decision logic to restore infrastructure to its desired state.
+
+The remediation workflow consists of the following key phases:
+
+1. **Detect drift:** Scheduled refresh-only plans identify differences between Terraform state and actual infrastructure
+1. **Classify drift:** Policies determine whether drift is critical (requires immediate remediation), advisory (remediate during maintenance), or expected (update code to match)
+1. **Execute remediation:** Based on classification, either apply Terraform changes automatically or create tickets for manual review
+1. **Verify restoration:** Post-remediation checks confirm infrastructure matches the desired state
+1. **Report and audit:** Record remediation actions for compliance and operational visibility
+
+## Configure scheduled drift remediation
+
+The following example shows a CI/CD workflow that detects drift and automatically remediates critical deviations.
+
+```yaml
+# .github/workflows/drift-remediation.yml
+name: Drift Detection and Remediation
+
+on:
+  schedule:
+    - cron: '0 */4 * * *'  # Run every 4 hours
+  workflow_dispatch:
+    inputs:
+      auto_remediate:
+        description: 'Automatically apply remediation'
+        required: true
+        default: 'false'
+        type: boolean
+
+env:
+  TF_CLOUD_ORGANIZATION: ${{ vars.TF_CLOUD_ORGANIZATION }}
+  TF_WORKSPACE: production
+
+jobs:
+  detect-drift:
+    runs-on: ubuntu-latest
+    outputs:
+      drift_detected: ${{ steps.check.outputs.drift_detected }}
+      drift_summary: ${{ steps.check.outputs.drift_summary }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+
+      - name: Initialize Terraform
+        run: terraform init
+
+      - name: Detect Drift
+        id: check
+        run: |
+          # Run refresh-only plan to detect drift
+          terraform plan -refresh-only -detailed-exitcode -out=drift.plan 2>&1 | tee drift_output.txt || exit_code=$?
+
+          if [ "$exit_code" == "2" ]; then
+            echo "drift_detected=true" >> $GITHUB_OUTPUT
+            echo "drift_summary<<EOF" >> $GITHUB_OUTPUT
+            grep -A 5 "has changed" drift_output.txt >> $GITHUB_OUTPUT || true
+            echo "EOF" >> $GITHUB_OUTPUT
+          else
+            echo "drift_detected=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload Drift Plan
+        if: steps.check.outputs.drift_detected == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: drift-plan
+          path: drift.plan
+
+  classify-drift:
+    needs: detect-drift
+    if: needs.detect-drift.outputs.drift_detected == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      remediation_action: ${{ steps.classify.outputs.action }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Drift Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: drift-plan
+
+      - name: Classify Drift Severity
+        id: classify
+        run: |
+          # Parse drift plan for critical resources
+          terraform show -json drift.plan > drift.json
+
+          # Check for security-critical drift
+          security_drift=$(jq '[.resource_changes[]? |
+            select(.type | test("security_group|iam|firewall|acl"))] | length' drift.json)
+
+          # Check for compute drift
+          compute_drift=$(jq '[.resource_changes[]? |
+            select(.type | test("instance|vm|server"))] | length' drift.json)
+
+          if [ "$security_drift" -gt "0" ]; then
+            echo "action=auto_remediate" >> $GITHUB_OUTPUT
+            echo "Critical security drift detected - auto-remediation required"
+          elif [ "$compute_drift" -gt "0" ]; then
+            echo "action=review_required" >> $GITHUB_OUTPUT
+            echo "Compute drift detected - manual review required"
+          else
+            echo "action=schedule_maintenance" >> $GITHUB_OUTPUT
+            echo "Minor drift detected - scheduling maintenance window"
+          fi
+
+  auto-remediate:
+    needs: [detect-drift, classify-drift]
+    if: |
+      needs.classify-drift.outputs.remediation_action == 'auto_remediate' ||
+      github.event.inputs.auto_remediate == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+
+      - name: Initialize and Apply Remediation
+        run: |
+          terraform init
+          terraform apply -auto-approve
+
+      - name: Verify Remediation
+        run: |
+          # Run another plan to confirm no drift remains
+          terraform plan -detailed-exitcode
+          if [ $? -eq 0 ]; then
+            echo "Remediation successful - no drift detected"
+          else
+            echo "Warning: Drift still detected after remediation"
+            exit 1
+          fi
+
+      - name: Record Remediation
+        run: |
+          echo "{
+            \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",
+            \"action\": \"auto_remediate\",
+            \"workspace\": \"$TF_WORKSPACE\",
+            \"status\": \"success\"
+          }" >> remediation_log.json
+
+  create-review-ticket:
+    needs: [detect-drift, classify-drift]
+    if: needs.classify-drift.outputs.remediation_action == 'review_required'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create GitHub Issue for Review
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: 'Infrastructure Drift Requires Review',
+              body: `## Drift Detection Summary\n\n${{ needs.detect-drift.outputs.drift_summary }}\n\n## Required Action\n\nCompute resource drift detected. Please review and determine:\n1. Should Terraform apply changes to restore desired state?\n2. Should Terraform code be updated to match current state?\n\n## Workflow Run\n\n[View Details](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`,
+              labels: ['drift', 'needs-review', 'infrastructure']
+            })
+```
+
+The workflow detects drift every 4 hours, classifies drift severity based on resource types, automatically remediates security-critical drift, and creates review tickets for changes requiring human judgment.
+
+## Implement drift remediation policies
+
+Define policies that determine how different types of drift should be handled.
+
+```hcl
+# drift_remediation_config.tf
+locals {
+  # Resources that should be auto-remediated immediately
+  auto_remediate_resources = [
+    "aws_security_group",
+    "aws_security_group_rule",
+    "aws_iam_policy",
+    "aws_iam_role_policy",
+    "azurerm_network_security_group",
+    "azurerm_network_security_rule",
+    "google_compute_firewall",
+  ]
+
+  # Resources that require manual review before remediation
+  review_required_resources = [
+    "aws_instance",
+    "aws_db_instance",
+    "azurerm_virtual_machine",
+    "azurerm_sql_database",
+    "google_compute_instance",
+    "google_sql_database_instance",
+  ]
+
+  # Resources where drift should update code, not infrastructure
+  update_code_resources = [
+    "aws_ami",
+    "azurerm_shared_image_version",
+    "google_compute_image",
+  ]
+}
+
+# Output remediation policy for CI/CD consumption
+output "remediation_policy" {
+  value = {
+    auto_remediate   = local.auto_remediate_resources
+    review_required  = local.review_required_resources
+    update_code      = local.update_code_resources
+  }
+}
+```
+
+The configuration defines remediation policies based on resource type. Security resources are auto-remediated, compute resources require review, and image references should trigger code updates rather than infrastructure changes.
+
+## Configure HCP Terraform drift detection
+
+Use HCP Terraform's built-in health assessments for continuous drift monitoring with automatic notifications.
+
+```hcl
+resource "tfe_workspace" "production" {
+  name         = "production-infrastructure"
+  organization = var.tfe_organization
+
+  # Enable health assessments for drift detection
+  assessments_enabled = true
+}
+
+resource "tfe_workspace_settings" "production" {
+  workspace_id = tfe_workspace.production.id
+
+  # Configure health check schedule
+  health_check_enabled = true
+}
+
+resource "tfe_notification_configuration" "drift_alerts" {
+  name             = "drift-detection-alerts"
+  workspace_id     = tfe_workspace.production.id
+  destination_type = "slack"
+  url              = var.slack_webhook_url
+  enabled          = true
+
+  triggers = [
+    "assessment:check_failure",
+    "assessment:drifted",
+  ]
+}
+```
+
+The configuration enables HCP Terraform health assessments for continuous drift detection and sends Slack notifications when drift is detected.
+
+## Respond to drift remediation failures
+
+When automated drift remediation fails or encounters unexpected situations, complete the following steps to resolve the issue:
+
+1. **Review the failure logs:** Examine Terraform apply output to understand why remediation failed, such as permission errors, resource conflicts, or state lock issues.
+1. **Assess the current state:** Run `terraform plan` to see the current drift and determine whether the situation has changed since the remediation attempt.
+1. **Resolve blocking issues:** Address any prerequisites preventing remediation, such as resource dependencies, IAM permissions, or concurrent modifications.
+1. **Decide on remediation approach:** Determine whether to retry auto-remediation, perform manual remediation, or update Terraform code to accept the current state.
+1. **Document the resolution:** Record why remediation failed and how the issue was resolved to improve future automated remediation.
+
+HashiCorp resources:
+
+- Learn Terraform with the [Terraform tutorials](/terraform/tutorials) and read the [Terraform documentation](/terraform/docs)
+- Configure [drift detection](/well-architected-framework/optimize-systems/monitor-system-health/detect-configuration-drift) to identify infrastructure deviations
+- Implement [CI/CD pipelines](/well-architected-framework/define-and-automate-processes/automate/cicd) for automated infrastructure management
+- Explore [HCP Terraform health assessments](/terraform/cloud-docs/workspaces/health) for continuous drift monitoring
+- Explore [tfe_workspace](https://registry.terraform.io/providers/hashicorp/tfe/latest/docs/resources/workspace) for workspace configuration options
+
+External resources:
+
+- [Terraform refresh command](https://developer.hashicorp.com/terraform/cli/commands/refresh) explains how Terraform detects drift
+- [Managing resource drift](https://developer.hashicorp.com/terraform/tutorials/state/resource-drift) walks through drift management strategies
+- [GitHub Actions for Terraform](https://github.com/hashicorp/setup-terraform) covers CI/CD integration for Terraform workflows
+
+## Next steps
+
+In this section of Optimize systems, you learned how to automate configuration drift remediation with Terraform to restore infrastructure to its desired state when deviations are detected. Drift remediation is part of the [Optimize systems pillar](/well-architected-framework/optimize-systems).
+
+Visit the following documents to continue building your infrastructure optimization strategy:
+
+- Set up [drift detection](/well-architected-framework/optimize-systems/monitor-system-health/detect-configuration-drift) to identify infrastructure deviations
+- Implement [infrastructure lifecycle management](/well-architected-framework/optimize-systems/lifecycle-management/decommission-infrastructure) to maintain optimal resource utilization

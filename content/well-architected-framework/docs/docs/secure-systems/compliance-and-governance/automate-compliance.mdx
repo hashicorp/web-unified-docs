@@ -1,0 +1,322 @@
+---
+page_title: Automate security compliance checks in your CI/CD pipeline
+description: Enforce security compliance automatically with policy as code. Use Sentinel and Terraform to validate CIS benchmarks, SOC2, and regulatory requirements before deployment.
+---
+
+# Automate security compliance with Terraform and Sentinel
+
+Manual compliance audits happen quarterly or annually, leaving months where non-compliant infrastructure can accumulate undetected. Organizations discover compliance violations during audits when remediation is expensive and time-consuming. Terraform and Sentinel let you automate compliance checks in your CI/CD pipeline, catching violations before infrastructure deploys and maintaining continuous compliance rather than point-in-time snapshots.
+
+Automated compliance transforms security from a periodic audit exercise into a continuous validation process. When compliance checks run on every infrastructure change, you prevent violations from reaching production and generate audit evidence automatically as a byproduct of your deployment workflow.
+
+## Why automate compliance
+
+Automating your security compliance checks addresses the following challenges:
+
+- **Prevent compliance violations before deployment:** Manual reviews cannot scale to check every infrastructure change against compliance requirements. Automated policy checks validate every Terraform plan against your compliance rules, blocking non-compliant changes before they reach production.
+- **Reduce audit preparation time and cost:** Organizations spend weeks gathering evidence and documentation for compliance audits. Automated compliance generates audit trails, policy enforcement records, and configuration snapshots continuously, reducing audit preparation from weeks to hours.
+- **Maintain consistent compliance across environments:** Different teams interpret compliance requirements differently, leading to inconsistent implementation. Automated policies enforce the same compliance rules across all teams and environments, ensuring consistent security posture.
+- **Detect compliance drift immediately:** Infrastructure changes can introduce compliance violations between audit cycles. Automated checks detect violations immediately when changes occur, preventing compliance drift from accumulating over time.
+
+## How automated compliance works
+
+Automated compliance uses policy as code to define compliance requirements as machine-readable rules that evaluate infrastructure configurations before deployment.
+
+The compliance automation workflow consists of the following key phases:
+
+1. **Define policies:** Translate compliance requirements (CIS benchmarks, SOC2 controls, regulatory requirements) into Sentinel or OPA policies
+1. **Integrate with CI/CD:** Configure policies to run automatically on every Terraform plan
+1. **Enforce policies:** Block deployments that violate mandatory policies, warn on advisory policies
+1. **Generate evidence:** Capture policy evaluation results as audit evidence
+1. **Report compliance status:** Aggregate policy results into compliance dashboards and reports
+
+## Implement CIS benchmark policies with Sentinel
+
+The following examples show Sentinel policies that enforce common CIS benchmark requirements for cloud infrastructure.
+
+<Tabs>
+<Tab heading="AWS CIS" group="compliance-framework">
+
+```hcl
+# Policy: Ensure S3 buckets have encryption enabled (CIS AWS 2.1.1)
+import "tfplan/v2" as tfplan
+
+s3_buckets = filter tfplan.resource_changes as _, rc {
+  rc.type is "aws_s3_bucket" and
+  rc.mode is "managed" and
+  (rc.change.actions contains "create" or rc.change.actions contains "update")
+}
+
+bucket_encryption_enabled = rule {
+  all s3_buckets as _, bucket {
+    bucket.change.after.server_side_encryption_configuration is not null
+  }
+}
+
+# Policy: Ensure CloudTrail is enabled in all regions (CIS AWS 3.1)
+cloudtrail_trails = filter tfplan.resource_changes as _, rc {
+  rc.type is "aws_cloudtrail" and
+  rc.mode is "managed" and
+  (rc.change.actions contains "create" or rc.change.actions contains "update")
+}
+
+cloudtrail_multiregion = rule {
+  all cloudtrail_trails as _, trail {
+    trail.change.after.is_multi_region_trail is true
+  }
+}
+
+# Policy: Ensure security groups do not allow unrestricted SSH (CIS AWS 5.2)
+security_groups = filter tfplan.resource_changes as _, rc {
+  rc.type is "aws_security_group" and
+  rc.mode is "managed" and
+  (rc.change.actions contains "create" or rc.change.actions contains "update")
+}
+
+no_unrestricted_ssh = rule {
+  all security_groups as _, sg {
+    all sg.change.after.ingress as ingress {
+      not (ingress.from_port <= 22 and ingress.to_port >= 22 and
+           ingress.cidr_blocks contains "0.0.0.0/0")
+    }
+  }
+}
+
+main = rule {
+  bucket_encryption_enabled and
+  cloudtrail_multiregion and
+  no_unrestricted_ssh
+}
+```
+
+The policy enforces three CIS AWS benchmark controls: S3 bucket encryption, multi-region CloudTrail logging, and restricted SSH access. Terraform plans that violate any control are blocked from applying.
+
+</Tab>
+<Tab heading="Azure CIS" group="compliance-framework">
+
+```hcl
+# Policy: Ensure storage accounts use secure transfer (CIS Azure 3.1)
+import "tfplan/v2" as tfplan
+
+storage_accounts = filter tfplan.resource_changes as _, rc {
+  rc.type is "azurerm_storage_account" and
+  rc.mode is "managed" and
+  (rc.change.actions contains "create" or rc.change.actions contains "update")
+}
+
+secure_transfer_enabled = rule {
+  all storage_accounts as _, sa {
+    sa.change.after.enable_https_traffic_only is true
+  }
+}
+
+# Policy: Ensure Activity Log retention is 365 days or greater (CIS Azure 5.1.2)
+activity_logs = filter tfplan.resource_changes as _, rc {
+  rc.type is "azurerm_monitor_log_profile" and
+  rc.mode is "managed" and
+  (rc.change.actions contains "create" or rc.change.actions contains "update")
+}
+
+activity_log_retention = rule {
+  all activity_logs as _, log {
+    log.change.after.retention_policy[0].days >= 365 or
+    log.change.after.retention_policy[0].enabled is false
+  }
+}
+
+# Policy: Ensure network security groups do not allow unrestricted RDP (CIS Azure 6.1)
+network_security_rules = filter tfplan.resource_changes as _, rc {
+  rc.type is "azurerm_network_security_rule" and
+  rc.mode is "managed" and
+  (rc.change.actions contains "create" or rc.change.actions contains "update")
+}
+
+no_unrestricted_rdp = rule {
+  all network_security_rules as _, rule {
+    not (rule.change.after.destination_port_range is "3389" and
+         rule.change.after.source_address_prefix is "*" and
+         rule.change.after.access is "Allow")
+  }
+}
+
+main = rule {
+  secure_transfer_enabled and
+  activity_log_retention and
+  no_unrestricted_rdp
+}
+```
+
+The policy enforces CIS Azure benchmark controls for secure storage transfer, activity log retention, and restricted RDP access.
+
+</Tab>
+<Tab heading="GCP CIS" group="compliance-framework">
+
+```hcl
+# Policy: Ensure Cloud Storage buckets have uniform access enabled (CIS GCP 5.1)
+import "tfplan/v2" as tfplan
+
+storage_buckets = filter tfplan.resource_changes as _, rc {
+  rc.type is "google_storage_bucket" and
+  rc.mode is "managed" and
+  (rc.change.actions contains "create" or rc.change.actions contains "update")
+}
+
+uniform_bucket_access = rule {
+  all storage_buckets as _, bucket {
+    bucket.change.after.uniform_bucket_level_access is true
+  }
+}
+
+# Policy: Ensure Cloud Audit Logging is configured properly (CIS GCP 2.1)
+audit_configs = filter tfplan.resource_changes as _, rc {
+  rc.type is "google_project_iam_audit_config" and
+  rc.mode is "managed" and
+  (rc.change.actions contains "create" or rc.change.actions contains "update")
+}
+
+audit_logging_enabled = rule {
+  length(audit_configs) > 0
+}
+
+# Policy: Ensure firewall rules do not allow unrestricted SSH (CIS GCP 3.6)
+firewall_rules = filter tfplan.resource_changes as _, rc {
+  rc.type is "google_compute_firewall" and
+  rc.mode is "managed" and
+  (rc.change.actions contains "create" or rc.change.actions contains "update")
+}
+
+no_unrestricted_ssh = rule {
+  all firewall_rules as _, rule {
+    not (rule.change.after.allow contains {"ports": ["22"], "protocol": "tcp"} and
+         rule.change.after.source_ranges contains "0.0.0.0/0")
+  }
+}
+
+main = rule {
+  uniform_bucket_access and
+  audit_logging_enabled and
+  no_unrestricted_ssh
+}
+```
+
+The policy enforces CIS GCP benchmark controls for uniform bucket access, audit logging, and restricted SSH access.
+
+</Tab>
+</Tabs>
+
+Each policy set validates infrastructure changes against specific CIS benchmark controls. Configure these policies in HCP Terraform or Terraform Enterprise to enforce compliance automatically on every run.
+
+## Configure policy enforcement in HCP Terraform
+
+Use Terraform to configure policy sets that apply your compliance policies to workspaces automatically.
+
+```hcl
+# Create policy set from version control
+resource "tfe_policy_set" "cis_compliance" {
+  name         = "cis-compliance-policies"
+  description  = "CIS benchmark compliance policies"
+  organization = var.tfe_organization
+  kind         = "sentinel"
+
+  vcs_repo {
+    identifier         = "example/terraform-sentinel-policies"
+    branch             = "main"
+    oauth_token_id     = var.oauth_token_id
+    ingress_submodules = false
+  }
+
+  # Apply to all production workspaces
+  workspace_ids = data.tfe_workspace_ids.production.ids
+}
+
+# Configure policy with enforcement level
+resource "tfe_sentinel_policy" "require_encryption" {
+  name         = "require-encryption"
+  description  = "Require encryption on all storage resources"
+  organization = var.tfe_organization
+  policy       = file("${path.module}/policies/require-encryption.sentinel")
+
+  # Hard-mandatory blocks deployment on failure
+  enforce_mode = "hard-mandatory"
+}
+
+resource "tfe_sentinel_policy" "require_tags" {
+  name         = "require-tags"
+  description  = "Require compliance tags on all resources"
+  organization = var.tfe_organization
+  policy       = file("${path.module}/policies/require-tags.sentinel")
+
+  # Soft-mandatory allows override with justification
+  enforce_mode = "soft-mandatory"
+}
+```
+
+The configuration creates a policy set from version-controlled policies, applies the policies to production workspaces, and configures enforcement levels that block non-compliant deployments while allowing justified overrides for advisory policies.
+
+## Generate compliance reports
+
+Capture policy evaluation results to generate compliance evidence and reports. The following workflow collects compliance data from HCP Terraform runs.
+
+```hcl
+# Query policy check results for compliance reporting
+data "tfe_policy_set" "cis_compliance" {
+  name         = "cis-compliance-policies"
+  organization = var.tfe_organization
+}
+
+# Store compliance results in S3 for audit evidence
+resource "aws_s3_object" "compliance_report" {
+  bucket = aws_s3_bucket.compliance_evidence.id
+  key    = "compliance-reports/${formatdate("YYYY-MM-DD", timestamp())}/policy-results.json"
+
+  content = jsonencode({
+    report_date    = timestamp()
+    policy_set     = data.tfe_policy_set.cis_compliance.name
+    workspaces     = data.tfe_policy_set.cis_compliance.workspace_ids
+    framework      = "CIS"
+    generated_by   = "terraform-compliance-automation"
+  })
+
+  tags = {
+    Compliance = "audit-evidence"
+    Framework  = "CIS"
+    Retention  = "7-years"
+  }
+}
+```
+
+The configuration queries policy set information and stores compliance report metadata in S3 with appropriate retention tags for audit evidence.
+
+## Respond to compliance violations
+
+When automated compliance checks detect violations, complete the following steps to remediate issues and maintain compliance:
+
+1. **Review the policy failure:** Examine the Sentinel policy output to understand which specific control was violated and which resource caused the failure.
+1. **Assess remediation options:** Determine whether to fix the infrastructure configuration, request a policy exception, or update the policy if requirements have changed.
+1. **Implement the fix:** Modify your Terraform configuration to meet compliance requirements, then re-run the plan to validate the fix.
+1. **Document exceptions:** If a legitimate business need requires a policy override, document the justification and obtain appropriate approvals before using soft-mandatory override.
+1. **Update policies as needed:** If the violation reveals a gap in your policies or an overly strict rule, update your Sentinel policies and version control the changes.
+
+HashiCorp resources:
+
+- Learn Terraform with the [Terraform tutorials](/terraform/tutorials) and read the [Terraform documentation](/terraform/docs)
+- Implement [policy as code](/well-architected-framework/secure-systems/compliance-and-governance/policy-as-code) with Sentinel fundamentals
+- Create [audit trails](/well-architected-framework/secure-systems/compliance-and-governance/audit-trails) for compliance evidence
+- Learn Sentinel with the [Sentinel tutorials](/sentinel/tutorials) and read the [Sentinel documentation](/sentinel/docs)
+- Explore [tfe_policy_set](https://registry.terraform.io/providers/hashicorp/tfe/latest/docs/resources/policy_set) for HCP Terraform policy configuration
+- Explore [tfe_sentinel_policy](https://registry.terraform.io/providers/hashicorp/tfe/latest/docs/resources/sentinel_policy) for individual policy management
+
+External resources:
+
+- [CIS Benchmarks](https://www.cisecurity.org/cis-benchmarks) provides security configuration guidelines for cloud platforms
+- [SOC2 compliance overview](https://www.aicpa-cima.com/topic/audit-assurance/audit-and-assurance-greater-than-soc-2) explains SOC2 trust service criteria
+- [Sentinel language documentation](https://docs.hashicorp.com/sentinel/language) covers policy writing syntax and functions
+
+## Next steps
+
+In this section of Secure systems, you learned how to automate security compliance checks with Terraform and Sentinel to enforce CIS benchmarks and regulatory requirements in your CI/CD pipeline. Compliance automation is part of the [Secure systems pillar](/well-architected-framework/secure-systems).
+
+Visit the following documents to continue building your security compliance strategy:
+
+- Implement [audit trails](/well-architected-framework/secure-systems/compliance-and-governance/audit-trails) for comprehensive compliance evidence
+- Use [dynamic credentials](/well-architected-framework/secure-systems/identity-access-management/use-dynamic-credentials) to reduce secret exposure and meet compliance requirements

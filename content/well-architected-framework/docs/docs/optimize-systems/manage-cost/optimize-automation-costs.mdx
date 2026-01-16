@@ -1,0 +1,308 @@
+---
+page_title: Optimize automation infrastructure costs with efficient CI/CD and resource management
+description: Reduce automation costs by optimizing CI/CD pipelines, ephemeral resources, and build infrastructure. Use Terraform to manage efficient automation workflows.
+---
+
+# Optimize automation infrastructure costs
+
+Automation infrastructure costs can accumulate quickly through inefficient CI/CD pipelines, always-on build agents, and wasteful resource provisioning. Organizations implementing automation often focus on the benefits—faster deployments, reduced errors, and improved consistency—without considering the infrastructure costs of running CI/CD systems, test environments, and build agents. Optimizing automation costs ensures you gain automation benefits without unnecessary spending.
+
+## Why optimize automation costs
+
+Automation infrastructure costs address the following challenges:
+
+**Uncontrolled pipeline resource consumption:** CI/CD pipelines run frequently and consume compute resources for builds, tests, and deployments. Without optimization, pipelines use oversized instances, run redundant tests, or keep resources active when idle, leading to costs that scale with team size and deployment frequency.
+
+**Always-on infrastructure for intermittent workloads:** Build agents, test environments, and CI/CD infrastructure often run 24/7 even though builds and deployments occur intermittently. This wastes compute costs during nights, weekends, and periods of low activity when automation infrastructure sits idle.
+
+**Inefficient test and build environments:** Test environments that mirror production consume significant resources. Without optimization, organizations run full-scale test environments continuously, duplicate environments unnecessarily, or retain test data and artifacts beyond their useful life.
+
+**Hidden costs in artifact storage and data transfer:** Build artifacts, container images, test reports, and logs accumulate over time. Organizations often implement unlimited retention policies without considering storage costs, bandwidth charges for artifact downloads, or the expense of maintaining multiple artifact repositories.
+
+## Automation cost optimization strategies
+
+The following strategies help you reduce automation infrastructure costs while maintaining or improving automation effectiveness. Each strategy addresses specific cost drivers in automated workflows.
+
+### Optimize CI/CD pipeline efficiency
+
+CI/CD pipelines represent a major automation cost driver. Optimizing pipeline execution reduces both compute costs and deployment times.
+
+**Use pipeline caching effectively:**
+- Cache dependencies between pipeline runs to avoid repeated downloads
+- Store compiled artifacts and reuse them across stages
+- Implement layer caching for container builds
+- Clear caches periodically to prevent storage bloat
+
+**Parallelize pipeline stages:**
+- Run independent tests simultaneously rather than sequentially
+- Split large test suites across multiple agents
+- Use matrix builds to test multiple configurations in parallel
+- Balance parallelization with resource costs
+
+**Right-size pipeline resources:**
+- Match agent sizes to pipeline workload requirements
+- Use smaller instances for lightweight tasks (linting, validation)
+- Reserve larger instances for resource-intensive tasks (compilation, integration tests)
+- Monitor pipeline resource utilization and adjust sizing
+
+**Optimize build and test execution:**
+- Skip redundant pipeline stages when code hasn't changed
+- Implement conditional pipeline execution based on changed files
+- Use incremental builds that only rebuild changed components
+- Eliminate duplicate tests across different pipeline stages
+
+### Implement ephemeral infrastructure for automation
+
+Ephemeral infrastructure reduces costs by creating resources only when needed and destroying them immediately after use.
+
+**Use ephemeral build agents:**
+- Provision build agents on-demand when pipelines trigger
+- Terminate agents after pipeline completion
+- Use spot instances or preemptible VMs for cost savings
+- Scale agent pools based on pipeline demand
+
+Terraform Cloud provides ephemeral workspaces that create and destroy infrastructure for testing without maintaining permanent test environments. This approach significantly reduces costs for development and testing workflows.
+
+**Create temporary test environments:**
+- Provision test environments at the start of test runs
+- Destroy test environments after tests complete
+- Use infrastructure as code to ensure consistent environment creation
+- Implement automatic cleanup for failed or abandoned tests
+
+**Optimize preview environments:**
+- Create preview environments per pull request for validation
+- Destroy preview environments after merge or close
+- Use minimal viable configurations for preview purposes
+- Set automatic expiration for stale preview environments
+
+The following example shows a Terraform configuration for ephemeral test infrastructure using AWS with automatic cleanup:
+
+```hcl
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+}
+
+variable "environment_ttl" {
+  description = "Time-to-live for ephemeral environment in hours"
+  type        = number
+  default     = 4
+}
+
+variable "pr_number" {
+  description = "Pull request number for environment identification"
+  type        = string
+}
+
+variable "test_ami" {
+  description = "AMI ID for test application instance"
+  type        = string
+}
+
+resource "aws_instance" "test_app" {
+  ami           = var.test_ami
+  instance_type = "t3.small" # Right-sized for test workloads
+
+  tags = {
+    Name        = "test-env-pr-${var.pr_number}"
+    Environment = "ephemeral"
+    PRNumber    = var.pr_number
+    CreatedAt   = timestamp()
+    ExpiresAt   = timeadd(timestamp(), "${var.environment_ttl}h")
+    ManagedBy   = "terraform"
+    CostCenter  = "engineering-testing"
+  }
+}
+
+# Lambda function for cleaning up expired ephemeral environments
+# Scans for resources with ExpiresAt tag older than current time
+resource "aws_lambda_function" "cleanup" {
+  function_name = "ephemeral-environment-cleanup"
+  runtime       = "python3.11"
+  handler       = "cleanup.handler"
+  filename      = "cleanup.zip" # Contains logic to check ExpiresAt tags
+  role          = aws_iam_role.lambda_cleanup.arn
+  
+  environment {
+    variables = {
+      TAG_FILTER = "Environment=ephemeral"
+    }
+  }
+}
+
+resource "aws_iam_role" "lambda_cleanup" {
+  name = "ephemeral-cleanup-lambda-role"
+  
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = "sts:AssumeRole"
+      Effect = "Allow"
+      Principal = {
+        Service = "lambda.amazonaws.com"
+      }
+    }]
+  })
+}
+
+resource "aws_cloudwatch_event_rule" "cleanup_schedule" {
+  name                = "cleanup-expired-test-environments"
+  description         = "Trigger cleanup of expired test environments"
+  schedule_expression = "rate(1 hour)"
+}
+
+resource "aws_cloudwatch_event_target" "lambda" {
+  rule      = aws_cloudwatch_event_rule.cleanup_schedule.name
+  target_id = "CleanupLambda"
+  arn       = aws_lambda_function.cleanup.arn
+}
+
+output "test_environment_url" {
+  value       = "http://${aws_instance.test_app.public_dns}"
+  description = "URL for ephemeral test environment"
+}
+```
+
+The configuration creates test infrastructure with automatic expiration. The `ExpiresAt` tag marks when resources should be cleaned up, and a Lambda function periodically removes expired environments.
+
+### Optimize artifact storage and retention
+
+Artifacts, container images, and build outputs consume storage that grows over time. Implementing retention policies prevents unbounded storage costs.
+
+**Implement artifact retention policies:**
+- Retain only successful builds from main branches indefinitely
+- Delete artifacts from failed builds after a short period (7 days)
+- Keep feature branch artifacts only until merge or deletion
+- Archive old artifacts to cheaper storage tiers
+
+**Optimize container image storage:**
+- Use image tags effectively to identify retention needs
+- Delete untagged images immediately
+- Implement lifecycle policies for old image versions
+- Keep only the last N versions of each image
+
+**Reduce artifact size:**
+- Compress artifacts before storing
+- Exclude unnecessary files from build outputs
+- Use incremental artifacts when possible
+- Implement artifact deduplication
+
+**Monitor storage costs:**
+- Track artifact storage growth over time
+- Set alerts for unusual storage increases
+- Review retention policies quarterly
+- Identify and remove orphaned artifacts
+
+### Use shared automation infrastructure efficiently
+
+Shared CI/CD infrastructure serves multiple teams and projects. Optimizing shared resources reduces per-team costs while maintaining performance.
+
+**Implement resource quotas:**
+- Set CPU and memory limits per team or project
+- Prevent resource monopolization by single pipelines
+- Queue low-priority workloads during peak times
+- Implement fair scheduling for shared resources
+
+**Optimize agent utilization:**
+- Monitor agent idle time and right-size pools
+- Use agent selectors to match workloads to appropriate agents
+- Implement agent retirement during low-activity periods
+- Scale agent pools based on historical demand patterns
+
+**Share common infrastructure components:**
+- Use shared artifact repositories across teams
+- Implement centralized secrets management
+- Share monitoring and logging infrastructure
+- Consolidate duplicate tooling and services
+
+### Monitor and optimize automation spending
+
+Continuous monitoring identifies cost optimization opportunities and prevents cost creep in automation infrastructure.
+
+**Track automation costs by category:**
+- Separate costs for CI/CD infrastructure, test environments, and artifact storage
+- Attribute costs to teams or projects using tags
+- Monitor cost trends over time
+- Set budgets and alerts for automation spending
+
+**Analyze pipeline cost efficiency:**
+- Calculate cost per pipeline run
+- Identify expensive test suites or stages
+- Compare costs across different pipeline configurations
+- Benchmark costs against industry standards
+
+**Implement cost dashboards:**
+- Visualize automation spending trends
+- Track cost optimization initiatives
+- Show cost attribution by team or project
+- Display cost-per-deployment metrics
+
+Terraform Cloud provides cost estimation for infrastructure changes, helping you understand the cost impact of automation decisions before applying them.
+
+## Automation cost optimization workflow
+
+Implement cost optimization as a continuous process rather than a one-time effort. The following workflow ensures ongoing cost efficiency:
+
+1. **Establish cost baselines:**
+   - Document current automation infrastructure costs
+   - Calculate cost per deployment or pipeline run
+   - Identify the most expensive automation components
+   - Set cost reduction targets
+
+1. **Implement quick wins:**
+   - Enable ephemeral infrastructure for test environments
+   - Implement artifact retention policies
+   - Right-size obviously oversized resources
+   - Schedule non-production environments for business hours only
+
+1. **Optimize iteratively:**
+   - Focus on the highest-cost components first
+   - Measure cost impact after each optimization
+   - Document optimization approaches for replication
+   - Share successful optimizations across teams
+
+1. **Monitor and refine:**
+   - Track automation costs continuously using [cloud budgets](/well-architected-framework/optimize-systems/manage-cost/create-cloud-budgets)
+   - Set up [anomaly detection](/well-architected-framework/optimize-systems/manage-cost/detect-cloud-spending-anomalies) to catch unexpected cost increases
+   - Review automation costs monthly
+   - Adjust optimization strategies based on results
+
+HashiCorp resources:
+
+- Learn Terraform with the [Terraform tutorials](/terraform/tutorials) and read the [Terraform documentation](/terraform/docs)
+- Reduce test environment costs with [Terraform Cloud ephemeral workspaces](https://developer.hashicorp.com/terraform/cloud-docs/workspaces/ephemeral-workspaces) for cost-effective testing
+- Understand infrastructure costs before deployment with [cost estimation](https://developer.hashicorp.com/terraform/cloud-docs/cost-estimation) for Terraform Cloud
+- Track automation spending with [cloud budgets](/well-architected-framework/optimize-systems/manage-cost/create-cloud-budgets) to control costs
+- Catch unexpected cost increases with [spending anomaly detection](/well-architected-framework/optimize-systems/manage-cost/detect-cloud-spending-anomalies)
+- Attribute costs accurately with a [cloud resource tagging strategy](/well-architected-framework/optimize-systems/lifecycle-management/tag-cloud-resources)
+- Remove unused automation infrastructure by [decommissioning resources](/well-architected-framework/optimize-systems/lifecycle-management/decommission-infrastructure)
+- Build cost-optimized automation with [CI/CD pipelines](/well-architected-framework/define-and-automate-processes/automate/cicd)
+- Explore [aws_instance](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/instance) for right-sizing compute resources
+- Explore [aws_lambda_function](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_function) for event-driven cleanup automation
+
+External resources:
+
+- [GitHub Actions billing documentation](https://docs.github.com/en/billing/managing-billing-for-github-actions/about-billing-for-github-actions) covers pipeline cost models and optimization strategies
+- [GitLab CI/CD cost management guide](https://docs.gitlab.com/ee/ci/pipelines/cicd_minutes.html) walks through compute minute tracking and optimization
+- [AWS CodeBuild pricing](https://aws.amazon.com/codebuild/pricing/) explains build infrastructure cost models and instance types
+- [AWS S3 lifecycle policies documentation](https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-lifecycle-mgmt.html) covers artifact retention automation
+- [Amazon ECR lifecycle policies guide](https://docs.aws.amazon.com/AmazonECR/latest/userguide/LifecyclePolicies.html) explains container image cleanup strategies
+- [Azure Blob Storage lifecycle management](https://learn.microsoft.com/en-us/azure/storage/blobs/lifecycle-management-overview) covers archival and deletion policies
+
+## Next steps
+
+In this section of Manage cost, you learned about optimizing automation infrastructure costs through efficient CI/CD pipelines, ephemeral resources, and artifact management. Optimize automation infrastructure costs is part of the [Optimize systems](/well-architected-framework/optimize-systems) pillar.
+
+To build a complete cost optimization strategy, implement the following practices:
+
+1. **Establish cost visibility first:** Before optimizing, implement [cloud budgets](/well-architected-framework/optimize-systems/manage-cost/create-cloud-budgets) to track automation spending and [anomaly detection](/well-architected-framework/optimize-systems/manage-cost/detect-cloud-spending-anomalies) to catch unexpected increases.
+
+1. **Build efficient automation workflows:** Implement [CI/CD pipelines](/well-architected-framework/define-and-automate-processes/automate/cicd) with cost optimization in mind from the start, using ephemeral infrastructure and efficient resource allocation.
+
+1. **Tag automation resources:** Use a [cloud resource tagging strategy](/well-architected-framework/optimize-systems/lifecycle-management/tag-cloud-resources) to attribute costs accurately to teams and projects, enabling better cost allocation decisions.
+
+1. **Implement lifecycle management:** Follow [infrastructure decommissioning best practices](/well-architected-framework/optimize-systems/lifecycle-management/decommission-infrastructure) to remove unused automation infrastructure and prevent cost accumulation.
