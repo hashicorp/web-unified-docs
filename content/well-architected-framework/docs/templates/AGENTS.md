@@ -2,6 +2,19 @@
 # Based on:
 # https://www.mintlify.com/blog/how-mintlify-uses-claude-code-as-a-technical-writing-assistant
 
+## About this file
+
+This file contains **writing standards, content patterns, and examples** for creating WAF documentation. It defines what good documentation looks like, not how to review it.
+
+**For review processes:** See [REVIEW_PHASES.md](./REVIEW_PHASES.md) for the step-by-step review workflow. That file references the standards defined here.
+
+**File organization:**
+- **Standards** - Writing rules, formatting requirements, SEO/AI optimization criteria
+- **Patterns** - Document structure, code examples, resource sections
+- **Examples** - Good vs. bad patterns with explanations
+- **Quick Reference Checklist** - Mechanical standards summary (not a review process)
+
+---
 
 ## Goals
 
@@ -662,34 +675,6 @@ build {
 
 ---
 
-## User Success Validation
-
-Before finalizing a document, ask these questions:
-
-### For Decision-Makers
-- [ ] Can they understand the strategic value in < 2 minutes?
-- [ ] Can they articulate why this matters to their organization?
-- [ ] Can they make an informed decision about which approach/tool to use?
-- [ ] Can they confidently send this to their implementers?
-
-### For Implementers
-- [ ] Can they understand what to build/implement?
-- [ ] Do they have concrete examples to adapt?
-- [ ] Can they find the resources to complete implementation?
-- [ ] Would they know what to do next after reading this?
-- [ ] Can they troubleshoot if something goes wrong?
-
-### Critical Test
-**The "Newcomer Test"**: If someone unfamiliar with HashiCorp tools reads this document, can they:
-1. Understand what problem it solves?
-2. Decide if it's right for their use case?
-3. Find enough information to start implementing?
-4. Know where to go for detailed implementation steps?
-
-If the answer to any is "no", the document needs more detail, examples, or resources.
-
----
-
 ## Document Depth Guidelines
 
 Use existing documents as benchmarks for depth:
@@ -756,51 +741,11 @@ Different HashiCorp tools need different documentation approaches:
 
 ---
 
-## Review Process Recommendation
+## Quick Reference Checklist
 
-Follow this order for efficient reviews:
+Use this as a quick reference for writing standards defined in this file. **For the complete review process, see [REVIEW_PHASES.md](./REVIEW_PHASES.md).**
 
-### 1. Structure Check (5 minutes)
-- Frontmatter present and correct?
-- "Why" section exists?
-- Code examples present when they would add value (implementation guides, technical how-tos)?
-- Resources section exists?
-
-### 2. Persona Value (10 minutes)
-- Would decision-makers find strategic value?
-- Would implementers have actionable guidance?
-- Run through User Success Validation questions
-
-### 3. Content Quality (15 minutes)
-- Are code examples (if present) realistic and complete?
-- Do workflow steps connect explicitly?
-- Are there enough details for implementation?
-
-### 4. Writing Standards (10 minutes)
-- Check formatting (bullet dashes, ordered lists, bold titles)
-- Check "the following" before lists
-- Check for passive voice
-
-### 5. SEO/AI Optimization (10 minutes)
-- Meta description length
-- Active voice throughout
-- Explicit outcomes after examples
-- No ambiguous pronouns
-
-### 6. Resources and Links (5 minutes)
-- 5+ HashiCorp resources?
-- Links are specific, not generic?
-- Resources match the content?
-
-**Total: ~55 minutes for thorough review**
-
-For quick reviews, focus on steps 1-3. For publication-ready reviews, do all 6 steps.
-
----
-
-## Review Checklist
-
-Use this checklist when reviewing or creating WAF documents to ensure all guidelines are followed.
+This checklist covers mechanical standards only (formatting, structure, SEO/AI optimization). Content quality and user success validation are covered in the review phases.
 
 ### Document Structure
 - [ ] Frontmatter includes `page_title` and `description`
@@ -812,16 +757,6 @@ Use this checklist when reviewing or creating WAF documents to ensure all guidel
 - [ ] "Next steps" section at end references related documents
 - [ ] HashiCorp resources section with 5+ relevant links
 - [ ] External resources section if applicable
-
-### Content Quality
-- [ ] Content serves both decision-makers (strategic) and implementers (actionable)
-- [ ] Explains the "what", "why", and "how" of the topic
-- [ ] Code examples (when present) show realistic, complete implementations (not just empty base examples)
-- [ ] Code examples (when present) demonstrate actual application/infrastructure packaging or deployment
-- [ ] Document provides enough detail for implementers to be successful
-- [ ] Workflow steps explicitly connect (e.g., Packer output → Terraform input)
-- [ ] Decision guidance uses "Use X when you need..." format with specific criteria
-- [ ] Avoids comparative language ("simpler", "easier") - uses neutral criteria
 
 ### Writing Standards
 - [ ] Second-person voice ("you") throughout
@@ -883,13 +818,5 @@ Use this checklist when reviewing or creating WAF documents to ensure all guidel
 - [ ] External resources section if relevant third-party tools mentioned
 - [ ] All links are specific (not generic dashboards)
 - [ ] Links direct users to exact pages needed for implementation
+- [ ] Link descriptions are optimized and clearly explain what users will find (not "Learn more" or "click here")
 - [ ] Resources organized logically (by tool, by task, or by workflow stage)
-
-### Persona Value Assessment
-- [ ] Decision-makers can understand strategic value and make informed decisions
-- [ ] Decision-makers see clear business outcomes and consequences
-- [ ] Implementers have actionable guidance to follow
-- [ ] Implementers can find resources to complete implementation
-- [ ] Examples bridge the gap between concepts and real implementation
-- [ ] Document acts as a directory to deeper implementation resources
-- [ ] Both personas will be successful after reading the document
