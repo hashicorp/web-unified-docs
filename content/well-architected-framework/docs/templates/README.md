@@ -10,26 +10,21 @@ The templates folder provides a complete system for creating consistent, high-qu
 
 ### Content Templates
 
-**waf-article.mdx**
-- MDX template for individual WAF articles (500-1,200 words)
-- Includes structure for introduction, "Why" section, implementation examples, and resources
-- Provides detailed section-by-section guidance and writing standards checklist
-- Target audience: Individual practice or concept documents
-- When to use: Creating new topic-specific WAF articles
+**DOCUMENT_TEMPLATE.md**
+- Comprehensive template for individual WAF articles (500-1,200 words, typically 700-1,000)
+- Includes MDX template, section-by-section guidance, and writing standards checklist
+- Structure: Introduction, "Why [topic]" section, implementation examples, resources, Next steps
+- Serves both decision-makers (strategic value) and implementers (actionable guidance)
+- Balances prose (explanations, context) with lists (challenges, steps, resources)
+- Target audience: Standard WAF articles for practices, concepts, and implementations
+- When to use: Creating new topic-specific WAF articles (most common use case)
 
 **pillar-overview.mdx**
 - MDX template for pillar overview pages
 - Includes structure for pillar introduction, topics, rationale, audience, timing, and framework relationships
 - More strategic and comprehensive than individual articles
 - Target audience: High-level pillar landing pages
-- When to use: Creating new pillar overview documents
-
-**DOCUMENT_TEMPLATE.md**
-- Simplified template focusing on atomic, single-topic articles
-- Emphasizes conversational, tutorial-like tone with 1-2 sections maximum
-- Focuses on practical implementation with natural prose (avoiding excessive lists)
-- Target audience: Short, focused WAF articles adapted from tutorial content
-- When to use: Creating concise, implementation-focused documents
+- When to use: Creating new pillar overview documents (rare - only for new pillars)
 
 ### AI Assistant Configurations
 
@@ -84,9 +79,8 @@ The templates folder provides a complete system for creating consistent, high-qu
 ### Creating a New WAF Article
 
 1. Choose the appropriate template:
-   - Use **waf-article.mdx** for standard 500-1,200 word articles
-   - Use **DOCUMENT_TEMPLATE.md** for shorter, atomic articles
-   - Use **pillar-overview.mdx** for pillar landing pages
+   - Use **DOCUMENT_TEMPLATE.md** for standard WAF articles (most common)
+   - Use **pillar-overview.mdx** for pillar landing pages (rare)
 
 2. Reference **AGENTS.md** for:
    - Understanding target personas (decision-makers and implementers)
@@ -121,8 +115,9 @@ The templates folder provides a complete system for creating consistent, high-qu
 ### Content Philosophy
 - WAF docs explain the **why and what**, show representative examples, then direct to tutorials for the **how**
 - Documents are directories, not tutorials
-- Target word count: 500-1,200 words for articles
+- Target word count: 500-1,200 words for articles (typically 700-1,000 for comprehensive coverage)
 - Serve two personas: decision-makers (strategic understanding) and implementers (actionable guidance)
+- Balance prose and lists: Use prose for explanations and context, lists for challenges, steps, and resources
 
 ### Writing Standards Hierarchy
 1. **HashiCorp writing standards** (styleguide.md) supersede all other standards
