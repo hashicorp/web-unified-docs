@@ -26,6 +26,8 @@ help:
 # to point to the correct directory. For example, I ran the following to set up the correct path:
 # export PATH=$PATH:/Users/user.name/go/bin
 # Your go path may be different depending on your OS and go installation method
+# After setting up your go path, you can run the following command to generate partials docs:
+# make generate
 
 .PHONY: install-gen-deps
 install-gen-deps: ## Install dependencies for code generation
