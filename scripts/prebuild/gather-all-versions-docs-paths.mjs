@@ -109,32 +109,34 @@ export async function getProductPaths(
 			} else {
 				const itemName = item.split('.')[0]
 
+				// TODO: Uncomment these lines in future PR to serve frontmatter data from API
 				// Read frontmatter from the MDX file
-				let frontmatter = {}
-				try {
-					const fileContent = fs.readFileSync(itemPath, 'utf-8')
-					const frontmatterMatch = fileContent.match(/^---\n([\s\S]*?)\n---/)
-					if (frontmatterMatch) {
-						const frontmatterText = frontmatterMatch[1]
-						frontmatterText.split('\n').forEach((line) => {
-							const [key, ...valueParts] = line.split(':')
-							if (key && valueParts.length > 0) {
-								const value = valueParts.join(':').trim()
-								frontmatter[key.trim()] = value
-							}
-						})
-					}
-				} catch (error) {
-					console.error(`Error reading frontmatter from ${itemPath}:`, error)
-				}
+				// let frontmatter = {}
+				// try {
+				// 	const fileContent = fs.readFileSync(itemPath, 'utf-8')
+				// 	const frontmatterMatch = fileContent.match(/^---\n([\s\S]*?)\n---/)
+				// 	if (frontmatterMatch) {
+				// 		const frontmatterText = frontmatterMatch[1]
+				// 		frontmatterText.split('\n').forEach((line) => {
+				// 			const [key, ...valueParts] = line.split(':')
+				// 			if (key && valueParts.length > 0) {
+				// 				const value = valueParts.join(':').trim()
+				// 				frontmatter[key.trim()] = value
+				// 			}
+				// 		})
+				// 	}
+				// } catch (error) {
+				// 	console.error(`Error reading frontmatter from ${itemPath}:`, error)
+				// }
 
 				if (itemName === 'index') {
 					apiPaths.push({
 						path: path.join(productSlug, relativePath),
 						itemPath,
+						// TODO: Uncomment these lines in future PR to serve frontmatter data from API
 						// add date metadata from frontmatter if it exists
-						created_at: frontmatter.created_at || null,
-						last_modified: frontmatter.last_modified || null,
+						// created_at: frontmatter.created_at || null,
+						// last_modified: frontmatter.last_modified || null,
 					})
 					return
 				}
@@ -142,9 +144,10 @@ export async function getProductPaths(
 				apiPaths.push({
 					path: path.join(productSlug, relativePath, itemName),
 					itemPath,
+					// TODO: Uncomment these lines in future PR to serve frontmatter data from API
 					// add date metadata from frontmatter if it exists
-					created_at: frontmatter.created_at || null,
-					last_modified: frontmatter.last_modified || null,
+					// created_at: frontmatter.created_at || null,
+					// last_modified: frontmatter.last_modified || null,
 				})
 			}
 		})
@@ -155,10 +158,11 @@ export async function getProductPaths(
 	// it is expensive, we only do it in production. Everything we use a default date of '2025-06-03T18:02:21+
 	if (!getRealFileChangedMetadata) {
 		apiPaths.forEach((apiPath) => {
-			if (apiPath.created_at == null) {
-				// We use a default date of '2025-06-03T18:02:21+00:00' for the created_at field
-				apiPath.created_at = '2025-06-03T18:02:21+00:00'
-			}
+			// TODO: Uncomment these lines in future PR to serve frontmatter data from API
+			// if (apiPath.created_at == null) {
+			// We use a default date of '2025-06-03T18:02:21+00:00' for the created_at field
+			apiPath.created_at = '2025-06-03T18:02:21+00:00'
+			// }
 		})
 
 		return apiPaths
@@ -168,16 +172,17 @@ export async function getProductPaths(
 		`Creating change history for files in ${directory}`,
 		apiPaths,
 		async (apiPath) => {
-			if (apiPath.created_at == null) {
-				// TODO: Store this data in frontmatter of each file instead
-				// Normalize path separators for cross-platform compatibility
-				const normalizedPath = apiPath.itemPath.replace(/\\/g, '/')
-				const gitLogTime = await execAsync(
-					`git log --format=%cI --max-count=1 -- "${normalizedPath}"`,
-				)
+			// TODO: Uncomment these lines in future PR to serve frontmatter data from API
+			// if (apiPath.created_at == null) {
+			// TODO: Store this data in frontmatter of each file instead
+			// Normalize path separators for cross-platform compatibility
+			const normalizedPath = apiPath.itemPath.replace(/\\/g, '/')
+			const gitLogTime = await execAsync(
+				`git log --format=%cI --max-count=1 -- "${normalizedPath}"`,
+			)
 
-				apiPath.created_at = gitLogTime.stdout.slice(0, -1)
-			}
+			apiPath.created_at = gitLogTime.stdout.slice(0, -1)
+			// }
 		},
 		{ loggingEnabled: false },
 	)

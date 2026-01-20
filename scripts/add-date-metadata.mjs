@@ -95,11 +95,6 @@ function addDateMetadata(filePath) {
 		return
 	}
 
-	// TODO: Maybe take into account the release stage file path?
-	// TODO: How should we deploy this? All at once? Or with only a specific product and version to make sure that the whole flow to dev-portal metadata works correctly
-	// TODO: Maybe a bug in scripts/prebuild/gather-all-versions-docs-paths.mjs?
-	// TODO: Check the flow of null values for when serving through the API
-
 	// Remove existing auto-generated metadata if present
 	const autoGenRegex =
 		/# START AUTO GENERATED METADATA, DO NOT EDIT\ncreated_at:.*\nlast_modified:.*\n# END AUTO GENERATED METADATA/g
