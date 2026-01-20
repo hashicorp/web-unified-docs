@@ -9,11 +9,13 @@
  * Usage:
  *   node scripts/add-date-metadata.mjs ./content/terraform/v1.5.x/docs/cli/cloud/migrating.mdx
  *   node scripts/add-date-metadata.mjs ./content/terraform/v1.5.x/
+ *   node scripts/add-date-metadata.mjs "./content/terraform/v1.15.x (alpha)/docs/cli/index.mdx"
  */
 
 import { execSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
+import grayMatter from 'gray-matter'
 
 /**
  * Get the creation date of a file from git history
@@ -55,6 +57,19 @@ function getLastModifiedDate(filePath) {
 	}
 }
 
+const parseMarkdownFrontMatter = (filePath) => {
+	try {
+		const {
+			content: markdownSource,
+			matter,
+			data: metadata,
+		} = grayMatter.read(filePath)
+		return { markdownSource, matter, metadata }
+	} catch (error) {
+		return { error: `Failed to parse Markdown front-matter: ${error}` }
+	}
+}
+
 /**
  * Add or update date metadata in MDX frontmatter
  * @param {string} filePath - Path to the MDX file
@@ -70,25 +85,16 @@ function addDateMetadata(filePath) {
 		return
 	}
 
-	let content = fs.readFileSync(filePath, 'utf-8')
+	const { markdownSource, matter, metadata } =
+		parseMarkdownFrontMatter(filePath)
+	let frontmatter = matter
 
 	// Check if file has frontmatter
-	if (!content.startsWith('---')) {
+	if (Object.keys(metadata).length === 0) {
 		console.warn(`⚠️  Skipping ${filePath}: No frontmatter found`)
 		return
 	}
 
-	// Split content into frontmatter and body
-	const parts = content.split('---')
-	if (parts.length < 3) {
-		console.warn(`⚠️  Skipping ${filePath}: Invalid frontmatter structure`)
-		return
-	}
-
-	let frontmatter = parts[1]
-	const body = parts.slice(2).join('---')
-
-	// TODO: if the frontmatter already has a created_at then skip adding it
 	// TODO: Maybe take into account the release stage file path?
 	// TODO: How should we deploy this? All at once? Or with only a specific product and version to make sure that the whole flow to dev-portal metadata works correctly
 	// TODO: Maybe a bug in scripts/prebuild/gather-all-versions-docs-paths.mjs?
@@ -96,15 +102,11 @@ function addDateMetadata(filePath) {
 
 	// Remove existing auto-generated metadata if present
 	const autoGenRegex =
-		/# auto generated metadata, do not change!\ncreated_at:.*\nlast_modified:.*\n# end of auto generated metadata\n/g
+		/# START AUTO GENERATED METADATA, DO NOT EDIT\ncreated_at:.*\nlast_modified:.*\n# END AUTO GENERATED METADATA/g
 	frontmatter = frontmatter.replace(autoGenRegex, '')
 
 	// Add new metadata at the end of frontmatter (before the closing ---)
-	const metadataBlock = `# auto generated metadata, do not change!
-created_at: ${createdDate}
-last_modified: ${lastModifiedDate}
-# end of auto generated metadata
-`
+	const metadataBlock = `# START AUTO GENERATED METADATA, DO NOT EDIT\ncreated_at: ${createdDate}\nlast_modified: ${lastModifiedDate}\n# END AUTO GENERATED METADATA\n`
 
 	// Ensure frontmatter ends with a newline before adding metadata
 	if (!frontmatter.endsWith('\n')) {
@@ -114,7 +116,7 @@ last_modified: ${lastModifiedDate}
 	frontmatter += metadataBlock
 
 	// Reconstruct the file
-	const newContent = `---${frontmatter}---${body}`
+	const newContent = `---${frontmatter}---\n${markdownSource}`
 
 	fs.writeFileSync(filePath, newContent, 'utf-8')
 	console.log(`✅ Updated: ${filePath}`)
