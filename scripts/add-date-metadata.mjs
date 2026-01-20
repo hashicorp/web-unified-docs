@@ -31,7 +31,10 @@ function getCreatedDate(filePath) {
 		)
 		return result.trim() || null
 	} catch (error) {
-		console.error(`Error getting created date for ${filePath}:`, error.message)
+		console.error(
+			`❌ Error getting created date for ${filePath}:`,
+			error.message,
+		)
 		return null
 	}
 }
@@ -50,7 +53,7 @@ function getLastModifiedDate(filePath) {
 		return result.trim() || null
 	} catch (error) {
 		console.error(
-			`Error getting last modified date for ${filePath}:`,
+			`❌ Error getting last modified date for ${filePath}:`,
 			error.message,
 		)
 		return null
@@ -66,7 +69,10 @@ const parseMarkdownFrontMatter = (filePath) => {
 		} = grayMatter.read(filePath)
 		return { markdownSource, matter, metadata }
 	} catch (error) {
-		return { error: `Failed to parse Markdown front-matter: ${error}` }
+		console.error(
+			`❌ Failed to parse Markdown front-matter for ${filePath}: ${error}`,
+		)
+		return null
 	}
 }
 
@@ -75,8 +81,6 @@ const parseMarkdownFrontMatter = (filePath) => {
  * @param {string} filePath - Path to the MDX file
  */
 function addDateMetadata(filePath) {
-	console.log(`Processing: ${filePath}`)
-
 	const createdDate = getCreatedDate(filePath)
 	const lastModifiedDate = getLastModifiedDate(filePath)
 
