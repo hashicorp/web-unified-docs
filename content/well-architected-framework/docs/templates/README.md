@@ -132,19 +132,79 @@ The templates folder provides a complete system for creating consistent, high-qu
 - Check existing patterns for consistency
 - Start with minimal, focused changes
 
-## File Dependencies
+## JIRA Ticket Creation
 
-- **REVIEW_PHASES.md** references → **AGENTS.md** (for detailed rules)
-- **AGENTS.md** references → **styleguide.md** (for complete style guide)
-- **DOCUMENT_TEMPLATE.md** references → **AGENTS.md** (for persona descriptions)
-- All templates follow standards defined in **AGENTS.md** and **styleguide.md**
+Create standardized WAF documentation tasks using the JIRA ticket creation tools in the `jira_tickets/` folder.
 
-## Additional Resources
+### Prerequisites
 
-- Example documents referenced in templates:
-  - `/docs/optimize-systems/manage-cost/create-cloud-budgets.mdx`
-  - `/docs/optimize-systems/manage-cost/detect-cloud-spending-anomalies.mdx`
-  - `/docs/define-and-automate-processes/automate/packaging.mdx`
+1. **Python 3** - Required for converting plain text descriptions to JIRA format
+   ```bash
+   python3 --version  # Should be 3.6 or higher
+   ```
+
+2. **jq** - Required for JSON manipulation
+   ```bash
+   # macOS
+   brew install jq
+
+   # Linux
+   sudo apt-get install jq
+   ```
+
+3. **JIRA credentials** - Set up as environment variables:
+   ```bash
+   export JIRA_EMAIL="your-email@ibm.com"
+   export JIRA_API_TOKEN="your-api-token"
+   ```
+
+   Generate an API token at: https://id.atlassian.com/manage-profile/security/api-tokens
+
+### Quick Start
+
+1. **Copy the description template:**
+   ```bash
+   cd jira_tickets
+   cp description_template my_article_name
+   ```
+
+2. **Edit your description file:**
+   ```bash
+   vim my_article_name
+   ```
+
+3. **Create the JIRA ticket:**
+   ```bash
+   cd scripts
+   ./create_jira.sh \
+     -t "Your Article Title" \
+     -p 2 \
+     --products "Terraform, Vault, Packer" \
+     -q 2 \
+     --product-line Security \
+     --pillar-label secure_systems \
+     -d ../my_article_name
+   ```
+
+   Available products: Terraform, Vault, Packer, Nomad, Consul, Boundary, Waypoint
+
+### Labels
+
+The script allows you to set labels for organization:
+- **Quarter**: 2026Q1-2026Q4, 2027Q1-2027Q2 (default: 2026Q2)
+- **Product line**: Security, IPL, Runtime, WAF (default: WAF)
+- **Pillar**: optimize_systems, secure_systems, define_and_automate_systems, design_resilient_systems
+- **Default**: `waf` label is always included
+
+### Details
+
+See `jira_tickets/README.md` for:
+- Complete documentation
+- Description file formatting guide
+- All command-line options and label choices
+- WAF pillar options (Optimize Systems, Secure Systems, Define and Automate Processes, Design Resilient Systems)
+- How to find user IDs for assignee field
+- What gets created in JIRA
 
 ## Contributing
 

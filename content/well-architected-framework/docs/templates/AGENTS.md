@@ -54,12 +54,13 @@ Suppose the decision-maker decides that Terraform and Packer fit their organizat
 - **Link to existing documents instead of duplicating content:** When a topic is already covered comprehensively in another WAF document, link to that document rather than repeating the information. Provide brief context (1-2 sentences) explaining what the linked document covers and why it's relevant, then direct users there for complete details. This approach maintains a single source of truth, reduces maintenance burden, and helps users discover related content. Only duplicate content when there's a strategic reason, such as providing a different perspective or addressing a different persona's needs.
 - Check existing patterns for consistency
 - Start by making the smallest reasonable changes
-- **Showcase the full HashiCorp toolset when it provides value:** When writing about automation, infrastructure, or workflows, consider the complete HashiCorp stack (Terraform, Packer, Vault, Consul, Nomad, Boundary, Waypoint, etc.) and include tools where they naturally fit the use case. Only include tools when they solve a real problem in the document's context - never force tools just to mention them. Each tool should address a specific challenge that implementers face. Examples:
+- **Showcase the full HashiCorp and IBM portfolio when it provides value:** When writing about automation, infrastructure, or workflows, consider the complete HashiCorp stack (Terraform, Packer, Vault, Consul, Nomad, Boundary) and complementary IBM portfolio tools (Ansible, OpenShift). Only include tools when they solve a real problem in the document's context - never force tools just to mention them. Each tool should address a specific challenge that implementers face. Examples:
   - Vault when discussing secrets in automation scripts
   - Consul when services need discovery or health checking
   - Nomad when orchestrating application deployments
   - Boundary when discussing secure access to infrastructure
-  - Waypoint when enabling developer self-service
+  - Ansible when discussing configuration management alongside infrastructure provisioning
+  - OpenShift when discussing container orchestration in enterprise environments
 
 ## Frontmatter requirements for pages
 - title: Clear, descriptive page title
@@ -215,7 +216,28 @@ Based on successful WAF documents, use these patterns:
 - Use absolute URLs for internal links
 - Include untested code examples
 - Make assumptions - always ask for clarification
-- Mention or reference HashiCorp Waypoint
+
+## IBM portfolio tools guidance
+
+HashiCorp is part of the IBM portfolio alongside Red Hat (Ansible, OpenShift) and other automation tools. When IBM portfolio tools provide value in a workflow, mention them naturally:
+
+**When to mention IBM portfolio tools:**
+- Ansible: Configuration management that complements infrastructure provisioning (Terraform provisions infrastructure, Ansible configures applications)
+- OpenShift: Container orchestration in enterprise environments (alternative to or alongside Nomad/Kubernetes)
+- Red Hat Enterprise Linux: Base OS for golden images built with Packer
+
+**How to mention IBM portfolio tools:**
+- Treat them as complementary tools, not competitors
+- Focus on integration points and workflows (e.g., "After Terraform provisions infrastructure, use Ansible to configure application settings")
+- Link to external documentation (Ansible docs, OpenShift docs) in External resources section
+- Don't force IBM tools into documents where they don't naturally fit
+- Maintain focus on HashiCorp tools as the primary subject
+
+**Example integration points:**
+- Packer builds golden images → Terraform deploys infrastructure → Ansible configures applications
+- Terraform provisions cloud resources → Ansible applies CIS benchmarks to running systems
+- Vault provides secrets → Ansible playbooks consume secrets during configuration
+- Terraform deploys to OpenShift clusters → Nomad alternative for container orchestration
 
 ## SEO
 
