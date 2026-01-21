@@ -44,10 +44,8 @@ merged.
 
 Jira: [<jira-ticket-number>]  // for example, Jira: [CE-1001] GH-Jira integration generates the link and updates the Jira ticket.
 GitHub Issue: <issue-link>
-Deploy previews:
 
-The bot does publish a root-level link to the deploy preview, 
-but it's nice to include a direct link to your content so the reviewers don't have to navigate to your pages.
+The bot does publish a root-level link to the deploy preview. The link changes with each build.
 -->
 
 ## Contributor checklists
