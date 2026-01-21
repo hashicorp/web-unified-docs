@@ -94,7 +94,7 @@ function addDateMetadata(filePath) {
 	let frontmatter = matter
 
 	// Check if file has frontmatter
-	if (Object.keys(metadata).length === 0) {
+	if (Object.keys(metadata).length === 0 || frontmatter === undefined) {
 		console.warn(`⚠️  Skipping ${filePath}: No frontmatter found`)
 		return
 	}
