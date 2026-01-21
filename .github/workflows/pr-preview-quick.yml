@@ -1,0 +1,398 @@
+name: Quick Preview Build (PR)
+run-name: 'Quick Preview for "${{ github.event.pull_request.title }}" (#${{ github.event.pull_request.number }})'
+
+on:
+  # Change to pull_request for testing, pull_request_target for production
+  # pull_request_target only works from base branch context, use pull_request to test changes
+  pull_request:
+    types: [opened, synchronize]
+  # TODO: Change back to pull_request_target before merging for security
+
+concurrency:
+  group: ${{ github.workflow }}-${{github.event_name}}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  pull-requests: write
+  contents: read # for embargoed content repos
+
+jobs:
+  deploy-unified-docs-api-preview:
+    name: Deploy Unified Docs API Preview (Quick Preview)
+    runs-on: ubuntu-latest
+    outputs:
+      preview_url: ${{ steps.unified_docs_preview_url.outputs.preview_url }}
+      preview_url_to_fetch_deployment: ${{ steps.unified_docs_preview_url.outputs.preview_url_to_fetch_deployment }}
+      inspector_url: ${{ steps.unified_docs_inspector_url.outputs.inspector_url }}
+      created_utc: ${{ steps.unified_docs_preview_url.outputs.created_utc }}
+      build_time: ${{ steps.quick_preview_detect.outputs.build_time }}
+      changed_files: ${{ steps.quick_preview_detect.outputs.changed_files }}
+      deleted_files: ${{ steps.quick_preview_detect.outputs.deleted_files }}
+      changed_docs: ${{ steps.quick_preview_detect.outputs.changed_docs }}
+      changed_nav: ${{ steps.quick_preview_detect.outputs.changed_nav }}
+    steps:
+      - name: Initial comment on PR
+        uses: marocchino/sticky-pull-request-comment@52423e01640425a022ef5fd42c6fb5f633a02728 # v2.9.1
+        with:
+          header: preview-notice
+          message: |
+            ## Deploying Vercel Previews (Quick Preview Mode)...
+            | Name | Status | Preview | Updated (UTC) |
+            | :--- | :----- | :------ | :------------ |
+            | Dev Portal | 🔄 Building ([Inspect](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})) | --- | --- |
+            | Unified Docs API | 🔄 Building ([Inspect](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})) | --- | --- |
+
+      - name: Security check for forked PRs
+        run: |
+          if [ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]; then
+            echo "⚠️ This is a PR from a forked repo. Checking for non-content changes..."
+            NON_CONTENT_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -v '^content/' || true)
+            if [ -n "$NON_CONTENT_FILES" ]; then
+              echo "❌ This is a PR from a forked repo with changes outside of content/**. Please only edit files in the content/** directory." >> $GITHUB_STEP_SUMMARY
+              exit 1
+            fi
+            echo "✅ Forked PR only modifies content/** - proceeding." >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Checkout hashicorp/web-unified-docs
+        uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0  # Full history needed for git diff
+
+      - name: Setup Node.js
+        uses: actions/setup-node@1d0ff469b7ec7b3cb9d8673fde0c81c44821de2a # v4.2.0
+        with:
+          cache: 'npm'
+          node-version-file: 'package.json'
+
+      - name: Cache Next.js build
+        uses: actions/cache@d4323d4df104b026a6aa633fdb11d772146be0bf # v4.2.2
+        with:
+          path: ${{ github.workspace }}/.next/cache
+          key: ${{ runner.os }}-nextjs-build-${{ hashFiles('package-lock.json', 'next.config.js') }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Fetch base branch for git diff
+        run: git fetch origin ${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}
+
+      - name: Detect changed files and generate manifest
+        id: quick_preview_detect
+        run: |
+          npm run quick-preview:detect
+          
+          # Extract and output stats
+          STATS=$(cat public/changedfiles.json | jq -r '.stats')
+          echo "changed_files=$(echo $STATS | jq -r '.changed')" >> $GITHUB_OUTPUT
+          echo "deleted_files=$(echo $STATS | jq -r '.deleted')" >> $GITHUB_OUTPUT
+          echo "changed_docs=$(echo $STATS | jq -r '.docs')" >> $GITHUB_OUTPUT
+          echo "changed_nav=$(echo $STATS | jq -r '.navData')" >> $GITHUB_OUTPUT
+          
+          echo "### Quick Preview Statistics" >> $GITHUB_STEP_SUMMARY
+          echo "- Changed: $(echo $STATS | jq -r '.changed')" >> $GITHUB_STEP_SUMMARY
+          echo "- Deleted: $(echo $STATS | jq -r '.deleted')" >> $GITHUB_STEP_SUMMARY
+          echo "- Docs: $(echo $STATS | jq -r '.docs')" >> $GITHUB_STEP_SUMMARY
+          echo "- Nav data: $(echo $STATS | jq -r '.navData')" >> $GITHUB_STEP_SUMMARY
+
+      - name: Generate metadata files and run selective prebuild
+        run: |
+          node scripts/prebuild/run-prebuild.mjs --only-metadata
+          npm run quick-preview:build
+        env:
+          BASE_BRANCH: ${{ github.base_ref }}
+
+      - name: Install Vercel CLI
+        run: npm i --global vercel@latest
+
+      - name: Link web-unified-docs Vercel Project
+        run: vercel link --yes --project web-unified-docs --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Pull Vercel Environment Information
+        run: vercel pull --yes --environment=preview --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Temporarily remove prebuild script to prevent npm lifecycle
+        run: |
+          jq '.scripts.prebuild_original = .scripts.prebuild | del(.scripts.prebuild)' package.json > package.json.tmp
+          mv package.json.tmp package.json
+
+      - name: Build with Vercel CLI
+        run: vercel build --target=preview --token=${{ secrets.VERCEL_TOKEN }}
+        env:
+          QUICK_PREVIEW: true
+          QUICK_PREVIEW_FALLBACK_URL: https://web-unified-docs-hashicorp.vercel.app
+          BASE_BRANCH: ${{ github.base_ref }}
+
+      - name: Restore prebuild script
+        if: always()
+        run: |
+          jq '.scripts.prebuild = .scripts.prebuild_original | del(.scripts.prebuild_original)' package.json > package.json.tmp
+          mv package.json.tmp package.json
+
+      - name: Deploy Project Artifacts and Set GitHub Outputs
+        id: unified_docs_preview_url
+        run: |
+          preview_url=$(vercel deploy \
+            --prebuilt \
+            --target=preview \
+            --token=${{ secrets.VERCEL_TOKEN }} \
+            --archive=tgz \
+            --env QUICK_PREVIEW=true \
+            --env QUICK_PREVIEW_FALLBACK_URL=https://web-unified-docs-hashicorp.vercel.app)
+          echo "preview_url=$preview_url" >> $GITHUB_OUTPUT
+
+          created_utc=$(date -u)
+          echo "created_utc=$created_utc" >> $GITHUB_OUTPUT
+
+          preview_url_to_fetch_deployment=$(echo "$preview_url" | sed 's/^https:\/\///')
+          echo "preview_url_to_fetch_deployment=$preview_url_to_fetch_deployment" >> $GITHUB_OUTPUT
+
+          echo "deployment url is $preview_url"
+          echo "deployment url for REST API request is $preview_url_to_fetch_deployment"
+          echo "created at is $created_utc"
+
+      - name: Vercel REST API Request to Fetch Inspect URL and Set GitHub Output
+        id: unified_docs_inspector_url
+        run: |
+          response=$(curl -sS -G "https://api.vercel.com/v13/deployments/${{ steps.unified_docs_preview_url.outputs.preview_url_to_fetch_deployment }}" \
+            -H "Authorization: Bearer ${{ secrets.VERCEL_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d "teamId=${{ secrets.VERCEL_TEAM_ID }}")
+
+          inspector_url=$(echo "$response" | jq -r ".inspectorUrl")
+          echo "inspector_url=$inspector_url" >> $GITHUB_OUTPUT
+
+          echo "Inspect URL is $inspector_url"
+
+      - name: Update Comment with Unified Docs API Data
+        uses: marocchino/sticky-pull-request-comment@52423e01640425a022ef5fd42c6fb5f633a02728 # v2.9.1
+        with:
+          header: preview-notice
+          message: |
+            ## Vercel Previews Deployed (Quick Preview Mode)
+            | Name | Status | Preview | Updated (UTC) |
+            | :--- | :--- | :--- | :--- |
+            | Dev Portal | 🔄 Building ([Inspect](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})) | --- | --- |
+            | Unified Docs API | ✅ Ready ([Inspect](${{ steps.unified_docs_inspector_url.outputs.inspector_url }} )) | [Visit Preview](${{ steps.unified_docs_preview_url.outputs.preview_url }}) | ${{ steps.unified_docs_preview_url.outputs.created_utc }} |
+            
+            **Quick Preview Stats:** ${{ steps.quick_preview_detect.outputs.changed_docs }} docs processed (vs ~72,000 in full build)
+
+  deploy-dev-portal-preview:
+    name: Deploy Dev Portal Preview
+    runs-on: ubuntu-latest
+    needs: [deploy-unified-docs-api-preview]
+    outputs:
+      preview_url: ${{ steps.deploy_dev_portal_preview.outputs.preview_url }}
+    steps:
+      - name: Checkout hashicorp/dev-portal (Frontend)
+        uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
+        with:
+          repository: hashicorp/dev-portal
+          path: ./unified-docs-frontend-preview
+
+      - name: Setup Node.js
+        uses: actions/setup-node@1d0ff469b7ec7b3cb9d8673fde0c81c44821de2a # v4.2.0
+        with:
+          cache: 'npm'
+          cache-dependency-path: 'unified-docs-frontend-preview/package-lock.json'
+          node-version-file: 'unified-docs-frontend-preview/package.json'
+
+      - name: Cache Next.js build
+        uses: actions/cache@d4323d4df104b026a6aa633fdb11d772146be0bf # v4.2.2
+        with:
+          path: ${{ github.workspace }}/unified-docs-frontend-preview/.next/cache
+          key: ${{ runner.os }}-nextjs-build-devportal-${{ hashFiles('unified-docs-frontend-preview/package-lock.json', 'unified-docs-frontend-preview/next.config.js') }}
+
+      - name: Setup Vercel CLI
+        run: npm i --global vercel@latest
+
+      - run: vercel pull --yes --environment=preview --scope=hashicorp --token=${{ secrets.VERCEL_TOKEN }}
+        working-directory: unified-docs-frontend-preview
+
+      - name: inject env vars
+        run: |
+          cd unified-docs-frontend-preview
+          echo "HASHI_ENV=unified-docs-sandbox" >> .env
+          echo "UNIFIED_DOCS_API=${{ needs.deploy-unified-docs-api-preview.outputs.preview_url }}" >> .env
+          echo "VERCEL_AUTOMATION_BYPASS_SECRET=${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}" >> .env
+
+      - name: Build dev-portal
+        uses: nick-fields/retry@7152eba30c6575329ac0576536151aca5a72780e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.CI_GITHUB_TOKEN }}
+        with:
+          shell: bash
+          timeout_minutes: 10
+          max_attempts: 2
+          command: |
+            cd unified-docs-frontend-preview
+            vercel build --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Deploy Project Artifacts and Set GitHub Outputs
+        id: deploy_dev_portal_preview
+        run: |
+          preview_url=$(vercel deploy --prebuilt --archive=tgz --scope=hashicorp --token=${{ secrets.VERCEL_TOKEN }})
+          echo "preview_url=$preview_url" >> $GITHUB_OUTPUT
+
+          created_utc=$(date -u)
+          echo "created_utc=$created_utc" >> $GITHUB_OUTPUT
+
+          preview_url_to_fetch_deployment=$(echo "$preview_url" | sed 's/^https:\/\///')
+          echo "preview_url_to_fetch_deployment=$preview_url_to_fetch_deployment" >> $GITHUB_OUTPUT
+
+          echo "deployment url is $preview_url"
+          echo "deployment url for REST API request is $preview_url_to_fetch_deployment"
+          echo "created at is $created_utc"
+        working-directory: unified-docs-frontend-preview
+
+      - name: Vercel REST API Request to Fetch Inspect URL and Set GitHub Output
+        id: dev_portal_inspector_url
+        run: |
+          response=$(curl -sS -G "https://api.vercel.com/v13/deployments/${{ steps.deploy_dev_portal_preview.outputs.preview_url_to_fetch_deployment }}" \
+            -H "Authorization: Bearer ${{ secrets.VERCEL_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d "teamId=${{ secrets.VERCEL_TEAM_ID }}")
+          inspector_url=$(echo "$response" | jq -r ".inspectorUrl")
+          echo "inspector_url=$inspector_url" >> $GITHUB_OUTPUT
+
+          echo "Inspect URL is $inspector_url"
+
+      - name: Update PR Comment with Dev Portal Data and Quick Preview Stats
+        uses: marocchino/sticky-pull-request-comment@52423e01640425a022ef5fd42c6fb5f633a02728 # v2.9.1
+        with:
+          header: preview-notice
+          message: |
+            ## Vercel Previews Deployed (Quick Preview Mode)
+            | Name | Status | Preview | Updated (UTC) |
+            | :--- | :--- | :--- | :--- |
+            | Dev Portal | ✅ Ready ([Inspect](${{ steps.dev_portal_inspector_url.outputs.inspector_url }})) | [Visit Preview](${{ steps.deploy_dev_portal_preview.outputs.preview_url }}) | ${{ steps.deploy_dev_portal_preview.outputs.created_utc }} |
+            | Unified Docs API | ✅ Ready ([Inspect](${{ needs.deploy-unified-docs-api-preview.outputs.inspector_url }} )) | [Visit Preview](${{ needs.deploy-unified-docs-api-preview.outputs.preview_url }}) | ${{ needs.deploy-unified-docs-api-preview.outputs.created_utc }} |
+            
+            ### ⚡ Quick Preview Statistics
+            - **Files changed:** ${{ needs.deploy-unified-docs-api-preview.outputs.changed_files }}
+            - **Files deleted:** ${{ needs.deploy-unified-docs-api-preview.outputs.deleted_files }}
+            - **Docs processed:** ${{ needs.deploy-unified-docs-api-preview.outputs.changed_docs }} (vs ~72,000 in full build)
+            - **Nav data processed:** ${{ needs.deploy-unified-docs-api-preview.outputs.changed_nav }}
+            
+            **Note:** Unchanged content is served from production. Only your changes were built (~95% faster).
+
+  check-links:
+    name: Run Link Checker
+    needs: [deploy-unified-docs-api-preview, deploy-dev-portal-preview]
+    if: needs.deploy-unified-docs-api-preview.outputs.changed_docs > 0
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Get list of changed markdown files
+        id: get-files
+        run: |
+          FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | grep '\.mdx$' | tr '\n' ' ')
+          echo "files=$FILES" >> $GITHUB_OUTPUT
+          echo "Checking links in files: $FILES"
+
+      - name: Run lychee link checker
+        id: lychee
+        uses: lycheeverse/lychee-action@f613c4a64e50d792e0b31ec34bbcbba12263c6a6 # v2.3.0
+        with:
+          args: >-
+            ${{ steps.get-files.outputs.files }}
+            -b ${{ needs.deploy-dev-portal-preview.outputs.preview_url }}
+            --exclude-all-private
+            --exclude '\.(svg|gif|jpg|png)'
+            --exclude 'gnu\.org'
+            --accept 200,408,429
+            --timeout=60
+            --max-concurrency 24
+            --no-progress
+            --verbose
+            --header x-vercel-protection-bypass=${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+          fail: false
+          failIfEmpty: false
+        env:
+          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+
+      - name: Print lychee exit code
+        run: |
+          echo "Lychee exit code:"
+          echo ${{ steps.lychee.outputs.exit_code }}
+
+      - name: Add Broken Link Checker header to lychee output
+        if: steps.lychee.outputs.exit_code != 0
+        run: |
+          cat > ./lychee/header.md << 'EOF'
+          ## Broken Link Checker
+
+          **This PR contains broken links, but won't be blocked.** Use this report to improve content quality:
+
+          ### Quick Actions
+          - **Internal links** (HashiCorp sites): Please fix these - they impact user experience
+          - **External links**: Consider if these are essential or can be updated/removed
+          - **Temporary issues**: External sites may recover - check again before merging
+
+          ### Need Help?
+          - Review our [Broken Link Monitoring docs](.github/BROKEN_LINK_MONITORING.md)
+          - Check the [monthly production report](https://github.com/hashicorp/web-unified-docs/issues?q=label%3Alink-checker-report+is%3Aopen) for context
+
+          ---
+
+          EOF
+          cat ./lychee/header.md ./lychee/out.md > ./lychee/final.md
+          mv ./lychee/final.md ./lychee/out.md
+
+      - name: lychee output size check
+        id: char-count
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        if: steps.lychee.outputs.exit_code != 0
+        with:
+          script: |
+            const size = require('fs').readFileSync('./lychee/out.md').length;
+            console.log(`${size} characters`);
+            core.setOutput('size', size);
+
+      - name: Upload lychee report to GitHub artifacts
+        id: upload-artifact
+        if: steps.lychee.outputs.exit_code != 0 && fromJson(steps.char-count.outputs.size) >= fromJson(vars.BROKEN_LINK_REPORT_CHAR_MAX)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # 4.6.2
+        with:
+          path: ./lychee/out.md
+          name: Link Checker Report
+
+      - name: Comment on PR with link to full link checker report
+        if: steps.lychee.outputs.exit_code != 0 && fromJson(steps.char-count.outputs.size) >= fromJson(vars.BROKEN_LINK_REPORT_CHAR_MAX)
+        uses: marocchino/sticky-pull-request-comment@52423e01640425a022ef5fd42c6fb5f633a02728 # v2.9.1
+        with:
+          header: Link Checker Report
+          message: |
+            ## Broken Link Checker
+            Report exceeds max length of ${{vars.BROKEN_LINK_REPORT_CHAR_MAX}} characters, so it cannot be displayed in GitHub comments. [Download full report.](${{steps.upload-artifact.outputs.artifact-url}})
+
+      - name: Comment on PR with link checker report
+        if: steps.lychee.outputs.exit_code != 0 && fromJson(steps.char-count.outputs.size) < fromJson(vars.BROKEN_LINK_REPORT_CHAR_MAX)
+        uses: marocchino/sticky-pull-request-comment@52423e01640425a022ef5fd42c6fb5f633a02728 # v2.9.1
+        with:
+          header: Link Checker Report
+          path: ./lychee/out.md
+
+      - name: Comment on PR about successful link check
+        uses: marocchino/sticky-pull-request-comment@52423e01640425a022ef5fd42c6fb5f633a02728 # v2.9.1
+        with:
+          header: Link Checker Report
+          message: |
+            ## Broken Link Checker
+            No broken links found! 🎉
+
+  skip-check-links:
+    name: Skip Link Checker
+    needs: [deploy-unified-docs-api-preview, deploy-dev-portal-preview]
+    if: needs.deploy-unified-docs-api-preview.outputs.changed_docs == 0
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update PR comment
+        uses: marocchino/sticky-pull-request-comment@52423e01640425a022ef5fd42c6fb5f633a02728 # v2.9.1
+        with:
+          header: Link Checker Report
+          delete: true

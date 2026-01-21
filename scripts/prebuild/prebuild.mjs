@@ -33,6 +33,8 @@ const getCommandLineArgs = () => {
 		(args, arg) => {
 			if (arg === '--only-build-version-metadata') {
 				args.onlyVersionMetadata = true
+			} else if (arg === '--only-metadata') {
+				args.onlyMetadata = true
 			} else if (arg === '--build-algolia-index') {
 				args.buildAlgoliaIndex = true
 			} else if (arg === '--get-real-file-changed-metadata') {
@@ -43,6 +45,7 @@ const getCommandLineArgs = () => {
 		},
 		{
 			onlyBuildVersionMetadata: false,
+			onlyMetadata: false,
 			buildAlgoliaIndex: false,
 			getRealFileChangedMetadata: false,
 		},
@@ -82,6 +85,13 @@ async function main() {
 	)
 	const docsPathsAllVersionsJson = JSON.stringify(docsPathsAllVersions, null, 2)
 	fs.writeFileSync(DOCS_PATHS_ALL_VERSIONS_FILE, docsPathsAllVersionsJson)
+
+	if (args.onlyMetadata) {
+		console.log(
+			'Only generating metadata files (versionMetadata.json + docsPathsAllVersions.json), skipping MDX transforms.',
+		)
+		return
+	}
 
 	// Apply MDX transforms, writing out transformed MDX files to `public`
 	await buildMdxTransforms(CONTENT_DIR, CONTENT_DIR_OUT, versionMetadata)
