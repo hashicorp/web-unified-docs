@@ -475,51 +475,18 @@ Provider/Integration links:
 
 #### Common Link Descriptions by Tool
 
-**Standard beginner format (combining tutorials and docs):**
-- "Learn Terraform with the [Terraform tutorials](/terraform/tutorials) and read the [Terraform documentation](/terraform/docs)"
-- "Learn Vault with the [Vault tutorials](/vault/tutorials) and read the [Vault documentation](/vault/docs)"
-- "Learn Packer with the [Packer tutorials](/packer/tutorials) and read the [Packer documentation](/packer/docs)"
-- "Learn Consul with the [Consul tutorials](/consul/tutorials) and read the [Consul documentation](/consul/docs)"
-- "Learn Nomad with the [Nomad tutorials](/nomad/tutorials) and read the [Nomad documentation](/nomad/docs)"
-- "Learn Boundary with the [Boundary tutorials](/boundary/tutorials) and read the [Boundary documentation](/boundary/docs)"
+**Standard beginner format (all tools):**
+- "Learn [Tool] with the [[Tool] tutorials] and read the [[Tool] documentation]"
+- Examples: Terraform, Vault, Packer, Consul, Nomad, Boundary
 
-**Cloud provider getting started:**
-- "Get started with [AWS](/terraform/tutorials/aws-get-started), [Azure](/terraform/tutorials/azure-get-started), or [GCP](/terraform/tutorials/gcp-get-started)"
-
-**Terraform:**
-- "Learn Terraform with the [Terraform tutorials](/terraform/tutorials) and read the [Terraform documentation](/terraform/docs)"
-- "Get started with [AWS](/terraform/tutorials/aws-get-started), [Azure](/terraform/tutorials/azure-get-started), or [GCP](/terraform/tutorials/gcp-get-started)"
-- "Learn the [Terraform language] for writing configurations"
-- "Learn about [Terraform state] for infrastructure tracking"
-- "Configure [backends] for remote state storage"
-
-**Packer:**
-- "Learn Packer with the [Packer tutorials](/packer/tutorials) and read the [Packer documentation](/packer/docs)"
-- "Learn about [Packer builders] for different platforms"
-- "Use [Packer provisioners] to configure images"
-
-**Vault:**
-- "Learn Vault with the [Vault tutorials](/vault/tutorials) and read the [Vault documentation](/vault/docs)"
-- "Learn about [Vault dynamic secrets] for automation"
-- "Use [Vault with Terraform] for secure deployments"
-
-**Consul:**
-- "Learn Consul with the [Consul tutorials](/consul/tutorials) and read the [Consul documentation](/consul/docs)"
-- "Learn about [Consul service mesh] for traffic management"
-
-**Nomad:**
-- "Learn Nomad with the [Nomad tutorials](/nomad/tutorials) and read the [Nomad documentation](/nomad/docs)"
-- "Learn about [Nomad job specifications] for container workloads"
-
-**Sentinel:**
-- "Get started with [Sentinel tutorials] for hands-on examples"
-- "Read the [Sentinel documentation] for policy as code concepts"
-- "Learn the [Sentinel language syntax] for writing policies"
-
-**HCP Products:**
-- "Get started with [HCP Terraform] for team collaboration"
-- "Learn about [HCP Packer] for image metadata tracking"
-- "Use [HCP Packer channels] for environment promotion"
+**Tool-specific examples:**
+- Terraform: "Get started with [AWS], [Azure], or [GCP]" | "Learn the [Terraform language]" | "Learn about [Terraform state]"
+- Packer: "Learn about [Packer builders]" | "Use [Packer provisioners]"
+- Vault: "Learn about [Vault dynamic secrets]" | "Use [Vault with Terraform]"
+- Consul: "Learn about [Consul service mesh]"
+- Nomad: "Learn about [Nomad job specifications]"
+- Sentinel: "Learn the [Sentinel language syntax]"
+- HCP: "Get started with [HCP Terraform]" | "Learn about [HCP Packer]" | "Use [HCP Packer channels]"
 
 #### Section Naming Conventions
 
@@ -590,23 +557,7 @@ Use clear, descriptive section headers that indicate the learning level or purpo
 
 ## Common Pitfalls to Avoid
 
-Watch for these frequent issues when reviewing or creating documents:
-
-### Formatting Issues
-- **Missing bullet dashes** - Every list item in a "Why" section needs a dash, even after blank lines
-  - Wrong: `**Challenge:** Description` (no dash)
-  - Right: `- **Challenge:** Description` (has dash)
-
-- **Incorrect ordered list numbering** - Always use `1.` for every item, not sequential numbers
-  - Wrong: `1. First\n2. Second\n3. Third`
-  - Right: `1. First\n1. Second\n1. Third`
-
-- **Missing "the following" before lists** - Every list (except resource sections) needs "the following" in the introduction
-  - Wrong: "Follow this workflow to deploy changes:" or "Use this workflow:"
-  - Right: "Use the following workflow to deploy changes:" or "Follow the following steps:"
-  - Wrong: "Implement these best practices:"
-  - Right: "Implement the following best practices:"
-  - Exception: "HashiCorp resources:" and "External resources:" don't need "the following"
+Watch for these frequent content issues (formatting rules are detailed in Writing Standards above):
 
 ### Content Gaps
 - **Empty base examples** - Code examples that don't show the actual use case
@@ -621,22 +572,13 @@ Watch for these frequent issues when reviewing or creating documents:
   - Wrong: "Test your infrastructure before deploying" (generic)
   - Right: "Use Sentinel for policy-as-code and Terratest for infrastructure validation" (specific HashiCorp tools)
 
-### SEO/Clarity Issues
-- **Passive voice** - "resources were created", "changes are applied", "tests are run"
-  - Wrong: "before they're applied"
-  - Right: "before Terraform applies them"
-
-- **Ambiguous pronouns** - Using "it", "this", "that" without clear antecedents
-  - Wrong: "This prevents issues" (what is "this"?)
-  - Right: "Automated testing prevents production failures"
-
 - **Missing outcomes** - Not explaining what happens when you run the code
   - Wrong: Just showing code with no explanation of results
   - Right: "Running `packer build` produces AMI ami-0abc123 which you can reference in Terraform"
 
-### Document Length Red Flags
+### Document Depth Red Flags
 - Document < 500 words likely lacks depth for implementers
-- Implementation guides without code examples may leave implementers unable to get started (evaluate if examples would add value)
+- Implementation guides without code examples may leave implementers unable to get started
 - < 3 resource links means implementers lack implementation guidance
 - Compare to similar existing documents - if yours is 1/3 the length, it's probably too shallow
 
@@ -756,80 +698,39 @@ Different HashiCorp tools need different documentation approaches:
 
 ## Quick Reference Checklist
 
-Use this as a quick reference for writing standards defined in this file. **For the complete review process, see [REVIEW_PHASES.md](./REVIEW_PHASES.md).**
+Quick mechanical checks for writing standards. **For complete review process and content quality validation, see [REVIEW_PHASES.md](./REVIEW_PHASES.md).**
 
-This checklist covers mechanical standards only (formatting, structure, SEO/AI optimization). Content quality and user success validation are covered in the review phases.
-
-### Document Structure
-- [ ] Frontmatter includes `page_title` and `description`
-- [ ] Meta description is 150-160 characters
-- [ ] Document has a "Why [topic]" section after intro, before implementation
-- [ ] "Why" section presents 3-4 strategic challenges with bold title format: `**Challenge name:** Description`
-- [ ] H2 headings use sentence case ("Getting started", not "Getting Started")
-- [ ] Document includes workflow connections to related WAF documents
-- [ ] "Next steps" section at end references related documents
-- [ ] HashiCorp resources section with 5+ relevant links
-- [ ] External resources section if applicable
-
-### Writing Standards
-- [ ] Second-person voice ("you") throughout
-- [ ] Active voice preferred over passive voice
-- [ ] No promotional language or marketing phrases
-- [ ] No editorializing ("it's important to note", "in conclusion")
-- [ ] No excessive conjunctions ("moreover", "furthermore", "additionally")
+### Structure & Formatting (see Writing Standards, Document Structure Patterns sections)
+- [ ] Frontmatter with `page_title` and `description` (150-160 chars)
+- [ ] "Why [topic]" section with 3-4 challenges using `**Challenge:** Description` format
 - [ ] Sentence case for all headings
+- [ ] "The following" before lists (except resource sections)
+- [ ] Bold titles with colons inside: `**Title:** Description`
+- [ ] Ordered lists use `1.` for every item
+- [ ] Workflow connections to related WAF docs
+- [ ] HashiCorp resources section (5+ links) before "Next steps"
+
+### Voice & Clarity (see Other Writing Standards, Language and Tone Standards sections)
+- [ ] Second-person voice, active voice, no promotional language
+- [ ] No vague pronouns at sentence start (use specific nouns)
+- [ ] No editorializing or excessive conjunctions
+
+### Code Examples (see Code Examples, Code Example Patterns sections)
 - [ ] Language tags on all code blocks
-- [ ] Alt text on all images (if applicable)
-- [ ] Relative paths for all internal links
+- [ ] Complete, actionable examples with realistic values
+- [ ] 1-2 sentence summaries explaining what code accomplishes and why it matters
+- [ ] Packer examples show provisioners; Terraform examples use data sources
 
-### Critical Formatting Rules (Check Every List!)
-- [ ] **"The following" before ALL lists** - "Use the following workflow:" NOT "Follow this workflow:" (Exception: resource sections)
-- [ ] **Bold titles with colons inside** - `**Title:** Description` NOT `**Title** - Description`
-- [ ] **Ordered lists use `1.` for every item** - NOT `1. 2. 3.`
-- [ ] **All bullet points have dashes** - Even after blank lines in "Why" sections
+### SEO (see SEO section)
+- [ ] Title: sentence case, no colons, no tool names in main title
+- [ ] First paragraph: strong hook, keyword placement, active voice
+- [ ] Link descriptions specific (not "Learn more")
 
-### Code Examples
-- [ ] All code examples include language tags
-- [ ] Examples are complete and actionable (not placeholders or TODOs)
-- [ ] Each code block has 1-2 sentence summary explaining what it accomplishes
-- [ ] Summaries connect to broader workflow (e.g., "uses AMI built with Packer...")
-- [ ] Examples use realistic values (not "ami-12345678" without context)
-- [ ] Provisioners included in Packer examples to show actual app packaging
-- [ ] Terraform examples show how to reference Packer-built images
-- [ ] Examples demonstrate real-world scenarios relevant to both personas
+### AI/LLM (see AI/LLM Optimization section)
+- [ ] Clear topic sentences, explicit relationships, terms defined
+- [ ] Question-based headings, "Use X when..." patterns
+- [ ] No ambiguous pronouns, explicit outcomes stated
 
-### SEO Optimization
-- [ ] Title uses sentence case, avoids colons, excludes tool names from main title
-- [ ] Meta description is optimized (150-160 chars, includes key concepts)
-- [ ] First paragraph has strong hook with keyword placement
-- [ ] First paragraph uses active voice and direct language
-- [ ] H2 headings are benefit-focused (tool names only when section is tool-specific)
-- [ ] No passive voice throughout document
-- [ ] Content structure supports readability and scanning
-- [ ] Internal linking opportunities identified and implemented
-
-### AI/LLM Optimization
-- [ ] Each section starts with clear topic sentence stating what it covers
-- [ ] Explicit relationships between concepts ("After X, you can Y", "X depends on Y")
-- [ ] Technical terms defined when first introduced
-- [ ] Acronyms spelled out on first use
-- [ ] Headings match how users ask questions ("Why automate testing" not "Testing rationale")
-- [ ] Decision guidance explicit: "Use X when..." patterns included
-- [ ] Sections can be understood independently with sufficient context
-- [ ] Avoids relying solely on directional references ("above", "below")
-- [ ] Examples clearly state what they demonstrate and the outcome
-- [ ] Prerequisites explicitly stated before instructions
-- [ ] Success criteria and outcomes clearly described
-- [ ] No ambiguous pronouns - specific nouns used instead of "it", "this", "that"
-- [ ] Parallel structure in all lists
-- [ ] Clear subject-verb relationships throughout
-- [ ] Explicit outcomes after code examples (what happens when you run this)
-- [ ] Workflow sequences numbered with clear prerequisites and results
-
-### Resources and Links
-- [ ] 5+ HashiCorp resource links (documentation, tutorials, references)
-- [ ] External resources section if relevant third-party tools mentioned
-- [ ] All links are specific (not generic dashboards)
-- [ ] Links direct users to exact pages needed for implementation
-- [ ] Link descriptions are optimized and clearly explain what users will find (not "Learn more" or "click here")
-- [ ] Resources organized logically (by tool, by task, or by workflow stage)
+### Resources (see Resources, HashiCorp Resources Section Patterns sections)
+- [ ] 5+ specific HashiCorp links organized logically
+- [ ] Verbs outside link brackets, context in sentence (no dashes after links)
