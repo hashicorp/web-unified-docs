@@ -1,3 +1,8 @@
+/**
+ * Copyright IBM Corp. 2025
+ * SPDX-License-Identifier: BUSL-1.1
+ */
+
 import { execSync } from 'node:child_process'
 import grayMatter from 'gray-matter'
 import fs from 'node:fs'
