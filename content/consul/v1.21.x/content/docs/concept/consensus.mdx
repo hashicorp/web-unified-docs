@@ -7,129 +7,68 @@ description: >-
 
 # Consensus
 
-Consul uses a [consensus protocol](<https://en.wikipedia.org/wiki/Consensus_(computer_science)>)
-to provide [Consistency (as defined by CAP)](https://en.wikipedia.org/wiki/CAP_theorem).
-The consensus protocol is based on
-["Raft: In search of an Understandable Consensus Algorithm"](https://raft.github.io/raft.pdf).
-For a visual explanation of Raft, see [The Secret Lives of Data](http://thesecretlivesofdata.com/raft).
+This page provides conceptual information about the Raft protocol and its implementation in Consul. For more information about the underlying architecture, refer to [Consul backend architecture](/consul/docs/architecture/backend).
 
-## Raft Protocol Overview
+## Introduction
 
-Raft is a consensus algorithm that is based on
-[Paxos](https://en.wikipedia.org/wiki/Paxos_%28computer_science%29). Compared
-to Paxos, Raft is designed to have fewer states and a simpler, more
-understandable algorithm.
+Raft is a consensus algorithm that Consul implements in datacenter operations. It operates according to the following concepts:
 
-There are a few key terms to know when discussing Raft:
+- _Log entries_ are the fundamental unit of work in a Raft system. A log is an ordered sequence of entries, and entries include any cluster changes, such as adding nodes, registering services, and updating key-value pairs.
+- The _Raft index_ records when the log entry was made, in an authoritative order. We consider the log consistent when all members agree on the entries and their order.
+- The _peer set_ is the set of all members participating in log replication. In Consul, a datacenter's server nodes are the members of the peer set.
+- _Quorum_ refers to the majority of a peer set's members. Mathematically, for a set of size `N`, quorum requires at least `(N/2)+1` members. For example, if there are 5 members in the peer set, you need 3 nodes to form a quorum. If a quorum of nodes is unavailable, the Consul cluster becomes _unavailable_ because no new logs can be committed.
 
-- Log - The primary unit of work in a Raft system is a log entry. The problem
-  of consistency can be decomposed into a _replicated log_. A log is an ordered
-  sequence of entries. Entries includes any cluster change: adding nodes, adding services, new key-value pairs, etc. We consider the log consistent
-  if all members agree on the entries and their order.
+## Node elections
 
-- FSM - [Finite State Machine](https://en.wikipedia.org/wiki/Finite-state_machine).
-  An FSM is a collection of finite states with transitions between them. As new logs
-  are applied, the FSM is allowed to transition between states. Application of the
-  same sequence of logs must result in the same state, meaning behavior must be deterministic.
+Raft nodes are always in one of three states:
 
-- Peer set - The peer set is the set of all members participating in log replication.
-  For Consul's purposes, all server nodes are in the peer set of the local datacenter.
+- follower
+- candidate
+- leader
 
-- Quorum - A quorum is a majority of members from a peer set: for a set of size `N`,
-  quorum requires at least `(N/2)+1` members.
-  For example, if there are 5 members in the peer set, we would need 3 nodes
-  to form a quorum. If a quorum of nodes is unavailable for any reason, the
-  cluster becomes _unavailable_ and no new logs can be committed.
+All nodes start out as a _follower_. In the follower state, nodes can:
 
-- Committed Entry - An entry is considered _committed_ when it is durably stored
-  on a quorum of nodes. Once an entry is committed it can be applied.
+- accept log entries from the leader
+- cast votes in elections
 
-- Leader - At any given time, the peer set elects a single node to be the leader.
-  The leader is responsible for ingesting new log entries, replicating to followers,
-  and managing when an entry is considered committed.
+If no entries are received for some time, nodes self-promote to the _candidate_ state. In the candidate state, nodes request votes from
+the other members of the peer set. If a candidate receives a quorum of votes, then it is promoted to leader.
 
-Raft is a complex protocol and will not be covered here in detail (for those who
-desire a more comprehensive treatment, the full specification is available in this
-[paper](https://raft.github.io/raft.pdf)).
-We will, however, attempt to provide a high level description which may be useful
-for building a mental model.
+The _leader_ is the member of the peer set that records the authoritative Raft log. Then it replicates the log to the other members of the peer set. The leader must accept new log entries and replicate to all the other followers. If stale reads are not acceptable, Consul also performs all queries on the leader.
 
-Raft nodes are always in one of three states: follower, candidate, or leader. All
-nodes initially start out as a follower. In this state, nodes can accept log entries
-from a leader and cast votes. If no entries are received for some time, nodes
-self-promote to the candidate state. In the candidate state, nodes request votes from
-their peers. If a candidate receives a quorum of votes, then it is promoted to a leader.
-The leader must accept new log entries and replicate to all the other followers.
-In addition, if stale reads are not acceptable, all queries must also be performed on
-the leader.
+## Log entries
 
-Once a cluster has a leader, it is able to accept new log entries. A client can
-request that a leader append a new log entry (from Raft's perspective, a log entry
-is an opaque binary blob). The leader then writes the entry to durable storage and
-attempts to replicate to a quorum of followers. Once the log entry is considered
-_committed_, it can be _applied_ to a finite state machine. The finite state machine
-is application specific; in Consul's case, we use
-[MemDB](https://github.com/hashicorp/go-memdb) to maintain cluster state. Consul's writes
-block until it is both _committed_ and _applied_. This achieves read after write semantics
-when used with the [consistent](/consul/api-docs/features/consistency#consistent) mode for queries.
+When a cluster has a leader, it is able to accept new log entries. A client can request that a leader append a new log entry. The leader then writes the entry to durable storage and attempts to replicate to a quorum of followers.
 
-Obviously, it would be undesirable to allow a replicated log to grow in an unbounded
-fashion. Raft provides a mechanism by which the current state is snapshotted and the
-log is compacted. Because of the FSM abstraction, restoring the state of the FSM must
-result in the same state as a replay of old logs. This allows Raft to capture the FSM
-state at a point in time and then remove all the logs that were used to reach that
-state. This is performed automatically without user intervention and prevents unbounded
-disk usage while also minimizing time spent replaying logs. One of the advantages of
-using MemDB is that it allows Consul to continue accepting new transactions even while
-old state is being snapshotted, preventing any availability issues.
+An entry is considered _committed_ when it is durably stored on a quorum of nodes. After an entry is committed it can be _applied_ to a finite state machine. Consul blocks writes until a log is both _committed_ and _applied_. This configuration enables [consistent mode for HTTP API queries](/consul/api-docs/features/consistency#consistent).
 
-Consensus is fault-tolerant up to the point where quorum is available.
-If a quorum of nodes is unavailable, it is impossible to process log entries or reason
-about peer membership. For example, suppose there are only 2 peers: A and B. The quorum
-size is also 2, meaning both nodes must agree to commit a log entry. If either A or B
-fails, it is now impossible to reach quorum. This means the cluster is unable to add
-or remove a node or to commit any additional log entries. This results in
-_unavailability_. At this point, manual intervention would be required to remove
-either A or B and to restart the remaining node in bootstrap mode.
+Consul uses [MemDB](https://github.com/hashicorp/go-memdb) to maintain a consistent log. One of the advantages of using MemDB is that it allows Consul to continue accepting new transactions even while capturing the old state in a snapshot, which prevents any availability issues. Snapshots of the cluster's state compact the logs to prevent unbounded growth in their size and the resources required to replicate them to other nodes.
 
-A Raft cluster of 3 nodes can tolerate a single node failure while a cluster
-of 5 can tolerate 2 node failures. The recommended configuration is to either
-run 3 or 5 Consul servers per datacenter. This maximizes availability without
-greatly sacrificing performance. The [deployment table](/concept/reliability#deployment-size)
-summarizes the potential cluster size options and the fault tolerance of each.
+## Quorum
 
-In terms of performance, Raft is comparable to Paxos. Assuming stable leadership,
-committing a log entry requires a single round trip to half of the cluster.
-Thus, performance is bound by disk I/O and network latency. Although Consul is
-not designed to be a high-throughput write system, it should handle on the order
-of hundreds to thousands of transactions per second depending on network and
-hardware configuration.
+Raft is fault tolerant up to the point where quorum is available. For example, a Raft cluster of 3 nodes can tolerate a single node failure, while a cluster of 5 can tolerate 2 node failures.
 
-## Raft in Consul
+When a quorum of nodes is unavailable, it is impossible to process log entries or reason about peer membership. Typically this situation requires manual intervention to re-establish a leader.
 
-Only Consul server nodes participate in Raft and are part of the peer set. All
-client nodes forward requests to servers. Part of the reason for this design is
-that, as more members are added to the peer set, the size of the quorum also increases.
-This introduces performance problems as you may be waiting for hundreds of machines
-to agree on an entry instead of a handful.
+We recommend running either 3 or 5 Consul servers per datacenter to maximize availability without greatly sacrificing performance. For more information, refer to the [deployment table](/concept/reliability#deployment-size), which summarizes the potential cluster size options and their fault tolerance.
 
-When getting started, a single Consul server is put into "bootstrap" mode. This mode
-allows it to self-elect as a leader. Once a leader is elected, other servers can be
-added to the peer set in a way that preserves consistency and safety. Eventually,
-once the first few servers are added, bootstrap mode can be disabled. See [this
-document](/consul/docs/deploy/server/vm/bootstrap) for more details.
+## Raft in Consul operations
 
-Since all servers participate as part of the peer set, they all know the current
-leader. When an RPC request arrives at a non-leader server, the request is
-forwarded to the leader. If the RPC is a _query_ type, meaning it is read-only,
-the leader generates the result based on the current state of the FSM. If
-the RPC is a _transaction_ type, meaning it modifies state, the leader
-generates a new log entry and applies it using Raft. Once the log entry is committed
-and applied to the FSM, the transaction is complete.
+In Consul, only Consul server nodes are part of the peer set. Because client agents are not part of the peer set, a group of server agents can support thousands of client nodes, without scale affecting the cluster's Raft performance.
 
-Because of the nature of Raft's replication, performance is sensitive to network
-latency. For this reason, each datacenter elects an independent leader and maintains
-a disjoint peer set. Data is partitioned by datacenter, so each leader is responsible
-only for data in their datacenter. When a request is received for a remote datacenter,
-the request is forwarded to the correct leader. This design allows for lower latency
-transactions and higher availability without sacrificing consistency.
+### Bootstrap mode
+
+To start a new datacenter, you must place a single Consul server in _bootstrap mode_. This mode allows it to self-elect as a leader. Once a leader is elected, other servers can join the peer set in a way that preserves consistency. After the first set of servers join, you can disable bootstrap mode. For more information, refer to [bootstrap a Consul datacenter](/consul/docs/deploy/server/vm/bootstrap).
+
+### Catalog transactions
+
+When a request for catalog information or update to the catalog arrives at a non-leader server, it forwards the request to the leader. If it is a _request_, meaning it is read-only, the leader generates the result based on the current state of the Raft log. If it is an _update_, meaning it modifies state, the leader generates a new log entry and applies it using Raft. After the log entry is committed and applied, the transaction is complete.
+
+## Additional information
+
+For more information about the Raft protocol, refer to the following external resources:
+
+- [Consistency (as defined by CAP)](https://en.wikipedia.org/wiki/CAP_theorem)
+- ["Raft: In search of an Understandable Consensus Algorithm"](https://raft.github.io/raft.pdf).
+- [The Secret Lives of Data](http://thesecretlivesofdata.com/raft)
+- [Complete Raft specification](https://raft.github.io/raft.pdf)
