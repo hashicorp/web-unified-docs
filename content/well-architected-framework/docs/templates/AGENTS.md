@@ -14,6 +14,29 @@ This file contains **writing standards, content patterns, and examples** for cre
 - **Examples** - Good vs. bad patterns with explanations
 - **Quick Reference Checklist** - Mechanical standards summary (not a review process)
 
+## Before modifying this file
+
+When adding or updating rules in AGENTS.md:
+
+1. **Search for existing rules first** - Use multiple related search terms, not just exact phrases
+   - Example: Search "resources", "structure", "multi-tool", "formatting", "link patterns"
+   - Use grep with multiple keywords to find related sections
+
+2. **Check these key sections for existing guidance**:
+   - Document ending structure (~line 188)
+   - HashiCorp resources section formatting (~line 391)
+   - Link Description Patterns (~line 416)
+   - Code example standards (~line 183)
+   - Voice and tone standards (~line 70)
+
+3. **View in context** - Read 50-100 lines around any found section to understand full scope
+
+4. **Consolidate, don't duplicate** - If related rules exist, enhance them rather than creating new sections
+
+5. **Ask before creating new sections** - Confirm no related guidance exists elsewhere in the file
+
+**Why this matters:** Duplicate or conflicting rules create confusion and make the file harder to maintain. One comprehensive section is always better than multiple partial sections.
+
 ---
 
 ## Goals
@@ -191,18 +214,6 @@ Based on successful WAF documents, use these patterns:
   1. HashiCorp resources (links to tutorials, product docs, etc.)
   2. External resources (optional, for third-party documentation)
   3. Next steps (links to related WAF documents with context)
-- Example:
-  ```markdown
-  HashiCorp resources:
-  - Get started with [Packer tutorials](/packer/tutorials)
-  - Learn about [Terraform providers](...)
-
-  External resources:
-  - [Dockerfile reference](https://docs.docker.com/...)
-
-  ## Next steps
-  In this section of Define your processes, you learned...
-  ```
 
 ## Content organization
 - Structure content in the order users need it
@@ -376,23 +387,62 @@ The "HashiCorp resources" section at the end of documents should follow these or
 
 Use your judgment. When in doubt, ask whether grouping helps the reader find what they need faster.
 
+**HashiCorp resources section formatting:**
+
+The HashiCorp resources section should be organized to help readers find relevant content efficiently.
+
+**Structure options:**
+
+1. **Simple list** - Use when resources are related and don't need categorization:
+   ```markdown
+   ## HashiCorp resources
+   
+   - [Related WAF page](/path/to/page)
+   - Learn about [concept](/path)
+   - Get started with [tutorials](/path)
+   ```
+
+2. **Categorized with introductory text** - Use when resources fall into distinct topics or multiple tools:
+   ```markdown
+   ## HashiCorp resources
+   
+   - [WAF cross-reference links]
+   
+   Learn about specific topic:
+   
+   - Learn how to [do thing](/path)
+   - Read the [documentation](/path)
+   
+   Deploy to specific platform:
+   
+   - Deploy [specific thing](/path)
+   - Read the [provider documentation](/path)
+   ```
+
+**Formatting rules:**
+
+- Start with WAF cross-references (other pillar pages)
+- Use action verbs: "Learn", "Read", "Get started with", "Deploy", "Use", "Create", "Implement", "Explore"
+- Group related links under plain text introductions (not headings with ##)
+- Plain text introductions should end with a colon
+- Keep link descriptions concise and action-oriented
+- Multiple related providers can be listed in one bullet with commas
+
 **Example structure for single-tool documents:**
 ```markdown
-HashiCorp resources:
+## HashiCorp resources
 
-- [WAF cross-reference links]
 - [WAF cross-reference links]
 
 Get started with [Tool]:
 
-- Get started with [Tool tutorials] for hands-on examples
-- Read the [Tool introduction] to understand core concepts
-- [Basic getting started links]
+- Get started with [[Tool] tutorials] for hands-on examples
+- Read the [[Tool] documentation] for comprehensive features
 
-[Tool] core concepts:
+[Tool] for [use case]:
 
-- Read the [Tool documentation] for comprehensive features
-- [Intermediate feature links]
+- [Tool-specific implementation links]
+- [Integration links]
 
 [Tool] advanced features:
 
@@ -402,7 +452,7 @@ Get started with [Tool]:
 
 **Example structure for multi-tool documents:**
 ```markdown
-HashiCorp resources:
+## HashiCorp resources
 
 - [WAF cross-reference links]
 
@@ -423,6 +473,35 @@ Packer for [use case]:
 Vault for [use case]:
 
 - [Vault-specific links]
+```
+
+**Real-world examples:**
+
+Categorized resources:
+```markdown
+To learn how to deploy applications to Kubernetes with Terraform:
+
+- Learn how to deploy [Federated Multi-Cloud Kubernetes Clusters](/path)
+- Read the [Terraform Kubernetes provider documentation](https://example.com)
+```
+
+Multiple providers in one bullet:
+```markdown
+- Review the artifact management Terraform providers: [Artifactory](url), [Nexus](url), and [CodeArtifact](url)
+```
+
+**Don't use subsection headings (##):**
+```markdown
+### Deploy to Kubernetes  ← DON'T DO THIS
+
+- Learn how to deploy...
+```
+
+Use plain text with colon instead:
+```markdown
+Deploy to Kubernetes:  ← DO THIS
+
+- Learn how to deploy...
 ```
 
 #### Link Description Patterns

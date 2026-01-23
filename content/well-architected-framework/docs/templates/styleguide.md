@@ -183,6 +183,19 @@ Always use the shortest word or phrase that conveys your intended meaning. Use d
 
 -  "use", not "utilize" or "utilization": Prefer the root for most "ize" words.
 - "because, not "due to the fact that": Also refer to [Do not use figures of speech](general/language.md#do-not-use-figures-of-speech).
+- "lets", not "enables" or "allows": Use "lets" when describing what tools or services do for users.
+
+**Do:**
+
+- `The AWS provider lets you manage CodeArtifact configuration through Terraform.`
+- `HCP Terraform's API lets you create workspaces without a VCS connection.`
+- `Vault lets you manage secrets dynamically.`
+
+**Don't:**
+
+- `The AWS provider enables you to manage CodeArtifact configuration through Terraform.`
+- `HCP Terraform's API allows you to create workspaces without a VCS connection.`
+- `Vault enables you to manage secrets dynamically.`
 
 ## Do not use words or phrases borrowed from other languages, scientific words, or jargon words
 
