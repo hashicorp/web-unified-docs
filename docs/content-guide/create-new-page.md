@@ -40,7 +40,7 @@ Use the appropriate page content type as a template for your new content. Refer
 to the Page templates section in the [Content
 types](./content-types.md) guide for examples.
 
-Follow the Education style guide's [top 12 guidelines](../style-guide/top-12.md) when you create your content.
+Follow the Education style guide's [top 12 guidelines](./docs/style-guide/top-12.md) when you create your content.
 
 ## Add your page to the navigation sidebar
 
