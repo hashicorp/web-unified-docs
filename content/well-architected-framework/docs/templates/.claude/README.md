@@ -8,26 +8,26 @@ Skills are reusable commands that automate common tasks. They're invoked with sl
 
 ### Available Skills
 
-#### `/review` - Documentation Review
+#### `/review-doc` - Documentation Review
 
-Performs comprehensive 7-phase documentation review following REVIEW_PHASES.md workflow.
+Performs comprehensive 7-phase documentation review following REVIEW_PHASES.md workflow and AGENTS.md standards.
 
 **Quick start:**
 ```bash
 # Review a single file
-/review docs/define-and-automate-processes/define/modules.mdx
+/review-doc docs/define-and-automate-processes/define/modules.mdx
 
 # Review and fix automatically
-/review docs/define-and-automate-processes/define/modules.mdx --fix
+/review-doc docs/define-and-automate-processes/define/modules.mdx --fix
 
 # Review specific phases
-/review docs/define-and-automate-processes/define/*.mdx --phases 1-3
+/review-doc docs/define-and-automate-processes/define/*.mdx --phases 1-3
 
 # Full review with report only
-/review docs/define-and-automate-processes/define/workflows.mdx --report-only
+/review-doc docs/define-and-automate-processes/define/workflows.mdx --report-only
 ```
 
-**See:** `skills/review.md` for complete documentation.
+**See:** `skills/review-doc.md` for complete documentation.
 
 ---
 

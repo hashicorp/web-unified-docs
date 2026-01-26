@@ -258,7 +258,7 @@ These issues require human judgment:
 /add-resources docs/new.mdx --add
 
 # 5. Comprehensive review
-/review docs/new.mdx --phases 1-3
+/review-doc docs/new.mdx --phases 1-3
 ```
 
 **Style-focused workflow:**
@@ -273,7 +273,7 @@ These issues require human judgment:
 /seo-optimize docs/file.mdx --fix
 
 # 4. Final validation
-/review docs/file.mdx --phases 4-5
+/review-doc docs/file.mdx --phases 4-5
 ```
 
 ## Common Style Issues
@@ -336,7 +336,7 @@ Typical execution times:
 - 5 files: ~2 minutes
 - 20 files: ~10 minutes
 
-Much faster than full `/review` (which runs all 7 phases).
+Much faster than full `/review-doc` (which runs all 7 phases).
 
 ## When to Use This Skill
 
@@ -348,10 +348,10 @@ Use `/check-style` when:
 - ✅ CI/CD fast-fail checks
 
 Don't use `/check-style` when:
-- ❌ Need comprehensive review (use `/review` instead)
-- ❌ Checking technical accuracy (use `/review --phases 2`)
+- ❌ Need comprehensive review (use `/review-doc` instead)
+- ❌ Checking technical accuracy (use `/review-doc --phases 2`)
 - ❌ Validating cross-references (use `/fix-links`)
-- ❌ Need user success evaluation (use `/review --phases 1`)
+- ❌ Need user success evaluation (use `/review-doc --phases 1`)
 
 ## Reference Files
 
@@ -364,6 +364,6 @@ This skill references:
 - Focuses exclusively on Phase 4 (style compliance)
 - Does not check content accuracy or completeness
 - Optimized for speed over comprehensiveness
-- Use `/review` for thorough validation
+- Use `/review-doc` for thorough validation
 - Reports include line numbers for easy navigation
 - Auto-fixes are safe and reversible
