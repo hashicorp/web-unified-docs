@@ -149,6 +149,27 @@ If the answer to any question is "no", revisit the content before finalizing.
 
 ---
 
+## Phase 8: Code example validation
+**Goal:** Ensure all code examples are syntactically correct and validated by tooling.
+
+Run this phase with **Copilot ChatGPT 5.2** so you can execute tool-based validation (formatters, validators) and capture results.
+
+Only run Phase 8 when you explicitly request it. Requests like "do a full review" (Phases 1–7) do not include Phase 8.
+
+This phase is required for documents that include Terraform, Packer, CLI, or other copy/paste-able examples.
+
+Review checklist:
+- [ ] Verify every code block is complete (no missing braces, closing fences, or required context)
+- [ ] Run formatters/linters where possible (for example: `terraform fmt -check`, `packer fmt -check`)
+- [ ] Run validators where possible (for example: `terraform validate`, `packer validate`)
+- [ ] Replace examples that cannot validate in isolation (for example, file provisioners that require local paths) with self-contained examples
+- [ ] Confirm placeholder values are clearly marked (for example, `your-organization`) and do not look production-ready
+- [ ] Record the command output and tool versions used for validation
+
+**Deliverable:** Confirmation that examples validate successfully, including the tool versions used, or a list of fixes required.
+
+---
+
 ## Usage Patterns
 
 **Comprehensive review:** Run all 7 phases in order. Create review documents in Phases 1-3 before editing.

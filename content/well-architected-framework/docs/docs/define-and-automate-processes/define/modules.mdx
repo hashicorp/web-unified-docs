@@ -1,21 +1,23 @@
 ---
 page_title: Create reusable infrastructure modules
-description: Create reusable Terraform modules to standardize infrastructure, enforce security policies across teams, and accelerate deployment while reducing duplication.
+description: Create reusable Terraform modules to standardize infrastructure, enforce security policies, and accelerate deployment while reducing duplication.
 ---
 
 # Create reusable infrastructure modules
 
-A Terraform module is a container for multiple infrastructure resources that you manage as a single unit. Modules let you package infrastructure configurations into reusable components—essentially infrastructure templates or libraries—that teams can share across your organization. These reusable patterns reduce deployment time, enforce security standards, and eliminate configuration duplication. You can design modules to comply with organizational best practices and ensure consistent infrastructure across environments. After [mapping your current workflows](/well-architected-framework/define-and-automate-processes/define/workflows) and defining your infrastructure as code, you can extract repeated patterns into modules and share them through registries for team-wide use.
+A Terraform module is a container for multiple infrastructure resources that you manage as a single unit. Modules let you package infrastructure configurations into reusable components that teams can share across your organization. These reusable patterns reduce deployment time, enforce security standards, and remove configuration duplication. You can design modules to comply with organizational best practices and let you deploy consistent infrastructure across environments.
+
+While this document focuses on Terraform modules, the principle of reusable components applies across the HashiCorp stack. Packer uses variables and data sources to create reusable image templates across cloud providers. Nomad uses parameterized job specifications to deploy applications with different configurations. Vault uses policy templates to enforce consistent security controls across secret engines. Consul uses configuration templates to standardize service definitions. The same benefits of reusability, standardization, and reduced duplication apply to all HashiCorp tools.
 
 ## Why create reusable modules
 
-Creating reusable infrastructure modules—also known as infrastructure abstractions or packaged components—addresses the following strategic operational and security challenges:
+Creating reusable infrastructure modules addresses the following strategic operational and security challenges:
 
-- **Remove deployment inconsistencies:** Manual infrastructure provisioning creates configuration drift between environments. Modules enforce consistent configuration across all deployments.
+**Remove deployment inconsistencies:** Manual infrastructure provisioning creates configuration drift between environments. Modules enforce consistent configuration across all deployments.
 
-- **Reduce security policy violations:** Teams deploying infrastructure without standardized security controls increase your organization's risk exposure. Each manual deployment requires security review and validation. Modules encode security best practices once and apply them consistently across all implementations.
+**Reduce security policy violations:** Teams deploying infrastructure without standardized security controls increase your organization's risk exposure. Each manual deployment requires security review and validation. Modules encode security best practices once, allowing you to reuse them across deployments.
 
-- **Increase developer productivity:** Developers don't have to write infrastructure as code from scratch. They can reuse existing infrastructure building blocks to provision infrastructure instead of spending time researching and writing new code.
+**Increase developer productivity:** Developers don't have to write infrastructure as code from scratch. They can reuse existing infrastructure code to provision infrastructure instead of spending time writing new code.
 
 ## When to use modules
 
@@ -26,128 +28,197 @@ Use modules in the following scenarios:
 - Multiple teams need to provision similar infrastructure
 - You need to maintain consistency across development, staging, and production environments
 
-You might not need reusable modules in the following cases:
-
-- One-time infrastructure deployments
-- Highly customized configurations
-- Prototype infrastructure that changes frequently
-
 ## Create Terraform modules
 
-A Terraform module is a set of Terraform configuration files in a single directory. Modules are reusable and customizable and you can wrap modules with configurations to fit your organization's standards. You can create modules for common infrastructure patterns that your teams use frequently, following the DRY (Don't Repeat Yourself) principle to reduce duplication.
+A Terraform module is a set of Terraform configuration files in a single directory. Modules are reusable and customizable and you can wrap modules with configurations to fit your organization's standards. Wrapping a module means creating your own module that calls an existing module and adds organization-specific configurations on top.
 
-For example, if your team manages object storage for multiple applications that all follow your organization's common standards, such as security or lifecycle management, you can use an object storage Terraform module for your cloud providers. The object storage module can contain configuration such as lifecycle policies or security standards. After creating modules, store them in version control alongside your infrastructure code to track changes. You can then publish modules to a registry for distribution and versioning.
+### Module structure
 
-To learn how to create Terraform modules, read the [Module development](/terraform/language/modules/develop) documentation.
+A basic Terraform module consists of three core files that define inputs, resources, and outputs. The following example shows a module that creates a web server with configurable instance type and environment tags:
 
-### Create a module
-
-A Terraform module consists of Terraform configuration files in a dedicated directory. Modules typically include input variables, resource definitions, and output values. The following example shows a VPC module structure:
-
-```text
-modules/
-└── vpc/
-    ├── main.tf       # Resource definitions
-    ├── variables.tf  # Input variables
-    └── outputs.tf    # Output values
-```
-
-The following example shows a complete VPC module that creates a VPC with configurable CIDR block and environment tagging:
-
-<CodeBlockConfig filename="modules/vpc/main.tf">
+<CodeBlockConfig filename="modules/web-server/main.tf">
 
 ```hcl
-resource "aws_vpc" "main" {
-  cidr_block           = var.cidr_block
-  enable_dns_hostnames = true
-  enable_dns_support   = true
+# Query for latest Ubuntu AMI
+data "aws_ami" "ubuntu" {
+  most_recent = true
+  owners      = ["099720109477"]
 
-  tags = {
-    Name        = "${var.environment}-vpc"
-    Environment = var.environment
+  filter {
+    name   = "name"
+    values = ["ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"]
   }
 }
 
-resource "aws_internet_gateway" "main" {
-  vpc_id = aws_vpc.main.id
+# Create security group for web server
+resource "aws_security_group" "web" {
+  name        = "${var.environment}-web-sg"
+  description = "Security group for web server"
+  vpc_id      = var.vpc_id
+
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
 
   tags = {
-    Name        = "${var.environment}-igw"
     Environment = var.environment
+    ManagedBy   = "Terraform"
+  }
+}
+
+# Create EC2 instance
+resource "aws_instance" "web" {
+  ami                    = data.aws_ami.ubuntu.id
+  instance_type          = var.instance_type
+  subnet_id              = var.subnet_id
+  vpc_security_group_ids = [aws_security_group.web.id]
+
+  tags = {
+    Name        = "${var.environment}-web-server"
+    Environment = var.environment
+    ManagedBy   = "Terraform"
   }
 }
 ```
 
 </CodeBlockConfig>
 
-<CodeBlockConfig filename="modules/vpc/variables.tf">
+<CodeBlockConfig filename="modules/web-server/variables.tf">
 
 ```hcl
+variable "instance_type" {
+  description = "EC2 instance type for the web server"
+  type        = string
+  default     = "t3.micro"
+}
+
 variable "environment" {
-  description = "Environment name (e.g., production, staging, development)"
+  description = "Environment name (development, staging, production)"
   type        = string
 }
 
-variable "cidr_block" {
-  description = "CIDR block for the VPC"
+variable "vpc_id" {
+  description = "VPC ID where resources will be created"
   type        = string
-  default     = "10.0.0.0/16"
+}
+
+variable "subnet_id" {
+  description = "Subnet ID where the EC2 instance will be launched"
+  type        = string
 }
 ```
 
 </CodeBlockConfig>
 
-<CodeBlockConfig filename="modules/vpc/outputs.tf">
+<CodeBlockConfig filename="modules/web-server/outputs.tf">
 
 ```hcl
-output "vpc_id" {
-  description = "The ID of the VPC"
-  value       = aws_vpc.main.id
+output "instance_id" {
+  description = "ID of the EC2 instance"
+  value       = aws_instance.web.id
 }
 
-output "internet_gateway_id" {
-  description = "The ID of the Internet Gateway"
-  value       = aws_internet_gateway.main.id
+output "public_ip" {
+  description = "Public IP address of the web server"
+  value       = aws_instance.web.public_ip
+}
+
+output "security_group_id" {
+  description = "ID of the security group"
+  value       = aws_security_group.web.id
 }
 ```
 
 </CodeBlockConfig>
 
-After creating the module, you can call it from your root configuration by referencing the module directory:
+The module accepts four input variables: `instance_type` for configuring instance size, `environment` for resource tagging, `vpc_id` for network placement, and `subnet_id` for instance placement. The module creates a security group allowing HTTP traffic, provisions an EC2 instance with the latest Ubuntu AMI, and outputs the instance ID, public IP, and security group ID for use by calling configurations.
+
+Teams can call this module from their root configuration to deploy web servers consistently across environments:
 
 <CodeBlockConfig filename="main.tf">
 
 ```hcl
-module "production_vpc" {
-  source      = "./modules/vpc"
-  environment = "production"
-  cidr_block  = "10.0.0.0/16"
+module "production_web" {
+  source = "./modules/web-server"
+
+  instance_type = "t3.medium"
+  environment   = "production"
+  vpc_id        = "vpc-0123456789abcdef0"    # Replace with your VPC ID
+  subnet_id     = "subnet-0123456789abcdef0"  # Replace with your subnet ID
 }
 
-module "staging_vpc" {
-  source      = "./modules/vpc"
-  environment = "staging"
-  cidr_block  = "10.1.0.0/16"
+module "development_web" {
+  source = "./modules/web-server"
+
+  instance_type = "t3.micro"
+  environment   = "development"
+  vpc_id        = "vpc-0123456789abcdef0"     # Replace with your VPC ID
+  subnet_id     = "subnet-abcdef0123456789"   # Replace with your subnet ID
 }
 
-# Use module outputs in other resources
-resource "aws_subnet" "production_public" {
-  vpc_id     = module.production_vpc.vpc_id
-  cidr_block = "10.0.1.0/24"
+# Use module outputs
+output "production_server_ip" {
+  value = module.production_web.public_ip
 }
 ```
 
 </CodeBlockConfig>
 
-This configuration creates two VPCs using the same module with different inputs. The module encapsulates VPC creation logic, ensuring consistent configuration across environments. Module outputs provide values that other resources can reference, creating connections between infrastructure components.
+The calling configuration uses the web-server module twice with different parameters, demonstrating how modules enable consistent infrastructure with environment-specific variations. Module outputs become accessible through `module.<name>.<output>` syntax, allowing infrastructure dependencies to flow between modules.
+
+### Organize modules in your repository
+
+Organize modules in a dedicated directory structure within your repository:
+
+```
+project-root/
+├── main.tf                    # Root configuration
+├── variables.tf               # Root variables
+├── outputs.tf                 # Root outputs
+└── modules/
+    ├── web-server/            # Web server module
+    │   ├── main.tf
+    │   ├── variables.tf
+    │   └── outputs.tf
+    ├── database/              # Database module
+    │   ├── main.tf
+    │   ├── variables.tf
+    │   └── outputs.tf
+    └── networking/            # Networking module
+        ├── main.tf
+        ├── variables.tf
+        └── outputs.tf
+```
+
+The root configuration calls modules using relative paths like `source = "./modules/web-server"`, keeping all module code within your repository for version control and team collaboration.
+
+### Test modules before deployment
+
+Test modules in isolated environments before using them in production:
+
+1. Create a test configuration in a separate directory that calls your module with test parameters
+1. Run `terraform plan` to preview the infrastructure changes
+1. Deploy to a test environment with `terraform apply`
+1. Verify the module creates resources correctly and outputs work as expected
+1. Run `terraform destroy` to clean up test resources
+
+Consider using Terratest or similar tools for automated module testing.
 
 ## Use the Terraform Registry
 
-The Terraform Registry is a centralized source for finding providers and their supporting documentation. You can find official, partner, and community providers, modules, policy libraries, and run tasks in the Terraform Registry. The Terraform Registry is a great first step in learning all the resources you can manage with Terraform.
+The Terraform Registry provides a centralized source for providers, modules, policy libraries, and run tasks. You can find publicly available Terraform modules for configuring common infrastructure such as networking, databases, and monitoring, that are free to use. Terraform downloads these modules automatically when you specify the source and version in your configuration, making it easy to leverage community-maintained infrastructure patterns.
 
-You can find publicly available Terraform modules for configuring many kinds of common infrastructure in the Terraform Registry. These modules are free to use, and Terraform can download them automatically if you specify the appropriate source and version in a module block (a `module` configuration block in your Terraform code).
-
-Your organization may produce modules tailored for your own infrastructure needs. HCP Terraform and Terraform Enterprise both include a private module registry which is a secure and internal repository, for sharing modules within your organization without publishing them publicly.
+Your organization can create private modules. HCP Terraform and Terraform Enterprise include private module registries, which are secure, internal repositories for sharing modules within your organization without publishing them publicly.
 
 ## Version your modules
 
@@ -157,7 +228,6 @@ Use the following best practices for module versioning:
 
 - Use semantic versioning, such as v1.2.3. Semantic versioning uses three numbers: major version for breaking changes, minor version for new features, and patch version for bug fixes
 - Tag releases in your version control system to mark stable versions
-- Document breaking changes in release notes
 - Pin module versions in production environments to prevent unexpected updates
 
 ### Specify module versions
@@ -180,8 +250,9 @@ This configuration pins the VPC module to version 5.0.0 exactly. Terraform alway
 ```hcl
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
-  version = "~> 5.0.0"  # Allow patch updates only
+  version = "~> 5.0.0"
 
+  # Allow patch updates only.
   name = "my-vpc"
   cidr = "10.0.0.0/16"
 }
@@ -191,22 +262,31 @@ The pessimistic constraint operator `~>` allows Terraform to automatically downl
 
 ## HashiCorp resources
 
+- Map your current [workflows](/well-architected-framework/define-and-automate-processes/define/workflows) to identify repeated patterns for modules
 - Define [infrastructure as code](/well-architected-framework/define-and-automate-processes/define/as-code/infrastructure) to understand IaC principles before creating modules
 - Store code in [version control](/well-architected-framework/define-and-automate-processes/define/version-control) to track and version modules
+- [Standardize workflows](/well-architected-framework/define-and-automate-processes/define/standardize-workflows) to create consistent processes using modules
 
 Learn how to write Terraform modules:
 
-- Learn Terraform with the [Terraform tutorials](/terraform/tutorials) and read the [Terraform documentation](/terraform/docs)
-- Follow the [Terraform style guide](https://developer.hashicorp.com/terraform/language/style-guide) to follow Terraform style conventions
+- Get started with [Terraform tutorials](/terraform/tutorials) and read the [Terraform documentation](/terraform/docs)
+- Follow the [Terraform style guide](https://developer.hashicorp.com/terraform/language/style-guide) for naming and formatting conventions
 
 Learn about Terraform modules:
 
-- Learn about [module development](/terraform/language/modules/develop) to create custom modules
-- Follow [module tutorials](/terraform/tutorials/modules) for hands-on module examples
-- Browse the [Terraform Registry](https://registry.terraform.io/browse/modules) for community modules
-- Read about [module sources](/terraform/language/modules/sources) for different module locations
-- Learn about [Sentinel policies](/terraform/cloud-docs/policy-enforcement) to enforce module standards
-- Use the [HCP Terraform private registry](/terraform/cloud-docs/registry) to share modules across your organization
+- Learn about [module development](/terraform/language/modules/develop) for structure, inputs, and outputs
+- Follow [module tutorials](/terraform/tutorials/modules) to build and publish modules
+- Browse the [Terraform Registry](https://registry.terraform.io/browse/modules) for verified and community-maintained modules
+- Read about [module sources](/terraform/language/modules/sources) for Git, registry, and local module references
+- Learn about [Sentinel policies](/terraform/cloud-docs/policy-enforcement) for mandatory module requirements
+- Use the [HCP Terraform private registry](/terraform/cloud-docs/registry) for internal module distribution
+
+Reusable components across HashiCorp tools:
+
+- Learn about [Packer variables](/packer/docs/templates/hcl_templates/variables) for reusable image templates
+- Read about [Nomad parameterized jobs](/nomad/docs/job-specification/parameterized) for reusable deployment specifications
+- Explore [Vault policy templates](/vault/docs/concepts/policies) for reusable security policies
+- Learn about [Consul service configuration](/consul/docs/services/configuration/services-configuration-reference) for reusable service definitions
 
 External resources:
 
@@ -218,7 +298,6 @@ In this section of Define your processes, you learned about using Terraform modu
 
 Refer to the following documents to learn more about infrastructure automation:
 
-- [CI/CD](/well-architected-framework/define-and-automate-processes/automate/cicd) to implement automation for infrastructure and applications
-- [Testing](/well-architected-framework/define-and-automate-processes/automate/testing) to implement testing for infrastructure and applications
-- [Deployment](/well-architected-framework/define-and-automate-processes/automate/deployments) to implement deployment for infrastructure and applications
-- [Packaging](/well-architected-framework/define-and-automate-processes/automate/packaging) to package applications for deployment 
+- Implement [CI/CD](/well-architected-framework/define-and-automate-processes/automate/cicd) to automate your standardized workflows
+- Automate your [infrastructure and application testing](/well-architected-framework/define-and-automate-processes/automate/testing)
+- Package your [applications with Packer](/well-architected-framework/define-and-automate-processes/automate/packaging)
