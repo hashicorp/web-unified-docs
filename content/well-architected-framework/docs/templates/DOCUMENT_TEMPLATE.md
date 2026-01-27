@@ -8,7 +8,9 @@ Use this template when creating new Well-Architected Framework documents. Copy t
 
 **Document philosophy:** WAF docs explain the **why and what**, show a representative example, then direct users to tutorials and product docs for the **how**. They are directories, not tutorials.
 
-**Target word count:** 500-1,200 words
+**Target word count:** 500-1,200 words (typically 700-1,000 for comprehensive coverage)
+
+**Writing style:** Balance prose and lists. Use prose for explanations and context, lists for challenges, steps, and resources. See "Prose vs. lists" section for detailed guidance.
 
 **Two personas to serve:**
 - **Decision-makers:** CTOs, architects, staff engineers who need to understand strategic value
@@ -42,9 +44,9 @@ description: [150-160 characters. Include key concepts and value proposition. Us
 
 ## How [topic] works
 
-[1-2 paragraphs explaining the concept, approach, or technology. Define technical terms on first use. Keep explanations high-level - link to product docs for deep dives.]
+[1-2 paragraphs of prose explaining the concept, approach, or technology. Define technical terms on first use. Keep explanations high-level - link to product docs for deep dives.]
 
-[If covering multiple cloud providers or approaches, briefly describe each option and when to use it.]
+[Optional: If covering multiple approaches, use a brief list with "Use X when..." patterns. Otherwise, continue with prose.]
 
 ## [Implementation section title - be specific, e.g., "Configure X with Terraform"]
 
@@ -57,7 +59,7 @@ description: [150-160 characters. Include key concepts and value proposition. Us
 [Terraform configuration for AWS]
 ```
 
-[1-2 sentence summary: What does this configuration do? What does it produce?]
+[1-2 sentences of prose: What does this configuration do? What does it produce? How does it connect to the broader workflow?]
 
 </Tab>
 <Tab heading="Azure" group="cloud-provider">
@@ -66,7 +68,7 @@ description: [150-160 characters. Include key concepts and value proposition. Us
 [Terraform configuration for Azure]
 ```
 
-[1-2 sentence summary: What does this configuration do? What does it produce?]
+[1-2 sentences of prose: What does this configuration do? What does it produce? How does it connect to the broader workflow?]
 
 </Tab>
 <Tab heading="GCP" group="cloud-provider">
@@ -75,16 +77,18 @@ description: [150-160 characters. Include key concepts and value proposition. Us
 [Terraform configuration for GCP]
 ```
 
-[1-2 sentence summary: What does this configuration do? What does it produce?]
+[1-2 sentences of prose: What does this configuration do? What does it produce? How does it connect to the broader workflow?]
 
 </Tab>
 </Tabs>
 
-[Summary paragraph after tabs: Explain key patterns, note provider differences, and reference Terraform registry docs for complete options.]
+[1-2 paragraphs of prose after tabs: Explain key patterns, note provider differences, connect to next steps, and reference Terraform registry docs for complete configuration options.]
 
 ## [Operational section - e.g., "Respond to X" or "Manage X"]
 
-[Brief intro explaining the value of this operational practice.]
+[1-2 paragraphs of prose explaining the operational practice, its value, and general approach.]
+
+[Optional: If providing step-by-step guidance, use numbered lists. Otherwise, continue with prose explaining best practices and workflows.]
 
 When [trigger event], complete the following steps:
 
@@ -92,7 +96,7 @@ When [trigger event], complete the following steps:
 1. **[Action verb] [what]:** [Detailed guidance with specific actions to take.]
 1. **[Action verb] [what]:** [Detailed guidance with specific actions to take.]
 
-[Optional: Transition sentence connecting to related WAF document.]
+[1-2 sentences of prose connecting to next steps or related workflow. Link to related WAF documents when applicable.]
 
 HashiCorp resources:
 
@@ -139,10 +143,13 @@ Visit the following documents to continue building your [strategy/workflow]:
 
 ### Opening paragraphs
 
-- **First sentence:** Hook with a problem statement or compelling statistic
-- **Include keywords:** Target search terms in first 100 words
-- **Establish value:** Why should the reader care?
-- **Connect to HashiCorp:** How do our tools help?
+Write 2-3 paragraphs using natural prose:
+- **First paragraph:** Hook with a problem statement, establish the challenge, introduce the solution
+- **Second paragraph:** Explain how HashiCorp tools address this, connect to broader workflow
+- **Include keywords naturally** in first 100 words for SEO
+- **Use active voice and second-person** ("you")
+
+**Prose, not bullets:** Opening paragraphs should flow naturally as written prose, not bullet points.
 
 ### Why section
 
@@ -159,6 +166,38 @@ Each challenge should:
 - Describe the operational/business challenge
 - Explain the consequence of not addressing it
 
+### Prose vs. lists - Finding the balance
+
+**Use prose (written paragraphs) for:**
+- Opening paragraphs and introductions
+- Explaining concepts, approaches, or how things work
+- Providing context and rationale
+- Summaries after code examples
+- Transitions between sections
+- Describing workflows and processes
+
+**Use lists for:**
+- "Why [topic]" section challenges (required format)
+- Step-by-step instructions (numbered lists)
+- Comparing multiple options with clear criteria
+- Resource links (HashiCorp resources, External resources)
+- When items are truly parallel and independent
+
+**Example of good balance:**
+
+```markdown
+Environment inconsistencies between development, testing, and production cause deployment failures that are difficult to diagnose. When developers work with different operating systems, dependency versions, or configurations, code that works in development fails in production.
+
+Standardizing development environments addresses the following operational challenges:
+
+- **Eliminate environment-specific bugs:** Applications behave differently across...
+- **Reduce onboarding time:** New team members spend hours...
+
+Vagrant creates and manages portable development environments using virtual machines. You define your environment in a Vagrantfile, a Ruby-based configuration file that specifies the base operating system, installed software, and network settings.
+```
+
+**Key principle:** Use lists when they improve scannability and clarity. Use prose when explaining, contextualizing, or connecting ideas. Avoid forcing content into lists just for brevity.
+
 ### Code examples
 
 **When to include:** Implementation guides and technical how-tos benefit from examples. Strategic overviews may not need them.
@@ -166,8 +205,9 @@ Each challenge should:
 **Requirements:**
 - Language tag on every code block (`hcl`, `bash`, `json`)
 - Complete, realistic configurations (not empty templates)
-- Summary after each code block explaining what it does
+- 1-2 sentences of prose after each code block explaining what it does and how it connects to the workflow
 - Use tabs for multi-cloud examples with `group="cloud-provider"`
+- After tabs, 1-2 paragraphs of prose explaining key patterns and next steps
 
 **If a provider lacks Terraform support:**
 ```mdx
@@ -282,8 +322,11 @@ Nomad deployment resources:
 - [ ] No vague pronouns at sentence start ("This", "That", "It")
 
 ### Content
+- [ ] Opening paragraphs use prose, not bullet points
 - [ ] 3-4 challenges in "Why" section with action verb titles
-- [ ] Code examples have summaries explaining what they do
+- [ ] Concept explanations use prose, not excessive lists
+- [ ] Code examples have 1-2 sentences of prose explaining what they do
+- [ ] Good balance between prose (explanations) and lists (steps, resources)
 - [ ] 5+ HashiCorp resource links
 - [ ] External resources section if third-party tools mentioned
 - [ ] Next steps links to related WAF documents
@@ -334,6 +377,8 @@ If someone unfamiliar with HashiCorp tools reads this document, can they:
 | Generic link text | "Learn more" → "Explore [specific topic] for [specific outcome]" |
 | Verbs inside brackets | "[Learn about X]" → "Learn about [X]" |
 | Tutorial-length content | Keep concise; link to tutorials for step-by-step |
+| Over-using bullet lists | Use prose for explanations; lists for steps and resources |
+| Bullet points in opening | Opening paragraphs must be prose, not bullets |
 
 ---
 

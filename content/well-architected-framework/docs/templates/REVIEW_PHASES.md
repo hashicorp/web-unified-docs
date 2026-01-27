@@ -9,11 +9,14 @@ Use this template for comprehensive documentation reviews. Complete phases in or
 ## How to Request Reviews
 
 **File relationships:**
-- **REVIEW_PHASES.md** (this file) = The review process (what to check)
-- **AGENTS.md** = The detailed rules and standards (what to check against)
+- **REVIEW_PHASES.md** (this file) = **Review process** - Step-by-step workflow, review questions, deliverables
+- **AGENTS.md** = **Writing standards** - Formatting rules, content patterns, SEO/AI criteria, examples
 - **DOCUMENT_TEMPLATE.md** = Practical template for creating new documents
 
-A full review uses both files: REVIEW_PHASES.md provides the process, AGENTS.md provides the rules.
+**Clear separation:**
+- This file tells you **how to review** (process, phases, questions)
+- AGENTS.md tells you **what good documentation looks like** (standards, patterns, rules)
+- Review phases reference specific AGENTS.md sections for detailed standards
 
 **Quick commands:**
 
@@ -22,8 +25,8 @@ A full review uses both files: REVIEW_PHASES.md provides the process, AGENTS.md 
 | Full review with fixes | "Full review on [document]. Implement fixes." |
 | Full review, no edits | "Full review on [document]. Review only, don't edit." |
 | Style check only | "Phase 4 review on [document]." |
-| Specific phase | "Phase [1-6] review on [document]." |
-| Final polish | "Phases 4-6 review on [document]. Fix issues." |
+| Specific phase | "Phase [1-7] review on [document]." |
+| Final polish | "Phases 4-7 review on [document]. Fix issues." |
 
 ---
 
@@ -91,18 +94,38 @@ Review checklist:
 
 ---
 
-## Phase 5: SEO & Discoverability Optimization
-**Goal:** Maximize search engine and LLM findability
+## Phase 5: SEO & AI/LLM Optimization
+**Goal:** Maximize discoverability for both search engines and AI systems
 
-Review questions:
-- Are meta descriptions compelling and keyword-rich?
-- Do first paragraphs contain target keywords naturally?
-- Are headings descriptive and search-friendly?
-- Do link descriptions explain outcomes (not "Learn more")?
+**Reference:** See [AGENTS.md](./AGENTS.md) for detailed SEO and AI/LLM optimization standards:
+- [SEO section](./AGENTS.md#seo) - Complete SEO evaluation criteria
+- [AI/LLM Optimization section](./AGENTS.md#aillm-optimization) - AI retrieval and understanding guidelines
+
+**SEO review questions:**
+- Are meta descriptions compelling and keyword-rich (150-160 characters)?
+- Do first paragraphs contain target keywords naturally with strong hooks?
+- Are headings descriptive and search-friendly (matching user search queries)?
+- Do link descriptions explain outcomes (not "Learn more" or "click here")?
 - Are there enough semantic variations of key terms?
-- Does the content answer likely search queries?
+- Does the content answer likely search queries with direct answers?
+- Are there opportunities for featured snippets (FAQs, bulleted lists, definitions)?
 
-**Deliverable:** SEO improvements for meta descriptions and link text
+**AI/LLM optimization review questions:**
+- Does each section start with a clear topic sentence stating what it covers?
+- Are relationships between concepts explicit ("After X, you can Y")?
+- Are technical terms defined when first introduced?
+- Do headings match how users ask questions ("When to use X")?
+- Can sections be understood independently with sufficient context?
+- Are examples complete with clear explanations of what they demonstrate?
+- Are prerequisites and outcomes explicitly stated?
+- Does content avoid ambiguous pronouns and unclear references?
+
+**Deliverable:** SEO and AI/LLM improvements including:
+- Optimized meta descriptions and title options
+- Enhanced link descriptions with clear outcomes
+- Improved section structure for AI retrieval
+- Added FAQ sections or question-answer patterns where appropriate
+- Explicit relationship statements and definitions
 
 ---
 
@@ -121,11 +144,42 @@ Review questions:
 
 ---
 
+## Phase 7: Final User Success Check
+**Goal:** Validate that both personas would succeed with this document
+
+This final phase steps back from the checklist details to ask: **Do the docs make sense? Would a user be successful following them?**
+
+WAF documents serve two personas. Validate the document works for both:
+
+**Decision-maker questions** (CTOs, architects, staff engineers):
+- Can they understand the strategic value in under 2 minutes?
+- Can they articulate why this matters to their organization?
+- Can they make an informed decision about which approach or tool to use?
+- Can they confidently send this document to their implementers?
+
+**Implementer questions** (DevOps, platform, and other engineers):
+- Can they understand what to build or implement?
+- Do they have concrete examples to adapt?
+- Can they find the resources to complete implementation?
+- Would they know what to do next after reading this?
+- Are there practical workflow details missing that would cause them to get stuck?
+
+**Final validation:**
+- Does the document address common alternatives and when to use each?
+- Does the example actually work, or is it too abstract to adapt?
+- Would users know where to go if something goes wrong?
+
+If the answer to any question is "no", revisit the content before finalizing.
+
+**Deliverable:** Final confirmation that the document serves both decision-makers and implementers, or list of gaps to address
+
+---
+
 ## Usage Instructions
 
 **For comprehensive reviews:**
 ```
-Run all 6 phases in order. Do NOT combine Phase 1 with other phases.
+Run all 7 phases in order. Do NOT combine Phase 1 with other phases.
 ```
 
 **For quick style-only reviews:**
@@ -135,8 +189,8 @@ Run Phase 4 (style guide compliance) only.
 
 **For new documentation:**
 ```
-Run Phase 1, then Phase 2, then Phase 3. 
-Save Phase 4-6 for polish after content is solid.
+Run Phase 1, then Phase 2, then Phase 3.
+Save Phases 4-7 for polish after content is solid.
 ```
 
 **For existing documentation improvements:**
@@ -155,8 +209,9 @@ Phase 1: Evaluate user success for these 5 docs. Create review document first.
 [After review] Phase 2: Fact-check all technical content.
 [After review] Phase 3: Add cross-document references.
 [After review] Phase 4: Fix style guide compliance issues.
-[After approval] Phase 5: Optimize SEO elements.
+[After approval] Phase 5: Optimize SEO and AI/LLM discoverability (reference AGENTS.md SEO/AI sections).
 [After approval] Phase 6: Enhance link quality and balance.
+[After approval] Phase 7: Final user success check - would a real user succeed?
 ```
 
 ### Quick Fix Command:
@@ -170,4 +225,4 @@ Phase 4 only: Review these docs for style guide compliance and fix all issues.
 
 **User success comes first.** Perfect formatting doesn't matter if users can't implement the content.
 
-Phase 1 requires the most cognitive empathy. Phases 4-6 are mechanical checklists.
+Phase 1 requires the most cognitive empathy. Phases 4-6 are mechanical checklists. Phase 7 brings it full circle by validating that all the polish didn't lose sight of the user.
