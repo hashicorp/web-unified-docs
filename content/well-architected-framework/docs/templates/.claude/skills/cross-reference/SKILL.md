@@ -1,3 +1,9 @@
+---
+name: cross-reference
+description: Visualizes document relationships, identifies orphaned documents, and suggests missing connections.
+argument-hint: [directory-path]
+---
+
 # Cross-Reference Skill
 
 Visualizes document relationships, identifies orphaned documents, and suggests missing connections to improve navigation and discoverability.

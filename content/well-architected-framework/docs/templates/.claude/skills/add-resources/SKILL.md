@@ -1,3 +1,9 @@
+---
+name: add-resources
+description: Enhances HashiCorp Resources sections with relevant documentation links and tutorials. Use when resources sections need improvement.
+argument-hint: <file-paths>
+---
+
 # Add Resources Skill
 
 Enhances HashiCorp Resources sections by finding and suggesting relevant documentation links, tutorials, and related content.

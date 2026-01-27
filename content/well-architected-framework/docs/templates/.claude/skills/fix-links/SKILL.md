@@ -1,3 +1,9 @@
+---
+name: fix-links
+description: Validates and fixes internal cross-references, broken links, and anchor references in documentation.
+argument-hint: <file-paths> [--fix]
+---
+
 # Fix Links Skill
 
 Validates and fixes internal cross-references, broken links, and anchor references in documentation files.

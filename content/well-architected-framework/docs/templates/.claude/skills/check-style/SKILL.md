@@ -1,3 +1,10 @@
+---
+name: check-style
+description: Fast style validation for AGENTS.md Phase 4 compliance. Use for pre-commit checks and quick style verification.
+argument-hint: <file-paths> [--fix]
+disable-model-invocation: true
+---
+
 # Check Style Skill
 
 Fast style validation focused on AGENTS.md Phase 4 compliance. Perfect for pre-commit checks and quick style verification.

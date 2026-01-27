@@ -1,3 +1,10 @@
+---
+name: create-doc
+description: Creates new documentation files with proper structure and frontmatter following WAF standards.
+argument-hint: <file-path> <page-title>
+disable-model-invocation: true
+---
+
 # Create Documentation Skill
 
 Creates new documentation files with proper structure, boilerplate, and frontmatter following WAF documentation standards.

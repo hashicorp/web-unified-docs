@@ -1,3 +1,10 @@
+---
+name: update-redirects
+description: Manages redirects.jsonc when moving or renaming documentation. Validates redirects and detects issues.
+argument-hint: <old-path> <new-path>
+disable-model-invocation: true
+---
+
 # Update Redirects Skill
 
 Manages the redirects.jsonc file when moving or renaming documentation. Validates redirects, detects issues, and suggests cleanup opportunities.

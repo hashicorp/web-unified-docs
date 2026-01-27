@@ -1,3 +1,10 @@
+---
+name: seo-optimize
+description: SEO optimization for meta descriptions, titles, headings, and links based on AGENTS.md Phase 5. Use for search engine and AI/LLM discoverability.
+argument-hint: <file-paths> [--fix]
+disable-model-invocation: true
+---
+
 # SEO Optimize Skill
 
 Fast SEO-focused review based on AGENTS.md Phase 5 criteria. Optimizes meta descriptions, titles, headings, and link descriptions for search engines and AI/LLM retrieval.

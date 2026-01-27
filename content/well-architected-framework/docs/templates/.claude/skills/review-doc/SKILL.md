@@ -1,3 +1,10 @@
+---
+name: review-doc
+description: Performs comprehensive 7-phase documentation review following REVIEW_PHASES.md and AGENTS.md standards. Use for thorough documentation quality checks.
+argument-hint: <file-paths> [--phases 1-7] [--fix]
+disable-model-invocation: true
+---
+
 # Documentation Review Skill
 
 Performs comprehensive 7-phase documentation review following the REVIEW_PHASES.md workflow and AGENTS.md standards.

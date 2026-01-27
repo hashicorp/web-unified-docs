@@ -1,3 +1,10 @@
+---
+name: create-jira
+description: Creates WAF JIRA tickets for documentation work using existing ticket infrastructure.
+argument-hint: [ticket-details]
+disable-model-invocation: true
+---
+
 # Create JIRA Skill
 
 Creates WAF JIRA tickets for new documentation articles using the existing jira_tickets infrastructure. Guides through the process of defining requirements and submitting tickets.

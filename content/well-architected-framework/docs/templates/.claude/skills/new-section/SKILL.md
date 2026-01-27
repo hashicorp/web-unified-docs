@@ -1,3 +1,10 @@
+---
+name: new-section
+description: Creates complete documentation sections with overview page, initial documents, and cross-referencing.
+argument-hint: <section-name>
+disable-model-invocation: true
+---
+
 # New Section Skill
 
 Creates complete documentation sections with overview page, initial documents, and proper cross-referencing structure.

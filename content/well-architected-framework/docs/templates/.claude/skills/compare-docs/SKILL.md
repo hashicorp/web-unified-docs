@@ -1,3 +1,10 @@
+---
+name: compare-docs
+description: Side-by-side documentation quality comparison. Highlights differences and gaps between files.
+argument-hint: <file1> <file2>
+disable-model-invocation: true
+---
+
 # Compare Docs Skill
 
 Side-by-side quality comparison of documentation files. Highlights differences, identifies gaps, and provides actionable recommendations to match baseline quality.

@@ -1,3 +1,10 @@
+---
+name: extract-examples
+description: Extracts, validates, and exports code examples from documentation. Ensures examples are syntactically correct.
+argument-hint: <file-paths>
+disable-model-invocation: true
+---
+
 # Extract Examples Skill
 
 Extracts, validates, and exports code examples from documentation. Ensures examples are syntactically correct, complete, and runnable.
