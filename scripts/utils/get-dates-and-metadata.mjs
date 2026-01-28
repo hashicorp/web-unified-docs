@@ -79,8 +79,12 @@ export function addDateMetadata(filePath) {
 		return
 	}
 
-	const { markdownSource, matter, metadata } =
-		parseMarkdownFrontMatter(filePath)
+	const parseResult = parseMarkdownFrontMatter(filePath)
+	if (parseResult === null) {
+		console.warn(`⚠️  Skipping ${filePath}: Could not parse frontmatter`)
+		return
+	}
+	const { markdownSource, matter, metadata } = parseResult
 	let frontmatter = matter
 
 	// Check if file has frontmatter
