@@ -1,0 +1,191 @@
+---
+layout: docs
+page_title: Load balancing with Fabio
+description: >-
+  Create and deploy a load balancing Fabio job and use the native Consul
+  integration to load balance your application.
+---
+
+# Load balancing with Fabio
+
+[Fabio](https://fabiolb.net/) distributes incoming HTTP(S) and TCP requests from
+the internet to front-end services that can handle these requests. It integrates
+natively with Consul and provides an optional web UI to visualize routing.
+
+Follow these steps to use Fabio as a load balancer:
+
+1. Deploy Fabio as a [system job](/nomad/docs/concepts/scheduling/schedulers#system) so that it can route
+incoming traffic evenly to your application's server group regardless of which
+client nodes your application is running on.
+1. Configure a `urlprefix-` tag in your application job specification's
+   `group.service` block. Refer to the [Fabio
+   Quickstart](https://fabiolb.net/quickstart/) for more information on the
+   `urlprefix-` tag requirement. 
+1. Place all Nomad client nodes behind your cloud provider's load balancer to
+provide the end user with a single endpoint for access to your application.
+
+This guide shows you how to deploy Fabio as a load balancer for an Apache web server.
+
+## Prerequisites
+
+You must configure your Nomad installation to use Consul. Refer to the
+[Consul integration](/nomad/docs/networking/consul) content for more
+information.
+
+## Deploy Fabio as a system job
+
+Create a job specification for Fabio and name it `fabio.nomad.hcl`. Note the following:
+
+- `type` is `system` so that the job runs as a system job.
+- `network_mode` is `host` so that Fabio can communicate with Consul
+on the client nodes.
+
+
+<CodeBlockConfig filename="fabio.nomad.hcl" highlight="3,18">
+
+```hcl
+job "fabio" {
+  datacenters = ["dc1"]
+  type = "system"
+
+  group "fabio" {
+    network {
+      port "lb" {
+        static = 9999
+      }
+      port "ui" {
+        static = 9998
+      }
+    }
+    task "fabio" {
+      driver = "docker"
+      config {
+        image = "fabiolb/fabio"
+        network_mode = "host"
+        ports = ["lb","ui"]
+      }
+
+      resources {
+        cpu    = 200
+        memory = 128
+      }
+    }
+  }
+}
+```
+
+</CodeBlockConfig>
+
+
+Deploy the Fabio job with the `nomad run` command.
+
+```shell-session
+$ nomad job run fabio.nomad.hcl
+==> Monitoring evaluation "fba4f04a"
+    Evaluation triggered by job "fabio"
+    Allocation "6e6367d4" created: node "f3739267", group "fabio"
+    Allocation "d17573b4" created: node "28d7f859", group "fabio"
+    Allocation "f3ad9b16" created: node "510898b6", group "fabio"
+    Evaluation status changed: "pending" -> "complete"
+==> Evaluation "fba4f04a" finished with status "complete"
+```
+
+At this point, you should be able to visit any one of your client nodes at port
+`9998` and access the web interface for Fabio. The routing table should be empty
+because you have not yet deployed anything that Fabio can route to. Accordingly,
+if you visit any of the client nodes at port `9999` at this point, you get a
+`404` HTTP response. This error is to be expected because there are no routes built
+yet.
+
+## Configure your application
+
+Create a job for the Apache web server and name it `webserver.nomad.hcl`. Notice the tag in the service stanza begins with `urlprefix-`. Fabio looks for
+services with that special tag and builds routes for them. In this case, the job
+registers the path `/` with Fabio. This routes incoming traffic to `/` to the
+default page for the Apache web server.
+
+<CodeBlockConfig filename="webserver.nomad.hcl" highlight="15">
+
+```hcl
+job "webserver" {
+  datacenters = ["dc1"]
+  type = "service"
+
+  group "webserver" {
+    count = 3
+    network {
+      port "http" {
+        to = 80
+      }
+    }
+
+    service {
+      name = "apache-webserver"
+      tags = ["urlprefix-/"]
+      port = "http"
+      check {
+        name     = "alive"
+        type     = "http"
+        path     = "/"
+        interval = "10s"
+        timeout  = "2s"
+      }
+    }
+
+    restart {
+      attempts = 2
+      interval = "30m"
+      delay = "15s"
+      mode = "fail"
+    }
+
+    task "apache" {
+      driver = "docker"
+      config {
+        image = "httpd:latest"
+        ports = ["http"]
+      }
+    }
+  }
+}
+```
+
+</CodeBlockConfig>
+
+Deploy the Apache web server job with the `nomad run` command.
+
+```shell-session
+$ nomad job run webserver.nomad.hcl
+==> Monitoring evaluation "c7bcaf40"
+    Evaluation triggered by job "webserver"
+    Evaluation within deployment: "e3603b50"
+    Allocation "20951ad4" created: node "510898b6", group "webserver"
+    Allocation "43807686" created: node "28d7f859", group "webserver"
+    Allocation "7b60eb24" created: node "f3739267", group "webserver"
+    Evaluation status changed: "pending" -> "complete"
+==> Evaluation "c7bcaf40" finished with status "complete"
+```
+
+You have now deployed and registered your web servers with Fabio. You should be able to visit any of the Nomad clients at port `9999` to visit Apache's
+default web page. If you visit Fabio's web interface by
+going to any of the client nodes at port `9998`, you can observe that the
+routing table is populated.
+
+## Place Nomad client nodes behind a cloud provider load balancer
+
+Your Nomad client nodes may change over time, so it is
+important to provide your end users with a single endpoint to access your
+services. You may do this by placing your Nomad client nodes behind a cloud
+provider's load balancer, such as [AWS Elastic Load Balancing
+(ELB)](https://aws.amazon.com/elasticloadbalancing/), [Azure Load Balancer](https://azure.microsoft.com/en-us/products/load-balancer),
+or [Google Cloud Load Balancing](https://cloud.google.com/load-balancing).
+
+The basic steps involve creating a load balancer, registering Nomad client nodes
+behind the load balancer, creating listeners, and configuring health checks. If you followed
+this guide, be sure to create ingress routes for Fabio.
+
+After you configure your cloud provider's load balancer, you should be
+able to access the cloud load balancer DNS name:
+
+- At port `80` to visit the Apache home page.
+- At port `9998` to access the Fabio web UI.

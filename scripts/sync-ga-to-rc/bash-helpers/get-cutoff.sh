@@ -1,7 +1,7 @@
-# 
-# Copyright (c) HashiCorp, Inc.
+#
+# Copyright IBM Corp. 2025
 # SPDX-License-Identifier: BUSL-1.1
-# 
+#
 # ------------------------------------------------------------------------------
 #
 # Get branch creation date
@@ -22,28 +22,27 @@ targetBranch="${1}"  # git branch name for RC docs
 # Bail if any of the command line parameters were omitted
 if [[ -z ${targetBranch} ]] ; then exit ; fi
 
+# Set the branch target appropriately
+if [[ "${targetBranch}" == "main" ]] ; then 
+  branchTarget="main"
+else 
+  branchTarget="main..${targetBranch}"
+fi 
+
 cd "${repoRoot}"
 
-if [[ "${targetBranch}" == "main" ]] ; then
-  # Find the earliest commit we can as the "creation" date; since git log
-  # entries expire based on the setting for reflogexpire on the repo/branch
-  branchDate=$(
-    git log                             \
-      --pretty=format:%ad               \
-      --date=iso                        \
-      --date=format:'%Y-%m-%d %H:%M:%S' \
-      "${targetBranch}"                     \
-      | tail -1
-  )
-else
-  branchDate=$(
-    git reflog                          \
-      --grep-reflog="Created from"      \
-      --pretty=format:%ad               \
-      --date=iso                        \
-      --date=format:'%Y-%m-%d %H:%M:%S' \
-      "${targetBranch}" 
-  )
-fi
+# Find the earliest commit in the release branch that *is not* in main and use
+# that as the "creation" date
+git fetch origin
+
+dateString=$(
+  git log              \
+  --pretty=format:%ad  \
+  --date=iso           \
+  ${branchTarget} |    \
+  tail -1
+)
+
+branchDate="$(getUTCDate "${dateString}")"
 
 echo "${branchDate}"

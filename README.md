@@ -1,5 +1,12 @@
 # Web Unified Docs
 
+> [!IMPORTANT]
+> This README is for developers working on the documentation website. If you
+> want to contribute docs content, refer to the [Contribute to HashiCorp
+> documentation](CONTRIBUTING.md) guide.
+
+---
+
 The project in this repository, `hashicorp/web-unified-docs`, aims to implement [[DEVDOT-023] Unified Product Documentation Repository](https://docs.google.com/document/d/1p8kOqySttvWUVfn7qiC4wGBR73LMBGMelwLt69pM3FQ/edit). The RFC for this project was intentionally light on implementation details, in order to foster consensus on the broad direction.
 
 - **PR previews**: Show broken links in comments for awareness (informational only, don't block PRs)
@@ -13,7 +20,11 @@ The weekly [`broken-link-check-full`](https://github.com/hashicorp/web-unified-d
 - **Check external docs/API links** (medium priority)
 - **Consider removing unreliable external links** (low priority)
 
-For detailed information about the monitoring system, see [Broken Link Monitoring Documentation](./.github/BROKEN_LINK_MONITORING.md). Unified Product Documentation Repository](https://docs.google.com/document/d/1p8kOqySttvWUVfn7qiC4wGBR73LMBGMelwLt69pM3FQ/edit). The RFC for this project was intentionally light on implementation details, in order to foster consensus on the broad direction.
+For detailed information about the monitoring system, see [Broken Link
+Monitoring Documentation](./.github/BROKEN_LINK_MONITORING.md). The [Unified Product Documentation
+Repository RFC](https://docs.google.com/document/d/1p8kOqySttvWUVfn7qiC4wGBR73LMBGMelwLt69pM3FQ/edit)
+for this project was intentionally light on implementation details, in order
+to foster consensus on the broad direction.
 
 The existing API (`content.hashicorp.com`) has endpoints that serve documentation content. You can find the source code in [hashicorp/mktg-content-workflows](https://github.com/hashicorp/mktg-content-workflows/blob/main/api/content.ts).
 
@@ -156,14 +167,6 @@ Check multiple directories.
 ```
 npm run broken-link terraform-plugin-framework-log terraform-plugin-mux
 ```
-
-## Contributing to the content
-
-Follow the [style guide](docs/style-guide/index.md) when making changes to documentation or tutorials. The [top 12 guidelines](docs/style-guide/top-12.md) covers the most common use cases.
-
-Work with your technical writer or education engineer when adding new content or for updates that may include structural changes to the information.
-
-Adherence to the style guide and our writing principles ensures that our content is clear, concise, and consistent.
 
 ## Architecture
 
