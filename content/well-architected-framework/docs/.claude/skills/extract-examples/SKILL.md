@@ -45,6 +45,8 @@ Extracts, validates, and exports code examples from documentation. Ensures examp
 
 This skill extracts all code examples from documentation, validates them, and optionally exports them as runnable files.
 
+**Phase 8 Support:** This skill directly supports Phase 8 (Code Example Validation) from REVIEW_PHASES.md by extracting and validating code syntax. Use `--validate` flag to run syntax checks on extracted code.
+
 ### Extraction Process
 
 1. **Code Block Discovery**
@@ -510,6 +512,22 @@ cd /tmp/tests && ./test-runner.sh --ci || exit 1
 
 ## Integration with Other Skills
 
+**Phase 8 Workflow (Code Example Validation):**
+```bash
+# Phase 8: Validate code examples with tooling
+/extract-examples docs/file.mdx --validate --export /tmp/examples/
+
+# Run formatters (requires tools installed)
+cd /tmp/examples/terraform && terraform fmt -check
+cd /tmp/examples/packer && packer fmt -check
+
+# Run validators
+cd /tmp/examples/terraform && terraform validate
+cd /tmp/examples/packer && packer validate
+
+# Document results in review
+```
+
 **With /review:**
 ```bash
 # Review includes code quality check
@@ -574,6 +592,7 @@ cd /tmp/tests && ./test-runner.sh
 ## When to Use This Skill
 
 Use `/extract-examples` when:
+- ✅ **Running Phase 8 reviews** (Code Example Validation from REVIEW_PHASES.md)
 - ✅ Validating documentation before release
 - ✅ Creating test suites for examples
 - ✅ Ensuring examples are runnable
@@ -586,7 +605,7 @@ Use `/extract-examples` when:
 
 This skill aligns with:
 - **`AGENTS.md`** - Code example standards
-- **`REVIEW_PHASES.md`** - Phase 2 (technical accuracy)
+- **`REVIEW_PHASES.md`** - Phase 2 (technical accuracy) and **Phase 8 (Code Example Validation)**
 
 ## Notes
 

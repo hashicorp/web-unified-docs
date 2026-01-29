@@ -555,10 +555,11 @@ Use `/check-code-examples` when:
 - ✅ Checking for complete (not empty) examples
 - ✅ Validating code summaries exist
 - ✅ Ensuring realistic values (data sources vs hardcoded)
+- ✅ **Part of documentation quality review** (checks completeness and patterns)
 
 Don't use when:
 - ❌ Document has no code examples
-- ❌ Need syntax validation (use Phase 8 with formatters)
+- ❌ Need syntax validation (use `/extract-examples --validate` for Phase 8)
 - ❌ Need full document review (use `/review-doc`)
 
 ## Reference
@@ -589,7 +590,7 @@ Typical execution times:
 /check-code-examples docs/**/*.mdx
 
 # Run syntax validators (Phase 8)
-/review-doc docs/file.mdx --phases 8
+/extract-examples docs/**/*.mdx --validate
 ```
 
 **Quick validation during writing:**
@@ -600,6 +601,7 @@ Typical execution times:
 ## Notes
 
 - Focuses on WAF-specific patterns (realistic values, workflow connections)
-- Does NOT validate syntax (use Phase 8 with terraform fmt, packer validate)
+- Does NOT validate syntax (use Phase 8 with `/extract-examples --validate` or run `terraform fmt`, `packer validate` directly)
 - Auto-fix only adds placeholder summaries requiring review
 - Most issues require human judgment about architecture and use cases
+- **For Phase 8 (Code Example Validation):** Use `/extract-examples` skill to validate syntax with tooling
