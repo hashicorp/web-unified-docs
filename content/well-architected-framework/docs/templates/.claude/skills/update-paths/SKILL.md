@@ -1,7 +1,7 @@
 ---
 name: update-paths
 description: Scans WAF pillar directories and updates CONTENT_PATHS.md with complete documentation file list.
-disable-model-invocation: true
+disable-model-invocation: false
 ---
 
 # Update Content Paths Skill

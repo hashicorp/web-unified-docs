@@ -241,105 +241,21 @@ HashiCorp is part of the IBM portfolio alongside Red Hat (Ansible, OpenShift) an
 - Don't force IBM tools into documents where they don't naturally fit
 - Maintain focus on HashiCorp tools as the primary subject
 
-## SEO
+## SEO & AI/LLM Optimization
 
-Analyze this document's SEO optimization and provide specific recommendations.
+**For complete SEO and AI/LLM optimization guidance, see [REVIEW_PHASES.md Phase 5](./REVIEW_PHASES.md).**
 
-**Areas to evaluate and improve:**
-1. **Title** - Provide 3 options that:
-   - Use sentence case
-   - Avoid colons
-   - Exclude tool names (e.g., Terraform, AWS) from the main title
-   - Are compelling and clear
-   
-2. **Meta description** - Suggest an optimized version (150-160 characters)
+Phase 5 covers:
+- Meta descriptions (150-160 characters)
+- Title optimization
+- First paragraph hooks
+- H2 heading optimization
+- Link descriptions
+- AI/LLM retrieval patterns
+- Topic sentences and relationships
+- Question-answer patterns
 
-3. **First paragraph** - Recommend improvements for:
-   - Hook/engagement
-   - Keyword placement
-   - Clarity of value proposition
-
-4. **H2 headings** - Evaluate current headings and suggest improvements
-   - Tool-specific names (Terraform, AWS) are allowed in H2s only when the section content is tool-specific
-   - Otherwise, keep headings generic and benefit-focused
-
-5. **Description for images and videos** - Review the tags for images and videos:
-   - Review descriptions for videos and images
-
-6. **Other critical SEO elements** - Flag any major issues with:
-   - Keyword usage and density
-   - Content structure and readability
-   - Internal linking opportunities
-   - Image alt text (if applicable)
-
-7. **Link descriptions** - Are link descriptions optimized? Do they clearly explain what the user will find (vs. generic "Learn more")?
-   - Avoid generic link text like "click here" or "read more"
-   - Use descriptive text that tells users what they'll find: "Learn about Terraform state management" instead of "Learn more"
-   - Link descriptions should stand alone and make sense out of context
-   - Include key context in the link text itself when possible
-
-**Writing requirements:**
-- Eliminate all passive voice
-- Use sentence case throughout
-- Prioritize clarity and user intent
-
-**Output format:**
-For each recommendation, explain why the change improves SEO and provide specific before/after examples where helpful.
-
-## AI/LLM Optimization
-
-When reviewing documents, analyze how well they are optimized for LLMs and AI systems to retrieve and understand.
-
-**Areas to evaluate:**
-
-1. **Clear topic sentences and summaries**
-   - Each section should start with a clear topic sentence that states what it covers
-   - Include brief summaries that state key takeaways explicitly
-   - LLMs extract information more accurately when key points are stated directly
-
-2. **Explicit relationships between concepts**
-   - Use clear transition phrases: "After X, you can Y", "X depends on Y", "Use X when you need Y"
-   - Define relationships explicitly rather than implying them
-   - Make prerequisite knowledge clear
-
-3. **Well-defined terminology**
-   - Define technical terms when first introduced
-   - Use consistent terminology throughout (don't switch between synonyms)
-   - Spell out acronyms on first use
-
-4. **Question-answer patterns**
-   - Structure content to answer common questions directly
-   - Use headings that match how users ask questions (e.g., "When to use X" rather than "X usage")
-   - Include clear decision guidance with "Use X when..." patterns
-
-5. **Contextual completeness**
-   - Provide enough context that sections can be understood independently
-   - Don't rely solely on directional references ("above", "below")
-   - Include relevant context when linking to other documents
-
-6. **Structured examples**
-   - Provide complete, working examples with explanations
-   - Clearly state what the example demonstrates
-   - Explain why the example matters (the outcome, not just what it does)
-
-7. **Explicit prerequisites and outcomes**
-   - State what readers need before starting
-   - Clearly describe what readers will achieve
-   - Make success criteria explicit
-
-8. **Semantic clarity**
-   - Avoid ambiguous pronouns (use specific nouns instead of "it", "this", "that" when unclear)
-   - Use parallel structure in lists
-   - Make subject-verb relationships clear
-
-**Why this matters:**
-LLMs and AI systems retrieve and synthesize information based on semantic understanding. Clear structure, explicit relationships, and direct statements improve:
-- Retrieval accuracy when AI systems search documentation
-- Answer quality when AI assistants reference documentation
-- Context understanding when content is used in RAG (Retrieval-Augmented Generation) systems
-
-**Output format:**
-Flag any areas where content could be clearer for AI systems and suggest specific improvements.
+Run Phase 5 review when optimizing for search engines and AI systems.
 
 
 ## Resources
@@ -775,41 +691,20 @@ Different HashiCorp tools need different documentation approaches:
 
 ---
 
-## Quick Reference Checklist
+## Quick Validation
 
-Quick mechanical checks for writing standards. **For complete review process and content quality validation, see [REVIEW_PHASES.md](./REVIEW_PHASES.md).**
+**For complete review checklists, see [REVIEW_PHASES.md](./REVIEW_PHASES.md).**
 
-### Structure & Formatting (see Writing Standards, Document Structure Patterns sections)
-- [ ] Frontmatter with `page_title` and `description` (150-160 chars)
-- [ ] "Why [topic]" section with 3-4 challenges using `**Challenge:** Description` format
-- [ ] Sentence case for all headings
-- [ ] "The following" before lists (except resource sections)
-- [ ] Bold titles with colons inside: `**Title:** Description`
-- [ ] Ordered lists use `1.` for every item
-- [ ] Workflow connections to related WAF docs
-- [ ] HashiCorp resources section (5+ links) before "Next steps"
+**For automated checks, use skills:**
+- `/check-structure` - Document structure patterns (Why sections, lists, headings)
+- `/check-code-examples` - Code completeness and summaries
+- `/check-resources` - HashiCorp resources section formatting
+- `/check-hashicorp-style` - Official style guide compliance (voice, tense, word choice)
+- `/review-doc --phases 4-5` - Style and SEO optimization
 
-### Voice & Clarity (see Other Writing Standards, Language and Tone Standards sections)
-- [ ] Second-person voice, active voice, no promotional language
-- [ ] No vague pronouns at sentence start (use specific nouns)
-- [ ] No editorializing or excessive conjunctions
-
-### Code Examples (see Code Examples, Code Example Patterns sections)
-- [ ] Language tags on all code blocks
-- [ ] Complete, actionable examples with realistic values
-- [ ] 1-2 sentence summaries explaining what code accomplishes and why it matters
-- [ ] Packer examples show provisioners; Terraform examples use data sources
-
-### SEO (see SEO section)
-- [ ] Title: sentence case, no colons, no tool names in main title
-- [ ] First paragraph: strong hook, keyword placement, active voice
-- [ ] Link descriptions specific (not "Learn more")
-
-### AI/LLM (see AI/LLM Optimization section)
-- [ ] Clear topic sentences, explicit relationships, terms defined
-- [ ] Question-based headings, "Use X when..." patterns
-- [ ] No ambiguous pronouns, explicit outcomes stated
-
-### Resources (see Resources, HashiCorp Resources Section Patterns sections)
-- [ ] 5+ specific HashiCorp links organized logically
-- [ ] Verbs outside link brackets, context in sentence (no dashes after links)
+**For detailed pattern references:**
+- [DOCUMENT_PATTERNS.md](./DOCUMENT_PATTERNS.md) - Structure and Why sections
+- [CODE_PATTERNS.md](./CODE_PATTERNS.md) - Code examples by tool
+- [RESOURCES_PATTERNS.md](./RESOURCES_PATTERNS.md) - Link formatting
+- [TOOL_PATTERNS.md](./TOOL_PATTERNS.md) - Tool-specific requirements
+- [PITFALLS.md](./PITFALLS.md) - Common mistakes to avoid

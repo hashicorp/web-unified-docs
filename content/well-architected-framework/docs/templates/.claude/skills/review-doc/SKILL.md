@@ -37,52 +37,20 @@ This skill automates the comprehensive documentation review process defined in `
 
 ### Review Process
 
-**Phase 1: User Success Evaluation** (PRIORITY)
-- Ensures users understand the problem/solution
-- Validates representative code examples exist
-- Confirms resources for implementation are provided
-- Checks both decision-maker and implementer personas are served
+This skill executes the 7-phase review process defined in `REVIEW_PHASES.md`. See that document for complete phase descriptions, review questions, and deliverables.
 
-**Phase 2: Technical Accuracy & Fact-Checking**
-- Verifies code examples are syntactically correct
-- Checks version numbers for tools/providers
-- Validates no deprecated patterns are used
-- Ensures configuration examples work
+**Phase overview:**
+1. **User Success Evaluation** - Ensures both decision-maker and implementer personas can succeed
+2. **Technical Accuracy & Fact-Checking** - Verifies all technical content is correct and current
+3. **Cross-Document Relationships** - Ensures docs form a cohesive workflow
+4. **Document Structure Compliance** - Validates WAF-specific document structure and formatting
+5. **SEO & AI/LLM Optimization** - Maximizes discoverability for search engines and AI systems
+6. **Link Quality & Balance** - Provides right mix of beginner and advanced resources
+7. **Final User Success Check** - Validates both personas would succeed with the document
 
-**Phase 3: Cross-Document Relationships**
-- Checks related documents reference each other
-- Validates HashiCorp Resources sections have cross-links
-- Ensures workflow progression is clear
-- Identifies orphaned documents
+**Note:** Phase 8 (Code Example Validation) requires tool execution and is not included in standard reviews. Request it explicitly when needed.
 
-**Phase 4: AGENTS.md Style Guide Compliance**
-- Meta descriptions are 150-160 characters
-- "Why" sections use **Bold challenge:** format with 3-4 challenges
-- Workflow connections in body text
-- Code examples have 1-2 sentence summaries
-- No vague pronouns at sentence start
-- Lists use "the following" introduction
-- Heading capitalization follows sentence case
-- Second-person voice, active voice
-
-**Phase 5: SEO & AI/LLM Optimization**
-- Reviews against AGENTS.md SEO section criteria
-- Optimizes meta descriptions and titles
-- Enhances link descriptions
-- Improves section structure for AI retrieval
-- Adds explicit relationship statements
-
-**Phase 6: Link Quality & Balance**
-- Verifies link descriptions with action verbs and outcomes
-- Ensures balance between beginner and advanced links
-- Checks 5+ HashiCorp resource links exist
-- Validates link organization
-
-**Phase 7: Final User Success Check**
-- Steps back from checklist to ask: "Would a user succeed?"
-- Validates decision-makers can understand strategic value
-- Validates implementers have actionable guidance
-- Confirms examples work and are adaptable
+For detailed review questions and criteria for each phase, refer to `REVIEW_PHASES.md`.
 
 ### Output Format
 
