@@ -458,7 +458,7 @@ Don't use `/new-section` when:
 ## Reference Files
 
 This skill uses:
-- **`DOCUMENT_TEMPLATE.md`** - Document structure
+- **`../../../templates/doc-templates/DOCUMENT_TEMPLATE.md`** - Document structure
 - **`AGENTS.md`** - Writing standards
 - **`styleguide.md`** - HashiCorp style guide
 

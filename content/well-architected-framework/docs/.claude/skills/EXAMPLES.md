@@ -8,7 +8,7 @@ Real-world examples of using the documentation review skill.
 
 **Workflow:**
 ```bash
-# Step 1: Write your document following DOCUMENT_TEMPLATE.md
+# Step 1: Write your document following ../../templates/doc-templates/DOCUMENT_TEMPLATE.md
 
 # Step 2: Run phases 1-3 to validate content
 /review docs/my-new-doc.mdx --phases 1-3
@@ -273,7 +273,7 @@ Real-world examples of using the documentation review skill.
 ❌ Severe technical errors
 ```
 
-**Action:** Complete rewrite required using DOCUMENT_TEMPLATE.md
+**Action:** Complete rewrite required using ../../templates/doc-templates/DOCUMENT_TEMPLATE.md
 
 ---
 
@@ -540,4 +540,4 @@ All documentation files are in the templates/ directory:
 - **Skill documentation:** `.claude/skills/review.md` (this file's parent directory)
 - **Writing standards:** `AGENTS.md`
 - **Review process:** `REVIEW_PHASES.md`
-- **Document template:** `DOCUMENT_TEMPLATE.md`
+- **Document template:** `../../templates/doc-templates/DOCUMENT_TEMPLATE.md`

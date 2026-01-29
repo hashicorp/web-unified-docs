@@ -347,7 +347,7 @@ Next Steps
 3. Assign to writer (if not already assigned)
 4. Create design document and link in ticket
 5. When ready to write, refer to templates:
-   - /templates/DOCUMENT_TEMPLATE.md
+   - /templates/doc-templates/DOCUMENT_TEMPLATE.md
    - /templates/AGENTS.md
    - /templates/REVIEW_PHASES.md
 
@@ -452,7 +452,7 @@ References:
 
 Templates and resources:
 - `/templates/WRITING_RESOURCES.md` - Overview of writing a WAF document
-- `/templates/DOCUMENT_TEMPLATE.md` - Document structure and formatting
+- `/templates/doc-templates/DOCUMENT_TEMPLATE.md` - Document structure and formatting
 - `/templates/AGENTS.md` - Complete writing standards
 - `/templates/REVIEW_PHASES.md` - Review process steps
 

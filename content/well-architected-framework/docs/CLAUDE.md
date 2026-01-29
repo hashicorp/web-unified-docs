@@ -1,29 +1,24 @@
 # Claude Code Context
 
-All documentation guidelines are maintained in [AGENTS.md](./AGENTS.md).
+**New to this system?** See [SETUP.md](./SETUP.md) for a quick start guide.
 
-Read that file for:
-- Goals and personas
-- Writing standards
-- Document structure patterns
-- Code example patterns
-- SEO and AI/LLM optimization
-- Review checklists
+**Main documentation guidelines:** [AGENTS.md](./AGENTS.md)
 
-Supporting files:
-- [REVIEW_PHASES.md](./REVIEW_PHASES.md) - Phase-based review process
-- [styleguide.md](./styleguide.md) - HashiCorp style guide
+Read AGENTS.md for all documentation standards, patterns, supporting files, and reference materials.
 
 ## Available Skills
 
-Custom documentation skills are located in `templates/.claude/skills/` directory.
+Custom documentation skills are located in `.claude/skills/` directory.
 
 Common skills for WAF documentation:
 
 **Review & Validation:**
 - `/review-doc` - Multi-phase documentation review (uses REVIEW_PHASES.md)
+- `/code-review` - Comprehensive code review for documentation
 - `/check-style` - Style guide compliance check (AGENTS.md Phase 4)
 - `/check-hashicorp-style` - HashiCorp official style guide validation (styleguide.md)
+- `/full-styleguide-check` - Complete HashiCorp style guide validation
+- `/quick-styleguide` - Quick style guide check for common issues
 - `/check-structure` - Document structure patterns (Why sections, lists, workflow connections)
 - `/check-code-examples` - Code example completeness and summaries
 - `/check-resources` - HashiCorp resources section formatting and links
@@ -37,6 +32,7 @@ Common skills for WAF documentation:
 
 **Document Creation:**
 - `/create-doc` - Create new documents from templates
+- `/new-section` - Create new sections in existing documents
 - `/create-jira` - Create Jira tickets for documentation work
 - `/compare-docs` - Compare two documents for consistency
 

@@ -3,7 +3,7 @@
 This folder contains templates, standards, reference files, and automated skills for creating and maintaining HashiCorp Well-Architected Framework (WAF) documentation.
 
 **Last updated:** January 28, 2026
-**Recent changes:** See [REORGANIZATION_SUMMARY.md](./REORGANIZATION_SUMMARY.md) for details on the new modular structure.
+**Recent changes:** See [reference/REORGANIZATION_SUMMARY.md](./reference/REORGANIZATION_SUMMARY.md) for details on the new modular structure.
 
 ---
 
@@ -24,9 +24,9 @@ This folder contains templates, standards, reference files, and automated skills
 ### For New Users
 
 1. **Read this README** to understand the system
-2. **Review [CLAUDE.md](./CLAUDE.md)** for available skills
+2. **Review [../CLAUDE.md](../CLAUDE.md)** for available skills
 3. **Use skills for validation:** `/check-structure`, `/check-resources`, etc.
-4. **Reference [AGENTS.md](./AGENTS.md)** for core writing standards
+4. **Reference [../AGENTS.md](../AGENTS.md)** for core writing standards
 
 ### For Document Reviews
 
@@ -43,7 +43,7 @@ This folder contains templates, standards, reference files, and automated skills
 
 ```bash
 # Use the template
-cat templates/DOCUMENT_TEMPLATE.md
+cat templates/doc-templates/DOCUMENT_TEMPLATE.md
 
 # Check structure as you write
 /check-structure docs/new-file.mdx
@@ -56,14 +56,21 @@ cat templates/DOCUMENT_TEMPLATE.md
 
 ## File Structure
 
-### Core Guidelines (Load These)
+### Core Guidelines (in parent docs/ directory)
 
 | File | Size | Purpose | When to Use |
 |------|------|---------|-------------|
-| **AGENTS.md** | 32KB | Main documentation standards and writing guidelines | Primary reference - load as needed |
+| **../CLAUDE.md** | 1.7KB | Skills directory and usage guide (auto-loaded) | Quick skill reference |
+| **../AGENTS.md** | 34KB | Main documentation standards and writing guidelines | Primary reference - load as needed |
+| **../.claude/** | - | Skills and agents directory | Contains all 20 skills |
+
+### Supporting Files (in templates/ directory)
+
+| File | Size | Purpose | When to Use |
+|------|------|---------|-------------|
 | **REVIEW_PHASES.md** | 8.5KB | 7-phase review process with checklists | When conducting reviews |
-| **styleguide.md** | 91KB | Official HashiCorp style guide (Top 12 + full guide) | Style validation |
-| **CLAUDE.md** | 1.7KB | Skills directory and usage guide | Quick skill reference |
+| **styleguide.md** | 106KB | Official HashiCorp style guide (Top 12 + full guide) | Style validation |
+| **styleguide-quick-reference.md** | 30KB | Quick style reference | Fast lookups |
 
 ### Reference Files (Load On-Demand)
 
@@ -71,26 +78,26 @@ These contain detailed patterns. **You don't need to load these manually** - ask
 
 | File | Size | Purpose | Skill Alternative |
 |------|------|---------|-------------------|
-| **DOCUMENT_PATTERNS.md** | 13KB | Structure patterns, Why sections, workflow connections | `/check-structure` |
-| **RESOURCES_PATTERNS.md** | 14KB | HashiCorp resources section formatting, link patterns | `/check-resources` |
-| **CODE_PATTERNS.md** | 13KB | Code example requirements by tool (Packer, Terraform, etc.) | `/check-code-examples` |
-| **PITFALLS.md** | 10KB | Common mistakes and how to avoid them | Part of `/review-doc` Phase 1 & 7 |
-| **TOOL_PATTERNS.md** | 14KB | Tool-specific documentation requirements | `/check-code-examples` |
+| **reference/DOCUMENT_PATTERNS.md** | 13KB | Structure patterns, Why sections, workflow connections | `/check-structure` |
+| **reference/RESOURCES_PATTERNS.md** | 14KB | HashiCorp resources section formatting, link patterns | `/check-resources` |
+| **reference/CODE_PATTERNS.md** | 13KB | Code example requirements by tool (Packer, Terraform, etc.) | `/check-code-examples` |
+| **reference/PITFALLS.md** | 10KB | Common mistakes and how to avoid them | Part of `/review-doc` Phase 1 & 7 |
+| **reference/TOOL_PATTERNS.md** | 14KB | Tool-specific documentation requirements | `/check-code-examples` |
 
 ### Templates
 
 | File | Purpose |
 |------|---------|
-| **DOCUMENT_TEMPLATE.md** | Template for creating new WAF articles |
-| **pillar-overview.mdx** | Template for pillar landing pages (rare use) |
+| **doc-templates/DOCUMENT_TEMPLATE.md** | Template for creating new WAF articles |
+| **doc-templates/pillar-overview.mdx** | Template for pillar landing pages (rare use) |
 
 ### Other Files
 
 | File | Purpose |
 |------|---------|
-| **REORGANIZATION_SUMMARY.md** | Details on recent system improvements (Jan 2026) |
-| **CONTENT_PATHS.md** | Content organization and file paths |
-| **TASK_AGENT_GUIDE.md** | Guide for using task agents |
+| **reference/REORGANIZATION_SUMMARY.md** | Details on recent system improvements (Jan 2026) |
+| **reference/CONTENT_PATHS.md** | Content organization and file paths |
+| **reference/TASK_AGENT_GUIDE.md** | Guide for using task agents |
 | **prompts.md** | Legacy prompts (mostly integrated into REVIEW_PHASES.md) |
 
 ---
@@ -757,7 +764,7 @@ templates/
 │   ├── DOCUMENT_TEMPLATE.md
 │   └── pillar-overview.mdx
 │
-└── .claude/skills/               ← Automated validation
+└── ../.claude/skills/            ← Automated validation (in parent directory)
     ├── check-structure/
     ├── check-code-examples/
     ├── check-resources/

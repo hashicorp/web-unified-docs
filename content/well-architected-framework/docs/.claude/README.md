@@ -66,7 +66,7 @@ Skills use these WAF standards and reference files (all in templates/ directory)
 - `AGENTS.md` - Writing standards, style guide, document patterns
 - `REVIEW_PHASES.md` - 7-phase review workflow
 - `CONTENT_PATHS.md` - Inventory of all .mdx files in pillar directories
-- `DOCUMENT_TEMPLATE.md` - Template for creating new documents
+- `../templates/doc-templates/DOCUMENT_TEMPLATE.md` - Template for creating new documents
 
 ## Customizing Standards
 
@@ -108,5 +108,5 @@ For questions about skills or standards (all in templates/ directory):
 - Skill documentation: `.claude/skills/<name>.md`
 - Writing standards: `AGENTS.md`
 - Review process: `REVIEW_PHASES.md`
-- Document template: `DOCUMENT_TEMPLATE.md`
+- Document template: `../templates/doc-templates/DOCUMENT_TEMPLATE.md`
 - Content inventory: `CONTENT_PATHS.md`

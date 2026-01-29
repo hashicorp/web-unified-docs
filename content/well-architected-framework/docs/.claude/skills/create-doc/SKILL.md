@@ -51,7 +51,7 @@ This skill automates the creation of new documentation files with proper structu
    - Confirms parent directory exists
 
 2. **Template Application**
-   - Uses `DOCUMENT_TEMPLATE.md` as base structure
+   - Uses `../../../templates/doc-templates/DOCUMENT_TEMPLATE.md` as base structure
    - Fills in frontmatter (title, description)
    - Creates "Why" section skeleton with proper formatting
    - Adds HashiCorp Resources section template
@@ -214,7 +214,7 @@ description: <Meta description 150-160 chars>
 ## Reference Files
 
 This skill uses:
-- **`DOCUMENT_TEMPLATE.md`** - Base template structure
+- **`../../../templates/doc-templates/DOCUMENT_TEMPLATE.md`** - Base template structure
 - **`AGENTS.md`** - Writing standards and patterns
 - **`styleguide.md`** - HashiCorp style guide
 

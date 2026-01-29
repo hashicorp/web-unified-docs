@@ -11,7 +11,7 @@ Use this template for comprehensive documentation reviews. Complete phases in or
 **File relationships:**
 - **REVIEW_PHASES.md** (this file) = **Review process** - Step-by-step workflow, review questions, deliverables
 - **AGENTS.md** = **Writing standards** - Formatting rules, content patterns, SEO/AI criteria, examples
-- **DOCUMENT_TEMPLATE.md** = Practical template for creating new documents
+- **doc-templates/DOCUMENT_TEMPLATE.md** = Practical template for creating new documents
 
 **Clear separation:**
 - This file tells you **how to review** (process, phases, questions)
