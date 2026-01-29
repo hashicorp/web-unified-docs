@@ -2,21 +2,15 @@
 
 This folder contains templates, documentation standards, and AI assistant configurations for creating and maintaining HashiCorp Well-Architected Framework (WAF) documentation.
 
-## Overview
-
-The templates folder provides a complete system for creating consistent, high-quality WAF content that serves both decision-makers and implementers. These files work together to establish writing standards, content structure, and review processes.
-
 ## File Descriptions
 
 ### Content Templates
 
 **DOCUMENT_TEMPLATE.md**
-- Comprehensive template for individual WAF articles (500-1,200 words, typically 700-1,000)
+- Comprehensive template for individual WAF articles
 - Includes MDX template, section-by-section guidance, and writing standards checklist
 - Structure: Introduction, "Why [topic]" section, implementation examples, resources, Next steps
 - Serves both decision-makers (strategic value) and implementers (actionable guidance)
-- Balances prose (explanations, context) with lists (challenges, steps, resources)
-- Target audience: Standard WAF articles for practices, concepts, and implementations
 - When to use: Creating new topic-specific WAF articles (most common use case)
 
 **pillar-overview.mdx**
@@ -44,17 +38,13 @@ The templates folder provides a complete system for creating consistent, high-qu
 - Complete HashiCorp writing style guide
 - Contains the "Top 12 guidelines" covering voice, tense, word choice, and formatting
 - Includes examples of correct and incorrect usage for each guideline
-- Critical rules: active voice, present tense, simple language, avoiding jargon
-- When to use: Reference during writing and editing to ensure consistency with HashiCorp standards
 
 ### Review and Quality Control
 
 **REVIEW_PHASES.md**
 - Seven-phase documentation review process
 - Phases: User Success Evaluation, Technical Accuracy, Cross-Document Relationships, Style Guide Compliance, SEO & AI/LLM Optimization, Link Quality & Balance, Final User Success Check
-- Includes quick commands for requesting specific types of reviews
 - Works in conjunction with AGENTS.md (provides process, AGENTS.md provides rules and standards)
-- Phase 5 references AGENTS.md SEO and AI/LLM Optimization sections for detailed standards
 - When to use: Conducting comprehensive document reviews before publication
 
 **TASK_AGENT_GUIDE.md**
@@ -66,13 +56,10 @@ The templates folder provides a complete system for creating consistent, high-qu
 
 **prompts.md**
 - Collection of useful prompts for content creation and review
-- Includes setup instructions, content prompts, review prompts, CLI prompts, and SEO prompts
-- Examples: checking spelling/grammar, finding supporting documents, testing links
-- When to use: Quick reference for common documentation tasks
+- Most have been integrated into the REVIEW_PHASES.md so you probably don't need to use this
 
 **CONTENT_PATHS.md**
-- Likely contains information about content organization and file paths
-- When to use: Understanding repository structure and where to place new content
+- Contains information about content organization and file paths
 
 ## Quick Start Workflow
 
@@ -110,46 +97,8 @@ The templates folder provides a complete system for creating consistent, high-qu
 3. Use **prompts.md** for specific review commands
 4. Validate against **styleguide.md** for HashiCorp-specific guidelines
 
-## Key Principles
+## JIRA Ticket Creation
 
-### Content Philosophy
-- WAF docs explain the **why and what**, show representative examples, then direct to tutorials for the **how**
-- Documents are directories, not tutorials
-- Target word count: 500-1,200 words for articles (typically 700-1,000 for comprehensive coverage)
-- Serve two personas: decision-makers (strategic understanding) and implementers (actionable guidance)
-- Balance prose and lists: Use prose for explanations and context, lists for challenges, steps, and resources
+Create standardized WAF documentation tasks using the JIRA ticket creation tools in the `jira_tickets/` folder.
 
-### Writing Standards Hierarchy
-1. **HashiCorp writing standards** (styleguide.md) supersede all other standards
-2. Second-person voice ("you"), active voice, present tense
-3. Avoid jargon, Latin phrases, and unnecessary complexity
-4. All code examples must have language tags and be tested
-
-### Content Strategy
-- Link to existing documents instead of duplicating content
-- Showcase full HashiCorp toolset when it provides value (but don't force it)
-- Make content evergreen when possible
-- Check existing patterns for consistency
-- Start with minimal, focused changes
-
-## File Dependencies
-
-- **REVIEW_PHASES.md** references → **AGENTS.md** (for detailed rules)
-- **AGENTS.md** references → **styleguide.md** (for complete style guide)
-- **DOCUMENT_TEMPLATE.md** references → **AGENTS.md** (for persona descriptions)
-- All templates follow standards defined in **AGENTS.md** and **styleguide.md**
-
-## Additional Resources
-
-- Example documents referenced in templates:
-  - `/docs/optimize-systems/manage-cost/create-cloud-budgets.mdx`
-  - `/docs/optimize-systems/manage-cost/detect-cloud-spending-anomalies.mdx`
-  - `/docs/define-and-automate-processes/automate/packaging.mdx`
-
-## Contributing
-
-When adding new templates or updating existing ones:
-1. Ensure consistency with existing standards in AGENTS.md and styleguide.md
-2. Update this README to reflect changes
-3. Provide clear "When to use" guidance for new templates
-4. Include examples where applicable
+View the JIRA tickets [README.md](/templates/jira_tickets/README.md) to learn how
