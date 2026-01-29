@@ -211,9 +211,9 @@ Based on successful WAF documents, use these patterns:
 **Document ending structure:**
 - Place resource sections before the "Next steps" section at the end of documents
 - Standard order at document end:
-  1. HashiCorp resources (links to tutorials, product docs, etc.)
-  2. External resources (optional, for third-party documentation)
-  3. Next steps (links to related WAF documents with context)
+  1. `## HashiCorp resources` - H2 heading for HashiCorp tutorials, product docs, WAF cross-references
+  2. `### External resources` - H3 heading for third-party documentation (optional)
+  3. `## Next steps` - H2 heading for links to related WAF documents with context
 
 ## Content organization
 - Structure content in the order users need it
