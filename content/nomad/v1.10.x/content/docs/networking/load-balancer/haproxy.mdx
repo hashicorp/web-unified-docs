@@ -1,0 +1,270 @@
+---
+layout: docs
+page_title: Load balancing with HAProxy
+description: >-
+  Create and deploy an HAProxy job and use the native Consul integration to
+  load balance your application.
+---
+
+# Load balancing with HAProxy
+
+[HAProxy](https://www.haproxy.org/) distributes incoming
+HTTP(S) and TCP requests from the internet to front-end services that can handle
+these requests. 
+
+HAProxy includes a [server-template] directive, which lets
+you specify placeholder backend servers to populate HAProxy's load balancing
+pools. You may use Consul as one of these backend servers,
+requesting SRV records from Consul DNS.
+
+Follow these steps to use HAProxy as a load balancer:
+
+1. Deploy your application.
+1. Configure and deploy HAProxy.
+
+This guide shows you how to deploy HAProxy as a load balancer for a demo web application.
+
+## Prerequisites
+
+You must configure your Nomad installation to use Consul. Refer to the
+[Consul integration](/nomad/docs/networking/consul) content for more
+information.
+
+## Deploy the demo web application
+
+Create a job specification for a demo web application and name the file
+`webapp.nomad.hcl`. This job specification creates three instances of the demo
+web application for you to target in your HAProxy configuration.
+
+<CodeBlockConfig filename="webapp.nomad.hcl" highlight="5">
+
+```hcl
+job "demo-webapp" {
+  datacenters = ["dc1"]
+
+  group "demo" {
+    count = 3
+
+    network {
+      port "http" { }
+    }
+
+    service {
+      name = "demo-webapp"
+      port = "http"
+
+      check {
+        type     = "http"
+        path     = "/"
+        interval = "2s"
+        timeout  = "2s"
+      }
+    }
+
+    task "server" {
+      env {
+        PORT    = "${NOMAD_PORT_http}"
+        NODE_IP = "${NOMAD_IP_http}"
+      }
+
+      driver = "docker"
+
+      config {
+        image = "hashicorp/demo-webapp-lb-guide"
+        ports = ["http"]
+      }
+    }
+  }
+}
+```
+
+</CodeBlockConfig>
+
+Deploy the web application job with the `nomad run` command.
+
+```shell-session
+$ nomad run webapp.nomad.hcl
+==> Monitoring evaluation "8f3af425"
+    Evaluation triggered by job "demo-webapp"
+    Evaluation within deployment: "dc4c1925"
+    Allocation "bf9f850f" created: node "d16a11fb", group "demo"
+    Allocation "25e0496a" created: node "b78e27be", group "demo"
+    Allocation "a97e7d39" created: node "01d3eb32", group "demo"
+    Evaluation status changed: "pending" -> "complete"
+==> Evaluation "8f3af425" finished with status "complete"
+```
+
+## Create and run the HAProxy job
+
+Create a job for HAProxy and name it `haproxy.nomad.hcl`. This HAProxy instance
+balances requests across the deployed instances of the web application.
+
+This job specification uses a static port of `8080` for the HAProxy load
+balancer, which lets you query `haproxy.service.consul:8080` from anywhere
+inside your cluster to reach the demo web application.
+
+<CodeBlockConfig filename="haproxy.nomad.hcl" highlight="11,58-60">
+
+```hcl
+job "haproxy" {
+  region      = "global"
+  datacenters = ["dc1"]
+  type        = "service"
+
+  group "haproxy" {
+    count = 1
+
+    network {
+      port "http" {
+        static = 8080
+      }
+
+      port "haproxy_ui" {
+        static = 1936
+      }
+    }
+
+    service {
+      name = "haproxy"
+
+      check {
+        name     = "alive"
+        type     = "tcp"
+        port     = "http"
+        interval = "10s"
+        timeout  = "2s"
+      }
+    }
+
+    task "haproxy" {
+      driver = "docker"
+
+      config {
+        image        = "haproxy:3.3.1"
+        network_mode = "host"
+
+        volumes = [
+          "local/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg",
+        ]
+      }
+
+      template {
+        data = <<EOF
+defaults
+   mode http
+
+frontend stats
+   bind *:1936
+   stats uri /
+   stats show-legends
+   no log
+
+frontend http_front
+   bind *:8080
+   default_backend http_back
+
+backend http_back
+    balance roundrobin
+    server-template mywebapp 10 _demo-webapp._tcp.service.consul resolvers consul resolve-opts allow-dup-ip resolve-prefer ipv4 check
+
+resolvers consul
+    nameserver consul 127.0.0.1:8600
+    accepted_payload_size 8192
+    hold valid 5s
+EOF
+
+        destination = "local/haproxy.cfg"
+      }
+
+      resources {
+        cpu    = 200
+        memory = 128
+      }
+    }
+  }
+}
+```
+
+</CodeBlockConfig>
+
+Note the following HAProxy `backend` configuration:
+
+- The `balance` is `roundrobin`, which means that HAProxy load balances across
+  the available services in order.
+- The `server-template` option allows Consul service registrations to configure
+  HAProxy's backend server pool. Because of this, you do not need to explicitly
+  add your backend servers' IP addresses.
+
+    - The server template name is `mywebapp`. This template name is not tied to
+  the service name that is registered in Consul.
+    - The `_demo-webapp._tcp.service.consul` parameter allows HAProxy to use the
+  DNS SRV record for the backend service `demo-webapp.service.consul` to
+  discover the available instances of the service.
+
+Although the job specification contains an inline template for HAProxy
+configuration, you could alternatively use the `task.template` stanza in
+conjunction with the `task.artifact` stanza to download an input template from a
+remote source such as an S3 bucket. Refer to the [`template`
+examples](/nomad/docs/job-specification/template#examples) for details.
+
+Deploy the HAProxy job with the `nomad run` command.
+
+```shell-session
+$ nomad run haproxy.nomad.hcl
+==> Monitoring evaluation "937b1a2d"
+    Evaluation triggered by job "haproxy"
+    Evaluation within deployment: "e8214434"
+    Allocation "53145b8b" created: node "d16a11fb", group "haproxy"
+    Evaluation status changed: "pending" -> "complete"
+==> Evaluation "937b1a2d" finished with status "complete"
+```
+
+### Check the HAProxy statistics page
+
+You can visit the statistics and monitoring page for HAProxy at
+`http://<your-haproxy-address>:1936`. Use this page to verify your
+settings and for basic monitoring.
+
+There are ten pre-provisioned load balancer backend slots for your service
+but only three of them are in use, which corresponds to the three
+allocations in the current job.
+
+## Make a request through the load balancer
+
+If you access the HAProxy load balancer, you should be able to see a response
+similar to the one shown in the following example. Run the `curl` command from a node inside your cluster.
+
+```shell-session
+$ curl haproxy.service.consul:8080
+Welcome! You are on node 172.31.54.242:20124
+```
+
+Note that HAProxy forwarded your request to one of the deployed instances of the
+demo web application, which is spread across three Nomad clients. The output
+shows the IP address of the demo web application host. If you repeat your
+requests, the IP address changes based on which backend web server instance
+received the request.
+
+## Access HAProxy from outside your cluster
+
+If you would like to access HAProxy from outside your cluster, you can set up a
+load balancer in your cloud environment that maps to an active port `8080` on
+your clients. You can then send your requests directly to your external load
+balancer.
+
+Your Nomad client nodes may change over time, so it is
+important to provide your end users with a single endpoint to access your
+services. You may do this by placing your Nomad client nodes behind a cloud
+provider's load balancer, such as [AWS Elastic Load Balancing
+(ELB)](https://aws.amazon.com/elasticloadbalancing/), [Azure Load Balancer](https://azure.microsoft.com/en-us/products/load-balancer),
+or [Google Cloud Load Balancing](https://cloud.google.com/load-balancing).
+
+The basic steps involve creating a load balancer, registering Nomad client nodes
+behind the load balancer, creating listeners, and configuring health checks. If
+you followed this guide, be sure to create ingress routes for HAProxy.
+
+After you configure your cloud provider's load balancer, you should be
+able to access the cloud load balancer DNS name:
+
+ - At port `8080` to observe the demo web application.
+ - At port `1936` to access the HAProxy web UI.
