@@ -1,0 +1,261 @@
+---
+layout: docs
+page_title: Load balancing with NGINX
+description: >-
+  Create and deploy an NGINX job balance requests. Generate a config with the template stanza and then dynamically reload it.
+---
+
+# Load balancing with NGINX
+
+You can use Nomad's [template stanza][template-stanza] to configure [NGINX] so
+that it can dynamically update its load balancer configuration to scale along
+with your services.
+
+The main use case for NGINX in this scenario is to distribute incoming HTTP(S)
+and TCP requests from the Internet to front-end services that can handle these
+requests.
+
+Follow these steps to use NGINX as a load balancer:
+
+1. Deploy your application.
+1. Configure and deploy NGINX.
+
+This guide shows you how to deploy NGINX as a load balancer for a demo web application.
+
+## Prerequisites
+
+You must configure your Nomad installation to use Consul. Refer to the
+[Consul integration](/nomad/docs/networking/consul) content for more
+information.
+
+## Deploy the demo web application
+
+Create a job specification for a demo web application and name the file
+`webapp.nomad.hcl`. This job specification creates three instances of the demo
+web application for you to target in your NGINX configuration.
+
+<CodeBlockConfig filename="webapp.nomad.hcl" highlight="5">
+
+```hcl
+job "demo-webapp" {
+  datacenters = ["dc1"]
+
+  group "demo" {
+    count = 3
+    network {
+      port "http" {
+        to = -1
+      }
+    }
+
+    service {
+      name = "demo-webapp"
+      port = "http"
+
+      check {
+        type     = "http"
+        path     = "/"
+        interval = "2s"
+        timeout  = "2s"
+      }
+    }
+
+    task "server" {
+      env {
+        PORT    = "${NOMAD_PORT_http}"
+        NODE_IP = "${NOMAD_IP_http}"
+      }
+
+      driver = "docker"
+
+      config {
+        image = "hashicorp/demo-webapp-lb-guide"
+        ports = ["http"]
+      }
+    }
+  }
+}
+```
+
+</CodeBlockConfig>
+
+Deploy the web application job with the `nomad run` command.
+
+```shell-session
+$ nomad run webapp.nomad.hcl
+==> Monitoring evaluation "ea1e8528"
+    Evaluation triggered by job "demo-webapp"
+    Allocation "9b4bac9f" created: node "e4637e03", group "demo"
+    Allocation "c386de2d" created: node "983a64df", group "demo"
+    Allocation "082653f0" created: node "f5fdf017", group "demo"
+    Evaluation status changed: "pending" -> "complete"
+==> Evaluation "ea1e8528" finished with status "complete"
+```
+
+## Create and run the NGINX job
+
+Create a job for NGINX and name it `nginx.nomad.hcl`. This NGINX instance
+balances requests across the deployed instances of the web application.
+
+This job specification uses a static port of `8080` for NGINX, which lets you
+query `nginx.service.consul:8080` from anywhere inside your cluster to reach
+the demo web application.
+
+The `template` stanza uses Consul Template to configure NGINX. The template
+dynamically queries Consul for the address and port of services named `demo-webapp`,
+ which is the service name configured in the demo web application's job specification.
+Refer to the [Consul Template Go language
+reference](/consul/docs/reference/consul-template/go) for syntax details. Consul
+notifies NGINX immediately when a change in the health of one of the service
+endpoints occurs. NGINX then re-renders a new load balancer configuration file
+that only includes healthy service instances.
+
+<CodeBlockConfig filename="nginx.nomad.hcl" highlight="9,32-47">
+
+```hcl
+job "nginx" {
+  datacenters = ["dc1"]
+
+  group "nginx" {
+    count = 1
+
+    network {
+      port "http" {
+        static = 8080
+      }
+    }
+
+    service {
+      name = "nginx"
+      port = "http"
+    }
+
+    task "nginx" {
+      driver = "docker"
+
+      config {
+        image = "nginx"
+
+        ports = ["http"]
+
+        volumes = [
+          "local:/etc/nginx/conf.d",
+        ]
+      }
+
+      template {
+        data = <<EOF
+upstream backend {
+{{ range service "demo-webapp" }}
+  server {{ .Address }}:{{ .Port }};
+{{ else }}server 127.0.0.1:65535; # force a 502
+{{ end }}
+}
+
+server {
+   listen 8080;
+
+   location / {
+      proxy_pass http://backend;
+   }
+}
+EOF
+
+        destination   = "local/load-balancer.conf"
+        change_mode   = "signal"
+        change_signal = "SIGHUP"
+      }
+    }
+  }
+}
+```
+
+</CodeBlockConfig>
+
+Although the job specification contains an inline template for NGINX
+configuration, you could alternatively use the `task.template` stanza in
+conjunction with the `task.artifact` stanza to download an input template from a
+remote source such as an S3 bucket. Refer to the [`template`
+examples](/nomad/docs/job-specification/template#examples) for details.
+
+Deploy the NGINX job with the `nomad run` command.
+
+```shell-session
+$ nomad run nginx.nomad.hcl
+==> Monitoring evaluation "45da5a89"
+    Evaluation triggered by job "nginx"
+    Allocation "c7f8af51" created: node "983a64df", group "nginx"
+    Evaluation status changed: "pending" -> "complete"
+==> Evaluation "45da5a89" finished with status "complete"
+```
+
+### Verify load balancer configuration
+
+Follow these steps to verify NGINX configuration.
+
+1. Run the [`nomad status nginx` command](/nomad/commands/status) to get the
+   allocation ID of your NGINX deployment.
+
+   ```shell-session
+   $ nomad status nginx
+     ID            = nginx
+     Name          = nginx
+     ...
+     Summary
+     Task Group  Queued  Starting  Running  Failed  Complete  Lost
+     nginx       0       0         1        0       0         0
+
+     Allocations
+     ID        Node ID   Task Group  Version  Desired  Status   Created    Modified
+     76692834  f5fdf017  nginx       0        run      running  17m40s ago  17m25s ago
+  ```
+
+1. Run the [`nomad alloc fs` command](/nomad/commands/alloc/fs) to read the configuration.
+
+   ```shell-session
+   $ nomad alloc fs 766 nginx/local/load-balancer.conf
+     upstream backend {
+       server 172.31.48.118:21354;
+       server 172.31.52.52:25958;
+       server 172.31.52.7:29728;
+     }
+     server {
+       listen 80;
+       location / {
+        proxy_pass http://backend;
+      }
+    }
+   ```
+
+## Make a request to the load balancer
+
+If you access the NGINX load balancer, you should receive a response
+similar to the one shown in the following example. Run the `curl` command from a node inside your cluster.
+
+```shell-session
+$ curl nginx.service.consul:8080
+Welcome! You are on node 172.31.48.118:21354
+```
+
+Note that NGINX forwarded your request to one of the deployed instances of the
+demo web application, which is spread across three Nomad clients. The output
+shows the IP address of the demo web application host. If you repeat your
+requests, the IP address changes based on which backend web server instance
+received the request.
+
+## Place Nomad client nodes behind a cloud provider load balancer
+
+Your Nomad client nodes may change over time, so it is
+important to provide your end users with a single endpoint to access your
+services. You may do this by placing your Nomad client nodes behind a cloud
+provider's load balancer, such as [AWS Elastic Load Balancing
+(ELB)](https://aws.amazon.com/elasticloadbalancing/), [Azure Load Balancer](https://azure.microsoft.com/en-us/products/load-balancer),
+or [Google Cloud Load Balancing](https://cloud.google.com/load-balancing).
+
+The basic steps involve creating a load balancer, registering Nomad client nodes
+behind the load balancer, creating listeners, and configuring health checks. If
+you followed this guide, be sure to create ingress route for NGINX.
+
+After you configure your cloud provider's load balancer, you should be
+able to access the cloud load balancer DNS name at port `8080 `to access 
+the demo web application. 
