@@ -11,7 +11,7 @@ Use this template for comprehensive documentation reviews. Complete phases in or
 **File relationships:**
 - **REVIEW_PHASES.md** (this file) = **Review process** - Step-by-step workflow, review questions, deliverables
 - **AGENTS.md** = **Writing standards** - Formatting rules, content patterns, SEO/AI criteria, examples
-- **DOCUMENT_TEMPLATE.md** = Practical template for creating new documents
+- **doc-templates/DOCUMENT_TEMPLATE.md** = Practical template for creating new documents
 
 **Clear separation:**
 - This file tells you **how to review** (process, phases, questions)
@@ -75,20 +75,25 @@ Review questions:
 
 ---
 
-## Phase 4: AGENTS.md style guide compliance
-**Goal:** Meet all formatting and structural requirements from AGENTS.md
+## Phase 4: Document structure compliance
+**Goal:** Validate WAF-specific document structure and formatting from AGENTS.md
+
+This phase focuses on document structure patterns unique to WAF. Use dedicated skills for other checks:
+- Active voice & second-person → Use `/check-hashicorp-style` (styleguide.md)
+- Meta description → Checked in Phase 5 (SEO optimization)
+- Code examples → Use `/check-code-examples` skill
+- Resources sections → Use `/check-resources` skill
 
 Review checklist:
-- [ ] Meta descriptions are 150-160 characters
 - [ ] "Why" sections use **Bold challenge:** format with 3-4 challenges
 - [ ] Workflow connections in body text ("After classifying...")
-- [ ] Code examples have 1-2 sentence summaries (when examples are included)
 - [ ] No vague pronouns at sentence start
 - [ ] Lists use "the following" introduction (except resource sections)
 - [ ] Heading capitalization follows sentence case
-- [ ] Second-person voice ("you configure", not "we configure")
-- [ ] Active voice preferred
-- [ ] Document structure matches pattern (intro, Why, representative example, resources)
+- [ ] Document structure matches pattern (intro, Why, implementation sections, resources)
+- [ ] Document ending order: HashiCorp resources → External resources → Next steps
+
+**Quick check:** Run `/check-structure <file> --fix` for auto-fixable items
 
 **Deliverable:** Style compliance fixes ready to commit
 
@@ -98,6 +103,19 @@ Review checklist:
 **Goal:** Maximize discoverability for both search engines and AI systems
 
 **Review against:** [AGENTS.md](./AGENTS.md) SEO and AI/LLM Optimization sections for complete criteria
+
+**Key SEO checks:**
+- Meta descriptions are 150-160 characters (optimal length)
+- Title optimization (sentence case, no colons)
+- First paragraph has strong hook and keyword placement
+- H2 headings are benefit-focused
+- Link descriptions are specific and actionable
+
+**Key AI/LLM checks:**
+- Clear topic sentences stating key points
+- Explicit relationships between concepts
+- Question-answer patterns ("Use X when...")
+- Contextual completeness in sections
 
 **Deliverable:** SEO and AI/LLM improvements including optimized meta descriptions, enhanced link descriptions, improved section structure for AI retrieval, and explicit relationship statements
 
