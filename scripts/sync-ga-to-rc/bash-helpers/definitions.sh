@@ -1,12 +1,12 @@
-# 
-# Copyright IBM Corp. 2025
+#
+# Copyright IBM Corp. 2024, 2026
 # SPDX-License-Identifier: BUSL-1.1
-# 
+#
 # ------------------------------------------------------------------------------
 #
 # Common values used by the bash helper files
 #
-# The script is meant to run under the scripts/ folder in a local clone of the 
+# The script is meant to run under the scripts/ folder in a local clone of the
 # hashicorp/web-unified-docs repo with the same name.
 #
 # 1. If you cloned the hashicorp/web-unified-docs with a different folder name,
@@ -41,7 +41,7 @@ prBody="Draft PR created by \`sync-ga-to-rc.mjs\` to push recent GA updates to t
 # Helper function to convert an ISO time string to UTC
 #
 function getUTCDate {
- 
+
   local dateString="${1}"
   local myShell="${SHELL}"
   local zBash="/bin/zsh"

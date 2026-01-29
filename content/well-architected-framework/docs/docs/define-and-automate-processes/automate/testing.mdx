@@ -1,34 +1,188 @@
 ---
 page_title: Automate testing
-description: Implement automated testing processes to validate application functionality, infrastructure changes, and deployment readiness before production.
+description: Automate testing for applications and infrastructure to catch issues early. Use Sentinel for policy enforcement and Terraform test for validation.
 ---
 
 # Automate testing
 
-Automated testing validates that your applications and infrastructure work correctly before deployment, reducing the risk of failures in production. Implement testing at multiple levels to catch issues early and ensure consistent quality.
+Test automation validates that your applications and infrastructure work correctly before deployment, catching issues in development rather than production. Manual testing processes create errors, consumes time, and become difficult to maintain as your infrastructure grows. Automate testing at multiple levels to ensure consistent quality, enforce compliance policies, and accelerate release cycles.
 
-## Application testing
+Use Sentinel for policy-as-code to validate infrastructure configurations before Terraform applies them, and Terraform test to verify that your configurations create the expected resources with correct configurations.
 
-Automate unit tests, integration tests, and end-to-end tests for your applications. Unit tests validate individual components, integration tests verify component interactions, and end-to-end tests ensure the complete application workflow functions correctly.
+## Why automate testing
 
-Run these tests automatically in your CI/CD pipeline to catch issues before deployment. Use test coverage metrics to ensure comprehensive testing and set quality gates that prevent deployment if tests fail.
+Automating testing addresses the following operational and security challenges:
 
-## Infrastructure testing
+- **Reduce production failures:** Manual testing misses edge cases and configuration errors that cause production incidents. Automated tests run consistently every time, catching issues before they reach production. Testing in development and staging environments prevents costly production failures.
 
-Test your infrastructure changes before applying them to production. Use tools like Terratest to validate that your Terraform configurations create the expected resources and that your infrastructure meets your requirements.
+- **Enforce compliance and security policies:** Manual policy enforcement relies on human review, which is inconsistent and doesn't scale. Automated policy testing with Sentinel validates that infrastructure configurations meet security requirements, compliance standards, and organizational policies before deployment.
 
-Test infrastructure changes in a staging environment that mirrors production. Validate that your infrastructure supports your application requirements and that security configurations are correct.
+- **Enable faster release cycles:** Manual testing creates bottlenecks in your deployment pipeline, slowing down releases. Automated testing runs in minutes rather than hours or days, enabling frequent deployments without sacrificing quality.
 
-## Deployment testing
+- **Improve infrastructure reliability:** Infrastructure changes without validation can break applications or create security vulnerabilities. Automated infrastructure testing verifies that Terraform configurations create resources correctly, with proper networking, security groups, and access controls.
 
-Test your deployment processes to ensure they work reliably. Use blue-green or canary deployments to test new versions in production-like environments before fully switching over.
+## Policy testing with Sentinel
 
-Automate post-deployment validation to verify that your application is running correctly and that all services are healthy. Include health checks, smoke tests, and monitoring validation in your deployment process.
+Sentinel is HashiCorp's policy-as-code framework that validates infrastructure configurations before Terraform applies them. Use Sentinel with HCP Terraform to enforce security policies, compliance requirements, and organizational standards across all infrastructure changes. Sentinel policies evaluate Terraform plans and block non-compliant changes before Terraform applies them.
+
+Use Sentinel when you need to enforce policies across teams, ensure security requirements are met automatically, or validate that infrastructure configurations comply with organizational standards before deployment.
+
+The following example shows a Sentinel policy that validates EC2 instances meet security requirements:
+
+```sentinel
+import "tfplan/v2" as tfplan
+
+# Find all EC2 instances in the Terraform plan
+ec2_instances = filter tfplan.resource_changes as _, rc {
+  rc.type is "aws_instance" and
+  rc.mode is "managed" and
+  (rc.change.actions contains "create" or rc.change.actions contains "update")
+}
+
+# Validate that all instances use encrypted EBS volumes
+instances_have_encrypted_root = rule {
+  all ec2_instances as _, instance {
+    instance.change.after.root_block_device[0].encrypted is true
+  }
+}
+
+# Validate that all instances use approved instance types
+approved_instance_types = ["t3.micro", "t3.small", "t3.medium"]
+
+instances_use_approved_types = rule {
+  all ec2_instances as _, instance {
+    instance.change.after.instance_type in approved_instance_types
+  }
+}
+
+# Main rule that enforces both policies
+main = rule {
+  instances_have_encrypted_root and
+  instances_use_approved_types
+}
+```
+
+The Sentinel policy validates that all EC2 instances have encrypted root volumes and use approved instance types. When you run `terraform plan` in HCP Terraform, Sentinel evaluates this policy against the plan. If the policy fails, HCP Terraform blocks the apply operation and displays the policy violations, ensuring security requirements are enforced before any infrastructure changes occur. Sentinel prevents developers from accidentally deploying non-compliant resources.
+
+## Infrastructure testing with Terraform test
+
+Terraform includes a built-in testing framework that validates your configurations by creating ephemeral infrastructure, testing assertions against in-memory state, and automatically destroying test resources. Use Terraform test to validate that your modules create the expected resources with correct configurations without impacting existing infrastructure.
+
+Use Terraform test when you need to validate complex infrastructure changes, test Terraform modules before using them in production, or ensure infrastructure changes don't break existing functionality. The test framework integrates with HCP Terraform for automatic testing on branch pushes and pull requests.
+
+The following example shows a Terraform test file that validates the EC2 instance configuration:
+
+```hcl
+# tests/ec2_instance.tftest.hcl
+
+variables {
+  region = "us-west-2"
+}
+
+run "validate_ami_query" {
+  command = plan
+
+  assert {
+    condition     = data.aws_ami.app.id != ""
+    error_message = "AMI data source must return a valid AMI ID"
+  }
+
+  assert {
+    condition     = length(regexall("^ami-", data.aws_ami.app.id)) > 0
+    error_message = "AMI ID must start with 'ami-'"
+  }
+}
+
+run "create_and_validate_instance" {
+  command = apply
+
+  assert {
+    condition     = aws_instance.app.instance_type == "t3.micro"
+    error_message = "Instance type should be t3.micro"
+  }
+
+  assert {
+    condition     = aws_instance.app.tags["Name"] == "application-server"
+    error_message = "Instance Name tag should be 'application-server'"
+  }
+
+  assert {
+    condition     = aws_instance.app.tags["Environment"] == "production"
+    error_message = "Instance Environment tag should be 'production'"
+  }
+
+  assert {
+    condition     = aws_instance.app.ami == data.aws_ami.app.id
+    error_message = "Instance must use the AMI from the data source"
+  }
+}
+
+run "verify_instance_state" {
+  command = apply
+
+  # This run block depends on the previous apply
+  assert {
+    condition     = aws_instance.app.instance_state == "running"
+    error_message = "Instance must be in running state"
+  }
+}
+```
+
+The Terraform test file validates that the EC2 instance configuration works correctly by checking the AMI data source returns valid results, verifying the instance uses correct instance type and tags, and ensuring the instance reaches running state. Running `terraform test` executes these validations in sequence, creating ephemeral infrastructure to test against and automatically cleaning up afterwards. If any assertion fails, the test stops and reports the error, preventing broken configurations from reaching production. The test framework automatically destroys all test resources, ensuring no infrastructure costs from testing.
+
+## Image and deployment testing
+
+Test your packaged images and deployment configurations to ensure they work correctly before production deployment. After [packaging your application](/well-architected-framework/define-and-automate-processes/automate/packaging) with Packer, validate that the images contain the correct application code, dependencies, and configurations.
+
+Implement the following testing practices in your deployment workflow:
+
+- **Container image scanning:** Scan Docker images for security vulnerabilities using security scanning tools before pushing to your registry. Fail the build if critical vulnerabilities are found.
+
+- **Image validation tests:** Verify that packaged images start correctly and contain expected files and dependencies. Test that your application responds to requests and passes health checks.
+
+- **Deployment smoke tests:** After deploying with Terraform, run automated tests that validate your application is accessible, health endpoints respond correctly, and critical functionality works.
+
+- **Progressive deployment testing:** Use blue-green or canary deployments to test new versions in production with a small percentage of traffic before full rollout. Monitor error rates and performance metrics during the deployment.
+
+## HashiCorp resources
+
+- Learn how to [package applications](/well-architected-framework/define-and-automate-processes/automate/packaging) before testing them
+- Learn how to [deploy applications](/well-architected-framework/define-and-automate-processes/automate/deployments) after testing passes
+- Implement [fully-automated deployments](/well-architected-framework/define-and-automate-processes/process-automation/fully-automated) with automated testing in CI/CD
+- Implement a [GitOps workflow](/well-architected-framework/define-and-automate-processes/process-automation/gitops) with automated testing on pull requests
+
+Sentinel documentation and tutorials:
+
+- Read the [Sentinel documentation](/sentinel/docs) for policy as code concepts
+- Learn the [Sentinel language syntax](/sentinel/docs/language) for writing policies
+- Learn to [write Sentinel policies for Terraform](/terraform/tutorials/policy/sentinel-policy)
+- Review [sample policies for common use cases](https://github.com/hashicorp/terraform-sentinel-policies)
+- Learn about [Sentinel imports for Terraform](/terraform/cloud-docs/policy-enforcement/sentinel/import) to access plan data
+
+Terraform testing documentation and tutorials:
+
+- Follow the [Terraform test tutorial](/terraform/tutorials/configuration-language/test) to learn the testing framework
+- Read the [Terraform test documentation](/terraform/language/tests) for test block syntax
+- Learn [best practices for Terraform module testing](/terraform/language/modules/testing-experiment)
+- Use [Terraform test assertions](/terraform/language/tests#test-assertions) to validate resources
+- Learn about [test run blocks](/terraform/language/tests#run-blocks) for organizing tests
+- Create [integration tests](/terraform/language/tests#integration-tests) for complete workflows
+
+HCP Terraform policy enforcement:
+
+- Read the [HCP Terraform policy enforcement documentation](/terraform/cloud-docs/policy-enforcement) to configure [policy sets](/terraform/cloud-docs/policy-enforcement/manage-policy-sets)
+- Use [Sentinel in HCP Terraform](/terraform/cloud-docs/policy-enforcement/sentinel) for automated validation
+- View [CI/CD integration examples](/terraform/tutorials/automation/github-actions) to automate testing in GitHub Actions
+
+### External resources
+
+- [Container image scanning best practices](https://docs.docker.com/scout/) - Security scanning for Docker images
 
 ## Next steps
 
-In this section of Automate your workflows, you learned how to implement automated testing processes for applications and infrastructure. Testing is part of the [Define and automate processes pillar](/well-architected-framework/define-and-automate-processes).
+In this section of Automate your workflows, you learned how to implement automated testing processes for applications, infrastructure, and deployments. Testing is part of the [Define and automate processes pillar](/well-architected-framework/define-and-automate-processes).
 
 Visit the following documents to learn more about the automation workflow:
 
-- [Automate deployments](/well-architected-framework/define-and-automate-processes/automate/deployments) - Deploy with confidence after testing
+- [Package your applications](/well-architected-framework/define-and-automate-processes/automate/packaging) with containers and machine images
+- [Automate deployments](/well-architected-framework/define-and-automate-processes/automate/deployments) with confidence after testing
