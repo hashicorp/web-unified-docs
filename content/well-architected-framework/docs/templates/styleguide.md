@@ -183,6 +183,19 @@ Always use the shortest word or phrase that conveys your intended meaning. Use d
 
 -  "use", not "utilize" or "utilization": Prefer the root for most "ize" words.
 - "because, not "due to the fact that": Also refer to [Do not use figures of speech](general/language.md#do-not-use-figures-of-speech).
+- "lets", not "enables" or "allows": Use "lets" when describing what tools or services do for users.
+
+**Do:**
+
+- `The AWS provider lets you manage CodeArtifact configuration through Terraform.`
+- `HCP Terraform's API lets you create workspaces without a VCS connection.`
+- `Vault lets you manage secrets dynamically.`
+
+**Don't:**
+
+- `The AWS provider enables you to manage CodeArtifact configuration through Terraform.`
+- `HCP Terraform's API allows you to create workspaces without a VCS connection.`
+- `Vault enables you to manage secrets dynamically.`
 
 ## Do not use words or phrases borrowed from other languages, scientific words, or jargon words
 
@@ -2185,19 +2198,1006 @@ These guidelines provide at-a-glance reference for using variants. For complete 
 ## Use sentence case for variant, variant option, and tab names
 
 - **keywords**: variants, capitalization, headings
-- **content sets**: tutorials, WAF, certifications 
+- **content sets**: tutorials, WAF, certifications
 
 ## Do not place H2-level headings in variants
 
 - **keywords**: variants, capitalization, headings
-- **content sets**: tutorials, WAF, certifications 
+- **content sets**: tutorials, WAF, certifications
 
 ## Use the variants component to add variations of the same information for different audiences
 
 - **keywords**: variants, writing, headings
-- **content sets**: tutorials, WAF, certifications 
+- **content sets**: tutorials, WAF, certifications
 
 
+
+---
+
+
+## Appendix
+
+# Appendix - Additional Guidelines
+
+## Guidelines for Screenshots in Tutorials
+
+- **keywords**: screenshots, visual aids, images
+- **content sets**: tutorials, WAF, certifications
+
+Use Chrome Developer Tools at iPad Pro dimensions for consistency.
+
+Use Snagit to edit and annotate images with specific hex colors:
+- Primary: #F92672
+- Alternative: #0D44CC
+
+Store images in product directories with descriptive, underscore-separated filenames. Prefix diagram images with `diagram_`.
+
+Use descriptive alt text without phrases like "image of".
+
+Employ inline links rather than reference-style links.
+
+### Product-Specific Naming
+
+**Terraform**: Replace "app.terraform.io_app" with "hcp_tf"
+
+**Vault**: Follow format `(platform|diagram|ui)_(section)-(subsection)*_(operation)`
+
+**Consul/Nomad**: Use `<common or collection>-<product>-<description>` structure
+
+## Guidelines for Alert Boxes
+
+Alerts should be used sparingly to flag beta, enterprise, or paid features—not as paragraph replacements.
+
+**Character limit**: Keep messages under 270 characters and concise.
+
+### Alert Types and Usage
+
+- **`<Tip/>`**: Optional settings and best practices
+- **`<Note/>`**: User action may be needed
+- **`<Warning/>`**: Required actions addressing breaking changes or security
+- **`<EnterpriseAlert/>`**: Paid edition or enterprise features
+
+### Alert Restrictions
+
+- Avoid consecutive alerts
+- Don't begin topics with alerts
+- No images or code blocks within alerts
+- Remove outdated alerts
+
+## Guidelines for Variants
+
+Variants display information for different audiences (like programming languages).
+
+Be extremely mindful when deciding on a variant and variant option slug. Keep names approximately 20 characters using sentence-style capitalization.
+
+Avoid H2 headers within variants.
+
+Reference existing variant types before creating new ones.
+
+---
+
+
+## Markdown Standards
+
+# Markdown Standards
+
+These guidelines ensure consistent markdown formatting across documentation, tutorials, and certification materials.
+
+## Use hash-style headings
+
+- **keywords**: markdown, headings, formatting
+- **content sets**: docs, tutorials, WAF, certifications
+
+Format headings using the `#` symbol syntax in markdown rather than alternative formatting methods. This approach ensures consistency across all content.
+
+### Example
+
+**Do:**
+
+```markdown
+# Main Heading
+## Subheading
+### Sub-subheading
+```
+
+**Don't:**
+
+```markdown
+Main Heading
+============
+
+Subheading
+----------
+```
+
+## Avoid markdown headings inside tabs
+
+- **keywords**: markdown, headings, tabs, components
+- **content sets**: docs, tutorials, WAF, certifications
+
+Do not place markdown heading syntax within tab components. Placing headings inside a tab can cause problems. For example, H2 headings inside tabs affect the table of contents and linking to H3 headings placed inside a tab can negatively affect the user experience.
+
+Instead of using markdown headings in tabs, utilize the `heading` attribute within tab components.
+
+### Example
+
+**Do:**
+
+```markdown
+<Tabs>
+<Tab heading="CLI command">
+Content
+</Tab>
+<Tab heading="API call using cURL">
+Content
+</Tab>
+</Tabs>
+```
+
+**Don't:**
+
+```markdown
+<Tabs>
+<Tab>
+## CLI command
+Content
+</Tab>
+<Tab>
+## API call using cURL
+Content
+</Tab>
+</Tabs>
+```
+
+## Use double asterisks for bold text
+
+- **keywords**: markdown, formatting, bold
+- **content sets**: docs, tutorials, WAF, certifications
+
+Use double asterisks (`**text**`) rather than underscores to emphasize words in documentation.
+
+### Example
+
+**Do:**
+
+```markdown
+Use the **bold** command to emphasize text.
+```
+
+**Don't:**
+
+```markdown
+Use the __bold__ command to emphasize text.
+```
+
+## Avoid combining multiple formatting styles
+
+- **keywords**: markdown, formatting, inline styles
+- **content sets**: docs, tutorials, WAF, certifications
+
+Avoid combining multiple formatting styles in prose. For instance, don't mix italics with bold or code formatting on the same phrase—pick one method to maintain clarity.
+
+### Example
+
+**Do:**
+
+```markdown
+Use the `terraform init` command to initialize the directory.
+```
+
+**Don't:**
+
+```markdown
+Use the **`terraform init`** command to initialize the directory.
+```
+
+## Use hyphens for unordered lists
+
+- **keywords**: markdown, lists, formatting
+- **content sets**: docs, tutorials, WAF, certifications
+
+Use hyphens (`-`) as bullet markers. Don't use asterisks or plus signs, which can create confusion with italic/bold syntax at list item starts.
+
+### Example
+
+**Do:**
+
+```markdown
+- First item
+- Second item
+- Third item
+```
+
+**Don't:**
+
+```markdown
+* First item
+* Second item
+* Third item
+```
+
+## Start ordered list items with 1
+
+- **keywords**: markdown, lists, formatting, ordered lists
+- **content sets**: docs, tutorials, WAF, certifications
+
+Start every item with `1.` instead of sequential numbering. The platform automatically renders consecutive "1." entries as incremental numbers, reducing manual errors.
+
+### Example
+
+**Do:**
+
+```markdown
+1. First step
+1. Second step
+1. Third step
+```
+
+**Don't:**
+
+```markdown
+1. First step
+2. Second step
+3. Third step
+```
+
+## Use appropriate spacing in lists
+
+- **keywords**: markdown, lists, formatting, spacing
+- **content sets**: docs, tutorials, WAF, certifications
+
+Simple, short lists use single spacing between items. Complex lists with long items, nested content, or code examples need blank lines between entries. Always include blank lines before and after the entire list.
+
+### Examples
+
+**Do (simple list):**
+
+```markdown
+- Short item
+- Another short item
+- Third short item
+```
+
+**Do (complex list):**
+
+```markdown
+- First item with a longer explanation that spans multiple lines
+  and continues here.
+
+- Second item that includes code:
+
+  ```shell-session
+  $ terraform init
+  ```
+
+- Third item with additional context.
+```
+
+## Add blank lines between structural elements
+
+- **keywords**: markdown, formatting, spacing
+- **content sets**: docs, tutorials, WAF, certifications
+
+Add an extra line space between headings and the next element to ensure proper visual separation between sections and their content.
+
+### Example
+
+**Do:**
+
+```markdown
+## Configuration
+
+The following example shows how to configure the service.
+
+```hcl
+config = "value"
+```
+```
+
+## Exclude domain from internal links
+
+- **keywords**: markdown, linking, internal links
+- **content sets**: docs, tutorials, WAF, certifications
+
+Exclude the 'developer.hashicorp.com' domain when linking to internal content. Use relative links instead of absolute URLs when directing readers to other pages within the HashiCorp developer documentation site. This approach simplifies link maintenance and improves portability of content.
+
+### Example
+
+**Do:**
+
+```markdown
+Refer to [Permissions](/terraform/cloud-docs/permissions) for additional information.
+```
+
+**Don't:**
+
+```markdown
+Refer to [Permissions](https://developer.hashicorp.com/terraform/cloud-docs/permissions) for additional information.
+```
+
+---
+
+
+## UI Components
+
+# UI Components
+
+These guidelines describe how to consistently document user interface interactions.
+
+## Format UI Elements
+
+- **keywords**: UI, formatting, interface
+- **content sets**: docs, tutorials, WAF, certifications
+
+Match capitalization, punctuation, and other formatting elements to the UI. Use bold for interactive elements like buttons and menus. Do not use quotation marks around UI names.
+
+### Examples
+
+**Do:**
+
+- `Click **Save and Close**.`
+- `Select the **Automatically check for updates** option.`
+- `In the **Settings** window, click **Advanced**.`
+
+**Don't:**
+
+- `Click "Save and Close".`
+- `Click the Save and Close button.`
+
+## Use Specific Action Verbs
+
+- **keywords**: UI, actions, verbs
+- **content sets**: docs, tutorials, WAF, certifications
+
+Use precise verbs based on interaction type:
+
+- **Press** for keyboard keys
+- **Click** for buttons, tabs, toggles, and similar interactive components
+- **Select** for choosing from grouped elements like checkboxes or radio buttons
+
+### Examples
+
+**Do:**
+
+- `Press **Enter** to confirm.`
+- `Click **Create Workspace**.`
+- `Select the **Enable TLS** checkbox.`
+
+## Use Correct Prepositions
+
+- **keywords**: UI, prepositions
+- **content sets**: docs, tutorials, WAF, certifications
+
+Prepositions vary by component type:
+
+- Use **in** for windows, panes, dialogs, and text boxes
+- Use **on** for pages
+
+### Examples
+
+**Do:**
+
+- `In the **Configuration** dialog, enter your credentials.`
+- `On the **Settings** page, configure your preferences.`
+- `In the **Name** field, enter the workspace name.`
+
+---
+
+
+## Codeblocks And Consoles
+
+# Codeblocks and Consoles
+
+These guidelines help you organize and format code examples and command-line content.
+
+## Format commands as code
+
+- **keywords**: code blocks, commands, formatting
+- **content sets**: docs, tutorials, WAF, certifications
+
+Commands should be presented in code blocks with proper syntax highlighting. This helps with proper rendering and future styling improvements.
+
+### Example
+
+**Do:**
+
+````
+Run the following command to initialize Terraform:
+
+```shell-session
+$ terraform init
+```
+````
+
+## Use shell-session for Linux commands
+
+- **keywords**: code blocks, CLI, syntax highlighting
+- **content sets**: docs, tutorials, WAF, certifications
+
+Employ the `shell-session` syntax highlighter for CLI examples. This helps with proper rendering and future styling improvements.
+
+### Example
+
+**Do:**
+
+````
+```shell-session
+$ vault status
+```
+````
+
+**Don't:**
+
+````
+```bash
+$ vault status
+```
+````
+
+## Use double pound signs for comments in CLI code blocks
+
+- **keywords**: code blocks, comments, CLI
+- **content sets**: docs, tutorials, WAF, certifications
+
+Precede comments with double pound signs (`##`) rather than single `#`. This prevents shell syntax highlighters from treating comments as root prompts.
+
+### Example
+
+**Do:**
+
+````
+```shell-session
+$ export VAULT_ADDR="http://127.0.0.1:8200"
+## Set the namespace to admin
+$ export VAULT_NAMESPACE=admin
+```
+````
+
+**Don't:**
+
+````
+```shell-session
+$ export VAULT_ADDR="http://127.0.0.1:8200"
+# Set the namespace to admin
+$ export VAULT_NAMESPACE=admin
+```
+````
+
+## Use long-form commands for HashiCorp CLIs
+
+- **keywords**: CLIs, commands, HashiCorp
+- **content sets**: docs, tutorials, WAF, certifications
+
+Use long-form command names, flags, and options in code examples for HashiCorp tools. Optionally demonstrate short-form equivalents separately.
+
+### Example
+
+**Do:**
+
+````
+```shell-session
+$ terraform plan --var-file="production.tfvars"
+```
+````
+
+**Don't:**
+
+````
+```shell-session
+$ terraform plan -var-file="production.tfvars"
+```
+````
+
+## Use common short flags for non-HashiCorp CLIs
+
+- **keywords**: CLIs, commands
+- **content sets**: docs, tutorials, WAF, certifications
+
+Short flags are acceptable for non-HashiCorp tools when they represent common usage patterns.
+
+### Example
+
+**Do:**
+
+````
+```shell-session
+$ docker exec -it container_name bash
+```
+````
+
+## Split long commands across multiple lines
+
+- **keywords**: code blocks, commands, formatting
+- **content sets**: docs, tutorials, WAF, certifications
+
+Split commands exceeding 100 characters across multiple lines using the shell's line continuation character (backslash).
+
+### Example
+
+**Do:**
+
+````
+```shell-session
+$ terraform apply \
+  -var-file="production.tfvars" \
+  -var="region=us-west-2" \
+  -var="instance_type=t3.medium"
+```
+````
+
+## Include sample output for commands
+
+- **keywords**: code blocks, commands, output
+- **content sets**: docs, tutorials, WAF, certifications
+
+Include sample output to confirm commands work as intended. Remove timestamps from output. Use commented ellipsis to truncate unnecessary content. Explicitly state when commands produce no output.
+
+### Example
+
+**Do:**
+
+````
+Run the following command:
+
+```shell-session
+$ vault status
+Key             Value
+---             -----
+Seal Type       shamir
+Initialized     true
+Sealed          false
+## ...
+```
+````
+
+**Do (no output):**
+
+````
+Run the following command. It produces no output on success.
+
+```shell-session
+$ vault policy write admin admin.hcl
+```
+````
+
+## Indent code blocks in lists with four spaces
+
+- **keywords**: code blocks, lists, indentation
+- **content sets**: docs, tutorials, WAF, certifications
+
+Code blocks within lists require four-space indentation to prevent list disruption and pass validation hooks.
+
+### Example
+
+**Do:**
+
+````
+1. Initialize the Terraform directory.
+
+    ```shell-session
+    $ terraform init
+    ```
+
+1. Apply the configuration.
+
+    ```shell-session
+    $ terraform apply
+    ```
+````
+
+## Use spaces for indentation
+
+- **keywords**: code blocks, indentation, formatting
+- **content sets**: docs, tutorials, WAF, certifications
+
+Use spaces rather than tabs for indentation (unless the language requires tabs like Go). Tabs display inconsistently across browsers and cause copy errors.
+
+## Match syntax highlighting to file type
+
+- **keywords**: code blocks, syntax highlighting
+- **content sets**: docs, tutorials, WAF, certifications
+
+Match highlighting labels to the file type being demonstrated. Use `javascript` label for JSON containing unsupported characters (allows comments).
+
+### Example
+
+**Do (HCL file):**
+
+````
+```hcl
+resource "aws_instance" "example" {
+  ami           = "ami-0c55b159cbfafe1f0"
+  instance_type = "t2.micro"
+}
+```
+````
+
+**Do (JSON with comments):**
+
+````
+```javascript
+{
+  "version": "1.0",
+  // This is a comment
+  "name": "example"
+}
+```
+````
+
+## Use angle brackets for placeholder values
+
+- **keywords**: code blocks, placeholders
+- **content sets**: docs, tutorials, WAF, certifications
+
+Enclose variable text in angle brackets to clearly indicate where users should substitute actual values.
+
+### Example
+
+**Do:**
+
+````
+```shell-session
+$ export VAULT_TOKEN=<your-token-value>
+```
+````
+
+**Don't:**
+
+````
+```shell-session
+$ export VAULT_TOKEN=YOUR_TOKEN
+```
+````
+
+## Do not use command names as verbs
+
+- **keywords**: writing, word choice, CLIs, commands
+- **content sets**: docs, tutorials, WAF, certifications
+
+Refer to "the {command words} command" instead of using the command name as a verb for clarity.
+
+### Example
+
+**Do:**
+
+```
+To download providers, run the `terraform init` command in the directory containing the `main.tf` file.
+```
+
+**Don't:**
+
+```
+To download providers, `init` the directory containing the `main.tf` file.
+```
+
+## Use language matching product keywords
+
+- **keywords**: writing, formatting, configuration, keys, values, code
+- **content sets**: docs, tutorials, WAF, certifications
+
+When describing code, configurations, settings, modes, and other elements, refer to specific keys or values and format them as code.
+
+### Examples
+
+**Do:**
+
+- `Add an `actions` field to your configuration to specify which actions clients can perform on the resources.`
+- `Set the `mode` to `active-active` to configure Terraform Enterprise to store and retrieve data from external sources.`
+
+**Don't:**
+
+- `Add Actions to your configuration and specify which actions clients are allowed to perform on the resources.`
+- `Operate Terraform Enterprise in Active-Active mode to configure Terraform Enterprise to store and retrieve data from external sources.`
+
+## Avoid providing instructions in code comments
+
+- **keywords**: code blocks, comments, writing
+- **content sets**: docs, tutorials, WAF
+
+Use comments to enhance clarity, but call out pertinent details from the code block when discussing the block instead of using comments to document instructions, functionalities, or other characteristics.
+
+### Examples
+
+**Do:**
+
+````
+The following configuration requires the `aws` provider version 2.7.0 or later from the public Terraform registry:
+
+```hcl
+terraform {
+  required_providers {
+    aws = {
+      version = ">= 2.7.0"
+      source = "hashicorp/aws"
+    }
+  }
+}
+```
+````
+
+**Don't:**
+
+````
+```hcl
+terraform {
+  required_providers {
+    aws = {
+      version = ">= 2.7.0"  ## Adds the required version
+      source = "hashicorp/aws" ## Where Terraform should get the provider from
+    }
+  }
+}
+```
+````
+
+## In tutorials, introduce code blocks with a descriptive imperative sentence
+
+- **keywords**: code blocks
+- **content sets**: tutorials, WAF
+
+The sentence before a code block describes a high-level operation that is expressed by the command. End with a period.
+
+### Example
+
+````
+Write out the policy named `exampleapp` that enables the `read` capability for secrets at path `secret/data/exampleapp/config`.
+
+```shell-session
+$ vault policy write exampleapp - <<EOH
+path "secret/data/exampleapp/config" {
+  capabilities = ["read"]
+}
+EOH
+```
+````
+
+## In documentation, introduce code blocks as examples
+
+- **keywords**: code blocks, examples
+- **content sets**: docs
+
+In documentation, describe an action and provide example configurations and commands whenever possible. Introduce examples by describing the actions the configuration or command represents.
+
+### Example
+
+````
+The following configuration requires the `aws` provider version 2.7.0 or later from the public Terraform registry:
+
+```hcl
+terraform {
+  required_providers {
+    aws = {
+      version = ">= 2.7.0"
+      source = "hashicorp/aws"
+    }
+  }
+}
+```
+````
+
+## Add one product command per code block
+
+- **keywords**: CLIs
+- **content sets**: docs, tutorials, WAF, certifications
+
+Do not place a sequence of product commands in the same block. Instead, place them in separate blocks so that practitioners have the context for running each command. When adding example commands related to the task but not the product, you can chain multiple commands for their convenience.
+
+### Examples
+
+**Do:**
+
+````
+1. Return to the terminal and set the `VAULT_TOKEN` environment variable.
+
+   ```shell-session
+   $ export VAULT_TOKEN=<token>
+   ```
+
+1. Set the `VAULT_NAMESPACE` environment variable to `admin`.
+
+   ```shell-session
+   $ export VAULT_NAMESPACE=admin
+   ```
+````
+
+````
+```shell-session
+$ mkdir /tmp/learn-vault-lab && export HC_LEARN_LAB="/tmp/learn-vault-lab"
+```
+````
+
+**Don't:**
+
+````
+Set the environment variables.
+
+```shell-session
+$ export VAULT_ADDR="http://127.0.0.1:8200"
+$ export VAULT_TOKEN=<token>
+$ export VAULT_NAMESPACE=admin
+```
+````
+
+---
+
+
+## Numbers Dates And Time
+
+# Numbers, Dates, and Time
+
+These guidelines ensure consistent formatting of numerical values, dates, and time references.
+
+## Spell out ordinal numbers
+
+- **keywords**: numbers, ordinals
+- **content sets**: docs, tutorials, WAF, certifications
+
+Spell out ordinal numbers that indicate position.
+
+### Example
+
+**Do:**
+
+```
+The first step is to initialize the configuration.
+The second iteration of the loop processes the data.
+```
+
+**Don't:**
+
+```
+The 1st step is to initialize the configuration.
+The 2nd iteration of the loop processes the data.
+```
+
+## Spell out numbers zero through nine
+
+- **keywords**: numbers, writing
+- **content sets**: docs, tutorials, WAF, certifications
+
+Spell out numbers zero through nine in general writing. However, use numerals when describing technical quantities like storage capacity. Apply non-breaking spaces between numerals and units unless they form compound descriptions.
+
+### Examples
+
+**Do:**
+
+```
+The system can handle three concurrent connections.
+Configure the service with 1 GB of memory.
+Use a 64-bit processor for optimal performance.
+```
+
+**Don't:**
+
+```
+The system can handle 3 concurrent connections.
+Configure the service with one gigabyte of memory.
+Use a 64 bit processor for optimal performance.
+```
+
+## Use numerals with dashes for ranges including 0-9
+
+- **keywords**: numbers, ranges
+- **content sets**: docs, tutorials, WAF, certifications
+
+Use numerals with dashes for clarity in ranges, even when the range includes numbers zero through nine.
+
+### Examples
+
+**Do:**
+
+```
+Ports 8000 - 9000 must be open.
+Restart all clients in zones from two to four.
+```
+
+**Don't:**
+
+```
+Ports 8000 to 9000 must be open.
+Restart all clients in zones from 2 - 4.
+```
+
+## Spell out the month and use cardinal numbers for dates in prose
+
+- **keywords**: formatting, dates
+- **content sets**: docs, tutorials, WAF, certifications
+
+Do not abbreviate months. When including a day of the week, do not abbreviate the day.
+
+### Example
+
+```
+We will release the final version of Terraform Enterprise that supports Replicated in November 2024. HashiCorp will support this release until April 1, 2026.
+```
+
+## Use YYYY-MM-DD format in tables, lists, titles, and non-prose elements
+
+- **keywords**: formatting, dates
+- **content sets**: docs, tutorials, WAF, certifications
+
+When adding dates as part of a reference, such as a releases page, use YYYY-MM-DD format.
+
+### Example
+
+```
+# Release notes
+
+This page contains release information about {product}.
+
+## 2024-11-15
+
+- New feature
+- Bug fix
+- Other changes
+
+## 2024-10-20
+
+- New feature
+- Bug fix
+- Other changes
+```
+
+## Use YYYY-MM-DDThh:mm:ss format for timestamps
+
+- **keywords**: formatting, timestamps
+- **content sets**: docs, tutorials, WAF, certifications
+
+In most cases, timestamps include the hours, minutes, and seconds, but depending on the context, you may add the year, month, and day as necessary.
+
+### Example
+
+````
+At `2024-11-11T15:51:21.680-0800`, the server initialized the LAN area manager:
+
+```
+...
+2024-11-11T15:51:21.680-0800 [INFO]  agent.router: Initializing LAN area manager
+...
+```
+````
+
+## Use the 12-hour clock for time of day and include a time zone
+
+- **keywords**: formatting, time, clock
+- **content sets**: docs, tutorials, WAF, certifications
+
+You can look up time zone abbreviations at [www.timeanddate.com](https://www.timeanddate.com/time/zones/).
+
+### Example
+
+`The regular maintenance window begins at 12:00 AM PST.`
+
+## Use commas in base-10 numbers with more than three digits, except for port numbers
+
+- **keywords**: numbers, ranges
+- **content sets**: docs, tutorials, WAF, certifications
+
+Except for port numbers, use commas between three-digit sets when the number has four or more digits.
+
+### Examples
+
+- `10,000 users`
+- `Port 8080` (no comma)
+- `1,234,567 records`
+
+## Format port numbers as code
+
+- **keywords**: formatting, port numbers, code
+- **content sets**: docs, tutorials, WAF, certifications
+
+### Example
+
+``Access the service on port `8080`.``
+
+## Format IP addresses as code
+
+- **keywords**: formatting, IP addresses, code
+- **content sets**: docs, tutorials, WAF, certifications
+
+### Example
+
+``Navigate to `192.168.1.1` in your browser.``
 
 ---
 
