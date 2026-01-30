@@ -7,48 +7,27 @@ description: >-
 
 # Consistency
 
-Consul uses an advanced method of maintaining service and health information.
-This page details how services and checks are registered, how the catalog is
-populated, and how health status information is updated as it changes.
+The page provides conceptual information about Consul's anti-entropy mechanism, which keeps Consul catalog results consistent across nodes in a datacenter.
 
-## Anti-Entropy
+## Introduction
 
-Entropy is the tendency of systems to become increasingly disordered. Consul's
-anti-entropy mechanisms are designed to counter this tendency, to keep the
-state of the cluster ordered even through failures of its components.
+_Entropy_ is the tendency of systems to become increasingly disordered over time. Consul includes anti-entropy mechanisms to counter this tendency and keep the state of the cluster ordered, even when cluster components fail.
 
-Consul has a clear separation between the global service catalog and the agent's
-local state as discussed above. The anti-entropy mechanism reconciles these two
-views of the world: anti-entropy is a synchronization of the local agent state and
-the catalog. For example, when a user registers a new service or check with the
-agent, the agent in turn notifies the catalog that this new check exists.
-Similarly, when a check is deleted from the agent, it is consequently removed from
-the catalog as well.
+In Consul, there is a distinction between the global service catalog and the agent's local state. Agents forward information about services and their registered health checks to the [leader node in the cluster](/consul/docs/concept/consensus), which replicates the authorative global service catalog to the other server nodes. As a result, any node in a Consul cluster may have catalog information that differs from the other nodes at a specific moment in time.
 
-Anti-entropy is also used to update availability information. As agents run
-their health checks, their status may change in which case their new status
-is synced to the catalog. Using this information, the catalog can respond
-intelligently to queries about its nodes and services based on their
-availability.
+Consul's anti-entropy mechanism reconciles catalog differences by periodically synchronizing the local agent state with the catalog.
 
-During this synchronization, the catalog is also checked for correctness. If
-any services or checks exist in the catalog that the agent is not aware of, they
-will be automatically removed to make the catalog reflect the proper set of
-services and health information for that agent. Consul treats the state of the
-agent as authoritative; if there are any differences between the agent
-and catalog view, the agent-local view will always be used.
+For example, when a user registers a new service or check with the agent, the agent notifies the leader that this new check exists, and the leader updates the catalog. Similarly, when a check is deleted from the agent, it notifies the leader to update the catalog. Using this information, the catalog can respond intelligently to queries about its nodes and services based on their availability.
 
-### Periodic Synchronization
+Consul treats the state of the agent as authoritative. If there are any differences between the agent's view and the catalog view, the agent uses its local view.
 
-In addition to running when changes to the agent occur, anti-entropy is also a
-long-running process which periodically wakes up to sync service and check
-status to the catalog. This ensures that the catalog closely matches the agent's
-true state. This also allows Consul to re-populate the service catalog even in
-the case of complete data loss.
+## Periodic synchronization
 
-To avoid saturation, the amount of time between periodic anti-entropy runs will
-vary based on cluster size. The table below defines the relationship between
-cluster size and sync interval:
+Consul's anti-entropy mechanism is a long-running process. In addition to detecting agent changes, it periodically syncs service and health check information to the catalog. This sync ensures that the catalog closely matches the agent's actual state.
+
+This capability also allows Consul to re-populate the service catalog, even in the case of complete data loss.
+
+The amount of time between periodic anti-entropy runs varies based on cluster size. The following table describes the the relationship between cluster size, counted by the number of nodes in the cluster, and sync interval:
 
 | Cluster Size | Periodic Sync Interval |
 | ------------ | ---------------------- |
@@ -58,75 +37,39 @@ cluster size and sync interval:
 | 513 - 1024   | 4 minutes              |
 | ...          | ...                    |
 
-The intervals above are approximate. Each Consul agent will choose a randomly
-staggered start time within the interval window to avoid a thundering herd.
+These intervals are approximate. To avoid too many nodes syncing at one time, each Consul agent randomly chooses a staggered start time within the interval window.
 
-### Best-effort sync
+### Synchronization failures
 
-Anti-entropy can fail in a number of cases, including misconfiguration of the
-agent or its operating environment, I/O problems (full disk, filesystem
-permission, etc.), networking problems (agent cannot communicate with server),
-among others. Because of this, the agent attempts to sync in best-effort
-fashion.
+There are a number of situations where Consul's anti-entropy can fail. These include:
 
-If an error is encountered during an anti-entropy run, the error is logged and
-the agent continues to run. The anti-entropy mechanism is run periodically to
-automatically recover from these types of transient failures.
+- Agent misconfiguration
+- Misconfiguration of the agent's operating environment
+- I/O problems, such as a full disk or filesystem permission error
+- Networking problems, such as an agent being unable to communicate with the server
 
-### Enable Tag Override
+If an error is encountered during an anti-entropy run, the agent logs the error and continues to run. Syncs are designed to run periodically to automatically recover from these types of transient failures.
 
-Synchronization of service registration can be partially modified to
-allow external agents to change the tags for a service. This can be
-useful in situations where an external monitoring service needs to be
-the source of truth for tag information. For example, the Redis
-database and its monitoring service Redis Sentinel have this kind of
-relationship. Redis instances are responsible for much of their
-configuration, but Sentinels determine whether the Redis instance is a
-primary or a secondary. Enable the
-[`enable_tag_override`](/consul/docs/reference/service#enable_tag_override) parameter in your service definition file to tell the Consul agent where the Redis database is running to bypass
-tags during anti-entropy synchronization. Refer to
-[Modify anti-entropy synchronization](/consul/docs/services/usage/define-services#modify-anti-entropy-synchronization) for additional information.
+## Consistency modes
 
-## Consistency Modes
+When you use Consul's service discovery features to return a registered service instance, Consul forwards the request to the cluster's leader by default. That way, Consul returns the most recent authoritative results from the catalog.
 
-Although all writes to the replicated log go through Raft, reads are more
-flexible. To support various trade-offs that developers may want, Consul
-supports 3 different consistency modes for reads.
+You can change a Consul agent's consistency mode so that the agent returns services with a greater or lower degree of accuracy, depending on the needs of the workloads in your service networking environment. 
 
-The three read modes are:
+There are three consistency modes for agents to return catalog information:
 
-- `default` - Raft makes use of leader leasing, providing a time window
-  in which the leader assumes its role is stable. However, if a leader
-  is partitioned from the remaining peers, a new leader may be elected
-  while the old leader is holding the lease. This means there are 2 leader
-  nodes. There is no risk of a split-brain since the old leader will be
-  unable to commit new logs. However, if the old leader services any reads,
-  the values are potentially stale. The default consistency mode relies only
-  on leader leasing, exposing clients to potentially stale values. We make
-  this trade-off because reads are fast, usually strongly consistent, and
-  only stale in a hard-to-trigger situation. The time window of stale reads
-  is also bounded since the leader will step down due to the partition.
+- `default` - To return accurate results as quick as possible, agents forward catalog read requests to the cluster leader. In Raft, agents use _leader leasing_, which provides a set time window where the leader assumes its role is stable. If an election occurs before the leader leasing window is complete, the old leader continues to service read requests on behalf of the entire cluster. Therefore Consul may occasionally return a stale result, but it processes reads faster in exchange.
+- `consistent` - This mode is strongly consistent without caveats. It requires a leader to verify with a quorum of peers that it is still the leader before it returns results. This mode introduces additional traffic to all server nodes as a result. For read requests, results are always consistent, but requests have additional latency.
+- `stale` - This mode allows any server to service the read, regardless of whether it is the leader. Reads become faster and more scalable, but are more likely to return stale value. This mode also allows reads without a leader, meaning that Consul servers can still respond to requests during an outage.
 
-- `consistent` - This mode is strongly consistent without caveats. It requires
-  that a leader verify with a quorum of peers that it is still leader. This
-  introduces an additional round-trip to all server nodes. The trade-off is
-  always consistent reads but increased latency due to the extra round trip.
+For more information, refer to [Consistency modes in the HTTP API documentation](/consul/api-docs/features/consistency).
 
-- `stale` - This mode allows any server to service the read regardless of whether
-  it is the leader. This means reads can be arbitrarily stale but are generally
-  within 50 milliseconds of the leader. The trade-off is very fast and scalable
-  reads but with stale values. This mode allows reads without a leader meaning
-  a cluster that is unavailable will still be able to respond.
-
-For more documentation about using these various modes, see the
-[HTTP API](/consul/api-docs/features/consistency).
-
-## Jepsen Testing Results
+## Jepsen testing
 
 [Jepsen](http://aphyr.com/posts/281-call-me-maybe-carly-rae-jepsen-and-the-perils-of-network-partitions)
-is a tool, written by Kyle Kingsbury, designed to test the partition
+is a tool designed to test the partition
 tolerance of distributed systems. It creates network partitions while fuzzing
-the system with random operations. The results are analyzed to see if the system
+the system with random operations. The results are analyzed to find out if the system
 violates any of the consistency properties it claims to have.
 
 As part of our Consul testing, we ran a Jepsen test to determine if
@@ -134,22 +77,13 @@ any consistency issues could be uncovered. In our testing, Consul
 gracefully recovered from partitions without introducing any consistency
 issues.
 
-### Running the tests
+### Test output
 
-At the moment, testing with Jepsen is rather complex as it requires
-setting up multiple virtual machines, SSH keys, DNS configuration,
-and a working Clojure environment. We hope to contribute our Consul
-testing code upstream and to provide a Vagrant environment for Jepsen
-testing soon.
-
-### Output
-
-Below is the output captured from Jepsen. We ran Jepsen multiple times,
-and it passed each time. This output is only representative of a single
-run and has been edited for length. Please reach out on [Consul's Discuss](https://discuss.hashicorp.com/c/consul)
-if you would like to reproduce the Jepsen results.
+The following output was captured during our Jepsen testing.
 
 <!--googleoff: all-->
+
+<CodeBlockConfig hideClipboard>
 
 ```shell-session
 $ lein test :only jepsen.system.consul-test
@@ -231,4 +165,9 @@ Ran 1 tests containing 1 assertions.
 0 failures, 0 errors.
 ```
 
+</CodeBlockConfig>
+
 <!--googleon: all-->
+
+We ran Jepsen multiple times, and Consul passed each time. This output is only representative of a single
+run and has been edited for length.
