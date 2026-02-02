@@ -1,0 +1,397 @@
+---
+page_title: Use dynamic credentials with the Azure provider in module testing
+description: >-
+  Configure Azure AD federated identity credentials to trust Terraform
+  Enterprise's OIDC tokens for module test runs, eliminating the need for static
+  Azure credentials.
+source: terraform-docs-common
+---
+
+# Configure dynamic credentials for Azure in module testing
+
+@include 'tfc-package-callouts/registry-test-dynamic-credentials.mdx'
+
+You can use HCP Terraform's native OpenID Connect integration with Microsoft Azure to get dynamic, short-lived credentials for module test runs. This approach uses Azure AD federated identity credentials to authenticate without storing static service principal secrets.
+
+## Requirements
+
+You need the following to configure dynamic credentials for Azure in module testing:
+
+-   An Azure subscription with permissions to create and configure Azure AD applications
+-   An HCP Terraform organization with module testing enabled
+-   A private registry module with [testing configured](/terraform/enterprise/registry/test)
+-   Permissions in HCP Terraform to modify registry module test settings
+-   The `az` CLI (optional, for command-line configuration)
+
+## Configure Azure
+
+### Register an Azure AD application
+
+Create an Azure AD application that will represent your module tests:
+
+1.  Sign in to the Azure Portal and navigate to **Azure Active Directory**
+2.  Click **App registrations** in the left menu
+3.  Click **New registration**
+4.  Enter a name (e.g., `terraform-module-tests`)
+5.  For **Supported account types**, select **Accounts in this organizational directory only**
+6.  Leave **Redirect URI** blank
+7.  Click **Register**
+
+Using the Azure CLI:
+
+```bash
+az ad app create --display-name "terraform-module-tests"
+```
+
+Note the **Application (client) ID** from the app's overview page. You'll need this for HCP Terraform configuration.
+
+### Create a service principal
+
+Create a service principal for the application:
+
+1.  In your app registration, note the **Application (client) ID**
+2.  Navigate to **Azure Active Directory > Enterprise applications**
+3.  Find your application and note the **Object ID** (this is the service principal's object ID)
+
+Alternatively, create the service principal using the Azure CLI:
+
+```bash
+az ad sp create --id <APPLICATION_CLIENT_ID>
+```
+
+Replace `<APPLICATION_CLIENT_ID>` with your application's client ID.
+
+### Add federated identity credentials
+
+Configure federated identity credentials to trust HCP Terraform's OIDC tokens:
+
+1.  In your app registration, navigate to **Certificates & secrets**
+2.  Click the **Federated credentials** tab
+3.  Click **Add credential**
+4.  Select **Other issuer** as the federated credential scenario
+5.  Enter the following details:
+    -   **Issuer**: `https://app.terraform.io` (or `https://<TFE_HOSTNAME>` for Terraform Enterprise)
+    -   **Subject identifier**: Enter a pattern that matches your module tests, for example:
+        -   For all modules: `organization:my-org:module:*:operation:test_run`
+        -   For specific module: `organization:my-org:module:terraform-azurerm-network:operation:test_run`
+    -   **Audience**: `azure.workload.identity`
+    -   **Name**: Enter a descriptive name (e.g., `terraform-module-tests`)
+6.  Click **Add**
+
+Using the Azure CLI:
+
+```bash
+az ad app federated-credential create \
+  --id <APPLICATION_CLIENT_ID> \
+  --parameters '{
+    "name": "terraform-module-tests",
+    "issuer": "https://app.terraform.io",
+    "subject": "organization:my-org:module:*:operation:test_run",
+    "audiences": ["azure.workload.identity"]
+  }'
+```
+
+~> **Important**: The subject identifier must match the format of HCP Terraform's subject claim for module tests: `organization:{ORGANIZATION_NAME}:module:{MODULE_NAME}:operation:test_run`. Use wildcards (`*`) to match multiple modules.
+
+### Multiple federated credentials for granular control
+
+You can create multiple federated credentials with different subject patterns to provide granular access:
+
+**Allow specific module:**
+
+```json
+{
+  "name": "vpc-module-tests",
+  "issuer": "https://app.terraform.io",
+  "subject": "organization:my-org:module:terraform-azurerm-network:operation:test_run",
+  "audiences": ["azure.workload.identity"]
+}
+```
+
+**Allow all Azure modules:**
+
+```json
+{
+  "name": "azurerm-module-tests",
+  "issuer": "https://app.terraform.io",
+  "subject": "organization:my-org:module:terraform-azurerm-*:operation:test_run",
+  "audiences": ["azure.workload.identity"]
+}
+```
+
+### Assign permissions
+
+Grant the service principal appropriate permissions for your tests:
+
+1.  Navigate to the Azure resource or scope you want to grant access to (subscription, resource group, or resource)
+2.  Click **Access control (IAM)**
+3.  Click **Add > Add role assignment**
+4.  Select an appropriate role (see [permissions recommendations](#permissions-recommendations))
+5.  Click **Next**
+6.  For **Assign access to**, select **User, group, or service principal**
+7.  Click **Select members** and search for your application name
+8.  Select your application and click **Select**
+9.  Click **Review + assign**
+
+Using the Azure CLI (for subscription-level access):
+
+```bash
+az role assignment create \
+  --assignee <SERVICE_PRINCIPAL_OBJECT_ID> \
+  --role "Contributor" \
+  --scope "/subscriptions/<SUBSCRIPTION_ID>"
+```
+
+Replace `<SERVICE_PRINCIPAL_OBJECT_ID>` with your service principal's object ID and `<SUBSCRIPTION_ID>` with your Azure subscription ID.
+
+## Configure HCP Terraform
+
+After configuring Azure, configure your registry module's test configuration to use dynamic credentials.
+
+### Gather required information
+
+You'll need:
+
+1.  **Tenant ID**: Found in **Azure Active Directory > Overview**
+2.  **Client ID**: The Application (client) ID from your app registration
+3.  **Subscription ID**: Found in **Subscriptions** in the Azure Portal
+
+To get these values using the Azure CLI:
+
+```bash
+# Get tenant ID
+az account show --query tenantId --output tsv
+
+# Get subscription ID
+az account show --query id --output tsv
+
+# Client ID is from your app registration (noted earlier)
+```
+
+### Configure through the UI
+
+1.  Navigate to your private registry module in HCP Terraform
+2.  Click **Tests** in the module navigation
+3.  Click **Configuration** or **Settings**
+4.  In the **Dynamic Credentials** section, toggle **Enable dynamic credentials**
+5.  Select **Azure** as the provider
+6.  Enter the **Tenant ID**
+7.  Enter the **Client ID** (Application ID)
+8.  Enter the **Subscription ID**
+9.  (Optional) Set a custom audience if you configured a different audience in your federated credentials
+10. Click **Save configuration**
+
+### Configure through the API
+
+You can also configure dynamic credentials using the [Test Configuration API](/terraform/enterprise/api-docs/private-registry/test-configuration):
+
+```bash
+curl \
+  --header "Authorization: Bearer $TOKEN" \
+  --header "Content-Type: application/vnd.api+json" \
+  --request PATCH \
+  --data @payload.json \
+  https://app.terraform.io/api/v2/registry-modules/:registry_name/:namespace/:name/:provider/test-configuration
+```
+
+With the following `payload.json`:
+
+```json
+{
+  "data": {
+    "type": "test-configurations",
+    "attributes": {
+      "oidc-enabled": true,
+      "oidc-provider": "azure",
+      "oidc-configuration": {
+        "tenant-id": "00000000-0000-0000-0000-000000000000",
+        "client-id": "11111111-1111-1111-1111-111111111111",
+        "subscription-id": "22222222-2222-2222-2222-222222222222",
+        "audience": "azure.workload.identity"
+      }
+    }
+  }
+}
+```
+
+## Environment variables
+
+When you configure dynamic credentials for Azure, HCP Terraform automatically sets the following environment variables in your module test runs:
+
+| Variable                               | Description                                           | Example Value                          |
+| -------------------------------------- | ----------------------------------------------------- | -------------------------------------- |
+| `TFC_AZURE_PROVIDER_AUTH`              | Signals the Azure provider to use OIDC authentication | `true`                                 |
+| `TFC_AZURE_RUN_CLIENT_ID`              | The Azure AD application (client) ID                  | `11111111-1111-1111-1111-111111111111` |
+| `TFC_AZURE_RUN_TENANT_ID`              | The Azure AD tenant ID                                | `00000000-0000-0000-0000-000000000000` |
+| `TFC_AZURE_RUN_SUBSCRIPTION_ID`        | The Azure subscription ID                             | `22222222-2222-2222-2222-222222222222` |
+| `TFC_AZURE_WORKLOAD_IDENTITY_AUDIENCE` | The audience claim for OIDC tokens                    | `azure.workload.identity`              |
+| `TFC_OIDC_ISSUER_URL`                  | The OIDC issuer URL                                   | `https://app.terraform.io`             |
+| `TFC_OIDC_AUDIENCE`                    | The OIDC audience                                     | `azure.workload.identity`              |
+
+The Azure Terraform provider (azurerm version 3.85.0 and later) automatically uses these environment variables to authenticate with Azure. You don't need to configure the provider block explicitly.
+
+## Permissions recommendations
+
+The permissions you grant to your service principal depend on what your module tests need to do. Follow the principle of least privilege.
+
+### Read-only testing
+
+For modules that only need to validate configurations without creating resources, use the **Reader** role:
+
+```bash
+az role assignment create \
+  --assignee <SERVICE_PRINCIPAL_OBJECT_ID> \
+  --role "Reader" \
+  --scope "/subscriptions/<SUBSCRIPTION_ID>"
+```
+
+### Resource creation for testing
+
+For modules that create test resources, consider these built-in roles:
+
+**Network resources:**
+
+```bash
+az role assignment create \
+  --assignee <SERVICE_PRINCIPAL_OBJECT_ID> \
+  --role "Network Contributor" \
+  --scope "/subscriptions/<SUBSCRIPTION_ID>/resourceGroups/<RESOURCE_GROUP>"
+```
+
+**Compute resources:**
+
+```bash
+az role assignment create \
+  --assignee <SERVICE_PRINCIPAL_OBJECT_ID> \
+  --role "Virtual Machine Contributor" \
+  --scope "/subscriptions/<SUBSCRIPTION_ID>/resourceGroups/<RESOURCE_GROUP>"
+```
+
+**Storage resources:**
+
+```bash
+az role assignment create \
+  --assignee <SERVICE_PRINCIPAL_OBJECT_ID> \
+  --role "Storage Account Contributor" \
+  --scope "/subscriptions/<SUBSCRIPTION_ID>/resourceGroups/<RESOURCE_GROUP>"
+```
+
+### Custom roles for specific permissions
+
+For more granular control, create a custom role with only the required permissions:
+
+```bash
+az role definition create --role-definition '{
+  "Name": "Module Test Role",
+  "Description": "Custom role for module testing",
+  "Actions": [
+    "Microsoft.Network/virtualNetworks/read",
+    "Microsoft.Network/virtualNetworks/write",
+    "Microsoft.Network/virtualNetworks/delete",
+    "Microsoft.Compute/virtualMachines/read"
+  ],
+  "AssignableScopes": ["/subscriptions/<SUBSCRIPTION_ID>"]
+}'
+
+az role assignment create \
+  --assignee <SERVICE_PRINCIPAL_OBJECT_ID> \
+  --role "Module Test Role" \
+  --scope "/subscriptions/<SUBSCRIPTION_ID>"
+```
+
+-> **Tip**: Scope role assignments to specific resource groups used for testing, rather than the entire subscription. This limits the blast radius if credentials are compromised.
+
+## Verify the configuration
+
+After configuring both Azure and HCP Terraform, verify the setup by running a test:
+
+1.  Navigate to your module in HCP Terraform
+2.  Go to the **Tests** tab
+3.  Click **Start Test Run** or trigger a test through your VCS
+4.  Monitor the test run logs for successful authentication
+
+If authentication succeeds, you'll see log output indicating the Azure provider authenticated using the OIDC token. If it fails, check the [troubleshooting](#troubleshooting) section.
+
+## Troubleshooting
+
+### Error: "No valid credential sources found"
+
+This error indicates the Azure provider cannot find credentials. Check:
+
+1.  The Azure provider (azurerm) version is 3.85.0 or later
+2.  Dynamic credentials are enabled in the test configuration
+3.  The tenant ID, client ID, and subscription ID are correct
+4.  The `TFC_AZURE_PROVIDER_AUTH` environment variable is set to `true`
+
+### Error: "AADSTS70021: No matching federated identity record found"
+
+The federated identity credential doesn't match the token's subject claim. Verify:
+
+1.  The subject identifier in the federated credential matches your organization name and module name format
+2.  The organization name in the subject matches your HCP Terraform organization
+3.  Wildcards are used correctly (e.g., `organization:my-org:module:*:operation:test_run`)
+4.  The issuer URL matches exactly (no trailing slash)
+
+To debug, check the token's subject claim format. For module tests, it should be:
+
+    organization:my-org:module:terraform-azurerm-network:operation:test_run
+
+### Error: "AADSTS50107: The requested federation realm object does not exist"
+
+The federated credential issuer doesn't match. Check:
+
+1.  The issuer is `https://app.terraform.io` (for HCP Terraform) without a trailing slash
+2.  For Terraform Enterprise, the issuer matches your TFE hostname exactly
+3.  The issuer uses `https://`, not `http://`
+
+### Error: "AADSTS700025: Invalid audience"
+
+The token's audience doesn't match the federated credential. Verify:
+
+1.  The audience in the federated credential is `azure.workload.identity`
+2.  The test configuration specifies the same audience
+3.  Custom audiences match on both sides
+
+### Error: "Authorization failed" or "insufficient privileges"
+
+The service principal lacks necessary permissions. Check:
+
+1.  The service principal has appropriate role assignments
+2.  Role assignments are at the correct scope (subscription, resource group, or resource)
+3.  Custom role definitions include all required actions
+4.  Azure policies aren't blocking the service principal
+5.  The subscription is not disabled or in a restricted state
+
+### Debugging federated credentials
+
+To verify your federated credential configuration:
+
+1.  Navigate to **Azure Active Directory > App registrations**
+2.  Select your application
+3.  Go to **Certificates & secrets > Federated credentials**
+4.  Review each credential's issuer, subject, and audience
+
+You can also use the Azure CLI:
+
+```bash
+az ad app federated-credential list --id <APPLICATION_CLIENT_ID>
+```
+
+### View authentication logs
+
+Enable and review Azure AD sign-in logs:
+
+1.  Navigate to **Azure Active Directory > Sign-in logs**
+2.  Filter by your application name
+3.  Review failed authentication attempts for details
+4.  Check the failure reason and additional details
+
+## Next steps
+
+-   Learn about [dynamic credentials for module testing](/terraform/enterprise/registry/test/dynamic-credentials)
+-   Configure dynamic credentials for other providers:
+    -   [AWS configuration](/terraform/enterprise/registry/test/dynamic-credentials/aws)
+    -   [GCP configuration](/terraform/enterprise/registry/test/dynamic-credentials/gcp)
+    -   [Vault configuration](/terraform/enterprise/registry/test/dynamic-credentials/vault)
+-   Review [workload identity token specifications](/terraform/enterprise/dynamic-provider-credentials/workload-identity-tokens)
+-   Set up [policy enforcement](/terraform/enterprise/policy-enforcement) to require OIDC for tests
