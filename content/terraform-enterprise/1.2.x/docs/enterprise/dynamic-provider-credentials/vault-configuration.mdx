@@ -1,0 +1,239 @@
+---
+page_title: Use dynamic credentials with the Vault provider in Terraform Enterprise
+description: >-
+  Use OpenID Connect to get short-term credentials for the Vault Terraform
+  provider in your Terraform Enterprise runs.
+source: terraform-docs-common
+---
+
+# Use dynamic credentials with the Vault provider
+
+~> **Important:** If you are self-hosting [HCP Terraform agents](/terraform/cloud-docs/agents), ensure your agents use [v1.7.0](/terraform/cloud-docs/agents/changelog#1-7-0-03-02-2023) or above. To use the latest dynamic credentials features, [upgrade your agents to the latest version](/terraform/cloud-docs/agents/changelog).
+
+You can use HCP Terraform’s native OpenID Connect integration with Vault to get [dynamic credentials](/terraform/enterprise/dynamic-provider-credentials) for the Vault provider in your HCP Terraform runs. Configuring the integration requires the following steps:
+
+1.  **[Configure Vault](#configure-vault):** Set up a trust configuration between Vault and HCP Terraform. Then, you must create Vault roles and policies for your HCP Terraform workspaces.
+2.  **[Configure HCP Terraform](#configure-hcp-terraform):** Add environment variables to the HCP Terraform workspaces where you want to use Dynamic Credentials.
+
+<!-- BEGIN: TFC:only name:stacks-tfe -->
+
+If you are configuring a Stack, refer to [Authenticate a Stack](/terraform/language/stacks/deploy/authenticate) to learn about the workflow of authenticating your Stack deployments with dynamic credentials.
+
+<!-- END: TFC:only name:stacks-tfe -->
+
+Once you complete the setup, HCP Terraform automatically authenticates to Vault during each run. The Vault provider authentication is valid for the length of the plan or apply. Vault does not revoke authentication until the run is complete.
+
+If you are using Vault's [secrets engines](/vault/docs/secrets), you must complete the following set up before continuing to configure [Vault-backed dynamic credentials](/terraform/enterprise/dynamic-provider-credentials/vault-backed).
+
+## Configure Vault
+
+You must enable and configure the JWT backend in Vault. These instructions use the Vault CLI commands, but you can also use Terraform to configure Vault. Refer to our [example Terraform configuration](https://github.com/hashicorp/terraform-dynamic-credentials-setup-examples/tree/main/vault).
+
+### Enable the JWT Auth Backend
+
+Run the following command to enable the JWT auth backend in Vault:
+
+```shell
+vault auth enable jwt
+```
+
+### Configure Trust with HCP Terraform
+
+You must configure Vault to trust HCP Terraform’s identity tokens and verify them using HCP Terraform’s public key. The following command configures the `jwt` auth backend in Vault to trust HCP Terraform as an OIDC identity provider:
+
+```shell
+vault write auth/jwt/config \
+    oidc_discovery_url="https://app.terraform.io" \
+    bound_issuer="https://app.terraform.io"
+```
+
+The `oidc_discovery_url` and `bound_issuer` should both be the root address of HCP Terraform, including the scheme and without a trailing slash.
+
+#### Terraform Enterprise Specific Requirements
+
+If you are using a custom or self-signed CA certificate you may need to specify the CA certificate or chain of certificates, in PEM format, via the [`oidc_discovery_ca_pem`](/vault/api-docs/auth/jwt#oidc_discovery_ca_pem) argument as shown in the following example command:
+
+```shell
+vault write auth/jwt/config \
+    oidc_discovery_url="https://app.terraform.io" \
+    bound_issuer="https://app.terraform.io" \
+    oidc_discovery_ca_pem=@my-cert.pem
+```
+
+In the example above, `my-cert.pem` is a PEM formatted file containing the certificate.
+
+### Create a Vault Policy
+
+You must create a Vault policy that controls what paths and secrets your HCP Terraform workspace can access in Vault.
+Create a file called tfc-policy.hcl with the following content:
+
+```hcl
+# Allow tokens to query themselves
+path "auth/token/lookup-self" {
+  capabilities = ["read"]
+}
+
+# Allow tokens to renew themselves
+path "auth/token/renew-self" {
+    capabilities = ["update"]
+}
+
+# Allow tokens to revoke themselves
+path "auth/token/revoke-self" {
+    capabilities = ["update"]
+}
+
+# Configure the actual secrets the token should have access to
+path "secret/*" {
+  capabilities = ["read"]
+}
+```
+
+Then create the policy in Vault:
+
+```shell
+vault policy write tfc-policy tfc-policy.hcl
+```
+
+### Create a JWT Auth Role
+
+Create a Vault role that HCP Terraform can use when authenticating to Vault.
+
+Vault offers a lot of flexibility in determining how to map roles and permissions in Vault to workspaces in HCP Terraform. You can have one role for each workspace, one role for a group of workspaces, or one role for all workspaces in an organization. You can also configure different roles for the plan and apply phases of a run.
+
+-> **Note:** If you set your `user_claim` to be per workspace, then Vault ties the entity it creates to that workspace's name. If you rename the workspace tied to your `user_claim`, Vault will create an additional identity object. To avoid this, update the alias name in Vault to your new workspace name before you update it in HCP Terraform.
+
+The following example creates a role called `tfc-role`. The role is mapped to a single workspace and HCP Terraform can use it for both plan and apply runs.
+
+Create a file called `vault-jwt-auth-role.json` with the following content:
+
+```json
+{
+  "policies": ["tfc-policy"],
+  "bound_audiences": ["vault.workload.identity"],
+  "bound_claims_type": "glob",
+  "bound_claims": {
+    "sub":
+"organization:my-org-name:project:my-project-name:workspace:my-workspace-name:run_phase:*"
+  },
+  "user_claim": "terraform_full_workspace",
+  "role_type": "jwt",
+  "token_ttl": "20m"
+}
+```
+
+Then run the following command to create a role named `tfc-role` with this configuration in Vault:
+
+```shell
+vault write auth/jwt/role/tfc-role @vault-jwt-auth-role.json
+```
+
+To understand all the available options for matching bound claims, refer to the [Terraform workload identity claim specification](/terraform/enterprise/dynamic-provider-credentials) and the [Vault documentation on configuring bound claims](/vault/docs/auth/jwt#bound-claims). To understand all the options available when configuring Vault JWT auth roles, refer to the [Vault API documentation](/vault/api-docs/auth/jwt#create-role).
+
+!> **Warning:** you should always check, at minimum, the audience and the name of the organization in order to prevent unauthorized access from other HCP Terraform organizations!
+
+#### Token TTLs
+
+We recommend creating a role which issues a renewable token, and setting `token_ttl` to a relatively short value, such as 20 minutes. HCP Terraform can renew the token periodically until the plan or apply is complete, then revoke it to prevent it from being used further.
+
+If you use a non-renewable token with HCP Terraform, the `token_ttl` has a maximum limit of 2 hours. If you use a non-renewable token with Terraform Enterprise, then the `token_ttl` of that token must match or exceed the [run phase timeout](/terraform/enterprise/application-administration/general#terraform-run-timeout-settings).
+
+## Configure HCP Terraform
+
+<!-- BEGIN: TFC:only name:stacks-tfe -->
+
+If you are configuring a Stack, refer to [Authenticate a Stack](/terraform/language/stacks/deploy/authenticate) to learn how to use the `identity_token` block to authenticate your Stack deployments with dynamic credentials.
+
+<!-- END: TFC:only name:stacks-tfe -->
+
+You’ll need to set some environment variables in your HCP Terraform workspace in order to configure HCP Terraform to authenticate with Vault using dynamic credentials. You can set these as workspace variables, or if you’d like to share one Vault role across multiple workspaces, you can use a variable set. When you configure dynamic provider credentials with multiple provider configurations of the same type, use either a default variable or a tagged alias variable name for each provider configuration. Refer to [Specifying Multiple Configurations](#specifying-multiple-configurations) for more details.
+
+### Required Environment Variables
+
+| Variable                                                                                               | Value                                                                            | Notes                                                                                                                                                                                                                                                                              |
+| ------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TFC_VAULT_PROVIDER_AUTH`<br />`TFC_VAULT_PROVIDER_AUTH[_TAG]`<br />_(Default variable not supported)_ | `true`                                                                           | Requires **v1.7.0** or later if self-managing agents. Must be present and set to `true`, or HCP Terraform will not attempt to authenticate to Vault.                                                                                                                               |
+| `TFC_VAULT_ADDR`<br />`TFC_VAULT_ADDR[_TAG]`<br />`TFC_DEFAULT_VAULT_ADDR`                             | The address of the Vault instance to authenticate against.                       | Requires **v1.7.0** or later if self-managing agents. Will also be used to set `VAULT_ADDR` in the run environment.                                                                                                                                                                |
+| `TFC_VAULT_RUN_ROLE`<br />`TFC_VAULT_RUN_ROLE[_TAG]`<br />`TFC_DEFAULT_VAULT_RUN_ROLE`                 | The name of the Vault role to authenticate against (`tfc-role`, in our example). | Requires **v1.7.0** or later if self-managing agents. Optional if `TFC_VAULT_PLAN_ROLE` and `TFC_VAULT_APPLY_ROLE` are both provided. These variables are described [below](/terraform/enterprise/dynamic-provider-credentials/vault-configuration#optional-environment-variables) |
+
+### Optional Environment Variables
+
+You may need to set these variables, depending on your Vault configuration and use case.
+
+| Variable                                                                                                                                     | Value                                                                                          | Notes                                                                                                                                                                                                          |
+| -------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TFC_VAULT_NAMESPACE`<br />`TFC_VAULT_NAMESPACE[_TAG]`<br />`TFC_DEFAULT_VAULT_NAMESPACE`                                                    | The namespace to use when authenticating to Vault.                                             | Requires **v1.7.0** or later if self-managing agents. Will also be used to set `VAULT_NAMESPACE` in the run environment.                                                                                       |
+| `TFC_VAULT_AUTH_PATH`<br />`TFC_VAULT_AUTH_PATH[_TAG]`<br />`TFC_DEFAULT_VAULT_AUTH_PATH`                                                    | The path where the JWT auth backend is mounted in Vault. Defaults to jwt.                      | Requires **v1.7.0** or later if self-managing agents.                                                                                                                                                          |
+| `TFC_VAULT_WORKLOAD_IDENTITY_AUDIENCE`<br />`TFC_VAULT_WORKLOAD_IDENTITY_AUDIENCE[_TAG]`<br />`TFC_DEFAULT_VAULT_WORKLOAD_IDENTITY_AUDIENCE` | Will be used as the `aud` claim for the identity token. Defaults to `vault.workload.identity`. | Requires **v1.7.0** or later if self-managing agents. Must match the `bound_audiences` configured for the role in Vault.                                                                                       |
+| `TFC_VAULT_PLAN_ROLE`<br />`TFC_VAULT_PLAN_ROLE[_TAG]`<br />`TFC_DEFAULT_VAULT_PLAN_ROLE`                                                    | The Vault role to use for the plan phase of a run.                                             | Requires **v1.7.0** or later if self-managing agents. Will fall back to the value of `TFC_VAULT_RUN_ROLE` if not provided.                                                                                     |
+| `TFC_VAULT_APPLY_ROLE`<br />`TFC_VAULT_APPLY_ROLE[_TAG]`<br />`TFC_DEFAULT_VAULT_APPLY_ROLE`                                                 | The Vault role to use for the apply phase of a run.                                            | Requires **v1.7.0** or later if self-managing agents. Will fall back to the value of `TFC_VAULT_RUN_ROLE` if not provided.                                                                                     |
+| `TFC_VAULT_ENCODED_CACERT`<br />`TFC_VAULT_ENCODED_CACERT[_TAG]`<br />`TFC_DEFAULT_VAULT_ENCODED_CACERT`                                     | A PEM-encoded CA certificate that has been Base64 encoded.                                     | Requires **v1.9.0** or later if self-managing agents. This certificate will be used when connecting to Vault. May be required when connecting to Vault instances that use a custom or self-signed certificate. |
+
+## Vault Provider Configuration
+
+Once you set up dynamic credentials for a workspace, HCP Terraform automatically authenticates to Vault for each run. Do not pass the `address`, `token`, or `namespace` arguments into the provider configuration block. HCP Terraform sets these values as environment variables in the run environment.
+
+You can use the Vault provider to read static secrets from Vault and use them with other Terraform resources. You can also access the other resources and data sources available in the [Vault provider documentation](https://registry.terraform.io/providers/hashicorp/vault/latest). You must adjust your [Vault policy](#create-a-vault-policy) to give your HCP Terraform workspace access to all required Vault paths.
+
+~> **Important:** data sources that use secrets engines to generate dynamic secrets must not be used with Vault dynamic credentials. You can use Vault's dynamic secrets engines for AWS, GCP, and Azure by adding additional configurations. For more details, see [Vault-backed dynamic credentials](/terraform/enterprise/dynamic-provider-credentials/vault-backed).
+
+### Specifying Multiple Configurations
+
+~> **Important:** If you are self-hosting [HCP Terraform agents](/terraform/cloud-docs/agents), ensure your agents use [v1.12.0](/terraform/cloud-docs/agents/changelog#1-12-0-07-26-2023) or above. To use the latest dynamic credentials features, [upgrade your agents to the latest version](/terraform/cloud-docs/agents/changelog).
+
+~> **Important:** Ensure you are using version **3.18.0** or later of the **Vault provider** as the required [`auth_login_token_file`](https://registry.terraform.io/providers/hashicorp/vault/latest/docs#token-file) block was introduced in this provider version.
+
+You can add additional variables to handle multiple distinct Vault setups, enabling you to use multiple [provider aliases](/terraform/language/providers/configuration#alias-multiple-provider-configurations) within the same workspace. You can configure each set of credentials independently, or use default values by configuring the variables prefixed with `TFC_DEFAULT_`.
+
+For more details, see [Specifying Multiple Configurations](/terraform/enterprise/dynamic-provider-credentials/specifying-multiple-configurations).
+
+#### Required Terraform Variable
+
+To use additional configurations, add the following code to your Terraform configuration. This lets HCP Terraform supply variable values that you can then use to map authentication and configuration details to the correct provider blocks.
+
+```hcl
+variable "tfc_vault_dynamic_credentials" {
+  description = "Object containing Vault dynamic credentials configuration"
+  type = object({
+    default = object({
+      token_filename = string
+      address = string
+      namespace = string
+      ca_cert_file = string
+    })
+    aliases = map(object({
+      token_filename = string
+      address = string
+      namespace = string
+      ca_cert_file = string
+    }))
+  })
+}
+```
+
+#### Example Usage
+
+```hcl
+provider "vault" {
+  // skip_child_token must be explicitly set to true as HCP Terraform manages the token lifecycle
+  skip_child_token = true
+  address          = var.tfc_vault_dynamic_credentials.default.address
+  namespace        = var.tfc_vault_dynamic_credentials.default.namespace
+
+  auth_login_token_file {
+    filename = var.tfc_vault_dynamic_credentials.default.token_filename
+  }
+}
+
+provider "vault" {
+  // skip_child_token must be explicitly set to true as HCP Terraform manages the token lifecycle
+  skip_child_token = true
+  alias            = "ALIAS1"
+  address          = var.tfc_vault_dynamic_credentials.aliases["ALIAS1"].address
+  namespace        = var.tfc_vault_dynamic_credentials.aliases["ALIAS1"].namespace
+
+  auth_login_token_file {
+    filename = var.tfc_vault_dynamic_credentials.aliases["ALIAS1"].token_filename
+  }
+}
+```

@@ -1,0 +1,92 @@
+---
+page_title: Connect to a PostgreSQL cluster deployed to Aurora
+description: Learn how to connect Terraform Enterprise to a highly-available PostgreSQL database cluster deployed to AWS Aurora.
+---
+
+# Connect to a PostgreSQL cluster deployed to Aurora
+
+This topic describes how to connect Terraform Enterprise to a highly-available PostgreSQL cluster deployed to AWS Aurora. 
+
+<Warning>
+
+**Connecting to a database cluster is in beta**. These instructions describe an example scenario that we tested and verified for non-production use cases. You should evaluate your requirements and business needs to determine the optimal architecture and configurations for your specific environment.
+
+</Warning>
+
+## Overview
+
+To connect Terraform Enterprise to a highly-available PostgreSQL cluster deployed to AWS Aurora, deploy the Aurora cluster and specify the cluster endpoint in the Terraform Enterprise configuration.
+
+It is optional, but you can create and run a test workload against Terraform Enterprise to measure the resilience of your high availability PostgreSQL cluster.
+
+### AWS Aurora
+
+AWS Aurora is a managed database service that natively supports high-availability and a writer or cluster endpoint that does not require load balancing. Aurora supports read-only endpoints, but Terraform Enterprise does not support them. 
+
+Refer to the following topics in the AWS documentation for additional information about Aurora:
+
+- [What is Amazon Aurora?](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/CHAP_AuroraOverview.html)
+- [High availability for Amazon Aurora](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Concepts.AuroraHighAvailability.html)
+- [Cluster endpoints for Amazon Aurora](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Aurora.Endpoints.Cluster.html)
+
+## Requirements
+
+During testing, the following deployment configuration resulted in seven successful failover recoveries after 10 iterations. Refer to [Measure failover resilience](#measure-failover-resilience) for additional information:
+
+- Release v202503-1 
+- Operational mode to either `active-active`  or `external`
+- Set the [`TFE_DATABASE_HOST` variable](/terraform/enterprise/deploy/reference/configuration#tfe_database_host) to the HAProxy load balancer 
+- Set the [`TFE_DATABASE_MONITOR_ENABLED`](/terraform/enterprise/deploy/reference/configuration#tfe_database_monitor_enabled) to ` true`
+- Terraform Enterprise nodes hosted on [Google Kubernetes Engine (GKE)](https://cloud.google.com/kubernetes-engine)
+- Terraform Enterprise deployed to three nodes 
+
+Terraform Enterprise does not support RDS proxy. 
+
+## Deploy an Aurora cluster
+
+Deploy an RDS cluster with Terraform. Refer to [`rds_cluster` documentation](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/rds_cluster#aurora-with-postgresql-engine) in the Terraform registry for configuration instructions.  
+
+The following example configuration provisions a cluster called `experiment` and two cluster instances:
+
+```hcl
+data "aws_availability_zones" "available" {
+  state = "available"
+}
+
+resource "aws_rds_cluster" "aurora_postgresql" {
+  cluster_identifier       = "experiment"
+  engine                   = "aurora-postgresql"
+  engine_version           = "16.2"
+  availability_zones       = slice(data.aws_availability_zones.available.names, 0, 3)
+  delete_automated_backups = true
+  backup_retention_period  = 1
+  deletion_protection      = false
+  skip_final_snapshot      = true
+  storage_encrypted        = true
+  ...
+}
+
+resource "aws_rds_cluster_instance" "cluster_instances_n" {
+  count              = 2
+  identifier         = format("%s-aurora-node-%d", "experiment", count.index + 1)
+  cluster_identifier = aws_rds_cluster.aurora_postgresql.id
+  instance_class     = "db.r5.xlarge"
+  engine             = aws_rds_cluster.aurora_postgresql.engine
+  engine_version     = aws_rds_cluster.aurora_postgresql.engine_version
+}
+```
+
+## Measure failover resilience
+
+You can collect recovery time objective (RTO) data to assess the resilience of your HA system. Refer to the following topics for additional information:
+
+- [PostgreSQL database failover](/terraform/enterprise/deploy/manage/failover)
+- [Measure failover resilience](/terraform/enterprise/deploy/configuration/storage/connect-database/failover-resilience) 
+
+In the example scenario, we executed test workloads against the instance every 20 seconds for 10 iterations. If the workload did not report success within 15 seconds, we consider the instance unhealthy. The instance is also considered non-operational if any run fails. We considered Terraform Enterprise to be fully operational when five consecutive runs finished successfully.  
+
+We observed the following outcomes after triggering 10 failovers:
+
+- All failovers recovered.
+- Recovery times ranged from a minimum RTO of less than 35 seconds to a maximum of 112 seconds.
+- Average RTO was 65 seconds.
