@@ -1,0 +1,341 @@
+---
+page_title: Enforce CIS benchmarks
+description: Automate CIS benchmark enforcement with Packer and Terraform to build hardened images and deploy compliant infrastructure for NIST 800-53, HIPAA, and PCI-DSS.
+---
+
+# Enforce CIS Benchmarks
+
+The Center for Internet Security [(CIS) Benchmarks](https://www.cisecurity.org/cis-benchmarks) provide detailed security configuration guidelines for operating systems, cloud platforms, and applications. Organizations adopt CIS benchmarks to meet compliance requirements like NIST 800-53, HIPAA, SOC 2, and PCI-DSS. Manual implementation creates inconsistencies across environments and makes auditing time-consuming.
+
+You can automate CIS benchmark enforcement by building security baselines into machine images with Packer and applying configurations at deployment with Terraform. Packer hardens operating systems during the image build process, ensuring every instance starts from a compliant baseline. Terraform applies infrastructure-level security controls like encryption, monitoring, and network policies when you deploy resources.
+
+Automated enforcement reduces security misconfigurations, accelerates compliance audits, and eliminates configuration drift across environments.
+
+## Why enforce CIS benchmarks
+
+CIS Benchmarks provide organizations with prescriptive security configuration guidelines that help harden systems against threats. By enforcing these standards, organizations establish a defensible security baseline across their infrastructure, reducing attack surfaces and protecting against common misconfigurations and vulnerabilities.
+
+CIS Benchmarks also support regulatory compliance requirements by providing documented, evidence-based security controls. The benchmarks also offer a standardized approach that enables consistent security posture across heterogeneous environments, simplifies auditing and remediation processes, and helps security teams prioritize resources effectively based on real-world threat intelligence
+
+### Enforce benchmarks to enhance security posture
+
+Organizations adopting CIS benchmarks face the following challenges to maintaining security posture throughout the enterprise. Enforcing CIS Benchmarks is effective in helping teams meet and resolve these challenges:
+
+- **Prevent security misconfigurations:** Manual configuration creates inconsistencies between environments. Teams face challenges with verifying compliance across multiple regulatory frameworks. Security misconfigurations expose systems to vulnerabilities that attackers exploit.
+
+- **Reduce compliance audit time:** Compliance teams spend weeks manually documenting security configurations for auditors. Auditors need consistent evidence that controls remain in place across all systems. Manual documentation processes are error-prone and difficult to maintain as infrastructure scales.
+
+- **Eliminate configuration drift:** System administrators make ad-hoc modifications that diverge from approved security baselines. Configuration drift introduces compliance gaps and increases your attack surface. Tracking manual changes across hundreds of servers becomes unmanageable.
+
+- **Standardize security baselines:** Development, staging, and production environments have inconsistent security postures when teams implement requirements differently. Different teams interpret CIS benchmark guidance in conflicting ways, creating security gaps between environments.
+
+## How CIS benchmarks work
+
+CIS benchmarks define two implementation levels. Level 1 includes essential security controls that apply to most environments with minimal operational impact. Level 2 adds stricter controls for high-security environments that may affect system capabilities or performance.
+
+Each benchmark provides specific configuration recommendations organized by category like filesystem permissions, network settings, logging, and access controls. Organizations select the appropriate level based on security requirements and operational constraints. For complete benchmark details, refer to the [CIS Benchmarks](https://www.cisecurity.org/cis-benchmarks) documentation.
+
+## Build security into golden images
+
+Packer builds machine images that include CIS benchmark hardening at the operating system level. You apply security configurations during the build process before deploying instances, ensuring every server starts from a compliant baseline.
+
+The following Packer configuration builds a hardened Ubuntu image with CIS Level 1 controls:
+
+```hcl
+packer {
+  required_plugins {
+    amazon = {
+      source  = "github.com/hashicorp/amazon"
+      version = "~> 1"
+    }
+  }
+}
+
+source "amazon-ebs" "ubuntu_cis" {
+  ami_name      = "ubuntu-22-04-cis-level1-{{timestamp}}"
+  instance_type = "t3.micro"
+  region        = "us-west-2"
+  source_ami_filter {
+    filters = {
+      name                = "ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"
+      root-device-type    = "ebs"
+      virtualization-type = "hvm"
+    }
+    owners      = ["099720109477"]
+    most_recent = true
+  }
+  ssh_username = "ubuntu"
+  tags = {
+    Name            = "Ubuntu 22.04 CIS Level 1"
+    CIS_Level       = "1"
+    Compliance      = "CIS"
+    Built_With      = "Packer"
+  }
+}
+
+build {
+  sources = ["source.amazon-ebs.ubuntu_cis"]
+
+  # Apply CIS filesystem hardening
+  provisioner "shell" {
+    inline = [
+      "sudo apt-get update",
+      "sudo apt-get install -y aide aide-common",
+      "sudo aideinit",
+      # Disable unnecessary filesystems
+      "echo 'install cramfs /bin/true' | sudo tee -a /etc/modprobe.d/CIS.conf",
+      "echo 'install freevxfs /bin/true' | sudo tee -a /etc/modprobe.d/CIS.conf",
+      "echo 'install jffs2 /bin/true' | sudo tee -a /etc/modprobe.d/CIS.conf",
+      "echo 'install hfs /bin/true' | sudo tee -a /etc/modprobe.d/CIS.conf",
+      "echo 'install hfsplus /bin/true' | sudo tee -a /etc/modprobe.d/CIS.conf",
+      "echo 'install udf /bin/true' | sudo tee -a /etc/modprobe.d/CIS.conf",
+    ]
+  }
+
+  # Configure secure logging
+  provisioner "shell" {
+    inline = [
+      "sudo apt-get install -y rsyslog",
+      "sudo systemctl enable rsyslog",
+      "sudo systemctl start rsyslog",
+      # Configure log file permissions
+      "sudo chmod -R g-wx,o-rwx /var/log/*",
+    ]
+  }
+
+  # Harden SSH configuration
+  provisioner "shell" {
+    inline = [
+      "sudo sed -i 's/#PermitRootLogin yes/PermitRootLogin no/' /etc/ssh/sshd_config",
+      "sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config",
+      "sudo sed -i 's/#PermitEmptyPasswords no/PermitEmptyPasswords no/' /etc/ssh/sshd_config",
+      "sudo sed -i 's/#MaxAuthTries 6/MaxAuthTries 4/' /etc/ssh/sshd_config",
+      "echo 'ClientAliveInterval 300' | sudo tee -a /etc/ssh/sshd_config",
+      "echo 'ClientAliveCountMax 0' | sudo tee -a /etc/ssh/sshd_config",
+    ]
+  }
+
+  # Enable automatic security updates
+  provisioner "shell" {
+    inline = [
+      "sudo apt-get install -y unattended-upgrades",
+      "sudo dpkg-reconfigure -plow unattended-upgrades",
+    ]
+  }
+
+  # Set file integrity monitoring
+  provisioner "shell" {
+    inline = [
+      "sudo systemctl enable aide.timer",
+    ]
+  }
+}
+```
+
+Packer builds an AMI with filesystem hardening, secure logging, SSH restrictions, and file integrity monitoring. Running `packer build` produces an AMI tagged with CIS compliance metadata. Terraform queries this AMI using data sources to deploy compliant instances, ensuring your infrastructure uses hardened images without manual AMI ID updates.
+
+The build process applies security controls before any application deployment, reducing the attack surface from the moment instances start. Teams can version and test security baselines independently from application code, maintaining separation of concerns between security and application teams.
+
+## Apply security configurations at deployment
+
+Terraform applies CIS benchmark requirements at the infrastructure level when you deploy resources. You configure encryption, monitoring, network policies, and access controls that complement the operating system hardening built into your machine images.
+
+The following Terraform configuration deploys a CIS-compliant EC2 instance with required security controls:
+
+```hcl
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+}
+
+provider "aws" {
+  region = "us-west-2"
+}
+
+# Query the most recent CIS-hardened AMI
+data "aws_ami" "cis_ubuntu" {
+  most_recent = true
+  owners      = ["self"]
+
+  filter {
+    name   = "name"
+    values = ["ubuntu-22-04-cis-level1-*"]
+  }
+
+  filter {
+    name   = "tag:CIS_Level"
+    values = ["1"]
+  }
+}
+
+# Create security group with restricted access
+resource "aws_security_group" "cis_compliant" {
+  name        = "cis-compliant-sg"
+  description = "CIS-compliant security group with restricted access"
+  vpc_id      = var.vpc_id
+
+  # Allow only necessary inbound traffic
+  ingress {
+    description = "HTTPS from approved networks"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = var.allowed_cidr_blocks
+  }
+
+  # Allow all outbound traffic
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name       = "CIS Compliant Security Group"
+    Compliance = "CIS"
+  }
+}
+
+# Deploy instance with encrypted EBS volumes
+resource "aws_instance" "cis_server" {
+  ami                     = data.aws_ami.cis_ubuntu.id
+  instance_type           = "t3.micro"
+  vpc_security_group_ids  = [aws_security_group.cis_compliant.id]
+  subnet_id               = var.subnet_id
+  monitoring              = true  # Enable detailed CloudWatch monitoring
+  iam_instance_profile    = aws_iam_instance_profile.cis_profile.name
+
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required"  # Require IMDSv2
+    http_put_response_hop_limit = 1
+  }
+
+  root_block_device {
+    encrypted   = true
+    kms_key_id  = aws_kms_key.ebs_key.arn
+    volume_type = "gp3"
+    volume_size = 20
+  }
+
+  tags = {
+    Name            = "CIS Compliant Server"
+    Compliance      = "CIS"
+    Backup_Required = "true"
+  }
+}
+
+# Create KMS key for EBS encryption
+resource "aws_kms_key" "ebs_key" {
+  description             = "KMS key for EBS volume encryption"
+  deletion_window_in_days = 10
+  enable_key_rotation     = true
+
+  tags = {
+    Name       = "EBS Encryption Key"
+    Compliance = "CIS"
+  }
+}
+
+# Create IAM role for CloudWatch logging
+resource "aws_iam_role" "cis_role" {
+  name = "cis-compliant-instance-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "cloudwatch_logs" {
+  role       = aws_iam_role.cis_role.name
+  policy_arn = "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
+}
+
+resource "aws_iam_instance_profile" "cis_profile" {
+  name = "cis-compliant-profile"
+  role = aws_iam_role.cis_role.name
+}
+
+# Enable CloudWatch log group for instance logs
+resource "aws_cloudwatch_log_group" "instance_logs" {
+  name              = "/aws/ec2/cis-compliant"
+  retention_in_days = 90
+
+  tags = {
+    Name       = "CIS Instance Logs"
+    Compliance = "CIS"
+  }
+}
+```
+
+Terraform uses a data source to query the latest CIS-hardened AMI built by Packer, eliminating hard-coded AMI IDs. The configuration enforces encrypted EBS volumes with KMS, restricts network access through security groups, requires IMDSv2 for metadata access, and enables detailed monitoring with CloudWatch.
+
+Running `terraform apply` creates infrastructure that meets CIS benchmark requirements for encryption, logging, and access control. Terraform state tracks all security configurations, making it straightforward to demonstrate compliance during audits. Teams can review infrastructure changes through version control before applying them to production, ensuring security controls remain consistent.
+
+## HashiCorp resources
+
+**Get started with automation tools:**
+
+- Follow the [Terraform AWS Get Started tutorials](/terraform/tutorials/aws-get-started)
+  to deploy your first infrastructure and understand core Terraform workflows
+- Complete the [Packer AWS Get Started tutorials](/packer/tutorials/aws-get-started)
+  to build your first machine image with security hardening
+- Read the [Terraform documentation](/terraform/docs) to understand state management,
+  providers, and resource configuration
+- Explore the [Packer documentation](/packer/docs) to learn about provisioners,
+  builders, and post-processors
+
+**Build security compliance workflows:**
+
+- Use [HCP Terraform](/terraform/cloud-docs) for team collaboration, remote state
+  management, and policy enforcement with Sentinel
+- Configure [Terraform state](/terraform/language/state) to track infrastructure
+  configurations and maintain compliance audit trails
+- Review the [Terraform AWS provider documentation](https://registry.terraform.io/providers/hashicorp/aws/latest/docs)
+  for detailed resource configuration options and security settings
+
+**Create hardened machine images:**
+
+- Learn about [Packer provisioners](/packer/docs/provisioners) to configure operating
+  systems during image builds with shell scripts, Ansible, or Chef
+- Read the [Packer Amazon EBS builder documentation](/packer/plugins/builders/amazon/ebs)
+  to understand AMI creation options, instance configuration, and tagging strategies
+- Explore [HCP Packer](/hcp/docs/packer) to version and track machine images across
+  your organization with automated compliance validation
+
+**Enforce security policies:**
+
+- Implement [Sentinel policy as code](/sentinel/docs) to validate infrastructure
+  changes before deployment and enforce CIS benchmark compliance
+- Learn the [Sentinel language syntax](/sentinel/docs/language) to write custom
+  policies that check encryption, network rules, and access controls
+- Review [Terraform Cloud policy enforcement](/terraform/cloud-docs/policy-enforcement)
+  to understand policy sets, enforcement levels, and compliance reporting
+
+## External resources
+
+- [CIS Benchmarks](https://www.cisecurity.org/cis-benchmarks) for security configuration standards
+- [NIST 800-53 Security Controls](https://csrc.nist.gov/publications/detail/sp/800-53/rev-5/final) for federal security control catalog
+- [AWS CIS Foundations Benchmark](https://docs.aws.amazon.com/securityhub/latest/userguide/cis-aws-foundations-benchmark.html) for AWS-specific controls
+- [Azure CIS Benchmark](https://learn.microsoft.com/en-us/azure/governance/policy/samples/cis-azure-1-4-0) for Azure security baseline
+- [GCP CIS Benchmark](https://cloud.google.com/security/compliance/cis-benchmark) for Google Cloud security standards
+
+## Next steps
+
+In this section of Secure systems, you learned how to enforce CIS benchmarks by building security into machine images with Packer and applying infrastructure controls with Terraform. Automated enforcement reduces manual configuration errors and accelerates compliance audits.
+
+After establishing security baselines, implement [policy as code](/well-architected-framework/security/policy-as-code) with Sentinel to validate that all infrastructure changes meet your security requirements before deployment. Use [immutable infrastructure](/well-architected-framework/security/immutable-infrastructure) practices to prevent configuration drift by replacing instances rather than modifying them. Learn about [secrets management](/well-architected-framework/security/secrets-management) with Vault to protect sensitive credentials and encryption keys.
