@@ -1,0 +1,114 @@
+---
+page_title: Perform post-apply operations using provisioners
+description: Learn how to run commands and scripts and upload files to prepare resources for service after applying the configuration with provisioners, config-init, and configuration management software.
+---
+
+# Perform post-apply operations
+
+You may need to upload files, run commands and scripts, and perform other operations to prepare resources you create and manage with Terraform for service. Terraform is primarily designed for immutable infrastructure operations, so we strongly recommend using purpose-built solutions to perform post-apply operations. 
+
+> **Hands-on:** Try the [Provision Infrastructure with Cloud-Init](/terraform/tutorials/provision/cloud-init) tutorial.
+
+## Overview
+
+You can use the following methods to prepare a resource for service after applying the configuration:
+
+- Pass data to the resource using the provider's `cloud-init` implementation.
+- Use the `cloudinit-config` data source.
+- Provision machine images with the necessary tools and packages.
+- Use configuration management tools.
+
+The provider may support post-apply operations, such as runing CLI commands and scripts on the resource. Refer to the resource provider documentation for instructions. If the provider does not include a mechanism for interacting with the resource, we recommend opening a feature request ticket with the provider. When you are unable to use a purpose-built solution, you can use functionality built into Terraform called [provisioners](/terraform/language/provisioners).
+
+## Requirements
+
+If you are using third-party software to set resources up for service, such as configuration management or automation software, refer to your vendor's documentation for specific requirements.
+
+## Pass data into compute resources
+
+When deploying virtual machines or other similar compute resources, you can pass data to the resource. Most cloud computing platforms provide mechanisms to pass data to instances at the time of their creation. This makes the data immediately available on system boot.
+
+### Cloud-init
+
+Many Linux distribution disk images include [cloud-init](https://cloudinit.readthedocs.io/en/latest/), which lets you run scripts and configure systems on system boot up. Some providers let you configure cloud-init on the virtual machine's guest operating system. For providers that support cloud-init, the `user_data` and `custom_data` arguments are common methods for passing data. Refer to the provider documentation for details.
+
+In the following example, the `custom_data` argument in the `azurerm_linux_virtual_machine` resource specifies a file containing the data to pass to the resource on startup:
+
+```hcl
+resource "azurerm_linux_virtual_machine" "example" {
+  # . . .
+  custom_data = base64encode(file("custom-data.sh"))
+}
+```
+
+If you build custom machine images, you may be able to access the data passed to the resource using `user_data` or `metadata` at runtime. Refer to your vendor's documentation for more information.
+
+This approach is required when you use your cloud provider to automatically launch and destroy servers in a group because individual servers will launch unattended when Terraform is not available to provision them.
+
+Even if you're deploying individual servers directly with Terraform, using `user_data` or `metadata` to pass data allows for faster boot times. It also simplifies deployment by avoiding the need for direct network access from Terraform to the new server and for remote access credentials to be provided.
+
+### Input arguments
+
+Refer to the following provider resources for instructions on how to pass data to respective compute resources. Note that you can also specify cloud-config files as values. You can use the `cloudinit_config` data source to render cloud-config files. Refer to the [cloudinit_config documentation](https://registry.terraform.io/providers/hashicorp/cloudinit/latest/docs/data-sources/config) for more information.
+
+| Cloud service | Argument | Resource type |
+| --- | --- | --- |
+| Alibaba Cloud | `user_data` | [`alicloud_instance`](https://registry.terraform.io/providers/aliyun/alicloud/latest/docs/resources/instance), [`alicloud_launch_template`](https://registry.terraform.io/providers/aliyun/alicloud/latest/docs/resources/launch_template) |
+| Amazon EC2 | `user_data`, `user_data_base64` | [`aws_instance`](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/instance), [`aws_launch_template`](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/launch_template), [`aws_launch_configuration`](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/launch_configuration) |
+| Amazon Lightsail | `user_data` | [`aws_lightsail_instance`](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lightsail_instance) |
+| Microsoft Azure | `custom_data` | [`azurerm_virtual_machine`](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/virtual_machine), [`azurerm_virtual_machine_scale_set`](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/virtual_machine_scale_set) |
+| Google Cloud Platform | `metadata` | [`google_compute_instance`](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/compute_instance), [`google_compute_instance_group`](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/compute_instance_group) |
+| Oracle Cloud Infrastructure | `metadata`, `extended_metadata` |  [`oci_core_instance`](https://registry.terraform.io/providers/oracle/oci/), [`oci_core_instance_configuration`](https://registry.terraform.io/providers/oracle/oci/) |
+| VMware vSphere | `cdrom` block | Attach a virtual CDROM to [`vsphere_virtual_machine`](https://registry.terraform.io/providers/hashicorp/vsphere/latest/docs/resources/virtual_machine) using the `cdrom` block and specify a file called `user-data.txt` |
+
+## Use the `cloud-config` data source to pass data
+
+You can add the [`cloudinit_config`](https://registry.terraform.io/providers/hashicorp/cloudinit/latest/docs) data source to your Terraform configuration and specify the files you want to provision as `text/cloud-config` content. The `cloudinit_config` data source renders multi-part MIME configurations for use with [cloud-init](https://cloudinit.readthedocs.io/en/latest/). Pass the files in the `content` field as YAML-encoded configurations using the `write_files` block.
+
+In the following example, the `my_cloud_config` data source specifies a `text/cloud-config` MIME part named `cloud.conf`. The `part.content` field is set to [`yamlencode`](/terraform/language/functions/yamlencode), which encodes the `write_files` JSON object as YAML so that the system can provision the referenced files.
+
+```hcl
+data "cloudinit_config" "my_cloud_config" {
+  gzip          = false
+  base64_encode = false
+
+  part {
+    content_type = "text/cloud-config"
+    filename     = "cloud.conf"
+    content = yamlencode(
+      {
+        "write_files" : [
+          {
+            "path" : "/etc/foo.conf",
+            "content" : "foo contents",
+          },
+          {
+            "path" : "/etc/bar.conf",
+            "content" : file("bar.conf"),
+          },
+          {
+            "path" : "/etc/baz.conf",
+            "content" : templatefile("baz.tpl.conf", { SOME_VAR = "qux" }),
+          },
+        ],
+      }
+    )
+  }
+}
+```
+
+## Build configuration into machine images
+
+You can use [HashiCorp Packer](/packer) or similar systems to build system configuration steps into custom images. Packer uses configuration management provisioners that can run installation steps during the build process before creating a system disk image that you can reuse.
+
+Configuration management software that uses a centralized server component may require you to register the software as part of the configuration process. You must delay the registration step until the final system is booted from your custom image. You can [pass the necessary information to the resource](#pass-data-into-compute-resources) to delay registration so that the configuration management software can register itself with the centralized server immediately on boot without requiring the resource to accept commands from Terraform over SSH or WinRM.
+
+> **Hands-on:** Try the [Provision Infrastructure with Packer](/terraform/tutorials/provision/packer) tutorial.
+
+## Run CLI commands
+
+The provider may support executing CLI commands on the resource. Refer to the resource provider documentation for instructions on how to invoke the CLI on your target system. If the provider does not include a mechanism for interacting with the resource CLI, we recommend opening a feature request ticket with the provider.
+
+## Execute remote scripts
+
+If the provider does not include a mechanism for executing scripts, we recommend opening a feature request ticket with the provider.
