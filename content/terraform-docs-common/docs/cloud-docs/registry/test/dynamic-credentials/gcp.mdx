@@ -1,0 +1,356 @@
+---
+page_title: Use dynamic credentials with the GCP provider in module testing
+description: >-
+  Configure GCP Workload Identity Federation to trust HCP Terraform's OIDC tokens for module test runs,
+  eliminating the need for static GCP credentials.
+---
+
+# Configure dynamic credentials for GCP in module testing
+
+@include 'tfc-package-callouts/registry-test-dynamic-credentials.mdx'
+
+You can use HCP Terraform's native OpenID Connect integration with Google Cloud Platform to get dynamic, short-lived credentials for module test runs. This approach uses GCP Workload Identity Federation to authenticate without storing static service account keys.
+
+## Requirements
+
+You need the following to configure dynamic credentials for GCP in module testing:
+
+- A Google Cloud project with permissions to create and configure Workload Identity resources
+- An HCP Terraform organization with module testing enabled
+- A private registry module with [testing configured](/terraform/cloud-docs/registry/test)
+- Permissions in HCP Terraform to modify registry module test settings
+- The `gcloud` CLI (optional, for command-line configuration)
+
+## Configure GCP
+
+### Create a Workload Identity Pool
+
+Workload Identity Pools manage external identity providers. Create one for HCP Terraform:
+
+1. In the Google Cloud Console, navigate to **IAM & Admin > Workload Identity Federation**
+2. Click **Create Pool**
+3. Enter a pool ID (e.g., `terraform-module-tests`)
+4. Optionally, add a display name and description
+5. Click **Continue**
+6. Click **Save** (you'll add providers in the next step)
+
+Alternatively, using the `gcloud` CLI:
+
+```bash
+gcloud iam workload-identity-pools create terraform-module-tests \
+  --location="global" \
+  --display-name="Terraform Module Tests"
+```
+
+### Create a Workload Identity Provider
+
+Create an OIDC provider within your Workload Identity Pool:
+
+1. In your Workload Identity Pool, click **Add Provider**
+2. Select **OpenID Connect (OIDC)** as the provider type
+3. Enter a provider ID (e.g., `terraform-cloud`)
+4. For **Issuer (URL)**, enter:
+   - HCP Terraform: `https://app.terraform.io`
+   - Terraform Enterprise: `https://<TFE_HOSTNAME>` (replace with your hostname)
+5. For **Audiences**, select **Allowed audiences** and enter: `gcp.workload.identity`
+6. Leave **Attribute mapping** at default for now (we'll customize it next)
+7. Click **Save**
+
+Using the `gcloud` CLI:
+
+```bash
+gcloud iam workload-identity-pools providers create-oidc terraform-cloud \
+  --location="global" \
+  --workload-identity-pool="terraform-module-tests" \
+  --issuer-uri="https://app.terraform.io" \
+  --allowed-audiences="gcp.workload.identity" \
+  --attribute-mapping="google.subject=assertion.sub,attribute.terraform_run_id=assertion.terraform_run_id,attribute.terraform_run_phase=assertion.terraform_run_phase,attribute.terraform_organization_id=assertion.terraform_organization_id,attribute.terraform_organization_name=assertion.terraform_organization_name"
+```
+
+### Configure attribute mapping
+
+Attribute mapping extracts claims from the OIDC token and makes them available for authorization. Configure the following mappings:
+
+1. Edit your Workload Identity Provider
+2. In the **Attribute Mapping** section, add:
+   - `google.subject` → `assertion.sub`
+   - `attribute.terraform_run_id` → `assertion.terraform_run_id`
+   - `attribute.terraform_run_phase` → `assertion.terraform_run_phase`
+   - `attribute.terraform_organization_id` → `assertion.terraform_organization_id`
+   - `attribute.terraform_organization_name` → `assertion.terraform_organization_name`
+3. Click **Save**
+
+### Create attribute conditions (optional)
+
+Attribute conditions filter which tokens can authenticate. To allow only module test runs:
+
+1. Edit your Workload Identity Provider
+2. In the **Attribute Conditions** section, add:
+   ```
+   google.subject.matches("organization:.+:module:.+:operation:test_run")
+   ```
+3. Click **Save**
+
+This ensures only tokens from module test runs (not workspace runs) can use this provider, by matching the subject claim format used for test runs.
+
+### Create a service account
+
+Create a service account that module tests will impersonate:
+
+1. Navigate to **IAM & Admin > Service Accounts**
+2. Click **Create Service Account**
+3. Enter a name (e.g., `terraform-module-test-sa`)
+4. Optionally, add a description
+5. Click **Create and Continue**
+6. Grant the service account appropriate roles for your tests (see [permissions recommendations](#permissions-recommendations))
+7. Click **Continue**, then **Done**
+
+Using the `gcloud` CLI:
+
+```bash
+gcloud iam service-accounts create terraform-module-test-sa \
+  --display-name="Terraform Module Test Service Account"
+```
+
+### Grant Workload Identity Pool access to the service account
+
+Allow the Workload Identity Pool to impersonate the service account:
+
+1. Open the service account you created
+2. Navigate to the **Permissions** tab
+3. Click **Grant Access**
+4. In the **New principals** field, enter:
+   ```
+   principalSet://iam.googleapis.com/projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/terraform-module-tests/*
+   ```
+   Replace `PROJECT_NUMBER` with your GCP project number.
+5. Select the role **Workload Identity User**
+6. Click **Save**
+
+Using the `gcloud` CLI:
+
+```bash
+gcloud iam service-accounts add-iam-policy-binding terraform-module-test-sa@PROJECT_ID.iam.gserviceaccount.com \
+  --role="roles/iam.workloadIdentityUser" \
+  --member="principalSet://iam.googleapis.com/projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/terraform-module-tests/*"
+```
+
+Replace `PROJECT_ID` with your project ID and `PROJECT_NUMBER` with your project number.
+
+### More specific principal filters
+
+You can create more granular access controls using principal filters:
+
+**Allow specific organization:**
+```
+principalSet://iam.googleapis.com/projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/terraform-module-tests/attribute.terraform_organization_name/my-org
+```
+
+**Allow by subject pattern (using CEL attribute condition on the provider):**
+
+To filter by module name, use an attribute condition on the Workload Identity Provider:
+```
+google.subject.matches("organization:my-org:module:terraform-gcp-.*:operation:test_run")
+```
+
+## Configure HCP Terraform
+
+After configuring GCP, configure your registry module's test configuration to use dynamic credentials.
+
+### Gather required information
+
+You'll need:
+
+1. **Service account email**: `terraform-module-test-sa@PROJECT_ID.iam.gserviceaccount.com`
+2. **Workload provider name**: In the format:
+   ```
+   projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/terraform-module-tests/providers/terraform-cloud
+   ```
+
+To find your project number:
+```bash
+gcloud projects describe PROJECT_ID --format="value(projectNumber)"
+```
+
+### Configure through the UI
+
+1. Navigate to your private registry module in HCP Terraform
+2. Click **Tests** in the module navigation
+3. Click **Configuration** or **Settings**
+4. In the **Dynamic Credentials** section, toggle **Enable dynamic credentials**
+5. Select **GCP** as the provider
+6. Enter the **Service account email**
+7. Enter the **Workload provider name**
+8. (Optional) Set a custom audience if you configured a different audience in your Workload Identity Provider
+9. Click **Save configuration**
+
+### Configure through the API
+
+You can also configure dynamic credentials using the [Test Configuration API](/terraform/cloud-docs/api-docs/private-registry/test-configuration):
+
+```bash
+curl \
+  --header "Authorization: Bearer $TOKEN" \
+  --header "Content-Type: application/vnd.api+json" \
+  --request PATCH \
+  --data @payload.json \
+  https://app.terraform.io/api/v2/registry-modules/:registry_name/:namespace/:name/:provider/test-configuration
+```
+
+With the following `payload.json`:
+
+```json
+{
+  "data": {
+    "type": "test-configurations",
+    "attributes": {
+      "oidc-enabled": true,
+      "oidc-provider": "gcp",
+      "oidc-configuration": {
+        "service-account-email": "terraform-module-test-sa@my-project.iam.gserviceaccount.com",
+        "workload-provider-name": "projects/123456789/locations/global/workloadIdentityPools/terraform-module-tests/providers/terraform-cloud",
+        "audience": "gcp.workload.identity"
+      }
+    }
+  }
+}
+```
+
+## Environment variables
+
+When you configure dynamic credentials for GCP, HCP Terraform automatically sets the following environment variables in your module test runs:
+
+| Variable | Description | Example Value |
+|----------|-------------|---------------|
+| `TFC_GCP_PROVIDER_AUTH` | Signals the GCP provider to use OIDC authentication | `true` |
+| `TFC_GCP_RUN_SERVICE_ACCOUNT_EMAIL` | The service account email to impersonate | `terraform-module-test-sa@my-project.iam.gserviceaccount.com` |
+| `TFC_GCP_WORKLOAD_PROVIDER_NAME` | The workload identity provider name | `projects/123456789/locations/global/workloadIdentityPools/terraform-module-tests/providers/terraform-cloud` |
+| `TFC_GCP_WORKLOAD_IDENTITY_AUDIENCE` | The audience claim for OIDC tokens | `gcp.workload.identity` |
+| `TFC_OIDC_ISSUER_URL` | The OIDC issuer URL | `https://app.terraform.io` |
+| `TFC_OIDC_AUDIENCE` | The OIDC audience | `gcp.workload.identity` |
+
+The Google Cloud Terraform provider (version 5.11.0 and later) automatically uses these environment variables to authenticate with GCP. You don't need to configure the provider block explicitly.
+
+## Permissions recommendations
+
+The permissions you grant to your service account depend on what your module tests need to do. Follow the principle of least privilege.
+
+### Read-only testing
+
+For modules that only need to validate configurations without creating resources:
+
+```bash
+gcloud projects add-iam-policy-binding PROJECT_ID \
+  --member="serviceAccount:terraform-module-test-sa@PROJECT_ID.iam.gserviceaccount.com" \
+  --role="roles/viewer"
+```
+
+### Resource creation for testing
+
+For modules that create test resources, grant specific roles:
+
+**For Compute Engine resources:**
+```bash
+gcloud projects add-iam-policy-binding PROJECT_ID \
+  --member="serviceAccount:terraform-module-test-sa@PROJECT_ID.iam.gserviceaccount.com" \
+  --role="roles/compute.instanceAdmin.v1"
+```
+
+**For Cloud Storage:**
+```bash
+gcloud projects add-iam-policy-binding PROJECT_ID \
+  --member="serviceAccount:terraform-module-test-sa@PROJECT_ID.iam.gserviceaccount.com" \
+  --role="roles/storage.admin"
+```
+
+**For multiple services:**
+Consider creating a custom role with only the necessary permissions:
+
+```bash
+gcloud iam roles create moduleTestRole --project=PROJECT_ID \
+  --title="Module Test Role" \
+  --description="Custom role for module testing" \
+  --permissions="compute.instances.create,compute.instances.delete,storage.buckets.create,storage.buckets.delete"
+
+gcloud projects add-iam-policy-binding PROJECT_ID \
+  --member="serviceAccount:terraform-module-test-sa@PROJECT_ID.iam.gserviceaccount.com" \
+  --role="projects/PROJECT_ID/roles/moduleTestRole"
+```
+
+-> **Tip**: Use resource labels like `testing: true` or `managed-by: terraform-test` to identify and manage test resources. You can then use IAM conditions to restrict the service account to only resources with those labels.
+
+## Verify the configuration
+
+After configuring both GCP and HCP Terraform, verify the setup by running a test:
+
+1. Navigate to your module in HCP Terraform
+2. Go to the **Tests** tab
+3. Click **Start Test Run** or trigger a test through your VCS
+4. Monitor the test run logs for successful authentication
+
+If authentication succeeds, you'll see log output indicating the GCP provider authenticated using the OIDC token. If it fails, check the [troubleshooting](#troubleshooting) section.
+
+## Troubleshooting
+
+### Error: "Unable to impersonate service account"
+
+This error indicates the Workload Identity Pool cannot impersonate the service account. Check:
+
+1. The service account exists in your GCP project
+2. The Workload Identity User role is granted to the correct principal set
+3. The principal set includes the correct project number and pool name
+4. Attribute conditions in the Workload Identity Provider match your token claims
+
+### Error: "Invalid audience"
+
+The token's audience doesn't match the workload identity provider configuration. Verify the following conditions:
+
+1. The workload identity provider's allowed audiences includes `gcp.workload.identity`.
+1. The test configuration specifies the same audience.
+1. Custom audiences match on both sides.
+
+### Error: "Token validation failed"
+
+The workload identity provider rejected the token. Verify the following conditions:
+
+1. The issuer URL exactly matches `app.terraform.io` for HCP Terraform or your Terraform Enterprise hostname.
+1. The issuer URL doesn't include a trailing slash.
+1. Attribute mappings are configured correctly.
+1. Attribute conditions allow the token, for example the subject matches the expected pattern.
+
+### Error: "Permission denied" or "Forbidden"
+
+The service account lacks necessary permissions. Verify the following conditions:
+
+1. The service account has appropriate IAM roles granted.
+1. Organization policies aren't blocking the service account.
+1. Resource-level IAM permissions allow the service account.
+1. The service account is enabled and not disabled.
+
+### Debugging principal filters
+
+To debug which principal would is authenticated, verify that the token's subject claim matches the following format for module tests:
+
+
+### View authentication logs
+
+Enable Cloud Audit Logs for your workload identity pool to see authentication attempts:
+
+1. Navigate to **IAM & Admin > Audit Logs**
+1. Find **IAM Service** and **Workload Identity Pools**
+1. Enable **Admin Read**, **Data Read**, and **Data Write**
+1. Check logs in **Logging > Logs Explorer** with the filter:
+
+   ```
+   resource.type="iam_workload_identity_pool"
+   ```
+
+## Next steps
+
+- Learn about [dynamic credentials for module testing](/terraform/cloud-docs/registry/test/dynamic-credentials)
+- Configure dynamic credentials for other providers:
+  - [AWS configuration](/terraform/cloud-docs/registry/test/dynamic-credentials/aws)
+  - [Azure configuration](/terraform/cloud-docs/registry/test/dynamic-credentials/azure)
+  - [Vault configuration](/terraform/cloud-docs/registry/test/dynamic-credentials/vault)
+- Review [workload identity token specifications](/terraform/cloud-docs/dynamic-provider-credentials/workload-identity-tokens)
+- Set up [policy enforcement](/terraform/cloud-docs/policy-enforcement) to require OIDC for tests
