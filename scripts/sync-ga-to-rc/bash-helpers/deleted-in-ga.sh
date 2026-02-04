@@ -1,7 +1,7 @@
-# 
-# Copyright IBM Corp. 2025
+#
+# Copyright IBM Corp. 2024, 2026
 # SPDX-License-Identifier: BUSL-1.1
-# 
+#
 # ------------------------------------------------------------------------------
 #
 # Get deleted files in GA
@@ -37,7 +37,7 @@ pathPrefix=${docFolder/"${filePath}"/""}                      # Full path to the
 
 cd "${repoRoot}"
 
-git fetch origin 
+git fetch origin
 
 # Loop through the list of deleted files in the git log
 IFS=$'\n'
@@ -61,7 +61,7 @@ for file in $(
   # If the last commit happened after the cutoff, add it to the results
   # We check the last commit time to avoid repeatedly deleting files that
   # the user may have reinstated since the last run
-  
+
   if [[ "${cutoff}" < "${lastCommit}" ]]; then
     shortName=${fullFilePath/"${filePath}"/""}
     jsonString=${jsonTemplate/'<FILENAME>'/"${fullFilePath}"}
