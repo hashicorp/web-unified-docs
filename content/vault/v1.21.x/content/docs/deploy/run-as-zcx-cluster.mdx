@@ -8,13 +8,8 @@ description: >-
 # Run Vault on IBM z/OS Container Extensions (zCX)
 
 Deploy a fully secured 3-node HashiCorp Vault Enterprise cluster on IBM z/OS
-Container Extensions (zCX) with:
+Container Extensions (zCX).
 
-- Three independent zCX instances running Vault on unique IP addressed.
-- A Layer-4 HAProxy load balancer to distribute traffic.
-- End-to-end TLS encryption to ensure secure communication throughout the cluster.
-
-![Vault zCX cluster deployment](/img/run-as-zcx-cluster.png)
 
 ## Before you start
 
@@ -36,325 +31,752 @@ Container Extensions (zCX) with:
   - **`vault.key`** - the private encryption key used by Vault
   - **`ca.pem`** - the certificate authority (CA) used to validate mutual TLS
     between nodes
-## Step 1: Get the Vault Enterprise image from Docker
 
-1. Use the Docker CLI to pull official Vault Enterprise container images on all three zCX nodes:
+- **Optional: install the [Vault CLI](/vault/install/)**. To make Vault CLI
+  calls, you must install Vault locally. If you prefer not to install Vault, you
+  can make API calls from the command line instead.
 
-  ```shell-session
-  $ docker pull hashicorp/vault-enterprise
-  ```
 
-1. Verify image integrity.
+## Step 1: Create your persistent Docker volumes
 
-  ```shell-session
-  $ docker images | grep vault-enterprise
-  ```
+We recommend creating a persistent Docker volume for Vault and HAProxy
+configuration persistence across nodes in the cluster.
 
-## Step 2: Create a persistent volume on each node
-
-Create Docker volumes for configuration and data persistence on each node.
-
-1. Create volume for Vault data storage including an internal storage backend and space for audit logs:
-
-  ```shell-session
-  $ docker volume create vault-data
-  ```
-
-1. Create a separate volume for Vault configuration files:
+1. Create a volume called `vault-config` for Vault configuration files:
 
   ```shell-session
   $ docker volume create vault-config
   ```
 
-1. Verify volume creation for both volumes:
+1. Create a volume called `haproxy-config` for proxy configuration files:
 
   ```shell-session
-  $ docker volume ls | grep vault
+  $ docker volume create haproxy-config
   ```
 
-You now have two explicit volume mount points for Vault:
+1. Verify volume creation for the volumes:
 
-Volume name    | Mount path        | Stores
--------------- | ----------------- | ------
-`vault-data`   | `/vault/data`     | Internal storage snapshots, encrypted storage backend
-`vault-config` | `/vault/config.d` | Vault configuration files
-
-## Step 3: Create your Vault configuration files
-
-Create individual Vault configuration files for the leader node and follower
-nodes with node-specific parameters.
-
-
-1. Create a configuration file, `vault-leader.hcl` for Vault leader nodes. For
-   example, the following configuration file exposes Vault on port 8200 for API
-   and UI traffic and sets `tls_disable` to `0` to force TLS communication
-   within the cluster:
-
-  ```hcl
-  ui = true
-  disable_mlock = true
-
-  # --- Listener Configuration ---
-  listener "tcp" {
-    address              = "0.0.0.0:8200"
-    tls_disable          = 0
-    tls_cert_file        = "/vault/vault.pem"
-    tls_key_file         = "/vault/vault.key"
-    tls_client_ca_file   = "/vault/ca.pem"
-  }
-
-  # --- Raft Storage (Leader Node) ---
-  storage "raft" {
-    path    = "/vault/data"
-    node_id = "<LEADER_NODE_ID>"  # e.g., "node1"
-
-    # No retry_join block needed for leader
-  }
-
-  # --- Cluster Networking ---
-  api_addr     = "https://<LEADER_IP>:8200"
-  cluster_addr = "https://<LEADER_IP>:8201"
+  ```shell-session
+  $ docker volume ls | grep 'config'
   ```
 
 
+## Step 2: Create your local directory structure
 
-1. Create a configuration file, `vault-follower.hcl` for Vault follower nodes.
-   For example, the following configuration file exposes Vault on port 8200 for
-   API and UI traffic, sets `tls_disable` to `0` to force TLS communication
-   within the cluster, and sets the leader information so that followers know
-   how to join the cluster:
+We recommend creating a local directory, `vault-deploy` to keep and version your
+deploy files and the relevant configuration files for your Vault deployment:
+
+```text
+shared-deploy
+vault-deploy
+  |-- local-config
+        |-- certs
+        |-- hcl
+proxy-deploy
+  |-- local-config
+```
+
+The remaining steps assume you store:
+
+- Shared docker compose files under `shared-deploy`.
+- Your Docker compose and `Dockerfile` files for Vault under `vault-deploy`.
+- Your Vault license file, `vault-license.hclic`, under `vault-deploy/local-config`.
+- Your encryption certificates, under `vault-deploy/local-config/certs`.
+- Your Vault node configuration files under `vault-deploy/local-config/hcl`.
+- Your Docker compose and `Dockerfile` files for the load balancer under
+  `proxy-deploy`.
+- Your load balancer configuration files under `proxy-deploy/local-config`
+
+
+## Step 3: Create a Docker environment file for Vault
+
+To simplify maintenance, we recommend creating an single file,
+`vault-deploy/vault.env` to collect and set common Vault environment variables:
+
+```bash
+# Mount path for vault-config
+VAULT_CONFIG="/vault/config"
+
+# Path to license file
+VAULT_LICENSE_PATH="${VAULT_CONFIG}/vault-license.hclic"
+
+# Custom variable to select node-specific config file
+NODE_IDX=""
+```
+
+
+## Step 4: Configure the network environment
+
+We recommend creating a Docker compose file, `shared-deploy/cluster-env.yml`,
+for the cluster environment that defines the persistent volumes  and a shared
+network so you can refer to containers and volumes by name in configuration
+files:
+
+<CodeBlockConfig highlight="2,3,7-9">
+
+```yaml
+networks:
+  <resource_name>:
+    name: <custom_network_name>
+    driver: bridge
+    ipam:
+      config:
+        - subnet: "<custom_subnet>"
+          ip_range: "<IP_range_for_nodes>"
+          gateway: "<gateway_IP>"
+
+volumes:
+  vault-config:
+    external: true
+    name: vault-config
+  haproxy-config:
+    external: true
+    name: haproxy-config
+```
+
+</CodeBlockConfig>
+
+For example:
+
+<CodeBlockConfig highlight="2,3,7-9">
+
+```yaml
+networks:
+  vault_cluster:
+    name: vault-network
+    driver: bridge
+    ipam:
+      config:
+        - subnet: "192.168.42.128/25"
+          ip_range: "192.168.42.128/25"
+          gateway: "192.168.42.129"
+
+volumes:
+  vault-config:
+    external: true
+    name: vault-config
+  haproxy-config:
+    external: true
+    name: haproxy-config
+```
+
+</CodeBlockConfig>
+
+
+## Step 5: Create a basic compose file for Vault
+
+Create a basic Docker compose file, `vault-deploy/vault.compose.yml` that
+defines the base build process for your Vault nodes:
+
+```yaml
+name: <project_name>
+services:
+  <serice_name>:
+    volumes:
+      - vault-config:/vault/config
+    env_file: 
+      - path: <relative_path_to_env_settings>
+        required: true
+    networks:
+      - <cluster_network_name>
+    build:
+
+include:
+  - path: <path_to_cluster_env_file>
+```
+
+For example:
+
+```yaml
+name: zcx
+services:
+  vault-base:
+    volumes:
+      - vault-config:/vault/config
+    env_file: 
+      - path: ./vault.env
+        required: true
+    networks:
+      - vault_cluster
+    build:
+
+include:
+  - path: ../shared-deploy/cluster-env.yml
+```
+
+
+## Step 6: Create a basic `Dockerfile` for Vault
+
+Create a build file, `vault-deploy/vault.Dockerfile`, that copies key files to
+persistent storage, creates directories for Vault data files, sets key directory
+ownership and access permissions for Vault, and uses environment variables to
+start Vault with the relevant, node-specific configuration file.
+
+For example:
+
+```Dockerfile
+# syntax=docker/dockerfile:1
+FROM hashicorp/vault-enterprise:<version_tag>
+
+# Copy the config and license files
+COPY local-config/hcl/vault-*.hcl     /vault/config/hcl/
+COPY local-config/vault-license.hclic /vault/config/vault-license.hclic
+
+# Copy the cert files
+COPY local-config/certs/vault.pem /vault/config/certs/vault.pem
+COPY local-config/certs/vault.key /vault/config/certs/vault.keyt
+COPY local-config/certs/ca.pem    /vault/config/certs/ca.pem
+
+RUN mkdir /vault/data/
+RUN mkdir /vault/plugins/
+RUN mkdir /vault/plugins/tmp
+
+# Make sure Vault owns the Vault-related files
+RUN chown -R vault:vault /vault
+
+# Set ownership and mode for certificate files
+RUN chown root:vault /vault/certs/vault-key.pem
+RUN chmod 0644       /vault/certs/vault-cert.pem
+RUN chmod 0644       /vault/certs/vault-ca.pem
+RUN chmod 0640       /vault/certs/vault-key.pem
+
+CMD vault server -config=${VAULT_CONFIG}/hcl/vault-${NODE_IDX}.hcl
+```
+
+
+## Step 7: Update your Vault compose file
+
+1. Update the base build in your `vault.compose.yml` file to use
+   `vault.Dockerfile`:
+
+    ```yaml
+    name: zcx
+    services:
+      vault-base:
+        volumes:
+          - vault-config:/vault/config
+        env_file: 
+          - path: ./vault.env
+            required: true
+        networks:
+          - vault_cluster
+        build:
+          context: .
+          dockerfile: vault.Dockerfile
+
+    include:
+      - path: ../shared-deploy/cluster-env.yml
+    ```
+
+1. Extend the base build definition to add build instructions for each node in
+   the cluser, set the relevant `VAULT_ADDR` environment variable, and use the
+   `NODE_IDX` environment variable to customize the behavior of
+   `vault.Dockerfile`. For example:
+
+    ```yaml
+    name: zcx
+    services:
+      vault-base:
+
+    ...
+
+      vault-1:
+        extends:
+          service: vault-base
+        container_name: zcx-vault-1
+        hostname: zcx-vault-1
+        environment:
+          VAULT_ADDR: https://zcx-vault-1:8200
+          NODE_IDX:   "1"
+
+      vault-2:
+        extends:
+          service: vault-base
+        container_name: zcx-vault-2
+        hostname: zcx-vault-2
+        environment:
+          VAULT_ADDR: https://zcx-vault-2:8200
+          NODE_IDX:   "2"
+
+      vault-3:
+        extends:
+          service: vault-base
+        container_name: zcx-vault-3
+        hostname: zcx-vault-3
+        environment:
+          VAULT_ADDR: https://zcx-vault-3:8200
+          NODE_IDX:   "3"
+
+      include:
+        - path: ../shared-deploy/cluster-env.yml
+    ```
+
+
+## Step 8: Create your Vault configuration files
+
+Use the following template to create individual configuration files
+(`vault-N.hcl`) for each of the Vault nodes:
+
+<CodeBlockConfig highlight="3,6-8,14-16,20-21,27,30-36">
 
 ```hcl
 ui = true
 disable_mlock = true
+license_path = "<path_to_license_file_on_cluster>"
 
-# --- Listener Configuration ---
+# --- Configure the non-loopback interface ---
+api_addr     = "https://<container_name>:8200"
+cluster_addr = "https://<container_name>:8201"
+cluster_name = "<custom_name_for_cluster>"
+
+# --- Listener configuration ---
 listener "tcp" {
-  address            = "0.0.0.0:8200"
-  tls_disable        = 0
-  tls_cert_file      = "/vault/vault.pem"
-  tls_key_file       = "/vault/vault.key"
-  tls_client_ca_file = "/vault/ca.pem"
+  address         = "[::]:8200"
+  tls_disable        = "false"
+  tls_cert_file      = "<path_to_cert_files>/vault.pem"
+  tls_key_file       = "<path_to_cert_files>/vault.key"
+  tls_client_ca_file = "<path_to_cert_files>/ca.pem"
 }
 
-# --- Raft Storage (Follower Node) ---
-storage "raft" {
-  path    = "/vault/data"
-  node_id = "<FOLLOWER_NODE_ID>"   # e.g., "node2" or "node3"
+# --- Plugin configuration ---
+plugin_directory = "<path_to_plugin_dir_on_container>"
+plugin_tmpdir    = "<path_to_tmp_dir_on_container>"
 
+# --- Integrated storage ---
+storage "raft" {
+
+  path    = "/vault/data"
+  node_id = "<container_name>"
+
+  # Rejoin/listener configuration for cluster node N+1
   retry_join {
-    leader_api_addr      = "https://<LEADER_IP>:8200"
-    leader_ca_cert_file  = "/vault/ca.pem"
+    leader_api_addr    = "https://<alt_container_name_1>:8200"
+    tls_disable        = "false"
+    tls_cert_file      = "<path_to_cert_files>/vault.pem"
+    tls_key_file       = "<path_to_cert_files>/vault.key"
+    tls_client_ca_file = "<path_to_cert_files>/ca.pem"
+  }
+
+  # Rejoin/listener configuration for cluster node N+2
+  retry_join {
+    leader_api_addr    = "https://<alt_container_name_2>:8200"
+    tls_disable        = "false"
+    tls_cert_file      = "<path_to_cert_files>/vault.pem"
+    tls_key_file       = "<path_to_cert_files>/vault.key"
+    tls_client_ca_file = "<path_to_cert_files>/ca.pem"
   }
 }
-
-# --- Cluster Networking ---
-api_addr     = "https://<FOLLOWER_IP>:8200"
-cluster_addr = "https://<FOLLOWER_IP>:8201"
 ```
 
-## Step 4: Push the configuration files and certificates
+</CodeBlockConfig>
 
-1. Use the Docker CLI to access the `vault-config` volume:
+You must set `tls_disable` to `false` to force TLS communication within the
+cluster. Additionally, we recommend setting the UI, license path, and plugin
+directory information. Even if you currently do not intend to register custom or
+enterprise plugins, we recommend deciding on a plugin location at setup because
+you must restart the cluster to update the plugin information later.
 
-  ```shell-session
-  $ docker run --rm -it -v vault-config:/vault alpine sh
-  ```
+For example:
 
-1. Add the leader configuration files to the volume:
-  
-  ```shell-session
-  $ TBD
-  ```
+```hcl
+ui = true
+disable_mlock = true
+license_path = "/vault/config/license.hclic"
 
-1. Add the follower configuration files to the volume:
-  
-  ```shell-session
-  $ TBD
-  ```
+# --- Configure the non-loopback interface ---
+api_addr     = "https://zcx-vault-1:8200"
+cluster_addr = "https://zcx-vault-1:8201"
+cluster_name = "zcx-vault"
 
-1. Use the Docker CLI to access the `vault-data` volume:
+# --- Plugin configuration ---
+plugin_directory = "/vault/plugins/"
+plugin_tmpdir    = "/vault/plugins/tmp"
 
-  ```shell-session
-  $ docker run --rm -it -v vault-data:/vault alpine sh
-  ```
+# --- Listener configuration ---
+listener "tcp" {
+  address         = "[::]:8200"
+  tls_disable        = "false"
+  tls_cert_file      = "/vault/config/certs/vault.pem"
+  tls_key_file       = "/vault/config/certs/vault.key"
+  tls_client_ca_file = "/vault/config/certs/ca.pem"
+}
 
-1. 2. Add the certificate files to the volume:  
-  ```shell-session
-  $ TBD
-  ```
-## Step 5: Deploy the Vault container
+# --- Integrated storage ---
+storage "raft" {
 
-Deploy the Vault container on each zCX node.
+  path    = "/vault/data"
+  node_id = "zcx-vault-1"
 
-1. Set and export the Vault license environment variable, `VAULT_LICENSE` to
-   your Enterprise license token.
+  # Rejoin/listener configuration for cluster node N+1
+  retry_join {
+    leader_api_addr = "https://zcx-vault-2:8200"
+    tls_disable        = "false"
+    tls_cert_file      = "/vault/config/certs/vault.pem"
+    tls_key_file       = "/vault/config/certs/vault.key"
+    tls_client_ca_file = "/vault/config/certs/ca.pem"
+  }
 
-  ```shell-session
-  $ export VAULT_LICENSE="02MV4UU43BK5HGYYTOJZWFQMTMNNEWU33JJVVGC..." 
-  ```
+  # Rejoin/listener configuration for cluster node N+2
+  retry_join {
+    leader_api_addr = "https://zcx-vault-3:8200"
+    tls_disable        = "false"
+    tls_cert_file      = "/vault/config/certs/vault.pem"
+    tls_key_file       = "/vault/config/certs/vault.key"
+    tls_client_ca_file = "/vault/config/certs/ca.pem"
+  }
+}
+```
 
-1. Deploying the Vault Enterprise container on zCX.
 
-  ```shell-session
-  $ docker run -d \
-      --name vault-zcx \
-      --cap-add IPC_LOCK \
-      -p 8200:8200 \
-      -p 8201:8201 \
-      -v vault-config:/vault/config.d \
-      -v vault-data:/vault/data \
-      -e VAULT_LICENSE="$VAULT_LICENSE" \
-      hashicorp/vault-enterprise:1.19.12-ent \
-      server -config=/vault/config.d/
-  ```
+## Step 9: Start the Vault cluster
 
-1. Check the deployment by verifying the container status:
+Before bringing up the entire cluster, you must bring up a single node to
+initialize Vault, generate a root token, and create your unseal keys. Then you
+can bring up and unseal the remaining nodes.
 
-  ```shell-session
-  $ docker ps | grep vault-zcx
-  ```
+1. Start one of the Vault services. For example, to start `vault-1`:
+   
+    ```shell-session
+    $ docker compose \
+      -f vault-deploy/vault.compose.yml up vault-1 --build --detach
+    ```
 
- 1. Check the container log. 
+1. Use the Docker CLI to run `vault operator init` against the container and
+   save the initialization details to `vault_init.json` in a secure location.
+   For example, to initialize Vault with the `vault-1` container, `zcx-vault-1`:
 
-  ```shell-session 
-  $ docker logs vault-zcx
-  ```
+    ```shell-session
+    $ docker exec -it zcx-vault-1 \
+      vault operator init -format=json > /secure/location/vault-init.json
+    ```
 
-## Step 6: Initialize and unseal the leader node
+1. Use the initialization details to run `vault operator unseal` against the
+   container with the generated unseal keys. For example, to unseal the Vault
+   instance running in the `zcx-vault-1` container:
 
-<Note>
+    ```shell-session
+    $ for token in $(
+        cat /secure/location/vault-init.json | \
+        jq -r '.unseal_keys_b64[0:3]         | join(" ")'
+      ) ; do
+        docker exec -it zcx-vault-1 vault operator unseal $token
+      done
+    ```
 
-Perform the initialization only on the leader node.
-
-</Note>
-
-1. Use Docker to call the Vault CLI so you can initialize the leader node and
-   save the unseal keys to a JSON file, `vault-init.json`:
-
-  ```shell-session
-  $ docker exec -it vault-zcx vault operator init \
-    -format=json > /secure/location/vault-init.json
-  ```
-
-  By default, `vault operator init` generates five unseal keys and configures
-  Vault to require three keys as the unseal threshold.
-
-1. Extract unseal keys and root token.
-
-  ```shell-session
-  $ cat /secure/location/vault-init.json
-  ```
-
-1. Unseal Vault on all nodes. 
-
-  Vault requires a certain threshold of shares to reconstruct the unseal key. Unseal Vault with 3 different unseal keys (repeat on each node).
-
-  ```shell-session
-  $ docker exec -it vault-zcx vault operator unseal <UNSEAL_KEY_1>
-  $ docker exec -it vault-zcx vault operator unseal <UNSEAL_KEY_2>
-  $ docker exec -it vault-zcx vault operator unseal <UNSEAL_KEY_3>
-  ```
-
-1. Remember to unseal with same key that you got from leader. Check the seal status.
+1. Check the seal status on the container. For example, to check the Vault
+   status for the `zcx-vault-1` container:
 
   ```shell-session
-  $ vault status
-  ``` 
+  $ docker exec -it zcx-vault-1 vault status
 
-## Step 7: Configure HAProxy load balancer 
+  ---                     -----
+  Seal Type               shamir
+  Initialized             true
+  Sealed                  false
+  Total Shares            5
+  Threshold               3
+  Version                 1.21.2+ent
+  Build Date              2026-01-06T16:58:57Z
+  Storage Type            raft
+  Cluster Name            zcx-vault
+  Cluster ID              520515c4-887f-4ace-b267-8625cfd5fb43
+  Removed From Cluster    false
+  HA Enabled              true
+  HA Cluster              https://zcx-vault-1:8201
+  HA Mode                 active
+  Active Since            2026-02-04T02:51:25.540535695Z
+  Raft Committed Index    9945
+  Raft Applied Index      9945
+  Last WAL                3819
+  ```
 
-In a Vault cluster, the load balancer plays a critical role in directing traffic to the active leader
-while maintaining full security. This example uses an HAProxy Layer-4 (TCP) load balancer,
-but you can use other load balancers as well depending on your environment and requirements.
+1. Repeat the `docker compose` and unseal steps for the remaining Vault nodes.
 
-- End-to-end TLS encryption: L4 simply forwards TCP connections, so Vault’s TLS traffic remains fully encrypted without terminating SSL at the load balancer.
+   For example, to build `vault-2` run:
 
-- Simpler configuration: No need to manage certificates on HAProxy or re-encrypt traffic.
+    ```shell-session
+    $ docker compose \
+      -f vault-deploy/vault.compose.yml up vault-2 --build --detach
+    ```
 
-- Leader-aware routing: Vault handles leader redirects natively, so the load balancer doesn’t need to interpret HTTP or Vault protocols.
+    And to unseal `vault-2`, run:
 
-- Better performance: Forwarding raw TCP reduces overhead, giving lower latency and higher throughput.
+    ```shell-session
+    $ for token in $(
+        cat /secure/location/vault-init.json | \
+        jq -r '.unseal_keys_b64[0:3]         | join(" ")'
+      ) ; do
+        docker exec -it zcx-vault-2 vault operator unseal $token
+      done
+    ```
 
-### Configuration
+
+## Step 10: Create a compose file for HAProxy
+
+Create a compose file, `proxy-deploy/proxy.compose.yml` for your load balancer
+that uses the same network configuration as the Vault cluster. For example:
+
+```yaml
+name: haproxy
+services:
+  vault-lb:
+    image: ibmz-hc-registry.ngrok.dev/haproxy:3.2
+    volumes:
+      - haproxy-config:/usr/local/etc/haproxy
+    networks:
+      - vault_cluster
+    ports:
+      - "8300:8200"
+      - "8404:8404"
+
+include:
+  - path: ../shared-deploy/cluster-env.yml
+```
+
+
+## Step 11: Create a configuration file for HAProxy
+
+Use the container names for your Vault nodes to create a basic HAProxy
+configuration file, `proxy-deploy/local-config/haproxy.cfg`. For example:
+
+<CodeBlockConfig highlight="32-34">
 
 ```plaintext
 global
-    maxconn 4096
-    log stdout format raw local0
+  maxconn 4096
+  log stdout format raw local0
 
 defaults
-    mode tcp                     # TCP mode for Layer-4 forwarding
-    timeout connect 5s
-    timeout client 1m
-    timeout server 1m
-    log global
+  mode tcp                     # TCP mode for Layer-4 forwarding
+  timeout connect 5s
+  timeout client 1m
+  timeout server 1m
+  log global
 
 # --- Stats Page (HTTPS) ---
 frontend stats
-    bind *:8404 ssl crt /usr/local/etc/haproxy/haproxy.pem
-    mode http
-    stats enable
-    stats uri /stats
-    stats refresh 10s
-    stats admin if TRUE
+  bind *:8404 ssl crt /usr/local/etc/haproxy/haproxy.pem
+  mode http
+  stats enable
+  stats uri /stats
+  stats refresh 10s
+  stats admin if TRUE
 
 # --- Vault API Frontend (TLS Passthrough) ---
 frontend vault_api
-    bind *:8200                 # Listen on Vault API port
-    mode tcp                    # Layer-4 forwarding to preserve TLS
-    default_backend vault_nodes
+  bind *:8200                 # Listen on Vault API port
+  mode tcp                    # Layer-4 forwarding to preserve TLS
+  default_backend vault_nodes
 
 # --- Vault Nodes Backend ---
 backend vault_nodes
-    mode tcp
-    balance roundrobin          # Simple load distribution among nodes
-    option tcp-check            # Health check at TCP level
-    server node1 <NODE1_IP>:8200 check
-    server node2 <NODE2_IP>:8200 check
-    server node3 <NODE3_IP>:8200 check
+mode tcp
+balance roundrobin          # Simple load distribution among nodes
+option tcp-check            # Health check at TCP level
+server node1 zcx-vault-2:8200 check
+server node2 zcx-vault-2:8200 check
+server node3 zcx-vault-2:8200 check
 ```
 
-1. Copy config to volume.
+</CodeBlockConfig>
+
+
+## Step 12: Deploy the load balancer 
+
+1. Use the Docker CLI to copy your HAProxy config to the persistent volume. For
+   example:
 
   ```shell-session
-  $ docker cp haproxy.cfg haproxy-tmp:/usr/local/etc/haproxy/haproxy.cfg
+  $ docker cp                             \
+    proxy-deploy/local-config/haproxy.cfg \
+    haproxy-tmp:/usr/local/etc/haproxy/haproxy.cfg
   ```
 
-1. Deploy HAProxy load-balancer.
+1. Use Docker compose to deploy the HAProxy load-balancer. For example:
 
   ```shell-session
-  $ docker run -d \
-    --name vault-lb \
-    -p 8300:8200 \
-    -p 8404:8404 \
-    -v haproxy-config:/usr/local/etc/haproxy \
-    ibmz-hc-registry.ngrok.dev/haproxy:3.2
-  ```
+  $ docker compose \
+    -f proxy-deploy/proxy.compose.yml up vault-lb --build --detach
 
-## Verify cluster
 
-1. List all the leader and follower nodes.
+## Step 13: Verify the deployment
 
-  ```shell-session
-  $ vault operator raft list-peers
-  ```
+1. Get the IP address of the `vault-1` container:
 
-1. Test container health on browser using HAProxy endpoint.
+    ```shell-session
+    $ docker inspect -f \
+      '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' zcx-vault-1
+    ```
 
-  ```plaintext
-  https://<LOAD_BALANCER_IP>:<PORT>/stats
-  ```
+1. Set your local `VAULT_ADDR` environment variable to the `vault-1` container
+   IP:
 
-1. Test secure Vault connection and view Raft configuration.
+    ```shell-session
+    $ export VAULT_ADDR=https://<vault-1-IP>:8200
+    ```
 
-  ```shell-session
-  $ curl \
-    --cacert <CA_CERT_FILE> \
-    --header "X-Vault-Token: <VAULT_TOKEN>" \
-    https://<LOAD_BALANCER_IP>:<PORT>/v1/sys/storage/raft/configuration \
-    | jq .
-  ```
+1. Set your local `VAULT_TOKEN` environment variable to the `root_token` value
+   returned in your initialization output file (`vault-init.json`):
+
+    ```shell-session
+    $ export VAULT_TOKEN=hvs.000000000000000000000000
+    ```
+
+1. Call Vault to list the current nodes:
+
+    <Tabs>
+
+    <Tab heading="CLI" group="cli">
+
+    ```shell-session
+    $ vault operator raft list-peers
+
+    Node           Address             State       Voter
+    ----           -------             -----       -----
+    zcx-vault-1    zcx-vault-1:8201    leader      true
+    zcx-vault-2    zcx-vault-2:8201    follower    true
+    zcx-vault-3    zcx-vault-3:8201    follower    true
+    ```
+
+    </Tab>
+
+    <Tab heading="API" group="api">
+
+    ```shell-session
+    $ curl                                     \
+      --request GET                            \
+      --header "X-Vault-Token: ${VAULT_TOKEN}" \
+      ${VAULT_ADDR}/v1/sys/storage/raft/configuration  | jq .data.config.servers
+
+      [
+        {
+          "node_id": "zcx-vault-1",
+          "address": "zcx-vault-1:8201",
+          "leader": true,
+          "protocol_version": "3",
+          "voter": true
+        },
+        {
+          "node_id": "zcx-vault-2",
+          "address": "zcx-vault-2:8201",
+          "leader": false,
+          "protocol_version": "3",
+          "voter": true
+        },
+        {
+          "node_id": "zcx-vault-3",
+          "address": "zcx-vault-3:8201",
+          "leader": false,
+          "protocol_version": "3",
+          "voter": true
+        }
+      ]
+    ```
+
+    </Tab>
+
+    </Tabs>
+
+1. Open `https://<proxy_url>:<proxy_port>/stats` in the browser to test the
+   HAProxy container health.
+
+1. Set your local `VAULT_PROXY_ADDR` environment variable to the URL of your
+   load balancer:
+
+    ```shell-session
+    $ export VAULT_PROXY_ADDR=https://<proxy_url>:<proxy_port>
+    ```
+
+1. Unset the `VAULT_ADDR` environment variable in favor of the proxy URL:
+
+    ```shell-session
+    $ unset VAULT_ADDR
+    ```
+
+1. Call Vault to check the current storage configuration and confirm the proxy
+   routes traffic correctly:
+
+    <Tabs>
+
+    <Tab heading="CLI" group="cli">
+
+    ```shell-session
+    $ vault read -format json sys/storage/raft/configuration | jq .data
+
+    {
+      "config": {
+        "index": 0,
+        "servers": [
+          {
+            "address": "zcx-vault-1:8201",
+            "leader": true,
+            "node_id": "zcx-vault-1",
+            "protocol_version": "3",
+            "voter": true
+          },
+          {
+            "address": "zcx-vault-2:8201",
+            "leader": false,
+            "node_id": "zcx-vault-2",
+            "protocol_version": "3",
+            "voter": true
+          },
+          {
+            "address": "zcx-vault-3:8201",
+            "leader": false,
+            "node_id": "zcx-vault-3",
+            "protocol_version": "3",
+            "voter": true
+          }
+        ]
+      }
+    }
+    ```
+
+    </Tab>
+
+    <Tab heading="API" group="api">
+
+    ```shell-session
+    $ curl                                     \
+      --request GET                            \
+      --header "X-Vault-Token: ${VAULT_TOKEN}" \
+      ${VAULT_PROXY_ADDR}/v1/sys/storage/raft/configuration  | jq .data
+
+      {
+        "config": {
+          "servers": [
+            {
+              "node_id": "zcx-vault-1",
+              "address": "zcx-vault-1:8201",
+              "leader": true,
+              "protocol_version": "3",
+              "voter": true
+            },
+            {
+              "node_id": "zcx-vault-2",
+              "address": "zcx-vault-2:8201",
+              "leader": false,
+              "protocol_version": "3",
+              "voter": true
+            },
+            {
+              "node_id": "zcx-vault-3",
+              "address": "zcx-vault-3:8201",
+              "leader": false,
+              "protocol_version": "3",
+              "voter": true
+            }
+          ],
+          "index": 0
+        }
+      }
+    ```
+
+    </Tab>
+
+    </Tabs>
+
 
 ## Additional resources
 
