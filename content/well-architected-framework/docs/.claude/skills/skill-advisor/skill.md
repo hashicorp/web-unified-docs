@@ -2,7 +2,6 @@
 name: skill-advisor
 description: Context-aware skill recommendation system that suggests the right skill for detected issues and provides usage guidance
 argument-hint: <file-paths> [--auto-suggest] [--explain]
-disable-model-invocation: true
 ---
 
 # Skill Advisor - Context-Aware Skill Recommendations
