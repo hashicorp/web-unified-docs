@@ -2,7 +2,6 @@
 name: full-styleguide-check
 description: Comprehensive validation against the complete HashiCorp style guide. Deep analysis for publication-ready documentation.
 argument-hint: <file-paths> [--fix]
-disable-model-invocation: true
 ---
 
 # Full HashiCorp Style Guide Check
