@@ -53,7 +53,7 @@ Validates against **all HashiCorp style guide rules** including:
 7. **Linear Content Flow** - No "above"/"below"
 8. **Avoid Unnecessary Words** - "in order to" → "to"
 9. **Simplest Words** - "lets" not "enables/allows"
-10. **No Foreign/Jargon** - Avoid "via", "etc."
+10. **No Latin Phrases/Foreign Words** - Avoid "ad-hoc", "via", "etc.", "e.g.", "i.e."
 11. **No Adjacent Elements** - Space out similar elements
 12. **Content Variety** - Mix prose and non-prose
 
@@ -75,6 +75,34 @@ Validates against **all HashiCorp style guide rules** including:
 - **UI Components** - Capitalization, interactions, language
 - **Codeblocks** - Syntax, comments, indentation, placeholders
 - **Numbers/Dates** - Formatting, words vs numerals, dates/times
+
+### Latin Phrases Detection (CRITICAL)
+
+The full style guide check includes comprehensive detection of Latin phrases that should be avoided:
+
+**Common Latin phrases flagged:**
+- `ad-hoc` → `improvised`, `unplanned`, `informal`, `spontaneous`
+- `via` → `using`, `through`, `with`
+- `etc.` → `and other {entities}`
+- `e.g.` → `for example`, `such as`
+- `i.e.` → `specifically`, `that is`
+- `ergo` → `therefore`, `as a result`
+- `vice versa` → `conversely`, `the reverse`
+- `per se` → `by itself`, `inherently`
+- `status quo` → `current state`, `existing situation`
+- `de facto` → `in practice`, `actual`
+- `quid pro quo` → `exchange`, `trade-off`
+- `bona fide` → `genuine`, `authentic`
+- `carte blanche` → `full permission`, `complete authority`
+- `in lieu of` → `instead of`, `in place of`
+- `pro forma` → `as a formality`, `routine`
+- `a priori` → `beforehand`, `in advance`
+- `post hoc` → `after the fact`, `retrospective`
+- `sine qua non` → `essential`, `required`
+- `verbatim` → `word for word`, `exactly`
+- `modus operandi` → `method`, `approach`, `way of working`
+
+These phrases are automatically flagged with context-appropriate alternatives.
 
 ## Performance
 
@@ -104,7 +132,41 @@ Manual Review: 4
 📄 docs/example.mdx
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-[Detailed issue reports with examples and explanations...]
+❌ LATIN PHRASES [CRITICAL] [AUTO-FIX]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Line 22: Latin phrase "ad-hoc" detected
+  Context: "System administrators make ad-hoc modifications..."
+
+  ❌ Current: "ad-hoc modifications"
+  ✅ Recommended: "improvised modifications"
+
+  Alternatives:
+  • "unplanned modifications"
+  • "informal modifications"
+  • "spontaneous modifications"
+
+  Rationale: Latin phrases reduce clarity for global audiences.
+             Use simple, concrete English words instead.
+
+Line 84: Latin abbreviation "e.g." detected
+  Context: "Configure resources, e.g., databases and networks"
+
+  ❌ Current: "e.g., databases"
+  ✅ Recommended: "such as databases"
+
+  Alternative: "for example, databases"
+
+  [AUTO-FIX AVAILABLE]
+
+❌ WORD CHOICE [CRITICAL] [AUTO-FIX]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Line 45: Use "lets" instead of "enables"
+  ❌ "Terraform enables you to manage infrastructure"
+  ✅ "Terraform lets you manage infrastructure"
+
+[Additional detailed issue reports with examples and explanations...]
 
 SUMMARY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
