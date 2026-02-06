@@ -7,6 +7,18 @@ description: Learn about common anti-patterns in CI/CD secrets management.
 
 Authentication and secrets management are critical components of any CI/CD system, but organizations inadvertently introduce security risks by adopting anti-patterns around authentication and secrets. These pitfalls can lead to compromised credentials, exposed data, or hijacking of the CI/CD pipeline itself, undermining the integrity of the entire software delivery process.
 
+## Why
+
+Organizations face significant risks when they fail to properly manage secrets in CI/CD pipelines:
+
+**Security breaches from exposed credentials:** Hard-coded secrets in source code repositories can be discovered by attackers through public GitHub searches, automated scanners, or accidental exposure, leading to unauthorized access to production systems and data breaches.
+
+**Compliance violations and audit failures:** Regulatory frameworks like SOC 2, PCI DSS, and HIPAA require demonstrable secrets management controls including automatic rotation, audit logging, and least-privilege access—all of which are impossible to achieve with anti-patterns like hard-coded credentials.
+
+**Operational overhead from manual secret management:** Without centralized secrets management, teams spend significant time manually updating secrets across multiple CI/CD systems, repositories, and environments, leading to human error and outdated credentials remaining in production.
+
+**Extended attack surface from long-lived credentials:** Static secrets that never expire provide attackers with unlimited time to discover and exploit them, whereas short-lived dynamic credentials automatically expire and limit the window of vulnerability.
+
 Vault can help you avoid these common authentication and secrets management anti-patterns in your CI/CD pipelines.
 
 ## Hard-coded secrets
@@ -26,14 +38,61 @@ Hard-coded secrets creates several security risks:
 - **Difficult rotation**: Hard to change secrets across multiple locations
 - **Audit challenges**: Hard to track secret usage
 
+### Anti-pattern example
+
+```yaml
+# ❌ ANTI-PATTERN: Hard-coded credentials in CI/CD configuration
+name: Deploy Application
+on: [push]
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to production
+        run: |
+          export AWS_ACCESS_KEY_ID="AKIAIOSFODNN7EXAMPLE"
+          export AWS_SECRET_ACCESS_KEY="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+          export DB_PASSWORD="MySecretPassword123!"
+          ./deploy.sh
+```
+
+This approach exposes credentials in version control, making them accessible to anyone with repository access and creating a permanent record of the secrets in Git history.
+
+### Recommended approach
+
+```yaml
+# ✅ RECOMMENDED: Retrieve secrets from Vault dynamically
+name: Deploy Application
+on: [push]
+permissions:
+  id-token: write
+  contents: read
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Import secrets from Vault
+        uses: hashicorp/vault-action@v2
+        with:
+          url: https://vault.example.com:8200
+          method: jwt
+          role: github-actions
+          secrets: |
+            aws/creds/deploy-role access_key | AWS_ACCESS_KEY_ID ;
+            aws/creds/deploy-role secret_key | AWS_SECRET_ACCESS_KEY ;
+            secret/data/database password | DB_PASSWORD
+
+      - name: Deploy to production
+        run: ./deploy.sh
+```
+
+This approach retrieves secrets from Vault at runtime using OIDC authentication, eliminating hard-coded credentials and enabling automatic secret rotation.
+
 HashiCorp offers platform-independent solutions to address hardcoded secrets in CI/CD pipelines. HashiCorp Vault provides a centralized secrets management system that works across different platforms and environments, enabling secure storage and retrieval of sensitive data without embedding credentials directly in code.
 
 HCP Vault Radar serves as an automated detection tool that scans codebases to identify unmanaged secrets, helping security teams proactively discover and remediate hardcoded credentials before they become security vulnerabilities.
-
-## HashiCorp resources
-
-- [HashiCorp Vault](https://developer.hashicorp.com/vault)
-- **Detection tool**: [HCP Vault Radar](https://developer.hashicorp.com/hcp/docs/vault-radar) - automates detection of unmanaged secrets in code
 
 ## Hard-coded authentication
 
@@ -52,11 +111,37 @@ Hard-coded authentication create several security risks:
 - **Privilege escalation**: Stolen tokens may have excessive permissions
 - **No audit trail**: Difficult to track who used what credentials
 
+### Anti-pattern example
+
+```bash
+# ❌ ANTI-PATTERN: Hard-coded Vault token in environment variable
+export VAULT_ADDR="https://vault.example.com:8200"
+export VAULT_TOKEN="s.AbCdEfGhIjKlMnOpQrStUvWx"  # Long-lived root token
+
+# Retrieve secrets using hard-coded token
+vault kv get secret/database/credentials
+```
+
+This approach stores a long-lived Vault token in CI/CD environment variables or configuration files, creating a high-value target for attackers and making token rotation difficult.
+
+### Recommended approach
+
+```bash
+# ✅ RECOMMENDED: Use OIDC/JWT authentication method
+export VAULT_ADDR="https://vault.example.com:8200"
+
+# Authenticate using CI/CD platform's OIDC token
+export VAULT_TOKEN=$(vault write -field=token auth/jwt/login \
+  role=ci-cd-role \
+  jwt=$CI_JOB_JWT_V2)
+
+# Retrieve secrets using short-lived token
+vault kv get secret/database/credentials
+```
+
+This approach uses the CI/CD platform's native OIDC token to authenticate to Vault, generating a short-lived Vault token that automatically expires after use.
+
 Users or processes should instead use a secure authentication method, such as [JWT/OIDC](/vault/docs/auth/jwt), or an external authentication method for dynamic authentication with a lifecycle policy.
-
-## HashiCorp resources
-
-- Read documentation on [lease, renew, revoke](/vault/docs/concepts/lease).
 
 ## Lack of revocation or rotation
 
@@ -76,11 +161,80 @@ Lack of revocation or rotation creates several security risks:
 - **Compliance violations**: Many standards require regular rotation
 - **Increased attack surface**: More time for attackers to exploit credentials
 
-You should establish a time-to-live policy for credentials and configure your CI/CD or external secrets manager to enforce it. For example, Vault can automatically revoke credentials when their time-to-live (TTL) expires. You can also rotate [dynamic credentials](#dynamic-secrets) and certificates generated by Vault secrets engines.
+### Anti-pattern example
+
+```yaml
+# ❌ ANTI-PATTERN: Long-lived static credentials that never rotate
+AWS_ACCESS_KEY_ID: AKIAIOSFODNN7EXAMPLE
+AWS_SECRET_ACCESS_KEY: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+# These credentials were created 2 years ago and have never been rotated
+```
+
+Static credentials with no expiration or rotation policy remain valid indefinitely, providing attackers unlimited time to discover and exploit them.
+
+### Recommended approach
+
+```yaml
+# ✅ RECOMMENDED: Use dynamic credentials with automatic expiration
+steps:
+  - name: Get temporary AWS credentials from Vault
+    run: |
+      # Authenticate to Vault
+      export VAULT_TOKEN=$(vault write -field=token auth/jwt/login \
+        role=ci-cd-role \
+        jwt=$CI_JOB_JWT_V2)
+
+      # Request dynamic AWS credentials (valid for 1 hour)
+      AWS_CREDS=$(vault read -format=json aws/creds/deploy-role)
+      export AWS_ACCESS_KEY_ID=$(echo $AWS_CREDS | jq -r '.data.access_key')
+      export AWS_SECRET_ACCESS_KEY=$(echo $AWS_CREDS | jq -r '.data.secret_key')
+
+      # Credentials automatically expire after TTL
+      # Vault revokes credentials even if job fails
+```
+
+Dynamic credentials are generated on-demand with a short TTL (time-to-live) and automatically expire, limiting the window of opportunity for attackers.
+
+You should establish a time-to-live policy for credentials and configure your CI/CD or external secrets manager to enforce it. For example, Vault can automatically revoke credentials when their time-to-live (TTL) expires. You can also rotate dynamic credentials and certificates generated by Vault secrets engines.
+
+## Detect anti-patterns in your pipelines
+
+Identify and remediate these anti-patterns in your CI/CD pipelines:
+
+1. **Scan repositories for secrets:** Use HCP Vault Radar or tools like git-secrets, truffleHog, or GitHub secret scanning to detect hard-coded credentials in version control history.
+
+2. **Audit environment variables:** Review CI/CD platform environment variables and secrets stores to identify long-lived static credentials that should be replaced with dynamic secrets from Vault.
+
+3. **Check credential age:** Identify credentials that have not been rotated in over 90 days and prioritize them for migration to Vault's dynamic secrets engines or automatic rotation policies.
+
+4. **Review Vault token usage:** Examine Vault audit logs to identify long-lived tokens or root tokens used in CI/CD pipelines that should be replaced with auth methods like JWT/OIDC or AppRole.
+
+5. **Validate least-privilege access:** Ensure each CI/CD pipeline has the minimum necessary permissions by reviewing Vault policies and confirming that pipelines cannot access secrets outside their scope.
 
 ## HashiCorp resources
 
-- Read documentation on [lease, renew, revoke](/vault/docs/concepts/lease).
+CI/CD secrets overview:
+
+- [CI/CD secrets overview](/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets)
+- [Dynamic and static secrets in CI/CD](/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets/dynamic-and-static-secrets)
+
+Vault secrets management:
+
+- Read documentation on [lease, renew, and revoke](/vault/docs/concepts/lease) to understand secret lifecycle management
+- Understand [dynamic and static secrets](/vault/tutorials/get-started/understand-static-dynamic-secrets) to choose the right approach
+- Learn about [secrets engines](/vault/docs/secrets) for different credential types
+
+Vault authentication:
+
+- Read the [Vault authentication methods documentation](/vault/docs/auth) for an overview of available auth methods
+- Learn about [JWT/OIDC auth method](/vault/docs/auth/jwt) for token-based pipeline authentication
+- Learn about the [AppRole auth method](/vault/docs/auth/approle) for machine-to-machine authentication
+
+Security and compliance:
+
+- Explore [HashiCorp Vault](https://developer.hashicorp.com/vault) for comprehensive secrets management
+- Use [HCP Vault Radar](https://developer.hashicorp.com/hcp/docs/vault-radar) to automate detection of unmanaged secrets in code
+- Review [five best practices for secrets management](https://www.hashicorp.com/resources/5-best-practices-for-secrets-management) for security guidance
 
 ## Next steps
 
