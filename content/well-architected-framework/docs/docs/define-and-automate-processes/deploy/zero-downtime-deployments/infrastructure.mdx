@@ -1,43 +1,158 @@
 ---
 page_title: Deploy blue/green infrastructure for zero-downtime
-description: Learn how to implement blue/green deployment strategies for zero-downtime infrastructure changes.
+description: Implement blue/green infrastructure deployments with Terraform modules for zero downtime. Switch traffic between environments with load balancers.
 ---
 
 # Deploy blue/green infrastructure
 
-Infrastructure changes like server or network policy updates can cause costly downtime if not managed correctly. Blue/green deployment strategies lower this risk by maintaining two identical production environments, allowing you to test changes before switching traffic. This guide explains what blue/green infrastructure is and how Terraform can help you implement it.
+Infrastructure updates cause downtime, disrupt services, and create risk when deployed directly to production. Traditional deployment strategies require taking systems offline for upgrades, causing revenue loss and poor user experience. Deploy infrastructure using blue/green strategies to achieve zero downtime during updates, enable safe testing in production-equivalent environments, and provide instant rollback capabilities.
 
-## What is blue/green infrastructure
+Blue/green infrastructure deployments maintain two identical environments, a blue environment that represents your current production environment and a green environment that represents your new environment. Blue/green environments also have a mechanism to route traffic between them. Use Terraform modules to deploy identical infrastructure with different configurations, test changes in the green environment, and switch traffic when ready.
 
-Blue/green deployments require two identical application infrastructure environments, a method for deploying your application to your two environments, and a way to route your traffic between them.
-
-The following diagram shows a basic blue/green deployment. The blue environment is the infrastructure where your current application runs. The green environment is identical, except that you have upgraded it to host the new version of the application.
+The following diagram shows a basic blue/green deployment:
 
 ![Typical blue/green deployment. The green environment runs in parallel with the blue environment. When you are ready to switch to the green environment the load balancer directs traffic to the green environment.](/img/well-architected-framework/blue-green-canary-tests-deployments/blue-green-deployment.png)
 
-You set up the blue and green environments as similar as possible. Infrastructure as code (IaC) lets you describe your environment as code and consistently deploy identical environments.
+Infrastructure as code allows you to describe your environment as code and consistently deploy identical blue and green environments. Deploy your green infrastructure environment only when needed, test it thoroughly, then switch traffic and tear down the blue environment to reduce costs.
 
-IaC makes your operations more cost-effective by allowing you to easily build and remove resources when you do not need them. Using IaC also lets you spin up your green environment whenever you need it. Instead of letting your blue and green environments persist indefinitely or allocating time to build them, you
-deploy your green infrastructure environment when you want to deploy your new software application. Once your green environment is stable, you can tear down your blue environment. 
+## Why deploy blue/green infrastructure
 
-## Using Terraform for blue/green deployments
+Deploying infrastructure with blue/green strategies addresses the following operational challenges:
 
-HashiCorp's Terraform is an infrastructure as code tool that can help you deploy and manage blue/green infrastructure environments. By using Terraform modules, you can consistently deploy identical infrastructure using the same code but in different environments through variables. You can also define feature toggles in your Terraform code to create a blue and green deployment environment simultaneously. You can then test your application in your new green environment, and then, when you are ready, set the toggle in your code to destroy your blue environment.
+**Eliminate downtime during infrastructure updates:** Traditional infrastructure updates require taking systems offline, causing service disruptions and revenue loss. Blue/green deployments maintain two identical environments, allowing you to switch traffic instantly without downtime.
 
-HashiCorp resources:
+**Enable safe testing in production-equivalent environments:** Testing infrastructure changes in staging environments often misses production-specific issues. Blue/green deployments let you test changes in a production environment before switching traffic.
 
-- Read the [use Application Load Balancers for blue-green and canary deployments](/terraform/tutorials/aws/blue-green-canary-tests-deployments) tutorial.
-- [Feature Toggles, Blue-Green Deployments & Canary Tests with Terraform](https://www.hashicorp.com/blog/terraform-feature-toggles-blue-green-deployments-canary-test) blog by Rosemary Wang
+**Provide rollback capabilities:** When infrastructure changes cause issues, traditional deployments require time-consuming rollback procedures. Blue/green deployments allow traffic switching back to the previous environment, reducing mean time to recovery.
 
-External resources:
+**Reduce deployment risk and blast radius:** Deploying infrastructure changes directly to production creates risk of widespread failures. Blue/green deployments isolate changes in the green environment, limiting impact until you verify the deployment works correctly.
 
-- [Blue Green Deployment](https://martinfowler.com/bliki/BlueGreenDeployment.html) blog by Martin Fowler 
-- [Continuous Blue-Green Deployments With Kubernetes](https://semaphoreci.com/blog/continuous-blue-green-deployments-with-kubernetes) blog by Tomas Fernandez
+## Implement blue/green with Terraform modules
+
+Use Terraform modules to deploy identical infrastructure for blue and green environments. Create a reusable module that defines your infrastructure, then instantiate it twice with different environment variables.
+
+The following example shows a Terraform module structure for blue/green infrastructure:
+
+<CodeBlockConfig filename="modules/infrastructure/main.tf">
+
+```hcl
+variable "environment" {
+  description = "Environment identifier (blue or green)"
+  type        = string
+}
+
+resource "aws_instance" "web" {
+  ami           = var.ami_id
+  instance_type = var.instance_type
+
+  tags = {
+    Name        = "web-server-${var.environment}"
+    Environment = var.environment
+  }
+}
+
+resource "aws_lb_target_group" "web" {
+  name     = "web-targets-${var.environment}"
+  port     = 80
+  protocol = "HTTP"
+  vpc_id   = var.vpc_id
+
+  health_check {
+    enabled           = true
+    healthy_threshold = 2
+    path              = "/health"
+  }
+}
+
+output "target_group_arn" {
+  value = aws_lb_target_group.web.arn
+}
+```
+
+</CodeBlockConfig>
+
+<CodeBlockConfig filename="main.tf">
+
+```hcl
+# Instantiate blue and green environments
+module "blue_infrastructure" {
+  source = "./modules/infrastructure"
+
+  environment   = "blue"
+  instance_type = "t3.micro"
+  ami_id        = var.blue_ami_id
+  vpc_id        = aws_vpc.main.id
+}
+
+module "green_infrastructure" {
+  source = "./modules/infrastructure"
+
+  environment   = "green"
+  instance_type = "t3.micro"
+  ami_id        = var.green_ami_id
+  vpc_id        = aws_vpc.main.id
+}
+
+# Switch traffic using variable
+variable "active_environment" {
+  description = "Active environment (blue or green)"
+  type        = string
+  default     = "blue"
+}
+
+resource "aws_lb_listener" "http" {
+  load_balancer_arn = aws_lb.main.arn
+  port              = "80"
+  protocol          = "HTTP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = var.active_environment == "blue" ? module.blue_infrastructure.target_group_arn : module.green_infrastructure.target_group_arn
+  }
+}
+```
+
+</CodeBlockConfig>
+
+The Terraform configuration creates two identical infrastructure environments with different AMI IDs. The load balancer routes traffic based on the `active_environment` variable. To switch from blue to green, update `active_environment = "green"` and run `terraform apply`. The load balancer immediately routes traffic to the green environment, achieving zero-downtime deployment.
+
+To learn how to implement this pattern with AWS Application Load Balancers and target groups, follow the [blue-green and canary deployments tutorial](/terraform/tutorials/aws/blue-green-canary-tests-deployments).
+
+## Deployment workflow
+
+Use the following workflow to deploy infrastructure changes using blue/green:
+
+1. **Deploy green environment:** Run `terraform apply` to create green infrastructure alongside blue
+1. **Test green environment:** Verify health checks pass and infrastructure performs correctly
+1. **Switch traffic:** Update `active_environment = "green"` and apply changes
+1. **Monitor green environment:** Confirm green handles production load successfully
+1. **Destroy blue environment:** Remove blue infrastructure after confirming green stability
+
+This workflow minimizes risk by validating changes before switching traffic and maintaining the ability to instantly rollback by switching the `active_environment` variable.
+
+## HashiCorp resources
+
+- Learn about [zero-downtime deployment strategies](/well-architected-framework/define-and-automate-processes/deploy/zero-downtime-deployments) overview
+- Deploy [applications with zero downtime](/well-architected-framework/define-and-automate-processes/deploy/zero-downtime-deployments/applications)
+- Deploy with [traffic splitting using service mesh](/well-architected-framework/define-and-automate-processes/deploy/zero-downtime-deployments/service-mesh)
+- Implement [atomic deployments](/well-architected-framework/define-and-automate-processes/deploy/atomic-deployments) with Terraform modules
+- Learn how to [package applications](/well-architected-framework/define-and-automate-processes/automate/packaging) for deployment
+- Implement [automated testing](/well-architected-framework/define-and-automate-processes/automate/testing) for infrastructure changes
+- Use [infrastructure as code](/well-architected-framework/define-and-automate-processes/define/as-code/infrastructure) for blue/green environments
+- Implement a [GitOps workflow](/well-architected-framework/define-and-automate-processes/process-automation/gitops) for automated deployments
+- Learn Terraform with the [Terraform tutorials](/terraform/tutorials) and the [Terraform documentation](/terraform/docs)
+- Read [Feature Toggles, Blue-Green Deployments & Canary Tests with Terraform](https://www.hashicorp.com/blog/terraform-feature-toggles-blue-green-deployments-canary-test) - HashiCorp blog by Rosemary Wang
+
+### External resources
+
+- [Blue Green Deployment](https://martinfowler.com/bliki/BlueGreenDeployment.html) - Martin Fowler's definition and patterns
 
 ## Next steps
 
-In this section of [Zero-downtime deployments](/well-architected-framework/define-and-automate-processes/deploy/zero-downtime-deployments), you learned about methods to deploy infrastructure changes with zero-downtime. Zero-downtime deployments is part of the [Define and automate processes pillar](/well-architected-framework/define-and-automate-processes).
+In this section of Zero-downtime deployments, you learned how to deploy infrastructure changes with blue/green strategies using Terraform modules and load balancers. Blue/green infrastructure deployments are part of the [Define and automate processes pillar](/well-architected-framework/define-and-automate-processes).
 
-- [Implement zero-downtime deployments with blue/green, canary, and rolling strategies](/well-architected-framework/define-and-automate-processes/deploy/zero-downtime-deployments)
-- [Deploy applications with zero downtime](/well-architected-framework/define-and-automate-processes/deploy/zero-downtime-deployments/infrastructure)
-- [Deploy applications with traffic splitting for zero-downtime](/well-architected-framework/define-and-automate-processes/deploy/zero-downtime-deployments/service-mesh)
+Refer to the following documents to learn more about deployment strategies:
+
+- Learn [zero-downtime deployments strategies](/well-architected-framework/define-and-automate-processes/deploy/zero-downtime-deployments)
+- Deploy [applications with zero downtime](/well-architected-framework/define-and-automate-processes/deploy/zero-downtime-deployments/applications)
+- Deploy [traffic splitting with service mesh](/well-architected-framework/define-and-automate-processes/deploy/zero-downtime-deployments/service-mesh)

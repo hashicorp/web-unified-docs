@@ -1,5 +1,5 @@
 #
-# Copyright IBM Corp. 2025
+# Copyright IBM Corp. 2024, 2026
 # SPDX-License-Identifier: BUSL-1.1
 #
 # ------------------------------------------------------------------------------
@@ -22,6 +22,13 @@ targetBranch="${1}"  # git branch name for RC docs
 # Bail if any of the command line parameters were omitted
 if [[ -z ${targetBranch} ]] ; then exit ; fi
 
+# Set the branch target appropriately
+if [[ "${targetBranch}" == "main" ]] ; then 
+  branchTarget="main"
+else 
+  branchTarget="main..${targetBranch}"
+fi 
+
 cd "${repoRoot}"
 
 # Find the earliest commit in the release branch that *is not* in main and use
@@ -29,10 +36,10 @@ cd "${repoRoot}"
 git fetch origin
 
 dateString=$(
-  git log                 \
-  --pretty=format:%ad     \
-  --date=iso              \
-  main..${targetBranch} | \
+  git log              \
+  --pretty=format:%ad  \
+  --date=iso           \
+  ${branchTarget} |    \
   tail -1
 )
 
