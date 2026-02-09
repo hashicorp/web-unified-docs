@@ -1,162 +1,85 @@
 ---
 page_title: Argo CD
-description: Learn how to integrate Argo CD with HashiCorp Vault for secure secrets management in GitOps workflows.
+description: Integrate Argo CD with HashiCorp Vault using Kubernetes authentication. Synchronize secrets to Kubernetes with Vault Secrets Operator for GitOps workflows.
 ---
 
 # Argo CD
 
-Argo CD is a Kubernetes-native GitOps continuous delivery tool that synchronizes application state from Git repositories to Kubernetes clusters. Integrating Vault with Argo CD provides secure secrets management in GitOps workflows by using the [Kubernetes auth method](/vault/docs/auth/kubernetes) to authenticate workloads and the [Vault Secrets Operator](/vault/docs/platform/k8s/vso) to synchronize secrets to Kubernetes-native Secret objects.
+Argo CD is a Kubernetes-native GitOps continuous delivery tool that synchronizes application state from Git repositories to Kubernetes clusters. Integrating Vault with Argo CD keeps secrets out of Git while maintaining GitOps principles through the [Kubernetes auth method](/vault/docs/auth/kubernetes) and [Vault Secrets Operator](/vault/docs/platform/k8s/vso).
 
-## Why
+## Why integrate Argo CD with Vault
 
-Managing secrets in Argo CD and GitOps workflows presents several challenges:
+Integrating Argo CD with Vault addresses the following critical security and operational challenges in GitOps workflows:
 
-**Secrets in Git repositories violate GitOps security:** Storing secrets directly in Git, even encrypted, creates risks if encryption keys are compromised and adds complexity to secret rotation workflows. GitOps principles require all application state in Git, but secrets need special handling.
+**Prevent secret exposure in Git and Argo CD:** Secrets stored directly in Git manifests create security risks because Argo CD caches generated manifests in plaintext in Redis and exposes them via the repo-server API. Anyone with access to Redis or the repo-server can read secret values. Vault keeps secrets out of Git entirely, with only non-sensitive Custom Resource references committed, reducing the attack surface.
 
-**Kubernetes Secret objects lack encryption at rest by default:** Kubernetes Secrets are base64-encoded, not encrypted, and are stored in etcd without encryption unless explicitly configured. Anyone with API access to the namespace can read secret values.
+**Simplify secret rotation workflows:** Rotating secrets stored in Git requires encrypting new values, committing changes, and triggering Argo CD sync operations. Vault rotates secrets independently of Git, updating Kubernetes Secrets without Argo CD sync intervention while maintaining audit trails.
 
-**Limited audit trail for secret access:** Kubernetes does not provide granular audit logging for Secret reads by default, making it difficult to track which applications accessed which secrets and when for compliance and security investigations.
+**Eliminate per-cluster encryption key management:** Solutions like Sealed Secrets and SOPS require managing encryption keys in each Kubernetes cluster, creating operational burden and key rotation challenges. Vault centralizes secret management with unified authentication and access control.
 
-**No dynamic credential support in GitOps workflows:** Static secrets stored in Kubernetes Secret manifests remain valid indefinitely, creating a larger attack surface compared to short-lived dynamic credentials that Vault can generate on demand.
+**Encrypt Kubernetes Secrets at rest:** Kubernetes Secrets are base64-encoded, not encrypted, and are stored in etcd without encryption unless explicitly configured. Anyone with API access to the namespace can read secret values. Vault provides encryption at rest and in transit, with secrets synchronized to Kubernetes only when needed.
 
-Integrating Vault with Argo CD addresses these challenges by keeping secrets out of Git, providing centralized management with audit logging, enabling dynamic secret generation, and synchronizing secrets to Kubernetes-native objects that applications consume without modification.
+**Enable granular audit logging:** Kubernetes does not provide granular audit logging for Secret reads by default, making it difficult to track which applications accessed which secrets and when for compliance and security investigations. Vault provides comprehensive audit logs that track every secret access with application identity and timestamp.
 
 ## Prerequisites
 
 Before integrating Argo CD with Vault, you need the following:
 
-- A Vault instance accessible from the Kubernetes cluster where Argo CD runs (or use HCP Vault)
-- Argo CD installed and configured in your Kubernetes cluster
-- Vault [Kubernetes auth method](/vault/docs/auth/kubernetes) configured with access to the cluster's TokenReview API
-- A Kubernetes service account for Vault authentication with appropriate RBAC permissions
-- Vault policies that grant the service account read permissions for your secrets
-- For production: TLS encryption between the Kubernetes cluster and Vault
-
-Refer to [Available authentication methods](/vault/docs/auth) for Vault auth method options.
+- A Vault instance or HCP Vault accessible from your Kubernetes cluster over the network
+- Kubernetes cluster with Argo CD installed and administrator access
+- Vault Kubernetes auth method configured to trust your cluster's service account tokens
+- Vault policies that grant Kubernetes service accounts the necessary read permissions for your secrets
+- We recommend TLS encryption between Kubernetes pods and Vault
 
 ## Choose an integration approach
 
-Several approaches exist for integrating Vault with Argo CD and Kubernetes. Review the [Kubernetes integrations comparison](/vault/docs/platform/k8s/comparisons) for a detailed feature comparison:
+Several approaches exist for integrating Vault with Argo CD and Kubernetes, each optimized for different use cases. The Vault Secrets Operator provides the best balance of ease-of-use and functionality for most GitOps workflows, while alternatives like AVP or External Secrets Operator address specific requirements.
 
-**Vault Secrets Operator (recommended):** The [Vault Secrets Operator](/vault/docs/platform/k8s/vso) synchronizes Vault secrets to Kubernetes Secret objects using Custom Resource Definitions (CRDs). The operator provides the lowest load on Vault, supports automatic secret drift detection and remediation, and works with standard Kubernetes patterns. Use the Vault Secrets Operator when you want a Kubernetes-native approach with minimal application changes.
+The following are common approaches for integrating Vault with Argo CD:
 
-**Argo CD Vault Plugin (AVP):** The [Argo CD Vault Plugin](https://argocd-vault-plugin.readthedocs.io/) is a community plugin that replaces placeholder values in Kubernetes manifests with secrets from Vault during Argo CD sync operations. Use AVP when you want inline secret references in your GitOps manifests.
+- **Vault Secrets Operator:** The [Vault Secrets Operator](/vault/docs/platform/k8s/vso) synchronizes Vault secrets to Kubernetes Secret objects using Custom Resource Definitions (CRDs). The operator provides the lowest load on Vault, supports automatic secret drift detection and remediation, and works with standard Kubernetes patterns. Use the Vault Secrets Operator when you want a Kubernetes-native approach with minimal application changes.
 
-**External Secrets Operator:** The [External Secrets Operator](https://external-secrets.io/) is a vendor-neutral Kubernetes operator that synchronizes secrets from multiple external stores, including Vault, to Kubernetes Secrets. Use the External Secrets Operator when you need to manage secrets from multiple backends in addition to Vault.
+- **Argo CD Vault Plugin (AVP):** The [Argo CD Vault Plugin](https://argocd-vault-plugin.readthedocs.io/) is a community plugin that replaces placeholder values in Kubernetes manifests with secrets from Vault during Argo CD sync operations. Use AVP when you want inline secret references in your GitOps manifests.
 
-**Vault Agent sidecar:** The [Vault Agent Injector](/vault/docs/platform/k8s/injector) injects Vault Agent sidecar containers that render secrets to shared volumes. This approach supports the widest range of auth methods but has higher resource consumption. Use the Vault Agent sidecar when you need maximum auth method flexibility.
+- **External Secrets Operator:** The [External Secrets Operator](https://external-secrets.io/) is a vendor-neutral Kubernetes operator that synchronizes secrets from multiple external stores, including Vault, to Kubernetes Secrets. Use the External Secrets Operator when you need to manage secrets from multiple backends in addition to Vault.
 
-## Use the Vault Secrets Operator
+- **Vault Agent sidecar:** The [Vault Agent Injector](/vault/docs/platform/k8s/injector) injects Vault Agent sidecar containers that render secrets to shared volumes. The Vault Agent sidecar approach supports the widest range of auth methods but has higher resource consumption. Use the Vault Agent sidecar when you need maximum auth method flexibility.
 
-The Vault Secrets Operator uses CRDs to define how secrets synchronize from Vault to Kubernetes. First, configure Vault authentication for the operator, then create a VaultStaticSecret resource to sync secrets:
-
-```yaml
-apiVersion: secrets.hashicorp.com/v1beta1
-kind: VaultAuth
-metadata:
-  name: vault-auth
-  namespace: app
-spec:
-  method: kubernetes
-  mount: kubernetes
-  kubernetes:
-    role: argocd-role
-    serviceAccount: app-sa
----
-apiVersion: secrets.hashicorp.com/v1beta1
-kind: VaultStaticSecret
-metadata:
-  name: app-secrets
-  namespace: app
-spec:
-  type: kv-v2
-  mount: secret
-  path: apps/production/config
-  destination:
-    name: app-secrets
-    create: true
-  refreshAfter: 60s
-  vaultAuthRef: vault-auth
-```
-
-This configuration creates a VaultAuth resource that authenticates using the Kubernetes service account `app-sa`, and a VaultStaticSecret that syncs secrets from Vault's KV engine at `secret/apps/production/config` to a Kubernetes Secret named `app-secrets`. The operator refreshes the secret every 60 seconds to detect changes.
-
-Applications deployed by Argo CD consume the synchronized secret using standard Kubernetes patterns:
-
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: app
-  namespace: app
-spec:
-  template:
-    spec:
-      serviceAccountName: app-sa
-      containers:
-        - name: app
-          image: myapp:latest
-          envFrom:
-            - secretRef:
-                name: app-secrets
-```
-
-This Deployment references the Kubernetes Secret created by the Vault Secrets Operator. The application reads secrets as environment variables without any Vault-specific code, keeping the application decoupled from the secrets backend.
-
-## Verify the integration
-
-After configuring Argo CD to use secrets from Vault, verify the integration works correctly:
-
-1. **Run a test sync:** Deploy a test application through Argo CD that references a Vault-synced secret. Confirm the application receives the expected secret values by checking pod logs.
-1. **Check Vault audit logs:** Verify that Vault audit logs show successful Kubernetes authentication and secret reads at the expected paths.
-1. **Test secret rotation:** Update a secret in Vault and verify the Vault Secrets Operator synchronizes the change to Kubernetes within the configured refresh interval.
-1. **Validate least-privilege access:** Confirm that the Kubernetes service account can only access secrets permitted by its Vault policy and cannot read secrets outside its scope.
-
-## Production readiness
-
-Before deploying your Vault integration to production, verify the following:
-
-- **High availability:** Use a Vault cluster with multiple nodes or [HCP Vault Dedicated](/hcp/docs/vault) for automatic HA
-- **Monitoring:** Configure [Vault telemetry](/vault/docs/internals/telemetry/enable-telemetry) to alert on seal status, authentication failures, and secret access anomalies
-- **Audit logging:** Enable at least one [Vault audit device](/vault/docs/audit) for compliance and security investigations
-- **Secret rotation:** Implement automated rotation for static secrets and appropriate TTLs for dynamic secrets
-- **Disaster recovery:** Document and test your Vault recovery procedures, including unseal processes and backup restoration
-- **Network security:** Ensure TLS encryption for all Vault communication and restrict network access to authorized CI/CD runners
-
-Review the [Vault production hardening guide](/vault/tutorials/vault/production-hardening) for comprehensive production deployment recommendations.
+For complete implementation guidance including Vault Secrets Operator installation, authentication setup, and verification steps, review the following HashiCorp resources.
 
 ## HashiCorp resources
 
-CI/CD secrets overview:
+Kubernetes integration and configuration:
 
-- [CI/CD secrets overview](/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets)
-- [Dynamic and static secrets in CI/CD](/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets/dynamic-and-static-secrets)
-- [CI/CD secrets anti-patterns](/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets/anti-patterns)
-
-Vault Kubernetes integration:
-
-- Read the [Vault Secrets Operator documentation](/vault/docs/platform/k8s/vso) for installation and configuration
-- Explore [Vault Secrets Operator examples](/vault/docs/platform/k8s/vso/examples) for common use cases
-- Compare [Kubernetes integrations](/vault/docs/platform/k8s/comparisons) to choose between VSO, CSI provider, and Agent Injector
-- Complete the [Vault Secrets Operator tutorial](/vault/tutorials/kubernetes/vault-secrets-operator) for a hands-on walkthrough
+- Compare [Kubernetes integrations](/vault/docs/platform/k8s/comparisons) to choose between Vault Secrets Operator, CSI provider, and Agent Injector
+- Complete the [Vault Secrets Operator tutorial](/vault/tutorials/kubernetes/vault-secrets-operator) for a hands-on walkthrough of the integration
+- Review [Vault Secrets Operator examples](/vault/docs/platform/k8s/vso/examples) for complete YAML configurations covering authentication, static secrets, and dynamic secrets
+- Read the [Vault Secrets Operator documentation](/vault/docs/platform/k8s/vso) for installation and configuration reference
 
 Vault authentication for Kubernetes:
 
+- Read the [Vault authentication methods documentation](/vault/docs/auth) for an overview of available auth methods
 - Learn about [Kubernetes auth method](/vault/docs/auth/kubernetes) for service account authentication
-- Follow the [Manage Vault access with Kubernetes service accounts](/vault/tutorials/validated-patterns/vault-kubernetes-auth) validated pattern
+- Configure [Kubernetes auth method](/vault/tutorials/kubernetes/kubernetes-aks-azure-ad) for Azure AKS with Azure AD
+- Configure [Kubernetes auth method](/vault/tutorials/kubernetes/kubernetes-amazon-eks) for Amazon EKS
 
 Vault secrets and dynamic credentials:
 
+- Understand [dynamic and static secrets](/vault/tutorials/get-started/understand-static-dynamic-secrets) to choose the right approach for your applications
 - Read the [KV secrets engine documentation](/vault/docs/secrets/kv) for static secret storage
-- Learn about [AWS secrets engine](/vault/docs/secrets/aws) for dynamic cloud credentials
 - Explore [database secrets engine](/vault/docs/secrets/databases) for dynamic database credentials
+- Learn about [AWS secrets engine](/vault/docs/secrets/aws) for dynamic cloud credentials
 
 ### External resources
 
-- Read the [Argo CD documentation](https://argo-cd.readthedocs.io/) for GitOps deployment patterns
-- Review the [External Secrets Operator Vault provider documentation](https://external-secrets.io/latest/provider/hashicorp-vault/) for an alternative integration approach
-- Learn about the [Argo CD Vault Plugin](https://argocd-vault-plugin.readthedocs.io/) for inline secret substitution
+- Read the [Argo CD documentation](https://argo-cd.readthedocs.io/) for GitOps workflow configuration and best practices
+- Review the [Argo CD Vault Plugin documentation](https://argocd-vault-plugin.readthedocs.io/) for inline secret substitution patterns
+- Explore the [External Secrets Operator documentation](https://external-secrets.io/) for multi-backend secret management
+- Learn about [Kubernetes Secrets](https://kubernetes.io/docs/concepts/configuration/secret/) for understanding native Kubernetes secret handling
 
 ## Next steps
 
-In this section of [managing CI/CD secrets](/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets), you learned about Argo CD and Vault integration for GitOps workflows. Argo CD and Vault integration is part of the [Secure systems pillar](/well-architected-framework/secure-systems).
+In this section of [managing CI/CD secrets](/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets), you learned about Argo CD and Vault integration. Argo CD and Vault integration is part of the [Secure systems pillar](/well-architected-framework/secure-systems).
+
+- Review the [CI/CD secrets overview](/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets) for architectural guidance across platforms
+- Compare [dynamic and static secrets in CI/CD](/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets/dynamic-and-static-secrets) to choose the right secrets strategy

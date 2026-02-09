@@ -1,140 +1,89 @@
 ---
 page_title: TeamCity
-description: Learn how to integrate TeamCity with HashiCorp Vault for secure secrets management.
+description: Integrate TeamCity with HashiCorp Vault using AppRole or LDAP authentication. Retrieve static and dynamic secrets securely with audit logs and automatic rotation.
 ---
 
 # TeamCity
 
 [TeamCity](https://www.jetbrains.com/teamcity/) supports native parameters and tokens to secure CI/CD pipelines, and also features the ability to add extra security through external secret managers like Vault. You can use the TeamCity Vault plugin to store sensitive values in Vault KV secrets engines.
 
-## Why
+## Why integrate TeamCity with Vault
 
-Managing secrets in TeamCity pipelines presents several challenges:
+Integrating TeamCity with Vault addresses the following critical security and operational challenges in build automation:
 
-**Limited native secret management:** TeamCity's built-in parameters and tokens provide basic secret storage, but lack advanced features like automatic rotation, dynamic secret generation, and centralized policy management across multiple TeamCity instances.
+**Enhance native secret management:** Vault provides enterprise-grade secret management with automated rotation, dynamic secret generation, and centralized policy management that can span multiple TeamCity instances.
 
-**Secret sprawl across projects:** Teams often duplicate secrets across multiple TeamCity projects and build configurations, making it difficult to rotate credentials and increasing the risk of exposure if a single project is compromised.
+**Eliminate secret sprawl across projects:** Vault centralizes secret storage so builds retrieve credentials on-demand from a single source, reducing the need to duplicate secrets across multiple TeamCity projects and build configurations. Centralized storage simplifies rotation and reduces the risk of exposure.
 
-**Compliance and audit requirements:** Organizations need detailed audit trails showing who accessed which secrets and when, but TeamCity's native logging may not provide the granularity required for compliance with security standards.
+**Meet compliance and audit requirements:** Vault provides comprehensive audit logs that track every secret access with build identity and timestamp, supporting compliance with security standards and regulatory frameworks.
 
-**No dynamic credential support:** Static credentials stored in TeamCity remain valid indefinitely, creating a larger attack surface compared to short-lived dynamic credentials that expire automatically.
-
-Integrating Vault with TeamCity addresses these challenges by centralizing secrets management, enabling dynamic secret generation, providing comprehensive audit logs, and supporting automatic credential rotation.
+**Enable dynamic credential support:** Vault generates temporary credentials for each build that automatically expire, minimizing exposure windows compared to long-lived static credentials.
 
 ## Prerequisites
 
 Before integrating TeamCity with Vault, you need the following:
 
-- A Vault instance accessible from your TeamCity agents over the network
-- TeamCity admin access to configure Vault connections
-- A Vault authentication method configured (AppRole or LDAP recommended for TeamCity)
+- A Vault instance or HCP Vault accessible from TeamCity build agents over the network
+- TeamCity installation with administrator access to configure projects and build configurations
+- [HashiCorp Vault plugin for TeamCity](https://plugins.jetbrains.com/plugin/10011-hashicorp-vault-support) installed
+- A Vault authentication method configured (AppRole or LDAP)
 - Vault policies that grant TeamCity the necessary read permissions for your secrets
-- For production: TLS encryption between TeamCity and Vault
+- We recommend TLS encryption between TeamCity agents and Vault
 
-Refer to [Available authentication methods](/vault/docs/auth) for Vault auth method options.
+## Choose an integration approach
 
-## Choose an authentication method
+TeamCity integrates with Vault using the native HashiCorp Vault plugin, which supports two authentication methods. Choose the approach that matches your infrastructure and security requirements:
 
-The TeamCity Vault plugin supports two primary authentication methods:
+| Approach | Setup Complexity | LDAP Dependency | Credential Management | Best For |
+|----------|-----------------|-----------------|----------------------|----------|
+| AppRole | Low | None | Role ID + Secret ID in TeamCity credentials | Automated pipelines and machine authentication |
+| LDAP | Medium | Required | LDAP user accounts | Teams with existing LDAP infrastructure |
 
-Use **AppRole authentication** when you need programmatic, machine-to-machine authentication with fine-grained access control based on role IDs and secret IDs. This approach works well for automated pipelines and provides better security through credential separation.
+- **AppRole authentication:** We recommend this approach for automated pipelines. AppRole provides programmatic, machine-to-machine authentication with fine-grained access control using role IDs and secret IDs. Store the role ID and secret ID in TeamCity credentials with secure storage. AppRole requires managing two credentials but provides better security through credential separation and works without LDAP infrastructure. Use this approach for most TeamCity integrations.
 
-Use **LDAP authentication** when you want to leverage existing LDAP infrastructure and user directories for authentication. This approach simplifies credential management by using your organization's existing LDAP credentials, but requires maintaining LDAP user accounts for TeamCity service identities.
+- **LDAP authentication:** Leverages existing LDAP infrastructure and user directories for authentication. This approach simplifies credential management by using your organization's existing LDAP credentials, but requires maintaining LDAP user accounts for TeamCity service identities. LDAP authentication requires an operational LDAP server and proper network connectivity. Use this approach when you have established LDAP infrastructure and want to centralize identity management.
 
-## Set up a Vault connection
+## Integration pattern
 
-You can set up a Vault connection to authenticate with either the AppRole or LDAP auth methods. The following example shows how to set up a connection with AppRole defined in TeamCity's Kotlin domain specific language:
+TeamCity retrieves secrets from Vault using the HashiCorp Vault plugin with Kotlin DSL configuration:
+
+1. **Configure connection:** Define a `hashiCorpVaultConnection` in TeamCity project settings, specifying Vault URL and authentication method (AppRole or LDAP)
+2. **Define parameters:** Create `hashiCorpVaultParameter` configurations that reference Vault secret paths using the format `secret/path!/field`
+3. **Retrieve at build time:** TeamCity automatically authenticates to Vault and retrieves secrets when builds start
+4. **Use in builds:** Secrets are available as environment variables, automatically masked in build logs
+
+The following example shows a minimal AppRole authentication pattern for TeamCity projects:
 
 ```kotlin
 project {
-
     features {
         hashiCorpVaultConnection {
-            id = "HashiCups"
+            id = "PROJECT_EXT_VAULT"
             name = "HashiCorp Vault"
-            url = "http://127.0.0.1:8200/"
-            vaultNamespace = "enterprise/vault/namespace"
+            url = "https://vault.example.com:8200"
+            vaultNamespace = ""
             authMethod = appRole {
-                roleId = "..."
-                secretId = "..."
+                roleId = "credentialsJSON:vault-role-id"
+                secretId = "credentialsJSON:vault-secret-id"
             }
         }
     }
-}
-```
 
-This configuration establishes a connection to Vault by specifying the Vault server URL, an optional Vault Enterprise namespace, and AppRole credentials (role ID and secret ID). The connection is identified by the ID "HashiCups" which you reference when retrieving secrets in your pipeline.
-
-After you define the connection, you can define a parameter to use a Vault secret in your TeamCity pipeline. Here is an example to use a static secret and set it as the pipeline environment variable `AWS_ACCESS_KEY_ID`:
-
-```kotlin
-project {
-    params {
-        hashiCorpVaultParameter {
-            name = "env.AWS_ACCESS_KEY_ID"
-            query = "secret/data/awscreds!/access_key"
-            vaultId = "HashiCups"
-        }
-    }
-}
-```
-
-This parameter configuration retrieves a secret from Vault at the path `secret/data/awscreds` (KV v2 secrets engine), extracts the `access_key` field, and makes it available to TeamCity builds as the environment variable `AWS_ACCESS_KEY_ID`. The `vaultId` references the connection defined in the previous example.
-
-## Use dynamic secrets
-
-You can configure TeamCity to retrieve dynamic secrets from Vault secrets engines like the AWS secrets engine or database credentials engine. Dynamic secrets are generated on-demand and automatically expire, providing stronger security than long-lived static credentials.
-
-To use dynamic secrets, configure a Vault parameter that queries a dynamic secrets engine path:
-
-```kotlin
-project {
     params {
         hashiCorpVaultParameter {
             name = "env.DB_PASSWORD"
-            query = "database/creds/app-role!/password"
-            vaultId = "HashiCups"
-        }
-        hashiCorpVaultParameter {
-            name = "env.DB_USERNAME"
-            query = "database/creds/app-role!/username"
-            vaultId = "HashiCups"
+            query = "secret/data/database/production!/password"
+            vaultId = "PROJECT_EXT_VAULT"
         }
     }
 }
 ```
 
-These parameters retrieve temporary database credentials from Vault's database secrets engine. Vault generates new credentials for each build and automatically revokes them after the configured TTL expires, eliminating the need to manage long-lived database credentials.
+The configuration defines a Vault connection using AppRole authentication with role ID and secret ID stored in TeamCity credentials. It then defines a parameter that retrieves a database password from Vault's KV secrets engine and makes it available as the `DB_PASSWORD` environment variable. Build steps can reference the secret using `%env.DB_PASSWORD%`, and TeamCity automatically masks the value in build logs.
 
-## Verify the integration
-
-After configuring TeamCity to retrieve secrets from Vault, verify the integration works correctly:
-
-1. **Run a test build:** Create a simple build configuration that retrieves a test secret from Vault and uses it in a build step. Confirm the secret is masked in TeamCity build logs.
-2. **Check Vault audit logs:** Verify that Vault audit logs show successful authentication from TeamCity and secret reads at the expected paths.
-3. **Test secret rotation:** If using dynamic secrets, verify that Vault generates new credentials for each build and that old credentials are revoked after use.
-4. **Validate least-privilege access:** Confirm that TeamCity can only access secrets permitted by its Vault policy and cannot read secrets outside its scope.
-
-## Production readiness
-
-Before deploying your Vault integration to production, verify the following:
-
-- **High availability:** Use a Vault cluster with multiple nodes or [HCP Vault Dedicated](/hcp/docs/vault) for automatic HA
-- **Monitoring:** Configure [Vault telemetry](/vault/docs/internals/telemetry/enable-telemetry) to alert on seal status, authentication failures, and secret access anomalies
-- **Audit logging:** Enable at least one [Vault audit device](/vault/docs/audit) for compliance and security investigations
-- **Secret rotation:** Implement automated rotation for static secrets and appropriate TTLs for dynamic secrets
-- **Disaster recovery:** Document and test your Vault recovery procedures, including unseal processes and backup restoration
-- **Network security:** Ensure TLS encryption for all Vault communication and restrict network access to authorized CI/CD runners
-
-Review the [Vault production hardening guide](/vault/tutorials/vault/production-hardening) for comprehensive production deployment recommendations.
+For complete implementation guidance including Kotlin DSL examples, UI configuration, and dynamic secrets setup, review the HashiCorp resources below.
 
 ## HashiCorp resources
-
-CI/CD secrets overview:
-
-- [CI/CD secrets overview](/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets)
-- [Dynamic and static secrets in CI/CD](/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets/dynamic-and-static-secrets)
-- [CI/CD secrets anti-patterns](/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets/anti-patterns)
 
 Vault authentication for CI/CD:
 
@@ -150,14 +99,35 @@ Vault secrets and dynamic credentials:
 
 ### External resources
 
-Learn more about [TeamCity HashiCorp Vault integration](https://www.jetbrains.com/help/teamcity/hashicorp-vault.html) in the official TeamCity documentation.
+TeamCity configuration resources:
+
+- Read the [TeamCity Kotlin DSL documentation](https://www.jetbrains.com/help/teamcity/kotlin-dsl.html) for project configuration syntax and patterns
+- Learn about [TeamCity typed parameters](https://www.jetbrains.com/help/teamcity/typed-parameters.html) for secret parameter handling
+- Explore [TeamCity project configuration examples](https://github.com/JetBrains/teamcity-documentation/tree/master/topics) for configuration patterns
+
+Videos and demonstrations:
+
+- Watch [New in TeamCity: Remote Parameters and Updated HashiCorp Vault Plugin](https://www.youtube.com/watch?v=cRNl2dTulTA) for plugin feature demonstrations
+- Watch [TeamCity Configuration as Code with Kotlin DSL](https://www.youtube.com/watch?v=9AEgZrjQx1M) for Kotlin DSL fundamentals
+- Watch [Secure CI/CD Pipelines with HashiCorp Vault](https://www.youtube.com/watch?v=lsWOx9bzAwY) for security patterns applicable to TeamCity
+
+Read the [TeamCity HashiCorp Vault integration guide](https://www.jetbrains.com/help/teamcity/hashicorp-vault.html) for detailed plugin configuration and troubleshooting steps.
 
 Install the [TeamCity plugin for HashiCorp Vault](https://plugins.jetbrains.com/plugin/10011-hashicorp-vault-support) from the JetBrains Plugin Marketplace.
 
 Review the [TeamCity Vault plugin source code](https://github.com/JetBrains/teamcity-hashicorp-vault-plugin) for implementation details and contribution opportunities.
 
-Watch [New in TeamCity: Remote Parameters and Updated HashiCorp Vault Plugin](https://www.youtube.com/watch?v=cRNl2dTulTA) for a video demonstration of the Vault plugin features.
+Explore [TeamCity plugin examples](https://github.com/JetBrains/teamcity-hashicorp-vault-plugin/tree/main/common/src/test/resources) for working Vault integration configurations.
+
+Read [Securing TeamCity CI/CD Pipelines with HashiCorp Vault](https://www.hashicorp.com/blog/securing-ci-cd-pipelines-with-hashicorp-vault) for HashiCorp's best practices and patterns.
+
+Learn about [TeamCity and Vault AppRole authentication](https://blog.jetbrains.com/teamcity/2020/10/teamcity-hashicorp-vault-integration/) from the JetBrains TeamCity blog.
+
+Explore [TeamCity community discussions on Vault integration](https://teamcity-support.jetbrains.com/hc/en-us/community/topics/200366979-TeamCity-Discussions) for troubleshooting and community solutions.
 
 ## Next steps
 
 In this section of [managing CI/CD secrets](/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets), you learned about TeamCity and Vault integration. TeamCity and Vault integration is part of the [Secure systems pillar](/well-architected-framework/secure-systems).
+
+- Review the [CI/CD secrets overview](/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets) for architectural guidance across platforms
+- Compare [dynamic and static secrets in CI/CD](/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets/dynamic-and-static-secrets) to choose the right secrets strategy

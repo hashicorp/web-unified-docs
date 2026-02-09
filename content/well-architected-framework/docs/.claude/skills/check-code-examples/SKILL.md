@@ -2,7 +2,6 @@
 name: check-code-examples
 description: Validate code examples have summaries, are complete, use realistic values, and follow WAF patterns for Terraform, Packer, and other tools.
 argument-hint: <file-paths> [--fix]
-disable-model-invocation: true
 ---
 
 # Check Code Examples Skill

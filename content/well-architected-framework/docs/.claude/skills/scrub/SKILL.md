@@ -150,6 +150,53 @@ Better (from reference docs):
 
 ---
 
+### 1A. "Addresses These Challenges By" Transitions [HIGH for WAF]
+
+**Problem:** AI uses this formulaic transition to connect problem lists to solutions. It's a telltale sign of list-based AI writing.
+
+**Pattern to detect:**
+- "addresses these challenges by..."
+- "solves these problems by..."
+- "tackles these issues by..."
+
+**Before:**
+> Integrating Vault with Azure DevOps addresses these challenges by centralizing secrets management, enabling dynamic secret generation, providing comprehensive audit logs, and supporting automatic credential rotation.
+
+**After:**
+> Integrating Vault with Azure DevOps centralizes secrets management in a single system. Vault generates dynamic credentials on demand, logs all secret access with detailed audit trails, and rotates credentials automatically based on configured TTLs.
+
+**What changed:**
+- Split the long list into separate, concrete statements
+- Each statement says what actually happens instead of listing capabilities
+- More direct and easier to understand
+
+---
+
+### 1B. Security Theater Jargon [HIGH for WAF]
+
+**Problem:** AI uses security buzzwords that sound impressive but don't explain concrete consequences. Replace with specific leak scenarios and timeframes.
+
+**Pattern to detect:**
+- "attack surface"
+- "security posture"
+- "threat landscape"
+- "security vectors"
+- "vulnerability exposure"
+
+**Before:**
+> Static secrets stored in Azure DevOps variables remain valid indefinitely, creating a larger attack surface compared to short-lived dynamic credentials that expire automatically.
+
+**After:**
+> Static secrets stored in Azure DevOps variables remain valid indefinitely. If these secrets leak through logs, error messages, or compromised pipeline agents, they remain exploitable until manually rotated. Dynamic credentials expire automatically—typically after 1 hour to 24 hours—limiting exposure if leaked.
+
+**What changed:**
+- Replaced "attack surface" with concrete leak scenarios (logs, error messages, compromised agents)
+- Added specific timeframes (1-24 hours)
+- Explained what "exploitable" means in practice (remains usable until manual rotation)
+- More actionable and specific
+
+---
+
 ### 2. Undue Emphasis on Significance, Legacy, and Broader Trends
 
 **Words to watch:** stands/serves as, is a testament/reminder, a vital/significant/crucial/pivotal/key role/moment, underscores/highlights its importance/significance, reflects broader, symbolizing its ongoing/enduring/lasting, contributing to the, setting the stage for, marking/shaping the, represents/marks a shift, key turning point, evolving landscape, focal point, indelible mark, deeply rooted
@@ -190,13 +237,32 @@ Better (from reference docs):
 
 **Words to watch:** boasts a, vibrant, rich (figurative), profound, enhancing its, showcasing, exemplifies, commitment to, natural beauty, nestled, in the heart of, groundbreaking (figurative), renowned, breathtaking, must-visit, stunning
 
-**Problem:** LLMs have serious problems keeping a neutral tone, especially for "cultural heritage" topics.
+**Also watch for vague quality claims:**
+- "provides the most X" (flexibility, power, control, etc.)
+- "advanced features"
+- "powerful capabilities"
+- "robust functionality"
+- "enterprise-grade"
+
+**Problem:** LLMs have serious problems keeping a neutral tone, especially for "cultural heritage" topics. They also use vague quality descriptors instead of explaining what something actually does.
 
 **Before:**
 > Nestled within the breathtaking region of Gonder in Ethiopia, Alamata Raya Kobo stands as a vibrant town with a rich cultural heritage and stunning natural beauty.
 
 **After:**
 > Alamata Raya Kobo is a town in the Gonder region of Ethiopia, known for its weekly market and 18th-century church.
+
+**WAF-specific example (vague quality claims):**
+
+**Before:**
+> AppRole provides the most flexibility but requires managing Role IDs and Secret IDs.
+
+**After:**
+> AppRole works with any CI/CD platform and supports custom authentication workflows, but requires managing Role IDs and Secret IDs.
+
+**What changed:**
+- Replaced "the most flexibility" with concrete explanation of what it enables (any platform, custom workflows)
+- More actionable and specific
 
 ---
 

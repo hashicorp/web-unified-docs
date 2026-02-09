@@ -2,7 +2,6 @@
 name: check-resources
 description: Validate HashiCorp and External resources sections for proper formatting, link descriptions, and organization.
 argument-hint: <file-paths> [--fix]
-disable-model-invocation: true
 ---
 
 # Check Resources Skill

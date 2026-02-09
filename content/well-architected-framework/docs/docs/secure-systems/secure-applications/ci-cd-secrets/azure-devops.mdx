@@ -1,139 +1,90 @@
 ---
 page_title: Azure DevOps
-description: Learn how to integrate Azure DevOps Pipelines with HashiCorp Vault for secure secrets management.
+description: Integrate Azure DevOps Pipelines with HashiCorp Vault using JWT/OIDC or managed identity authentication. Retrieve secrets with detailed audit trails.
 ---
 
 # Azure DevOps
 
-Azure DevOps Pipelines can authenticate with Vault using JWT/OIDC tokens to securely retrieve secrets for CI/CD workflows. Instead of storing credentials in Azure DevOps variable groups or pipeline variables, pipelines authenticate to Vault at runtime and retrieve secrets on demand.
+Azure DevOps Pipelines can authenticate with Vault to securely retrieve secrets for CI/CD workflows. Instead of storing credentials in Azure DevOps variable groups or pipeline variables, pipelines authenticate to Vault at runtime and retrieve secrets on demand.
 
-## Why
+## Why integrate Azure DevOps with Vault
 
-Managing secrets in Azure DevOps pipelines presents several challenges:
+Integrating Azure DevOps with Vault addresses the following critical security and operational challenges in pipeline automation:
 
-**Secret sprawl across projects and variable groups:** Teams often duplicate secrets across multiple Azure DevOps projects, variable groups, and service connections. When secrets need rotation, administrators must update each copy manually. If a single project is compromised, attackers gain access to secrets duplicated across other projects.
+**Eliminate secret sprawl across projects:** Vault centralizes secret storage so pipelines retrieve credentials on-demand from a single source, reducing the need to duplicate secrets across multiple Azure DevOps projects, variable groups, and service connections. Centralized storage simplifies rotation and reduces the risk of exposure.
 
-**Limited variable group protection:** Azure DevOps variable groups provide basic secret storage with masking in logs, but secrets stored in variable groups remain valid indefinitely. Variable groups do not support automatic rotation, dynamic secret generation, or centralized policy management across multiple Azure DevOps organizations.
+**Enable automatic credential rotation:** Vault automates credential rotation and distributes updated credentials without requiring pipeline configuration changes, reducing operational overhead and maintaining security posture.
 
-**Compliance and audit requirements:** Organizations need detailed audit trails showing which pipelines accessed which secrets and when. Azure DevOps logs pipeline runs and variable group access, but these logs do not capture individual secret reads, secret field access patterns, or failed authentication attempts required for SOC 2, PCI DSS, and HIPAA compliance.
+**Meet compliance and audit requirements:** Vault provides comprehensive audit logs that track every secret access with pipeline identity and timestamp, supporting regulatory compliance frameworks like SOC 2, PCI DSS, and HIPAA.
 
-**No dynamic credential support:** Static secrets stored in Azure DevOps variables remain valid indefinitely. If these secrets leak through logs, error messages, or compromised pipeline agents, they remain exploitable until manually rotated. Dynamic credentials expire automatically—typically after 1 hour to 24 hours—limiting exposure if leaked.
-
-Integrating Vault with Azure DevOps centralizes secrets management in a single system. Vault generates dynamic credentials on demand, logs all secret access with detailed audit trails, and rotates credentials automatically based on configured TTLs.
+**Provide dynamic credentials:** Vault generates temporary credentials for each pipeline run that automatically expire, limiting the exposure window if credentials leak through logs, error messages, or compromised pipeline agents.
 
 ## Prerequisites
 
 Before integrating Azure DevOps with Vault, you need the following:
 
-- A Vault instance accessible from Azure DevOps pipeline agents over the network (or use HCP Vault)
-- Azure DevOps project with administrator access to configure service connections and pipelines
-- A Vault authentication method configured (JWT/OIDC recommended for Azure DevOps)
+- A Vault instance or HCP Vault accessible from Azure DevOps pipeline agents over the network
+- Azure DevOps project with administrator access to configure pipelines and variable groups
+- A Vault authentication method configured
 - Vault policies that grant Azure DevOps the necessary read permissions for your secrets
-- For production: TLS encryption between Azure DevOps agents and Vault
-
-Refer to [Available authentication methods](/vault/docs/auth) for Vault auth method options.
+- We recommend TLS encryption between Azure DevOps agents and Vault
 
 ## Choose an integration approach
 
-Azure DevOps supports several approaches for integrating with Vault:
+Azure DevOps supports several approaches for integrating with Vault. Choose one of the following approach that matches your security requirements and Azure infrastructure:
 
-**JWT/OIDC authentication:** Azure DevOps can issue OIDC tokens for service connections that Vault verifies using the [JWT/OIDC auth method](/vault/docs/auth/jwt). This approach eliminates long-lived credentials and provides fine-grained access control based on Azure DevOps project, pipeline, and environment claims. Use JWT/OIDC authentication when your Azure DevOps organization supports workload identity federation.
+| Approach | Setup Complexity | Security Posture | Azure AD Dependency | Agent Types Supported |
+|----------|-----------------|------------------|---------------------|----------------------|
+| AppRole | Low | Good | None | All (Microsoft-hosted, self-hosted) |
+| JWT/OIDC with Azure AD | Medium-High | Excellent | Required | All with Azure AD service connections |
+| Azure Managed Identity | Medium | Excellent | Required | Self-hosted on Azure VMs only |
 
-**Azure managed identity with Vault Azure auth:** For self-hosted pipeline agents running on Azure VMs, use the [Vault Azure auth method](/vault/docs/auth/azure) to authenticate with Azure managed identities. Vault validates the Azure AD JWT token and grants access based on subscription, resource group, and VM identity. Use this approach when you run self-hosted agents on Azure infrastructure.
+- **AppRole authentication:** Install Vault CLI on pipeline agents and authenticate using the [AppRole auth method](/vault/docs/auth/approle). AppRole works reliably with Azure DevOps Pipelines, requires minimal Azure AD configuration, and supports all agent types including Microsoft-hosted and self-hosted. Store the Role ID and Secret ID in Azure DevOps variable groups with secret masking enabled. AppRole requires managing two credentials (Role ID and Secret ID) but provides straightforward setup.
 
-**Vault CLI with AppRole:** Install the Vault CLI on pipeline agents and authenticate using the [AppRole auth method](/vault/docs/auth/approle). AppRole works with any CI/CD platform and supports custom authentication workflows, but requires managing Role IDs and Secret IDs. Use AppRole when your environment does not support OIDC or managed identities.
+- **JWT/OIDC authentication with Azure AD:** For Azure DevOps service connections with workload identity federation, authenticate to Vault through Azure AD service principals using the [JWT/OIDC auth method](/vault/docs/auth/jwt). JWT/OIDC auth method approach requires configuring Azure AD application registrations and service connections, but removes the need to manage Role IDs and Secret IDs in variable groups. OIDC authentication requires additional Azure AD setup and is more complex than AppRole, but provides the strongest security posture by eliminating long-lived credentials entirely. Use this approach when you need Azure AD-based identity for compliance or when integrating with other Azure AD-protected resources.
 
-## Use JWT/OIDC authentication
+- **Azure managed identity with Vault Azure auth:** For self-hosted pipeline agents running on Azure VMs, use the [Vault Azure auth method](/vault/docs/auth/azure) to authenticate with Azure managed identities. Vault validates the Azure AD JWT token and grants access based on subscription, resource group, and VM identity. Managed identities eliminate credential management entirely but require Azure VM infrastructure. Use this approach when you run self-hosted agents on Azure infrastructure and want to leverage Azure's native identity management.
 
-Configure Vault's JWT auth method to accept tokens from Azure DevOps. Create a role that maps Azure DevOps claims to Vault policies:
+## Integration pattern
 
-```bash
-vault write auth/jwt/config \
-  oidc_discovery_url="https://vstoken.dev.azure.com/YOUR_ORG_ID" \
-  bound_issuer="https://vstoken.dev.azure.com/YOUR_ORG_ID"
+Azure DevOps pipelines authenticate to Vault, retrieve secrets, and set them as masked pipeline variables for use in deployment tasks:
 
-vault write auth/jwt/role/azure-devops-role \
-  role_type="jwt" \
-  bound_audiences="api://AzureADTokenExchange" \
-  bound_claims_type="glob" \
-  bound_claims='{"sub":"sc://YOUR_ORG/YOUR_PROJECT/*"}' \
-  user_claim="sub" \
-  policies="azure-devops-policy" \
-  ttl=1h
-```
+1. **Authenticate:** Pipeline uses AppRole credentials, stored in variable groups, Azure AD OIDC tokens, or Azure managed identities to authenticate to Vault
+1. **Retrieve secrets:** Pipeline calls Vault API to retrieve static secrets from KV engine or dynamic credentials from secrets engines
+1. **Use secrets:** Vault secrets are set as Azure DevOps pipeline variables with secret masking enabled and used in subsequent deployment tasks
 
-This configuration establishes trust between Vault and Azure DevOps by specifying the OIDC discovery URL and creating a role that restricts access to tokens from your specific Azure DevOps organization and project.
-
-Configure your Azure DevOps pipeline to authenticate with Vault using an OIDC service connection and retrieve secrets:
+The following example shows a minimal AppRole authentication pattern for Azure DevOps pipelines:
 
 ```yaml
-trigger:
-  - main
-
-pool:
-  vmImage: 'ubuntu-latest'
-
 steps:
   - task: Bash@3
     displayName: 'Retrieve secrets from Vault'
-    env:
-      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
     inputs:
       targetType: 'inline'
       script: |
-        # Install Vault CLI
-        curl -fsSL https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
-        echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
-        sudo apt update && sudo apt install vault -y
-
-        # Authenticate to Vault with OIDC token
+        # Authenticate to Vault with AppRole
         export VAULT_ADDR="https://vault.example.com:8200"
-        export VAULT_TOKEN=$(vault write -field=token auth/jwt/login \
-          role=azure-devops-role \
-          jwt=$SYSTEM_ACCESSTOKEN)
-
-        # Retrieve secrets from Vault
+        export VAULT_TOKEN=$(vault write -field=token auth/approle/login \
+          role_id=$(VAULT_ROLE_ID) \
+          secret_id=$(VAULT_SECRET_ID))
+        
+        # Retrieve database password from Vault
         export DB_PASSWORD=$(vault kv get -field=password secret/database/production)
-
-        # Use secrets in deployment
+        
+        # Set as masked pipeline variable for use in subsequent tasks
         echo "##vso[task.setvariable variable=DB_PASSWORD;issecret=true]$DB_PASSWORD"
 ```
 
-This pipeline authenticates to Vault using the Azure DevOps system access token, retrieves a database password from Vault's KV secrets engine, and sets it as a masked pipeline variable for use in subsequent tasks.
+The pipeline authenticates to Vault using AppRole credentials stored in Azure DevOps variable groups, retrieves a database password from Vault's KV secrets engine, and sets it as a masked pipeline variable. Subsequent deployment tasks can reference the `DB_PASSWORD` variable securely.
 
-## Verify the integration
-
-After configuring Azure DevOps to retrieve secrets from Vault, verify the integration works correctly:
-
-1. **Run a test pipeline:** Create a simple pipeline that retrieves a test secret from Vault and uses it in a script. Confirm the secret is masked in Azure DevOps pipeline logs.
-1. **Check Vault audit logs:** Verify that Vault audit logs show successful authentication from Azure DevOps and secret reads at the expected paths.
-1. **Test secret rotation:** If using dynamic secrets, verify that Vault generates new credentials on each pipeline run and that old credentials are revoked after the configured TTL.
-1. **Validate least-privilege access:** Confirm that Azure DevOps can only access secrets permitted by its Vault policy and cannot read secrets outside its scope.
-
-## Production readiness
-
-Before deploying your Vault integration to production, verify the following:
-
-- **High availability:** Use a Vault cluster with multiple nodes or [HCP Vault Dedicated](/hcp/docs/vault) for automatic HA
-- **Monitoring:** Configure [Vault telemetry](/vault/docs/internals/telemetry/enable-telemetry) to alert on seal status, authentication failures, and secret access anomalies
-- **Audit logging:** Enable at least one [Vault audit device](/vault/docs/audit) for compliance and security investigations
-- **Secret rotation:** Implement automated rotation for static secrets and appropriate TTLs for dynamic secrets
-- **Disaster recovery:** Document and test your Vault recovery procedures, including unseal processes and backup restoration
-- **Network security:** Ensure TLS encryption for all Vault communication and restrict network access to authorized CI/CD runners
-
-Review the [Vault production hardening guide](/vault/tutorials/vault/production-hardening) for comprehensive production deployment recommendations.
+For complete implementation guidance, including Vault configuration, authentication method setup, and verification steps, review the following HashiCorp resources.
 
 ## HashiCorp resources
-
-CI/CD secrets overview:
-
-- [CI/CD secrets overview](/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets)
-- [Dynamic and static secrets in CI/CD](/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets/dynamic-and-static-secrets)
-- [CI/CD secrets anti-patterns](/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets/anti-patterns)
 
 Vault authentication for CI/CD:
 
 - Read the [Vault authentication methods documentation](/vault/docs/auth) for an overview of available auth methods
+- Learn about the [AppRole auth method](/vault/docs/auth/approle) for machine-to-machine authentication in pipelines
 - Learn about [JWT/OIDC auth method](/vault/docs/auth/jwt) for token-based pipeline authentication
 - Learn about the [Azure auth method](/vault/docs/auth/azure) for managed identity authentication
 - Configure the [Azure AD OIDC provider](/vault/docs/auth/jwt/oidc-providers/azuread) for Azure-specific OIDC configuration
@@ -144,13 +95,17 @@ Vault secrets and dynamic credentials:
 - Read the [KV secrets engine documentation](/vault/docs/secrets/kv) for static secret storage
 - Learn about [Azure secrets engine](/vault/docs/secrets/azure) for dynamic Azure service principals
 - Learn about [AWS secrets engine](/vault/docs/secrets/aws) for dynamic cloud credentials
+- Explore [database secrets engine](/vault/docs/secrets/databases) for dynamic database credentials
 
 ### External resources
 
 - Read the [Azure DevOps workload identity federation documentation](https://learn.microsoft.com/en-us/azure/devops/pipelines/library/connect-to-azure?view=azure-devops#create-an-azure-resource-manager-service-connection-that-uses-workload-identity-federation) for OIDC service connection setup
 - Review [Azure Pipelines YAML schema reference](https://learn.microsoft.com/en-us/azure/devops/pipelines/yaml-schema/) for pipeline configuration syntax
-- Learn about [Azure DevOps variable groups](https://learn.microsoft.com/en-us/azure/devops/pipelines/library/variable-groups) to understand the built-in secrets management that Vault replaces
+- Learn about [Azure DevOps variable groups](https://learn.microsoft.com/en-us/azure/devops/pipelines/library/variable-groups) for secrets management
 
 ## Next steps
 
 In this section of [managing CI/CD secrets](/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets), you learned about Azure DevOps and Vault integration. Azure DevOps and Vault integration is part of the [Secure systems pillar](/well-architected-framework/secure-systems).
+
+- Review the [CI/CD secrets overview](/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets) for architectural guidance across platforms
+- Compare [dynamic and static secrets in CI/CD](/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets/dynamic-and-static-secrets) to choose the right secrets strategy
