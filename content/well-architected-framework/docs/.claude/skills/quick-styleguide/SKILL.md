@@ -2,7 +2,6 @@
 name: quick-styleguide
 description: Fast HashiCorp style validation using optimized quick-reference. Perfect for daily checks and pre-commit workflows.
 argument-hint: <file-paths> [--fix]
-disable-model-invocation: true
 ---
 
 # Quick HashiCorp Style Guide Check

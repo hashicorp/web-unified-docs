@@ -188,9 +188,12 @@ Based on successful WAF documents, use these patterns:
 **"Why [topic]" section:**
 - Include early in the document (after intro, before implementation details)
 - Use bold title format with colons inside: `**Challenge name:** Description`
+- **Bold titles must start with action verbs, not noun phrases**
+  - ✅ Good: "Track spending by team:", "Prevent configuration drift:", "Eliminate deployment inconsistencies:"
+  - ❌ Bad: "Lack of visibility:", "Configuration inconsistency:", "Deployment problems:"
 - Present 3-4 strategic operational/security challenges that the topic addresses
 - Focus on business outcomes and consequences of not addressing the challenge
-- Example challenges: "Eliminate deployment inconsistencies:", "Reduce deployment time and risk:"
+- Write each challenge as a paragraph (2-4 sentences of prose), not bullet lists
 
 **Workflow connections:**
 - Explicitly link related WAF documents to show how topics connect
