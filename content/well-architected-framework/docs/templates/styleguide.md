@@ -204,7 +204,7 @@ Always use the shortest word or phrase that conveys your intended meaning. Use d
 
 Use simple, concrete words so global audiences can understand our content more easily. Refer to [Spell out a phrase and place the acronym form in parentheses on first use](language#spell-out-a-phrase-and-place-the-acronym-form-in-parentheses-on-first-use) for related guidance.
 
-Avoid Latin loan words such as via, which are common in the English language.
+**Do not use Latin phrases.** Avoid Latin loan words and phrases such as via, ad-hoc, e.g., and i.e., which are common in English but reduce clarity for global audiences.
 
 ### Examples
 
@@ -212,12 +212,21 @@ The following list contains common words and phrases that you should avoid in ed
 
 | Do not use | Suggestion | Explanation |
 | --- | --- | --- |
+| "ad-hoc" | "improvised", "unplanned", "informal", "spontaneous" | Latin phrase meaning "for this purpose" |
 | "blast radius" | "affected scope" | jargon |
 | "ergo" | "therefore", "as a result", "so" | Latin word meaning "therefore" |
 | "etc." | " . . . and other {entities matching the description}." |  Latin abbreviation of "et cetera", which means "and the rest". |
+| "e.g." or "i.e." | "for example", "such as", "specifically", "that is" | Latin abbreviations for "exempli gratia" and "id est" |
 | "carte blanche" | "full permission", "admin access" | French phrase that translates to "blank document" and means "unlimited authority". |
 | "via" | Choose a more concrete word to describe the relationship. | Latin word meaning "by way of". |
-| "vice versa" | "conversely" | Latin word meaning "the other way around". |
+| "vice versa" | "conversely", "the reverse" | Latin phrase meaning "the other way around". |
+| "per se" | "by itself", "inherently", "as such" | Latin phrase meaning "by itself" |
+| "status quo" | "current state", "existing situation" | Latin phrase meaning "the state in which" |
+| "de facto" | "in practice", "actual" | Latin phrase meaning "in fact" |
+| "in lieu of" | "instead of", "in place of" | French/Latin phrase meaning "in place of" |
+| "a priori" | "beforehand", "in advance" | Latin phrase meaning "from the earlier" |
+| "post hoc" | "after the fact", "retrospective" | Latin phrase meaning "after this" |
+| "verbatim" | "word for word", "exactly" | Latin adverb meaning "word for word" |
 | "sanity check" | "verification" | jargon, ableist |
 | "smoke test" |  "preliminary test", "initial test" | jargon |
 
@@ -1625,10 +1634,12 @@ Always use the shortest word that has the same meaning.
 
 ## Do not use words or phrases borrowed from other languages, scientific words, or jargon words
 
-- **keywords**: diction, short words, simple words  
+- **keywords**: diction, short words, simple words
 - **content sets**: docs, WAF, tutorials, certifications
 
-Use simple, concrete words to help our global audiences understand our content. 
+Use simple, concrete words to help our global audiences understand our content.
+
+**Do not use Latin phrases.** Avoid Latin loan words and phrases such as via, ad-hoc, e.g., and i.e., which are common in English but reduce clarity for global audiences.
 
 ### Examples
 
@@ -1636,14 +1647,22 @@ The following list contains common words and phrases that you should avoid in ed
 
 | Do not use | Suggestion | Explanation |
 | --- | --- | --- |
+| ad-hoc | improvised, unplanned, informal, spontaneous | Latin phrase meaning "for this purpose" |
 | blast radius | affected scope | metaphor, jargon |
 | ergo | therefore, as a result, so | Latin word meaning "therefore" |
 | etc. | " . . . and other {entities matching the description}." | Latin abbreviation of "et cetera", which means "and the rest". |
-| e.g. or i.e. | "For example", "such as" | Abbreviation of Latin phrases used to give examples or restate what was previously said. |
+| e.g. or i.e. | "For example", "such as", "specifically", "that is" | Abbreviation of Latin phrases used to give examples or restate what was previously said. |
 | carte blanche | full permission, admin access | French word that literally translates to "blank document" and means "unlimited authority". |
 | via | Choose a more concrete word to describe the relationship. | Latin word meaning "by way of". |
-| vice versa | conversely | Latin word meaning "the other way around". |
-| sanity check | preliminary check, verification, dry run | jarbon, ableist |
+| vice versa | conversely, the reverse | Latin phrase meaning "the other way around". |
+| per se | by itself, inherently, as such | Latin phrase meaning "by itself" |
+| status quo | current state, existing situation | Latin phrase meaning "the state in which" |
+| de facto | in practice, actual | Latin phrase meaning "in fact" |
+| in lieu of | instead of, in place of | French/Latin phrase meaning "in place of" |
+| a priori | beforehand, in advance | Latin phrase meaning "from the earlier" |
+| post hoc | after the fact, retrospective | Latin phrase meaning "after this" |
+| verbatim | word for word, exactly | Latin adverb meaning "word for word" |
+| sanity check | preliminary check, verification, dry run | jargon, ableist |
 
 **Do:**
 
