@@ -9,13 +9,17 @@ docs/
 ├── CLAUDE.md              # Auto-loaded by Claude Code (skills reference)
 ├── AGENTS.md              # Main documentation standards and guidelines
 ├── .claude/               # Skills and automation
-│   ├── skills/           # 20 documentation skills
+│   ├── skills/           # Documentation skills
 │   └── agents/           # Specialized agents
 ├── templates/             # Reference materials
-│   ├── reference/        # Pattern files (CODE_PATTERNS, DOCUMENT_PATTERNS, etc.)
-│   ├── doc-templates/    # Document templates
-│   ├── REVIEW_PHASES.md  # 7-phase review process
-│   └── styleguide.md     # HashiCorp style guide
+│   ├── QUICK_REFERENCE.md    # Patterns, checklist, skills, troubleshooting
+│   ├── REVIEW_PHASES.md      # 7-phase review process
+│   ├── styleguide.md         # HashiCorp style guide
+│   ├── reference/
+│   │   ├── PATTERNS.md       # All documentation patterns (consolidated)
+│   │   ├── CONTENT_PATHS.md  # File organization
+│   │   └── TASK_AGENT_GUIDE.md # Agent usage guide
+│   └── doc-templates/        # Document templates
 └── docs/                  # Pillar documentation (optimize, secure, define, design)
 ```
 
@@ -33,8 +37,10 @@ When you start Claude Code in the `docs/` directory:
 | File | Purpose | When to Read |
 |------|---------|--------------|
 | **CLAUDE.md** | Skills directory | Quick skill reference |
-| **AGENTS.md** | Documentation standards, writing guidelines, patterns | Before writing or reviewing |
+| **AGENTS.md** | Documentation standards, writing guidelines | Before writing or reviewing |
+| **templates/QUICK_REFERENCE.md** | Quick patterns, checklist, skills, troubleshooting | Daily reference |
 | **templates/REVIEW_PHASES.md** | Step-by-step review workflow | When conducting reviews |
+| **templates/reference/PATTERNS.md** | All documentation patterns | For detailed pattern guidance |
 
 ## Quick Start Workflows
 
@@ -80,35 +86,25 @@ When you start Claude Code in the `docs/` directory:
 /seo-optimize docs/file.mdx
 ```
 
-## Available Skills (20 Total)
+## Key Skills (Most Common)
 
-### Review & Validation (10 skills)
-- `/review-doc` - Multi-phase documentation review
-- `/code-review` - Comprehensive code review
-- `/check-style` - Style guide compliance
-- `/check-hashicorp-style` - HashiCorp style validation
-- `/full-styleguide-check` - Complete style validation
-- `/quick-styleguide` - Quick style check
-- `/check-structure` - Document structure patterns
-- `/check-code-examples` - Code completeness
-- `/check-resources` - Resources section formatting
+### Essential Daily Skills
+- `/check-structure` - Validate document structure (auto-fix available)
+- `/check-hashicorp-style` - HashiCorp style validation (auto-fix available)
+- `/check-resources` - Resources section formatting (auto-fix available)
+- `/review-doc` - Comprehensive 7-phase review
+- `/full-styleguide-check` - Complete style guide validation
+
+### Document Creation
+- `/create-doc` - Create new documents with template
+- `/add-resources` - Enhance resources sections
+
+### Analysis & Optimization
+- `/doc-intelligence` - Documentation health dashboard
+- `/skill-advisor` - Context-aware skill recommendations
 - `/seo-optimize` - SEO and AI/LLM optimization
 
-### Content Management (4 skills)
-- `/cross-reference` - Add cross-document links
-- `/add-resources` - Enhance resources sections
-- `/fix-links` - Fix broken links
-- `/extract-examples` - Extract code examples
-
-### Document Creation (4 skills)
-- `/create-doc` - Create new documents
-- `/new-section` - Add sections to documents
-- `/create-jira` - Create Jira tickets
-- `/compare-docs` - Compare documents
-
-### Maintenance (2 skills)
-- `/update-paths` - Update file paths
-- `/update-redirects` - Update redirects
+**See CLAUDE.md for the complete list of all available skills**
 
 ## Getting Help
 
@@ -145,10 +141,13 @@ A: Use `/create-doc docs/path/file.mdx --interactive`
 A: See **templates/REVIEW_PHASES.md** for the 7-phase process.
 
 **Q: Where are code example patterns?**
-A: **templates/reference/CODE_PATTERNS.md** has tool-specific requirements.
+A: **templates/reference/PATTERNS.md** has all patterns including tool-specific requirements.
 
 **Q: How do I validate HashiCorp resources sections?**
-A: Use `/check-resources docs/file.mdx` or see **templates/reference/RESOURCES_PATTERNS.md**
+A: Use `/check-resources docs/file.mdx` or see **templates/reference/PATTERNS.md**
+
+**Q: Where's the quick reference for common issues?**
+A: See **templates/QUICK_REFERENCE.md** for patterns, checklist, and troubleshooting
 
 **Q: Can I use skills without Claude Code?**
 A: No, skills require Claude Code. But you can manually reference the pattern files in templates/reference/
@@ -164,10 +163,11 @@ A: No, skills require Claude Code. But you can manually reference the pattern fi
 ## File References Quick Guide
 
 When working from the docs/ directory:
-- Main guidelines: `AGENTS.md` (same directory)
+- Main guidelines: `AGENTS.md`
+- Quick reference: `templates/QUICK_REFERENCE.md` (patterns, checklist, troubleshooting)
 - Review process: `templates/REVIEW_PHASES.md`
 - Style guide: `templates/styleguide.md`
-- Pattern files: `templates/reference/*.md`
+- All patterns: `templates/reference/PATTERNS.md`
 - Document templates: `templates/doc-templates/*.md`
 
 ---

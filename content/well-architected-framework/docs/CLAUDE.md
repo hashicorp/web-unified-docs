@@ -20,35 +20,30 @@ Common skills for WAF documentation:
 **Review & Validation:**
 - `/review-doc` - Multi-phase documentation review (uses REVIEW_PHASES.md)
 - `/code-review` - Comprehensive code review for documentation
-- `/check-style` - Style guide compliance check (AGENTS.md Phase 4)
 - `/check-hashicorp-style` - HashiCorp official style guide validation (styleguide.md)
-- `/full-styleguide-check` - Complete HashiCorp style guide validation
 - `/quick-styleguide` - Quick style guide check for common issues
 - `/check-structure` - Document structure patterns (Why sections, lists, workflow connections)
 - `/check-code-examples` - Code example completeness and summaries
 - `/check-resources` - HashiCorp resources section formatting and links
 - `/check-consistency` - Ensure terminology and naming consistency across documents
 - `/seo-optimize` - SEO and AI/LLM optimization
-- `/validate-links` - Comprehensive link validation (internal, external, anchors)
 - `/persona-coverage` - Analyze balance between decision-maker and implementer personas
 - `/content-freshness` - Track content currency and detect outdated information
-- `/doc-health-dashboard` - Generate comprehensive health dashboard with visual indicators
+- `/gap-analysis` - Identify content and concept gaps in documentation
 
 **Content Management:**
-- `/cross-reference` - Add cross-document workflow links
 - `/add-resources` - Enhance HashiCorp resources sections
-- `/fix-links` - Fix broken internal/external links
-- `/find-duplicates` - Detect duplicate content and suggest consolidation
-- `/extract-examples` - Extract code examples from documents
 
 **Document Creation:**
 - `/create-doc` - Create new documents from templates
-- `/new-section` - Create new sections in existing documents
 - `/create-jira` - Create Jira tickets for documentation work
-- `/compare-docs` - Compare two documents for consistency
 
 **Maintenance:**
 - `/update-paths` - Update file paths across documents
 - `/update-redirects` - Update redirect configurations
+
+**Special Tools:**
+- `/qmd` - Search local documentation database for resources and examples
+- `/scrub` - Clean and normalize documentation content
 
 Run skills with the Skill tool or by name (e.g., "/review-doc").

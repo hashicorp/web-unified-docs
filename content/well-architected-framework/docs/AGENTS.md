@@ -252,9 +252,9 @@ HashiCorp is part of the IBM portfolio alongside Red Hat (Ansible, OpenShift) an
 
 ## SEO & AI/LLM Optimization
 
-**For complete SEO and AI/LLM optimization guidance, see [templates/REVIEW_PHASES.md Phase 5](./templates/REVIEW_PHASES.md).**
+**For complete SEO and AI/LLM optimization guidance, use the `/seo-optimize` skill.**
 
-Phase 5 covers:
+The skill covers:
 - Meta descriptions (150-160 characters)
 - Title optimization
 - First paragraph hooks
@@ -264,7 +264,7 @@ Phase 5 covers:
 - Topic sentences and relationships
 - Question-answer patterns
 
-Run Phase 5 review when optimizing for search engines and AI systems.
+Run `/seo-optimize <file>` when optimizing for search engines and AI systems.
 
 
 ## Resources
@@ -712,11 +712,7 @@ Different HashiCorp tools need different documentation approaches:
 - `/review-doc --phases 4-5` - Style and SEO optimization
 
 **For detailed pattern references:**
-- [templates/reference/DOCUMENT_PATTERNS.md](./templates/reference/DOCUMENT_PATTERNS.md) - Structure and Why sections
-- [templates/reference/CODE_PATTERNS.md](./templates/reference/CODE_PATTERNS.md) - Code examples by tool
-- [templates/reference/RESOURCES_PATTERNS.md](./templates/reference/RESOURCES_PATTERNS.md) - Link formatting
-- [templates/reference/TOOL_PATTERNS.md](./templates/reference/TOOL_PATTERNS.md) - Tool-specific requirements
-- [templates/reference/PITFALLS.md](./templates/reference/PITFALLS.md) - Common mistakes to avoid
+- [templates/reference/PATTERNS.md](./templates/reference/PATTERNS.md) - All documentation patterns (structure, code examples, resources, tools, pitfalls)
 
 ---
 
@@ -725,17 +721,12 @@ Different HashiCorp tools need different documentation approaches:
 ### Core Documentation Files
 - [templates/REVIEW_PHASES.md](./templates/REVIEW_PHASES.md) - Phase-based review process
 - [templates/styleguide.md](./templates/styleguide.md) - HashiCorp style guide (full)
-- [templates/styleguide-quick-reference.md](./templates/styleguide-quick-reference.md) - Quick style reference
+- [templates/QUICK_REFERENCE.md](./templates/QUICK_REFERENCE.md) - Quick reference: patterns, checklist, skills, troubleshooting
 
 ### Reference Materials (templates/reference/ folder)
-- [templates/reference/CODE_PATTERNS.md](./templates/reference/CODE_PATTERNS.md) - Code example patterns by tool
-- [templates/reference/DOCUMENT_PATTERNS.md](./templates/reference/DOCUMENT_PATTERNS.md) - Document structure patterns
-- [templates/reference/RESOURCES_PATTERNS.md](./templates/reference/RESOURCES_PATTERNS.md) - HashiCorp resources patterns
-- [templates/reference/TOOL_PATTERNS.md](./templates/reference/TOOL_PATTERNS.md) - Tool-specific documentation requirements
-- [templates/reference/PITFALLS.md](./templates/reference/PITFALLS.md) - Common pitfalls to avoid
+- [templates/reference/PATTERNS.md](./templates/reference/PATTERNS.md) - All documentation patterns (structure, code, resources, tools, pitfalls)
 - [templates/reference/CONTENT_PATHS.md](./templates/reference/CONTENT_PATHS.md) - Content organization and file paths
 - [templates/reference/TASK_AGENT_GUIDE.md](./templates/reference/TASK_AGENT_GUIDE.md) - Guide for using task agents
-- [templates/reference/REORGANIZATION_SUMMARY.md](./templates/reference/REORGANIZATION_SUMMARY.md) - Recent system improvements
 
 ### Document Templates (templates/doc-templates/ folder)
 - [templates/doc-templates/DOCUMENT_TEMPLATE.md](./templates/doc-templates/DOCUMENT_TEMPLATE.md) - Standard document template
