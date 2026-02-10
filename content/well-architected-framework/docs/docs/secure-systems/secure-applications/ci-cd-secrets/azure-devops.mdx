@@ -27,23 +27,78 @@ Before integrating Azure DevOps with Vault, you need the following:
 - Azure DevOps project with administrator access to configure pipelines and variable groups
 - A Vault authentication method configured
 - Vault policies that grant Azure DevOps the necessary read permissions for your secrets
-- We recommend TLS encryption between Azure DevOps agents and Vault
+- Network connectivity from Azure DevOps agents to Vault (for Microsoft-hosted agents, Vault must be publicly accessible or use Azure Private Link; for self-hosted agents, use private networking)
+- Firewall rules allowing outbound HTTPS (port 443) from pipeline agents to Vault
+- TLS encryption between Azure DevOps agents and Vault
 
 ## Choose an integration approach
 
-Azure DevOps supports several approaches for integrating with Vault. Choose one of the following approach that matches your security requirements and Azure infrastructure:
+Azure DevOps supports several approaches for integrating with Vault. Choose one of the following approaches that matches your security requirements and Azure infrastructure:
 
 | Approach | Setup Complexity | Security Posture | Azure AD Dependency | Agent Types Supported |
 |----------|-----------------|------------------|---------------------|----------------------|
 | AppRole | Low | Good | None | All (Microsoft-hosted, self-hosted) |
 | JWT/OIDC with Azure AD | Medium-High | Excellent | Required | All with Azure AD service connections |
 | Azure Managed Identity | Medium | Excellent | Required | Self-hosted on Azure VMs only |
+| Vault Agent | Medium | Excellent | Configurable | Self-hosted agents only |
 
 - **AppRole authentication:** Install Vault CLI on pipeline agents and authenticate using the [AppRole auth method](/vault/docs/auth/approle). AppRole works reliably with Azure DevOps Pipelines, requires minimal Azure AD configuration, and supports all agent types including Microsoft-hosted and self-hosted. Store the Role ID and Secret ID in Azure DevOps variable groups with secret masking enabled. AppRole requires managing two credentials (Role ID and Secret ID) but provides straightforward setup.
 
-- **JWT/OIDC authentication with Azure AD:** For Azure DevOps service connections with workload identity federation, authenticate to Vault through Azure AD service principals using the [JWT/OIDC auth method](/vault/docs/auth/jwt). JWT/OIDC auth method approach requires configuring Azure AD application registrations and service connections, but removes the need to manage Role IDs and Secret IDs in variable groups. OIDC authentication requires additional Azure AD setup and is more complex than AppRole, but provides the strongest security posture by eliminating long-lived credentials entirely. Use this approach when you need Azure AD-based identity for compliance or when integrating with other Azure AD-protected resources.
+- **JWT/OIDC authentication with Azure AD:** For Azure DevOps service connections with workload identity federation, authenticate to Vault through Azure AD service principals using the [JWT/OIDC auth method](/vault/docs/auth/jwt). JWT/OIDC authentication requires configuring Azure AD application registrations and service connections, but removes the need to manage Role IDs and Secret IDs in variable groups. OIDC authentication requires additional Azure AD setup and is more complex than AppRole, but provides the strongest security posture by eliminating long-lived credentials entirely. Use this approach when you need Azure AD-based identity for compliance or when integrating with other Azure AD-protected resources.
 
 - **Azure managed identity with Vault Azure auth:** For self-hosted pipeline agents running on Azure VMs, use the [Vault Azure auth method](/vault/docs/auth/azure) to authenticate with Azure managed identities. Vault validates the Azure AD JWT token and grants access based on subscription, resource group, and VM identity. Managed identities eliminate credential management entirely but require Azure VM infrastructure. Use this approach when you run self-hosted agents on Azure infrastructure and want to leverage Azure's native identity management.
+
+- **Vault Agent with auto-auth:** For self-hosted pipeline agents, deploy [Vault Agent](/vault/docs/agent-and-proxy/agent) as a sidecar process that handles authentication and token renewal automatically. The agent can use AppRole, Azure managed identity, or other auth methods, and exposes secrets via the agent cache. This approach reduces code complexity in pipelines and provides automatic token renewal. Use this approach when you want to simplify pipeline code and ensure tokens are always valid without manual renewal logic.
+
+## Security best practices
+
+When using AppRole authentication, follow these security practices:
+
+- **Rotate Secret IDs regularly:** Generate new Secret IDs monthly or after suspected compromise using `vault write -f auth/approle/role/azure-devops/secret-id`
+- **Use response wrapping:** Wrap Secret IDs when distributing them to reduce exposure: `vault write -wrap-ttl=1h -f auth/approle/role/azure-devops/secret-id`
+- **Limit Secret ID usage:** Configure `secret_id_num_uses` to limit how many times a Secret ID can be used
+- **Monitor authentication failures:** Set up audit logging and monitor for repeated authentication failures
+- **Revoke tokens after use:** Explicitly revoke Vault tokens when pipelines complete to minimize token lifetime
+
+## Configure Vault for Azure DevOps
+
+Configure AppRole to issue batch tokens with appropriate TTLs:
+
+```shell-session
+vault write auth/approle/role/azure-devops \
+    token_type=batch \
+    secret_id_ttl=10m \
+    token_ttl=1h \
+    token_max_ttl=2h \
+    token_policies="azure-devops-policy"
+```
+
+Configure `token_ttl` to be long enough for your pipeline to complete all tasks it needs in Vault.
+
+For complete AppRole setup instructions, see the [AppRole auth method documentation](/vault/docs/auth/approle).
+
+### Create Vault policies
+
+Create policies that grant least-privilege access to secrets your pipelines need. For example, a policy that allows reading database credentials:
+
+```hcl
+# Read database credentials
+path "database/creds/production" {
+  capabilities = ["read"]
+}
+
+# Read static secrets
+path "secret/data/azure-devops/*" {
+  capabilities = ["read"]
+}
+```
+
+Apply the policy:
+```shell-session
+vault policy write azure-devops-policy azure-devops-policy.hcl
+```
+
+For policy syntax and advanced features, see the [Vault policies documentation](/vault/docs/concepts/policies).
 
 ## Integration pattern
 
@@ -53,12 +108,14 @@ Azure DevOps pipelines authenticate to Vault, retrieve secrets, and set them as 
 1. **Retrieve secrets:** Pipeline calls Vault API to retrieve static secrets from KV engine or dynamic credentials from secrets engines
 1. **Use secrets:** Vault secrets are set as Azure DevOps pipeline variables with secret masking enabled and used in subsequent deployment tasks
 
-The following example shows a minimal AppRole authentication pattern for Azure DevOps pipelines:
+### Dynamic database credentials
+
+The following example shows retrieving dynamic database credentials that are automatically generated and revoked:
 
 ```yaml
 steps:
   - task: Bash@3
-    displayName: 'Retrieve secrets from Vault'
+    displayName: 'Retrieve dynamic database credentials from Vault'
     inputs:
       targetType: 'inline'
       script: |
@@ -67,15 +124,58 @@ steps:
         export VAULT_TOKEN=$(vault write -field=token auth/approle/login \
           role_id=$(VAULT_ROLE_ID) \
           secret_id=$(VAULT_SECRET_ID))
-        
-        # Retrieve database password from Vault
-        export DB_PASSWORD=$(vault kv get -field=password secret/database/production)
-        
-        # Set as masked pipeline variable for use in subsequent tasks
+
+        # Generate dynamic credentials (automatically revoked after lease expires)
+        CREDS=$(vault read -format=json database/creds/production)
+        DB_USERNAME=$(echo $CREDS | jq -r '.data.username')
+        DB_PASSWORD=$(echo $CREDS | jq -r '.data.password')
+
+        # Set as masked pipeline variables
+        echo "##vso[task.setvariable variable=DB_USERNAME;issecret=true]$DB_USERNAME"
         echo "##vso[task.setvariable variable=DB_PASSWORD;issecret=true]$DB_PASSWORD"
+
+        # Revoke token immediately after retrieving secrets
+        vault token revoke -self
 ```
 
-The pipeline authenticates to Vault using AppRole credentials stored in Azure DevOps variable groups, retrieves a database password from Vault's KV secrets engine, and sets it as a masked pipeline variable. Subsequent deployment tasks can reference the `DB_PASSWORD` variable securely.
+Dynamic credentials are automatically revoked when the Vault lease expires, limiting the exposure window. For database secrets engine configuration, see the [database secrets engine documentation](/vault/docs/secrets/databases).
+
+### Azure service principal credentials
+
+For Azure deployments, generate short-lived service principals dynamically. After authenticating to Vault (shown above), retrieve Azure credentials:
+
+```yaml
+# Generate dynamic Azure service principal
+AZURE_CREDS=$(vault read -format=json azure/creds/deploy-role)
+AZURE_CLIENT_ID=$(echo $AZURE_CREDS | jq -r '.data.client_id')
+AZURE_CLIENT_SECRET=$(echo $AZURE_CREDS | jq -r '.data.client_secret')
+
+# Set for Azure CLI tasks
+echo "##vso[task.setvariable variable=AZURE_CLIENT_ID;issecret=true]$AZURE_CLIENT_ID"
+echo "##vso[task.setvariable variable=AZURE_CLIENT_SECRET;issecret=true]$AZURE_CLIENT_SECRET"
+```
+
+The service principal is automatically deleted when the lease expires. For Azure secrets engine configuration, see the [Azure secrets engine documentation](/vault/docs/secrets/azure).
+
+## Enable audit logging
+
+Track all secret access from Azure DevOps pipelines by enabling Vault audit logging:
+
+```shell-session
+# Enable file audit device
+vault audit enable file file_path=/var/log/vault/audit.log
+```
+
+Each pipeline authentication and secret retrieval is logged with:
+- Timestamp
+- Pipeline identity (AppRole role name)
+- Secret path accessed
+- IP address of the agent
+
+Review audit logs regularly for:
+- Unexpected authentication attempts
+- Access to sensitive secret paths
+- Failed authentication from unknown IPs
 
 For complete implementation guidance, including Vault configuration, authentication method setup, and verification steps, review the following HashiCorp resources.
 
@@ -87,7 +187,20 @@ Vault authentication for CI/CD:
 - Learn about the [AppRole auth method](/vault/docs/auth/approle) for machine-to-machine authentication in pipelines
 - Learn about [JWT/OIDC auth method](/vault/docs/auth/jwt) for token-based pipeline authentication
 - Learn about the [Azure auth method](/vault/docs/auth/azure) for managed identity authentication
-- Configure the [Azure AD OIDC provider](/vault/docs/auth/jwt/oidc-providers/azuread) for Azure-specific OIDC configuration
+- Configure the [Azure AD OIDC provider](/vault/docs/auth/jwt/oidc-providers/azuread) for Azure-specific OIDC configuration with workload identity federation
+- Review the [Azure AD OIDC setup guide](/vault/docs/auth/jwt/oidc-providers/azuread#optional-azure-specific-configuration) for handling users with 200+ group memberships
+
+Azure DevOps and Vault integration:
+
+- Read [Integrating Azure DevOps Pipelines with HashiCorp Vault](https://www.hashicorp.com/en/blog/integrating-azure-devops-pipelines-with-hashicorp-vault) for practical integration guidance
+- Complete the [Integrate Terraform with Vault](/validated-patterns/terraform-integrate-vault) tutorial for end-to-end integration patterns
+- Review [AppRole Pull Authentication](/vault/tutorials/auth-methods/approle) tutorial for complete AppRole setup
+- Learn about [AppRole best practices](/vault/tutorials/auth-methods/approle-best-practices) for production deployments
+
+Batch tokens for CI/CD:
+
+- Understand [token types](/vault/docs/concepts/tokens#token-types) and why batch tokens are recommended for pipelines
+- Learn about [token lifecycle](/vault/docs/concepts/tokens) including TTLs and renewal
 
 Vault secrets and dynamic credentials:
 
@@ -96,6 +209,9 @@ Vault secrets and dynamic credentials:
 - Learn about [Azure secrets engine](/vault/docs/secrets/azure) for dynamic Azure service principals
 - Learn about [AWS secrets engine](/vault/docs/secrets/aws) for dynamic cloud credentials
 - Explore [database secrets engine](/vault/docs/secrets/databases) for dynamic database credentials
+- Configure [PostgreSQL dynamic credentials](/vault/docs/secrets/databases/postgresql) for Azure Database for PostgreSQL
+- Configure [MySQL dynamic credentials](/vault/docs/secrets/databases/mysql) for Azure Database for MySQL
+- Configure [MSSQL dynamic credentials](/vault/docs/secrets/databases/mssql) for Azure SQL Database
 
 ### External resources
 
