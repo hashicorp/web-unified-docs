@@ -1,0 +1,174 @@
+---
+page_title: Workload identity in Terraform Enterprise
+description: >-
+  Learn how workload identity uses OpenID Connect (OIDC) to allow Terraform
+  plans and applies to safely authenticate to external systems.
+source: terraform-docs-common
+---
+
+# Workload identity
+
+Dynamic Provider Credentials are powered by Terraform Workload Identity, which allows HCP Terraform to present information about a Terraform workload to an external system – like its workspace, organization, or whether it’s a plan or apply – and allows other external systems to verify that the information is accurate.
+
+You can think of it like an identity card for your Terraform runs: one that comes with a way for another system to easily verify whether the card is genuine. If the other system can confirm that the ID card is legitimate, it can trust the information the card contains and use it to decide whether to let that Terraform workload in the door.
+
+The “identity card” in this analogy is a workload identity token: a JSON Web Token (JWT) that contains information about a plan or apply, is signed by HCP Terraform’s private key, and expires at the end of the plan or apply timeout. Other systems can use HCP Terraform’s [public key](https://app.terraform.io/.well-known/jwks) to verify that a token that claims to be from HCP Terraform is genuine and has not been tampered with.
+
+This workflow is built on the [OpenID Connect protocol](https://openid.net/connect/), a trusted standard for verifying identity across different systems.
+
+## Token Specification
+
+Workload identity tokens contain useful metadata in their payloads, known as _claims_. This is the equivalent of the name and date of birth on an identity card. Once a cloud platform verifies a token using HCP Terraform’s public key, it can look at the claims in the identity token to either match it to the correct permissions or reject it.
+
+You don't need to understand the full token specification and what every claim means in order to use dynamic credentials, but it's useful for debugging.
+
+### Workspace run token structure
+
+The following example shows a decoded HCP Terraform workload identity token for a workspace run:
+
+#### Header
+
+```json
+{
+  "typ": "JWT",
+  "alg": "RS256",
+  "kid": "j-fFp9evPJAzV5I2_58HY5UvdCK6Q4LLB1rnPOUfQAk"
+}
+```
+
+#### Payload
+
+```json
+{
+  "jti": "1192426d-b525-4fde-9d42-f238be437bbd",
+  "iss": "https://app.terraform.io",
+  "aud": "my-example-audience",
+  "iat": 1650486122,
+  "nbf": 1650486117,
+  "exp": 1650486422,
+  "sub": "organization:my-org:project:Default Project:workspace:my-workspace:run_phase:apply",
+  "terraform_organization_id": "org-GRNbCjYNpBB6NEH9",
+  "terraform_organization_name": "my-org",
+  "terraform_project_id": "prj-vegSA59s1XPwMr2t",
+  "terraform_project_name": "Default Project",
+  "terraform_workspace_id": "ws-mbsd5E3Ktt5Rg2Xm",
+  "terraform_workspace_name": "my-workspace",
+  "terraform_full_workspace": "organization:my-org:project:Default Project:workspace:my-workspace",
+  "terraform_run_id": "run-X3n1AUXNGWbfECsJ",
+  "terraform_run_phase": "apply"
+}
+```
+
+This payload includes a number of standard claims defined in the OIDC spec as well as a number of custom claims for further customization.
+
+### Standard Claims
+
+| Claim              | Value                                                                                                                                                                                |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `jti` (JWT ID)     | A unique identifier for each JWT.                                                                                                                                                    |
+| `iss` (issuer)     | Full URL of HCP Terraform or the Terraform Enterprise instance which signed the JWT.                                                                                                 |
+| `iat` (issued at)  | Unix Timestamp when the JWT was issued. May be required by certain relying parties.                                                                                                  |
+| `nbf` (not before) | Unix Timestamp when the JWT can start being used. This will be the same as `iat` for tokens issued by HCP Terraform, but may be required by certain relying parties.                 |
+| `aud` (audience)   | Intended audience for the JWT. For example, `aws.workload.identity` for AWS. This can be customized.                                                                                 |
+| `exp` (expiration) | Unix Timestamp based on the timeout of the run phase that it was issued for. This will follow the `plan` and `apply` timeouts set at the organization and site admin level.          |
+| `sub` (subject)    | Fully qualified path to a workspace, followed by the run phase. For example: `organization:my-organization-name:project:Default Project:workspace:my-workspace-name:run_phase:apply` |
+
+### Custom claims for workspace runs
+
+The following custom claims are included in tokens for workspace runs:
+
+| Claim                                                  | Value                                                                                                                                                                                |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `terraform_organization_id` (organization ID)          | ID of the HCP Terraform organization performing the run.                                                                                                                             |
+| `terraform_organization_name` (organization name)      | Human-readable name of the HCP Terraform organization performing the run. Note that organization names can be changed.                                                               |
+| `terraform_project_id` (project ID)                    | ID of the HCP Terraform project performing the run.                                                                                                                                  |
+| `terraform_project_name` (project name)                | Human-readable name of the HCP Terraform project performing the run. Note that project names can be changed. The default project name is `Default Project`.                          |
+| `terraform_workspace_id` (workspace ID)                | ID of the HCP Terraform workspace performing the run.                                                                                                                                |
+| `terraform_workspace_name` (workspace name)            | Human-readable name of the HCP Terraform workspace performing the run. Note that workspace names can be changed.                                                                     |
+| `terraform_full_workspace` (fully qualified workspace) | Fully qualified path to a workspace. For example: `organization:my-organization-name:project:my-project-name:workspace:my-workspace-name`. Only included in workspace-scoped tokens. |
+| `terraform_run_id` (run ID)                            | ID of the run that the token was generated for. This is intended to aid in traceability and logging.                                                                                 |
+| `terraform_run_phase` (run phase)                      | The phase of the run this token was issued for. For example, `plan` or `apply`                                                                                                       |
+
+~> **Note**: The `terraform_full_workspace` claim is only included in workspace-scoped tokens. Organization-level operations, such as [module test runs](/terraform/enterprise/registry/test/dynamic-credentials), do not include this claim.
+
+## Module test run tokens
+
+When using [dynamic credentials for module testing](/terraform/enterprise/registry/test/dynamic-credentials), HCP Terraform generates workload identity tokens specifically for test runs. These tokens have a different structure and custom claims compared to workspace run tokens.
+
+### Module test token structure
+
+The following example shows a decoded module test workload identity token:
+
+#### Header
+
+```json
+{
+  "typ": "JWT",
+  "alg": "RS256",
+  "kid": "j-fFp9evPJAzV5I2_58HY5UvdCK6Q4LLB1rnPOUfQAk"
+}
+```
+
+#### Payload
+
+```json
+{
+  "jti": "a7c3f2e1-8b9a-4d5e-9f2c-1a3b5c7d9e0f",
+  "iss": "https://app.terraform.io",
+  "aud": "aws.workload.identity",
+  "iat": 1705334400,
+  "nbf": 1705334370,
+  "exp": 1705335000,
+  "sub": "organization:my-org:module:terraform-aws-vpc:operation:test_run",
+  "terraform_run_phase": "plan",
+  "terraform_organization_id": "org-abc123xyz",
+  "terraform_organization_name": "my-org",
+  "terraform_run_id": "trun-KFg8DSiRz4E37mdJ"
+}
+```
+
+### Module test subject claim format
+
+For module test runs, the subject claim has a different format than workspace runs:
+
+    organization:{ORGANIZATION_NAME}:module:{MODULE_NAME}:operation:test_run
+
+For example: `organization:my-org:module:terraform-aws-vpc:operation:test_run`
+
+This format allows you to create trust policies that scope permissions to specific organizations and modules.
+
+### Module test custom claims
+
+In addition to standard JWT claims, tokens for module test runs include these custom claims:
+
+| Claim                                             | Value                                                                                                   |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `terraform_run_phase` (run phase)                 | Always `"plan"` for module test runs. Test runs are read-only operations and always use the plan phase. |
+| `terraform_organization_id` (organization ID)     | ID of the HCP Terraform organization performing the test.                                               |
+| `terraform_organization_name` (organization name) | Human-readable name of the HCP Terraform organization performing the test.                              |
+| `terraform_run_id` (run ID)                       | ID of the test run that the token was generated for.                                                    |
+
+~> **Note**: Module test tokens do not include workspace, project, or `terraform_full_workspace` claims since tests run in the context of the module at the organization level, not within a specific workspace.
+
+### Token lifetime for module tests
+
+Module test tokens have a configurable time-to-live (TTL) separate from workspace run tokens:
+
+-   **Default TTL**: 10 minutes (600 seconds)
+-   **Valid range**: 5 to 30 minutes (300 to 1,800 seconds)
+-   **Configuration**: Organization owners can adjust the TTL using the Organizations API by setting the `module_test_token_ttl` attribute
+
+Each token includes a 30-second clock skew mitigation (`nbf` is 30 seconds before `iat`) to account for time differences between systems.
+
+For more information, refer to [Dynamic credentials for module testing](/terraform/enterprise/registry/test/dynamic-credentials).
+
+### Configuring Trust with your Cloud Platform
+
+When configuring the trust relationship between HCP Terraform and your cloud platform, you’ll set up conditions to validate the contents of the identity token provided by HCP Terraform against your roles and policies.
+
+At the minimum, you should match against the following claims:
+
+-   `aud` - the audience value of the token. This ensures that, for example, a workload identity token intended for AWS can’t be used to authenticate to Vault.
+-   `sub` - the subject value, which includes the organization and workspace performing the run. If you don’t match against at least the organization name, any organization or workspace on HCP Terraform will be able to access your cloud resources!
+
+You can match on as many claims as you want, depending on your cloud platform.
