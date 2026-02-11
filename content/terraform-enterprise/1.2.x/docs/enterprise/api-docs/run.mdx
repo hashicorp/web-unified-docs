@@ -1,0 +1,903 @@
+---
+page_title: /runs API reference for Terraform Enterprise
+description: >-
+  Use the Terraform Enterprise API's `/runs` endpoint to read, get, create,
+  apply, discard, execute, and cancel Terraform runs. You can also list a
+  workspace's or organization's runs.
+source: terraform-docs-common
+---
+
+[200]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/200
+
+[201]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/201
+
+[202]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/202
+
+[204]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/204
+
+[400]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/400
+
+[401]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401
+
+[403]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403
+
+[404]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404
+
+[409]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/409
+
+[412]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/412
+
+[422]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+
+[429]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429
+
+[500]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500
+
+[504]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/504
+
+[JSON API document]: /terraform/enterprise/api-docs#json-api-documents
+
+[JSON API error object]: https://jsonapi.org/format/#error-objects
+
+# Runs API reference
+
+Before working with the runs or configuration versions APIs, read the [API-driven run workflow](/terraform/enterprise/workspaces/run/api) page, which provides an overview of this workflow and walks through a simplified implementation.
+
+Performing a workspace run on a new configuration is a multi-step process.
+
+1.  [Create a configuration version on the workspace](/terraform/enterprise/api-docs/configuration-versions#create-a-configuration-version).
+2.  [Upload configuration files to the configuration version](/terraform/enterprise/api-docs/configuration-versions#upload-configuration-files).
+3.  [Create a run on the workspace](#create-a-run); this is done automatically when a configuration file is uploaded.
+4.  [Create and queue an apply on the run](#apply-a-run); if the run can't be auto-applied.
+
+Alternatively, you can create a run with a pre-existing configuration version, even one from another workspace. This is useful for promoting known good code from one workspace to another.
+
+## Attributes
+
+### Run States
+
+The run state is found in `data.attributes.status`, and you can reference the following list of possible states.
+
+| State                  | Description                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pending`              | The initial status of a run after creation.                                                                                                                                                                                                                                                                                                                                                                          |
+| `fetching`             | The run is waiting for HCP Terraform to fetch the configuration from VCS.                                                                                                                                                                                                                                                                                                                                            |
+| `fetching_completed`   | HCP Terraform has fetched the configuration from VCS and the run will continue.                                                                                                                                                                                                                                                                                                                                      |
+| `pre_plan_running`     | The pre-plan phase of the run is in progress.                                                                                                                                                                                                                                                                                                                                                                        |
+| `pre_plan_completed`   | The pre-plan phase of the run has completed.                                                                                                                                                                                                                                                                                                                                                                         |
+| `queuing`              | HCP Terraform is queuing the run to start the planning phase.                                                                                                                                                                                                                                                                                                                                                        |
+| `plan_queued`          | HCP Terraform is waiting for its backend services to start the plan.                                                                                                                                                                                                                                                                                                                                                 |
+| `planning`             | The planning phase of a run is in progress.                                                                                                                                                                                                                                                                                                                                                                          |
+| `planned`              | The planning phase of a run has completed.                                                                                                                                                                                                                                                                                                                                                                           |
+| `cost_estimating`      | The cost estimation phase of a run is in progress.                                                                                                                                                                                                                                                                                                                                                                   |
+| `cost_estimated`       | The cost estimation phase of a run has completed.                                                                                                                                                                                                                                                                                                                                                                    |
+| `policy_checking`      | The sentinel policy checking phase of a run is in progress.                                                                                                                                                                                                                                                                                                                                                          |
+| `policy_override`      | A sentinel policy has soft failed, and a user can override it to continue the run.                                                                                                                                                                                                                                                                                                                                   |
+| `policy_soft_failed`   | A sentinel policy has soft failed for a plan-only run. This is a final state.                                                                                                                                                                                                                                                                                                                                        |
+| `policy_checked`       | The sentinel policy checking phase of a run has completed.                                                                                                                                                                                                                                                                                                                                                           |
+| `confirmed`            | A user has confirmed the plan.                                                                                                                                                                                                                                                                                                                                                                                       |
+| `post_plan_running`    | The post-plan phase of the run is in progress.                                                                                                                                                                                                                                                                                                                                                                       |
+| `post_plan_completed`  | The post-plan phase of the run has completed.                                                                                                                                                                                                                                                                                                                                                                        |
+| `planned_and_finished` | The run is completed. This status only exists for plan-only runs and runs that produce a plan with no changes to apply. This is a final state.                                                                                                                                                                                                                                                                       |
+| `planned_and_saved`    | The run has finished its planning, checks, and estimates, and can be confirmed for apply. This status is only used for saved plan runs.                                                                                                                                                                                                                                                                              |
+| `apply_queued`         | Once the changes in the plan have been confirmed, the run will transition to `apply_queued`. This status indicates that the run should start as soon as the backend services that run terraform have available capacity. In HCP Terraform, you should seldom see this status, as our aim is to always have capacity. However, in Terraform Enterprise this status will be more common due to the self-hosted nature. |
+| `applying`             | Terraform is applying the changes specified in the plan.                                                                                                                                                                                                                                                                                                                                                             |
+| `applied`              | Terraform has applied the changes specified in the plan.                                                                                                                                                                                                                                                                                                                                                             |
+| `discarded`            | The run has been discarded. This is a final state.                                                                                                                                                                                                                                                                                                                                                                   |
+| `errored`              | The run has errored. This is a final state.                                                                                                                                                                                                                                                                                                                                                                          |
+| `canceled`             | The run has been canceled.                                                                                                                                                                                                                                                                                                                                                                                           |
+| `force_canceled`       | A workspace admin forcefully canceled the run.                                                                                                                                                                                                                                                                                                                                                                       |
+
+### Run Operations
+
+The run operation specifies the Terraform execution mode. You can reference the following list of possible execution modes and use them as query parameters in the [workspace](/terraform/enterprise/api-docs/run#list-runs-in-a-workspace) and [organization](/terraform/enterprise/api-docs/run#list-runs-in-a-organization) runs lists.
+
+| Operation        | Description                                                                                                                                                                              |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `plan_only`      | The run does not have an apply phase. This is also called a [_speculative plan_](/terraform/enterprise/workspaces/run/modes-and-options#plan-only-speculative-plan).                     |
+| `plan_and_apply` | The run includes both plan and apply phases.                                                                                                                                             |
+| `save_plan`      | The run is a saved plan run. It can include both plan and apply phases, but only becomes the workspace's current run if a user chooses to apply it.                                      |
+| `refresh_only`   | The run should update Terraform state, but not make changes to resources.                                                                                                                |
+| `destroy`        | The run should destroy all objects, regardless of configuration changes.                                                                                                                 |
+| `empty_apply`    | The run should perform an apply with no changes to resources. This is most commonly used to [upgrade terraform state versions](/terraform/enterprise/workspaces/state#upgrading-state).  |
+| `action_only`    | The run is a `refresh_only` run that contains at least one [action invocation](/terraform/plugin/framework/actions). It updates state but does not create, change, or destroy resources. |
+
+### Run Sources
+
+You can use the following sources as query parameters in [workspace](/terraform/enterprise/api-docs/run#list-runs-in-a-workspace) and [organization](/terraform/enterprise/api-docs/run#list-runs-in-a-organization) runs lists.
+
+| Source                      | Description                                                                             |
+| --------------------------- | --------------------------------------------------------------------------------------- |
+| `tfe-ui`                    | Indicates a run was queued from HCP Terraform UI.                                       |
+| `tfe-api`                   | Indicates a run was queued from HCP Terraform API.                                      |
+| `tfe-configuration-version` | Indicates a run was queued from a Configuration Version, triggered from a VCS provider. |
+
+### Run Status Groups
+
+The run status group specifies a collection of run states by logical category.
+
+| Group         | Description                                                                                                                                                                                |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `non_final`   | Inclusive of runs that are currently running, require user confirmation, or are queued/pending.                                                                                            |
+| `final`       | Inclusive of runs that have reached their final and terminal state.                                                                                                                        |
+| `discardable` | Inclusive of runs whose state falls under the following: `planned`, `planned_and_saved`, `cost_estimated`, `policy_checked`, `policy_override`, `post_plan_running`, `post_plan_completed` |
+
+## Create a Run
+
+`POST /runs`
+
+A run performs a plan and apply, using a configuration version and the workspace’s current variables. You can specify a configuration version when creating a run; if you don’t provide one, the run defaults to the workspace’s most recently used version. (A configuration version is “used” when it is created or used for a run in this workspace.)
+
+Creating a run requires permission to queue plans for the specified workspace. ([More about permissions.](/terraform/enterprise/users-teams-organizations/permissions))
+
+When creating a run, you may optionally provide a list of variable objects containing key and value attributes. These values apply to that run specifically and take precedence over variables with the same key applied to the workspace(e.g., variable sets). Refer to [Variable Precedence](/terraform/enterprise/variables#precedence) for more information. All values must be expressed as an HCL literal in the same syntax you would use when writing Terraform code. Refer to [Types](/terraform/language/expressions/types#types) in the Terraform documentation for more details.
+
+Setting `debugging_mode: true` enables debugging mode for the queued run only. This is equivalent to setting the `TF_LOG` environment variable to `TRACE` for this run. See [Debugging Terraform](/terraform/internals/debugging) for more information.
+
+**Sample Run Variables:**
+
+```json
+"attributes": {
+  "variables": [
+    { "key": "replicas", "value": "2" },
+    { "key": "access_key", "value": "\"ABCDE12345\"" }
+  ]
+}
+```
+
+[permissions-citation]: #intentionally-unused---keep-for-maintainers
+
+-> **Note:** This endpoint cannot be accessed with [organization tokens](/terraform/enterprise/users-teams-organizations/api-tokens#organization-api-tokens). You must access it with a [user token](/terraform/enterprise/users-teams-organizations/users#api-tokens) or [team token](/terraform/enterprise/users-teams-organizations/api-tokens#team-api-tokens).
+
+### Request Body
+
+This POST endpoint requires a JSON object with the following properties as a request payload.
+
+Properties without a default value are required.
+
+| Key path                                           | Type                 | Default                                                                                                                | Description                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| -------------------------------------------------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `data.attributes.allow-empty-apply`                | bool                 | none                                                                                                                   | Specifies whether Terraform can apply the run even when the plan [contains no changes](/terraform/enterprise/workspaces/run/modes-and-options#allow-empty-apply). Use this property to [upgrade state](/terraform/enterprise/workspaces/state#upgrading-state) after upgrading a workspace to a new terraform version.                                                                                                             |
+| `data.attributes.allow-config-generation`          | bool                 | `false`                                                                                                                | Specifies whether Terraform can [generate resource configuration](/terraform/language/import/generating-configuration) when planning to import new resources. When set to `false`, Terraform returns an error when `import` blocks do not have a corresponding `resource` block.                                                                                                                                                   |
+| `data.attributes.auto-apply`                       | bool                 | Defaults to the [Auto Apply](/terraform/enterprise/workspaces/settings#auto-apply-and-manual-apply) workspace setting. | Determines if Terraform automatically applies the configuration on a successful `terraform plan`.                                                                                                                                                                                                                                                                                                                                  |
+| `data.attributes.debugging-mode`                   | bool                 | `false`                                                                                                                | When set to `true`, enables verbose logging for the queued plan.                                                                                                                                                                                                                                                                                                                                                                   |
+| `data.attributes.is-destroy`                       | bool                 | `false`                                                                                                                | When set to `true`, the plan destroys all provisioned resources. Mutually exclusive with `refresh-only`.                                                                                                                                                                                                                                                                                                                           |
+| `data.attributes.message`                          | string               | `"Queued manually via the Terraform Enterprise API"`                                                                   | Specifies the message associated with this run.                                                                                                                                                                                                                                                                                                                                                                                    |
+| `data.attributes.refresh`                          | bool                 | `true`                                                                                                                 | Specifies whether or not to refresh the state before a plan.                                                                                                                                                                                                                                                                                                                                                                       |
+| `data.attributes.refresh-only`                     | bool                 | `false`                                                                                                                | When set to `true`,  this run  refreshes the state without modifying any resources. Mutually exclusive with `is-destroy`.                                                                                                                                                                                                                                                                                                          |
+| `data.attributes.replace-addrs`                    | array\[string]       |                                                                                                                        | Specifies an optional list of resource addresses to be passed to the `-replace` flag.                                                                                                                                                                                                                                                                                                                                              |
+| `data.attributes.target-addrs`                     | array\[string]       |                                                                                                                        | Specifies an optional list of resource addresses to be passed to the `-target` flag.                                                                                                                                                                                                                                                                                                                                               |
+| `data.attributes.variables`                        | array\[{key, value}] | (empty array)                                                                                                          | Specifies an optional list of run-specific variable values. Refer to [Run-Specific Variables](/terraform/enterprise/variables/managing-variables#run-specific-variables) for details.                                                                                                                                                                                                                                              |
+| `data.attributes.plan-only`                        | bool                 | (from configuration version)                                                                                           | Specifies if this is a [speculative, plan-only](/terraform/enterprise/workspaces/run/modes-and-options#plan-only-speculative-plan) run that Terraform cannot apply. Often used in conjunction with terraform-version in order to test whether an upgrade would succeed.                                                                                                                                                            |
+| `data.attributes.save-plan`                        | bool                 | `false`                                                                                                                | When set to `true`, the run is executed as a `save plan` run. A `save plan` run plans and checks the configuration without becoming the workspace's current run. These run types only becomes the current run if you confirm that you want to apply them when prompted. When creating new [configuration versions](/terraform/enterprise/api-docs/configuration-versions) for saved plan runs, be sure to make them `provisional`. |
+| `data.attributes.terraform-version`                | string               | none                                                                                                                   | Specifies the Terraform version to use in this run. Only valid for plan-only runs; must be a valid Terraform version available to the organization.                                                                                                                                                                                                                                                                                |
+| `data.relationships.workspace.data.id`             | string               | none                                                                                                                   | Specifies the workspace ID to execute the run in.                                                                                                                                                                                                                                                                                                                                                                                  |
+| `data.relationships.configuration-version.data.id` | string               | none                                                                                                                   | Specifies the configuration version to use for this run. If the `configuration-version` object is omitted, Terraform uses the workspace's latest configuration version to create the run .                                                                                                                                                                                                                                         |
+
+| Status  | Response                               | Reason                                                                      |
+| ------- | -------------------------------------- | --------------------------------------------------------------------------- |
+| [201][] | [JSON API document][] (`type: "runs"`) | Successfully created a run                                                  |
+| [404][] | [JSON API error object][]              | Organization or workspace not found, or user unauthorized to perform action |
+| [422][] | [JSON API error object][]              | Malformed request body (missing attributes, wrong types, etc.)              |
+
+### Sample Payload
+
+```json
+{
+  "data": {
+    "attributes": {
+      "message": "Custom message"
+    },
+    "type":"runs",
+    "relationships": {
+      "workspace": {
+        "data": {
+          "type": "workspaces",
+          "id": "ws-LLGHCr4SWy28wyGN"
+        }
+      },
+      "configuration-version": {
+        "data": {
+          "type": "configuration-versions",
+          "id": "cv-n4XQPBa2QnecZJ4G"
+        }
+      }
+    }
+  }
+}
+```
+
+### Sample Request
+
+```shell
+curl \
+  --header "Authorization: Bearer $TOKEN" \
+  --header "Content-Type: application/vnd.api+json" \
+  --request POST \
+  --data @payload.json \
+  https://app.terraform.io/api/v2/runs
+```
+
+### Sample Response
+
+```json
+{
+  "data": {
+    "id": "run-CZcmD7eagjhyX0vN",
+    "type": "runs",
+    "attributes": {
+      "actions": {
+        "is-cancelable": true,
+        "is-confirmable": false,
+        "is-discardable": false,
+        "is-force-cancelable": false
+      },
+      "canceled-at": null,
+      "created-at": "2021-05-24T07:38:04.171Z",
+      "has-changes": false,
+      "auto-apply": false,
+      "allow-empty-apply": false,
+      "allow-config-generation": false,
+      "is-destroy": false,
+      "message": "Custom message",
+      "plan-only": false,
+      "source": "tfe-api",
+      "status-timestamps": {
+        "plan-queueable-at": "2021-05-24T07:38:04+00:00"
+      },
+      "status": "pending",
+      "trigger-reason": "manual",
+      "target-addrs": null,
+      "permissions": {
+        "can-apply": true,
+        "can-cancel": true,
+        "can-comment": true,
+        "can-discard": true,
+        "can-force-execute": true,
+        "can-force-cancel": true,
+        "can-override-policy-check": true
+      },
+      "refresh": false,
+      "refresh-only": false,
+      "replace-addrs": null,
+      "save-plan": false,
+      "variables": []
+    },
+    "relationships": {
+      "apply": {...},
+      "comments": {...},
+      "configuration-version": {...},
+      "cost-estimate": {...},
+      "created-by": {...},
+      "input-state-version": {...},
+      "plan": {...},
+      "run-events": {...},
+      "policy-checks": {...},
+      "workspace": {...},
+      "workspace-run-alerts": {...}
+    },
+    "links": {
+      "self": "/api/v2/runs/run-CZcmD7eagjhyX0vN"
+    }
+  }
+}
+```
+
+## Apply a Run
+
+`POST /runs/:run_id/actions/apply`
+
+| Parameter | Description         |
+| --------- | ------------------- |
+| `run_id`  | The run ID to apply |
+
+Applies a run that is paused waiting for confirmation after a plan. This includes runs in the "needs confirmation" and "policy checked" states. This action is only required for runs that can't be auto-applied. Plans can be auto-applied if the auto-apply setting is enabled on the workspace and the plan was queued by a new VCS commit or by a user with permission to apply runs for the workspace.
+
+-> **Note:** If the run has a soft failed sentinel policy, you will need to [override the policy check](/terraform/enterprise/api-docs/policy-checks#override-policy) before Terraform can apply the run. You can find policy check details in the `relationships` section of the [run details endpoint](#get-run-details) response.
+
+Applying a run requires permission to apply runs for the workspace. ([More about permissions.](/terraform/enterprise/users-teams-organizations/permissions))
+
+[permissions-citation]: #intentionally-unused---keep-for-maintainers
+
+This endpoint queues the request to perform an apply; the apply might not happen immediately.
+
+Since this endpoint represents an action (not a resource), it does not return any object in the response body.
+
+-> **Note:** This endpoint cannot be accessed with [organization tokens](/terraform/enterprise/users-teams-organizations/api-tokens#organization-api-tokens). You must access it with a [user token](/terraform/enterprise/users-teams-organizations/users#api-tokens) or [team token](/terraform/enterprise/users-teams-organizations/api-tokens#team-api-tokens).
+
+| Status  | Response                  | Reason(s)                                               |
+| ------- | ------------------------- | ------------------------------------------------------- |
+| [202][] | none                      | Successfully queued an apply request.                   |
+| [409][] | [JSON API error object][] | Run was not paused for confirmation; apply not allowed. |
+
+### Request Body
+
+This POST endpoint allows an optional JSON object with the following properties as a request payload.
+
+| Key path  | Type   | Default | Description                        |
+| --------- | ------ | ------- | ---------------------------------- |
+| `comment` | string | `null`  | An optional comment about the run. |
+
+### Sample Payload
+
+This payload is optional, so the `curl` command will work without the `--data @payload.json` option too.
+
+```json
+{
+  "comment":"Looks good to me"
+}
+```
+
+### Sample Request
+
+```shell
+curl \
+  --header "Authorization: Bearer $TOKEN" \
+  --header "Content-Type: application/vnd.api+json" \
+  --request POST \
+  --data @payload.json \
+  https://app.terraform.io/api/v2/runs/run-DQGdmrWMX8z9yWQB/actions/apply
+```
+
+## List Runs in a Workspace
+
+`GET /workspaces/:workspace_id/runs`
+
+| Parameter      | Description                        |
+| -------------- | ---------------------------------- |
+| `workspace_id` | The workspace ID to list runs for. |
+
+By default, `plan_only` runs will be excluded from the results. To see all runs, use `filter[operation]` with all available operations included as a comma-separated list.
+This endpoint has an adjusted rate limit of 30 requests per minute. Note that most endpoints are limited to 30 requests per second.
+
+| Status  | Response                                         | Reason                   |
+| ------- | ------------------------------------------------ | ------------------------ |
+| [200][] | Array of [JSON API document][]s (`type: "runs"`) | Successfully listed runs |
+
+### Query Parameters
+
+This endpoint supports pagination [with standard URL query parameters](/terraform/enterprise/api-docs#query-parameters); remember to percent-encode `[` as `%5B` and `]` as `%5D` if your tooling doesn't automatically encode URLs.
+
+| Parameter                  | Description                                                                                                                                                                                                                                                            | Required |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| `page[number]`             | If omitted, the endpoint returns the first page.                                                                                                                                                                                                                       | Optional |
+| `page[size]`               | If omitted, the endpoint returns 20 runs per page.                                                                                                                                                                                                                     | Optional |
+| `filter[operation]`        | A comma-separated list of run operations. The result lists runs that perform one of these operations. For details on options, refer to [Run operations](/terraform/enterprise/api-docs/run#run-operations).                                                            | Optional |
+| `filter[status]`           | A comma-separated list of run statuses. The result lists runs that are in one of the statuses you specify. For details on options, refer to [Run states](/terraform/enterprise/api-docs/run#run-states).                                                               | Optional |
+| `filter[agent_pool_names]` | A comma-separated list of agent pool names. The result lists runs that use one of the agent pools you specify.                                                                                                                                                         | Optional |
+| `filter[source]`           | A comma-separated list of run sources. The result lists runs that came from one of the sources you specify. Options are listed in [Run Sources](/terraform/enterprise/api-docs/run#run-sources).                                                                       | Optional |
+| `filter[status_group]`     | A single status group. The result lists runs whose status falls under this status group. For details on options, refer to [Run status groups](/terraform/enterprise/api-docs/run#run-status-groups).                                                                   | Optional |
+| `filter[timeframe]`        | A single year period. The result lists runs that were created within the year you specify. An integer year or the string "year" for the past year are valid values. If omitted, the endpoint returns all runs since the creation of the workspace.                     | Optional |
+| `search[user]`             | Searches for runs that match the VCS username you supply.                                                                                                                                                                                                              | Optional |
+| `search[commit]`           | Searches for runs that match the commit sha you specify.                                                                                                                                                                                                               | Optional |
+| `search[basic]`            | Searches for runs that match the VCS username, commit sha, run_id, or run message your specify. HCP Terraform prioritizes `search[commit]` or `search[user]` and ignores `search[basic]` in favor of the higher priority parameters if you include them in your query. | Optional |
+
+### Sample Request
+
+```shell
+curl \
+  --header "Authorization: Bearer $TOKEN" \
+  --header "Content-Type: application/vnd.api+json" \
+  https://app.terraform.io/api/v2/workspaces/ws-yF7z4gyEQRhaCNG9/runs
+```
+
+### Sample Response
+
+```json
+{
+  "data": [
+    {
+      "id": "run-CZcmD7eagjhyX0vN",
+      "type": "runs",
+      "attributes": {
+        "actions": {
+          "is-cancelable": true,
+          "is-confirmable": false,
+          "is-discardable": false,
+          "is-force-cancelable": false
+        },
+        "canceled-at": null,
+        "created-at": "2021-05-24T07:38:04.171Z",
+        "has-changes": false,
+        "auto-apply": false,
+        "allow-empty-apply": false,
+        "allow-config-generation": false,
+        "is-destroy": false,
+        "message": "Custom message",
+        "plan-only": false,
+        "source": "tfe-api",
+        "status-timestamps": {
+          "plan-queueable-at": "2021-05-24T07:38:04+00:00"
+        },
+        "status": "pending",
+        "trigger-reason": "manual",
+        "target-addrs": null,
+        "permissions": {
+          "can-apply": true,
+          "can-cancel": true,
+          "can-comment": true,
+          "can-discard": true,
+          "can-force-execute": true,
+          "can-force-cancel": true,
+          "can-override-policy-check": true
+        },
+        "refresh": false,
+        "refresh-only": false,
+        "replace-addrs": null,
+        "save-plan": false,
+        "variables": []
+      },
+      "relationships": {
+        "apply": {...},
+        "comments": {...},
+        "configuration-version": {...},
+        "cost-estimate": {...},
+        "created-by": {...},
+        "input-state-version": {...},
+        "plan": {...},
+        "run-events": {...},
+        "policy-checks": {...},
+        "workspace": {...},
+        "workspace-run-alerts": {...}
+      },
+      "links": {
+        "self": "/api/v2/runs/run-bWSq4YeYpfrW4mx7"
+      }
+    },
+    {...}
+  ],
+  "links": {
+    "first": "https://app.terraform.io/api/v2/workspaces/ws-yF7z4gyEQRhaCNG9/runs?page[number]=1&page[size]=20",
+    "last": "https://app.terraform.io/api/v2/workspaces/ws-yF7z4gyEQRhaCNG9/runs?page[number]=19206&page[size]=20",
+    "self": "https://app.terraform.io/api/v2/workspaces/ws-yF7z4gyEQRhaCNG9/runs?page[number]=2&page[size]=20",
+    "prev": "https://app.terraform.io/api/v2/workspaces/ws-yF7z4gyEQRhaCNG9/runs?page[number]=1&page[size]=20",
+    "next": "https://app.terraform.io/api/v2/workspaces/ws-yF7z4gyEQRhaCNG9/runs?page[number]=3&page[size]=20"
+  },
+  "meta": {
+    "pagination": {
+      "current-page": 2,
+      "next-page": 3,
+      "prev-page": 1,
+      "page-size": 20,
+      "total-count": 384105,
+      "total-pages": 19206
+    }
+  }
+}
+```
+
+## List Runs in an Organization
+
+`GET /organizations/:organization_name/runs`
+
+| Parameter           | Description                             |
+| ------------------- | --------------------------------------- |
+| `organization_name` | The organization name to list runs for. |
+
+This endpoint has an adjusted rate limit of 30 requests per minute. Note that most endpoints are limited to 30 requests per second.
+
+Note that this endpoint differs from others in the pagination metadata included in the response, such as the exclusion of the typical `total-count` and `total-pages`. See the Sample Response below for more details.
+
+| Status  | Response                                         | Reason                   |
+| ------- | ------------------------------------------------ | ------------------------ |
+| [200][] | Array of [JSON API document][]s (`type: "runs"`) | Successfully listed runs |
+
+### Query Parameters
+
+This endpoint supports pagination [with standard URL query parameters](/terraform/enterprise/api-docs#query-parameters); remember to percent-encode `[` as `%5B` and `]` as `%5D` if your tooling doesn't automatically encode URLs.
+
+| Parameter                  | Description                                                                                                                                                                                                                                                            | Required |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| `page[number]`             | If omitted, the endpoint returns the first page.                                                                                                                                                                                                                       | Optional |
+| `page[size]`               | If omitted, the endpoint returns 20 runs per page.                                                                                                                                                                                                                     | Optional |
+| `filter[operation]`        | A comma-separated list of run operations. The result lists runs that perform one of these operations. For details on options, refer to [Run operations](/terraform/enterprise/api-docs/run#run-operations).                                                            | Optional |
+| `filter[status]`           | A comma-separated list of run statuses. The result lists runs that are in one of the statuses you specify. For details on options, refer to [Run states](/terraform/enterprise/api-docs/run#run-states).                                                               | Optional |
+| `filter[agent_pool_names]` | A comma-separated list of agent pool names. The result lists runs that use one of the agent pools you specify.                                                                                                                                                         | Optional |
+| `filter[workspace_names]`  | A comma-separated list of workspace names. The result lists runs that belong to one of the workspaces your specify.                                                                                                                                                    | Optional |
+| `filter[source]`           | A comma-separated list of run sources. The result lists runs that came from one of the sources you specify. Options are listed in [Run Sources](/terraform/enterprise/api-docs/run#run-sources).                                                                       | Optional |
+| `filter[status_group]`     | A single status group. The result lists runs whose status falls under this status group. For details on options, refer to [Run status groups](/terraform/enterprise/api-docs/run#run-status-groups).                                                                   | Optional |
+| `filter[timeframe]`        | A single year period. The result lists runs that were created within the year you specify. An integer year or the string "year" for the past year are valid values. If omitted, the endpoint returns runs created in the last year.                                    | Optional |
+| `search[user]`             | Searches for runs that match the VCS username you supply.                                                                                                                                                                                                              | Optional |
+| `search[commit]`           | Searches for runs that match the commit sha you specify.                                                                                                                                                                                                               | Optional |
+| `search[basic]`            | Searches for runs that match the VCS username, commit sha, run_id, or run message your specify. HCP Terraform prioritizes `search[commit]` or `search[user]` and ignores `search[basic]` in favor of the higher priority parameters if you include them in your query. | Optional |
+
+### Sample Request
+
+```shell
+curl \
+  --header "Authorization: Bearer $TOKEN" \
+  --header "Content-Type: application/vnd.api+json" \
+  https://app.terraform.io/api/v2/organizations/hashicorp/runs
+```
+
+### Sample Response
+
+```json
+{
+  "data": [
+    {
+      "id": "run-CZcmD7eagjhyX0vN",
+      "type": "runs",
+      "attributes": {
+        "actions": {
+          "is-cancelable": true,
+          "is-confirmable": false,
+          "is-discardable": false,
+          "is-force-cancelable": false
+        },
+        "canceled-at": null,
+        "created-at": "2021-05-24T07:38:04.171Z",
+        "has-changes": false,
+        "auto-apply": false,
+        "allow-empty-apply": false,
+        "allow-config-generation": false,
+        "is-destroy": false,
+        "message": "Custom message",
+        "plan-only": false,
+        "source": "tfe-api",
+        "status-timestamps": {
+          "plan-queueable-at": "2021-05-24T07:38:04+00:00"
+        },
+        "status": "pending",
+        "trigger-reason": "manual",
+        "target-addrs": null,
+        "permissions": {
+          "can-apply": true,
+          "can-cancel": true,
+          "can-comment": true,
+          "can-discard": true,
+          "can-force-execute": true,
+          "can-force-cancel": true,
+          "can-override-policy-check": true
+        },
+        "refresh": false,
+        "refresh-only": false,
+        "replace-addrs": null,
+        "save-plan": false,
+        "variables": []
+      },
+      "relationships": {
+        "apply": {...},
+        "comments": {...},
+        "configuration-version": {...},
+        "cost-estimate": {...},
+        "created-by": {...},
+        "input-state-version": {...},
+        "plan": {...},
+        "run-events": {...},
+        "policy-checks": {...},
+        "workspace": {...},
+        "workspace-run-alerts": {...}
+      },
+      "links": {
+        "self": "/api/v2/runs/run-bWSq4YeYpfrW4mx7"
+      }
+    },
+    {...}
+  ],
+  "links": {
+    "self": "https://app.terraform.io/api/v2/organizations/hashicorp/runs?page[number]=2&page[size]=20",
+    "prev": "https://app.terraform.io/api/v2/organizations/hashicorp/runs?page[number]=1&page[size]=20",
+    "next": "https://app.terraform.io/api/v2/organizations/hashicorp/runs?page[number]=3&page[size]=20"
+  },
+  "meta": {
+    "pagination": {
+      "current-page": 1,
+      "next-page": 2,
+      "prev-page": null,
+      "page-size": 20
+    }
+  }
+}
+```
+
+## Get run details
+
+`GET /runs/:run_id`
+
+| Parameter | Description        |
+| --------- | ------------------ |
+| `:run_id` | The run ID to get. |
+
+This endpoint is used for showing details of a specific run.
+
+| Status  | Response                               | Reason                               |
+| ------- | -------------------------------------- | ------------------------------------ |
+| [200][] | [JSON API document][] (`type: "runs"`) | Success                              |
+| [404][] | [JSON API error object][]              | Run not found or user not authorized |
+
+### Sample Request
+
+```shell
+curl \
+  --header "Authorization: Bearer $TOKEN" \
+  https://app.terraform.io/api/v2/runs/run-bWSq4YeYpfrW4mx7
+```
+
+### Sample Response
+
+```json
+{
+  "data": {
+    "id": "run-CZcmD7eagjhyX0vN",
+    "type": "runs",
+    "attributes": {
+      "actions": {
+        "is-cancelable": true,
+        "is-confirmable": false,
+        "is-discardable": false,
+        "is-force-cancelable": false
+      },
+      "canceled-at": null,
+      "created-at": "2021-05-24T07:38:04.171Z",
+      "has-changes": false,
+      "auto-apply": false,
+      "allow-empty-apply": false,
+      "allow-config-generation": false,
+      "is-destroy": false,
+      "message": "Custom message",
+      "plan-only": false,
+      "source": "tfe-api",
+      "status-timestamps": {
+        "plan-queueable-at": "2021-05-24T07:38:04+00:00"
+      },
+      "status": "pending",
+      "trigger-reason": "manual",
+      "target-addrs": null,
+      "permissions": {
+        "can-apply": true,
+        "can-cancel": true,
+        "can-comment": true,
+        "can-discard": true,
+        "can-force-execute": true,
+        "can-force-cancel": true,
+        "can-override-policy-check": true
+      },
+      "refresh": false,
+      "refresh-only": false,
+      "replace-addrs": null,
+      "save-plan": false,
+      "variables": []
+    },
+    "relationships": {
+      "apply": {...},
+      "comments": {...},
+      "configuration-version": {...},
+      "cost-estimate": {...},
+      "created-by": {...},
+      "input-state-version": {...},
+      "plan": {...},
+      "run-events": {...},
+      "policy-checks": {...},
+      "task-stages": {...},
+      "workspace": {...},
+      "workspace-run-alerts": {...}
+    },
+    "links": {
+      "self": "/api/v2/runs/run-bWSq4YeYpfrW4mx7"
+    }
+  }
+}
+```
+
+## Discard a Run
+
+`POST /runs/:run_id/actions/discard`
+
+| Parameter | Description           |
+| --------- | --------------------- |
+| `run_id`  | The run ID to discard |
+
+The `discard` action can be used to skip any remaining work on runs that are paused waiting for confirmation or priority. This includes runs in the "pending," "needs confirmation," "policy checked," and "policy override" states.
+
+Discarding a run requires permission to apply runs for the workspace. ([More about permissions.](/terraform/enterprise/users-teams-organizations/permissions))
+
+[permissions-citation]: #intentionally-unused---keep-for-maintainers
+
+This endpoint queues the request to perform a discard; the discard might not happen immediately. After discarding, the run is completed and later runs can proceed.
+
+This endpoint represents an action as opposed to a resource. As such, it does not return any object in the response body.
+
+-> **Note:** This endpoint cannot be accessed with [organization tokens](/terraform/enterprise/users-teams-organizations/api-tokens#organization-api-tokens). You must access it with a [user token](/terraform/enterprise/users-teams-organizations/users#api-tokens) or [team token](/terraform/enterprise/users-teams-organizations/api-tokens#team-api-tokens).
+
+| Status  | Response                  | Reason(s)                                                             |
+| ------- | ------------------------- | --------------------------------------------------------------------- |
+| [202][] | none                      | Successfully queued a discard request.                                |
+| [409][] | [JSON API error object][] | Run was not paused for confirmation or priority; discard not allowed. |
+
+### Request Body
+
+This POST endpoint allows an optional JSON object with the following properties as a request payload.
+
+| Key path  | Type   | Default | Description                                            |
+| --------- | ------ | ------- | ------------------------------------------------------ |
+| `comment` | string | `null`  | An optional explanation for why the run was discarded. |
+
+### Sample Payload
+
+This payload is optional, so the `curl` command will work without the `--data @payload.json` option too.
+
+```json
+{
+  "comment": "This run was discarded"
+}
+```
+
+### Sample Request
+
+```shell
+curl \
+  --header "Authorization: Bearer $TOKEN" \
+  --header "Content-Type: application/vnd.api+json" \
+  --request POST \
+  --data @payload.json \
+  https://app.terraform.io/api/v2/runs/run-DQGdmrWMX8z9yWQB/actions/discard
+```
+
+## Cancel a Run
+
+`POST /runs/:run_id/actions/cancel`
+
+| Parameter | Description          |
+| --------- | -------------------- |
+| `run_id`  | The run ID to cancel |
+
+The `cancel` action can be used to interrupt a run that is currently planning or applying. Performing a cancel is roughly equivalent to hitting ctrl+c during a Terraform plan or apply on the CLI. The running Terraform process is sent an `INT` signal, which instructs Terraform to end its work and wrap up in the safest way possible.
+
+Canceling a run requires permission to apply runs for the workspace. ([More about permissions.](/terraform/enterprise/users-teams-organizations/permissions))
+
+[permissions-citation]: #intentionally-unused---keep-for-maintainers
+
+This endpoint queues the request to perform a cancel; the cancel might not happen immediately. After canceling, the run is completed and later runs can proceed.
+
+This endpoint represents an action as opposed to a resource. As such, it does not return any object in the response body.
+
+-> **Note:** This endpoint cannot be accessed with [organization tokens](/terraform/enterprise/users-teams-organizations/api-tokens#organization-api-tokens). You must access it with a [user token](/terraform/enterprise/users-teams-organizations/users#api-tokens) or [team token](/terraform/enterprise/users-teams-organizations/api-tokens#team-api-tokens).
+
+| Status  | Response                  | Reason(s)                                             |
+| ------- | ------------------------- | ----------------------------------------------------- |
+| [202][] | none                      | Successfully queued a cancel request.                 |
+| [409][] | [JSON API error object][] | Run was not planning or applying; cancel not allowed. |
+| [404][] | [JSON API error object][] | Run was not found or user not authorized.             |
+
+### Request Body
+
+This POST endpoint allows an optional JSON object with the following properties as a request payload.
+
+| Key path  | Type   | Default | Description                                           |
+| --------- | ------ | ------- | ----------------------------------------------------- |
+| `comment` | string | `null`  | An optional explanation for why the run was canceled. |
+
+### Sample Payload
+
+This payload is optional, so the `curl` command will work without the `--data @payload.json` option too.
+
+```json
+{
+  "comment": "This run was stuck and would never finish."
+}
+```
+
+### Sample Request
+
+```shell
+curl \
+  --header "Authorization: Bearer $TOKEN" \
+  --header "Content-Type: application/vnd.api+json" \
+  --request POST \
+  --data @payload.json \
+  https://app.terraform.io/api/v2/runs/run-DQGdmrWMX8z9yWQB/actions/cancel
+```
+
+## Forcefully cancel a run
+
+`POST /runs/:run_id/actions/force-cancel`
+
+| Parameter | Description          |
+| --------- | -------------------- |
+| `run_id`  | The run ID to cancel |
+
+The `force-cancel` action is like [cancel](#cancel-a-run), but ends the run immediately. Once invoked, the run is placed into a `canceled` state, and the running Terraform process is terminated. The workspace is immediately unlocked, allowing further runs to be queued. The `force-cancel` operation requires admin access to the workspace. ([More about permissions.](/terraform/enterprise/users-teams-organizations/permissions))
+
+[permissions-citation]: #intentionally-unused---keep-for-maintainers
+
+This endpoint enforces a prerequisite that a [non-forceful cancel](#cancel-a-run) is performed first, and a cool-off period has elapsed. To determine if this criteria is met, it is useful to check the `data.attributes.is-force-cancelable` value of the [run details endpoint](#get-run-details). The time at which the force-cancel action will become available can be found using the [run details endpoint](#get-run-details), in the key `data.attributes.force_cancel_available_at`. Note that this key is only present in the payload after the initial cancel has been initiated.
+
+This endpoint represents an action as opposed to a resource. As such, it does not return any object in the response body.
+
+-> **Note:** This endpoint cannot be accessed with [organization tokens](/terraform/enterprise/users-teams-organizations/api-tokens#organization-api-tokens). You must access it with a [user token](/terraform/enterprise/users-teams-organizations/users#api-tokens) or [team token](/terraform/enterprise/users-teams-organizations/api-tokens#team-api-tokens).
+
+~> **Warning:** This endpoint has potentially dangerous side-effects, including loss of any in-flight state in the running Terraform process. Use this operation with extreme caution.
+
+| Status  | Response                  | Reason(s)                                                                                                          |
+| ------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| [202][] | none                      | Successfully queued a cancel request.                                                                              |
+| [409][] | [JSON API error object][] | Run was not planning or applying, has not been canceled non-forcefully, or the cool-off period has not yet passed. |
+| [404][] | [JSON API error object][] | Run was not found or user not authorized.                                                                          |
+
+### Request Body
+
+This POST endpoint allows an optional JSON object with the following properties as a request payload.
+
+| Key path  | Type   | Default | Description                                           |
+| --------- | ------ | ------- | ----------------------------------------------------- |
+| `comment` | string | `null`  | An optional explanation for why the run was canceled. |
+
+### Sample Payload
+
+This payload is optional, so the `curl` command will work without the `--data @payload.json` option too.
+
+```json
+{
+  "comment": "This run was stuck and would never finish."
+}
+```
+
+### Sample Request
+
+```shell
+curl \
+  --header "Authorization: Bearer $TOKEN" \
+  --header "Content-Type: application/vnd.api+json" \
+  --request POST \
+  --data @payload.json \
+  https://app.terraform.io/api/v2/runs/run-DQGdmrWMX8z9yWQB/actions/force-cancel
+```
+
+## Forcefully execute a run
+
+`POST /runs/:run_id/actions/force-execute`
+
+| Parameter | Description           |
+| --------- | --------------------- |
+| `run_id`  | The run ID to execute |
+
+The force-execute action cancels all prior runs that are not already complete, unlocking the run's workspace and allowing the run to be executed. (It initiates the same actions as the "Run this plan now" button at the top of the view of a pending run.)
+
+Force-executing a run requires permission to apply runs for the workspace. ([More about permissions.](/terraform/enterprise/users-teams-organizations/permissions))
+
+[permissions-citation]: #intentionally-unused---keep-for-maintainers
+
+This endpoint enforces the following prerequisites:
+
+-   The target run is in the "pending" state.
+-   The workspace is locked by another run.
+-   The run locking the workspace can be discarded.
+
+This endpoint represents an action as opposed to a resource. As such, it does not return any object in the response body.
+
+-> **Note:** This endpoint cannot be accessed with [organization tokens](/terraform/enterprise/users-teams-organizations/api-tokens#organization-api-tokens). You must access it with a [user token](/terraform/enterprise/users-teams-organizations/users#api-tokens) or [team token](/terraform/enterprise/users-teams-organizations/api-tokens#team-api-tokens).
+
+~> **Note:** While useful at times, force-executing a run circumvents the typical workflow of applying runs using HCP Terraform. It is not intended for regular use. If you find yourself using it frequently, please reach out to HashiCorp Support for help in developing an alternative approach.
+
+| Status  | Response                  | Reason(s)                                                                                     |
+| ------- | ------------------------- | --------------------------------------------------------------------------------------------- |
+| [202][] | none                      | Successfully initiated the force-execution process.                                           |
+| [403][] | [JSON API error object][] | Run is not pending, its workspace was not locked, or its workspace association was not found. |
+| [409][] | [JSON API error object][] | The run locking the workspace was not in a discardable state.                                 |
+| [404][] | [JSON API error object][] | Run was not found or user not authorized.                                                     |
+
+### Request Body
+
+This POST endpoint does not take a request body.
+
+### Sample Request
+
+```shell
+curl \
+  --header "Authorization: Bearer $TOKEN" \
+  --header "Content-Type: application/vnd.api+json" \
+  --request POST \
+  https://app.terraform.io/api/v2/runs/run-DQGdmrWMX8z9yWQB/actions/force-execute
+```
+
+## Available Related Resources
+
+The GET endpoints above can optionally return related resources, if requested with [the `include` query parameter](/terraform/enterprise/api-docs#inclusion-of-related-resources). The following resource types are available:
+
+-   `plan` - Additional information about plans.
+-   `apply` - Additional information about applies.
+-   `created_by` - Full user records of the users responsible for creating the runs.
+-   `cost_estimate` - Additional information about cost estimates.
+-   `configuration_version` - The configuration record used in the run.
+-   `configuration_version.ingress_attributes` - The commit information used in the run.
