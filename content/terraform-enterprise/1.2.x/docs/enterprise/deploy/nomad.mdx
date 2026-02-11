@@ -1,0 +1,621 @@
+---
+page_title: Deploy Terraform Enterprise to HashiCorp Nomad
+description: >-
+  Learn how to install Terraform Enterprise on Nomad.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-02-02T17:54:50Z
+last_modified: 2026-02-02T17:54:50Z
+# END AUTO GENERATED METADATA
+---
+
+# Deploy Terraform Enterprise to HashiCorp Nomad
+
+This topic describes how to deploy Terraform Enterprise to a HashiCorp Nomad cluster.
+
+Complete the following steps to deploy Terraform Enterprise to Nomad-orchestrated containers:
+
+1. Complete the prerequisites.
+1. Parameterize the Terraform Enterprise license, host, and TLS encryption settings by adding Nomad variables to your job specifications. This enable you to use the same job specification with different configurations. Refer to [Job Specification](/nomad/docs/job-specification) in the Nomad documentation for additional information.
+1. Add Terraform Enterprise environment variables to your Nomad job specification to configure Terraform behavior. Refer to the [Terraform Enterprise configuration reference](/terraform/enterprise/deploy/configuration) for additional information.
+1. Create a Nomad job specification for operating the Terraform Enterprise agent. Refer to [Custom Worker Image](/terraform/enterprise/deploy/custom-image) for additional information about the Terraform Enterprise agent.
+1. Run the Nomad command for pulling the Terraform Enterprise image and installing the binary.
+
+## Prerequisites 
+
+You can deploy Terraform Enterprise on Nomad version v1.5.0 and newer.
+
+Complete the following prerequisites before installing Terraform Enterprise on [Nomad](/nomad).
+
+Refer to the [Nomad clusters on the cloud tutorial](/nomad/tutorials/cluster-setup/cluster-setup-overview) for instructions on how to setup a Nomad cluster.
+
+### Nomad requirements
+
+You must provide the following Nomad items.
+
+Please make sure you have the following environment variables set before running Nomad commands from CLI:
+
+```bash
+export NOMAD_ADDR=http://<nomad-server-ip>:4646
+export NOMAD_TOKEN=<nomad-token>
+export NOMAD_CLIENT_CERT=<path-to-client-cert>
+export NOMAD_CLIENT_KEY=<path-to-client-key>
+export NOMAD_CA_CERT=<path-to-ca-cert>
+```
+
+You can read more about the Nomad environment variables [here](/nomad/docs/commands).
+
+### Prepare the host environment
+
+Provide a DNS hostname for Terraform Enterprise and the associated TLS certificate. Additionally, you must configure your network so that your host can receive and send traffic. Refer to [Prepare the host environment](/terraform/enterprise/deploy/prepare-host) for details about preparing the host environment.
+
+### Deploy external storage systems
+
+Deploy the database and other storage devices so that Terraform can connect to them when the application starts. Refer to [Data storage settings overview](/terraform/enterprise/deploy/configuration/storage) for additional information.
+
+Terraform Enterprise requires the following external services to be present and accessible from the Nomad cluster:
+
+1. A PostgreSQL database. Refer to [PostgreSQL Requirements for Terraform Enterprise](/terraform/enterprise/flexible-deployments/install/requirements/data-storage/postgres-requirements) for additional information.
+1. An S3-compatible storage service, such as AWS S3, Azure Cloud Storage, and Google Cloud Storage. Refer to [External Services Mode](/terraform/enterprise/flexible-deployments/install/requirements/data-storage/operational-mode-requirements#external-services-mode) for additional information.
+1. A Redis data store. Refer to [Configure Redis data store connection](/terraform/enterprise/deploy/configuration/storage/connect-redis) for supported versions.
+
+### Create the deployment configuration
+
+Create a custom YAML configuration file, for example `/tmp/overrides.yaml`, to override the default values in the Terraform Enterprise Helm chart. The file contains settings for the operational mode, license, TLS certificates, and network configuration. Add any additional configurations necessary for your environment. Refer to [Configuration file overview](/terraform/enterprise/deploy/reference/configuration) for additional information.
+
+### Create an ACL policy
+
+Create a token that grants access to the namespace where the Terraform Enterprise agents will run. The Terraform Enterprise job must present the token to the Terraform Enterprise agent so that it can run the agent job that performs Terraform operations. Refer to the [Nomad ACL system fundamentals](https://developer.hashicorp.com/nomad/tutorials/access-control/access-control) tutorial for instructions on how to create ACL policies linked to tokens.
+
+Create a policy file named `terraform-enterprise-policy.hcl` with the following content, and apply it to the `terraform-enterprise` namespace so that Terraform Enterprise has permission to run and manage agent jobs.
+
+```hcl
+namespace "tfe-agents" {
+    capabilities = [
+        "submit-job",
+        "dispatch-job",
+        "list-jobs",
+        "read-job",
+        "read-logs" 
+    ]
+}
+```
+
+The following example applies the `terraform-enterprise-policy` policy to the `tfe-job-task` task within the `tfe-job-group` of the `tfe-job` job.  
+
+  ```shell-session
+  $ nomad acl policy apply \
+   -namespace terraform-enterprise -job tfe-job \
+   -group tfe-job-group -task tfe-job-task \
+   terraform-enterprise-policy ./terraform-enterprise-policy.hcl
+  ```
+Refer to the [Nomad documentation](/nomad/docs/commands/acl/policy/apply) for additional information about applying ACL policies.
+
+### Enable a workload identity
+
+Enable a workload identity on the Nomad cluster so that Nomad can inject the Nomad ACL token. The workload identity passes the token using the `NOMAD_TOKEN` environment variable. Refer to [Workload Identity](/nomad/docs/concepts/workload-identity) for additional information.
+
+Terraform Enterprise does not use workload identities on Nomad v1.4 and older. Instead, you must pass the `NOMAD_TOKEN` directly in the Terraform Enterprise job specification. Refer to [Configure Terraform Enterprise Nomad job specification](/terraform/enterprise/deploy/nomad#configure-terraform-enterprise-nomad-job-specification) for additional information.
+
+### Create namespaces
+
+Create at least two separate Nomad namespaces to provide better isolation, security, and control over Nomad workloads. One namespace is for the Terraform Enterprise job and the second is for the Terraform Enterprise agent job. Refer to  the [Namespaces tutorial](/nomad/tutorials/manage-clusters/namespaces) in the Nomad documentation for instructions on how to create a namespace.
+
+## Parameterize Terraform Enterprise settings 
+
+Add the following variables to your Terraform Enterprise Nomad job:
+
+- `tfe_license`: Specifies the Terraform Enterprise license key.
+- `tfe_hostname`: Specifies the hostname of the Terraform Enterprise instance.
+- `tfe_tls_cert_file`: Specifies the base64 encoded TLS certificate file.
+- `tfe_tls_key_file`: Specifies the base64 encoded TLS key file.
+- `tfe_tls_ca_bundle_file`: Specifies the base64 encoded TLS CA bundle file.
+
+Create file `var.hcl` and add the following variables:
+
+```hcl
+  path      = "nomad/jobs/tfe-job/tfe-group/tfe-task"
+  namespace = "terraform-enterprise"
+
+  items {
+    # The field should contain the base64 encoded value of the cert. Mappped to the TFE_TLS_CERT_FILE environment variable.
+    tfe_tls_cert_file = ""
+
+    # The field should contain the base64 encoded value of the bundle. Mapped to the TFE_TLS_CA_BUNDLE_FILE environment variable.
+    tfe_tls_ca_bundle_file = ""
+
+    # The field should contain the base64 encoded value of the key. Mappped to the TFE_TLS_KEY_FILE environment variable.
+    tfe_tls_key_file = ""
+
+    # A valid TFE license. Mapped to the TFE_LICENSE environment variable.
+    tfe_license = ""
+
+    # The hostname of the TFE instance. Mapped to the TFE_HOSTNAME environment variable.
+    tfe_hostname = ""
+  }
+  ```
+
+`path` variable specifies the path where the Nomad variables will be stored.
+Update the `path` variable if default value of `job_name` is overridden in the `var.hcl` file.
+
+Apply the Nomad variables to the job specification by running the following command:
+  ```bash
+  $ nomad var put @var.hcl
+  ```
+
+Refer to [Nomad Variables](/nomad/docs/concepts/variables) in the Nomad documentation for additional information.
+
+Refer to the [example Nomad job specification](#nomad-job-specification) for additional guidance.
+
+## Configure Terraform Enterprise Nomad job specification
+
+This job is responsible for running the Terraform Enterprise image on Nomad.
+
+Refer to the [example Nomad job specification for TFE](/terraform/enterprise/flexible-deployments/install/nomad/install#nomad-job-specification-for-tfe) for a template that you can copy and modify.
+
+Pass the variables that you defined in the [Parameterize Terraform Enterprise settings](#parameterize-terraform-enterprise-settings) section. Refer to [Assigning Values to job Variables](/nomad/docs/job-specification/hcl2/variables#assigning-values-to-job-variables) in the Nomad documentation for instructions. The following variables are required:
+
+- `tfe_image_username`
+- `tfe_image_password`
+
+The following variables are optional:
+
+- `tfe_image`
+- `namespace`
+
+Terraform Enterprise does not use workload identities on Nomad v1.4 and older. If you are deploying to Nomad v1.4.x or older, complete the following steps:
+
+1. Manually create an ACL token. Refer to [Command: `acl token create`](/nomad/docs/commands/acl/token/create) in the Nomad documentation for instructions.
+1. Remove the `identity` stanza. 
+1. Pass the ACL token to the Terraform Enterprise job. Export the token to the `NOMAD_TOKEN` environment variable and add it to the `env` stanza. 
+
+Refer to the [example Nomad job specification](#nomad-job-specification) for a template that you can copy and modify. Run the `nomad job run` command and specify job configuration to submit the changes. Refer to [Command: job run](/nomad/docs/commands/job/run) in the Nomad documentation for additional information about the command.
+
+## Configure a Nomad batch job to run the Terraform Enterprise agent
+
+Terraform Enterprise creates ephemeral agent jobs to execute Terraform runs when operating in Remote execution mode. A run is an invocation of the `terraform plan` or `terraform apply` command. To enable this behavior, create a Nomad batch job specification that defines how Terraform Enterprise agents run on Nomad.
+
+You can use the [example Nomad batch job specification for TFE agent](/terraform/enterprise/flexible-deployments/install/nomad/install#nomad-batch-job-specification) as a template to copy and change. After registering the batch job in Nomad, manual execution of batch jobs is not required. When Terraform executes a plan or apply, it automatically dispatches the jobs as Nomad batch jobs and completes the run.
+
+Refer to [Batch Job](/nomad/docs/job-specification/job#batch-job) in the Nomad documentation for more information.
+
+## Run the Nomad jobs
+
+### 1. Deploy Terraform Enterprise Instance
+
+Run the `nomad job run` command to pull the Terraform Enterprise image and install the application. Pass the Terraform Enterprise job specification as the command argument. You must also provide the credentials for the registry to download the image:
+
+```shell-session
+$ nomad job run \
+  -var="tfe_image_username=$TFE_REGISTRY_USERNAME" \
+  -var="tfe_image_password=$TFE_REGISTRY_PASSWORD" \
+  <path-to-tfe-job-spec>
+```
+
+### 2. Register Terraform Agent Job
+Run the `nomad job run` command and pass the Terraform agent job specification to register the batch job in Nomad:
+
+```shell-session
+$ nomad job run <path-to-tfe-agent-job-spec>
+```
+
+Alternatively, you can pull and install the Terraform Enterprise image using the Terraform Enterprise On Nomad Pack tool. Refer to the [`terraform-enterprise-fdo-nomad-pack` repository](https://github.com/hashicorp/nomad-pack-community-registry/tree/main/packs/tfe_fdo_nomad) on GitHub for instructions.
+
+## Post installation tasks
+
+Complete the following tasks after starting Terraform Enterprise. 
+
+### Review startup checks
+
+When you start Terraform Enterprise, several startup checks also run to prevent errors related to invalid configurations or certificates, as well as other issues that could prevent the application from running successfully or safely. Refer to the [startup checks reference](/terraform/enterprise/deploy/reference/startup-checks) for additional information.
+
+### Create initial admin user
+
+[Provision your first administrative user](/terraform/enterprise/deploy/initial-admin-user) and start using Terraform Enterprise.
+
+## Deploy a load balancer to the Nomad Cluster (Optional)
+
+You can deploy a load balancer to the Nomad cluster so that you can manage external traffic loads. Refer to the [load balancer tutorial](/nomad/tutorials/load-balancing) in the Nomad documentation for instructions.
+Refer to the [example NGINX configuration](/terraform/enterprise/flexible-deployments/install/nomad/install#nomad-nginx-job-for-load-balancing) for additional guidance.
+
+## Examples
+
+You can copy the following examples and modify the values to match your deployment.
+
+### Nomad job specification
+
+The following example configuration defines a Terraform Enterprise job specification. You can copy the example and modify the values to match your deployment.
+This example uses minimal configuration options. Refer to [Configuration Reference](/terraform/enterprise/flexible-deployments/install/configuration)
+for a list of all the configuration options.
+
+```hcl
+variable "tfe_image" {
+  description = "The TFE image to use"
+  type        = string
+  default     = "images.releases.hashicorp.com/hashicorp/terraform-enterprise:v202408-1"
+}
+
+variable "tfe_image_username" {
+  description = "Username for the registry to download TFE image"
+  type        = string
+}
+
+variable "tfe_image_password" {
+  description = "Password for the registry to download TFE image"
+  type        = string
+}
+
+variable "namespace" {
+  description = "The Nomad namespace to run the job"
+  type        = string
+  default     = ""
+}
+
+job "tfe-job" {
+  datacenters = ["dc1"]
+  namespace   = var.namespace
+  type        = "service"
+
+  group "tfe-group" {
+    count = 1
+
+    restart {
+      attempts = 3
+      delay    = "60s"
+      interval = "10m"
+      mode     = "fail"
+    }
+
+    update {
+      max_parallel      = 1
+      min_healthy_time  = "30s"
+      healthy_deadline  = "15m"
+      progress_deadline = "20m"
+      health_check      = "checks"
+    }
+
+    network {
+      port "tfe" {
+        # static port is not required if load balancer is used.
+        static = 443
+        to     = 8443
+      }
+      port "tfehttp" {
+        # static port is not required if load balancer is used.
+        static = 80
+        to     = 8080
+      }
+      port "vault" {
+        to = 8201
+      }
+    }
+
+    service {
+      name     = "tfe-svc"
+      port     = "tfe"
+      provider = "nomad"
+      check {
+        name     = "tfe_probe"
+        type     = "http"
+        protocol = "https"
+        port     = "tfe"
+        path     = "/_health_check"
+        interval = "5s"
+        timeout  = "2s"
+        method   = "GET"
+      }
+    }
+
+    task "tfe-task" {
+      driver = "docker"
+
+      identity {
+        # Expose Workload Identity in NOMAD_TOKEN env var
+        env = true
+      }
+
+      template {
+        data        = <<EOF
+              {{- with nomadVar "nomad/jobs/tfe-job/tfe-group/tfe-task" -}}
+              TFE_LICENSE={{ .tfe_license }}
+              TFE_HOSTNAME={{ .tfe_hostname }}
+              {{- end -}}
+              EOF
+        destination = "secrets/env.env"
+        env         = true
+        change_mode = "restart"
+      }
+
+      template {
+        data        = <<EOF
+              {{- with nomadVar "nomad/jobs/tfe-job/tfe-group/tfe-task" -}}
+              {{ base64Decode .tfe_tls_cert_file.Value }}
+              {{- end -}}
+              EOF
+        destination = "secrets/cert.pem"
+        env         = false
+        change_mode = "restart"
+      }
+
+      template {
+        data        = <<EOF
+              {{- with nomadVar "nomad/jobs/tfe-job/tfe-group/tfe-task" -}}
+              {{ base64Decode .tfe_tls_key_file.Value }}
+              {{- end -}}
+              EOF
+        destination = "secrets/key.pem"
+        env         = false
+        change_mode = "restart"
+      }
+
+      template {
+        data        = <<EOF
+              {{- with nomadVar "nomad/jobs/tfe-job/tfe-group/tfe-task" -}}
+              {{ base64Decode .tfe_tls_ca_bundle_file.Value }}
+              {{- end -}}
+              EOF
+        destination = "secrets/bundle.pem"
+        env         = false
+        change_mode = "restart"
+      }
+
+      config {
+        image = var.tfe_image
+        ports = ["tfe", "tfehttp", "vault"]
+
+        auth {
+          username = var.tfe_image_username
+          password = var.tfe_image_password
+        }
+
+        volumes = [
+          "secrets:/etc/ssl/private/terraform-enterprise",
+        ]
+      }
+
+      resources {
+        cpu    = 2500
+        memory = 2048
+      }
+
+      env {
+        # Database settings. See the configuration reference for more settings.
+        TFE_DATABASE_HOST       = "<Database hostname and port e.g. postgres:5432>"
+        TFE_DATABASE_USER       = "<Database user e.g. postgres>"
+        TFE_DATABASE_PASSWORD   = "<Database password e.g. postgres>"
+        TFE_DATABASE_NAME       = "<Database name e.g. hashicorp>"
+        TFE_DATABASE_PARAMETERS = "<Database parameters e.g. sslmode=disable>"
+
+        # Object storage settings. See the configuration reference for more settings.
+        TFE_OBJECT_STORAGE_TYPE                 = "s3"
+        TFE_OBJECT_STORAGE_S3_ENDPOINT          = "<S3 hostname and port e.g. localhost:9000>"
+        TFE_OBJECT_STORAGE_S3_ACCESS_KEY_ID     = "<AWS Access Key ID>"
+        TFE_OBJECT_STORAGE_S3_SECRET_ACCESS_KEY = "<AWS Secret Access Key>"
+        TFE_OBJECT_STORAGE_S3_REGION            = "<AWS Region e.g.us-east-1>"
+        TFE_OBJECT_STORAGE_S3_BUCKET            = "<Bucket name>"
+
+        # Redis settings. See the configuration reference for more settings.
+        TFE_REDIS_HOST     = "<Redis hostname and port e.g. redis:6379>"
+        TFE_REDIS_USER     = "<Redis username>"
+        TFE_REDIS_PASSWORD = "<Redis password>"
+        TFE_REDIS_USE_TLS  = "<To use tls? e.g. false>"
+        TFE_REDIS_USE_AUTH = "<To use customized credential to authenticate? e.g. false>"
+        TFE_REDIS_USE_MTLS = "<To use mtls with Redis standalone or Sentinel? eg. "false">
+        TFE_REDIS_CLIENT_CERT_PATH = "<Path to the client certificate file to be used for mTLS authentication with Redis server>"
+        TFE_REDIS_CA_CERT_PATH = "<Path to the Certificate Authority file user to validate the certificate>"
+        TFE_REDIS_CLIENT_KEY_PATH = "<Path to the private key file corresponding to the client certificate>"
+        TFE_REDIS_SIDEKIQ_USE_MTLS = "<To use mtls with Redis Enterprise? eg. false>"
+        TFE_REDIS_SIDEKIQ_CLIENT_CERT_PATH = "<Path to the client certificate file to be used for mTLS authentication with Redis server>"
+        TFE_REDIS_SIDEKIQ_CA_CERT_PATH = "<Path to the Certificate Authority file user to validate the certificate>"
+        TFE_REDIS_SIDEKIQ_CLIENT_KEY_PATH = "<Path to the private key file corresponding to the client certificate>"
+        TFE_REDIS_SENTINEL_ENABLED = "<To use sentinel? e.g. false>"
+        TFE_REDIS_SENTINEL_HOSTS: "<Hostname and port of Sentinel hosts, e.g. sentinel.example.com:26379>"
+        TFE_REDIS_SENTINEL_LEADER_NAME: "<Name of the Sentinel leader>"
+
+        TFE_RUN_PIPELINE_DRIVER                       = "nomad"
+        TFE_VAULT_DISABLE_MLOCK                       = "true"
+        TFE_ENCRYPTION_PASSWORD                       = "<Encryption password>"
+
+        # If you are using the default internal vault, this should be the private routable IP address of the node itself.
+        TFE_VAULT_CLUSTER_ADDRESS = "http://${NOMAD_HOST_ADDR_vault}"
+        
+        # Nomad driver settings
+        TFE_RUN_PIPELINE_NOMAD_AGENT_JOB_ID = "<Nomad batch job name>"
+        TFE_RUN_PIPELINE_NOMAD_NAMESPACE   = "tfe-agents"
+
+        TFE_HTTP_PORT = "8080"
+        TFE_HTTPS_PORT = "8443"
+
+        TFE_TLS_CERT_FILE      = "/etc/ssl/private/terraform-enterprise/cert.pem"
+        TFE_TLS_KEY_FILE       = "/etc/ssl/private/terraform-enterprise/key.pem"
+        TFE_TLS_CA_BUNDLE_FILE = "/etc/ssl/private/terraform-enterprise/bundle.pem"
+      }
+    }
+  }
+}
+```
+
+### Nomad batch job specification
+
+The following example configuration defines a Terraform Enterprise agent job for Remote execution mode, where Terraform creates an ephemeral batch job for each plan and apply operation. You can copy the example and change the values to match your deployment. The job name must match the `TFE_RUN_PIPELINE_NOMAD_AGENT_JOB_ID` configuration you set in the Nomad TFE jobspec above.
+
+In conjunction with the Nomad TFE job spec, this example configuration directs Nomad to dispatch Terraform Plan and Apply operations to a Nomad batch job named `tfe-agent-job`. The job runs in the `tfe-agents` namespace and associates with the `node_pool_tfe_agents` node pool.
+
+```hcl
+job "tfe-agent-job" {
+  type        = "batch"
+  namespace   = "tfe-agents"
+  datacenters = ["dc1"]
+  node_pool   = "node_pool_tfe_agents"
+
+  constraint {
+    attribute = "${attr.kernel.name}"
+    value     = "linux"
+  }
+
+  parameterized {
+    payload = "forbidden"
+
+    meta_required = [
+      "TFC_AGENT_TOKEN",
+      "TFC_ADDRESS"
+    ]
+
+    meta_optional = [
+      "TFE_RUN_PIPELINE_IMAGE",
+      "TFC_AGENT_AUTO_UPDATE",
+      "TFC_AGENT_CACHE_DIR",
+      "TFC_AGENT_SINGLE",
+      "HTTPS_PROXY",
+      "HTTP_PROXY",
+      "NO_PROXY"
+    ]
+  }
+
+  group "tfe-agent-group" {
+    task "tfc-agent-task" {
+
+      driver = "docker"
+
+      template {
+        destination = "local/image.env"
+        env         = true
+        change_mode = "noop"
+        data        = <<EOF
+          {{ $image := env "NOMAD_META_TFE_RUN_PIPELINE_IMAGE" }}
+          {{ if ne $image "" }}TFE_RUN_PIPELINE_IMAGE={{$image}} {{ else }}TFE_RUN_PIPELINE_IMAGE="hashicorp/tfc-agent:latest"  {{ end }}
+          EOF
+      }
+
+      config {
+        image = "${TFE_RUN_PIPELINE_IMAGE}"
+      }
+
+      env {
+        TFC_ADDRESS           = "${NOMAD_META_TFC_ADDRESS}"
+        TFC_AGENT_TOKEN       = "${NOMAD_META_TFC_AGENT_TOKEN}"
+        TFC_AGENT_AUTO_UPDATE = "${NOMAD_META_TFC_AGENT_AUTO_UPDATE}"
+        TFC_AGENT_CACHE_DIR   = "${NOMAD_META_TFC_AGENT_CACHE_DIR}"
+        TFC_AGENT_SINGLE      = "${NOMAD_META_TFC_AGENT_SINGLE}"
+        HTTPS_PROXY           = "${NOMAD_META_HTTPS_PROXY}"
+        HTTP_PROXY            = "${NOMAD_META_HTTP_PROXY}"
+        NO_PROXY              = "${NOMAD_META_NO_PROXY}"
+      }
+
+      resources {
+        cpu    = 500
+        memory = 2048
+      }
+    }
+  }
+}
+```
+
+### Nomad NGINX job for load balancing
+
+The following example configuration defines an NGINX job. 
+Add the TLS certificate and key variables to the `nomad/jobs/nginx/nginx/nginx` path before running the job.
+
+```hcl
+variable "tfe_hostname" {
+  type = string
+}
+
+variable "namespace" {
+  type    = string
+  default = ""
+}
+
+job "nginx" {
+  datacenters = ["dc1"]
+  namespace = var.namespace
+  type = "system"
+
+  group "nginx" {
+    network {
+      port "https" {
+        static = 443
+      }
+    }
+
+    service {
+      name = "nginx"
+      port = "https"
+    }
+
+    task "nginx" {
+      driver = "docker"
+
+      config {
+        image = "nginx"
+
+        ports = ["https"]
+
+        volumes = [
+          "local:/etc/nginx/conf.d",
+          "secrets:/etc/nginx/sslcerts",
+        ]
+      }
+
+      template {
+        data        = <<EOF
+{{- with nomadVar "nomad/jobs/nginx/nginx/nginx" -}}
+{{ base64Decode .tfe_tls_cert_file.Value }}
+{{- end -}}
+EOF
+        destination = "secrets/cert.pem"
+        env         = false
+        change_mode = "restart"
+      }
+
+      template {
+        data        = <<EOF
+{{- with nomadVar "nomad/jobs/nginx/nginx/nginx" -}}
+{{ base64Decode .tfe_tls_key_file.Value }}
+{{- end -}}
+EOF
+        destination = "secrets/key.pem"
+        env         = false
+        change_mode = "restart"
+      }
+
+      template {
+        data = <<EOF
+upstream backend {
+{{ range nomadService "tfe-svc" }}
+  server {{ .Address }}:{{ .Port }};
+{{ else }}server 127.0.0.1:65535; # force a 502
+{{ end }}
+}
+
+server {
+   listen 443 ssl;
+   
+   server_name ${var.tfe_hostname};
+
+   ssl_certificate     /etc/nginx/sslcerts/cert.pem;
+   ssl_certificate_key /etc/nginx/sslcerts/key.pem;
+
+   location / {
+    
+    client_max_body_size 100M;
+    proxy_pass https://backend;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header Host ${var.tfe_hostname};
+    proxy_redirect off;
+   }
+}
+EOF
+
+        destination   = "local/load-balancer.conf"
+        change_mode   = "signal"
+        change_signal = "SIGHUP"
+      }
+    }
+  }
+}
+```
+
+## Security
+
+Terraform Enterprise calls the [Nomad Task API](/nomad/api-docs/task-api) to dispatch the parameterized jobs that run the TFE agents.
+Terraform Enterprise does not require mTLS information because the call occurs over Unix sockets.
