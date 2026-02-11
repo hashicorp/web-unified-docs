@@ -1,138 +1,335 @@
 ---
 page_title: GitLab
-description: Learn how to integrate GitLab with HashiCorp Vault for secure secrets management.
+description: Integrate GitLab CI/CD with HashiCorp Vault using OIDC authentication. Retrieve static and dynamic secrets securely with bound claims, automatic authentication, and comprehensive audit logging.
 ---
 
 # GitLab
 
-GitLab uses a JSON Web Token (JWT) to authenticate with Vault to securely access secrets for CI/CD pipelines. Once authenticated, GitLab can pull static secrets from the KV secrets engine, or dynamic secrets from engines such as the [AWS secrets engine](/vault/docs/secrets/aws).
+GitLab CI/CD pipelines can authenticate to Vault using OpenID Connect (OIDC) tokens, allowing builds to retrieve secrets without storing long-lived credentials. GitLab automatically generates short-lived JWT tokens for each pipeline run that Vault validates to grant access to secrets. GitLab Premium and Ultimate editions provide native integration with automatic authentication, while Community Edition supports manual authentication workflows.
 
-Follow the guidance in [Use HashiCorp Vault secrets in GitLab CI/CD](https://docs.gitlab.com/ci/secrets/hashicorp_vault/) to enable your GitLab pipeline to establish authentication, and use secrets in Vault. Review the [Using external secrets in CI](https://docs.gitlab.com/ci/secrets/#use-vault-secrets-in-a-ci-job) tutorial to learn more about using Vault secrets engines with your GitLab pipelines.
+## Why integrate GitLab with Vault
+
+Integrating GitLab with Vault addresses the following security and operational challenges in pipeline automation:
+
+**Eliminate credentials from GitLab variables:** Vault keeps secrets out of GitLab CI/CD variables and repository settings, reducing the risk of exposure through misconfigured access controls or compromised GitLab accounts. Native OIDC authentication eliminates the need to store Vault tokens in GitLab.
+
+**Enable dynamic credential support:** Vault generates temporary credentials for databases, cloud providers (AWS, Azure, GCP), and other services that automatically expire after pipeline completion. Dynamic credentials reduce the attack surface compared to long-lived static credentials stored in GitLab variables.
+
+**Meet compliance and audit requirements:** Vault provides comprehensive audit logs that track which GitLab projects and pipelines accessed which secrets during which runs, supporting compliance frameworks like SOC 2, PCI DSS, and HIPAA that require detailed access trails.
+
+**Support multiple secrets engines:** GitLab integrates with Vault's KV secrets engine (v1 and v2) for static secrets, and dynamic secrets engines including AWS, databases, Artifactory, and LDAP for on-demand credential generation.
+
+## Prerequisites
+
+Before integrating GitLab with Vault, you need the following:
+
+- A Vault instance or HCP Vault accessible from GitLab runners over the network
+- GitLab Premium, Ultimate, or Community Edition with administrator access to projects and CI/CD settings
+- A Vault JWT auth method configured to trust GitLab's OIDC issuer
+- Vault policies that grant GitLab pipelines the necessary read permissions for your secrets. Each policy should follow the principle of least privilege by specifying exact secret paths rather than using wildcards. Policies must be attached to JWT auth method roles that bind to specific GitLab claims like project_id, namespace_id, or ref_protected.
+- For HCP Vault: Vault namespace configuration required
+- We recommend TLS encryption between GitLab runners and Vault
+
+## Choose an integration approach
+
+GitLab provides different integration approaches depending on your edition and requirements:
+
+| Approach | GitLab Edition | Authentication | Setup Complexity | Best For |
+|----------|---------------|----------------|------------------|----------|
+| Native secrets integration | Premium, Ultimate | Automatic OIDC | Low | Teams using GitLab Premium/Ultimate |
+| Manual CLI authentication | Community Edition | Manual JWT | Medium | Teams using GitLab Community Edition |
+
+- **Native secrets integration:** GitLab Premium and Ultimate provide the `secrets:vault` keyword that automatically authenticates to Vault using OIDC tokens and retrieves secrets without additional configuration. GitLab generates ID tokens for each pipeline run, authenticates to Vault, and makes secrets available as environment variables. This approach provides the strongest security with no credential storage. Use this approach when running GitLab Premium or Ultimate.
+
+- **Manual CLI authentication:** GitLab Community Edition supports manual authentication workflows where pipelines explicitly call the Vault CLI to authenticate and retrieve secrets. Pipelines must set VAULT_ADDR and obtain a token by calling `vault write auth/jwt/login`, then use that token to retrieve secrets. This approach requires more configuration but works with all GitLab editions. Use this approach when running GitLab Community Edition or when you need maximum control over authentication.
+
+## Integration pattern
+
+GitLab authenticates to Vault using JWT tokens and retrieves secrets during pipeline execution:
+
+1. **Enable OIDC:** GitLab generates an OIDC token for each pipeline run containing claims about the project, branch, user, and environment
+2. **Authenticate:** Pipeline uses the token to authenticate to Vault's JWT auth method configured to trust GitLab
+3. **Retrieve secrets:** Pipeline calls Vault API (automatically via `secrets:vault` or manually via Vault CLI) to retrieve static or dynamic secrets
+4. **Use in pipeline:** Secrets are available as environment variables for deployment, testing, or other pipeline steps
+
+The following sections show detailed configuration for both GitLab Premium/Ultimate and Community Edition.
 
 <Tabs>
-<Tab heading="GitLab Premium" group="gitlab">
+<Tab heading="GitLab Premium/Ultimate" group="gitlab">
 
-### Static secrets
+### Static secrets with automatic authentication
 
-To use static secrets, reference the [`secrets:vault`](https://docs.gitlab.com/ee/ci/yaml/index.html#secretsvault)
-keyword in the secrets portion of your `gitlab-ci.yml` file.
+GitLab Premium and Ultimate provide the [`secrets:vault`](https://docs.gitlab.com/ee/ci/yaml/index.html#secretsvault) keyword that automatically authenticates to Vault using OIDC tokens and retrieves secrets without manual authentication steps.
 
-In the following example, the GitLab pipeline automatically authenticates to Vault with an ID Token. The pipeline then uses `secrets:vault` to pull a secret from the Vault K/V secrets engine at the path /ops/production/db, and set the value of the password field as the `DATABASE_PASSWORD` environment variable. Pipeline jobs 
-can then use the secret stored in the environment variable to authenticate to the correlating database. Refer to the [Use Vault secrets in a CI job](https://docs.gitlab.com/ee/ci/secrets/index.html#use-vault-secrets-in-a-ci-job) for further documentation.
+The following example shows automatic authentication and secret retrieval. GitLab generates an OIDC token, authenticates to Vault, retrieves the secret from the KV v2 secrets engine, and makes it available as an environment variable:
 
 ```yaml
 job_with_secrets:
   id_tokens:
-    # Automatically authenticate to Vault with GitLab ID token
+    # GitLab generates OIDC token automatically
     VAULT_ID_TOKEN:
       aud: https://vault.example.com
   secrets:
-    # Store the the secret value in the DATABASE_PASSWORD environment variable
-    DATABASE_PASSWORD:  
-      # Secret path: ops/data/production/db, field: password
+    # Retrieve password field from Vault KV v2 at ops/data/production/db
+    DATABASE_PASSWORD:
       vault: production/db/password@ops
-      # Store value directly in the environment variable, not a file
+      file: false  # Store directly in environment variable, not as file
+
+    # Retrieve multiple secrets from different paths
+    API_KEY:
+      vault: production/api/github/token@ops
       file: false
+  script:
+    - echo "Deploying with secrets from Vault"
+    - ./deploy.sh
+
 ```
 
-You can also pull static secrets and set them to environment variables from the CLI with manual authentication as shown in the 
-[Manual ID Token authentication](https://docs.gitlab.com/ci/secrets/hashicorp_vault/#manual-id-token-authentication) documentation example.
+### Bound claims for security
+
+Configure Vault JWT roles with bound claims to restrict which pipelines can access secrets. The following example shows a production deployment that only runs on protected tags, with Vault configured to verify the project ID and protected ref status:
 
 ```yaml
-manual_authentication:
-  variables:
-    VAULT_ADDR: http://vault.example.com:8200
-  image: vault:latest
+production_deploy:
   id_tokens:
     VAULT_ID_TOKEN:
-      aud: http://vault.example.com
-  # Store the the secret value in the DATABASE_PASSWORD environment variable
+      aud: https://vault.example.com
+  secrets:
+    DATABASE_PASSWORD:
+      vault: production/db/password@ops
+      file: false
+  only:
+    - tags  # Only run on tags
+  variables:
+    # Vault role configured with bound_claims:
+    # {"project_id":"42","ref_protected":"true","ref_type":"tag"}
+    VAULT_AUTH_ROLE: myproject-production
   script:
-    - export DATABASE_PASSWORD="$(vault kv get -field=password secret/myproject/example/db)"
+    - echo "Deploying to production with verified credentials"
+    - ./deploy.sh
 ```
 
-The following diagram shows the steps a GitLab CI/CD pipeline takes to retrieve a secret from Vault.
-![GitLab Vault workflow](/img/well-architected-framework/gitlab-vault-workflow.png)
+Configure the corresponding Vault role with:
+
+```bash
+vault write auth/jwt/role/myproject-production \
+  role_type="jwt" \
+  bound_audiences="https://vault.example.com" \
+  bound_claims='{"project_id":"42","ref_protected":"true","ref_type":"tag"}' \
+  user_claim="user_email" \
+  policies="myproject-production" \
+  token_ttl=60
+```
 
 ### Dynamic secrets
 
-GitLab users are also able to take advantage of Vault dynamic secrets engines. Once you set up JWT authentication to
-Vault as described above, you can enable a dynamic secrets engine such as
-[AWS secrets engine](/vault/docs/secrets/aws) in Vault.
-The AWS secrets engine allows the GitLab CI/CD jobs to request short-lived dynamic AWS credentials.
-
-The following is an example of using dynamic AWS credentials in a GitLab job.
-
-<Note>
-
-If you're [signing requests to AWS](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_sigv.html), you may need to set `AWS_SESSION_TOKEN` in the following example.
-
-</Note>
+GitLab integrates with Vault's dynamic secrets engines to generate temporary credentials that automatically expire. The following example retrieves dynamic AWS credentials for deployment:
 
 ```yaml
-read_secrets:
-  image: hashicorp/vault:latest
+deploy_to_aws:
+  id_tokens:
+    VAULT_ID_TOKEN:
+      aud: https://vault.example.com
+  secrets:
+    # Automatic authentication retrieves dynamic AWS credentials
+    AWS_ACCESS_KEY_ID:
+      vault:
+        engine:
+          name: generic
+          path: aws
+        path: creds/deploy-role
+        field: access_key
+      file: false
+    AWS_SECRET_ACCESS_KEY:
+      vault:
+        engine:
+          name: generic
+          path: aws
+        path: creds/deploy-role
+        field: secret_key
+      file: false
+    AWS_SESSION_TOKEN:
+      vault:
+        engine:
+          name: generic
+          path: aws
+        path: creds/deploy-role
+        field: security_token
+      file: false
   script:
-    # jq must be installed
-    # set the dynamic aws credentials to AWS_CREDS variable
-    - export AWS_CREDS="$(vault read aws/creds/my-role -format=json)"
-    # use jq to parse AWS_CREDS and set the AWS access_key to AWS_ACCESS_KEY_ID
-    - AWS_ACCESS_KEY_ID=$(echo "${AWS_CREDS}" | jq -r .data.access_key)
-    - export AWS_ACCESS_KEY_ID
-    # use jq to parse AWS_CREDS and set the AWS secret_key to AWS_SECRET_ACCES_KEY
-    - AWS_SECRET_ACCESS_KEY=$(echo "${AWS_CREDS}" | jq -r .data.secret_key)
-    - export AWS_SECRET_ACCESS_KEY
-    # uncomment next two lines to use set a session token if required
-    #- AWS_SESSION_TOKEN=$(echo "$(AWS_CREDS}" | jq -r .data.security.token)
-    #- export AWS_SESSION_TOKEN
+    - aws s3 sync ./build s3://my-bucket
+    - echo "Deployment complete. AWS credentials auto-expire after lease duration."
 ```
+
+### Multiple secrets engines
+
+GitLab supports retrieving secrets from different Vault secrets engines using the `engine` syntax introduced in GitLab 16.11:
+
+```yaml
+job_with_multiple_engines:
+  id_tokens:
+    VAULT_ID_TOKEN:
+      aud: https://vault.example.com
+  secrets:
+    # KV v2 secret (default engine)
+    DATABASE_PASSWORD:
+      vault: production/db/password@secret
+      file: false
+
+    # Artifactory token from generic engine
+    JFROG_TOKEN:
+      vault:
+        engine:
+          name: generic
+          path: artifactory
+        path: production/jfrog
+        field: access_token
+      file: false
+
+    # Database dynamic credentials
+    DB_DYNAMIC_USER:
+      vault:
+        engine:
+          name: generic
+          path: database
+        path: creds/readonly
+        field: username
+      file: false
+  script:
+    - echo "Using secrets from multiple Vault engines"
+```
+
+The following diagram shows the steps a GitLab CI/CD pipeline takes to retrieve a secret from Vault:
+
+![GitLab Vault workflow](/img/well-architected-framework/gitlab-vault-workflow.png)
+
 </Tab>
 
 <Tab heading="GitLab Community Edition" group="gitlab">
 
-GitLab Community Edition users can pull secrets from Vault.
+### Manual authentication workflow
 
-You must manually set the authentication environment variables to do so.
+GitLab Community Edition supports manual authentication where pipelines explicitly call the Vault CLI to authenticate and retrieve secrets. This approach requires setting VAULT_ADDR and obtaining a token through manual authentication.
+
+The following example shows the complete manual authentication workflow:
 
 ```yaml
-read_secrets:
+manual_authentication:
+  variables:
+    VAULT_ADDR: https://vault.example.com:8200
+    # Optional: Set namespace for HCP Vault
+    # VAULT_NAMESPACE: admin
   image: hashicorp/vault:latest
   id_tokens:
-    VAULT_AUTH_TOKEN:
-      aud: https://gitlab.com
+    VAULT_ID_TOKEN:
+      aud: https://vault.example.com
   script:
-    - export VAULT_ADDR=http://vault.example.com:8200
-    # authenticate and get token. Token expiry time and other properties can be configured
-    # when configuring JWT Auth - https://developer.hashicorp.com/vault/api-docs/auth/jwt#parameters-1
-    - export VAULT_TOKEN="$(vault write -field=token auth/jwt/login role=myproject-staging jwt=$VAULT_AUTH_TOKEN)"
-    # use the VAULT_TOKEN to read the secret and store it in an environment variable
-    - export PASSWORD="$(vault kv get -field=password secret/myproject/staging/db)"
+    # Authenticate to Vault with GitLab OIDC token and get Vault token
+    # Token TTL and other properties configured in Vault JWT auth role
+    - export VAULT_TOKEN="$(vault write -field=token auth/jwt/login role=myproject-staging jwt=$VAULT_ID_TOKEN)"
+
+    # Retrieve secrets using Vault token
+    - export DATABASE_PASSWORD="$(vault kv get -field=password secret/myproject/staging/db)"
+    - export API_KEY="$(vault kv get -field=token secret/myproject/staging/api)"
+
+    # Use secrets in deployment
+    - echo "Connected to database with credentials from Vault"
+    - ./deploy.sh
 ```
 
-Once you set the Vault authentication environment variables, you can pull static and dynamic secrets through the CLI, as covered in the GitLab Premium tab.
+### Dynamic secrets with manual authentication
+
+Community Edition users can retrieve dynamic secrets using the Vault CLI. The following example retrieves temporary AWS credentials:
+
+```yaml
+deploy_to_aws:
+  variables:
+    VAULT_ADDR: https://vault.example.com:8200
+  image: hashicorp/vault:latest
+  id_tokens:
+    VAULT_ID_TOKEN:
+      aud: https://vault.example.com
+  script:
+    # Authenticate to Vault
+    - export VAULT_TOKEN="$(vault write -field=token auth/jwt/login role=myproject-aws jwt=$VAULT_ID_TOKEN)"
+
+    # Request dynamic AWS credentials from Vault (automatically expire after TTL)
+    - export AWS_CREDS="$(vault read aws/creds/deploy-role -format=json)"
+
+    # Extract credentials using jq
+    - export AWS_ACCESS_KEY_ID=$(echo "${AWS_CREDS}" | jq -r '.data.access_key')
+    - export AWS_SECRET_ACCESS_KEY=$(echo "${AWS_CREDS}" | jq -r '.data.secret_key')
+    - export AWS_SESSION_TOKEN=$(echo "${AWS_CREDS}" | jq -r '.data.security_token')
+
+    # Deploy to AWS using temporary credentials
+    - aws s3 sync ./build s3://my-bucket
+    - echo "Deployment complete. AWS credentials will auto-expire after lease duration."
+```
+
+Community Edition users can access all Vault secrets engines (KV, AWS, databases, etc.) using the manual authentication workflow. The authentication token obtained from Vault provides access to secrets based on the configured policies.
 
 </Tab>
 </Tabs>
 
+## Best practices
+
+The following best practices help you secure and operationalize Vault integration with GitLab:
+
+- **Configure bound claims to restrict access:** Configure Vault JWT auth method roles with bound claims that restrict authentication to specific GitLab projects, namespaces, branches, or protected refs. Use claims like `project_id`, `namespace_id`, `ref_protected`, `ref_type`, and `ref` to ensure only authorized pipelines can access secrets. Without bound claims, any pipeline in your GitLab instance could potentially authenticate using the role.
+
+- **Use protected branches and tags for production secrets:** Configure GitLab protected branches and tags for production deployments, then use `bound_claims: {"ref_protected":"true"}` in Vault roles to ensure only pipelines running on protected refs can access production secrets. This prevents unauthorized access from feature branches or unprotected tags.
+
+- **Set short token TTLs:** Configure Vault JWT auth roles with short token TTL values (recommended 60 seconds) to minimize the risk window if tokens are compromised. GitLab pipelines typically complete within seconds to minutes, making short TTLs practical while improving security.
+
+- **Implement least-privilege policies per project:** Write Vault policies that grant each GitLab project the minimum permissions required for its pipelines. Create separate policies for different projects or environments (dev, staging, production) with each policy restricted to specific secret paths. Grant read access only to the secrets each project needs.
+
+- **Use Vault namespaces for isolation:** When using HCP Vault or Vault Enterprise, configure separate Vault namespaces for different GitLab groups or teams. Set the `VAULT_NAMESPACE` variable in GitLab CI/CD settings to isolate secrets between teams and prevent cross-team access.
+
+- **Prefer dynamic secrets over static:** Use Vault's dynamic secrets engines (AWS, databases, SSH, PKI) instead of static secrets in the KV engine when possible. Dynamic secrets provide automatic rotation, time-limited credentials, and better audit trails without requiring manual rotation workflows in GitLab.
+
+- **Audit pipeline secret access regularly:** Enable Vault audit logging and regularly review which GitLab projects and pipelines accessed which secrets. Monitor for unexpected access patterns, failed authentication attempts, or secrets accessed by pipelines that should not need them for security investigations and compliance reporting.
+
+- **Store Vault configuration in GitLab CI/CD settings:** Store VAULT_SERVER_URL, VAULT_AUTH_ROLE, and VAULT_NAMESPACE as GitLab CI/CD variables at the project or group level rather than hard-coding them in `.gitlab-ci.yml` files. This centralizes configuration and makes it easier to update Vault settings across multiple pipelines.
+
 ## HashiCorp resources
 
-- [Generate cloud provider credentials with Vault](/vault/tutorials/secrets-management/azure-secrets)
+Vault authentication for CI/CD:
 
-- [AWS dynamic secrets engine](/vault/docs/secrets/aws)
+- Read the [Vault authentication methods documentation](/vault/docs/auth) for an overview of available auth methods
+- Learn about [JWT/OIDC auth method](/vault/docs/auth/jwt) for token-based authentication
+- Complete the [OIDC auth method tutorial](/vault/tutorials/auth-methods/oidc-auth) to understand OIDC authentication patterns
+- Review the [JWT auth method API documentation](/vault/api-docs/auth/jwt) for role configuration and bound claims
 
-- [Dynamic secrets for database credential management](/vault/tutorials/db-credentials/database-secrets)
+Vault secrets and dynamic credentials:
 
-- [Manage LDAP credentials with Vault](/vault/tutorials/secrets-management/openldap)
+- Understand [dynamic and static secrets](/vault/tutorials/get-started/understand-static-dynamic-secrets) to choose the right approach
+- Read the [KV secrets engine documentation](/vault/docs/secrets/kv) for static secret storage
+- Learn about [AWS secrets engine](/vault/docs/secrets/aws) for dynamic cloud credentials
+- Explore [database secrets engine](/vault/docs/secrets/databases) for dynamic database credentials
+- Review [Azure secrets engine](/vault/tutorials/secrets-management/azure-secrets) for Azure service principal generation
+
+HCP Vault and Enterprise features:
+
+- Learn about [Vault namespaces](/vault/docs/enterprise/namespaces) for multi-tenant isolation
+- Review [HCP Vault](/hcp/docs/vault) for managed Vault service
 
 ### External resources
 
-- [Authenticating and reading secrets with HashiCorp Vault](https://docs.gitlab.com/ee/ci/examples/authenticating-with-hashicorp-vault/)
+GitLab official documentation:
 
-- [Using external secrets in CI](https://docs.gitlab.com/ee/ci/secrets/)
+- Read [Use HashiCorp Vault secrets in GitLab CI/CD](https://docs.gitlab.com/ci/secrets/hashicorp_vault/) for complete integration guide
+- Review [Using external secrets in CI](https://docs.gitlab.com/ci/secrets/) for secrets management overview
+- Learn about [GitLab CI/CD variables](https://docs.gitlab.com/ee/ci/variables/) for configuration management
+- Explore [ID tokens in GitLab CI/CD](https://docs.gitlab.com/ee/ci/secrets/id_token_authentication.html) for OIDC token details
 
-- Guy Barros, a Senior Solutions Engineer at HashiCorp, maintains a [repository](https://github.com/GuyBarros/terraform_vault_gitlab_auth) with Terraform code to automate the JWT auth method integration between HCP Vault Dedicated and GitLab. Barros demonstrates how to use the Terraform code in the [Codify your JWT-OIDC Vault auth method with Terraform](https://www.youtube.com/watch?v=M-Lq7TDV-70) HashiTalks video.
+Videos and demonstrations:
 
-- GitLab Unfiltered - [How to integrate GitLab CI with HashiCorp Vault to retrieve secrets (via JWT or "secrets:")](https://www.youtube.com/watch?v=NsPcl4rqy9A), uses AWS Quick Start to launch [HashiCorp Vault on AWS](https://aws.amazon.com/quickstart/architecture/vault/), and demonstrates how to set up policies, roles, and authentication to Vault.
+- Watch [How to integrate GitLab CI with HashiCorp Vault](https://www.youtube.com/watch?v=NsPcl4rqy9A) (GitLab Unfiltered) for complete setup demonstration including policies, roles, and authentication
+- Watch [Codify your JWT-OIDC Vault auth method with Terraform](https://www.youtube.com/watch?v=M-Lq7TDV-70) (HashiTalks) for automating Vault JWT auth configuration with Terraform
+
+Community resources:
+
+- Explore [terraform_vault_gitlab_auth](https://github.com/GuyBarros/terraform_vault_gitlab_auth) repository for Terraform automation of JWT auth method integration between HCP Vault and GitLab
 
 ## Next steps
 

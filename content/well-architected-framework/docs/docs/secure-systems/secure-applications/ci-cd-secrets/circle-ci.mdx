@@ -26,7 +26,7 @@ Before integrating CircleCI with Vault, you need the following:
 - A Vault instance or HCP Vault accessible from CircleCI runners over the network
 - CircleCI organization with administrator access to configure projects and contexts
 - A Vault JWT auth method configured to trust CircleCI's OIDC issuer
-- Vault policies that grant CircleCI the necessary read permissions for your secrets
+- Vault policies that grant CircleCI the necessary read permissions for your secrets. Each policy should follow the principle of least privilege by specifying exact secret paths rather than using wildcards. Policies must be attached to JWT auth method roles that bind to specific CircleCI claims like project ID, organization ID, or branch patterns.
 - We recommend TLS encryption between CircleCI runners and Vault
 
 ## Integration pattern
@@ -74,6 +74,65 @@ The workflow authenticates to Vault using the CircleCI-generated OIDC token avai
 
 For complete implementation guidance including Vault configuration, pipeline YAML examples for static and dynamic secrets, and OIDC setup instructions, review the [CircleCI OIDC documentation](https://circleci.com/docs/openid-connect-tokens) and HashiCorp resources below.
 
+## Alternative: AppRole authentication
+
+If OIDC authentication is not available in your environment or you are running self-hosted CircleCI runners without OIDC support, you can use the [AppRole auth method](/vault/docs/auth/approle) as a fallback. AppRole uses a role ID and secret ID pair stored as CircleCI project environment variables to authenticate pipelines to Vault.
+
+The following example shows AppRole authentication for CircleCI workflows:
+
+```yaml
+version: 2.1
+
+jobs:
+  deploy:
+    docker:
+      - image: cimg/base:stable
+    steps:
+      - checkout
+      - run:
+          name: Retrieve secrets from Vault using AppRole
+          command: |
+            # Authenticate to Vault with AppRole credentials
+            export VAULT_ADDR="https://vault.example.com:8200"
+            export VAULT_TOKEN=$(vault write -field=token auth/approle/login \
+              role_id=$VAULT_ROLE_ID \
+              secret_id=$VAULT_SECRET_ID)
+
+            # Retrieve database password from Vault
+            export DB_PASSWORD=$(vault kv get -field=password secret/database/production)
+
+            # Use secret in deployment
+            ./deploy.sh
+
+workflows:
+  deploy-workflow:
+    jobs:
+      - deploy:
+          context: vault-context
+```
+
+When using AppRole authentication, store the `VAULT_ROLE_ID` as a standard CircleCI project environment variable and `VAULT_SECRET_ID` as a CircleCI project secret to protect the secret ID from exposure. Use CircleCI Contexts to scope these credentials to specific workflows and restrict access to authorized team members.
+
+We strongly recommend OIDC authentication over AppRole when available because OIDC eliminates the need to store long-lived credentials in CircleCI and provides automatic token rotation for each workflow run.
+
+## Best practices
+
+The following best practices help you secure and operationalize Vault integration with CircleCI:
+
+- **Configure JWT roles with bound claims:** When using OIDC authentication, configure Vault JWT auth method roles with bound claims that restrict authentication to specific projects, organizations, or branch patterns. Use `bound_claims` to match CircleCI's project ID (`oidc.circleci.com/project-id`) or organization ID to ensure only authorized workflows can authenticate.
+
+- **Set appropriate token TTLs:** Configure Vault token time-to-live (TTL) values that match your workflow execution duration. Short TTLs (5-15 minutes) work well for most workflows and reduce the risk window if tokens are compromised, while longer TTLs may be needed for extended deployment pipelines.
+
+- **Implement least-privilege policies per workflow:** Write Vault policies that grant each workflow or project the minimum permissions required for its operation. Grant read access only to the specific secret paths each workflow needs, avoiding wildcard permissions or broad path access.
+
+- **Use CircleCI Contexts for credential isolation:** Store Vault-related configuration (OIDC settings, AppRole credentials) in CircleCI Contexts to control which workflows can access Vault. Configure Context restrictions based on security groups to limit access to authorized team members and projects.
+
+- **Use dynamic secrets where possible:** Prefer dynamic secrets over static secrets for database credentials, cloud provider credentials, and other infrastructure access. Dynamic secrets provide automatic rotation, time-limited credentials, and better audit trails without requiring manual rotation workflows.
+
+- **Revoke tokens on job completion:** Configure your CircleCI workflows to revoke Vault tokens after the job completes, even if the job fails. Use a cleanup step with `when: always` to ensure tokens are revoked regardless of job status, reducing the risk window for compromised tokens.
+
+- **Audit pipeline secret access regularly:** Enable Vault audit logging and regularly review which workflows accessed which secrets. Monitor for unexpected access patterns, failed authentication attempts, or secrets accessed by workflows that should not need them for security investigations and compliance reporting.
+
 ## HashiCorp resources
 
 Vault authentication for CI/CD:
@@ -81,6 +140,7 @@ Vault authentication for CI/CD:
 - Read the [Vault authentication methods documentation](/vault/docs/auth) for an overview of available auth methods
 - Learn about [JWT/OIDC auth method](/vault/docs/auth/jwt) for token-based pipeline authentication
 - Complete the [OIDC auth method tutorial](/vault/tutorials/auth-methods/oidc-auth) to understand OIDC authentication patterns
+- Read the [AppRole auth method documentation](/vault/docs/auth/approle) for credential-based authentication as a fallback option
 
 Vault secrets and dynamic credentials:
 
@@ -89,6 +149,14 @@ Vault secrets and dynamic credentials:
 - Learn about [AWS secrets engine](/vault/docs/secrets/aws) for dynamic cloud credentials
 
 ### External resources
+
+CircleCI and Vault integration:
+
+<VideoEmbed url="https://www.hashicorp.com/en/resources/injecting-dynamic-secrets-into-circleci-pipeline"/>
+
+- Read [Vault integration with CircleCI](https://www.hashicorp.com/en/blog/vault-integration-with-circleci) for CircleCI OIDC setup guide
+
+Additional resources:
 
 - Watch [Inject secrets from HashiCorp Vault into CircleCI](https://www.youtube.com/watch?v=l6lG7FR5_Ow) with Rosemary Wang (HashiCorp) and Angel Rivera (CircleCI) for a hands-on demonstration
 - Review [code examples from the video](https://github.com/punkdata/nodejs-circleci/tree/vault) for working CircleCI-Vault integration

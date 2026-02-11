@@ -26,7 +26,7 @@ Before integrating Bitbucket Pipelines with Vault, you need the following:
 - A Vault instance or HCP Vault accessible from Bitbucket Pipelines over the network
 - Bitbucket workspace with administrator access to configure pipelines and repository settings
 - A Vault JWT auth method configured to trust Bitbucket's OIDC issuer
-- Vault policies that grant Bitbucket Pipelines the necessary read permissions for your secrets
+- Vault policies that grant Bitbucket Pipelines the necessary read permissions for your secrets. Each policy should follow the principle of least privilege by specifying exact secret paths rather than using wildcards. Policies must be attached to JWT auth method roles that bind to specific Bitbucket claims like repository UUID, workspace UUID, or branch patterns.
 - We recommend TLS encryption between Bitbucket Pipelines and Vault
 
 ## Integration pattern
@@ -62,6 +62,49 @@ The pipeline enables OIDC for the step, authenticates to Vault using the Bitbuck
 
 For complete implementation guidance including Vault configuration, pipeline YAML examples, and OIDC setup instructions, review the [Bitbucket OIDC documentation](https://support.atlassian.com/bitbucket-cloud/docs/integrate-pipelines-with-resource-servers-using-oidc/) and HashiCorp resources below.
 
+## Alternative: AppRole authentication
+
+If OIDC authentication is not available in your environment or you need to support legacy pipeline configurations, you can use the [AppRole auth method](/vault/docs/auth/approle) as a fallback. AppRole uses a role ID and secret ID pair stored as Bitbucket repository variables to authenticate pipelines to Vault.
+
+The following example shows AppRole authentication for Bitbucket Pipelines:
+
+```yaml
+pipelines:
+  default:
+    - step:
+        name: Deploy with Vault secrets using AppRole
+        script:
+          # Authenticate to Vault with AppRole credentials
+          - export VAULT_ADDR="https://vault.example.com:8200"
+          - export VAULT_TOKEN=$(vault write -field=token auth/approle/login role_id=$VAULT_ROLE_ID secret_id=$VAULT_SECRET_ID)
+
+          # Retrieve database password from Vault
+          - export DB_PASSWORD=$(vault kv get -field=password secret/database/production)
+
+          # Use secret in deployment
+          - ./deploy.sh
+```
+
+When using AppRole authentication, store the `VAULT_ROLE_ID` as a standard Bitbucket repository variable and `VAULT_SECRET_ID` as a secured repository variable to protect the secret ID from exposure. The role ID is not considered highly sensitive, while the secret ID must be protected.
+
+We strongly recommend OIDC authentication over AppRole when available because OIDC eliminates the need to store long-lived credentials in Bitbucket variables and provides automatic token rotation for each pipeline run.
+
+## Best practices
+
+The following best practices help you secure and operationalize Vault integration with Bitbucket Pipelines:
+
+- **Configure JWT roles with bound claims:** When using OIDC authentication, configure Vault JWT auth method roles with bound claims that restrict authentication to specific repositories, workspaces, or branch patterns. Use `bound_claims` to match Bitbucket's repository UUID, workspace UUID, or other OIDC token claims to ensure only authorized pipelines can authenticate.
+
+- **Set appropriate token TTLs:** Configure Vault token time-to-live (TTL) values that match your pipeline execution duration. Short TTLs (5-15 minutes) work well for most pipelines and reduce the risk window if tokens are compromised, while longer TTLs may be needed for extended deployment workflows.
+
+- **Implement least-privilege policies per pipeline:** Write Vault policies that grant each pipeline or repository the minimum permissions required for its operation. Grant read access only to the specific secret paths each pipeline needs, avoiding wildcard permissions or broad path access.
+
+- **Use bound audiences to restrict token usage:** Configure the `bound_audiences` parameter in JWT auth method roles to ensure Bitbucket OIDC tokens can only be used for Vault authentication. Set this to your Vault's expected audience value to prevent token reuse across different systems.
+
+- **Use dynamic secrets where possible:** Prefer dynamic secrets over static secrets for database credentials, cloud provider credentials, and other infrastructure access. Dynamic secrets provide automatic rotation, time-limited credentials, and better audit trails without requiring manual rotation workflows in your pipelines.
+
+- **Audit pipeline secret access regularly:** Enable Vault audit logging and regularly review which pipelines accessed which secrets. Monitor for unexpected access patterns, failed authentication attempts, or secrets accessed by pipelines that should not need them for security investigations and compliance reporting.
+
 ## HashiCorp resources
 
 Vault authentication for CI/CD:
@@ -69,6 +112,7 @@ Vault authentication for CI/CD:
 - Read the [Vault authentication methods documentation](/vault/docs/auth) for an overview of available auth methods
 - Learn about [JWT/OIDC auth method](/vault/docs/auth/jwt) for token-based pipeline authentication
 - Complete the [OIDC auth method tutorial](/vault/tutorials/auth-methods/oidc-auth) to understand OIDC authentication patterns
+- Read the [AppRole auth method documentation](/vault/docs/auth/approle) for credential-based authentication as a fallback option
 
 Vault secrets and dynamic credentials:
 

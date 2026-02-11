@@ -73,7 +73,14 @@ When you start Claude Code in the `docs/` directory:
 # 4. Add resources
 /add-resources docs/security/new-topic.mdx
 
-# 5. Full review before committing
+# 5. Update navigation (if in a section with nav)
+# Edit: /Users/cjobermaier/workspace/web-unified-docs/content/well-architected-framework/data/docs-nav-data.json
+# Add your document to the appropriate section in the JSON structure
+
+# 6. Update index page (if adding to a multi-page section)
+# Edit the section's index.mdx to add links/tables referencing the new doc
+
+# 7. Full review before committing
 /review-doc docs/security/new-topic.mdx
 ```
 
@@ -128,6 +135,33 @@ When you start Claude Code in the `docs/` directory:
 "/review-doc --help"
 "/create-doc --help"
 ```
+
+## Navigation and Document Organization
+
+### Adding Documents to Navigation
+
+When creating new documents, update the navigation in two places:
+
+**1. Main Navigation File**
+- **Path:** `/Users/cjobermaier/workspace/web-unified-docs/content/well-architected-framework/data/docs-nav-data.json`
+- **Format:** JSON structure with nested routes
+- **Example:**
+  ```json
+  {
+    "title": "Your Document Title",
+    "path": "secure-systems/secure-applications/ci-cd-secrets/your-doc"
+  }
+  ```
+
+**2. Section Index Page (if applicable)**
+- **Path:** The `index.mdx` file in the document's section
+- **Example:** For CI/CD docs, update `docs/secure-systems/secure-applications/ci-cd-secrets/index.mdx`
+- **Update:** Add to comparison tables and integration links
+
+**Common sections with navigation:**
+- CI/CD secrets: Has both `docs-nav-data.json` entry and `index.mdx` links
+- Secrets management: Has `docs-nav-data.json` entries
+- Process automation: Has nested routes in `docs-nav-data.json`
 
 ## Common Questions
 

@@ -1,0 +1,422 @@
+---
+page_title: Terraform
+description: Integrate Terraform with HashiCorp Vault using OIDC authentication. Retrieve secrets in infrastructure code and use Vault-backed dynamic credentials for cloud providers.
+---
+
+# Terraform
+
+Terraform Cloud and Terraform Enterprise provide native OIDC integration with Vault, allowing infrastructure deployments to authenticate to Vault and retrieve secrets without storing long-lived credentials. When you use OIDC authentication, Terraform automatically generates short-lived identity tokens for each run that Vault validates to grant access to secrets and dynamic credentials.
+
+## Why integrate Terraform with Vault
+
+Integrating Terraform with Vault addresses the following security and operational challenges in infrastructure automation:
+
+**Eliminate credentials from Terraform configurations:** Vault keeps sensitive values out of Terraform code, state files, and version control by providing secrets on-demand during runs. Hard-coded credentials in `.tf` files or workspace variables create security risks because they persist in state files and can be exposed through misconfigured storage or logs.
+
+**Enable dynamic cloud credentials:** Vault generates temporary AWS, Azure, and GCP credentials for each Terraform run that automatically expire, eliminating the need to store long-lived cloud provider credentials in Terraform Cloud workspaces. Dynamic credentials reduce the attack surface by providing time-limited access that expires when the run completes.
+
+**Support infrastructure secret requirements:** Infrastructure deployments require various secrets including database credentials, API keys for external services, TLS certificates, and encryption keys. Vault centralizes management of these secrets with unified access control, rotation policies, and audit logging across all infrastructure deployments.
+
+**Meet compliance and audit requirements:** Vault provides comprehensive audit logs that track which Terraform workspaces accessed which secrets during which runs, supporting compliance frameworks that require detailed access trails and secret usage reporting.
+
+## Prerequisites
+
+Before integrating Terraform with Vault, you need the following:
+
+- A Vault instance or HCP Vault accessible from Terraform Cloud or Terraform Enterprise over the network
+- Terraform Cloud organization or Terraform Enterprise installation with workspace administrator access
+- A Vault JWT auth method configured to trust Terraform Cloud or Terraform Enterprise as an OIDC issuer
+- Vault policies that grant Terraform workspaces the necessary read permissions for your secrets. Each policy should follow the principle of least privilege by specifying exact secret paths rather than using wildcards. Policies must be attached to JWT auth method roles that bind to specific Terraform organizations, workspaces, or run phases.
+- We recommend TLS encryption between Terraform runs and Vault
+
+## Choose an integration approach
+
+Terraform supports several approaches for integrating with Vault. Choose the approach that matches your deployment model and security requirements:
+
+| Approach | Setup Complexity | Credentials Required | Secret Access | Best For |
+|----------|-----------------|---------------------|---------------|----------|
+| Terraform Cloud OIDC | Low | None (OIDC tokens) | Vault provider in Terraform code | Teams using Terraform Cloud or Enterprise |
+| Vault-backed dynamic credentials | Medium | None (OIDC tokens) | Automatic cloud provider credentials | Teams wanting to eliminate cloud credentials |
+| Terraform in CI/CD | Medium | AppRole or OIDC | Environment variables before Terraform runs | Teams running Terraform in GitHub Actions, CircleCI, etc. |
+
+- **Terraform Cloud OIDC integration:** Terraform Cloud and Terraform Enterprise provide native OIDC integration with Vault that eliminates the need to store Vault credentials. Terraform automatically authenticates to Vault during each run using short-lived OIDC tokens, retrieves secrets using the Vault provider in your Terraform code, and revokes tokens when runs complete. This approach provides the best security posture with no static credentials. Use this approach when running Terraform Cloud or Terraform Enterprise.
+
+- **Vault-backed dynamic credentials:** Terraform Cloud can use Vault to generate temporary cloud provider credentials (AWS, Azure, GCP) for each run instead of storing long-lived credentials in workspace variables. Terraform authenticates to Vault using OIDC, Vault generates dynamic credentials from its secrets engines, and Terraform uses those credentials to provision infrastructure. Credentials automatically expire after the run completes. Use this approach to eliminate cloud provider credentials from Terraform Cloud entirely.
+
+- **Terraform in CI/CD pipelines:** When running Terraform CLI in CI/CD platforms like GitHub Actions or CircleCI, treat Terraform as another tool in the pipeline. The CI/CD platform authenticates to Vault using AppRole or OIDC, retrieves secrets and sets them as environment variables, then runs Terraform commands. Use this approach when using Terraform CLI in existing CI/CD pipelines rather than Terraform Cloud.
+
+## Integration pattern
+
+Terraform Cloud authenticates to Vault using OIDC tokens and retrieves secrets during runs:
+
+1. **Configure JWT auth:** Enable Vault's JWT auth method and configure it to trust Terraform Cloud's OIDC issuer
+2. **Create Vault role:** Define a JWT auth role with bound claims that restrict access to specific Terraform organizations and workspaces
+3. **Enable in workspace:** Set environment variables in Terraform Cloud workspace to enable Vault provider authentication
+4. **Use in code:** Reference secrets in Terraform configurations using the Vault provider data sources
+
+## Integration approaches
+
+<Tabs>
+<Tab heading="Terraform Cloud OIDC" group="terraform">
+
+### Terraform Cloud OIDC integration
+
+Terraform Cloud and Terraform Enterprise provide native OIDC integration that automatically authenticates to Vault during runs without storing credentials.
+
+**When to use:** We recommend this approach for most Terraform Cloud and Terraform Enterprise users. It provides the strongest security posture by eliminating static credentials entirely.
+
+**Configure Vault JWT auth method:**
+
+```bash
+# Enable JWT auth method
+vault auth enable jwt
+
+# Configure to trust Terraform Cloud
+vault write auth/jwt/config \
+    oidc_discovery_url="https://app.terraform.io" \
+    bound_issuer="https://app.terraform.io"
+
+# Create role for Terraform workspace
+vault write auth/jwt/role/terraform-prod \
+    role_type="jwt" \
+    bound_audiences="vault.workload.identity" \
+    bound_claims='{"sub":"organization:my-org:workspace:production:run_phase:*"}' \
+    user_claim="terraform_full_workspace" \
+    token_policies="terraform-prod-policy" \
+    token_ttl=20m
+```
+
+**Create Vault policy:**
+
+```hcl
+# terraform-prod-policy.hcl
+
+# Allow tokens to query themselves
+path "auth/token/lookup-self" {
+  capabilities = ["read"]
+}
+
+# Allow tokens to renew themselves
+path "auth/token/renew-self" {
+  capabilities = ["update"]
+}
+
+# Allow tokens to revoke themselves
+path "auth/token/revoke-self" {
+  capabilities = ["update"]
+}
+
+# Grant access to production secrets
+path "secret/data/production/*" {
+  capabilities = ["read"]
+}
+```
+
+**Configure Terraform Cloud workspace:**
+
+Set the following environment variables in your Terraform Cloud workspace:
+
+- `TFC_VAULT_PROVIDER_AUTH=true`
+- `TFC_VAULT_ADDR=https://vault.example.com:8200`
+- `TFC_VAULT_ROLE=terraform-prod`
+
+**Use in Terraform configuration:**
+
+```hcl
+terraform {
+  required_providers {
+    vault = {
+      source  = "hashicorp/vault"
+      version = "~> 3.0"
+    }
+  }
+}
+
+# Provider authenticates automatically using Terraform Cloud's OIDC token
+provider "vault" {
+  # No explicit auth configuration needed
+  # TFC_VAULT_PROVIDER_AUTH handles authentication
+}
+
+# Read database credentials from Vault
+data "vault_kv_secret_v2" "database" {
+  mount = "secret"
+  name  = "production/database"
+}
+
+# Use secrets in resources
+resource "aws_db_instance" "main" {
+  allocated_storage = 20
+  engine           = "postgres"
+  instance_class   = "db.t3.micro"
+  username         = data.vault_kv_secret_v2.database.data["username"]
+  password         = data.vault_kv_secret_v2.database.data["password"]
+}
+```
+
+Terraform Cloud automatically authenticates to Vault at the start of each run, retrieves secrets as needed during plan and apply phases, and revokes tokens when runs complete.
+
+</Tab>
+<Tab heading="Vault-backed dynamic credentials" group="terraform">
+
+### Vault-backed dynamic credentials
+
+Terraform Cloud can use Vault to generate temporary cloud provider credentials for each run, eliminating the need to store long-lived credentials in workspace variables.
+
+**When to use:** Use this approach when you want to completely eliminate cloud provider credentials from Terraform Cloud and leverage Vault's dynamic secrets engines for AWS, Azure, or GCP.
+
+**Architecture:** Terraform Cloud authenticates to Vault using OIDC, Vault generates temporary cloud credentials from its secrets engines, and Terraform uses those credentials to provision infrastructure. Credentials automatically expire after the run.
+
+**Configure Vault AWS secrets engine:**
+
+```bash
+# Enable AWS secrets engine
+vault secrets enable aws
+
+# Configure AWS secrets engine with root credentials
+vault write aws/config/root \
+    access_key=AKIAXXXXXXXXX \
+    secret_key=XXXXXXXXXXXXXXX \
+    region=us-east-1
+
+# Create role for Terraform deployments
+vault write aws/roles/terraform-deploy \
+    credential_type=assumed_role \
+    role_arns=arn:aws:iam::123456789012:role/terraform-deploy \
+    default_sts_ttl=3600 \
+    max_sts_ttl=7200
+```
+
+**Create Vault policy for AWS credentials:**
+
+```hcl
+# terraform-aws-policy.hcl
+
+# Allow token management
+path "auth/token/lookup-self" {
+  capabilities = ["read"]
+}
+
+path "auth/token/renew-self" {
+  capabilities = ["update"]
+}
+
+path "auth/token/revoke-self" {
+  capabilities = ["update"]
+}
+
+# Grant access to AWS dynamic credentials
+path "aws/creds/terraform-deploy" {
+  capabilities = ["read"]
+}
+```
+
+**Configure Terraform Cloud workspace for Vault-backed AWS:**
+
+Set the following environment variables in your workspace:
+
+- `TFC_VAULT_PROVIDER_AUTH=true`
+- `TFC_VAULT_ADDR=https://vault.example.com:8200`
+- `TFC_VAULT_ROLE=terraform-prod`
+- `TFC_VAULT_BACKED_AWS_AUTH=true`
+- `TFC_VAULT_BACKED_AWS_RUN_VAULT_ROLE=terraform-prod`
+- `TFC_VAULT_BACKED_AWS_MOUNT=aws`
+- `TFC_VAULT_BACKED_AWS_ROLE=terraform-deploy`
+
+**Use in Terraform configuration:**
+
+```hcl
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+}
+
+# Provider automatically receives dynamic credentials from Vault
+provider "aws" {
+  region = "us-east-1"
+  # Credentials provided by Terraform Cloud via Vault
+}
+
+# Provision AWS resources with dynamic credentials
+resource "aws_s3_bucket" "app" {
+  bucket = "my-app-bucket"
+}
+```
+
+Terraform Cloud requests new AWS credentials from Vault for each run, uses them to provision infrastructure, and credentials automatically expire after the configured TTL.
+
+</Tab>
+<Tab heading="Terraform in CI/CD" group="terraform">
+
+### Terraform in CI/CD pipelines
+
+When running Terraform CLI in CI/CD platforms like GitHub Actions or CircleCI, the pipeline authenticates to Vault and retrieves secrets before running Terraform commands.
+
+**When to use:** Use this approach when running Terraform CLI in existing CI/CD pipelines rather than Terraform Cloud. The CI/CD platform handles Vault authentication following standard patterns.
+
+**Example: GitHub Actions with Terraform**
+
+```yaml
+name: Deploy infrastructure with Terraform
+on: [push]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.6.0
+
+      - name: Authenticate to Vault
+        uses: hashicorp/vault-action@v3
+        with:
+          url: https://vault.example.com:8200
+          method: jwt
+          role: github-terraform-role
+          secrets: |
+            aws/creds/deploy access_key | AWS_ACCESS_KEY_ID
+            aws/creds/deploy secret_key | AWS_SECRET_ACCESS_KEY
+            secret/data/terraform/prod api_key | TF_VAR_api_key
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Plan
+        run: terraform plan
+
+      - name: Terraform Apply
+        if: github.ref == 'refs/heads/main'
+        run: terraform apply -auto-approve
+```
+
+The GitHub Actions workflow authenticates to Vault using OIDC, retrieves dynamic AWS credentials and static secrets, sets them as environment variables, and runs Terraform commands.
+
+**Example: CircleCI with Terraform**
+
+```yaml
+version: 2.1
+
+jobs:
+  deploy:
+    docker:
+      - image: hashicorp/terraform:1.6
+    steps:
+      - checkout
+
+      - run:
+          name: Authenticate to Vault and retrieve credentials
+          command: |
+            export VAULT_ADDR="https://vault.example.com:8200"
+            export VAULT_TOKEN=$(vault write -field=token auth/approle/login \
+              role_id=$VAULT_ROLE_ID \
+              secret_id=$VAULT_SECRET_ID)
+
+            # Get dynamic AWS credentials
+            AWS_CREDS=$(vault read -format=json aws/creds/deploy)
+            echo "export AWS_ACCESS_KEY_ID=$(echo $AWS_CREDS | jq -r '.data.access_key')" >> $BASH_ENV
+            echo "export AWS_SECRET_ACCESS_KEY=$(echo $AWS_CREDS | jq -r '.data.secret_key')" >> $BASH_ENV
+
+            # Get API key for Terraform
+            API_KEY=$(vault kv get -field=api_key secret/terraform/prod)
+            echo "export TF_VAR_api_key=$API_KEY" >> $BASH_ENV
+
+      - run:
+          name: Terraform Init
+          command: terraform init
+
+      - run:
+          name: Terraform Apply
+          command: terraform apply -auto-approve
+
+workflows:
+  deploy:
+    jobs:
+      - deploy:
+          context: vault-context
+```
+
+For detailed CI/CD pipeline configuration, refer to the platform-specific integration guides for [GitHub Actions](/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets/github-actions), [CircleCI](/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets/circle-ci), or other CI/CD platforms.
+
+</Tab>
+</Tabs>
+
+## Best practices
+
+The following best practices help you secure and operationalize Vault integration with Terraform:
+
+- **Use Terraform Cloud OIDC integration when possible:** Prefer Terraform Cloud's native OIDC integration over storing Vault credentials in workspace variables or using token-based authentication. OIDC eliminates static credential management, provides automatic token rotation for each run, and reduces the risk of credential exposure through misconfigured storage or logs.
+
+- **Configure JWT roles with bound claims:** When using OIDC authentication, configure Vault JWT auth method roles with bound claims that restrict authentication to specific Terraform organizations, workspaces, or run phases. Use `bound_claims` to match Terraform's organization name and workspace name to ensure only authorized workspaces can authenticate. This prevents workspaces from other organizations or unintended workspaces from accessing your secrets.
+
+- **Set appropriate token TTLs for run duration:** Configure Vault token time-to-live (TTL) values that match your typical Terraform run duration. Most Terraform runs complete within 10-20 minutes, so setting `token_ttl=20m` provides adequate time while minimizing the risk window if tokens are compromised. Terraform Cloud automatically handles token renewal for longer-running plans or applies.
+
+- **Implement least-privilege policies per workspace:** Write Vault policies that grant each Terraform workspace the minimum permissions required for its infrastructure deployments. Create separate policies for different environments (development, staging, production) with each policy restricted to specific secret paths. Grant read access only to the secrets each workspace needs, avoiding wildcard permissions or organization-wide access.
+
+- **Use Vault-backed dynamic credentials for cloud providers:** Prefer Vault-backed dynamic credentials over storing long-lived AWS, Azure, or GCP credentials in Terraform Cloud workspace variables. Dynamic credentials provide automatic rotation, time-limited access, and better audit trails without requiring manual credential rotation workflows. Vault generates fresh credentials for each run and automatically revokes them when runs complete.
+
+- **Separate secrets by environment in Vault:** Organize secrets in Vault using a path structure that separates environments, such as `secret/development/*`, `secret/staging/*`, and `secret/production/*`. Bind Vault policies to these paths and configure separate JWT roles for workspaces in each environment. This isolation prevents production workspaces from accidentally accessing development secrets and vice versa.
+
+- **Avoid storing secrets in Terraform state:** When using the Vault provider to read secrets, Terraform stores the secret values in state files. Ensure state files are encrypted at rest using Terraform Cloud's encryption or configure remote state backends with encryption. Never commit state files to version control or store them in unencrypted locations.
+
+- **Audit Terraform workspace secret access:** Enable Vault audit logging and regularly review which Terraform workspaces accessed which secrets during which runs. Monitor for unexpected access patterns, failed authentication attempts, or workspaces accessing secrets they should not need. Use Vault's audit logs to track the organization, workspace name, and run ID for each secret access for security investigations and compliance reporting.
+
+- **Use dynamic secrets for database credentials in Terraform:** When Terraform needs to configure database resources, use Vault's database secrets engine to generate temporary credentials rather than storing static database passwords in Vault's KV engine. Dynamic database credentials provide automatic rotation and time-limited access, improving security posture for infrastructure deployments.
+
+For complete implementation guidance, including JWT auth configuration, workspace setup, and Vault-backed dynamic credentials for AWS, Azure, and GCP, review the HashiCorp resources below.
+
+## HashiCorp resources
+
+Terraform and Vault integration guides:
+
+- Review the [Terraform Cloud dynamic credentials with Vault](/terraform/cloud-docs/workspaces/dynamic-provider-credentials/vault-configuration) for complete OIDC configuration
+- Learn about [Vault-backed dynamic credentials](/terraform/cloud-docs/workspaces/dynamic-provider-credentials/vault-backed) for AWS, Azure, and GCP
+- Explore [Terraform dynamic credentials setup examples](https://github.com/hashicorp/terraform-dynamic-credentials-setup-examples/tree/main/vault) for working configurations
+- Read the [Vault provider documentation](https://registry.terraform.io/providers/hashicorp/vault/latest/docs) for Terraform data sources and resources
+
+Vault authentication for infrastructure automation:
+
+- Read the [Vault authentication methods documentation](/vault/docs/auth) for an overview of available auth methods
+- Learn about [JWT/OIDC auth method](/vault/docs/auth/jwt) for token-based authentication
+- Complete the [OIDC auth method tutorial](/vault/tutorials/auth-methods/oidc-auth) to understand OIDC authentication patterns
+
+Vault secrets engines for cloud credentials:
+
+- Learn about [AWS secrets engine](/vault/docs/secrets/aws) for dynamic AWS credentials
+- Explore [Azure secrets engine](/vault/docs/secrets/azure) for dynamic Azure service principals
+- Read about [GCP secrets engine](/vault/docs/secrets/gcp) for dynamic GCP service account keys
+- Understand [database secrets engine](/vault/docs/secrets/databases) for dynamic database credentials
+
+Vault secrets for infrastructure:
+
+- Understand [dynamic and static secrets](/vault/tutorials/get-started/understand-static-dynamic-secrets) to choose the right approach
+- Read the [KV secrets engine documentation](/vault/docs/secrets/kv) for static secret storage
+- Learn about [PKI secrets engine](/vault/docs/secrets/pki) for dynamic certificate generation
+
+Terraform best practices:
+
+<VideoEmbed url="https://www.hashicorp.com/en/resources/best-practices-for-using-terraform-with-vault"/>
+
+### External resources
+
+- Read [Terraform Cloud documentation](https://developer.hashicorp.com/terraform/cloud-docs) for workspace configuration and features
+- Review [Managing Secrets in Terraform](https://developer.hashicorp.com/terraform/tutorials/configuration-language/sensitive-variables) for handling sensitive data
+- Learn about [Terraform Cloud OIDC tokens](https://developer.hashicorp.com/terraform/cloud-docs/workspaces/dynamic-provider-credentials#configure-terraform-cloud) for authentication details
+
+## Next steps
+
+In this section of [managing CI/CD secrets](/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets), you learned about Terraform and Vault integration. Terraform and Vault integration is part of the [Secure systems pillar](/well-architected-framework/secure-systems).
+
+- Review the [CI/CD secrets overview](/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets) for architectural guidance across platforms
+- Compare [dynamic and static secrets in CI/CD](/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets/dynamic-and-static-secrets) to choose the right secrets strategy
