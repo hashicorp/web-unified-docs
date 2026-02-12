@@ -1,0 +1,434 @@
+---
+page_title: Use dynamic credentials with Vault in module testing
+description: >-
+  Configure HashiCorp Vault JWT auth to trust HCP Terraform's OIDC tokens for module test runs,
+  enabling dynamic secret generation without static credentials.
+---
+
+# Configure dynamic credentials for Vault in module testing
+
+@include 'tfc-package-callouts/registry-test-dynamic-credentials.mdx'
+
+You can use HCP Terraform's native OpenID Connect integration with HashiCorp Vault to get dynamic secrets for module test runs. This approach uses Vault's JWT/OIDC auth method to authenticate and generate short-lived credentials or secrets without storing static Vault tokens.
+
+## Requirements
+
+You need the following to configure dynamic credentials for Vault in module testing:
+
+- A HashiCorp Vault instance version 1.8.0 or later with permissions to configure auth methods and policies
+- An HCP Terraform organization with module testing enabled
+- A private registry module with [testing configured](/terraform/cloud-docs/registry/test)
+- Permissions in HCP Terraform to modify registry module test settings
+
+  The `vault` CLI is optional but useful for command-line configuration.
+
+## Configure Vault
+Complete the following steps in Vault, then [configure HCP Terraform](#configure-hcp-terraform).
+### Enable the JWT auth method
+
+Enable the JWT auth method in Vault if it's not already enabled:
+
+```bash
+vault auth enable jwt
+```
+
+By default, Vault enables the auth method in a directory named after the type, but you can specify a different path if you want to isolate the auth method for the organization, for example:
+
+```bash
+vault auth enable -path=terraform-module-tests jwt
+```
+
+### Configure the JWT auth method
+
+Configure the auth method to trust HCP Terraform's OIDC issuer:
+
+```bash
+vault write auth/jwt/config \
+  oidc_discovery_url="https://app.terraform.io" \
+  bound_issuer="https://app.terraform.io"
+```
+
+For Terraform Enterprise, replace `app.terraform.io` with your Terraform Enterprise hostname:
+
+```bash
+vault write auth/jwt/config \
+  oidc_discovery_url="https://tfe.example.com" \
+  bound_issuer="https://tfe.example.com"
+```
+
+~> **Note**: The `oidc_discovery_url` must be accessible from your Vault instance. For Terraform Enterprise, ensure your Vault instance can reach the TFE hostname.
+
+### Create a Vault policy
+
+Create a policy that defines what secrets and operations module tests can access:
+
+```bash
+vault policy write module-test-policy - <<EOF
+# Allow reading secrets from a test path
+path "secret/data/module-tests/*" {
+  capabilities = ["read", "list"]
+}
+
+# Allow generating dynamic database credentials
+path "database/creds/readonly" {
+  capabilities = ["read"]
+}
+
+# Allow reading PKI certificates
+path "pki/issue/module-tests" {
+  capabilities = ["create", "update"]
+}
+EOF
+```
+
+Adjust the policy based on your module's testing requirements. Follow the principle of least privilege.
+
+### Create a JWT auth role
+
+Create a role that binds the Vault policy to HCP Terraform module test runs:
+
+```bash
+vault write auth/jwt/role/module-tests \
+  role_type="jwt" \
+  bound_audiences="vault.workload.identity" \
+  bound_claims_type="glob" \
+  bound_claims="/terraform_run_phase=plan,terraform_organization_name=my-org" \
+  bound_subject="organization:my-org:module:*:operation:test_run" \
+  claim_mappings="/terraform_run_id=run_id,terraform_organization_name=organization_name,terraform_run_phase=run_phase" \
+  user_claim="terraform_run_id" \
+  token_policies="module-test-policy" \
+  token_ttl="1h"
+```
+
+This configuration:
+- Requires the audience to be `vault.workload.identity`
+- Only accepts tokens where `terraform_run_phase` is `plan` (test runs always use the plan phase)
+- Uses the `bound_subject` to match the module test subject claim format (`organization:{ORG_NAME}:module:{MODULE_NAME}:operation:test_run`)
+- Maps token claims to Vault identity metadata
+- Grants the `module-test-policy` to authenticated requests
+- Issues Vault tokens valid for 1 hour
+
+### More specific bound claims
+
+You can create more granular access controls using bound claims:
+
+**Allow specific module using subject claim:**
+```bash
+vault write auth/jwt/role/vpc-module-tests \
+  role_type="jwt" \
+  bound_audiences="vault.workload.identity" \
+  bound_subject="organization:my-org:module:terraform-aws-vpc:operation:test_run" \
+  bound_claims="/terraform_run_phase=plan" \
+  token_policies="vpc-test-policy" \
+  token_ttl="30m"
+```
+
+**Allow specific organization:**
+```bash
+vault write auth/jwt/role/org-module-tests \
+  role_type="jwt" \
+  bound_audiences="vault.workload.identity" \
+  bound_claims="/terraform_run_phase=plan,terraform_organization_name=my-org" \
+  bound_subject="organization:my-org:module:*:operation:test_run" \
+  token_policies="module-test-policy" \
+  token_ttl="1h"
+```
+
+**Use subject claim pattern for all modules:**
+```bash
+vault write auth/jwt/role/module-tests \
+  role_type="jwt" \
+  bound_audiences="vault.workload.identity" \
+  bound_claims_type="glob" \
+  bound_subject="organization:my-org:module:*:operation:test_run" \
+  bound_claims="/terraform_run_phase=plan" \
+  token_policies="module-test-policy" \
+  token_ttl="1h"
+```
+
+## Configure Vault Enterprise namespaces
+
+If you're using Vault Enterprise with namespaces, specify the namespace when configuring the auth method:
+
+```bash
+# Set the namespace
+export VAULT_NAMESPACE=terraform-tests
+
+# Configure the JWT auth method in the namespace
+vault auth enable jwt
+vault write auth/jwt/config \
+  oidc_discovery_url="https://app.terraform.io" \
+  bound_issuer="https://app.terraform.io"
+
+vault write auth/jwt/role/module-tests \
+  role_type="jwt" \
+  bound_audiences="vault.workload.identity" \
+  bound_claims="/terraform_run_phase=plan" \
+  bound_claims_type="glob" \
+  bound_subject="organization:*:module:*:operation:test_run" \
+  token_policies="module-test-policy" \
+  token_ttl="1h"
+```
+
+## Configure HCP Terraform
+
+After configuring Vault, configure your registry module's test configuration to use dynamic credentials.
+
+### Gather required information
+
+You'll need:
+
+1. **Vault URL**: Your Vault instance URL (e.g., `https://vault.example.com:8200`)
+2. **Role name**: The JWT role you created (e.g., `module-tests`)
+3. **Namespace** (optional, Vault Enterprise only): The namespace containing the JWT auth method
+4. **Auth path** (optional): The custom path if you didn't use `jwt` (default)
+
+### Configure through the UI
+
+1. Navigate to your private registry module in HCP Terraform
+2. Click **Tests** in the module navigation
+3. Click **Configuration** or **Settings**
+4. In the **Dynamic Credentials** section, toggle **Enable dynamic credentials**
+5. Select **Vault** as the provider
+6. Enter the **Vault URL**
+7. Enter the **Role name**
+8. (Optional) Enter the **Namespace** if using Vault Enterprise
+9. (Optional) Enter the **Auth path** if you used a custom path
+10. (Optional) Set a custom audience if you configured a different audience in your JWT role
+11. Click **Save configuration**
+
+### Configure through the API
+
+You can also configure dynamic credentials using the [Test Configuration API](/terraform/cloud-docs/api-docs/private-registry/test-configuration):
+
+```bash
+curl \
+  --header "Authorization: Bearer $TOKEN" \
+  --header "Content-Type: application/vnd.api+json" \
+  --request PATCH \
+  --data @payload.json \
+  https://app.terraform.io/api/v2/registry-modules/:registry_name/:namespace/:name/:provider/test-configuration
+```
+
+With the following `payload.json`:
+
+```json
+{
+  "data": {
+    "type": "test-configurations",
+    "attributes": {
+      "oidc-enabled": true,
+      "oidc-provider": "vault",
+      "oidc-configuration": {
+        "url": "https://vault.example.com:8200",
+        "role-name": "module-tests",
+        "namespace": "terraform-tests",
+        "auth-path": "jwt",
+        "audience": "vault.workload.identity"
+      }
+    }
+  }
+}
+```
+
+~> **Note**: The `namespace` and `auth-path` fields are optional. Omit them if you're using the root namespace and the default `jwt` path.
+
+## Environment variables
+
+When you configure dynamic credentials for Vault, HCP Terraform automatically sets the following environment variables in your module test runs:
+
+| Variable | Description | Example Value |
+|----------|-------------|---------------|
+| `TFC_VAULT_PROVIDER_AUTH` | Signals the Vault provider to use OIDC authentication | `true` |
+| `TFC_VAULT_ADDR` | The Vault instance URL | `https://vault.example.com:8200` |
+| `TFC_VAULT_RUN_ROLE` | The Vault JWT role name | `module-tests` |
+| `TFC_VAULT_NAMESPACE` | The Vault namespace (if configured) | `terraform-tests` |
+| `TFC_VAULT_AUTH_PATH` | The JWT auth method path | `jwt` |
+| `TFC_VAULT_WORKLOAD_IDENTITY_AUDIENCE` | The audience claim for OIDC tokens | `vault.workload.identity` |
+| `TFC_OIDC_ISSUER_URL` | The OIDC issuer URL | `https://app.terraform.io` |
+| `TFC_OIDC_AUDIENCE` | The OIDC audience | `vault.workload.identity` |
+
+The Vault Terraform provider (version 3.23.0 and later) automatically uses these environment variables to authenticate with Vault. You don't need to configure the provider block explicitly.
+
+## Using dynamic secrets in tests
+
+Once configured, your module tests can access Vault secrets without managing static tokens:
+
+### Reading static secrets
+
+```hcl
+data "vault_generic_secret" "test_config" {
+  path = "secret/data/module-tests/config"
+}
+
+# Use the secret in your test
+resource "aws_instance" "test" {
+  ami           = data.vault_generic_secret.test_config.data["ami_id"]
+  instance_type = "t2.micro"
+}
+```
+
+### Generating dynamic database credentials
+
+```hcl
+data "vault_database_secret_backend_connection" "db" {
+  backend = "database"
+  name    = "readonly"
+}
+
+# Use the generated credentials
+provider "postgresql" {
+  host     = data.vault_database_secret_backend_connection.db.data["host"]
+  username = data.vault_database_secret_backend_connection.db.data["username"]
+  password = data.vault_database_secret_backend_connection.db.data["password"]
+}
+```
+
+### Generating PKI certificates
+
+```hcl
+resource "vault_pki_secret_backend_cert" "test_cert" {
+  backend     = "pki"
+  role        = "module-tests"
+  common_name = "test.example.com"
+  ttl         = "24h"
+}
+
+# Use the certificate in your test
+resource "aws_acm_certificate" "test" {
+  private_key      = vault_pki_secret_backend_cert.test_cert.private_key
+  certificate_body = vault_pki_secret_backend_cert.test_cert.certificate
+}
+```
+
+## Policy best practices
+
+When creating Vault policies for module tests:
+
+1. **Use path-based isolation**: Create separate secret paths for different modules or teams
+   ```hcl
+   path "secret/data/module-tests/${module_name}/*" {
+     capabilities = ["read"]
+   }
+   ```
+
+2. **Limit secret engines**: Only grant access to the secret engines needed for testing
+   ```hcl
+   # Allow only database and KV access
+   path "database/creds/readonly" {
+     capabilities = ["read"]
+   }
+   path "secret/data/module-tests/*" {
+     capabilities = ["read"]
+   }
+   ```
+
+3. **Use templated policies**: Leverage Vault's identity templating for dynamic policies
+   ```hcl
+   path "secret/data/{{identity.entity.aliases.AUTH_ACCESSOR.metadata.organization_name}}/*" {
+     capabilities = ["read"]
+   }
+   ```
+
+4. **Set appropriate TTLs**: Configure token TTLs based on typical test duration
+   ```bash
+   vault write auth/jwt/role/module-tests \
+     token_ttl="30m" \
+     token_max_ttl="1h"
+   ```
+
+5. **Audit access**: Enable Vault audit logging to track secret access
+   ```bash
+   vault audit enable file file_path=/var/log/vault/audit.log
+   ```
+
+## Verify the configuration
+
+After configuring both Vault and HCP Terraform, verify the setup by running a test:
+
+1. Navigate to your module in HCP Terraform
+2. Go to the **Tests** tab
+3. Click **Start Test Run** or trigger a test through your VCS
+4. Monitor the test run logs for successful Vault authentication
+
+If authentication succeeds, you'll see log output indicating the Vault provider authenticated using the OIDC token. If it fails, check the [troubleshooting](#troubleshooting) section.
+
+## Troubleshooting
+
+### Error: "Permission denied"
+
+The JWT role denied the token. Verify the following conditions:
+
+1. The JWT auth method is enabled at the correct path
+1. The role exists and is configured correctly
+1. The `bound_audiences` includes `vault.workload.identity`
+1. The `bound_claims` match your test run's token claims
+1. The subject claim matches the `bound_subject` if configured
+
+### Error: "Invalid JWT"
+
+The token validation failed. Verify the following conditions:
+
+1. The `oidc_discovery_url` in Vault points to HCP Terraform's OIDC endpoint
+2. Your Vault instance can reach the OIDC discovery URL
+3. The `bound_issuer` matches the token's issuer exactly
+4. Vault is using version 1.8.0 or later
+
+### Error: "Vault address not configured"
+
+HCP Terraform couldn't reach Vault. Verify the following conditions:
+
+1. The Vault URL in the test configuration is correct
+1. The URL includes the `https://` protocol  and port number
+1. Your network allows HCP Terraform to reach Vault
+1. Either Vault's TLS certificate is valid or Vault is configured to allow insecure connections
+
+### Error: "Role not found"
+
+The specified role doesn't exist. Verify the following conditions:
+
+1. The role name in HCP Terraform matches the role in Vault exactly. Role names are case-sensitive.
+1. If using Vault Enterprise, the role exists in the correct namespace.
+1. The auth path is correct. The default path is `jwt`.
+
+### Vault namespace errors
+
+If using Vault Enterprise with namespaces:
+
+1. Ensure the namespace is created in Vault
+2. The JWT auth method is enabled in the correct namespace
+3. The namespace is specified correctly in HCP Terraform's configuration
+4. Policies exist in the same namespace
+
+### Debugging JWT authentication
+
+Enable Vault's debug logging to see detailed JWT validation:
+
+```bash
+vault login -method=jwt role=module-tests jwt=<TOKEN>
+```
+
+This command shows exactly why Vault accepted or rejected the token.
+
+You can also check Vault's audit logs for authentication attempts:
+
+```bash
+vault audit enable file file_path=/var/log/vault/audit.log
+```
+
+Then review the logs for entries with `type=response` and `auth.token_type=batch`.
+
+### Token claim debugging
+
+To see what claims HCP Terraform includes in module test tokens, use the manual token generation endpoint (requires organization owner permissions) or check the Vault audit logs after a failed authentication attempt. The logs show all claims present in the token.
+
+## Next steps
+
+- Learn about [dynamic credentials for module testing](/terraform/cloud-docs/registry/test/dynamic-credentials)
+- Configure dynamic credentials for other providers:
+  - [AWS configuration](/terraform/cloud-docs/registry/test/dynamic-credentials/aws)
+  - [GCP configuration](/terraform/cloud-docs/registry/test/dynamic-credentials/gcp)
+  - [Azure configuration](/terraform/cloud-docs/registry/test/dynamic-credentials/azure)
+- Review [workload identity token specifications](/terraform/cloud-docs/dynamic-provider-credentials/workload-identity-tokens)
+- Set up [policy enforcement](/terraform/cloud-docs/policy-enforcement) to require OIDC for tests
+- Learn about [Vault JWT auth method](https://developer.hashicorp.com/vault/docs/auth/jwt)

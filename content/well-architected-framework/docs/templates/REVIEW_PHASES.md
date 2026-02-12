@@ -11,7 +11,7 @@ Use this template for comprehensive documentation reviews. Complete phases in or
 **File relationships:**
 - **REVIEW_PHASES.md** (this file) = **Review process** - Step-by-step workflow, review questions, deliverables
 - **AGENTS.md** = **Writing standards** - Formatting rules, content patterns, SEO/AI criteria, examples
-- **DOCUMENT_TEMPLATE.md** = Practical template for creating new documents
+- **doc-templates/DOCUMENT_TEMPLATE.md** = Practical template for creating new documents
 
 **Clear separation:**
 - This file tells you **how to review** (process, phases, questions)
@@ -75,20 +75,25 @@ Review questions:
 
 ---
 
-## Phase 4: AGENTS.md style guide compliance
-**Goal:** Meet all formatting and structural requirements from AGENTS.md
+## Phase 4: Document structure compliance
+**Goal:** Validate WAF-specific document structure and formatting from AGENTS.md
+
+This phase focuses on document structure patterns unique to WAF. Use dedicated skills for other checks:
+- Active voice & second-person → Use `/check-hashicorp-style` (styleguide.md)
+- Meta description → Checked in Phase 5 (SEO optimization)
+- Code examples → Use `/check-code-examples` skill
+- Resources sections → Use `/check-resources` skill
 
 Review checklist:
-- [ ] Meta descriptions are 150-160 characters
 - [ ] "Why" sections use **Bold challenge:** format with 3-4 challenges
 - [ ] Workflow connections in body text ("After classifying...")
-- [ ] Code examples have 1-2 sentence summaries (when examples are included)
 - [ ] No vague pronouns at sentence start
 - [ ] Lists use "the following" introduction (except resource sections)
 - [ ] Heading capitalization follows sentence case
-- [ ] Second-person voice ("you configure", not "we configure")
-- [ ] Active voice preferred
-- [ ] Document structure matches pattern (intro, Why, representative example, resources)
+- [ ] Document structure matches pattern (intro, Why, implementation sections, resources)
+- [ ] Document ending order: HashiCorp resources → External resources → Next steps
+
+**Quick check:** Run `/check-structure <file> --fix` for auto-fixable items
 
 **Deliverable:** Style compliance fixes ready to commit
 
@@ -97,35 +102,22 @@ Review checklist:
 ## Phase 5: SEO & AI/LLM Optimization
 **Goal:** Maximize discoverability for both search engines and AI systems
 
-**Reference:** See [AGENTS.md](./AGENTS.md) for detailed SEO and AI/LLM optimization standards:
-- [SEO section](./AGENTS.md#seo) - Complete SEO evaluation criteria
-- [AI/LLM Optimization section](./AGENTS.md#aillm-optimization) - AI retrieval and understanding guidelines
+**Review against:** [AGENTS.md](./AGENTS.md) SEO and AI/LLM Optimization sections for complete criteria
 
-**SEO review questions:**
-- Are meta descriptions compelling and keyword-rich (150-160 characters)?
-- Do first paragraphs contain target keywords naturally with strong hooks?
-- Are headings descriptive and search-friendly (matching user search queries)?
-- Do link descriptions explain outcomes (not "Learn more" or "click here")?
-- Are there enough semantic variations of key terms?
-- Does the content answer likely search queries with direct answers?
-- Are there opportunities for featured snippets (FAQs, bulleted lists, definitions)?
+**Key SEO checks:**
+- Meta descriptions are 150-160 characters (optimal length)
+- Title optimization (sentence case, no colons)
+- First paragraph has strong hook and keyword placement
+- H2 headings are benefit-focused
+- Link descriptions are specific and actionable
 
-**AI/LLM optimization review questions:**
-- Does each section start with a clear topic sentence stating what it covers?
-- Are relationships between concepts explicit ("After X, you can Y")?
-- Are technical terms defined when first introduced?
-- Do headings match how users ask questions ("When to use X")?
-- Can sections be understood independently with sufficient context?
-- Are examples complete with clear explanations of what they demonstrate?
-- Are prerequisites and outcomes explicitly stated?
-- Does content avoid ambiguous pronouns and unclear references?
+**Key AI/LLM checks:**
+- Clear topic sentences stating key points
+- Explicit relationships between concepts
+- Question-answer patterns ("Use X when...")
+- Contextual completeness in sections
 
-**Deliverable:** SEO and AI/LLM improvements including:
-- Optimized meta descriptions and title options
-- Enhanced link descriptions with clear outcomes
-- Improved section structure for AI retrieval
-- Added FAQ sections or question-answer patterns where appropriate
-- Explicit relationship statements and definitions
+**Deliverable:** SEO and AI/LLM improvements including optimized meta descriptions, enhanced link descriptions, improved section structure for AI retrieval, and explicit relationship statements
 
 ---
 
@@ -175,54 +167,34 @@ If the answer to any question is "no", revisit the content before finalizing.
 
 ---
 
-## Usage Instructions
+## Phase 8: Code example validation
+**Goal:** Ensure all code examples are syntactically correct and validated by tooling.
 
-**For comprehensive reviews:**
-```
-Run all 7 phases in order. Do NOT combine Phase 1 with other phases.
-```
+Run this phase with **Copilot ChatGPT 5.2** so you can execute tool-based validation (formatters, validators) and capture results.
 
-**For quick style-only reviews:**
-```
-Run Phase 4 (style guide compliance) only.
-```
+Only run Phase 8 when you explicitly request it. Requests like "do a full review" (Phases 1–7) do not include Phase 8.
 
-**For new documentation:**
-```
-Run Phase 1, then Phase 2, then Phase 3.
-Save Phases 4-7 for polish after content is solid.
-```
+This phase is required for documents that include Terraform, Packer, CLI, or other copy/paste-able examples.
 
-**For existing documentation improvements:**
-```
-Run all phases, but create review documents in Phases 1-3 before making edits.
-Only edit files after review documents are approved.
-```
+Review checklist:
+- [ ] Verify every code block is complete (no missing braces, closing fences, or required context)
+- [ ] Run formatters/linters where possible (for example: `terraform fmt -check`, `packer fmt -check`)
+- [ ] Run validators where possible (for example: `terraform validate`, `packer validate`)
+- [ ] Replace examples that cannot validate in isolation (for example, file provisioners that require local paths) with self-contained examples
+- [ ] Confirm placeholder values are clearly marked (for example, `your-organization`) and do not look production-ready
+- [ ] Record the command output and tool versions used for validation
+
+**Deliverable:** Confirmation that examples validate successfully, including the tool versions used, or a list of fixes required.
 
 ---
 
-## Example Usage
+## Usage Patterns
 
-### Full Review Command:
-```
-Phase 1: Evaluate user success for these 5 docs. Create review document first.
-[After review] Phase 2: Fact-check all technical content.
-[After review] Phase 3: Add cross-document references.
-[After review] Phase 4: Fix style guide compliance issues.
-[After approval] Phase 5: Optimize SEO and AI/LLM discoverability (reference AGENTS.md SEO/AI sections).
-[After approval] Phase 6: Enhance link quality and balance.
-[After approval] Phase 7: Final user success check - would a real user succeed?
-```
+**Comprehensive review:** Run all 7 phases in order. Create review documents in Phases 1-3 before editing.
 
-### Quick Fix Command:
-```
-Phase 4 only: Review these docs for style guide compliance and fix all issues.
-```
+**New documentation:** Run Phases 1-3 first. Add Phases 4-7 for polish after content is solid.
 
----
+**Style-only review:** Run Phase 4 only.
 
-## Key Principle
+**Note:** Do NOT combine Phase 1 with other phases. It requires separate cognitive focus on user success.
 
-**User success comes first.** Perfect formatting doesn't matter if users can't implement the content.
-
-Phase 1 requires the most cognitive empathy. Phases 4-6 are mechanical checklists. Phase 7 brings it full circle by validating that all the polish didn't lose sight of the user.
