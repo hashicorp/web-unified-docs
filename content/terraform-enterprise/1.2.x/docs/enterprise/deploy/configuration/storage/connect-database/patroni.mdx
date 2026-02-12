@@ -1,0 +1,193 @@
+---
+page_title:  Connect to a PostgreSQL cluster deployed to Patroni
+description: Learn how to connect Terraform Enterprise to a PostgresSQL cluster deployed to Patroni in high availability mode so that you can enable HA failover workflows.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-02-02T17:54:50Z
+last_modified: 2026-02-02T17:54:50Z
+# END AUTO GENERATED METADATA
+---
+
+# Connect to a PostgreSQL cluster deployed to Patroni
+
+This topic describes how to connect Terraform Enterprise to a highly-available PostgreSQL cluster deployed to Patroni on Kubernetes. 
+
+<Warning>
+
+**Connecting to a database cluster is in beta**. These instructions describe an example scenario that we tested and verified for non-production use cases. You should evaluate your requirements and business needs to determine the optimal architecture and configurations for your specific environment.
+
+</Warning>
+
+## Overview
+
+Install the `postgres-operator` chart, which creates a Postgres construct that manages PostgreSQL clusters on Kubernetes. Refer to the [Postgres operator documentation](https://postgres-operator.readthedocs.io/en/latest/#scope) for additional information.
+
+1. Create a custom `values.yaml` file and define the necessary Kubernetes objects, such as the HAProxy and a service that enables the proxy to discover the Patroni pods.
+1. Deploy the configurations using the Postgres operator Helm chart. 
+
+It is optional, but you can create and run a test workload against Terraform Enterprise to measure the resilience of your high availability PostgreSQL cluster. 
+
+## Requirements
+
+During testing, the following deployment configuration resulted in three successful failover recoveries after five iterations. Refer to [Measure failover resilience](#measure-failover-resilience) for additional information.
+
+### Load balancer
+
+You must deploy a load balancer between Terraform Enterprise and the PostgreSQL cluster on Patroni. Refer to the [requirements for connecting Terraform Enterprise to a PostgreSQL cluster](/terraform/enterprise/deploy/configuration/storage/connect-database/postgres-cluster#requirements) for additional information.
+
+The scenario described in these instructions uses an HAProxy. For a production deployment of Patroni on Kubernetes, we recommend using the Kubernetes load balancer service. You can configure the load balancer service in the Patroni cluster manifest. Refer to the [Patroni documentation](https://postgres-operator.readthedocs.io/en/latest/administrator/#load-balancers-and-allowed-ip-ranges) for details. 
+
+### Terraform Enterprise
+
+We tested the scenario described in this topic against the following Terraform Enterprise deployment:
+
+- Release v202503-1 	
+- `active-active` operational mode 
+- Deployed to [Google Kubernetes Engine (GKE)](https://cloud.google.com/kubernetes-engine)
+- Deployed on three nodes 
+- The follow environment variables configured:
+   - [`TFE_DATABASE_HOST` variable](/terraform/enterprise/deploy/reference/configuration#tfe_database_host) set to an HAProxy load balancer 
+   - [`TFE_DATABASE_MONITOR_ENABLED`](/terraform/enterprise/deploy/reference/configuration#tfe_database_monitor_enabled) set to `true`.
+
+### Patroni 
+
+We tested the scenario described in this topic against the following Patroni deployment:
+
+- Deployed with three nodes
+- Served to Terraform Enterprise through an HAProxy load balancer 
+
+## Configure Kubernetes objects 
+
+Create a `values.yaml` file to override the default Postgres operator values.
+
+### Define cluster resource defaults
+
+The Postgres operator Helm chart contains default values for all Patroni clusters deployed using the operator. Refer to the [Zalando Postgres operator values](https://github.com/zalando/postgres-operator/blob/master/charts/postgres-operator/values.yaml) for additional information. 
+
+Specify the resources that the Postgres containers should use in the `configPostgresPodResources` field. The following example configures resource requests, such as CPU and memory limits for the Postgres containers in the pods:
+
+```yaml
+configPostgresPodResources
+  # CPU limits for the postgres containers
+  default_cpu_limit: "8"
+  # CPU request value for the postgres containers
+  default_cpu_request: "4"
+  # memory limits for the postgres containers
+  default_memory_limit: 32Gi
+  # memory request value for the postgres containers
+  default_memory_request: 16Gi
+```
+
+### Define cluster behaviors
+
+Kubernetes allocates resources to the Patroni cluster according to the [values you define in the `configPostgresPodResources` field](#define-cluster-reource-defaults) and starts individual Postgres clusters according to the cluster manifest. The manifest is a custom resource definition (CRD) that defines parameters for each cluster. Refer to the following Postgres operator topics for additional information about the cluster manifest:
+
+- [Cluster manifest reference documentation](https://postgres-operator.readthedocs.io/en/latest/reference/cluster_manifest/) 
+- [Zalando Postgres operator repository](https://github.com/zalando/postgres-operator/tree/master/manifests)
+
+The following example manifest specifies the cluster configuration we tested for this scenario:  
+
+```yaml
+apiVersion: "acid.zalan.do/v1"
+kind: postgresql
+metadata:
+  name: patroni
+  namespace: failover
+spec:
+  teamId: "terraform-enterprise"
+  volume:
+    size: 10Gi
+  numberOfInstances: 3
+  users:
+    cluster_admin:  # database owner
+    - superuser
+    - createdb
+    user: []  # role for application foo
+  databases:
+    db: user  # dbname: owner
+  postgresql:
+    version: "15"
+```
+
+### Discovery service
+
+Define a service that enables the HAProxy to discover the IP addresses of the Patroni pods. The following example uses the Spilo application for discovery. It discovers all Patroni pods and then uses the HAproxy to route to the master:
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: patroni-headless
+  namespace: failover
+spec:
+  clusterIP: None
+  selector:
+    cluster-name: patroni
+    application: spilo    
+  ports:
+    - port: 5432
+      name: postgresql
+    - port: 8008
+      name: api
+```
+
+### HAProxy
+
+Define an HAProxy that routes traffic to the primary node by setting the [`/primary` Patroni endpoint](https://patroni.readthedocs.io/en/latest/rest_api.html). 
+
+The HAProxy configuration is crucial to the successful recovery of Terraform Enterprise after a failover. By default, the proxy runs a health check every two seconds, which is too long for many implementations. We recommend configuring HAProxy with an interval of maximum `1s`.
+
+Refer to [HAProxy documentation](https://www.haproxy.com/documentation/haproxy-configuration-tutorials/service-reliability/health-checks/#change-the-interval) for instructions on how to change the health check interval.
+
+The following configuration uses the Kubernetes DNS set up in `resolv.conf` and applies server-templates and service names to the HAProxy. It also uses a Kubernetes resolver to resolve the DNS name of the Patroni service. If it is unable to resolve the DNS name, it uses the last known IP address or the `libc` resolver in that order.
+
+```yaml
+   global
+         log stdout format raw local0
+         maxconn 2000
+
+   defaults
+         log global
+         mode tcp
+         option tcplog
+         timeout connect 5000ms
+         timeout client 50000ms
+         timeout server 50000ms
+
+   
+   resolvers kubernetes
+         parse-resolv-conf
+         hold valid 10s
+
+   listen postgres
+         bind *:5000
+         mode tcp
+         retry-on all-retryable-errors
+         
+         option httpchk
+         http-check send meth HEAD uri /primary
+         http-check expect status 200
+
+         default-server inter 1s fall 3 rise 2 on-marked-down shutdown-sessions
+         
+         server-template patroni- 1-3 
+
+   patroni-headless.failover.svc.cluster.local:5432 check port 8008 resolvers 
+   kubernetes init-addr last,libc,none
+```
+
+## Deploy the configurations
+
+Install the Postgres operator chart and apply the configuration files to deploy Patroni and the HAProxy. Refer to the [Postgres operator documentation](https://postgres-operator.readthedocs.io/en/latest/quickstart/#deployment-options) for instructions on how to deploy.
+
+## Measure failover resilience
+
+You can collect recovery time objective (RTO) data to assess the resilience of your HA system. Refer to the following topics for additional information:
+
+- [PostgreSQL database failover](/terraform/enterprise/deploy/manage/failover)
+- [Measure failover resilience](/terraform/enterprise/deploy/configuration/storage/connect-database/failover-resilience) 
+
+In the example scenario, we observed the following outcomes:
+
+- Recovery times ranging from a minimum RTO of 23s to a maximum of 143s
+- Average RTO of 59s across failovers. 
+- Terraform Enterprise recovered in all tests cases. 
