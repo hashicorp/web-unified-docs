@@ -1,0 +1,278 @@
+---
+page_title: Deploy Terraform Enterprise to OpenShift
+description: Learn how to deploy Terraform Enterprise to Red Hat OpenShift.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-02-02T17:54:50Z
+last_modified: 2026-02-02T17:54:50Z
+# END AUTO GENERATED METADATA
+---
+
+# Deploy Terraform Enterprise to OpenShift
+
+This topic describes how to deploy Terraform Enterprise to Red Hat OpenShift. You should have a deep understanding of OpenShift before deploying Terraform Enterprise to a production environment.
+
+## Overview
+
+Deploy external service dependencies outside the OpenShift cluster and scale as necessary to accommodate Terraform Enterprise workloads. The following diagram shows the Terraform Enterprise architecture when deployed to OpenShift-orchestrated containers:
+
+![Example of Kubernetes Architecture](/img/docs/TFE_In_Kubernetes.png)
+
+Complete the following steps to install Terraform Enterprise:
+
+1. Complete the prerequisites.
+1. Create a custom HCP Terraform agent.
+1. Enable the OpenShift configuration your overrides values file.
+1. Install the Helm chart and apply your override values.
+1. Complete post installation tasks.
+
+
+## Prerequisites
+
+Complete the following tasks before attempting to install Terraform Enterprise.
+
+### Prepare the deployment environment
+
+Provide a DNS hostname for Terraform Enterprise and the associated TLS certificate. Additionally, you must configure your network so that your host can receive and send traffic. Refer to [Prepare the host environment](/terraform/enterprise/deploy/prepare-host) for details about preparing the host environment.
+
+### Deploy external storage systems
+
+Deploy the database and other storage devices so that Terraform can connect to them when the application starts. Refer to [Data storage settings overview](/terraform/enterprise/deploy/configuration/storage) for additional information.
+
+### Create the deployment configuration
+
+Create a custom YAML configuration file, for example `/tmp/overrides.yaml`, to override the default values in the Terraform Enterprise Helm chart. The file contains settings for the operational mode, license, TLS certificates, and network configuration. Specify any additional configurations necessary for your environment. Refer to the [deployment configuration reference](/terraform/enterprise/deploy/reference/configuration) for additional information.
+
+@include 'common-kubernetes-blocks/externalizing-secret-values.mdx'
+
+## Create a custom HCP Terraform agent
+
+Per the default restricted security context constraints, OpenShift requires containers run under a unique user ID. Refer to the [OpenShift documentation](https://docs.openshift.com/container-platform/4.15/authentication/managing-security-context-constraints.html) for additional information about the security context constraints.
+
+Create a custom `tfc-agent` image in order to perform Terraform operations in Terraform Enterprise workspaces in compliance with the security context constraints. The image creates the default working directory for the `tfc-agent` and assigns permissions to the root group.
+
+Place the following `tfc-agent` image configuration in a container registry that is accessible to the OpenShift nodes hosting Terraform Enterprise:
+
+```Dockerfile
+FROM hashicorp/tfc-agent
+
+USER root
+
+RUN mkdir /.tfc-agent && \
+    chmod og+rw /.tfc-agent && \
+    chmod o+rx /home/tfc-agent
+
+USER tfc-agent
+```
+
+Note that custom images sourced from `tfc-agent`s cannot use automatic CA certificate injection. As a result, you may need to add CA certificate injection configuration to the Dockerfile.
+
+In your deployment configuration file, configure the following environment variables to enable Terraform Enterprise to use the custom image:
+
+- [`TFE_RUN_PIPELINE_IMAGE`](/terraform/enterprise/deploy/reference/configuration#tfe_run_pipeline_image)
+- [`TFE_RUN_PIPELINE_KUBERNETES_IMAGE_PULL_SECRET_NAME`](/terraform/enterprise/deploy/reference/configuration#tfe_run_pipeline_kubernetes_image_pull_secret_name)
+
+Refer to the [deployment configuration reference](/terraform/enterprise/deploy/reference/configuration) for information about all configuration settings.
+
+## Enable OpenShift
+
+In your overrides YAML file, set the `openshift.enabled` value to `true` so that Terraform Enterprise starts each Terraform Enterprise service as the OpenShift-assigned container entry user ID.
+
+```YAML
+openshift:
+  enabled: true
+```
+
+By default, the Terraform Enterprise Helm chart applies the following security context configuration so that Terraform Enterprise complies with OpenShift's restricted security context constraint:
+
+```yaml
+securityContext:
+  seccompProfile:
+    type: RuntimeDefault
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  runAsNonRoot: true
+```
+
+## Install Terraform Enterprise with Helm
+
+1. Connect to the host instance.
+
+1. Log in to the Terraform Enterprise container image registry.
+
+    ```shell-session
+    $ cat <PATH_TO_HASHICORP_LICENSE_FILE> |  docker login --username terraform images.releases.hashicorp.com --password-stdin
+    ```
+
+1. Pull the Terraform Enterprise image from the registry.  Refer to [Terraform Enterprise Releases](https://developer.hashicorp.com/terraform/enterprise/releases) for a list of versions and replace `<vYYYYMM-#>` with the version you wish to install; `latest` is not a valid tag.  
+
+  ```shell-session
+  $ docker pull images.releases.hashicorp.com/hashicorp/terraform-enterprise:<vYYYYMM-#>
+  ```
+
+1. Create a new project.
+
+  ```shell-session
+  $ oc new-project <TFE_PROJECT>
+  ```
+
+1. Create an image pull secret in `<TFE_PROJECT>` to fetch the `terraform-enterprise` container from the `<DOCKER_REGISTRY_URL>`. This URL can be `images.releases.hashicorp.com`, or your internal container registry. If you are using `images.releases.hashicorp.com`, use `terraform` as the `<DOCKER_REGISTRY_USERNAME>` parameter in the following command with `--docker-password=$(cat /path/to/terraform.hclic)`
+
+  ```shell-session
+  $ oc create secret docker-registry terraform-enterprise --docker-server=<DOCKER_REGISTRY_URL> --docker-username=<DOCKER_REGISTRY_USERNAME> --docker-password=<DOCKER_REGISTRY_PASSWORD>  -n <TFE_PROJECT>
+  ```
+
+1. Add the Hashicorp Helm registry:
+
+  ```shell-session
+  $ helm repo add hashicorp https://helm.releases.hashicorp.com
+  ```
+
+1. Render the `terraform-enterprise` chart with your custom [values file](https://helm.sh/docs/chart_template_guide/values_files/) `<OVERRIDES_FILE>`, for example `tmp/overrides.yaml`.
+
+  ```shell-session
+  $ helm template terraform-enterprise hashicorp/terraform-enterprise –n <TFE_PROJECT> --values <OVERRIDES_FILE>
+  ```
+
+1. Install `terraform-enterprise`, this step can take several minutes.
+
+    ```shell-session
+    $ helm install terraform-enterprise hashicorp/terraform-enterprise –n <TFE_PROJECT> --values <OVERRIDES_FILE>
+    ```
+
+1. Inspect `terraform-enterprise` pods to verify their successful start.
+
+  ```shell-session
+  $ oc get pods -n <TFE_PROJECT>             
+  ```
+
+  If Terraform Enterprise pods fail to start, refer to [Kubernetes Troubleshooting](/terraform/enterprise/deploy/troubleshoot#kubernetes).
+
+1. By default, Terraform Enterprise installs a load balancer service. Retrieve the external IP address of this service.
+
+  ```shell-session
+  $ oc get services -n <TFE_PROJECT>
+  ```
+
+1. Set up a DNS record that points to your external IP address to enable routing to your `<TFE_HOSTNAME>`. A DNS address is required to communicate with Terraform Enterprise, and it is managed outside of OpenShift and the Terraform Enterprise helm chart or application.
+
+1. Validate the readiness of the Terraform Enterprise application by querying the health check endpoint.
+
+  ```shell-session
+  $ curl https://tfe.test.hashicorp.com/_health_check
+  ```
+
+## Post installation tasks
+
+Complete the following tasks after the initial installation.
+
+### Review startup checks
+
+When you start Terraform Enterprise, several startup checks also run to prevent errors related to invalid configurations or certificates, as well as other issues that could prevent the application from running successfully or safely. Refer to the [startup checks reference](/terraform/enterprise/deploy/reference/startup-checks) for additional information.
+
+### Configuring a route
+
+When you deploy Terraform Enterprise to OpenShift, the Helm chart does not create an [OpenShift route](https://docs.openshift.com/container-platform/latest/networking/routes/route-configuration.html) by default.
+
+Provisioning a route creates a public-facing URL at which users can access the Terraform Enterprise UI and API.
+
+```shell-session
+$ oc expose svc/terraform-enterprise --hostname terraform-enterprise.apps.<openshift cluster base domain> --name terraform-enterprise -n <TFE_PROJECT>
+```
+-> **Note:** Use the options on the `oc expose` command to tailor the route to the needs of your environment.
+
+The newly created route can then be retrieved from the cluster:
+
+```shell-session
+$ oc get routes
+NAME                   HOST/PORT                                                   PATH   SERVICES               PORT         TERMINATION          WILDCARD
+terraform-enterprise   terraform-enterprise.apps.<openshift cluster base domain>          terraform-enterprise   https-port   reencrypt/Redirect   None
+```
+
+### Create the initial admin user
+
+[Provision your first administrative user](/terraform/enterprise/deploy/initial-admin-user) and start using Terraform Enterprise.
+
+### Extend or fork the OpenShift `terraform-enterprise` helm chart
+
+The [Terraform Enterprise Helm Chart](https://github.com/hashicorp/terraform-enterprise-helm) is intended to meet the needs of the majority of our users. Many OpenShift primitives, such as routing, are absent in the `terraform-enterprise` Helm chart. You can fork our Helm chart and adapt it to your organization’s requirements. Alternatively, you can use the `terraform-enterprise` Helm chart as a [sub-chart](https://helm.sh/docs/chart_template_guide/subcharts_and_globals/), thus relegating OpenShift primitives to the parent chart to be deployed around the `terraform-enterprise` chart contents.
+
+If you contact HashiCorp support, include your custom Helm chart alongside your support bundle to ensure support has all the information they need.
+
+## Example deployment configuration 
+
+The following example configuration deploys Terraform Enterprise to OpenShift in Azure with hosted external services. The configuration is based on cloud native hosted PostgreSQL, storage, or Redis cache services. You can copy the example configuration and modify the values to per your environment. Refer to [Configuration Reference](/terraform/enterprise/deploy/reference/configuration)
+for a list of all configuration options.
+
+The example also depends on the following conditions:
+
+- Values under `.env.variables` are set as a `ConfigMap` and mounted as Terraform Enterprise environment variables.
+- Values under `.env.secrets` are set as Kubernetes secrets and mounted as Terraform Enterprise environment variables.
+- Extend the `env.configMapRefs[]` or `env.secretRefs[]` with your own resources to add additional `ConfigMap` or `Secret` resources within your environment configuration.
+
+- Values marked `BASE_64_ENCODED*` indicate that the value given must be base 64 encoded. If you are using this certificate configuration to host Terraform Enterprise web traffic, this value must be valid with the `env.TFE_HOSTNAME`, or match the wildcard pattern.
+
+```yaml
+replicaCount: <Number of replicas e.g 3>
+tls:
+  certData: <BASE_64_ENCODED_CERTIFICATE_PEM_FILE>
+  keyData: <BASE_64_ENCODED_CERTIFICATE_PRIVATE_KEY_PEM_FILE>
+  caCertData: <BASE_64_ENCODED_CERTIFICATE_CA_CERTIFICATE_PEM_FILE>
+image:
+  repository: images.releases.hashicorp.com
+  name: hashicorp/terraform-enterprise
+  tag: <vYYYYMM-#>
+openshift:
+  enabled: true
+env:
+  variables:
+    TFE_HOSTNAME: <TFE hostname (DNS) e.g. terraform.example.com>
+    TFE_IACT_SUBNETS: <IACT subnet, eg. 10.0.0.0/8,192.168.0.0/24>
+
+    # Database settings.
+    TFE_DATABASE_HOST: <Database hostname with port e.g "xxx.postgres.database.azure.com:5432">
+    TFE_DATABASE_NAME: <Database name>
+    TFE_DATABASE_PARAMETERS: <Database extra params e.g "sslmode=disable">
+    TFE_DATABASE_USER: <Database user>
+
+    # Redis settings.
+    TFE_REDIS_HOST: <Redis host, eg. 10.101.0.4>
+    TFE_REDIS_USE_TLS: <To use tls? eg. "false">
+    TFE_REDIS_USE_AUTH: <To use customized credential to authenticate? eg. "true">
+    TFE_REDIS_USER: <Redis username>
+    TFE_REDIS_USE_MTLS: <To use mtls with Redis standalone or Sentinel? eg. "false">
+    TFE_REDIS_CLIENT_CERT_PATH: <Path to the client certificate file to be used for mTLS authentication with Redis server>
+    TFE_REDIS_CA_CERT_PATH: <Path to the Certificate Authority file user to validate the certificate>
+    TFE_REDIS_CLIENT_KEY_PATH: <Path to the private key file corresponding to the client certificate>
+    TFE_REDIS_SIDEKIQ_USE_MTLS: <To use mtls with Redis Enterprise? eg. "false">
+    TFE_REDIS_SIDEKIQ_CLIENT_CERT_PATH: <Path to the client certificate file to be used for mTLS authentication with Redis server>
+    TFE_REDIS_SIDEKIQ_CA_CERT_PATH: <Path to the Certificate Authority file user to validate the certificate>
+    TFE_REDIS_SIDEKIQ_CLIENT_KEY_PATH: <Path to the private key file corresponding to the client certificate>
+    TFE_REDIS_SENTINEL_ENABLED: <To use sentinel? e.g. "false">
+    TFE_REDIS_SENTINEL_HOSTS: <Hostname and port of Sentinel hosts, e.g. sentinel.example.com:26379>
+    TFE_REDIS_SENTINEL_LEADER_NAME: <Name of the Sentinel leader>
+
+    # Azure container storage settings.
+    TFE_OBJECT_STORAGE_TYPE: azure
+    TFE_OBJECT_STORAGE_AZURE_ACCOUNT_NAME: <Azure storage account name>
+    TFE_OBJECT_STORAGE_AZURE_CONTAINER: <Azure storage container name>
+    TFE_OBJECT_STORAGE_AZURE_ENDPOINT: <Azure storage endpoint>
+
+    # Terraform Enterprise on OpenShift Required settings
+    TFE_RUN_PIPELINE_IMAGE: <URL and path to the custom tfc-agent image>
+    TFE_RUN_PIPELINE_KUBERNETES_IMAGE_PULL_SECRET_NAME: <The name of an imagePullSecret created in the agents namespace for the tfc-agent image>
+
+  secrets:
+    TFE_DATABASE_PASSWORD: '<Database password>'
+    TFE_OBJECT_STORAGE_AZURE_ACCOUNT_KEY: '<Azure storage account key>'
+    TFE_REDIS_PASSWORD: '<Redis password>'
+    TFE_LICENSE: '<Hashicorp license>'
+    TFE_ENCRYPTION_PASSWORD: '<Encryption password>'
+```
+
+
+Refer to the following materials for additional guidance on setting up Helm chart values files:
+- [Terraform Enterprise Helm repository](https://github.com/hashicorp/terraform-enterprise-helm)
+- [Release version tags](/terraform/enterprise/releases)
+- Generic reference for [values file](https://helm.sh/docs/chart_template_guide/values_files/) to override the default values in the Helm chart.
