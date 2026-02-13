@@ -1,0 +1,205 @@
+---
+layout: docs
+page_title: Install the Vault Kubernetes KMS plugin.
+description: Installation steps for the Vault Kubernetes KMS plugin.
+---
+
+# Installing the Vault Kubernetes KMS plugin.
+
+This guide assumes you are installing the Vault Kubernetes KMS plugin for the first time.
+
+## Prerequisites
+
+* Vault Enterprise server with a valid license
+* An authenticated Vault client
+
+## Configuring Vault
+
+The Vault Kubernetes KMS plugin uses the Transit secrets engine to perform cryptographic
+operations on Kubernetes data encryption keys (DEKs). The steps below configure Vault
+for use with the plugin.
+
+1. Set up AppRole auth:
+
+ ```bash
+ vault auth enable approle
+ vault write auth/approle/role/k8s-kms-role \
+     token_policies=k8s-kms-policy
+    ```
+1. Retrieve the AppRole ID and secret ID for use later when configuring the KMS plugin
+
+ ```bash
+ vault read auth/approle/role/k8s-kms-role/role-id
+ vault write -f auth/approle/role/k8s-kms-role/secret-id
+    ```
+
+1. Enable the transit secret engine and create a key:
+
+ ```bash
+ vault secrets enable transit
+ vault write -f transit/keys/k8s-kms-key
+    ```
+
+1. Create a policy for the KMS plugin to use. The following policy has
+the minimum required permissions:
+
+ ```bash
+ vault policy write k8s-kms-policy -<<EOF
+ path "transit/keys/k8s-kms-key" {
+     capabilities = ["read"]
+ }
+
+ path "transit/encrypt/k8s-kms-key" {
+     capabilities = ["update"]
+ }
+
+ path "transit/decrypt/k8s-kms-key" {
+     capabilities = ["update"]
+ }
+
+ path "sys/license/status" {
+     capabilities = ["read"]
+ }
+ EOF
+```
+
+## Configuring Kubernetes
+
+Kubernetes encryption at rest is enabled by providing the API server an EncryptionConfiguration
+file and setting the --encryption-provider-config flag. If the API server is not started with
+--encryption-provider-config, encryption at rest is not enabled.
+
+KMS-based encryption uses envelope encryption: the API server calls the configured KMS plugin
+(over a Unix socket in this guide) to encrypt/decrypt data before it is written to / read from etcd.
+
+This procedure requires control-plane access and will not work on most managed Kubernetes offerings,
+since the Kubernetes control plane is not accessible by the customer.
+
+### Create the EncryptionConfiguration on each control-plane node
+
+Choose a path that exists on every control-plane node. A common choice is `/etc/kubernetes/encryption/encryption-config.yaml`.
+
+Example encryption config:
+
+```yaml
+apiVersion: apiserver.config.k8s.io/v1
+kind: EncryptionConfiguration
+resources:
+  - resources:
+  - secrets
+providers:
+  - kms:
+apiVersion: v2
+name: vault-kms
+endpoint: unix:///var/run/kmsplugin/kms.sock
+timeout: 3s
+  - identity: {}
+```
+
+> **Note**: The endpoint must match where the plugin creates its Unix socket on the host..
+
+### Deploy KMS plugin as a Static Pod
+
+Using a static pod is the preferring installation method for running the Vault KMS plugin.
+If your control plane supports static pods, you can deploy the KMS plugin as a static pod by placing a manifest on each control-plane node under:
+`/etc/kubernetes/manifests/`.
+
+The kubelet watches this directory and starts the pod automatically.
+
+Generic static Pod manifest:
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: vault-kms-plugin
+  namespace: kube-system
+  labels:
+    tier: control-plane
+    component: vault-kms-plugin
+spec:
+  hostNetwork: true
+  priorityClassName: system-node-critical
+
+  containers:
+    - name: vault-kms-plugin
+      image: <YOUR_IMAGE>
+      imagePullPolicy: IfNotPresent
+      args:
+        - --vault-address=<YOUR_VAULT_ADDRESS>
+        - --listen-address=unix:///var/run/kmsplugin/kms.sock
+        - --approle-role-id=<YOUR_APPROLE_ROLE_ID>
+        - --approle-secret-id-path=/etc/vault-kms/approle-secret-id
+        - --transit-mount=transit
+        - --transit-key=kube-kms
+        - --log-level=info
+      volumeMounts:
+        - name: kmsplugin-sockdir
+          mountPath: /var/run/kmsplugin
+        - name: approle-secret-id
+          mountPath: /etc/vault-kms/approle-secret-id
+          readOnly: true
+      resources:
+        requests:
+          cpu: 10m
+          memory: 32Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+
+  volumes:
+    - name: kmsplugin-socker-dir
+      hostPath:
+        path: /var/run/kmsplugin
+        type: DirectoryOrCreate
+
+    - name: approle-secret-id
+      hostPath:
+        path: /etc/vault-kms/approle-secret-id
+        type: File
+```
+Save as: /etc/kubernetes/manifests/vault-kms-plugin.yaml on each control-plane node.
+
+Operational notes:
+
+This assumes you place the AppRole secret-id on each node at /etc/vault-kms/approle-secret-id (how you distribute that is up to your environment).
+If you run multiple API servers (HA control plane), you must deploy the plugin on each control-plane node, because each API server will dial its local Unix socket.
+
+### Apply the the EncryptionConfiguration
+
+Kubernetes encryption at rest is enabled by passing the kube-apiserver a path to an EncryptionConfiguration file using the -`-encryption-provider-config` flag.
+If the kube-apiserver is started without this flag, encryption at rest is not enabled.
+
+Ensure the kube-apiserver process (or container) can read the Encrpytion Configuration file at `/etc/kubernetes/encryption/encryption-config.yaml`.
+
+Edit the kube-apiserver static pod manifest on each control-plane node located at `/etc/kubernetes/manifests/kube-apiserver.yaml`:
+
+Add this flag to the kube-apiserver container args:
+`--encryption-provider-config=/etc/kubernetes/encryption/encryption-config.yaml`
+
+Mount the file to the kube-apiserver container by adding the stanza to the manifest file:
+
+```yaml
+volumeMounts:
+  - name: encryption-config
+mountPath: /etc/kubernetes/encryption/encryption-config.yaml
+readOnly: true
+```
+
+Add a matching volume in the manifest files:
+
+```yaml
+volumes:
+  - name: encryption-config
+hostPath:
+path: /etc/kubernetes/encryption/encryption-config.yaml
+type: File
+```
+
+After saving the manifest, the kubelet will restart the kube-apiserver static pod.
+
+
+> **Note**: if you make a mistake in the manifest (bad YAML, wrong hostPath, wrong mountPath), kube-apiserver may fail to start and the cluster
+will appear “down”. That’s expected. Fix the manifest on the node and the kubelet will restart the api-server.
+
+
