@@ -72,13 +72,13 @@ export const parseMarkdownFrontMatter = (filePath) => {
  * @param {string|null} defaultDate - Default date to use in precommit script
  */
 export function addDateMetadata(filePath, defaultDate) {
+	const createdDate = getCreatedDate(filePath)
 	let lastModifiedDate
 	if (defaultDate === null) {
 		lastModifiedDate = getLastModifiedDate(filePath)
 	} else {
-		lastModifiedDate = new Date().toISOString()
+		lastModifiedDate = new Date(defaultDate).toISOString()
 	}
-	const createdDate = getCreatedDate(filePath)
 
 	if (!createdDate || !lastModifiedDate) {
 		console.warn(`⚠️  Skipping ${filePath}: Could not retrieve git dates`)
