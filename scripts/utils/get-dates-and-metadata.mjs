@@ -69,10 +69,16 @@ export const parseMarkdownFrontMatter = (filePath) => {
 /**
  * Add or update date metadata in MDX frontmatter
  * @param {string} filePath - Path to the MDX file
+ * @param {string|null} defaultDate - Default date to use in precommit script
  */
-export function addDateMetadata(filePath) {
+export function addDateMetadata(filePath, defaultDate) {
+	let lastModifiedDate
+	if (defaultDate === null) {
+		lastModifiedDate = getLastModifiedDate(filePath)
+	} else {
+		lastModifiedDate = new Date().toISOString()
+	}
 	const createdDate = getCreatedDate(filePath)
-	const lastModifiedDate = getLastModifiedDate(filePath)
 
 	if (!createdDate || !lastModifiedDate) {
 		console.warn(`⚠️  Skipping ${filePath}: Could not retrieve git dates`)
