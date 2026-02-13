@@ -2,7 +2,6 @@
 name: check-hashicorp-style
 description: Validate documentation against HashiCorp official style guide. Checks for active voice, word choice, tense, and formatting compliance.
 argument-hint: <file-paths> [--fix]
-disable-model-invocation: true
 ---
 
 # Check HashiCorp Style Guide Skill

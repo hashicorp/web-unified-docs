@@ -1,13 +1,21 @@
 ---
 name: seo-optimize
-description: SEO optimization for meta descriptions, titles, headings, and links based on AGENTS.md Phase 5. Use for search engine and AI/LLM discoverability.
+description: SEO optimization for meta descriptions, titles, headings, and links. Complete source of truth for SEO and AI/LLM optimization criteria.
 argument-hint: <file-paths> [--fix]
-disable-model-invocation: true
 ---
 
 # SEO Optimize Skill
 
-Fast SEO-focused review based on AGENTS.md Phase 5 criteria. Optimizes meta descriptions, titles, headings, and link descriptions for search engines and AI/LLM retrieval.
+Complete SEO and AI/LLM optimization tool. Optimizes meta descriptions, titles, headings, link descriptions, image alt text, code blocks, and content structure for maximum discoverability by search engines and AI systems.
+
+**This skill is the source of truth for all SEO optimization criteria** (used by Phase 5 of documentation reviews).
+
+**Comprehensive checks include:**
+- Traditional SEO (meta, titles, keywords, links)
+- AI/LLM optimization (context, entities, definitions)
+- Accessibility (alt text, code languages)
+- Featured snippet opportunities
+- Content quality (readability, completeness)
 
 ## Usage
 
@@ -86,6 +94,66 @@ This skill runs Phase 5 (SEO & AI/LLM Optimization) checks from REVIEW_PHASES.md
    - Keyword-rich anchor text
    - Related content connections
    - Topic clustering
+
+9. **Image Alt Text Optimization**
+   - All images have descriptive alt text
+   - Alt text includes relevant keywords naturally
+   - Describes what's shown, not just "screenshot"
+   - Length: 10-125 characters (optimal for screen readers)
+   - Avoids "image of" or "picture of" redundancy
+
+10. **Code Block Language Specification**
+    - Every code block has language specified (```hcl, ```bash, ```json)
+    - Language matches actual code type
+    - No generic ```code blocks
+    - Helps AI distinguish between different languages
+    - Enables proper syntax highlighting for users
+
+11. **Contextual Completeness for AI Extraction**
+    - Each section can be understood independently
+    - Key context repeated when referencing earlier content
+    - Product/tool names mentioned explicitly (not just "it")
+    - Acronyms defined on first use per section
+    - "This section covers..." introductions
+
+12. **Entity Recognition Clarity**
+    - Product names consistently capitalized (Vault, Terraform, Packer)
+    - Feature names clearly attributed to products
+    - Version numbers specified when relevant
+    - Tool names not abbreviated mid-section
+
+13. **Featured Snippet & Answer Box Optimization**
+    - Direct answers to "what is", "how to", "when to use" questions
+    - Concise 40-60 word answers early in content
+    - Use lists/tables for step-by-step or comparison content
+    - Question headings (H2: "When should you use X?")
+    - Summary boxes or definition callouts
+
+14. **Term Definition Clarity**
+    - Technical terms defined on first mention
+    - Clear "X is a Y that..." patterns
+    - Avoid assuming prerequisite knowledge
+    - Glossary-style clarity for key concepts
+
+15. **Prerequisites & Requirements Clarity**
+    - Clear "Before you begin" or "Prerequisites" sections
+    - Version requirements explicitly stated
+    - Dependencies listed upfront
+    - Required knowledge level indicated
+
+16. **Readability Optimization**
+    - Average sentence length: 15-20 words
+    - Paragraph length: 3-5 sentences
+    - Avoid overly complex sentences (25+ words)
+    - Use transition words for flow
+    - Break up long technical explanations
+
+17. **External Link Quality Check**
+    - No broken external links (404s)
+    - Links to authoritative sources (official docs, RFCs)
+    - Links to current versions (not deprecated docs)
+    - HTTPS preferred over HTTP
+    - Link text indicates external destination
 
 ## Examples
 
@@ -274,21 +342,162 @@ After: "Terraform modules provide three primary benefits for infrastructure team
 
 ---
 
+Image Alt Text
+==============
+
+Found 3 images, 2 need optimization:
+
+Line 45: `<img src="architecture.png" alt="diagram">`
+❌ Non-descriptive alt text
+✓ Better: `alt="Vault architecture showing client requests flowing through load balancer to active and standby nodes"`
+   [AUTO-FIX AVAILABLE]
+
+Line 89: `![](./workflow.png)`
+❌ Missing alt text
+✓ Better: `![Terraform workflow diagram showing write, plan, and apply stages](./workflow.png)`
+   [AUTO-FIX AVAILABLE]
+
+---
+
+Code Block Language Specification
+==================================
+
+Found 8 code blocks, 2 missing language:
+
+Line 67: ``` (no language specified)
+❌ Generic code block
+✓ Should be: ```hcl (Terraform configuration)
+   [AUTO-FIX AVAILABLE]
+
+Line 123: ```code
+❌ Invalid language identifier
+✓ Should be: ```bash (shell commands)
+   [AUTO-FIX AVAILABLE]
+
+---
+
+Contextual Completeness
+========================
+
+⚠️ 3 sections could improve standalone comprehension:
+
+Line 78: "Configure it using the following steps:"
+❌ Unclear what "it" refers to
+✓ Better: "Configure Vault's AppRole authentication using the following steps:"
+   [MANUAL REVIEW]
+
+Line 145: "The command returns the token."
+❌ Which command?
+✓ Better: "The `vault token create` command returns the authentication token."
+   [MANUAL REVIEW]
+
+---
+
+Entity Recognition & Definitions
+=================================
+
+✅ Product names consistently capitalized
+⚠️ 2 terms need definition on first use:
+
+Line 34: "Configure the TTL for your tokens"
+❌ Acronym not defined
+✓ Better: "Configure the TTL (time-to-live, how long the token remains valid) for your tokens"
+   [MANUAL REVIEW]
+
+Line 92: "Use a backend to store state"
+❌ Assumes knowledge
+✓ Better: "Use a remote backend (a service that stores Terraform state files) to store state"
+   [MANUAL REVIEW]
+
+---
+
+Featured Snippet Opportunities
+===============================
+
+💡 2 sections could be optimized for featured snippets:
+
+Line 23: Consider adding question heading
+💡 Suggestion: "## What is Terraform state?" followed by 40-60 word answer
+   [MANUAL REVIEW]
+
+Line 67: How-to content could use numbered list
+💡 Current: Paragraph format
+💡 Better: Numbered steps for "How to configure AppRole authentication"
+   [MANUAL REVIEW]
+
+---
+
+Prerequisites & Requirements
+=============================
+
+⚠️ Prerequisites section could be clearer:
+
+Current: "You need Vault installed"
+💡 Better format:
+   ```
+   Prerequisites:
+   - Vault 1.12.0 or later
+   - AppRole auth method enabled
+   - Valid ACL policy created
+   ```
+   [MANUAL REVIEW]
+
+---
+
+Readability Analysis
+====================
+
+Average sentence length: 18 words ✅ (target: 15-20)
+Longest sentence: 34 words ⚠️ (Line 89 - consider breaking up)
+Average paragraph length: 4 sentences ✅
+
+Recommendations:
+- Line 89: Sentence too complex (34 words) - break into 2 sentences
+- Line 145: Paragraph too long (7 sentences) - consider splitting
+
+---
+
+External Link Quality
+======================
+
+Found 5 external links, 1 issue:
+
+Line 56: http://terraform.io/docs/modules (HTTP)
+⚠️ Use HTTPS: https://terraform.io/docs/modules
+   [AUTO-FIX AVAILABLE]
+
+✅ All external links are to current documentation versions
+✅ No broken links detected
+
+---
+
 Summary
 =======
 
-Auto-fixable Issues: 6
-Manual Review Needed: 3
+Auto-fixable Issues: 11
+Manual Review Needed: 8
 SEO Score: 7/10 → Projected 9/10 after fixes
 
-Priority Improvements:
-1. ✓ Optimize meta description (adds 15 chars, keywords)
-2. ✓ Enhance link descriptions (3 links)
-3. ✓ Improve generic headings (2 headings)
-4. ⚠️ Add strategic internal links (3 links)
-5. ⚠️ Strengthen first paragraph keyword placement
+Traditional SEO:
+✓ Meta description (optimize)
+✓ Link descriptions (3 fixes)
+✓ Generic headings (2 fixes)
+⚠️ Internal links (3 additions needed)
 
-Run with --fix to apply 6 automatic improvements.
+AI/LLM Optimization:
+✓ Code block languages (2 fixes)
+✓ Image alt text (2 fixes)
+⚠️ Contextual completeness (3 improvements)
+⚠️ Term definitions (2 additions)
+⚠️ Featured snippet opportunities (2 sections)
+
+Content Quality:
+✓ External link HTTPS (1 fix)
+⚠️ Readability (1 sentence to split)
+⚠️ Prerequisites (formatting improvement)
+
+Run with --fix to apply 11 automatic improvements.
+Manual review recommended for 8 contextual improvements.
 ```
 
 ## SEO Best Practices
@@ -351,6 +560,106 @@ This document explains modules. They are useful for teams.
 Terraform modules enable teams to create reusable infrastructure components that improve consistency and accelerate deployment across environments.
 ```
 
+### Image Alt Text
+
+**Poor:**
+```markdown
+![](architecture.png)
+![diagram](./workflow.png)
+<img src="screenshot.png" alt="screenshot">
+```
+
+**Good:**
+```markdown
+![Vault architecture showing client requests flowing through load balancer to active and standby nodes](architecture.png)
+![Terraform workflow diagram showing write, plan, and apply stages](./workflow.png)
+<img src="screenshot.png" alt="Vault UI dashboard displaying active namespace and token statistics">
+```
+
+### Code Block Languages
+
+**Poor:**
+````markdown
+```
+terraform {
+  backend "remote" {}
+}
+```
+
+```code
+vault write auth/approle/role/my-role
+```
+````
+
+**Good:**
+````markdown
+```hcl
+terraform {
+  backend "remote" {}
+}
+```
+
+```bash
+vault write auth/approle/role/my-role \
+  token_ttl=1h \
+  token_max_ttl=4h
+```
+````
+
+### Contextual Completeness
+
+**Poor:**
+```markdown
+## Configuration steps
+
+Configure it using the following steps:
+1. Enable the auth method
+2. Create a role
+3. Generate credentials
+```
+
+**Good:**
+```markdown
+## AppRole authentication configuration
+
+Configure Vault's AppRole authentication using the following steps:
+1. Enable the AppRole auth method in Vault
+2. Create an AppRole role with appropriate policies
+3. Generate role ID and secret ID credentials for your application
+```
+
+### Term Definitions
+
+**Poor:**
+```markdown
+Configure the TTL for your tokens to ensure security.
+Use a backend to store state remotely.
+```
+
+**Good:**
+```markdown
+Configure the TTL (time-to-live, how long the token remains valid) for your tokens to ensure security.
+Use a remote backend (a service that stores Terraform state files) to store state remotely.
+```
+
+### Prerequisites Clarity
+
+**Poor:**
+```markdown
+You need Vault installed and some basic knowledge of authentication.
+```
+
+**Good:**
+```markdown
+## Prerequisites
+
+Before you begin, ensure you have:
+- Vault 1.12.0 or later installed
+- AppRole auth method enabled (`vault auth enable approle`)
+- Basic understanding of Vault policies
+- Valid ACL policy created for your application
+```
+
 ## Integration with Other Skills
 
 **Complete SEO workflow:**
@@ -392,6 +701,12 @@ Terraform modules enable teams to create reusable infrastructure components that
 - Descriptive links throughout
 - Strong internal linking (8+ links)
 - Perfect heading hierarchy
+- All images have descriptive alt text
+- All code blocks have language specified
+- Contextually complete sections (AI-optimized)
+- Terms defined on first use
+- Clear prerequisites section
+- Featured snippet opportunities optimized
 
 **7-8/10 - Good**
 - Meta description acceptable length
@@ -399,6 +714,10 @@ Terraform modules enable teams to create reusable infrastructure components that
 - Some keyword placement
 - Most links descriptive
 - Adequate internal linking (5-7 links)
+- Most images have alt text
+- Most code blocks have language
+- Sections mostly self-contained
+- Key terms defined
 
 **5-6/10 - Needs Improvement**
 - Meta description too short/long
@@ -406,6 +725,10 @@ Terraform modules enable teams to create reusable infrastructure components that
 - Limited keyword placement
 - Some generic links
 - Sparse internal linking (3-4 links)
+- Some missing alt text
+- Some code blocks missing language
+- Sections assume context
+- Acronyms not defined
 
 **3-4/10 - Poor**
 - Missing or very short meta description
@@ -413,6 +736,10 @@ Terraform modules enable teams to create reusable infrastructure components that
 - No keyword strategy
 - Many generic links
 - Minimal internal linking (0-2 links)
+- Most images missing alt text
+- Many code blocks without language
+- Poor contextual completeness
+- No term definitions
 
 **1-2/10 - Critical**
 - No meta description
@@ -420,6 +747,10 @@ Terraform modules enable teams to create reusable infrastructure components that
 - No keyword usage
 - No internal links
 - Poor structure
+- No image alt text
+- No code block languages
+- Sections not standalone
+- No prerequisites stated
 
 ## When to Use This Skill
 
@@ -431,26 +762,33 @@ Use `/seo-optimize` when:
 - ✅ Enhancing AI/LLM discoverability
 - ✅ After content rewrites
 - ✅ Monthly SEO audits
+- ✅ Optimizing for featured snippets
+- ✅ Improving accessibility (alt text, code languages)
+- ✅ Preparing docs for AI training/extraction
 
 Don't use `/seo-optimize` when:
-- ❌ Need comprehensive review (use `/review` instead)
-- ❌ Need style checking (use `/check-style`)
-- ❌ Need technical accuracy validation (use `/review --phases 2`)
+- ❌ Need comprehensive review (use `/review-doc` instead)
+- ❌ Need style checking (use `/check-hashicorp-style`)
+- ❌ Need technical accuracy validation (use `/review-doc --phases 2`)
 
 ## Performance
 
-Typical execution times:
-- Single file: ~2-3 minutes
-- 5 files: ~10-15 minutes
-- 20 files: ~40-60 minutes
+Typical execution times (with 17 optimization areas):
+- Single file: ~3-4 minutes
+- 5 files: ~12-20 minutes
+- 20 files: ~50-80 minutes
 
-Faster than full `/review` but more comprehensive than `/check-style`.
+**Note:** Comprehensive checks (17 areas) take slightly longer than basic SEO, but provide significantly more value for AI/LLM optimization and accessibility.
+
+Faster than full `/review-doc` but more comprehensive than `/check-hashicorp-style`.
 
 ## Reference Files
 
-This skill uses:
-- **`AGENTS.md`** - SEO & AI/LLM optimization section
-- **`REVIEW_PHASES.md`** - Phase 5 criteria
+This skill is referenced by:
+- **`REVIEW_PHASES.md Phase 5`** - SEO & AI/LLM Optimization phase
+- **`AGENTS.md`** - SEO & AI/LLM Optimization section
+
+**This skill contains the complete SEO criteria** - other documents reference it.
 
 ## Notes
 
