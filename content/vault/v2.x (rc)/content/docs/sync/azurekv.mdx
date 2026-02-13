@@ -14,7 +14,7 @@ secrets when they either get dissociated from the destination or deleted from Va
 
 Prerequisites:
 * Ability to read or create KVv2 secrets
-* Ability to create Azure AD user credentials with access to an Azure Key Vault
+* Ability to create Azure AD user credentials with access to an Azure Key Vault, or configure workload identity federation (WIF)
 * Ability to create sync destinations and associations on your Vault server
 
 ## Setup
@@ -22,9 +22,13 @@ Prerequisites:
 1. If you do not already have an Azure Key Vault instance, navigate to the Azure Portal to create a new
   [Key Vault](https://learn.microsoft.com/en-us/azure/key-vault/general/quick-create-portal).
 
-1. A service principal with a client ID and client secret will be needed to configure Azure Key Vault as a
-  sync destination. This [guide](https://learn.microsoft.com/en-us/azure/active-directory/develop/howto-create-service-principal-portal)
-  will walk you through creating the service principal.
+1. Configure authentication credentials for Azure Key Vault. You can use one of the following methods:
+
+   - **Client secret authentication**: Create a service principal with a client ID and client secret. This [guide](https://learn.microsoft.com/en-us/azure/active-directory/develop/howto-create-service-principal-portal) walks you through creating the service principal.
+   
+   - **Workload identity federation (WIF)**: Configure a trust relationship between Vault and Azure. This method eliminates the need to manage long-lived client secrets. See the [WIF setup](#workload-identity-federation-wif) section for details.
+   
+   - **Managed identity**: If running Vault on Azure infrastructure, you can use Azure managed identity. This method requires minimal configuration as authentication is inferred from the environment.
 
 1. Once the service principal is created, the next step is to
   [grant the service principal](https://learn.microsoft.com/en-us/azure/key-vault/general/rbac-guide?tabs=azure-cli)
@@ -32,29 +36,58 @@ Prerequisites:
   which gives sufficient access to manage secrets. For more information, see the [Permissions](#permissions) section.
 
 
-1. Configure a sync destination with the service principal credentials and Key Vault URI created in the previous steps.
+1. Configure a sync destination with the Key Vault URI and authentication credentials.
 
-  ```shell-session
-  $ vault write sys/sync/destinations/azure-kv/my-azure-1 \
-      key_vault_uri="$KEY_VAULT_URI" \
-      client_id="$CLIENT_ID" \
-      client_secret="$CLIENT_SECRET" \
-      tenant_id="$TENANT_ID"
-  ```
+   **Client secret authentication:**
 
-  **Output:**
+   ```shell-session
+   $ vault write sys/sync/destinations/azure-kv/my-azure-1 \
+       key_vault_uri="$KEY_VAULT_URI" \
+       client_id="$CLIENT_ID" \
+       client_secret="$CLIENT_SECRET" \
+       tenant_id="$TENANT_ID"
+   ```
 
-  <CodeBlockConfig hideClipboard>
+   **Output:**
 
-  ```plaintext
-  Key                   Value
-  ---                   -----
-  connection_details    map[client_id:123 client_secret:***** key_vault_uri:***** tenant_id:123]
-  name                  my-azure-1
-  type                  azure-kv
-  ```
+   <CodeBlockConfig hideClipboard>
 
-  </CodeBlockConfig>
+   ```plaintext
+   Key                   Value
+   ---                   -----
+   connection_details    map[client_id:uuid client_secret:***** identity_token_audience:***** identity_token_ttl:***** key_vault_uri:https://keyvault-1234abcd.vault.azure.net tenant_id:uuid]
+   name                  my-azure-1
+   options               map[custom_tags:map[] granularity_level:secret-path secret_name_template:vault-{{ .MountAccessor | replace "_" "-" }}-{{ .SecretPath }}]
+   type                  azure-kv
+   ```
+
+   </CodeBlockConfig>
+
+   **Workload identity federation (WIF) authentication:**
+
+   ```shell-session
+   $ vault write sys/sync/destinations/azure-kv/my-azure-1 \
+       key_vault_uri="$KEY_VAULT_URI" \
+       client_id="$CLIENT_ID" \
+       tenant_id="$TENANT_ID" \
+       identity_token_audience="api://AzureADTokenExchange" \
+       identity_token_ttl="1h"
+   ```
+
+   **Output:**
+
+   <CodeBlockConfig hideClipboard>
+
+   ```plaintext
+   Key                   Value
+   ---                   -----
+   connection_details    map[client_id:uuid identity_token_audience:***** identity_token_ttl:***** key_vault_uri:https://keyvault-1234abcd.vault.azure.net tenant_id:uuid]
+   name                  my-azure-1
+   options               map[custom_tags:map[] granularity_level:secret-path secret_name_template:vault-{{ .MountAccessor | replace "_" "-" }}-{{ .SecretPath }}]
+   type                  azure-kv
+   ```
+
+   </CodeBlockConfig>
 
 ## Usage
 
@@ -129,6 +162,38 @@ Moving forward, any modification on the Vault secret will be propagated in near 
 counterpart. Creating a new secret version in Vault will create a new version in Azure Key Vault. Deleting the secret
 or the association in Vault will delete the secret in your Azure Key Vault as well.
 
+## Workload identity federation (WIF)
+
+Workload identity federation (WIF) lets the Azure Key Vault sync destination authenticate to Azure without managing long-lived client secrets. Instead, Vault exchanges short-lived plugin identity tokens for Azure access tokens.
+
+To configure WIF for Azure Key Vault sync:
+
+1. Ensure that Vault [openid-configuration](/vault/api-docs/secret/identity/tokens#read-plugin-identity-token-issuer-s-openid-configuration)
+   and [public JWKS](/vault/api-docs/secret/identity/tokens#read-plugin-identity-token-issuer-s-public-jwks)
+   APIs are network-reachable by Azure. We recommend using an API proxy or gateway
+   if you need to limit Vault API exposure.
+
+1. Configure a
+   [federated identity credential](https://learn.microsoft.com/en-us/entra/workload-id/workload-identity-federation-create-trust?pivots=identity-wif-apps-methods-azp#configure-a-federated-identity-credential-on-an-app)
+   on a dedicated application registration in Azure to establish a trust relationship with Vault.
+   
+   - The issuer URL **must** point at your [Vault plugin identity token issuer](/vault/api-docs/secret/identity/tokens#read-plugin-workload-identity-issuer-s-openid-configuration) with the
+     `/.well-known/openid-configuration` suffix removed. For example:
+     `https://host:port/v1/identity/oidc/plugins`.
+   
+   - The subject identifier **must** match the unique `sub` claim issued by plugin identity tokens.
+     The subject identifier should have the form `plugin-identity:<NAMESPACE_ID>:system:sync-destination-azure-kv`.
+   
+   - The audience should be under 600 characters. The default value in Azure is `api://AzureADTokenExchange`.
+
+1. Configure the Azure Key Vault sync destination with the subscription, client and tenant IDs and the OIDC audience value,
+   as shown in the [Setup](#setup) section above.
+
+By default, WIF [credentials](https://learn.microsoft.com/en-us/entra/identity-platform/access-tokens#token-lifetime)
+have a time-to-live of 1 hour and automatically refresh when they expire.
+
+For more information about the WIF-related configuration parameters, refer to the
+[API documentation](/vault/api-docs/system/secrets-sync#create-update-azure-key-vault-destination).
 
 ## Permissions
 
