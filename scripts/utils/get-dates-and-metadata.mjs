@@ -72,12 +72,18 @@ export const parseMarkdownFrontMatter = (filePath) => {
  * @param {string|null} defaultDate - Default date to use in precommit script
  */
 export function addDateMetadata(filePath, defaultDate) {
-	const createdDate = getCreatedDate(filePath)
+	let createdDate = getCreatedDate(filePath)
 	let lastModifiedDate
 	if (defaultDate === null) {
 		lastModifiedDate = getLastModifiedDate(filePath)
 	} else {
 		lastModifiedDate = new Date(defaultDate).toISOString()
+	}
+
+	// This handles the case where a file is newly created and has no git history yet
+	// we want to set created_at to the defaultDate provided by the precommit script
+	if (!createdDate && defaultDate !== null) {
+		createdDate = new Date(defaultDate).toISOString()
 	}
 
 	if (!createdDate || !lastModifiedDate) {
