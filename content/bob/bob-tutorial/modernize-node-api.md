@@ -147,7 +147,7 @@ In the Bob chat panel, type the following prompt:
 
 The `@` symbol before `package.json` tells Bob to include that file's contents as context.
 
-Bob doesn't start answering immediately. Bob explores your codebase first—reading files, following patterns, and analyzing code. Don't interrupt this phase.
+Bob doesn't start answering immediately. Bob explores your codebase first, reading files, following patterns, and analyzing code. Don't interrupt this phase.
 
 Bob reads the `package.json` file and responds with a detailed list of things that need updating. Bob catagorizes the findings into Critical, Recommended, and Already compatible. 
 
