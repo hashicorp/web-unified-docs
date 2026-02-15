@@ -86,10 +86,7 @@ Before you have Bob modernize the legacy application, you should make sure the c
 In the Bob chat panel, describe what you want Bob to do:
 
 ```text
-Build and test the legacy application using Docker to verify it works correctly before modernization. The application should:
-- Build successfully into a Docker image
-- Run in a container on port 3000
-- Respond to API requests at /api/todos with sample data
+Build and test the legacy application using Docker to verify it works correctly before modernization. The application should respond to API requests at /api/todos with sample data
 
 After testing, clean up the container.
 ```
@@ -99,23 +96,26 @@ Bob understands your intent and determines the right Docker commands to use. Bob
 Bob gives you the following output to confirm the legacy application builds:
 
 ```
-Successfully built and tested the legacy Node.js TypeScript application using Docker:
+Successfully created, tested, and verified the Dockerfile for the Node.js TypeScript application:
 
-✅ **Docker Image Built**: express-todo-api image created using Node 16 Alpine
-✅ **Container Running**: Application started successfully on port 3000
-✅ **API Tested**: 
-   - Root endpoint (/) returned API information
-   - /api/todos endpoint returned sample todo data:
-     ```json
-     [{"id":"c835b871-ee20-453e-96b2-ebc746be1626","title":"Learn Node.js modernization","completed":false,"createdAt":"2026-02-15T17:38:21.903Z"}]
-     ```
-✅ **Cleanup Complete**: Container stopped and removed
+**Dockerfile Features:**
+- Uses Node 16 Alpine image (matching package.json requirement)
+- Installs all dependencies including dev dependencies for build
+- Builds TypeScript code using `npm run build`
+- Prunes dev dependencies for smaller production image
+- Exposes port 3000
+- Runs application with `npm start`
 
-The application is working correctly and ready for modernization. The Dockerfile successfully:
-- Uses Node 16 Alpine base image
-- Builds TypeScript code into JavaScript
-- Runs the application on port 3000
-- Serves the REST API endpoints properlyy
+**Testing Results:**
+✅ Docker image built successfully
+✅ Container ran on port 3000
+✅ API endpoint /api/todos responded correctly with sample data:
+```json
+[{"id":"667aa608-e9ed-4ac7-b413-8ea8e6a6e255","title":"Learn Node.js modernization","completed":false,"createdAt":"2026-02-15T17:55:33.423Z"}]
+```
+✅ Container and image cleaned up
+
+The legacy application is working correctly in Docker and ready for modernization.
 ```
 
 ## Explore the codebase with Bob's Ask mode
@@ -131,50 +131,112 @@ Bob supports **@ context mentions** that let you reference specific files, folde
 In the Bob chat panel, run the following prompt:
 
 ```text
-@package.json What Node.js version is this project using? What dependencies would need updating for Node.js 22?
+@package.json What Node.js version is this project using? What dependencies would need updating for Node.js 22? Give me a short summary.
 ```
 
 The `@` symbol before `package.json` tells Bob to include that file's contents as context.
 
 Bob doesn't start answering immediately. Bob explores your codebase first—reading files, following patterns, and analyzing code. Don't interrupt this phase.
 
-Bob reads the `package.json` file and responds with a detailed list of things that need updating. Bob categorizes the findings into Critical, Recommended, and Already compatible.
+Bob reads the `package.json` file and responds with a list of components that you need to update for Node.js 22.
 
 In summary, Bob tells you that the application needs to have the following modernized:
-- `@types/node ^16.18.0` to `^22.x.x`
-- `typescript ^4.9.5` to `^5.3.0` or later
-- `ts-node ^10.9.1` to `^10.9.2 or later`
-- Consider upgrading `express` from `^4.18.2` to `14.19.0` or later
+
+```text
+**Current Version:** Node.js 16.x
+
+**Required Updates for Node.js 22:**
+- [`@types/node`](express-todo-api/package.json:21): `^16.18.0` → `^22.x.x` (critical)
+- [`typescript`](express-todo-api/package.json:24): `^4.9.5` → `^5.x.x` (recommended)
+- [`express`](express-todo-api/package.json:16): `^4.18.2` → `^4.21.x` (optional, for security patches)
+
+The main requirement is updating @types/node to match Node.js 22. TypeScript 5.x is recommended for full compatibility with modern Node.js features.
+```text
 
 ### Analyze the TypeScript configuration
 
 Ask Bob to analyze the project's TypeScript configuration:
 
 ```text
-@tsconfig.json What module system and compiler settings is this TypeScript project using?
+@tsconfig.json What module system and compiler settings is this TypeScript project using? Give me a short summary.
 ```
 
-Bob tells you that the project uses CommonJS modules and targets ES2020. Bob explains that the TypeScript compiler settings should be updated to target ES2022 for better Node.js 22 compatibility.
+Bob reads the `tsconfig.json` file and responds with a list of components that you need to update for Node.js 22.
 
-After Bob learns about `@package.json` and `@tsconfig.json`, you and Bob know the modernization opportunities:
+In summary, Bob tells you that the application needs to have the following modernized:
+
+```text
+**Module System:** CommonJS ([`module: "commonjs"`](express-todo-api/tsconfig.json:4))
+
+**Key Compiler Settings:**
+- **Target:** ES2020 ([`target: "ES2020"`](express-todo-api/tsconfig.json:3))
+- **Output:** [`./dist`](express-todo-api/tsconfig.json:6) directory
+- **Source:** [`./src`](express-todo-api/tsconfig.json:7) directory
+- **Strict mode:** Enabled ([`strict: true`](express-todo-api/tsconfig.json:8))
+- **Module resolution:** Node ([`moduleResolution: "node"`](express-todo-api/tsconfig.json:13))
+
+This is a traditional Node.js setup using CommonJS modules with strict TypeScript checking and ES2020 features.
+```
+
+### Analyze the Dockerfile
+
+Ask Bob to analyze the project's Dockerfile:
+
+```text
+@Dockerfile What Node.js version does this Dockerfile use? What would need to change for Node.js 22? Give me a short summary.
+```
+
+Bob reads the `Dockerfile` and responds with what needs to be updated for Node.js 22.
+
+In summary, Bob tells you:
+
+```text
+**Current Version:** Node.js 16 Alpine ([`FROM node:16-alpine`](express-todo-api/Dockerfile:2))
+
+**Required Change for Node.js 22:**
+- Update base image: `FROM node:16-alpine` → `FROM node:22-alpine`
+
+That's the only change needed in the Dockerfile. The rest of the build process (npm install, TypeScript compilation, etc.) remains the same.
+```
+
+## Modernize the API with Bob's Code mode
+
+
+You and Bob know the modernization opportunities for `@package.json`, `@tsconfig.json`, and `@Dockerfile`.
 - Node.js 16 → 22 in package.json and Dockerfile
 - TypeScript compiler target and module settings
 - Outdated dependency versions
 
-## Modernize the API with Bob's Code mode
-
-You and Bob now understand what needs updating, switch back to **Code mode** so Bob can make code changes. Click the mode selector and select **Code**, or type `/code` in the chat.
+To start modernizing the application, switch back to **Code mode** so Bob can make code changes. Click the mode selector and select **Code**, or type `/code` in the chat.
 
 You need Code mode to:
 - **Edit files** such as modify package.json, tsconfig.json, and Dockerfile
 - **Run terminal commands** such as build and test with Docker
 
-In the Bob chat panel, run the following modernization prompt. Notice the `@` references that point Bob to specific files:
+In the Bob chat panel, run the following modernization prompt. Notice the `@` references that point Bob to specific files that Bob will work on:
 
 ```text
 @package.json @tsconfig.json @Dockerfile
 
-Modernize this Express API from Node.js 16 to Node.js 22. Keep the API functionality identical - this is a platform upgrade, not a feature change.
+Modernize this Express API from Node.js 16 to Node.js 22. Keep the API functionality identical - this is a platform upgrade, not a feature change. Give me a short summary.
+```
+
+Bob will give you a summary of all of the componets Bob updated in the modernization.
+
+```text
+**Modernization Complete: Node.js 16 → 22**
+
+**Changes Made:**
+- [`package.json`](express-todo-api/package.json): Updated Node.js to 22.x, TypeScript to 5.7.3, @types/node to 22.10.5, Express to 4.21.2
+- [`tsconfig.json`](express-todo-api/tsconfig.json): Updated target and lib from ES2020 to ES2022
+- [`Dockerfile`](express-todo-api/Dockerfile): Changed base image from node:16-alpine to node:22-alpine
+
+**Verification:**
+✅ Built and tested successfully
+✅ API functionality identical (GET/POST /api/todos working)
+✅ No breaking changes to application behavior
+
+Platform upgrade complete with zero functional changes.
 ```
 
 ### Learn Bob's approval workflow
@@ -242,31 +304,37 @@ Bob's **literate coding** feature lets you write code with AI assistance directl
 
 Use literate coding to mark the app as modernized by updating the sample todo title:
 
-1. Open `src/routes/todos.ts` in the editor
+1. Open `src/db.ts` in the editor
 
 2. Toggle literate coding mode by clicking the magic wand icon in the editor toolbar (or press `Cmd+M` on Mac / `Ctrl+M` on Windows/Linux)
 
-3. Find the sample todo object (around line 15-20) and select the title line. Type:
+3. At the top of the file, paste the following instruction:
 
-   ```typescript
-   // Change this title to "Welcome to the Modernized Node.js 22 API"
+   ```text
+   // Find the sample todo object's title property and change it to "Welcome to the Modernized Node.js 22 API"
    ```
 
-   Your instruction appears highlighted in blue, marking it as literate coding content.
+   Your instruction appears highlighted.
 
-4. Press `Cmd+Enter` (Mac) or `Ctrl+Enter` (Windows/Linux) to apply the change
+4. Click **Generate** at the bottom of the document
 
-   Bob updates the title string. You see an inline diff showing:
+   Bob locates the `sampleTodo` object in the constructor (around line 11-16) and shows you the change. You'll see the title change from:
 
+   **Before:**
+   ```typescript
+   title: "Learn Node.js modernization"
+   ```
+
+   **After:**
    ```typescript
    title: "Welcome to the Modernized Node.js 22 API"
    ```
 
-5. Press `Cmd+Enter` to accept the change, or `Cmd+Shift+Backspace` to reject
+5. Click **Accept all** to apply the change to the file
 
-6. Press `Cmd+M` (Mac) or `Ctrl+M` (Windows/Linux) to exit literate coding mode
+6. Click **Exit** to exit literate coding mode
 
-You've updated the API using literate coding. When you test the API in the following section, you'll see your new title in the response.
+You've updated the API using literate coding. When you test the API in the following section, you'll see this new title in the API response.
 
 ## Verify the modernized application with Docker
 
@@ -275,122 +343,43 @@ Now that Bob has modernized the code, verify everything works by rebuilding and 
 In Code mode, describe what you want Bob to verify:
 
 ```text
-Build and test the modernized application using Docker to verify the Node.js 22 upgrade was successful. The application should:
-- Build successfully with the updated dependencies
-- Run in a container and respond to API requests at /api/todos
-- Show the updated todo title from the previous step
-
-After testing, clean up the container.
+Verify the modernized Node.js 22 application works by building and testing it with Docker. Check that the API responds at /api/todos and shows the updated todo title. Clean up when done. Give me a short summary. I also want to see the validate of the new title.
 ```
 
-Bob determines the appropriate Docker commands to verify the modernization. Bob shows you the commands and asks for approval.
-
-Click **Run** to execute them. Bob runs the build and tests, then shows the output directly in the chat panel:
-
-Once Bob verifies the application, you should see the following output:
+Once Bob verifies the application has been modernized, it will give you the following summary.
 
 ```text
-Successfully modernized and verified the Express API from Node.js 16 to Node.js 22:
+**Verification Complete ✅**
 
-Changes Made:
+Built and tested Node.js 22 application with Docker:
+- ✅ Image built successfully
+- ✅ API responding at /api/todos
+- ✅ **New title validated:** `"Welcome to the Modernized Node.js 22 API"`
+- ✅ Cleanup complete
 
-package.json - Updated Node.js engine to 22.x and all dependencies to latest versions:
+**API Response:**
+```json
+[
+  {
+    "id": "4af8bfab-1205-4fe6-a9be-d49d5804a7e9",
+    "title": "Welcome to the Modernized Node.js 22 API",
+    "completed": false,
+    "createdAt": "2026-02-15T18:30:02.295Z"
+  }
+]
+```
 
-express: 4.18.2 → 4.21.2
-uuid: 9.0.0 → 11.0.3
-@types/express: 4.17.17 → 5.0.0
-@types/node: 16.18.0 → 22.10.2
-@types/uuid: 9.0.0 → 10.0.0
-typescript: 4.9.5 → 5.7.2
-ts-node: 10.9.1 → 10.9.2
-tsconfig.json - Updated TypeScript target from ES2020 to ES2022 for Node.js 22 compatibility (kept module as "commonjs")
-
-Dockerfile - Changed base image from node:16 to node:22-alpine for smaller image size
-
-src/routes/todos.ts - Fixed type assertions for req.params.id to handle stricter typing in @types/express v5
-
-Docker Verification:
-✅ Docker image built successfully with Node.js 22 Alpine
-✅ Container started and API responded correctly
-✅ API endpoint /api/todos returned expected JSON response with updated title
-✅ Container stopped and cleaned up successfully
-
-The modernized application is fully functional and maintains identical API behavior.
+Modernization from Node.js 16 to 22 verified and working.
 
 ```
 
-The API works correctly, confirming that Bob preserved existing behavior while modernizing the Node.js version and dependencies.
+The API works correctly, and the title is updated to welcome to the Modernized Node.js 22 API, confirming that Bob preserved existing behavior while modernizing the Node.js version, dependencies, and name.
 
 
 ## Next steps
 
 In this tutorial you learned how to modernize an Express API from Node.js 16 to Node.js 22 using Bob. Bob analyzed your dependencies, updated configuration files, and modernized the Docker setup while preserving all functionality.
 
-
-## Do we want to have these sections the the tutorial:
-
-Use Bob's AI-powered code review to catch issuesshows the user how to use Code actions. We need to decide if we want  keep this or switch to a simple Code action where the user just uses the Explain Code action to look at the single line of code.
-
-Add functionality with literate coding shows the user how to add code to the application using Bob AI. This is useful but it adds a lot of steps
-
-## Use Bob's AI-powered code review to catch issues
-
-After modernization, use Bob's built-in `/review` command to analyze your changes. When programming with Bob, you should use `/review` before committing changes to your code repository.
-
-You can run `/review` from Code mode, but switching to **Advanced mode** has all the capabilities of Code mode plus additional tools like browser access and MCP (Model Context Protocol).
-
-Click the mode selector and select **Advanced**, or type `/advanced` in the chat input.
-
-In the Bob chat panel, type:
-
-```text
-/review
-```
-
-Bob opens the **Bob Findings** panel and analyzes all uncommitted changes. Results are organized by priority (High, Medium, Low).
-
-<Add picture or video>
-
-Bob finds the following issues:
-
-```text
-Summary:
-
-2 medium severity issues (security & performance)
-4 low severity issues (maintainability & functionality)
-Key Issues:
-
-Dockerfile installs devDependencies in production (security/performance impact)
-Missing multi-stage build optimization
-No health check configured
-Minor improvements needed for .dockerignore
-```
-
-You can click on each finding for more details. You can also sort the findings by File, Type, and Severity.
-
-<Add picture or video>
-
-### Fix Bob findings with code actions
-
-You will use **code actions** feature to interact with Bob directly from the editor without using the Bob chat panel. 
-
-The following are Bob code actions:
-- **Add to Context** - Adds selected code to your Bob conversation with file path and line numbers
-- **Explain Code** - Asks Bob to explain the selected code
-- **Improve Code** - Asks Bob to suggest improvements to the selected code
-
-You will use the **Explain code** and **Improve Code** code actions to fix the Bob Findings.
-
-1. In the Bob Findings tab, sort the findings by Severity.
-<add picture or video>
-2. Click the Medium folder. You see "Missing input validation for UpdateTodoInput:37"
-<add picture or video> ?
-3. Click on the Missing input validation for UpdateTodoInput:37 to open options for the error.
-4. You can either go to the issue location, dismiss the error, or use direct fix to have Bob automatically fix the issue. Click on `Go To Location`. Go to location opens the file in a new tab and places you on line 37.
-5. With line 37 selected, click on the light bulb at the start of the line.
-6. You see several options. Click 'Explain with IBM Bob' so you can understand what the issue is. Bob Chat automatically opens and explains the issue.
-7. Once you review the issue, click on the lightbulb again and select Improve with IBM Bob.
-8. Bob chat fixes the issue and shows you the improved code.
-9. In the Bob Findings window, you can click on the `Mark as resolved` option.
+Learn about Bob's [Code review feature](https://qa.bob.ibm.com/docs/ide/features/code-reviews) `/review` to catch potential issues before you commit your work.
 
 
