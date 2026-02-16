@@ -165,7 +165,6 @@ You and Bob verified the legacy application is working correctly.
 
 Before modernizing, click the mode selector drop down and switch to Bob's **Ask mode**. Ask mode can only read files, so you can safely explore code without accidentally making changes. You can also type `/ask` in Bob chat to change to Ask mode.
 
-You will explore three files that you need to modernize: `package.json`, `tsconfig.json`, and `Dockerfile`, by explicitly telling Bob which files to analyze using @ mentions. You will understand the modernization requirements before making any changes.
 
 ### Use @ context mentions to review the project
 
