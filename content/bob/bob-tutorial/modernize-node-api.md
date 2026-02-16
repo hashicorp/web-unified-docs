@@ -45,7 +45,7 @@ Bob has different modes for different tasks. Each mode has a different set of to
 
 ## Open Bob and clone the repository
 
-1. Launch the IBM Bob application on your computer. Look for "IBM Bob" in your Applications folder (macOS), Start menu (Windows), or applications menu (Linux). 
+1. Launch the IBM Bob application on your computer. Look for IBM Bob in your Applications folder (macOS), Start menu (Windows), or applications menu (Linux). 
 
 
 1. If Bob is not already opened, open the Bob chat panel by clicking the Bob icon beside the navigation bar or use the shortcut `Cmd+L` (Mac) or `Ctrl+L` (Windows/Linux)
@@ -181,7 +181,7 @@ In the Bob chat panel, run the following prompt:
 
 The `@` symbol before `package.json` tells Bob to include that file's contents as context.
 
-Bob doesn't start answering immediately. Bob explores your codebase first—reading files, following patterns, and analyzing code. Don't interrupt this phase.
+Bob doesn't start answering immediately. Bob explores your codebase first, reading files, following patterns, and analyzing code. Don't interrupt this phase.
 
 Bob reads the `package.json` file and responds with a list of components that you need to update for Node.js 22.
 
