@@ -5,9 +5,10 @@
 
 import path from 'path'
 import fs from 'fs'
-
-import dotenv from 'dotenv'
 import { client, v1 } from '@datadog/datadog-api-client'
+
+const configuration = client.createConfiguration()
+const api = new v1.MetricsApi(configuration)
 
 const NEXTJS_TRACE_FILE = './.next/trace'
 const PREBUILD_TRACE_FILE = './scripts/prebuild/trace'
@@ -50,14 +51,6 @@ async function main() {
 	const [, , appName] = process.argv
 
 	try {
-		const envLocalPath = '.env.local'
-		dotenv.config({
-			path: fs.existsSync(envLocalPath) ? [envLocalPath, '.env'] : '.env',
-		})
-
-		const configuration = client.createConfiguration()
-		const api = new v1.MetricsApi(configuration)
-
 		const timestamp = Math.round(Date.now() / 1e3)
 
 		// Read trace files
@@ -88,11 +81,9 @@ async function main() {
 				series: structuredMetrics,
 			},
 		})
-
-		console.log(`Submitted build metrics to Datadog for app ${appName}`)
 	} catch {
-		// Swallow errors
-		// we don't want to impact the build or make it seem like there's been an error in the actual app if something goes wrong when sending metrics
+		// Swallow errors here, we don't want to impact the build or make it seem like there's been an error in the actual app
+		// if something goes wrong when sending metrics
 	}
 }
 
