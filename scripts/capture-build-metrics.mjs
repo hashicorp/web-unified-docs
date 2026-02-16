@@ -72,16 +72,18 @@ async function main() {
 
 		const environment = process.env.CI ? 'ci' : 'local'
 		const buildType = process.env.INCREMENTAL_BUILD ? 'incremental' : 'full'
+		const tags = [
+			`app:${appName}`,
+			`environment:${environment}`,
+			`buildType:${buildType}`,
+		]
+
 		const structuredMetrics = filteredEvents.map((event) => {
 			return captureMetric({
 				name: `build.${event.name}`,
 				duration: Math.round(event.duration / 1e3),
 				timestamp,
-				tags: [
-					`app:${appName}`,
-					`environment:${environment}`,
-					`buildType:${buildType}`,
-				],
+				tags,
 			})
 		})
 
@@ -92,7 +94,7 @@ async function main() {
 		})
 
 		console.log(
-			`Submitted build metrics to Datadog for app ${appName} in environment ${environment} with build type ${buildType}`,
+			`\n〽️ Submitted build metrics to Datadog:\n${JSON.stringify(tags, null, 2)}\n`,
 		)
 	} catch {
 		// Swallow errors
