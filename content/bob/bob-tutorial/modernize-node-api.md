@@ -67,7 +67,7 @@ Bob has different modes for different tasks. Each mode has a different set of to
 
    ![Cloning the repository in Bob IDE](img/git-clone.png)
 
-1. Bob will ask you if you want to "Would you like to open the cloned repository?" Click "Open"
+1. Bob asks you if you want to "Would you like to open the cloned repository?" Click "Open"
 
    You see the project files in the Explorer and the Bob chat panel on the side.
 
@@ -83,7 +83,7 @@ In this tutorial, you will interact with Bob in the Bob chat, located at the bot
 
    ![Navigating to the express-todo-api folder in Bob IDE](img/navigate-to-app.png)
 
-   Bob will change to the `express-todo-api` folder, and respond with the following:
+   Bob changes to the `express-todo-api` folder, and responds with the following:
 
    ```text
    Successfully navigated to the express-todo-api folder at:
@@ -108,7 +108,7 @@ Create a `Dockerfile` in the express-todo-api folder to run the application in a
 1. Ask Bob to create the Dockerfile in the Bob chat panel:
 
    ```text
-   Create a Dockerfile for this Node.js TypeScript application. It should use Node 16 to match the current application version, build the TypeScript code, and run the app on port 3000.
+   Create a Dockerfile for this Node.js TypeScript application. It should use Node 16 to match the current application version, build the TypeScript code, and run the app on port `3000`.
    ```
 
    ![Bob proposes Dockerfile with Save action button](img/create-dockerfile.png)
@@ -140,7 +140,7 @@ Successfully built, tested, and cleaned up the legacy Express TODO API applicati
 - Image size optimized with production-only dependencies
 
 **Test Results:**
-- Container ran successfully on port 3000
+- Container ran successfully on port `3000`
 - API endpoint `/api/todos` responded correctly with sample data:
   ```json
   [{
@@ -159,7 +159,7 @@ The legacy application is verified to work correctly and is ready for modernizat
 
 ```
 
-You and Bob verified legacy application is working correctly.
+You and Bob verified the legacy application is working correctly.
 
 ## Explore Node.js codebase with Bob's Ask mode
 
@@ -352,7 +352,7 @@ Use literate coding to mark the app as modernized by updating the sample todo ti
 
 5. Click **Accept all** at the bottom of the document where you clicked **Generate** to apply the change to the file
 
-6. Click **Exit** below the literate magic wand at the to of the file to exit literate coding mode
+6. Click **Exit** below the literate magic wand at the top of the file to exit literate coding mode
 
 You've updated the API using literate coding. When you test the API in the following section, you see this new title in the API response.
 
