@@ -47,7 +47,6 @@ Bob has different modes for different tasks. Each mode has a different set of to
 
 1. Launch the IBM Bob application on your computer. Look for IBM Bob in your Applications folder (macOS), Start menu (Windows), or applications menu (Linux). 
 
-
 1. If Bob is not already opened, open the Bob chat panel by clicking the Bob icon beside the navigation bar or use the shortcut `Cmd+L` (Mac) or `Ctrl+L` (Windows/Linux)
 
    ![Bob chat panel open in IBM Bob IDE](img/open-bob.png)
