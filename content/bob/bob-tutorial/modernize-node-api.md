@@ -32,23 +32,23 @@ To complete this tutorial, you need:
 
 - **[IBM Bob IDE](https://bob.ibm.com/docs/ide/install)** - Download and install the IBM Bob application on your computer. Bob is a standalone IDE application and not an extension.
 - **[Docker](https://docs.docker.com/get-docker/)** - To run containerized builds. You won't need to install Node.js or dependencies locally.
-- **[Git](https://git-scm.com/downloads)** - To download the tutorial repository.
 
 ## Understanding Bob's AI development modes
 
 Bob has different modes for different tasks. Each mode has a different set of tools and features. The following are Bob's default modes and when you should use them:
 
-- **Plan mode** - When you want to analyze requirements, research and design implementation steps
-- **Code mode** - When you want Bob to make changes or run commands 
-- **Ask mode** - When you want to explore and understand code without making changes
-- **Advanced mode** - When you need all of Bob's tools for complex workflows 
+- **Plan** - When you want to analyze requirements, research and design implementation steps
+- **Code** - When you want Bob to make changes or run commands 
+- **Ask** - When you want to explore and understand code without making changes
+- **Advanced** - When you need all of Bob's tools for complex workflows 
 - **Orchestrator** - Coordinates complex tasks across multiple modes
 
 ## Open Bob and clone the repository
 
-1. Launch the IBM Bob application on your computer. Look for "IBM Bob" in your Applications folder (macOS), Start menu (Windows), or applications menu (Linux).
+1. Launch the IBM Bob application on your computer. Look for "IBM Bob" in your Applications folder (macOS), Start menu (Windows), or applications menu (Linux). 
 
-1. Open the Bob chat panel by clicking the Bob icon beside the navigation bar or use the shortcut `Cmd+L` (Mac) or `Ctrl+L` (Windows/Linux)
+
+1. If Bob is not already opened, open the Bob chat panel by clicking the Bob icon beside the navigation bar or use the shortcut `Cmd+L` (Mac) or `Ctrl+L` (Windows/Linux)
 
    ![Bob chat panel open in IBM Bob IDE](img/open-bob.png)
 
@@ -59,23 +59,47 @@ Bob has different modes for different tasks. Each mode has a different set of to
 
    You interact with Bob by typing natural language requests in the input field, just like chatting with a colleague.
 
-1. Clone the tutorial repository by clicking on the files icon located on the top left of the Bob IDE panel. Then click **Clone Repository**, and paste the following GitHub repository into the search bar:
+1. Clone the tutorial repository by clicking on the files icon located on the top left of the Bob IDE panel. Then click **Clone Repository**, and paste the following GitHub repository into the search bar. Bob will ask you where you want to save the repository. You can save it wherever you like:
 
    ```text
-   PLACEHOLDER FOR GITHUB URL
+   https://github.com/cjobermaier/bob-demo.git
    ```
 
    ![Cloning the repository in Bob IDE](img/git-clone.png)
 
-1. After Bob clones the repository, open the project folder: Select **File > Open Folder** and navigate to the `bob-tutorial/express-todo-api` directory located on your desktop.
+1. Bob will ask you if you want to "Would you like to open the cloned repository?" Click "Open"
 
    You see the project files in the Explorer and the Bob chat panel on the side.
 
    ![Project files displayed in Explorer with Bob chat panel](img/files.png)
 
+## Working with Bob Chat
+
+In this tutorial, you will interact with Bob in the Bob chat, located at the bottom right of the window. This tutorial works out of the `express-todo-api` folder. Tell Bob to work out of the `express-todo-api` folder.
+
+   ```text
+   Navigate to the express-todo-api folder.
+   ```
+
+   ![Navigating to the express-todo-api folder in Bob IDE](img/navigate-to-app.png)
+
+   Bob will change to the `express-todo-api` folder, and respond with the following:
+
+   ```text
+   Successfully navigated to the express-todo-api folder at:
+
+   The directory contains a TypeScript-based Express.js TODO API with the following structure:
+   - Source code in `src/` directory
+   - Database configuration (`db.ts`)
+   - Main entry point (`index.ts`)
+   - Models and routes for TODO management
+   - Configuration files (package.json, tsconfig.json)
+   - Documentation (README.md, SETUP-VERIFIED.md, TESTING-NOTES.md, MODERNIZATION.md)
+   ``` 
+
 ## Create a Dockerfile
 
-You create a `Dockerfile` in the project root to run the application in a containerized environment. With Docker, you don't need to install Node.js or dependencies on your machine.
+Create a `Dockerfile` in the express-todo-api folder to run the application in a containerized environment. With Docker, you don't need to install Node.js or dependencies on your machine.
 
 1. Switch Bob to code mode by clicking the mode selector dropdown to the left of the chat input field and selecting **Code**.
 
@@ -89,7 +113,7 @@ You create a `Dockerfile` in the project root to run the application in a contai
 
    ![Bob proposes Dockerfile with Save action button](img/create-dockerfile.png)
 
-   Bob determines the appropriate Dockerfile structure and shows you the proposed file. Action buttons appear above the chat input field—click **Save** to create the file. Later in this tutorial, Bob updates the Dockerfile to use Node 22.
+   Bob determines the appropriate Dockerfile structure and shows you the proposed file. Action buttons appear above the chat input field. Click **Save** to create the file. Later in this tutorial, Bob updates the Dockerfile to use Node 22.
 
 ## Verify the legacy application builds
 
@@ -108,33 +132,42 @@ Bob understands your intent and determines the right Docker commands to use. Bob
 Bob gives you something similar to following output to confirm the legacy application builds:
 
 ```
-Successfully created, tested, and verified the Dockerfile for the Node.js TypeScript application:
+Successfully built, tested, and cleaned up the legacy Express TODO API application using Docker:
 
-**Dockerfile Features:**
-- Uses Node 16 Alpine image (matching package.json requirement)
-- Installs all dependencies including dev dependencies for build
-- Builds TypeScript code using `npm run build`
-- Prunes dev dependencies for smaller production image
-- Exposes port 3000
-- Runs application with `npm start`
+**Build Results:**
+- Created Dockerfile using Node 16 Alpine with multi-stage build
+- Successfully built Docker image with TypeScript compilation
+- Image size optimized with production-only dependencies
 
-**Testing Results:**
-✅ Docker image built successfully
-✅ Container ran on port 3000
-✅ API endpoint /api/todos responded correctly with sample data:
-```json
-[{"id":"667aa608-e9ed-4ac7-b413-8ea8e6a6e255","title":"Learn Node.js modernization","completed":false,"createdAt":"2026-02-15T17:55:33.423Z"}]
-✅ Container and image cleaned up
+**Test Results:**
+- Container ran successfully on port 3000
+- API endpoint `/api/todos` responded correctly with sample data:
+  ```json
+  [{
+    "id": "0133de51-d9ba-490a-93c9-e9af8bb58a33",
+    "title": "Learn Node.js modernization",
+    "completed": false,
+    "createdAt": "2026-02-16T16:15:56.627Z"
+  }]
+  
+
+**Cleanup:**
+- Stopped and removed container `express-todo-api-test`
+- Removed Docker image `express-todo-api`
+
+The legacy application is verified to work correctly and is ready for modernization. The Dockerfile remains in the project for future use.
 
 ```
 
-The legacy application is working correctly in Docker and ready for modernization.
+You and Bob verified legacy application is working correctly.
 
 ## Explore Node.js codebase with Bob's Ask mode
 
 Before modernizing, switch to Bob's **Ask mode** in the same dropdown that you used to change Bob to Code mode. Ask mode can only read files, so you can safely explore code without accidentally making changes.
 
 Click the mode selector dropdown to the left of the chat input field and select **Ask** or type `/ask` in Bob chat.
+
+You will explore three files that you need to modernize: `package.json`, `tsconfig.json`, and `Dockerfile`, by explicitly telling Bob which files to analyze using @ mentions. You will understand the modernization requirements before making any changes.
 
 ### Use @ context mentions to review the project
 
@@ -155,14 +188,21 @@ Bob reads the `package.json` file and responds with a list of components that yo
 In summary, Bob tells you that the application needs the following updates:
 
 ```text
-**Current Version:** Node.js 16.x
+**Current Node.js Version:** 16.x
 
-**Required Updates for Node.js 22:**
-- [`@types/node`](express-todo-api/package.json:21): `^16.18.0` → `^22.x.x` (critical)
-- [`typescript`](express-todo-api/package.json:24): `^4.9.5` → `^5.x.x` (recommended)
-- [`express`](express-todo-api/package.json:16): `^4.18.2` → `^4.21.x` (optional, for security patches)
+**Dependencies Needing Updates for Node.js 22:**
 
-The main requirement is updating @types/node to match Node.js 22. TypeScript 5.x is recommended for full compatibility with modern Node.js features.
+1. **@types/node**: ^16.18.0 → ^22.x.x (TypeScript types for Node.js 22)
+2. **typescript**: ^4.9.5 → ^5.x.x (TypeScript 5+ for better Node.js 22 support)
+3. **ts-node**: ^10.9.1 → ^10.9.2+ (ensure compatibility with TS 5 and Node 22)
+
+**Dependencies Already Compatible:**
+- **express**: ^4.18.2 ✓ (works with Node.js 22)
+- **uuid**: ^9.0.0 ✓ (works with Node.js 22)
+- **@types/express**: ^4.17.17 ✓ (compatible)
+- **@types/uuid**: ^9.0.0 ✓ (compatible)
+
+**Summary:** Only the Node.js-specific dev dependencies need updating. The runtime dependencies (Express, UUID) are already compatible with Node.js 22.
 ```
 
 ### Analyze the TypeScript configuration
@@ -178,19 +218,26 @@ Bob reads the `tsconfig.json` file and responds with a list of components that y
 In summary, Bob tells you that the application needs the following updates:
 
 ```text
-**Module System & Compiler Settings:**
-- **Module**: CommonJS (legacy format)
-- **Target**: ES2020
-- **Module Resolution**: Node
-- **Key Settings**: Strict mode enabled, ESM interop enabled
+**Current TypeScript Configuration:**
 
-**For Node.js 22 Modernization:**
-1. **Module system**: Update from `"commonjs"` to `"ES2022"` or `"NodeNext"`
-2. **Target**: Update from `"ES2020"` to `"ES2022"` or higher
-3. **Module Resolution**: Change from `"node"` to `"node16"` or `"nodenext"`
-4. **package.json**: Add `"type": "module"` for native ESM support
+**Module System:** CommonJS (`"module": "commonjs"`)
+- Traditional Node.js module system using `require()` and `module.exports`
+- Output: `.js` files with CommonJS syntax
 
-Node.js 22 fully supports native ES modules, so the project should migrate from CommonJS to ESM for better performance and modern JavaScript features.
+**Compiler Settings:**
+- **Target:** ES2020 (compiles to ES2020 JavaScript)
+- **Lib:** ES2020 (uses ES2020 standard library features)
+- **Module Resolution:** Node (standard Node.js resolution algorithm)
+- **Strict Mode:** Enabled (full type checking)
+
+**Recommended Updates for Node.js 22:**
+
+1. **target**: ES2020 → **ES2022** or **ESNext** (leverage newer JS features)
+2. **lib**: ES2020 → **ES2022** (access newer APIs)
+3. **module**: Consider migrating to **"node16"** or **"nodenext"** for native ESM support
+4. **moduleResolution**: "node" → **"node16"** or **"bundler"** (better modern resolution)
+
+**Summary:** The project uses legacy CommonJS with ES2020 target. For Node.js 22, you should update the target/lib to ES2022+ and consider migrating to native ESM modules (though CommonJS still works fine).
 ```
 
 ### Analyze the Dockerfile
@@ -206,12 +253,14 @@ Bob reads the `Dockerfile` and responds with what needs to be updated for Node.j
 In summary, Bob tells you:
 
 ```text
-**Current Version:** Node.js 16 Alpine ([`FROM node:16-alpine`](express-todo-api/Dockerfile:2))
+**Current Dockerfile Node.js Version:** Node 16 Alpine (`node:16-alpine`)
 
-**Required Change for Node.js 22:**
-- Update base image: `FROM node:16-alpine` → `FROM node:22-alpine`
+**Changes Needed for Node.js 22:**
 
-That's the only change needed in the Dockerfile. The rest of the build process (npm install, TypeScript compilation, etc.) remains the same.
+1. **Base Image (Line 3):** `FROM node:16-alpine` → `FROM node:22-alpine`
+2. **Production Image (Line 18):** `FROM node:16-alpine` → `FROM node:22-alpine`
+
+**Summary:** Only 2 lines need to change - update both `FROM` statements from `node:16-alpine` to `node:22-alpine`. The multi-stage build structure, commands, and configuration remain the same since the Dockerfile is already well-structured and Node.js 22 maintains backward compatibility with the build process.
 ```
 
 ## Modernize the API with Bob's Code mode
@@ -234,19 +283,29 @@ Modernize this Express API from Node.js 16 to Node.js 22. Keep the API functiona
 Bob gives you a summary of all components it updated in the modernization.
 
 ```text
-**Modernization Complete: Node.js 16 → 22**
+Successfully modernized the Express TODO API from Node.js 16 to Node.js 22:
 
 **Changes Made:**
-- [`package.json`](express-todo-api/package.json): Updated Node.js to 22.x, TypeScript to 5.7.3, @types/node to 22.10.5, Express to 4.21.2
-- [`tsconfig.json`](express-todo-api/tsconfig.json): Updated target and lib from ES2020 to ES2022
-- [`Dockerfile`](express-todo-api/Dockerfile): Changed base image from node:16-alpine to node:22-alpine
+
+1. **package.json**
+   - Node.js engine: 16.x → 22.x
+   - @types/node: ^16.18.0 → ^22.0.0
+   - TypeScript: ^4.9.5 → ^5.3.3
+   - ts-node: ^10.9.1 → ^10.9.2
+
+2. **tsconfig.json**
+   - Target: ES2020 → ES2022
+   - Lib: ES2020 → ES2022
+
+3. **Dockerfile**
+   - Base images: node:16-alpine → node:22-alpine (both stages)
 
 **Verification:**
-✅ Built and tested successfully
-✅ API functionality identical (GET/POST /api/todos working)
-✅ No breaking changes to application behavior
+- ✅ Docker build successful with Node.js 22
+- ✅ API functionality identical - /api/todos returns sample data correctly
+- ✅ No breaking changes - pure platform upgrade
 
-Platform upgrade complete with zero functional changes.
+**Summary:** Platform upgrade complete. The application now runs on Node.js 22 with modern TypeScript 5.x while maintaining 100% API compatibility. All dependencies updated to support Node.js 22.
 ```
 
 You and Bob have modernized the application.
@@ -291,15 +350,15 @@ Use literate coding to mark the app as modernized by updating the sample todo ti
 
    ![Bob shows the generated changes with Accept all button](img/literate-generate.png)
 
-5. Click **Accept all** to apply the change to the file
+5. Click **Accept all** at the bottom of the document where you clicked **Generate** to apply the change to the file
 
-6. Click **Exit** to exit literate coding mode
+6. Click **Exit** below the literate magic wand at the to of the file to exit literate coding mode
 
 You've updated the API using literate coding. When you test the API in the following section, you see this new title in the API response.
 
 ## Verify the modernized application with Docker
 
-Now that Bob has modernized the code, verify everything works by rebuilding and testing the Docker container.
+Verify the code modernization and your literate code change by rebuilding and testing the Docker container.
 
 In Code mode, describe what you want Bob to verify:
 
@@ -310,27 +369,28 @@ Verify the modernized Node.js 22 application works by building and testing it wi
 Once Bob verifies the application has been modernized, it gives you the following summary.
 
 ```text
-**Verification Complete ✅**
+✅ **Verification Complete - Node.js 22 Modernization Successful**
 
-Built and tested Node.js 22 application with Docker:
-- ✅ Image built successfully
-- ✅ API responding at /api/todos
-- ✅ **New title validated:** `"Welcome to the Modernized Node.js 22 API"`
-- ✅ Cleanup complete
+**Build & Test Results:**
+- Docker image built successfully with Node.js 22
+- TypeScript compilation completed without errors
+- Application started and responded correctly
 
-**API Response:**
+**API Validation:**
+{
+  "id": "72459851-7953-4a9c-94d3-4f8f1c656d21",
+  "title": "Welcome to the Modernized Node.js 22 API",
+  "completed": false,
+  "createdAt": "2026-02-16T16:35:49.132Z"
+}
 
-[
-  {
-    "id": "4af8bfab-1205-4fe6-a9be-d49d5804a7e9",
-    "title": "Welcome to the Modernized Node.js 22 API",
-    "completed": false,
-    "createdAt": "2026-02-15T18:30:02.295Z"
-  }
-]
+**Confirmed:**
+- ✅ Updated todo title displays correctly: "Welcome to the Modernized Node.js 22 API"
+- ✅ API endpoint /api/todos responds successfully
+- ✅ All functionality working on Node.js 22
+- ✅ Cleanup completed (container and image removed)
 
-
-Modernization from Node.js 16 to 22 verified and working.
+**Summary:** The modernized Express TODO API is fully functional on Node.js 22 with the updated sample data showing the new title confirming the modernization is complete.
 
 ```
 
