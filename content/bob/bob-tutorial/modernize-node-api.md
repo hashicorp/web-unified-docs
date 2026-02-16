@@ -59,7 +59,7 @@ Bob has different modes for different tasks. Each mode has a different set of to
 
    You interact with Bob by typing natural language requests in the input field, just like chatting with a colleague.
 
-1. Clone the tutorial repository by clicking on the files icon located on the top left of the Bob IDE panel. Then click **Clone Repository**, and paste the following GitHub repository into the search bar. Bob will ask you where you want to save the repository. You can save it wherever you like:
+1. Clone the tutorial repository by clicking on the files icon located on the top left of the Bob IDE panel. Then click **Clone Repository**, and paste the following GitHub repository into the search bar. Bob asks you where you want to save the repository. You can save it wherever you like:
 
    ```text
    https://github.com/cjobermaier/bob-demo.git
@@ -67,7 +67,7 @@ Bob has different modes for different tasks. Each mode has a different set of to
 
    ![Cloning the repository in Bob IDE](img/git-clone.png)
 
-1. Bob asks you if you want to "Would you like to open the cloned repository?" Click "Open"
+1. Click **Open** when Bob asks you if you want to open the cloned repository.
 
    You see the project files in the Explorer and the Bob chat panel on the side.
 
@@ -75,7 +75,7 @@ Bob has different modes for different tasks. Each mode has a different set of to
 
 ## Working with Bob Chat
 
-In this tutorial, you will interact with Bob in the Bob chat, located at the bottom right of the window. This tutorial works out of the `express-todo-api` folder. Tell Bob to work out of the `express-todo-api` folder.
+Next, interact with Bob in the Bob chat at the bottom right of the window to tell Bob to work out of the `express-todo-api` folder.
 
    ```text
    Navigate to the express-todo-api folder.
@@ -99,13 +99,13 @@ In this tutorial, you will interact with Bob in the Bob chat, located at the bot
 
 ## Create a Dockerfile
 
-Create a `Dockerfile` in the express-todo-api folder to run the application in a containerized environment. With Docker, you don't need to install Node.js or dependencies on your machine.
+Create a Dockerfile in the `express-todo-api` folder to run the application in a containerized environment. With Docker, you don't need to install Node.js or dependencies on your machine.
 
 1. Switch Bob to code mode by clicking the mode selector dropdown to the left of the chat input field and selecting **Code**.
 
    ![Mode selector dropdown showing Code mode selection](img/modes-code-dropdown.png)
 
-1. Ask Bob to create the Dockerfile in the Bob chat panel:
+1. Enter the following prompt in the Bob chat panel to ask Bob to create the Dockerfile:
 
    ```text
    Create a Dockerfile for this Node.js TypeScript application. It should use Node 16 to match the current application version, build the TypeScript code, and run the app on port `3000`.
@@ -119,7 +119,7 @@ Create a `Dockerfile` in the express-todo-api folder to run the application in a
 
 Before you have Bob modernize the legacy application, verify the legacy code works. Ask Bob to build and test the legacy application using Docker.
 
-In the Bob chat panel, tell Bob what you want it to do:
+In the Bob chat panel, tell Bob to build and test the application:
 
 ```text
 Build and test the legacy application using Docker to verify it works correctly before modernization. The application should respond to API requests at /api/todos with sample data
@@ -163,7 +163,7 @@ You and Bob verified the legacy application is working correctly.
 
 ## Explore Node.js codebase with Bob's Ask mode
 
-Before modernizing, switch to Bob's **Ask mode** in the same dropdown that you used to change Bob to Code mode. Ask mode can only read files, so you can safely explore code without accidentally making changes.
+Before modernizing, click the mode selector drop down and switch to Bob's **Ask mode**. Ask mode can only read files, so you can safely explore code without accidentally making changes. You can also type `/ask` in Bob chat to change to Ask mode.
 
 Click the mode selector dropdown to the left of the chat input field and select **Ask** or type `/ask` in Bob chat.
 
@@ -172,6 +172,8 @@ You will explore three files that you need to modernize: `package.json`, `tsconf
 ### Use @ context mentions to review the project
 
 Bob supports **@ context mentions** that let you reference specific files, folders, or problems directly in your prompts. Context mentions give Bob precise information about what you want to discuss.
+
+Explore the `package.json`, `tsconfig.json`, and `Dockerfile` files by explicitly telling Bob which files to analyze using @ mentions. This helps you understand the modernization requirements before you make any changes.
 
 In the Bob chat panel, run the following prompt:
 
@@ -185,7 +187,7 @@ Bob doesn't start answering immediately. Bob explores your codebase first, readi
 
 Bob reads the `package.json` file and responds with a list of components that you need to update for Node.js 22.
 
-In summary, Bob tells you that the application needs the following updates:
+Bob tells you that the application needs the following updates:
 
 ```text
 **Current Node.js Version:** 16.x
@@ -215,7 +217,7 @@ Ask Bob to analyze the project's TypeScript configuration:
 
 Bob reads the `tsconfig.json` file and responds with a list of components that you need to update for Node.js 22.
 
-In summary, Bob tells you that the application needs the following updates:
+Bob tells you that the application needs the following updates:
 
 ```text
 **Current TypeScript Configuration:**
@@ -250,7 +252,7 @@ Ask Bob to analyze the project's Dockerfile:
 
 Bob reads the `Dockerfile` and responds with what needs to be updated for Node.js 22.
 
-In summary, Bob tells you:
+Bob tells you the Dockerfile need the following updates:
 
 ```text
 **Current Dockerfile Node.js Version:** Node 16 Alpine (`node:16-alpine`)
@@ -265,10 +267,11 @@ In summary, Bob tells you:
 
 ## Modernize the API with Bob's Code mode
 
-You and Bob know the modernization requirements for `@package.json`, `@tsconfig.json`, and `@Dockerfile`.
-- Node.js 16 → 22 in package.json and Dockerfile
-- TypeScript compiler target and module settings
-- Outdated dependency versions
+Bob determined the following modernization requirements for `package.json`, `tsconfig.json`, and `Dockerfile`:
+
+- Change Node.js 16 to Node.js 22 in package.json and Dockerfile
+- Update the TypeScript compiler target and module settings
+- Fix outdated dependency versions
 
 To start modernizing the application, switch back to **Code mode** so Bob can make code changes. Click the mode selector and select **Code**, or type `/code` in the chat.
 
@@ -320,7 +323,7 @@ Use literate coding to mark the app as modernized by updating the sample todo ti
 
    ![db.ts file open in the editor](img/db.ts.png)
 
-2. Toggle literate coding mode by clicking the magic wand icon in the editor toolbar (or press `Cmd+M` on Mac / `Ctrl+M` on Windows/Linux)
+2. Toggle literate coding mode by clicking the magic wand icon in the editor toolbar. Alternativly, you can press `Cmd+M` on Mac, or `Ctrl+M` on Windows and Linux.
 
    ![Literate coding mode activated](img/literate-coding.png)
 
@@ -330,7 +333,7 @@ Use literate coding to mark the app as modernized by updating the sample todo ti
    // Find the sample todo object's title property and change it to "Welcome to the Modernized Node.js 22 API"
    ```
 
-   Bob understands this comment is an instruction (not regular code) because you're in literate coding mode. Your instruction appears highlighted in the editor.
+   Bob understands this comment is an instruction, rather than regular code, because you're in literate coding mode. Your instruction appears highlighted in the editor.
 
    ![Instruction highlighted in literate coding mode](img/literate-run.png)
 
