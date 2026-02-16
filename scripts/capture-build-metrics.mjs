@@ -70,6 +70,8 @@ async function main() {
 			},
 		)
 
+		const environment = process.env.CI ? 'ci' : 'local'
+		const buildType = process.env.INCREMENTAL_BUILD ? 'incremental' : 'full'
 		const structuredMetrics = filteredEvents.map((event) => {
 			return captureMetric({
 				name: `build.${event.name}`,
@@ -77,8 +79,8 @@ async function main() {
 				timestamp,
 				tags: [
 					`app:${appName}`,
-					`environment:${process.env.CI ? 'ci' : 'local'}`,
-					`buildType:${process.env.INCREMENTAL_BUILD ? 'incremental' : 'full'}`,
+					`environment:${environment}`,
+					`buildType:${buildType}`,
 				],
 			})
 		})
@@ -89,7 +91,9 @@ async function main() {
 			},
 		})
 
-		console.log(`Submitted build metrics to Datadog for app ${appName}`)
+		console.log(
+			`Submitted build metrics to Datadog for app ${appName} in environment ${environment} with build type ${buildType}`,
+		)
 	} catch {
 		// Swallow errors
 		// we don't want to impact the build or make it seem like there's been an error in the actual app if something goes wrong when sending metrics
