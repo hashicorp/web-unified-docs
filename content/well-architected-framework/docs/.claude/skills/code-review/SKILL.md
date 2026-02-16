@@ -2,7 +2,6 @@
 name: code-review
 description: Validates code examples in documentation using formatters and validators (terraform fmt, packer validate, etc). Phase 8 from REVIEW_PHASES.md.
 argument-hint: <file-paths> [--fix]
-disable-model-invocation: true
 allowed-tools: Bash(terraform *), Bash(packer *), Bash(vault *), Bash(nomad *), Bash(consul *)
 ---
 

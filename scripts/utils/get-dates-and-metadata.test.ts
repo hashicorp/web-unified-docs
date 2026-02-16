@@ -225,7 +225,7 @@ last_modified: 2026-04-20T04:20:00Z
 			// eat log message
 			vi.spyOn(console, 'log').mockImplementation(() => {})
 
-			addDateMetadata(filePath)
+			addDateMetadata(filePath, null)
 
 			expect(fsWriteSpy).toHaveBeenCalledWith(filePath, newMdxContent, 'utf-8')
 			expect(fsWriteSpy).toHaveBeenCalledTimes(1)
@@ -263,7 +263,7 @@ last_modified: 2026-04-20T04:20:00Z
 			// eat log message
 			vi.spyOn(console, 'log').mockImplementation(() => {})
 
-			addDateMetadata(filePath)
+			addDateMetadata(filePath, null)
 
 			expect(fsWriteSpy).toHaveBeenCalledWith(filePath, newMdxContent, 'utf-8')
 			expect(fsWriteSpy).toHaveBeenCalledTimes(1)
@@ -294,7 +294,7 @@ last_modified: 2026-04-20T04:20:00Z
 			// eat log message
 			vi.spyOn(console, 'log').mockImplementation(() => {})
 
-			addDateMetadata(filePath)
+			addDateMetadata(filePath, null)
 
 			expect(fsWriteSpy).toHaveBeenCalledWith(filePath, newMdxContent, 'utf-8')
 			expect(fsWriteSpy).toHaveBeenCalledTimes(1)
@@ -310,7 +310,7 @@ last_modified: 2026-04-20T04:20:00Z
 				.mockReturnValueOnce('')
 				.mockReturnValueOnce('2026-04-20T04:20:00Z')
 
-			addDateMetadata(filePath)
+			addDateMetadata(filePath, null)
 
 			expect(vi.mocked(fs.writeFileSync)).not.toHaveBeenCalled()
 			expect(consoleWarnSpy).toHaveBeenCalledWith(
@@ -331,7 +331,7 @@ last_modified: 2026-04-20T04:20:00Z
 				.mockReturnValueOnce('2025-04-20T04:20:00Z')
 				.mockReturnValueOnce('')
 
-			addDateMetadata(filePath)
+			addDateMetadata(filePath, null)
 
 			expect(vi.mocked(fs.writeFileSync)).not.toHaveBeenCalled()
 			expect(consoleWarnSpy).toHaveBeenCalledWith(
@@ -359,7 +359,7 @@ last_modified: 2026-04-20T04:20:00Z
 				data: {},
 			} as any)
 
-			addDateMetadata(filePath)
+			addDateMetadata(filePath, null)
 
 			expect(vi.mocked(fs.writeFileSync)).not.toHaveBeenCalled()
 			expect(consoleWarnSpy).toHaveBeenCalledWith(
@@ -387,7 +387,7 @@ last_modified: 2026-04-20T04:20:00Z
 				data: {},
 			} as any)
 
-			addDateMetadata(filePath)
+			addDateMetadata(filePath, null)
 
 			expect(vi.mocked(fs.writeFileSync)).not.toHaveBeenCalled()
 			expect(consoleWarnSpy).toHaveBeenCalledWith(
@@ -396,6 +396,43 @@ last_modified: 2026-04-20T04:20:00Z
 				),
 			)
 			consoleWarnSpy.mockRestore()
+		})
+
+		it('should use default date when provided', () => {
+			const filePath = '/path/to/file.mdx'
+			const createdDate = '2025-04-20T04:20:00Z'
+			const lastModifiedDate = '2026-04-20'
+			const oldMetadataBlock =
+				'# START AUTO GENERATED METADATA, DO NOT EDIT\ncreated_at: 2025-01-01T00:00:00Z\nlast_modified: 2025-01-02T00:00:00Z\n# END AUTO GENERATED METADATA\n'
+			const frontmatterWithOldMetadata = `title: Test\n${oldMetadataBlock}`
+			const newMdxContent = `---title: Test
+
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2025-04-20T04:20:00Z
+last_modified: 2026-04-20T00:00:00.000Z
+# END AUTO GENERATED METADATA
+---
+# Hello World`
+
+			vi.mocked(execSync).mockReturnValueOnce(createdDate)
+			// .mockReturnValueOnce(lastModifiedDate)
+			vi.mocked(grayMatter.read).mockReturnValue({
+				content: '# Hello World',
+				matter: frontmatterWithOldMetadata,
+				data: {
+					title: 'Test',
+					created_at: createdDate,
+					last_modified: lastModifiedDate,
+				},
+			} as any)
+			const fsWriteSpy = vi.spyOn(fs, 'writeFileSync')
+			// eat log message
+			// vi.spyOn(console, 'log').mockImplementation(() => {})
+
+			addDateMetadata(filePath, lastModifiedDate)
+
+			expect(fsWriteSpy).toHaveBeenCalledWith(filePath, newMdxContent, 'utf-8')
+			expect(fsWriteSpy).toHaveBeenCalledTimes(1)
 		})
 	})
 })
