@@ -10,15 +10,15 @@ description: >-
 
 # Modernize a Node.js API with Bob
 
-IBM Bob is an AI-powered IDE (Integrated Development Environment) and SDLC (Software Development Lifecycle) partner for developers. Bob is a standalone application that you install on your computer.
+IBM Bob is an AI-powered Integrated Development Environment (IDE) and Software Development Lifecycle (SDLC) partner for developers. Bob is a standalone application that you install on your computer.
 
-Bob helps you write code by separating intent (your goal), evidence (what exists), and judgment (your decision). Bob works in two phases: planning and execution—ensuring you stay in control while upgrading Node.js applications, refactoring TypeScript, and managing dependencies.
+ensuring you stay in control while upgrading applications, refactoring APIs, and managing dependencies.
 
-In this tutorial, you learn Bob's core features by modernizing a TypeScript Express API from Node.js 16 to Node.js 22. You learn how Bob analyzes dependencies and modernizes code patterns. 
+In this tutorial, you will learn Bob's core features by modernizing a TypeScript Express API from Node.js 16 to Node.js 22. You will learn how Bob analyzes dependencies and modernizes code patterns. 
 
-Bob provides the following five key capabilities that you learn by modernizing a working API:
+Bob provides the following five key capabilities that you will learn by modernizing a working API:
 
-1. **Modes** - Bob has different modes which differ in permissions and workflows. The primary modes are Plan, Code, Ask, and Advanced.
+1. **Modes** differ in permissions and workflows. The primary modes are Plan, Code, Ask, and Advanced.
 1. **Context mentions** let you reference specific elements of your project in your conversations with Bob, such as specific file, folder, or Git commits.
 1. **Approval workflow** lets you review every file edit and command before Bob executes it.
 1. **Code actions** provide quick fixes, refactorings, and AI-powered suggestions in your editor.
@@ -28,7 +28,7 @@ Bob provides the following five key capabilities that you learn by modernizing a
 
 This tutorial uses a TypeScript Express REST API as the example project. However, you do not need experience in Node.js or TypeScript.
 
-To complete this tutorial, you need:
+To complete this tutorial, you need the following:
 
 - **[IBM Bob IDE](https://bob.ibm.com/docs/ide/install)** - Download and install the IBM Bob application on your computer. Bob is a standalone IDE application and not an extension.
 - **[Docker](https://docs.docker.com/get-docker/)** - To run containerized builds. You won't need to install Node.js or dependencies locally.
