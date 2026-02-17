@@ -12,17 +12,17 @@ description: >-
 
 IBM Bob is an AI-powered Integrated Development Environment (IDE) and Software Development Lifecycle (SDLC) partner for developers. Bob is a standalone application that you install on your computer.
 
-ensuring you stay in control while upgrading applications, refactoring APIs, and managing dependencies.
+Bob helps you write code by separating intent (your goal), evidence (what exists), and judgment (your decision). Bob works in two phases: planning and execution, ensuring you stay in control while upgrading applications, refactoring APIs, and managing dependencies.
 
 In this tutorial, you will learn Bob's core features by modernizing a TypeScript Express API from Node.js 16 to Node.js 22. You will learn how Bob analyzes dependencies and modernizes code patterns. 
 
 Bob provides the following five key capabilities that you will learn by modernizing a working API:
 
-1. **Modes** differ in permissions and workflows. The primary modes are Plan, Code, Ask, and Advanced.
-1. **Context mentions** let you reference specific elements of your project in your conversations with Bob, such as specific file, folder, or Git commits.
-1. **Approval workflow** lets you review every file edit and command before Bob executes it.
-1. **Code actions** provide quick fixes, refactorings, and AI-powered suggestions in your editor.
-1. **Literate coding** lets you write code with AI assistance in your editor. You type instructions in plain language right where the code should go.
+1. **[Modes](https://bob.ibm.com/docs/ide/features/using-modes)** differ in permissions and workflows. The primary modes are Plan, Code, Ask, Advanced, and Orchestrator.
+1. **[Context mentions](https://bob.ibm.com/docs/ide/features/context-mentions)** let you reference specific elements of your project in your conversations with Bob, such as specific file, folder, or Git commits.
+1. **[Approval workflow](https://bob.ibm.com/docs/ide/core-concepts/bob-tools#tool-workflow)** lets you review every tool Bob plans to use before it executes.
+1. **[Code actions](https://bob.ibm.com/docs/ide/features/code-actions)** provide quick fixes, refactorings, and AI-powered suggestions in your editor.
+1. **[Literate coding](https://bob.ibm.com/docs/ide/features/literate-coding)** lets you write code with AI assistance in your editor. You type instructions in plain language right where the code should go.
 
 ## Prerequisites
 
@@ -30,51 +30,62 @@ This tutorial uses a TypeScript Express REST API as the example project. However
 
 To complete this tutorial, you need the following:
 
-- **[IBM Bob IDE](https://bob.ibm.com/docs/ide/install)** - Download and install the IBM Bob application on your computer. Bob is a standalone IDE application and not an extension.
-- **[Docker](https://docs.docker.com/get-docker/)** - To run containerized builds. You won't need to install Node.js or dependencies locally.
+- **[IBM Bob IDE](https://bob.ibm.com/docs/ide/install):** Download and install the IBM Bob application on your computer. Bob is a standalone IDE application and not an extension.
+- **[Docker](https://docs.docker.com/get-docker/):** Use Docker to run containerized builds. You won't need to install Node.js or dependencies locally.
 
-## Understanding Bob's AI development modes
+## Understanding Bob's workflow and modes
 
-Bob has different modes for different tasks. Each mode has a different set of tools and features. The following are Bob's default modes and when you should use them:
+Throughout this tutorial, Bob will ask for your approval before taking actions:
+- **Approve:** Grant permission to read files or access resources
+- **Run:** Execute commands or scripts
+- **Save:** Write or modify files
 
-- **Plan** - When you want to analyze requirements, research and design implementation steps
-- **Code** - When you want Bob to make changes or run commands 
-- **Ask** - When you want to explore and understand code without making changes
-- **Advanced** - When you need all of Bob's tools for complex workflows 
-- **Orchestrator** - Coordinates complex tasks across multiple modes
+This approval workflow ensures you stay in control. When you see these prompts in the following sections, review Bob's request to understand what it wants to do, and then click the **Approve**, **Run**, or **Save** button to allow Bob to proceed.
+
+Bob has different [modes](https://bob.ibm.com/docs/ide/features/using-modes) for different tasks. Each mode has a different set of tools and features. The following are Bob's default modes and when you should use them:
+
+- **Plan:** When you want to analyze requirements, research and design implementation steps
+- **Code:** When you want Bob to make changes or run commands
+- **Ask:** When you want to explore and understand code without making changes
+- **Advanced:** When you need all of Bob's tools for complex workflows 
+- **Orchestrator:** When you work on complex projects requiring coordination across different specialties, multi-domain workflows, and task management
 
 ## Open Bob and clone the repository
 
+To begin the tutorial, you need to launch IBM Bob and clone the example repository containing the Node.js application you will modernize.
+
 1. Launch the IBM Bob application on your computer. Look for IBM Bob in your Applications folder (macOS), Start menu (Windows), or applications menu (Linux). 
 
-1. If Bob is not already opened, open the Bob chat panel by clicking the Bob icon beside the navigation bar or use the shortcut `Cmd+L` (Mac) or `Ctrl+L` (Windows/Linux)
+1. If Bob is not already opened, open the Bob chat panel by clicking the Bob icon beside the navigation bar or use the shortcut `Cmd+L` (Mac) or `Ctrl+L` (Windows/Linux).
 
    ![Bob chat panel open in IBM Bob IDE](img/open-bob.png)
 
    The Bob chat panel has three main components:
-   - **Chat history** - Displays your conversation with Bob at the top
-   - **Input field** - At the bottom of the panel, type your requests to Bob using natural language
-   - **Send button** - Click the paper plane icon to the right of the input field, or press **Enter** to send your message
+   - **Chat history:** This displays your conversation with Bob at the top.
+   - **Input field:** At the bottom of the panel, type your requests to Bob using natural language.
+   - **Send button:** Click the paper plane icon to the right of the input field, or press **Enter** to send your message.
 
    You interact with Bob by typing natural language requests in the input field, just like chatting with a colleague.
 
 1. Clone the tutorial repository by clicking on the files icon located on the top left of the Bob IDE panel. Then click **Clone Repository**, and paste the following GitHub repository into the search bar. Bob asks you where you want to save the repository. You can save it wherever you like:
 
    ```text
-   https://github.com/cjobermaier/bob-demo.git
+   https://github.com/IBM/bob-demo.git
    ```
 
    ![Cloning the repository in Bob IDE](img/git-clone.png)
 
-1. Click **Open** when Bob asks you if you want to open the cloned repository.
+1. Click **Open** when Bob asks you if you want to open the cloned repository. If Bob asks, "Do you trust the authors of the files in the folder?" click "Yes, I trust the authors".
 
    You see the project files in the Explorer and the Bob chat panel on the side.
 
    ![Project files displayed in Explorer with Bob chat panel](img/files.png)
 
+1. Make sure auto-approval is disabled. Above the Bob chat at the bottom right of the window is a slider. If auto-approve is disabled, you will see "Auto-approval disabled" as shown in the previous image. If auto-approval is on you will  see two small white checkmarks and a circle. Click the circle to disable auto-approve.
+
 ## Working with Bob Chat
 
-Next, interact with Bob in the Bob chat at the bottom right of the window to tell Bob to work out of the `express-todo-api` folder.
+Interact with Bob in the Bob chat at the bottom right of the window to tell Bob to navigate to the `express-todo-api` folder. Bob verifies that you want to navigate to the `express-todo-api` folder:
 
    ```text
    Navigate to the express-todo-api folder.
@@ -82,18 +93,17 @@ Next, interact with Bob in the Bob chat at the bottom right of the window to tel
 
    ![Navigating to the express-todo-api folder in Bob IDE](img/navigate-to-app.png)
 
-   Bob changes to the `express-todo-api` folder, and responds with the following:
+   Bob changes to the `express-todo-api` folder, and responds with something similar to the following:
 
    ```text
    Successfully navigated to the express-todo-api folder at:
 
-   The directory contains a TypeScript-based Express.js TODO API with the following structure:
+   The directory contains a TypeScript Express.js TODO API project with the following structure:
    - Source code in `src/` directory
    - Database configuration (`db.ts`)
    - Main entry point (`index.ts`)
-   - Models and routes for TODO management
-   - Configuration files (package.json, tsconfig.json)
-   - Documentation (README.md, SETUP-VERIFIED.md, TESTING-NOTES.md, MODERNIZATION.md)
+   - Todo model and routes
+   - Configuration files (package.json, tsconfig.json, .gitignore, .dockerignore)
    ``` 
 
 ## Create a Dockerfile
@@ -104,7 +114,7 @@ Create a Dockerfile in the `express-todo-api` folder to run the application in a
 
    ![Mode selector dropdown showing Code mode selection](img/modes-code-dropdown.png)
 
-1. Enter the following prompt in the Bob chat panel to ask Bob to create the Dockerfile:
+1. Enter the following prompt in the Bob chat panel to ask Bob to create the Dockerfile. Bob will request read access to several files in order to understand the requirements for the Dockerfile:
 
    ```text
    Create a Dockerfile for this Node.js TypeScript application. It should use Node 16 to match the current application version, build the TypeScript code, and run the app on port `3000`.
@@ -116,7 +126,7 @@ Create a Dockerfile in the `express-todo-api` folder to run the application in a
 
 ## Verify the legacy application builds
 
-Before you have Bob modernize the legacy application, verify the legacy code works. Ask Bob to build and test the legacy application using Docker.
+Before you have Bob modernize the legacy application, verify the legacy code works. Establishing this baseline lets you know the legacy application works before you make changes during the modernization process.
 
 In the Bob chat panel, tell Bob to build and test the application:
 
@@ -126,9 +136,9 @@ Build and test the legacy application using Docker to verify it works correctly 
 After testing, clean up the container.
 ```
 
-Bob understands your intent and determines the right Docker commands to use. Bob shows you the commands and asks for approval. Click **Run** to execute them.
+Bob understands your intent and determines the right Docker commands to use. It knows to build, test, and display verification information for you to review. 
 
-Bob gives you something similar to following output to confirm the legacy application builds:
+Bob gives you the following output, or something similar, to confirm the legacy application builds:
 
 ```
 Successfully built, tested, and cleaned up the legacy Express TODO API application using Docker:
@@ -164,12 +174,11 @@ You and Bob verified the legacy application is working correctly.
 
 Before modernizing, click the mode selector drop down and switch to Bob's **Ask mode**. Ask mode can only read files, so you can safely explore code without accidentally making changes. You can also type `/ask` in Bob chat to change to Ask mode.
 
-
 ### Use @ context mentions to review the project
 
 Bob supports **@ context mentions** that let you reference specific files, folders, or problems directly in your prompts. Context mentions give Bob precise information about what you want to discuss.
 
-Explore the `package.json`, `tsconfig.json`, and `Dockerfile` files by explicitly telling Bob which files to analyze using @ mentions. This helps you understand the modernization requirements before you make any changes.
+Explore the `package.json`, `tsconfig.json`, and `Dockerfile` files by explicitly telling Bob which files to analyze using @ mentions. Learning about these files helps you understand the modernization requirements before you make any changes.
 
 In the Bob chat panel, run the following prompt:
 
@@ -177,13 +186,9 @@ In the Bob chat panel, run the following prompt:
 @package.json What Node.js version is this project using? What dependencies would need updating for Node.js 22? Give me a short summary.
 ```
 
-The `@` symbol before `package.json` tells Bob to include that file's contents as context.
+The `@` symbol tells Bob to include `package.json` as context. Bob doesn't start answering immediately; it explores your codebase first, reading files, following patterns, and analyzing code. Don't interrupt this exploration phase.
 
-Bob doesn't start answering immediately. Bob explores your codebase first, reading files, following patterns, and analyzing code. Don't interrupt this phase.
-
-Bob reads the `package.json` file and responds with a list of components that you need to update for Node.js 22.
-
-Bob tells you that the application needs the following updates:
+Bob identifies the following updates, or something similar, needed for Node.js 22:
 
 ```text
 **Current Node.js Version:** 16.x
@@ -211,9 +216,7 @@ Ask Bob to analyze the project's TypeScript configuration:
 @tsconfig.json What module system and compiler settings is this TypeScript project using? What dependencies would need updating for Node.js 22? Give me a short summary.
 ```
 
-Bob reads the `tsconfig.json` file and responds with a list of components that you need to update for Node.js 22.
-
-Bob tells you that the application needs the following updates:
+Bob reads the `tsconfig.json` file and responds with the following list, or something similar, of components that you need to update for Node.js 22:
 
 ```text
 **Current TypeScript Configuration:**
@@ -246,19 +249,16 @@ Ask Bob to analyze the project's Dockerfile:
 @Dockerfile What Node.js version does this Dockerfile use? What would need to change for Node.js 22? Give me a short summary.
 ```
 
-Bob reads the `Dockerfile` and responds with what needs to be updated for Node.js 22.
-
-Bob tells you the Dockerfile need the following updates:
+Bob reads the `Dockerfile` and responds with the following, or something similar, that needs to be updated for Node.js 22.
 
 ```text
 **Current Dockerfile Node.js Version:** Node 16 Alpine (`node:16-alpine`)
 
 **Changes Needed for Node.js 22:**
 
-1. **Base Image (Line 3):** `FROM node:16-alpine` → `FROM node:22-alpine`
-2. **Production Image (Line 18):** `FROM node:16-alpine` → `FROM node:22-alpine`
+1. **Base Image (Line 2):** `FROM node:16-alpine` → `FROM node:22-alpine`
 
-**Summary:** Only 2 lines need to change - update both `FROM` statements from `node:16-alpine` to `node:22-alpine`. The multi-stage build structure, commands, and configuration remain the same since the Dockerfile is already well-structured and Node.js 22 maintains backward compatibility with the build process.
+**Summary:** Only one line change required: update base image from node:16-alpine to node:22-alpine. The rest of the Dockerfile is compatible with Node.js 22, though npm flag syntax could be modernized
 ```
 
 ## Modernize the API with Bob's Code mode
@@ -279,7 +279,7 @@ In the Bob chat panel, run the following modernization prompt. Notice the `@` re
 Modernize this Express API from Node.js 16 to Node.js 22. Keep the API functionality identical - this is a platform upgrade, not a feature change. Give me a short summary.
 ```
 
-Bob gives you a summary of all components it updated in the modernization.
+Bob gives you the following summary, or something similar, of all components it updated in the modernization.
 
 ```text
 Successfully modernized the Express TODO API from Node.js 16 to Node.js 22:
@@ -315,15 +315,12 @@ Bob's **literate coding** feature lets you write code with AI assistance in your
 
 Use literate coding to mark the app as modernized by updating the sample todo title:
 
-1. In the Explorer tab on the left side of the screen, navigate to the `express-todo-api` folder and click on `src/db.ts` to open it in the editor
-
-   ![db.ts file open in the editor](img/db.ts.png)
-
-2. Toggle literate coding mode by clicking the magic wand icon in the editor toolbar. Alternativly, you can press `Cmd+M` on Mac, or `Ctrl+M` on Windows and Linux.
+1. In the Explorer tab on the left side of the screen, navigate to the `express-todo-api` folder and click on `src/db.ts` to open it in the editor. Once you have `src/db.ts` open, toggle literate coding mode by clicking the magic wand icon in the editor toolbar. Alternatively, you can press Cmd+M on Mac, or Ctrl+M on Windows and Linux.
 
    ![Literate coding mode activated](img/literate-coding.png)
+   
 
-3. In the `src/db.ts` file that's now open in your editor, paste the following instruction at the top of the file, before any code:
+1. In the `src/db.ts` file that's open in your editor, paste the following instruction at the top of the file, before any code:
 
    ```text
    // Find the sample todo object's title property and change it to "Welcome to the Modernized Node.js 22 API"
@@ -333,9 +330,9 @@ Use literate coding to mark the app as modernized by updating the sample todo ti
 
    ![Instruction highlighted in literate coding mode](img/literate-run.png)
 
-4. Click **Generate** at the bottom of the document
+1. Click **Generate** at the bottom of the document.
 
-   Bob locates the `sampleTodo` object in the constructor (around line 11-16) and shows you the change. You'll see the title change from:
+   Bob locates the `sampleTodo` object in the constructor and shows you the change. You'll see the title change from:
 
    **Before:**
    ```typescript
@@ -347,11 +344,9 @@ Use literate coding to mark the app as modernized by updating the sample todo ti
    title: "Welcome to the Modernized Node.js 22 API"
    ```
 
-   ![Bob shows the generated changes with Accept all button](img/literate-generate.png)
+1. Click **Accept all** at the bottom of the document where you clicked **Generate** to apply the change to the file.
 
-5. Click **Accept all** at the bottom of the document where you clicked **Generate** to apply the change to the file
-
-6. Click **Exit** below the literate magic wand at the top of the file to exit literate coding mode
+1. Click **Exit** below the literate magic wand at the top of the file to exit literate coding mode.
 
 You've updated the API using literate coding. When you test the API in the following section, you see this new title in the API response.
 
@@ -365,7 +360,7 @@ In Code mode, describe what you want Bob to verify:
 Verify the modernized Node.js 22 application works by building and testing it with Docker. Check that the API responds at /api/todos and shows the updated todo title. Clean up when done. Give me a short summary. I also want to see the validation of the new title.
 ```
 
-Once Bob verifies the application has been modernized, it gives you the following summary.
+Once Bob verifies the application has been modernized, it gives you the following, or something similar, summary.
 
 ```text
 ✅ **Verification Complete - Node.js 22 Modernization Successful**
@@ -400,6 +395,6 @@ The API works correctly, and the title is updated to "Welcome to the Modernized 
 
 In this tutorial you learned how to modernize an Express API from Node.js 16 to Node.js 22 using Bob. Bob analyzed your dependencies, updated configuration files, and modernized the Docker setup while preserving all functionality.
 
-Learn about Bob's [Code review feature](https://qa.bob.ibm.com/docs/ide/features/code-reviews) `/review` to catch potential issues before you commit your work.
+Learn about Bob's [Code review feature](https://bob.ibm.com/docs/ide/features/code-reviews) `/review` to catch potential issues before you commit your work.
 
 
