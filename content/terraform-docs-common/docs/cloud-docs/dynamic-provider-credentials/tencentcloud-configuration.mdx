@@ -1,0 +1,297 @@
+---
+page_title: Use dynamic credentials with the Tencent Cloud provider in HCP Terraform
+description: >-
+  Use OpenID Connect to get short-term credentials for the Tencent Cloud Terraform provider in
+  your HCP Terraform runs.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-02-13T00:00:00-00:00
+last_modified: 2026-02-13T00:00:00-00:00
+# END AUTO GENERATED METADATA
+---
+
+# Use dynamic credentials with the Tencent Cloud provider
+
+~> **Important:** If you are self-hosting [HCP Terraform agents](/terraform/cloud-docs/agents), ensure your agents use [v1.7.0](/terraform/cloud-docs/agents/changelog#1-7-0-03-02-2023) or above. To use the latest dynamic credentials features, [upgrade your agents to the latest version](/terraform/cloud-docs/agents/changelog).
+
+You can use HCP Terraform's native OpenID Connect integration with Tencent Cloud to get [dynamic credentials](/terraform/cloud-docs/dynamic-provider-credentials) for the Tencent Cloud provider in your HCP Terraform runs. Configuring the integration requires the following steps:
+
+1. **[Configure Tencent Cloud](#configure-tencent-cloud):** Set up a trust configuration between Tencent Cloud and HCP Terraform. Then, you must create Tencent Cloud roles and policies for your HCP Terraform workspaces.
+2. **[Configure HCP Terraform](#configure-hcp-terraform):** Add environment variables to the HCP Terraform workspaces where you want to use Dynamic Credentials.
+
+<!-- BEGIN: TFC:only name:stacks-tfe -->
+
+If you are configuring a Stack, refer to [Authenticate a Stack](/terraform/language/stacks/deploy/authenticate) to learn about the workflow of authenticating your Stack deployments with dynamic credentials.
+
+<!-- END: TFC:only name:stacks-tfe -->
+
+Once you complete the setup, HCP Terraform automatically authenticates to Tencent Cloud during each run. The Tencent Cloud provider authentication is valid for the length of the plan or apply.
+
+## Configure Tencent Cloud
+
+You must enable and configure an OIDC identity provider and accompanying role and trust policy in Tencent Cloud CAM (Cloud Access Management). These instructions use the Tencent Cloud console, but you can also use Terraform to configure Tencent Cloud. Refer to our [example Terraform configuration](https://github.com/hashicorp/terraform-dynamic-credentials-setup-examples/tree/main/tencentcloud).
+
+### Create an OIDC Identity Provider
+
+Tencent Cloud documentation for setting up OIDC identity providers can be found here: [Identity Providers - Tencent Cloud](https://www.tencentcloud.com/document/product/598/30290).
+
+To create an OIDC identity provider in the Tencent Cloud console:
+
+1. Navigate to **CAM (Cloud Access Management)** > **Identity Providers** > **Create Identity Provider**.
+2. Select **OIDC** as the provider type.
+3. Configure the following settings:
+   - **Provider Name**: A descriptive name for the provider, such as `hcp-terraform-provider`.
+   - **Provider URL**: The address of HCP Terraform (e.g., `https://app.terraform.io` **without** a trailing slash).
+   - **Client ID**: Set this to `tencentcloud.workload.identity` or the value of `TFC_TENCENTCLOUD_WORKLOAD_IDENTITY_AUDIENCE`, if you configure a custom audience.
+
+### Configure a Role and Trust Policy
+
+You must configure a role and corresponding trust policy. Tencent Cloud documentation for creating roles can be found here: [Roles - Tencent Cloud](https://www.tencentcloud.com/document/product/598/19420).
+
+To create a role for the OIDC provider:
+
+1. Navigate to **CAM** > **Roles** > **Create Role**.
+2. Select **Identity Provider** as the trusted entity type.
+3. Select the OIDC identity provider you created in the previous step.
+4. Configure the trust policy with conditions to restrict which HCP Terraform workspaces can assume the role.
+
+The following example shows the trust policy format in JSON:
+
+```json
+{
+  "version": "2.0",
+  "statement": [
+    {
+      "action": "name/sts:AssumeRoleWithWebIdentity",
+      "effect": "allow",
+      "principal": {
+        "federated": [
+          "qcs::cam::uin/ACCOUNT_ID:oidc-provider/PROVIDER_NAME"
+        ]
+      },
+      "condition": {
+        "string_equal": {
+          "SITE_ADDRESS:aud": "AUDIENCE_VALUE",
+          "SITE_ADDRESS:sub": "organization:ORG_NAME:project:PROJECT_NAME:workspace:WORKSPACE_NAME:run_phase:RUN_PHASE"
+        }
+      }
+    }
+  ]
+}
+```
+
+Replace the capitalized values with the following:
+* **ACCOUNT_ID**: Your Tencent Cloud account ID (UIN).
+* **PROVIDER_NAME**: The name of the OIDC provider you created (e.g., `hcp-terraform-provider`).
+* **SITE_ADDRESS**: The address of HCP Terraform with `https://` stripped (e.g., `app.terraform.io`).
+* **AUDIENCE_VALUE**: This should be set to `tencentcloud.workload.identity` unless a non-default audience has been specified in HCP Terraform.
+* **ORG_NAME**: The organization name this policy will apply to, such as `my-org-name`.
+* **PROJECT_NAME**: The project name that this policy will apply to, such as `my-project-name`.
+* **WORKSPACE_NAME**: The workspace name this policy will apply to, such as `my-workspace-name`.
+* **RUN_PHASE**: The run phase this policy will apply to, currently one of `plan` or `apply`.
+
+-> **Note:** If different permissions are desired for plan and apply, then two separate roles and trust policies must be created for each of these run phases to properly match them to the correct access level. If the same permissions will be used regardless of run phase, then the condition can be modified to use a wildcard match for the subject claim.
+
+The following example shows a trust policy that matches any run phase:
+
+```json
+{
+  "condition": {
+    "string_equal": {
+      "SITE_ADDRESS:aud": "AUDIENCE_VALUE"
+    },
+    "string_like": {
+      "SITE_ADDRESS:sub": "organization:ORG_NAME:project:PROJECT_NAME:workspace:WORKSPACE_NAME:run_phase:*"
+    }
+  }
+}
+```
+
+!> **Warning**: You should always check, at minimum, the audience and the name of the organization in order to prevent unauthorized access from other HCP Terraform organizations!
+
+### Configure Role Permissions
+
+A permissions policy needs to be added to the role which defines what operations within Tencent Cloud the role is allowed to perform. You can attach existing policies or create custom policies.
+
+As an example, the following policy allows read-only access to CVM (Cloud Virtual Machine) resources:
+
+```json
+{
+  "version": "2.0",
+  "statement": [
+    {
+      "effect": "allow",
+      "action": [
+        "cvm:Describe*"
+      ],
+      "resource": "*"
+    }
+  ]
+}
+```
+
+You should grant the minimum set of permissions necessary for your Terraform configurations to operate.
+
+## Configure HCP Terraform
+
+<!-- BEGIN: TFC:only name:stacks-tfe -->
+
+If you are configuring a Stack, refer to [Authenticate a Stack](/terraform/language/stacks/deploy/authenticate) to learn how to use the `identity_token` block to authenticate your Stack deployments with dynamic credentials.
+
+<!-- END: TFC:only name:stacks-tfe -->
+
+You'll need to set some environment variables in your HCP Terraform workspace in order to configure HCP Terraform to authenticate with Tencent Cloud using dynamic credentials. You can set these as workspace variables, or if you'd like to share one Tencent Cloud role across multiple workspaces, you can use a variable set. When you configure dynamic provider credentials with multiple provider configurations of the same type, use either a default variable or a tagged alias variable name for each provider configuration. Refer to [Specifying Multiple Configurations](#specifying-multiple-configurations) for more details.
+
+### Example Configuration
+
+Here's a complete example of the environment variables needed for a basic setup:
+
+```
+TFC_TENCENTCLOUD_PROVIDER_AUTH=true
+TFC_TENCENTCLOUD_PROVIDER_ID=qcs::cam::uin/12345678:oidc-provider/app.terraform.io
+TFC_TENCENTCLOUD_RUN_ROLE_ARN=qcs::cam::uin/12345678:roleName/TerraformRole
+TFC_TENCENTCLOUD_REGION=ap-guangzhou
+```
+
+For a setup with separate plan and apply roles (recommended for least-privilege access):
+
+```
+TFC_TENCENTCLOUD_PROVIDER_AUTH=true
+TFC_TENCENTCLOUD_PROVIDER_ID=qcs::cam::uin/12345678:oidc-provider/app.terraform.io
+TFC_TENCENTCLOUD_PLAN_ROLE_ARN=qcs::cam::uin/12345678:roleName/TerraformPlanRole
+TFC_TENCENTCLOUD_APPLY_ROLE_ARN=qcs::cam::uin/12345678:roleName/TerraformApplyRole
+TFC_TENCENTCLOUD_REGION=ap-guangzhou
+```
+
+### Required Environment Variables
+
+| Variable                                                                                     | Value                                 | Notes                                                                                                                                                                                                                                                                                           |
+|----------------------------------------------------------------------------------------------|---------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `TFC_TENCENTCLOUD_PROVIDER_AUTH`<br />`TFC_TENCENTCLOUD_PROVIDER_AUTH_TAG`<br />_(Default variable not supported)_                                   | `true`                                | Requires **v1.7.0** or later if self-managing agents. Must be present and set to `true`, or HCP Terraform will not attempt to authenticate to Tencent Cloud.                                                                                                                                              |
+| `TFC_TENCENTCLOUD_PROVIDER_ID`<br />`TFC_TENCENTCLOUD_PROVIDER_ID_TAG`<br />`TFC_DEFAULT_TENCENTCLOUD_PROVIDER_ID` | The OIDC provider identifier in Tencent Cloud CAM. Format: `qcs::cam::uin/ACCOUNT_ID:oidc-provider/PROVIDER_NAME` | Requires **v1.7.0** or later if self-managing agents. This identifies the OIDC identity provider you created in Tencent Cloud CAM. Example: `qcs::cam::uin/12345678:oidc-provider/app.terraform.io`|
+| `TFC_TENCENTCLOUD_RUN_ROLE_ARN`<br />`TFC_TENCENTCLOUD_RUN_ROLE_ARN_TAG`<br />`TFC_DEFAULT_TENCENTCLOUD_RUN_ROLE_ARN` | The ARN of the role to assume in Tencent Cloud. Format: `qcs::cam::uin/ACCOUNT_ID:roleName/ROLE_NAME` | Requires **v1.7.0** or later if self-managing agents. Optional if `TFC_TENCENTCLOUD_PLAN_ROLE_ARN` and `TFC_TENCENTCLOUD_APPLY_ROLE_ARN` are both provided. Refer to [Optional environment variables](/terraform/cloud-docs/dynamic-provider-credentials/tencentcloud-configuration#optional-environment-variables) for more information.|
+
+### Optional Environment Variables
+
+You may need to set these variables, depending on your use case.
+
+| Variable                                                                                                                               | Value                                                                                        | Notes                                                                                                                        |
+|----------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------|
+| `TFC_TENCENTCLOUD_WORKLOAD_IDENTITY_AUDIENCE`<br />`TFC_TENCENTCLOUD_WORKLOAD_IDENTITY_AUDIENCE_TAG`<br />`TFC_DEFAULT_TENCENTCLOUD_WORKLOAD_IDENTITY_AUDIENCE` | Will be used as the `aud` claim for the identity token. Defaults to `tencentcloud.workload.identity`. | Requires **v1.7.0** or later if self-managing agents.                                                                        |
+| `TFC_TENCENTCLOUD_PLAN_ROLE_ARN`<br />`TFC_TENCENTCLOUD_PLAN_ROLE_ARN_TAG`<br />`TFC_DEFAULT_TENCENTCLOUD_PLAN_ROLE_ARN`                                        | The ARN of the role to use for the plan phase of a run. Format: `qcs::cam::uin/ACCOUNT_ID:roleName/ROLE_NAME`                                      | Requires **v1.7.0** or later if self-managing agents. Will fall back to the value of `TFC_TENCENTCLOUD_RUN_ROLE_ARN` if not provided. Useful for implementing least-privilege access where plan operations use read-only permissions. |
+| `TFC_TENCENTCLOUD_APPLY_ROLE_ARN`<br />`TFC_TENCENTCLOUD_APPLY_ROLE_ARN_TAG`<br />`TFC_DEFAULT_TENCENTCLOUD_APPLY_ROLE_ARN`                                     | The ARN of the role to use for the apply phase of a run. Format: `qcs::cam::uin/ACCOUNT_ID:roleName/ROLE_NAME`                                     | Requires **v1.7.0** or later if self-managing agents. Will fall back to the value of `TFC_TENCENTCLOUD_RUN_ROLE_ARN` if not provided. Useful for implementing least-privilege access where apply operations use write permissions. |
+| `TFC_TENCENTCLOUD_REGION`<br />`TFC_TENCENTCLOUD_REGION_TAG`<br />`TFC_DEFAULT_TENCENTCLOUD_REGION`                                     | The Tencent Cloud region to use.                                     | Optional. If not specified, the region configured in your Terraform provider configuration will be used. |
+| `TFC_TENCENTCLOUD_SESSION_DURATION`<br />`TFC_TENCENTCLOUD_SESSION_DURATION_TAG`<br />`TFC_DEFAULT_TENCENTCLOUD_SESSION_DURATION`                                     | Session duration in seconds (900-43200).                                     | Optional. The duration for which the temporary credentials are valid. Defaults to 3600 seconds (1 hour). |
+
+## Configure the Tencent Cloud Provider
+
+When dynamic credentials are enabled, HCP Terraform automatically sets the following environment variables in the run environment:
+- `TENCENTCLOUD_SECRET_ID` - Temporary access key ID
+- `TENCENTCLOUD_SECRET_KEY` - Temporary secret access key
+- `TENCENTCLOUD_SECURITY_TOKEN` - Security token for the temporary session
+- `TENCENTCLOUD_REGION` - Region (if `TFC_TENCENTCLOUD_REGION` is configured)
+
+The Tencent Cloud provider automatically reads these environment variables, so no additional configuration is needed in your Terraform code. Simply configure your provider as normal:
+
+```hcl
+provider "tencentcloud" {
+  region = "ap-guangzhou"
+  # Credentials are automatically provided via environment variables
+  # No secret_id or secret_key needed
+}
+```
+
+-> **Note:** You can omit the `region` argument if you've set the `TFC_TENCENTCLOUD_REGION` environment variable in your workspace.
+
+Make sure that you're not manually setting credentials in your Terraform configuration, as these settings will interfere with dynamic provider credentials:
+- Do not set `TENCENTCLOUD_SECRET_ID` and `TENCENTCLOUD_SECRET_KEY` as workspace variables
+- Do not use `secret_id` and `secret_key` in the provider configuration block
+- Do not use shared credentials files
+
+### Specifying Multiple Configurations
+
+~> **Important:** If you are self-hosting [HCP Terraform agents](/terraform/cloud-docs/agents), ensure your agents use [v1.12.0](/terraform/cloud-docs/agents/changelog#1-12-0-07-26-2023) or above. To use the latest dynamic credentials features, [upgrade your agents to the latest version](/terraform/cloud-docs/agents/changelog).
+
+You can use multiple distinct Tencent Cloud roles within the same workspace by using [provider aliases](/terraform/language/providers/configuration#alias-multiple-provider-configurations). To configure multiple Tencent Cloud providers with different dynamic credentials, append a tag suffix to the environment variable names.
+
+For example, to use two different Tencent Cloud roles:
+
+**Workspace Environment Variables:**
+```
+# Default provider configuration
+TFC_TENCENTCLOUD_PROVIDER_AUTH=true
+TFC_TENCENTCLOUD_PROVIDER_ID=qcs::cam::uin/12345678:oidc-provider/app.terraform.io
+TFC_TENCENTCLOUD_RUN_ROLE_ARN=qcs::cam::uin/12345678:roleName/DefaultRole
+
+# Production provider configuration (using "prod" tag)
+TFC_TENCENTCLOUD_PROVIDER_AUTH_prod=true
+TFC_TENCENTCLOUD_PROVIDER_ID_prod=qcs::cam::uin/87654321:oidc-provider/app.terraform.io
+TFC_TENCENTCLOUD_RUN_ROLE_ARN_prod=qcs::cam::uin/87654321:roleName/ProductionRole
+```
+
+**Terraform Configuration:**
+```hcl
+# Default provider uses the default role
+provider "tencentcloud" {
+  region = "ap-guangzhou"
+}
+
+# Aliased provider uses the tagged role (prod)
+provider "tencentcloud" {
+  alias  = "prod"
+  region = "ap-singapore"
+}
+
+# Use the default provider
+resource "tencentcloud_vpc" "dev_vpc" {
+  name       = "dev-vpc"
+  cidr_block = "10.0.0.0/16"
+}
+
+# Use the aliased provider
+resource "tencentcloud_vpc" "prod_vpc" {
+  provider   = tencentcloud.prod
+  name       = "prod-vpc"
+  cidr_block = "10.1.0.0/16"
+}
+```
+
+HCP Terraform automatically sets the appropriate credentials for each provider based on the tag suffix. No special Terraform variables are required - the credentials are automatically available via environment variables for each provider configuration.
+
+For more details on the general approach, see [Specifying Multiple Configurations](/terraform/cloud-docs/dynamic-provider-credentials/specifying-multiple-configurations).
+
+## Troubleshooting
+
+### Common Issues
+
+**Authentication fails with "invalid token" error**
+
+This error usually occurs when:
+- The OIDC provider URL in Tencent Cloud doesn't match your HCP Terraform instance URL exactly
+- The audience value configured in Tencent Cloud doesn't match the `TFC_TENCENTCLOUD_WORKLOAD_IDENTITY_AUDIENCE` variable (or the default `tencentcloud.workload.identity`)
+- The trust policy conditions don't match your workspace's organization, project, or workspace names
+
+**Role assumption fails**
+
+This error can occur when:
+- The trust policy subject condition doesn't match the format `organization:ORG_NAME:project:PROJECT_NAME:workspace:WORKSPACE_NAME:run_phase:PHASE`
+- The role ARN specified in `TFC_TENCENTCLOUD_RUN_ROLE_ARN` is incorrect or malformed
+- The OIDC identity provider is not properly configured or linked to the role
+
+**Permission denied errors during Terraform operations**
+
+If your plan or apply succeeds in authenticating but fails with permission errors:
+- Check that the role has the necessary permissions policies attached
+- Verify that the permissions policies grant access to the specific resources and actions your Terraform configuration requires
+- Consider using more permissive policies during initial testing, then restricting to least-privilege access once your configuration is working
+
+### Debugging Tips
+
+1. **Verify the identity token claims**: You can use the [workload identity tokens](/terraform/cloud-docs/dynamic-provider-credentials/workload-identity-tokens) documentation to understand what claims are included in the token HCP Terraform generates.
+
+2. **Check trust policy syntax**: Ensure your trust policy JSON is valid and uses the correct condition operators (`string_equal` vs `string_like`).
+
+3. **Test with a broader policy first**: Start with a trust policy that uses wildcard matching for the workspace name or run phase, then restrict it once you've confirmed authentication is working.
+
+4. **Review HCP Terraform run logs**: The run output will show authentication attempts and any errors returned by Tencent Cloud.
+
+5. **Check Tencent Cloud CAM logs**: Use Tencent Cloud's CloudAudit service to review authentication and authorization events.
