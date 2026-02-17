@@ -15,10 +15,10 @@ import { includePartials } from './include-partials.mjs'
 describe('Include Partials', () => {
 	const fixtureDir = path.join(
 		process.cwd(),
-		'scripts/prebuild/mdx-transforms/include-partials/__fixtures__/basic',
+		'scripts/prebuild/mdx-transforms/include-partials/__fixtures__',
 	)
 
-	const partialsDir = path.join(fixtureDir, 'partials')
+	const partialsDir = path.join(fixtureDir, 'basic', 'partials')
 
 	test('should include markdown partial', async () => {
 		const transformedText = `# Hello world!
@@ -31,7 +31,7 @@ This is the end of the test file.
 `
 
 		// Set up paths to the test data
-		const testFilePath = path.join(fixtureDir, 'test-file.mdx')
+		const testFilePath = path.join(fixtureDir, 'basic', 'test-file.mdx')
 		// Read in the test file, and split the MDX string from frontmatter
 		const testFileString = fs.readFileSync(testFilePath, 'utf8')
 		const testMdxString = grayMatter(testFileString).content
@@ -53,7 +53,11 @@ This is the end of the test file.
 `
 
 		// Set up paths to the test data
-		const testFilePath = path.join(fixtureDir, 'test-file-text-partial.mdx')
+		const testFilePath = path.join(
+			fixtureDir,
+			'basic',
+			'test-file-text-partial.mdx',
+		)
 		// Read in the test file, and split the MDX string from frontmatter
 		const testFileString = fs.readFileSync(testFilePath, 'utf8')
 		const testMdxString = grayMatter(testFileString).content
@@ -64,8 +68,12 @@ This is the end of the test file.
 
 	test('should throw error when partial is missing', async () => {
 		// Set up paths to the test data
-		const testFilePath = path.join(fixtureDir, 'test-file-bad-partial.mdx')
-		const partialsDir = path.join(fixtureDir, 'partials')
+		const testFilePath = path.join(
+			fixtureDir,
+			'basic',
+			'test-file-bad-partial.mdx',
+		)
+		const partialsDir = path.join(fixtureDir, 'basic', 'partials')
 		// Read in the test file, and split the MDX string from frontmatter
 		const testFileString = fs.readFileSync(testFilePath, 'utf8')
 		const testMdxString = grayMatter(testFileString).content
@@ -83,5 +91,23 @@ This is the end of the test file.
 		await expect(includePartials()).rejects.toThrow(
 			'Error in remarkIncludePartials: The partialsDir argument is required. Please provide the path to the partials directory.',
 		)
+	})
+	test('should include global partial', async () => {
+		const fixturePath = path.join(
+			fixtureDir,
+			'global',
+			'partials',
+			'test-partial.mdx',
+		)
+		const baseContent = `# Hello world! \n\n@include "${path.basename(fixturePath)}"\n`
+
+		const fixtureContent = fs.readFileSync(fixturePath, 'utf8')
+
+		const transformed = await includePartials(
+			baseContent,
+			path.join(fixtureDir, 'global', 'partials'),
+		)
+
+		expect(transformed).toContain(fixtureContent)
 	})
 })

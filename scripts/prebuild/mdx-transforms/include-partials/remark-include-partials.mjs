@@ -29,6 +29,9 @@ export function remarkIncludePartialsPlugin({ partialsDir, filePath }) {
 			'Error in remarkIncludePartials: The partialsDir argument is required. Please provide the path to the partials directory.',
 		)
 	}
+
+	// Define the top-level partials directory
+	const topLevelPartialsDir = path.resolve(process.cwd(), 'content', 'partials')
 	// Set up and return the transformer function to be used as a remark plugin
 	return function transformer(tree) {
 		/**
@@ -57,14 +60,21 @@ export function remarkIncludePartialsPlugin({ partialsDir, filePath }) {
 			 * should block our build from proceeding.
 			 */
 
-			const includePath = path.join(partialsDir, includeMatch[1])
+			// Try top-level partials first
+			let includePath = path.join(topLevelPartialsDir, includeMatch[1])
 			let includeContents
 			try {
 				includeContents = fs.readFileSync(includePath, 'utf8')
 			} catch {
-				throw new Error(
-					`@include file not found. In "${filePath}", on line ${node.position.start.line}, column ${node.position.start.column}, please ensure the referenced file "${includePath}" exists.`,
-				)
+				// If not found, try product/version-specific partialsDir
+				includePath = path.join(partialsDir, includeMatch[1])
+				try {
+					includeContents = fs.readFileSync(includePath, 'utf8')
+				} catch {
+					throw new Error(
+						`@include file not found. In "${filePath}", on line ${node.position.start.line}, column ${node.position.start.column}, please ensure the referenced file "${includePath}" exists.`,
+					)
+				}
 			}
 
 			/**
