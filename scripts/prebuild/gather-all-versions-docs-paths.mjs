@@ -169,7 +169,6 @@ export async function getProductPaths(
 		apiPaths,
 		async (apiPath) => {
 			if (apiPath.created_at == null) {
-				// TODO: Store this data in frontmatter of each file instead
 				// Normalize path separators for cross-platform compatibility
 				const normalizedPath = apiPath.itemPath.replace(/\\/g, '/')
 				const gitLogTime = await execAsync(
