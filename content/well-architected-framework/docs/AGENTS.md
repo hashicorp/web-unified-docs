@@ -215,6 +215,12 @@ Based on successful WAF documents, use these patterns:
   2. `### External resources` - H3 heading for third-party documentation (optional)
   3. `## Next steps` - H2 heading for links to related WAF documents with context
 
+**Next steps section pattern:**
+- When a document is part of a subsection (e.g., "Managing leaked secrets"), the first paragraph must link the subsection name back to its index page
+- Format: "In this section of [Subsection Name](/path/to/index), you learned..."
+- Example: "In this section of [Managing leaked secrets](/well-architected-framework/secure-systems/secrets/manage-leaked-secrets), you learned..."
+- Do NOT add this link in the index page itself, only in the child pages
+
 ## Content organization
 - Structure content in the order users need it
 - Combine related information to reduce redundancy
