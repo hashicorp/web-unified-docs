@@ -31,7 +31,12 @@ export function remarkIncludePartialsPlugin({ partialsDir, filePath }) {
 	}
 
 	// Define the top-level partials directory
-	const topLevelPartialsDir = path.resolve(process.cwd(), 'content', 'partials')
+	const topLevelPartialsDir = path.resolve(
+		process.cwd(),
+		'content',
+		'global',
+		'partials',
+	)
 	// Set up and return the transformer function to be used as a remark plugin
 	return function transformer(tree) {
 		/**
