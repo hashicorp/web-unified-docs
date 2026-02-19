@@ -15,13 +15,13 @@ ability to keep control of all your secrets localized while leveraging the benef
 
 Prerequisites:
 * Ability to read or create KVv2 secrets
-* Ability to create AWS IAM user and access keys with access to the Secrets Manager
+* Ability to create AWS IAM user and access keys with access to the Secrets Manager, or configure workload identity federation (WIF)
 * Ability to create sync destinations and associations on your Vault server
 
 ## Setup
 
 1. Navigate to the [AWS Identity and Access Management (IAM) console](https://us-east-1.console.aws.amazon.com/iamv2/home#/home)
-  to configure a IAM user with access to the Secrets Manager. The following is an example policy outlining the required
+  to configure an IAM user or role with access to the Secrets Manager. The following is an example policy outlining the required
   permissions to use secrets syncing.
 
   ```json
@@ -42,7 +42,10 @@ Prerequisites:
   }
   ```
 
-1.	Configure a sync destination with the IAM user credentials created in the previous step.
+
+1. Configure a sync destination with the appropriate authentication credentials.
+
+   **IAM user credentials:** Use IAM user credentials created in the previous step
 
 	```shell-session
 	$ vault write sys/sync/destinations/aws-sm/my-awssm-1 \
@@ -59,6 +62,32 @@ Prerequisites:
 	Key                   Value
 	---                   -----
 	connection_details    map[access_key_id:***** region:us-east-1 secret_access_key:*****]
+	name                  my-awssm-1
+	type                  aws-sm
+	```
+
+	</CodeBlockConfig>
+
+   [Workload identity federation (WIF)](#workload-identity-federation-wif) authentication: Configure a trust relationship
+     between Vault and AWS. Use WIF to eliminate the need to manage long-lived
+     access keys.
+
+	```shell-session
+	$ vault write sys/sync/destinations/aws-sm/my-awssm-1 \
+		  role_arn="arn:aws:iam::123456789123:role/example-web-identity-role" \
+		  identity_token_audience="$AUDIENCE" \
+		  identity_token_ttl="1h" \
+		  region='us-east-1'
+	```
+
+	**Output:**
+
+	<CodeBlockConfig hideClipboard>
+
+	```plaintext
+	Key                   Value
+	---                   -----
+	connection_details    map[identity_token_audience:***** identity_token_ttl:***** region:us-east-1 role_arn:arn:aws:iam::123456789123:role/example-web-identity-role]
 	name                  my-awssm-1
 	type                  aws-sm
 	```
@@ -137,6 +166,67 @@ Prerequisites:
 Moving forward, any modification on the Vault secret will be propagated to its AWS Secrets Manager
 counterpart. Creating a new secret version in Vault will update the one in AWS to the new version. Deleting either
 the secret or the association in Vault will delete the secret in your AWS account as well.
+
+## Workload identity federation (WIF)
+
+
+The AWS Secrets Manager sync destination supports the WIF workflow, and has a source of identity called
+an identity token. The identity token is a JWT that is internally signed by Vault's
+[secrets sync identity token issuer](/vault/api-docs/secret/identity/tokens#read-openid-configuration-for-secret-sync-identity-token-issuer).
+
+If there is a trust relationship configured between Vault and AWS through
+[workload identity federation](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_oidc.html),
+the sync destination can exchange its identity token for short-lived STS credentials needed to
+perform its actions.
+
+Exchanging identity tokens for STS credentials lets the AWS Secrets Manager sync destination
+operate without configuring explicit access to sensitive IAM security
+credentials.
+
+To configure the sync destination to use WIF:
+
+1. Ensure that Vault [openid-configuration](/vault/api-docs/secret/identity/tokens#read-openid-configuration-for-secret-sync-identity-token-issuer)
+   and [public JWKS](/vault/api-docs/secret/identity/tokens#read-the-public-jwks-from-a-secrets-sync-identity-token-issuer)
+   APIs are network-reachable by AWS. We recommend using an API proxy or gateway
+   if you need to limit Vault API exposure.
+
+1. Create an
+   [IAM OIDC identity provider](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_create_oidc.html)
+   in AWS.
+
+   - The provider URL **must** point at your [Vault identity token issuer](/vault/api-docs/secret/identity/tokens#read-openid-configuration-for-secret-sync-identity-token-issuer) with the
+     `/.well-known/openid-configuration` suffix removed. For example:
+     `https://host:port/v1/identity/oidc/secrets-sync`.
+
+   - The audience should uniquely identify the recipient of the identity
+     token. In AWS, the recipient is the identity provider. We recommend using
+     the `host:port/v1/identity/oidc/secrets-sync` portion of the provider URL
+     as your recipient since it is unique for each configured identity provider.
+
+1. Create a [web identity role](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_create_for-idp_oidc.html#idp_oidc_Create)
+   in AWS with the same audience used for your IAM OIDC identity provider.
+
+   - The subject identifier **must** match the unique `sub` claim issued by identity tokens and have the form `secrets-sync:<NAMESPACE_PATH>:<STORE_TYPE>:<STORE_NAME>`.
+
+   - Attach the IAM policy granting the required Secrets Manager permissions
+     to the web identity role, as shown in the [Setup](#setup) section.
+
+1. Configure the AWS Secrets Manager sync destination with the IAM OIDC
+   audience value and web identity role ARN.
+
+```shell-session
+$ vault write sys/sync/destinations/aws-sm/my-awssm-1 \
+    identity_token_audience="vault.example/v1/identity/oidc/secrets-sync" \
+    role_arn="arn:aws:iam::123456789123:role/example-web-identity-role" \
+    region="us-east-1"
+```
+
+Your sync destination can now use WIF for its configuration credentials.
+By default, WIF [credentials](https://docs.aws.amazon.com/STS/latest/APIReference/API_AssumeRoleWithWebIdentity.html)
+have a time-to-live of 1 hour and automatically refresh when they expire.
+
+For more information about the WIF-related configuration parameters, refer to the
+[API documentation](/vault/api-docs/system/secrets-sync#create-update-aws-secrets-manager-destination).
 
 ## Access management
 
