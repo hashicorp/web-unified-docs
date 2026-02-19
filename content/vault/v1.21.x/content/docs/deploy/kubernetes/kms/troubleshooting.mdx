@@ -1,0 +1,179 @@
+---
+layout: docs
+page_title: Vault Kubernetes KMS plugin troubleshooting
+description: >-
+  Understand why your installation of the 
+  Vault Kubernetes KMS plugin might not be working properly.
+---
+
+# Troubleshooting the Vault Kubernetes KMS plugin
+
+## Plugin cannot access Vault
+
+If the plugin cannot connect to Vault, check the plugin logs for error messages.
+If the plugin is deployed as a static Pod, you can view the logs with the following command,
+replacing <NAMESPACE> with the namespace you deployed your static Pod to, and <POD_NAME> with the name of your static Pod:
+
+```shell-session
+$ kubectl logs -n <NAMESPACE> <POD_NAME>
+```
+
+### Incorrect policy configuration
+
+If you see permission denied errors in the plugin logs, verify that the Vault policy
+attached to the AppRole includes the required permissions:
+
+```hcl
+path "transit/keys/<KEY_NAME>" {
+    capabilities = ["read"]
+}
+
+path "transit/encrypt/<KEY_NAME>" {
+    capabilities = ["update"]
+}
+
+path "transit/decrypt/<KEY_NAME>" {
+    capabilities = ["update"]
+}
+
+path "sys/license/status" {
+    capabilities = ["read"]
+}
+```
+
+This assumes your Transit secrets engine is mounted to the path `transit`. 
+If you have chosen a different path for your Transit secrets engine, you will need to put that in the policy instead.
+
+The `sys/license/status` path is required for Vault Enterprise validation. If you
+omit this permission, the plugin cannot verify that you are running Vault Enterprise and will not start.
+
+### Incorrect auth mount or AppRole name
+
+If you see authentication errors in the plugin logs, verify the following:
+- The `--approle-role-id` flag matches the Role ID for your AppRole in Vault.
+- The file at `--approle-secret-id-path` contains a valid Secret ID for the AppRole.
+- The AppRole auth method is enabled at the expected mount path in Vault.
+
+### Vault is unreachable
+
+If you see connection errors in the plugin logs, verify the following:
+- The `--vault-address` flag points to a reachable Vault server.
+- Network policies or firewalls allow traffic from the control plane node to Vault.
+- If using TLS, the `--vault-ca` flag points to a valid CA certificate, or the system
+  trust store includes the Vault server's CA.
+
+### Expired AppRole Secret ID
+
+If the plugin was working previously but authentication starts failing, the AppRole
+Secret ID may have expired. Generate a new Secret ID in Vault and replace the contents
+of the file at `--approle-secret-id-path`:
+
+```shell-session
+$ vault write -f auth/approle/role/<ROLE_NAME>/secret-id
+```
+
+Copy the new Secret ID to the file on each control plane node. The plugin reads
+this file at startup, so you must restart the plugin after updating the Secret ID.
+
+## API server cannot access the plugin
+
+If the Kubernetes API server cannot communicate with the plugin, Kubernetes reports
+errors when encrypting or decrypting data. Check the kube-apiserver logs for KMS-related
+error messages.
+
+### Plugin is not healthy
+
+Verify that the plugin Pod is running and healthy:
+
+```shell-session
+$ kubectl get pods -n kube-system -l component=vault-kms-plugin
+```
+
+If the Pod is not running, check the plugin logs for startup errors. Common causes include:
+- Missing or invalid configuration flags
+- Vault connectivity issues
+- Vault Enterprise validation failures
+
+### Vault Enterprise validation failing
+
+The Vault Kubernetes KMS plugin requires Vault Enterprise. If you see an error message
+indicating that the plugin detected Vault Community Edition, verify that you are
+connecting to a Vault Enterprise server.
+
+<CodeBlockConfig hideClipboard>
+
+```shell
+vault Community Edition detected - vault-kube-kms requires Vault Enterprise
+```
+
+</CodeBlockConfig>
+
+### Socket address mismatch
+
+The `endpoint` field in the Kubernetes `EncryptionConfiguration` must match the
+`--listen-address` flag passed to the plugin.
+
+Verify that both values point to the same Unix socket path. For example, if your
+`EncryptionConfiguration` contains the following:
+
+```yaml
+providers:
+  - kms:
+      apiVersion: v2
+      name: vault-kms
+      endpoint: unix:///var/run/kmsplugin/kms.sock
+```
+
+The plugin must be started with:
+
+```shell-session
+--listen-address=unix:///var/run/kmsplugin/kms.sock
+```
+
+Also verify that the kube-apiserver Pod mounts the directory containing the socket
+so it can access the plugin's Unix socket.
+
+## Encryption or decryption errors
+
+If encryption or decryption operations fail after the plugin connects to Vault,
+the Transit key configuration may be incompatible.
+
+### Key version constraints
+
+If decryption fails for data encrypted with an older key version, verify the
+`min_decryption_version` setting on the Transit key in Vault:
+
+```shell-session
+$ vault read transit/keys/<KEY_NAME>
+```
+
+If `min_decryption_version` is higher than the key version used to encrypt the data,
+Vault rejects decryption requests. Lower the `min_decryption_version` or re-encrypt
+the data with a newer key version.
+
+~> **Warning:** Changing `min_decryption_version` can prevent Kubernetes from reading
+data encrypted with older key versions. Verify that all encrypted data uses a key
+version at or above the new minimum before increasing this value.
+
+Similarly, if `min_encryption_version` is set, verify that the plugin is using a
+key version at or above the minimum.
+
+## Re-encrypting existing data
+
+After rotating the Transit key in Vault, existing encrypted data in etcd remains
+encrypted with the old key version. Kubernetes does not automatically re-encrypt
+existing data.
+
+To re-encrypt existing Secrets with the new key version, perform a no-op write
+to force Kubernetes to re-encrypt them:
+
+```shell-session
+$ kubectl get secrets --all-namespaces -o json | kubectl replace -f -
+```
+
+For other resource types configured in your `EncryptionConfiguration`, repeat this
+process for each resource type.
+
+For large clusters or complex migrations, refer to the Kubernetes documentation on
+[encrypting confidential data at rest](https://kubernetes.io/docs/tasks/administer-cluster/encrypt-data/)
+for guidance on storage migration strategies.
