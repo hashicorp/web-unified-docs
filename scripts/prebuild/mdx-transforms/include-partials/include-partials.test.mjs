@@ -11,6 +11,7 @@ import { describe, expect, test } from 'vitest'
 import grayMatter from 'gray-matter'
 // Local
 import { includePartials } from './include-partials.mjs'
+import { vol } from 'memfs'
 
 describe('Include Partials', () => {
 	const fixtureDir = path.join(
@@ -92,7 +93,7 @@ This is the end of the test file.
 			'Error in remarkIncludePartials: The partialsDir argument is required. Please provide the path to the partials directory.',
 		)
 	})
-	test('should include global partial', async () => {
+	test('should include global product partial', async () => {
 		const fixturePath = path.join(
 			fixtureDir,
 			'global',
@@ -109,5 +110,41 @@ This is the end of the test file.
 		)
 
 		expect(transformed).toContain(fixtureContent)
+	})
+
+	test('global partials includes content from ./content/global/partials', async () => {
+		const globalPartialContent = fs.readFileSync(
+			path.join(fixtureDir, 'global', 'partials', 'test-partial.mdx'),
+			'utf8',
+		)
+		const testFilePath = path.join(fixtureDir, 'basic', 'test-file.mdx')
+		vol.fromJSON({
+			[testFilePath]: `---
+	title: Hello world test document
+	---
+
+	# Hello world!
+
+	This is a test file. Here's a partial file included in this file:
+
+	@include 'test-partial.mdx'
+
+	This is the end of the test file.
+	`,
+			[path.join(fixtureDir, 'global', 'partials', 'test-partial.mdx')]:
+				globalPartialContent,
+		})
+		const { content: testMdxString } = grayMatter(
+			fs.readFileSync(testFilePath, 'utf8'),
+		)
+
+		const transformed = await includePartials(
+			testMdxString,
+			path.join(fixtureDir, 'global', 'partials'),
+		)
+
+		expect(transformed).toContain(globalPartialContent)
+
+		vol.reset()
 	})
 })
