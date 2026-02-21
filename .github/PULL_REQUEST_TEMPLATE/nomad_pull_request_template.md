@@ -65,14 +65,12 @@ Jira: [<jira-ticket-number>]  // for example, Jira: [NMD-1234]
 
 GitHub Issue: <issue-link>
 
-Deploy previews: The bot does publish a root-level link to the deploy preview, 
-but it's nice to include a direct link to your content so the reviewers don't have to navigate to your pages.
+Deploy previews: The bot does publish a root-level link to the deploy preview, but the preview URL changes with each build.
 -->
 
 Nomad Code PR:
 Jira:
 GitHub Issue:
-Deploy Previews:
 
 ## Contributor checklists
 
