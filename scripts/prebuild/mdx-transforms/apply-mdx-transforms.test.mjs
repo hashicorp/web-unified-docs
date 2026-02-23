@@ -5,11 +5,60 @@
 
 import { expect, test, describe, vi, beforeEach, afterEach } from 'vitest'
 import { fs, vol } from 'memfs'
+import { applyMdxTransforms } from './apply-mdx-transforms.mjs'
 import { buildMdxTransforms } from './build-mdx-transforms.mjs'
+import versionMetadata from '__fixtures__/versionMetadata.json'
 import * as repoConfig from '#productConfig.mjs'
 
 vi.mock('node:fs')
 vi.mock('node:fs/promises')
+
+const mdxContent = `---
+page_title: 'Plugin Development - Framework: Paths'
+---
+
+# Paths
+
+An exact location within a [schema](/plugin/framework/schemas)
+`
+
+const transformedMdxContent = `---
+page_title: 'Plugin Development - Framework: Paths'
+---
+# Paths
+
+An exact location within a [schema](/plugin/framework/schemas)`
+
+const transformedOutPath = 'public/content/terraform/v1.19.x/test.mdx'
+
+describe('applyMdxTransforms - Unit Tests', () => {
+	beforeEach(() => {
+		vol.fromJSON({
+			'content/terraform/v1.19.x/test.mdx': mdxContent,
+			'public/content/terraform/v1.19.x/test.mdx': transformedMdxContent,
+			'app/api/versionMetadata.json': JSON.stringify(versionMetadata),
+			'content/terraform/v1.19.x/partials': {},
+		})
+	})
+
+	test('test applyMdxTransforms', async () => {
+		vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({
+			terraform: {
+				basePaths: ['cli', 'internals', 'intro', 'language'],
+			},
+		})
+		const entry = {
+			filePath: 'content/terraform/v1.19.x/test.mdx',
+			partialsDir: '../../partials',
+			outPath: transformedOutPath,
+		}
+		const result = await applyMdxTransforms(entry, versionMetadata)
+		expect(result).toStrictEqual({ error: null })
+
+		const transformedContent = fs.readFileSync(entry.outPath, 'utf8')
+		expect(transformedContent.trim()).toContain(transformedMdxContent.trim())
+	})
+})
 
 describe('applyMdxTransforms - Integration Tests', () => {
 	const mockVersionMetadata = {
