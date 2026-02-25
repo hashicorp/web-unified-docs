@@ -6,6 +6,8 @@
 import { getUrlFromFilePath } from '#scriptUtils/file-path/url/index.mjs'
 import allDocsPathsJson from '#api/docsPathsAllVersions.json' with { type: 'json' }
 
+// test
+
 const filePaths = process.argv.slice(2)
 
 // Run the main script
