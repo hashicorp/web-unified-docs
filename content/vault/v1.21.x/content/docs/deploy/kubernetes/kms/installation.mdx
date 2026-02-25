@@ -12,6 +12,8 @@ This guide assumes you are installing the Vault Kubernetes KMS plugin for the fi
 
 * Vault Enterprise server with a valid license
 * An authenticated Vault client
+* Access to a Kubernetes control plane host
+* Ability to modify the Kubernetes API server configuration and EncryptionConfig for the Kubernetes cluster
 
 ## Configuring Vault
 
@@ -25,20 +27,20 @@ for use with the plugin.
  vault auth enable approle
  vault write auth/approle/role/k8s-kms-role \
      token_policies=k8s-kms-policy
-    ```
+ ```
 1. Retrieve the AppRole ID and secret ID for use later when configuring the KMS plugin
 
  ```bash
  vault read auth/approle/role/k8s-kms-role/role-id
  vault write -f auth/approle/role/k8s-kms-role/secret-id
-    ```
+ ```
 
 1. Enable the transit secret engine and create a key:
 
  ```bash
  vault secrets enable transit
  vault write -f transit/keys/k8s-kms-key
-    ```
+ ```
 
 1. Create a policy for the KMS plugin to use. The following policy has
 the minimum required permissions:
@@ -65,15 +67,10 @@ the minimum required permissions:
 
 ## Configuring Kubernetes
 
-Kubernetes encryption at rest is enabled by providing the API server an EncryptionConfiguration
-file and setting the --encryption-provider-config flag. If the API server is not started with
---encryption-provider-config, encryption at rest is not enabled.
+KMS-based encryption in Kubernetes uses envelope encryption: the Kubernetes API server calls the configured KMS plugin 
+over a Unix socket to encrypt/decrypt data before it is written to or read from etcd.
 
-KMS-based encryption uses envelope encryption: the API server calls the configured KMS plugin
-(over a Unix socket in this guide) to encrypt/decrypt data before it is written to / read from etcd.
-
-This procedure requires control-plane access and will not work on most managed Kubernetes offerings,
-since the Kubernetes control plane is not accessible by the customer.
+To accomplish this, the KMS plugin must run on the control plane node as a [static Pod](https://kubernetes.io/docs/tasks/configure-pod-container/static-pod/).
 
 ### Create the EncryptionConfiguration on each control-plane node
 
@@ -98,15 +95,16 @@ timeout: 3s
 
 > **Note**: The endpoint must match where the plugin creates its Unix socket on the host.
 
-### Deploy KMS plugin as a Static Pod
+### Deploy KMS plugin
 
-Using a static Pod is the preferred installation method for running the Vault KMS plugin.
-If your control plane supports static Pods, you can deploy the KMS plugin as a static Pod by placing a manifest on each control-plane node under:
+1. Copy the AppRole secret ID to each control plane node at `/etc/vault-kms/approle-secret-id`.
+
+1. Deploy the KMS plugin as a static Pod by placing a manifest on each control-plane node under:
 `/etc/kubernetes/manifests/`.
 
 The kubelet watches this directory and starts the Pod automatically.
 
-Generic static Pod manifest:
+Example static Pod manifest:
 
 ```yaml
 apiVersion: v1
@@ -118,9 +116,7 @@ metadata:
     tier: control-plane
     component: vault-kms-plugin
 spec:
-  hostNetwork: true
   priorityClassName: system-node-critical
-
   containers:
     - name: vault-kms-plugin
       image: <YOUR_IMAGE>
@@ -158,23 +154,20 @@ spec:
         path: /etc/vault-kms/approle-secret-id
         type: File
 ```
-Save as: /etc/kubernetes/manifests/vault-kms-plugin.yaml on each control-plane node.
-
-Operational notes:
-
-This assumes you place the AppRole [secret ID](https://developer.hashicorp.com/vault/api-docs/auth/approle#generate-new-secret-id) on each node at /etc/vault-kms/approle-secret-id (how you distribute that is up to your environment).
-If you run multiple API servers (HA control plane), you must deploy the plugin on each control-plane node, because each API server will dial its local Unix socket.
+Save as `/etc/kubernetes/manifests/vault-kms-plugin.yaml` on the control-plane node where the Kubernetes API server is running.
+If you run multiple API servers, you must deploy the plugin on each control-plane node, because each Kubernetes API server instance will dial its own local Unix socket.
 
 ### Apply the EncryptionConfiguration
 
-Kubernetes encryption at rest is enabled by passing the kube-apiserver a path to an EncryptionConfiguration file using the -`-encryption-provider-config` flag.
-If the kube-apiserver is started without this flag, encryption at rest is not enabled.
+You enable Kubernetes encryption at rest by providing the Kubernetes API server an EncryptionConfiguration
+file and setting the `--encryption-provider-config` flag. If you do not start the API server with
+`--encryption-provider-config`, encryption at rest will not be enabled.
 
-Ensure the kube-apiserver process (or container) can read the Encrpytion Configuration file at `/etc/kubernetes/encryption/encryption-config.yaml`.
+Ensure the `kube-apiserver` container can read the Encryption Configuration file at `/etc/kubernetes/encryption/encryption-config.yaml`.
 
-Edit the kube-apiserver static Pod manifest on each control-plane node located at `/etc/kubernetes/manifests/kube-apiserver.yaml`:
+Edit the `kube-apiserver` static Pod manifest on each control-plane node located at `/etc/kubernetes/manifests/kube-apiserver.yaml`:
 
-Add this flag to the kube-apiserver container args:
+Add this flag to the `kube-apiserver` process args:
 `--encryption-provider-config=/etc/kubernetes/encryption/encryption-config.yaml`
 
 Mount the file to the kube-apiserver container by adding the stanza to the manifest file:
