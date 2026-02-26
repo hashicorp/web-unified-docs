@@ -66,7 +66,7 @@ Unix sockets provide process-to-process communication with kernel-enforced acces
 
 ---
 
-## Architecture
+## Process flow and component overview
 
 The Kubernetes API server and the KMS plugin use Unix sockets to provide
 process-to-process communication with kernel-enforced access controls based on
@@ -107,91 +107,106 @@ filesystem permissions.
 
 ### Component Description
 
-#### Vault Kubernetes KMS (gRPC Server)
+### Vault Kubernetes KMS (gRPC Server)
 
-The core component that implements the Kubernetes [KMS v2](https://kubernetes.io/docs/tasks/administer-cluster/kms-provider/#implementing-a-kms-plugin) interface. It:
+The core component that implements the Kubernetes [KMS v2](https://kubernetes.io/docs/tasks/administer-cluster/kms-provider/#implementing-a-kms-plugin) interface.
 
-- **Listens** on a Unix domain socket for gRPC requests from the API server
-- **Authenticates** to Vault using AppRole authentication
-- **Forwards** encrypt/decrypt operations to Vault Transit
-- **Caches** the Vault client with automatic token renewal
-- **Reports** health status and current KEK version to Kubernetes
 
-#### Unix Domain Socket
+Vault Kubernetes KMS:
 
-Vault Kubernetes KMS creates a Unix socket at a configurable path (default: `/tmp/vault-kube-kms.socket`) with 
-permissions `0770` (owner and group read/write/execute). This restricts access to:
-- The `vault-kube-kms` process (owner)
-- Processes in the same group
+- **Listens** on a Unix domain socket for gRPC requests from the API server.
+- **Authenticates** to Vault using AppRole authentication.
+- **Forwards** encrypt/decrypt operations to Vault Transit.
+- **Caches** the Vault client with automatic token renewal.
+- **Reports** health status and current KEK version to Kubernetes.
 
-#### Vault Client
+### The Unix domain socket
 
-A cached client that:
-- Authenticates using AppRole (role ID + secret ID from filesystem)
-- Automatically renews tokens before expiration
-- Re-authenticates if tokens exceed max TTL
+Vault Kubernetes KMS creates a Unix socket at a configurable path  
+(default: `/tmp/vault-kube-kms.socket`) with read/write/execute permissions for  the 
+owner and group (`0770`). The default permissions protect the Kubernets plugin  
+by restricting access to just the process itself (the owner) and other processes  
+running in the same group.  
 
-#### AppRole Authentication
+### The Vault client
 
-Vault Kubernetes KMS uses Vault's AppRole auth method:
-- **Role ID**: Non-sensitive identifier, can be configured via flag or environment variable
-- **Secret ID**: Sensitive credential read from a filesystem path, rather than passed directly
+The Kubernetes API server caches a Vault client that:
 
-### Security Controls
+- Authenticates using AppRole (role ID + secret ID from filesystem).
+- Automatically renews tokens before expiration.
+- Re-authenticates if tokens exceed max TTL.
+
+### AppRole authentication
+
+Vault Kubernetes KMS uses AppRole authentication through the Vault AppRole
+plugin:
+
+- **The role ID** is a non-sensitive identifier that you can configure with a
+  flag or environment variable.
+- **The secret ID** is a sensitive credential read by the Kubernetes plugin from
+  a filesystem path.
+
+## Security controls
 
 | Control | Implementation |
 |---------|----------------|
 | **Socket Permissions** | Unix socket created with umask `0007` restricting access to owner+group |
-| **TLS to Vault** | TLS enabled by default; custom CA certificate supported; SNI configurable |
+| **TLS to Vault** | TLS enabled by default with custom CA certificate support and configurable SNI  |
 | **Authentication** | AppRole with secret ID from protected filesystem path |
-| **Token Management** | Automatic renewal; re-authentication on token expiry |
-| **Non-root Container** | Runs as UID 65532 (nonroot) in container image; UBI image for OpenShift |
+| **Token Management** | Automatic renewal with re-authentication on token expiry |
+| **Non-root Container** | Runs as UID 65532 (nonroot) in a container or OpenShift UBI image |
 | **Input Validation** | Strict validation of key IDs, configuration values, and Vault responses |
 | **Enterprise Validation** | Verifies Vault Enterprise license (not Community Edition) |
-| **Logging** | Structured JSON logging with configurable levels; sensitive data redacted |
+| **Logging** | Structured JSON logging with configurable levels and sensitive data redacted |
 | **Metrics** | Prometheus endpoint with gRPC latency histograms |
 
 ---
 
 ## Threat Model
 
-The design for Vault Kubernetes KMS addresses the following categories of threats:
+The design for Vault Kubernetes KMS addresses the following security threats:
 
 | Threat | Description | Key mitigations |
 |--------|-------------|------------------|
 | **Unauthorized socket access** | A process on the control plane node attempting to communicate with Vault Kubernetes KMS without authorization. | Restricted socket permissions, non-root execution, and limited node access. |
 | **Network interception** | An attacker intercepting traffic between Vault Kubernetes KMS and Vault. | TLS enabled by default with support for custom CA certificates and SNI configuration. |
 | **Key exposure** | Exposing the Transit encryption key (KEK) | The KEK never leaves Vault. Vault Kubernetes KMS only handles ciphertext and plaintext, never raw key material. |
-| **Data replay or rollback** | An attacker substitutes older encrypted data. | Key version tracking allows Kubernetes to detect stale encryption and trigger re-encryption. |
-| **Vault unavailability** | Vault becoming unavailable | Kubernetes KMS v2 means the API server caches the DEK seed locally, reducing dependency on Vault during normal operation. |
-| **Information leakage** | Sensitive data appearing in logs or metrics. | Structured logging with sensitive value redaction. Metrics expose only latency and counters. |
+| **Data replay or rollback** | An attacker substitutes older encrypted data. | Key version tracking lets Kubernetes detect stale encryption and trigger re-encryption. |
+| **Vault unavailability** | Vault becomes unavailable | Kubernetes KMS v2 means the API server caches the DEK seed locally, reducing dependency on Vault during normal operation. |
+| **Information leakage** | Sensitive data appears in logs or metrics. | Structured logging with sensitive value redaction. Metrics expose only latency and counters. |
 | **Resource exhaustion** | Excessive requests overwhelm Vault Kubernetes KMS. | Client-side caching of connection-handling, and configurable request timeouts. |
 
 ---
 
-## Threat Model Exclusions
+## Threat model exclusions
 
 Vault Kubernetes KMS does not protect against threats that require infrastructure-level controls.
-Kubernetes cluster administrators must ensure that access to their control plane nodes are properly secured, 
-and Vault cluster administrators must ensure that Vault cluster access is protected with appropriate policy.
+
+- **Kubernetes cluster administrators** must properly secure access to their control
+  plane nodes.
+- **Vault cluster administrators** must protect Vault cluster access with
+  appropriate policies.
 
 ---
 
-## Recommendations For Secure Use
+## Best practices for secure use
 
-### Deployment
+### Deployment recommendations
 
 1. **Deploy as a Static Pod**: Run Vault Kubernetes KMS as a static Pod on each control plane node.
 
 2. **Use Minimal Container Image**: Deploy using the distroless or UBI-based images that contain only the process binary and necessary certificates.
 
-3. **Restrict Node Access**: Limit SSH and console access to control plane nodes to authorized administrators only.
+1. **Restrict node access**. Limit SSH and console access to your control plane
+   nodes to authorized administrators only.
 
-4. **Network Policies**: Apply Kubernetes network policies to restrict the `vault-kube-kms` process's egress to only the Vault endpoints.
+1. **Enforce network policies**. Apply Kubernetes network policies to restrict
+   the `vault-kube-kms` process so it can only access Vault endpoints.
 
-### Vault Configuration
+### Vault configuration recommendations
 
-1. **Use Minimum Required Policy**: Grant only the permissions required:
+1. **Use the minimum required policy**. Grant the smallest set of required
+   permissions required to the Transit plugin. For example:
    ```hcl
    path "transit/encrypt/kms-key" {
      capabilities = ["create", "update"]
@@ -207,15 +222,19 @@ and Vault cluster administrators must ensure that Vault cluster access is protec
    }
    ```
 
-2. **Use AES-256-GCM96**: Configure the Transit key with the `aes256-gcm96` type for authenticated encryption.
+1. **Use AES-256-GCM96 encryption**. Configure your Transit key with the
+   `aes256-gcm96` type for authenticated encryption.
 
-3. **Enable Key Versioning**: Do not disable key versioning; it is required for proper key rotation support.
+1. **Enable key versioning**. You must enable key versioning for proper key
+   rotation support.
 
-4. **Rotate Keys Regularly**: Rotate the Transit key at least every 90 days per Kubernetes project recommendations.
+1. **Rotate your key encyption keys regularly**. Rotate the Transit key at least
+   every 90 days per Kubernetes project recommendations.
 
-5. **Use Vault Namespaces**: In multi-tenant environments, isolate the KMS Transit key in a dedicated Vault namespace.
+1. **Use Vault namespaces**. In multi-tenant environments, we recommend
+   isolating the KMS Transit key in a dedicated Vault namespace.
 
-### Authentication
+### AppRole authentication recommendations
 
 1. **Protect Secret ID**: Mount the AppRole Secret ID as a file with restricted permissions (mode 0400).
 
