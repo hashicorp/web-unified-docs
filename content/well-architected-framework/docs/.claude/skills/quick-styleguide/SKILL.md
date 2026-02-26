@@ -54,7 +54,7 @@ Validates against **all critical HashiCorp style guide rules** using an optimize
 7. **Linear Flow** [AUTO-FIX: Partial] - No "above"/"below"
 8. **No Unnecessary Words** [AUTO-FIX: Yes] - "to" not "in order to"
 9. **Simplest Words** [AUTO-FIX: Yes] - "lets" not "enables"
-10. **No Foreign/Jargon** [AUTO-FIX: Yes] - Avoid "via", "etc."
+10. **No Latin Phrases/Foreign Words** [AUTO-FIX: Yes] - Avoid "ad-hoc", "via", "etc.", "e.g.", "i.e."
 11. **No Adjacent Elements** [MANUAL] - Space similar elements
 12. **Content Variety** [MANUAL] - Mix elements
 
@@ -117,13 +117,24 @@ Line 42: Avoid "will"
   ❌ "The output will show..."
   ✅ "The output shows..."
 
+❌ LATIN PHRASES [CRITICAL] [AUTO-FIX]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Line 56: Latin phrase "ad-hoc" detected
+  ❌ "System administrators make ad-hoc modifications..."
+  ✅ "System administrators make improvised modifications..."
+  Alternative: "unplanned", "informal", "spontaneous"
+
+Line 78: Latin abbreviation "e.g." detected
+  ❌ "Configure resources, e.g., databases and networks"
+  ✅ "Configure resources, such as databases and networks"
+
 ✅ PASSES (10 checks)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ✓ No unofficial abbreviations
 ✓ Proper use of "we"
 ✓ Addresses reader as "you"
 ✓ No unnecessary words
-✓ No foreign/jargon words
+✓ No Latin phrases or foreign words
 ✓ No adjacent elements
 ✓ Proper content flow
 ✓ Active voice
@@ -148,7 +159,8 @@ The quick-styleguide can automatically fix:
 
 ✅ **Present tense** - "will show" → "shows"
 ✅ **Word choice** - "enables/allows" → "lets"
-✅ **Foreign words** - "via" → "using", "etc." → "and other"
+✅ **Latin phrases** - "ad-hoc" → "improvised", "via" → "using", "etc." → "and other"
+✅ **Common Latin terms** - "e.g." → "for example", "i.e." → "specifically"
 ✅ **Unnecessary phrases** - "in order to" → "to"
 ✅ **Abbreviations** - "TF" → "Terraform"
 ✅ **Simple passive** - "is managed by" → "manages"
@@ -237,10 +249,32 @@ The quick-reference includes optimized patterns for:
 - `in order to` → `to`
 - `above`, `below` → specific references
 
+**Latin phrases to avoid (CRITICAL):**
+- `ad-hoc` → `improvised`, `unplanned`, `informal`, `spontaneous`
+- `via` → `using`, `through`, `with`
+- `etc.` → `and other {entities}`
+- `e.g.` → `for example`, `such as`
+- `i.e.` → `specifically`, `that is`
+- `ergo` → `therefore`, `as a result`
+- `vice versa` → `conversely`, `the reverse`
+- `per se` → `by itself`, `inherently`
+- `status quo` → `current state`, `existing situation`
+- `de facto` → `in practice`, `actual`
+- `quid pro quo` → `exchange`, `trade-off`
+- `bona fide` → `genuine`, `authentic`
+- `carte blanche` → `full permission`, `complete authority`
+- `in lieu of` → `instead of`, `in place of`
+- `pro forma` → `as a formality`, `routine`
+- `a priori` → `beforehand`, `in advance`
+- `post hoc` → `after the fact`, `retrospective`
+- `sine qua non` → `essential`, "required"
+- `verbatim` → `word for word`, `exactly`
+- `modus operandi` → `method`, `approach`, `way of working`
+
 **Regex patterns available for:**
 - Passive voice constructions
 - Unofficial abbreviations
-- Foreign loan words
+- Latin phrases and foreign loan words
 - Unnecessary phrases
 - Directional references
 
