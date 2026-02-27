@@ -5,13 +5,14 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { describe, expect, test } from 'vitest'
+import { describe, expect, test, vi } from 'vitest'
 
 // Third-party
 import grayMatter from 'gray-matter'
 // Local
 import { includePartials } from './include-partials.mjs'
 import { vol } from 'memfs'
+import { PARTIALS_ALIAS } from './remark-include-partials.mjs'
 
 describe('Include Partials', () => {
 	const fixtureDir = path.join(
@@ -110,6 +111,31 @@ This is the end of the test file.
 		)
 
 		expect(transformed).toContain(fixtureContent)
+	})
+
+	describe(`${PARTIALS_ALIAS.GLOBAL} alias`, () => {
+		const globalPartialName = 'global-test-partial.mdx'
+		const globalPartialContent = 'Hey this is some partial content!'
+
+		test(`resolves global alias to global partials directory`, async () => {
+			const mdxString = `# Hello\n\n@include "${PARTIALS_ALIAS.GLOBAL}/${globalPartialName}"\n`
+			vi.spyOn(fs, 'readFileSync').mockImplementationOnce(() => {
+				return globalPartialContent
+			})
+			const transformed = await includePartials(mdxString, partialsDir)
+
+			expect(transformed).toContain(globalPartialContent)
+
+			vi.restoreAllMocks()
+		})
+
+		test('throws an error when the aliased partial does not exist', async () => {
+			const mdxString = `# Hello\n\n@include "${PARTIALS_ALIAS.GLOBAL}/nonexistent.mdx"\n`
+
+			await expect(includePartials(mdxString, partialsDir)).rejects.toThrow(
+				'@include file not found',
+			)
+		})
 	})
 
 	test('global partials includes content from ./content/global/partials', async () => {

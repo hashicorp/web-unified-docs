@@ -3,11 +3,24 @@
  * SPDX-License-Identifier: MPL-2.0
  */
 
-import fs from 'node:fs'
+import fs from 'fs'
 import path from 'node:path'
 
 import remark from 'remark'
 import flatMap from 'unist-util-flatmap'
+
+/**
+ * Magic configurable string tokens used to rewrite include paths to partials dirs.
+ *
+ * `@include`ing a path beginning with one of these will cause the loader to
+ * attempt to resolve the path using the corresponding partials directory.
+ *
+ * @example `@include "{{global}}/my-partial.mdx"` will cause the loader to try
+ * to attempt to resolve the path using the top-level global partials directory.
+ */
+export const PARTIALS_ALIAS = {
+	GLOBAL: '@global',
+}
 
 /**
  * A remark plugin that allows including "partials" into other files.
@@ -21,6 +34,10 @@ import flatMap from 'unist-util-flatmap'
  * - The path must include the file extension.
  * - There must be no other content or whitespace around the `@include`.
  * Example: `@include 'path/to/file.mdx'` or `@include "path/to/file.mdx"`
+ *
+ * You can also use the `{{global}}` alias to explicitly target the
+ * top-level partials directory (`content/global/partials`).
+ * Example: `@include "{{global}}/my-partial.mdx"`
  */
 export function remarkIncludePartialsPlugin({ partialsDir, filePath }) {
 	// If the partialsDir has not been provided, throw an error.
@@ -65,14 +82,21 @@ export function remarkIncludePartialsPlugin({ partialsDir, filePath }) {
 			 * should block our build from proceeding.
 			 */
 
-			// Try top-level partials first
-			let includePath = path.join(topLevelPartialsDir, includeMatch[1])
-			let includeContents
+			// Strip the {{global}} alias prefix, then resolve using the
+			// standard global-then-local lookup.
+			const [, rawPath] = includeMatch
+			const globalPrefix = PARTIALS_ALIAS.GLOBAL + '/'
+			const resolvedPath = rawPath.startsWith(globalPrefix)
+				? rawPath.slice(globalPrefix.length)
+				: rawPath
+			let includePath, includeContents
+
+			// Try top-level partials first, then fall back to product/version-specific partialsDir
+			includePath = path.join(topLevelPartialsDir, resolvedPath)
 			try {
 				includeContents = fs.readFileSync(includePath, 'utf8')
 			} catch {
-				// If not found, try product/version-specific partialsDir
-				includePath = path.join(partialsDir, includeMatch[1])
+				includePath = path.join(partialsDir, resolvedPath)
 				try {
 					includeContents = fs.readFileSync(includePath, 'utf8')
 				} catch {
