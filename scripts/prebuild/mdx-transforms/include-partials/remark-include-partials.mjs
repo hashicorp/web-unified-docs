@@ -82,28 +82,31 @@ export function remarkIncludePartialsPlugin({ partialsDir, filePath }) {
 			 * should block our build from proceeding.
 			 */
 
-			// Strip the {{global}} alias prefix, then resolve using the
-			// standard global-then-local lookup.
 			const [, rawPath] = includeMatch
 			const globalPrefix = PARTIALS_ALIAS.GLOBAL + '/'
-			const resolvedPath = rawPath.startsWith(globalPrefix)
-				? rawPath.slice(globalPrefix.length)
-				: rawPath
+			const isGlobalAlias = rawPath.startsWith(globalPrefix)
+			const resolvedPath = isGlobalAlias ? rawPath.slice(globalPrefix.length) : rawPath
 			let includePath, includeContents
 
-			// Try top-level partials first, then fall back to product/version-specific partialsDir
-			includePath = path.join(topLevelPartialsDir, resolvedPath)
+			if(isGlobalAlias){
+				// {{global}} paths resolve only against topLevelPartialsDir — no local fallback,
+				// to prevent name conflicts with product-specific partials.
+				includePath = path.join(topLevelPartialsDir, resolvedPath)
+			} else {
+				includePath = path.join(partialsDir, resolvedPath)
+			}
+
+			console.log({
+				isGlobalAlias,
+				resolvedPath,
+				includePath,
+			})
 			try {
 				includeContents = fs.readFileSync(includePath, 'utf8')
 			} catch {
-				includePath = path.join(partialsDir, resolvedPath)
-				try {
-					includeContents = fs.readFileSync(includePath, 'utf8')
-				} catch {
-					throw new Error(
-						`@include file not found. In "${filePath}", on line ${node.position.start.line}, column ${node.position.start.column}, please ensure the referenced file "${includePath}" exists.`,
-					)
-				}
+				throw new Error(
+					`@include file not found. In "${filePath}", on line ${node.position.start.line}, column ${node.position.start.column}, please ensure the referenced file "${includePath}" exists.`,
+				)
 			}
 
 			/**
