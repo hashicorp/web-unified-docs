@@ -10,6 +10,7 @@
  *   node scripts/add-date-metadata.mjs ./content/terraform/v1.5.x/docs/cli/cloud/migrating.mdx
  *   node scripts/add-date-metadata.mjs ./content/terraform/v1.5.x/
  *   node scripts/add-date-metadata.mjs "./content/terraform/v1.15.x (alpha)/docs/cli/index.mdx"
+ *   node scripts/add-date-metadata.mjs ./content/terraform/v1.5.x/ 2024-01-01
  */
 
 import fs from 'node:fs'
@@ -19,8 +20,9 @@ import { addDateMetadata } from './utils/get-dates-and-metadata.mjs'
 /**
  * Process a single file or all MDX files in a directory
  * @param {string} target - File or directory path
+ * @param {string|null} defaultDate - Default date to use in precommit script
  */
-function processTarget(target) {
+function processTarget(target, defaultDate) {
 	const targetPath = path.resolve(target)
 
 	if (!fs.existsSync(targetPath)) {
@@ -33,7 +35,7 @@ function processTarget(target) {
 	if (stats.isFile()) {
 		// Process single file
 		if (path.extname(targetPath) === '.mdx') {
-			addDateMetadata(targetPath)
+			addDateMetadata(targetPath, defaultDate)
 		} else {
 			console.error(`❌ Error: File must have .mdx extension: ${targetPath}`)
 			process.exit(1)
@@ -61,7 +63,7 @@ function processTarget(target) {
 		console.log(`Found ${mdxFiles.length} MDX file(s) to process\n`)
 
 		mdxFiles.forEach((filePath) => {
-			addDateMetadata(filePath)
+			addDateMetadata(filePath, defaultDate)
 		})
 
 		console.log(`\n✅ Processed ${mdxFiles.length} file(s)`)
@@ -80,4 +82,5 @@ if (args.length === 0) {
 }
 
 const target = args[0]
-processTarget(target)
+const defaultDate = args[1] || null
+processTarget(target, defaultDate)
