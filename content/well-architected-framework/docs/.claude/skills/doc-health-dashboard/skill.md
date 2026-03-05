@@ -1,8 +1,7 @@
 ---
 name: doc-health-dashboard
 description: Generate comprehensive health dashboard showing structure, content, style, and link health with visual indicators
-argument-hint: <file-paths> [--format text|json]
-disable-model-invocation: true
+argument-hint: <file-paths|--pillar pillar-name> [--format text|json]
 ---
 
 # Document Health Dashboard Skill
@@ -22,9 +21,20 @@ Provides an at-a-glance view of document health across multiple quality dimensio
 # Multiple documents comparison
 /doc-health-dashboard docs/section/*.mdx
 
-# JSON output for automation
-/doc-health-dashboard docs/document.mdx --format json
+# Entire pillar analysis
+/doc-health-dashboard --pillar secure-systems
+/doc-health-dashboard --pillar optimize-systems
+
+# Pillar analysis with JSON output
+/doc-health-dashboard --pillar define-and-automate-processes --format json
 ```
+
+## Available Pillars
+
+- `secure-systems` - Security, compliance, data protection, secrets management
+- `define-and-automate-processes` - Infrastructure as code, CI/CD, testing, deployment
+- `design-resilient-systems` - High availability, disaster recovery, scaling, monitoring
+- `optimize-systems` - Cost management, performance tuning, resource selection
 
 ## What It Checks
 
@@ -391,8 +401,14 @@ Ready for: Full review with /review-doc
 # Check all documents in section
 /doc-health-dashboard docs/section/*.mdx --format json > health-report.json
 
-# Identify documents needing attention
-# (filter JSON for status: "needs_attention" or "critical")
+# Check entire pillar
+/doc-health-dashboard --pillar secure-systems --format json > secure-health.json
+
+# Check all pillars (run separately for each)
+/doc-health-dashboard --pillar secure-systems
+/doc-health-dashboard --pillar define-and-automate-processes
+/doc-health-dashboard --pillar design-resilient-systems
+/doc-health-dashboard --pillar optimize-systems
 ```
 
 **Before committing:**
@@ -418,6 +434,7 @@ Use `/doc-health-dashboard` when:
 - ✅ Monitoring documentation health over time
 - ✅ Identifying critical issues before detailed review
 - ✅ Comparing health across multiple documents
+- ✅ Checking entire pillar health at once
 - ✅ Reporting documentation status to stakeholders
 
 Don't use when:
