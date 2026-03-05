@@ -2,7 +2,6 @@
 name: seo-optimize
 description: SEO optimization for meta descriptions, titles, headings, and links. Complete source of truth for SEO and AI/LLM optimization criteria.
 argument-hint: <file-paths> [--fix]
-disable-model-invocation: true
 ---
 
 # SEO Optimize Skill
