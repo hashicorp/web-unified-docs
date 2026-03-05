@@ -3,11 +3,24 @@
  * SPDX-License-Identifier: MPL-2.0
  */
 
-import fs from 'node:fs'
+import fs from 'fs'
 import path from 'node:path'
 
 import remark from 'remark'
 import flatMap from 'unist-util-flatmap'
+
+/**
+ * Magic configurable string tokens used to rewrite include paths to partials dirs.
+ *
+ * `@include`ing a path beginning with one of these will cause the loader to
+ * attempt to resolve the path using the corresponding partials directory.
+ *
+ * @example `@include "{{global}}/my-partial.mdx"` will cause the loader to try
+ * to attempt to resolve the path using the top-level global partials directory.
+ */
+export const PARTIALS_ALIAS = {
+	GLOBAL: '@global',
+}
 
 /**
  * A remark plugin that allows including "partials" into other files.
@@ -21,6 +34,10 @@ import flatMap from 'unist-util-flatmap'
  * - The path must include the file extension.
  * - There must be no other content or whitespace around the `@include`.
  * Example: `@include 'path/to/file.mdx'` or `@include "path/to/file.mdx"`
+ *
+ * You can also use the `{{global}}` alias to explicitly target the
+ * top-level partials directory (`content/global/partials`).
+ * Example: `@include "{{global}}/my-partial.mdx"`
  */
 export function remarkIncludePartialsPlugin({ partialsDir, filePath }) {
 	// If the partialsDir has not been provided, throw an error.
@@ -29,6 +46,14 @@ export function remarkIncludePartialsPlugin({ partialsDir, filePath }) {
 			'Error in remarkIncludePartials: The partialsDir argument is required. Please provide the path to the partials directory.',
 		)
 	}
+
+	// Define the top-level partials directory
+	const topLevelPartialsDir = path.resolve(
+		process.cwd(),
+		'content',
+		'global',
+		'partials',
+	)
 	// Set up and return the transformer function to be used as a remark plugin
 	return function transformer(tree) {
 		/**
@@ -57,8 +82,25 @@ export function remarkIncludePartialsPlugin({ partialsDir, filePath }) {
 			 * should block our build from proceeding.
 			 */
 
-			const includePath = path.join(partialsDir, includeMatch[1])
-			let includeContents
+			const [, rawPath] = includeMatch
+			const globalPrefix = PARTIALS_ALIAS.GLOBAL + '/'
+			const isGlobalAlias = rawPath.startsWith(globalPrefix)
+			const resolvedPath = isGlobalAlias ? rawPath.slice(globalPrefix.length) : rawPath
+			let includePath, includeContents
+
+			if(isGlobalAlias){
+				// {{global}} paths resolve only against topLevelPartialsDir — no local fallback,
+				// to prevent name conflicts with product-specific partials.
+				includePath = path.join(topLevelPartialsDir, resolvedPath)
+			} else {
+				includePath = path.join(partialsDir, resolvedPath)
+			}
+
+			console.log({
+				isGlobalAlias,
+				resolvedPath,
+				includePath,
+			})
 			try {
 				includeContents = fs.readFileSync(includePath, 'utf8')
 			} catch {
