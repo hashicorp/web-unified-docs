@@ -6,6 +6,7 @@
 import fs from 'fs'
 import path from 'path'
 import { execSync } from 'child_process'
+import { getFilesUsingPartial } from './utils/get-files-using-partial.mjs'
 
 const OUTPUT_FILE = './changedFiles.json'
 
@@ -54,8 +55,27 @@ function buildChangedFiles() {
 			// Copy: treat the destination as added
 			added.push(parts[2])
 		}
+	}
 
-		// TODO: If a partial file was changed, then we need to add all files that include that partial to the modified list.
+	// TODO: Remove only used for testing
+	// modified.push("content/vault/global/partials/alerts/compliance-letters.mdx")
+	// modified.push("content/terraform/v1.14.x/docs/intro/index.mdx")
+	// modified.push("content/vault/v1.21.x/img/gui/databases/pluginConfig.png")
+	// modified.push("content/nomad/v1.11.x/redirects.jsonc")
+
+	// For any changed partial files, add all files that include them to the modified list.
+	const changedPartials = [...added, ...modified].filter((f) => {
+		return f.includes('/partials/')
+	})
+
+	for (const partial of changedPartials) {
+		const filesUsingPartial = getFilesUsingPartial(partial)
+		for (const file of filesUsingPartial) {
+			// If the file isn't already in added or modified, add it to modified.
+			if (!modified.includes(file) && !added.includes(file)) {
+				modified.push(file)
+			}
+		}
 	}
 
 	return { added, modified, removed }
@@ -65,19 +85,21 @@ export async function getChangedFiles() {
 	try {
 		const changedFiles = buildChangedFiles()
 
-		const output = { changedFiles }
-
 		const outputPath = path.join(process.cwd(), OUTPUT_FILE)
-		await fs.promises.writeFile(outputPath, JSON.stringify(output, null, 2), {
-			encoding: 'utf-8',
-		})
+		await fs.promises.writeFile(
+			outputPath,
+			JSON.stringify(changedFiles, null, 2),
+			{
+				encoding: 'utf-8',
+			},
+		)
 
 		console.log(`Changed files written to ${outputPath}`)
 		console.log(
 			`  Added: ${changedFiles.added.length}, Modified: ${changedFiles.modified.length}, Removed: ${changedFiles.removed.length}`,
 		)
 
-		return output
+		return changedFiles
 	} catch (error) {
 		console.error('Error getting changed files:', error)
 		process.exit(1)
