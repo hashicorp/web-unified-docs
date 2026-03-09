@@ -114,7 +114,8 @@ export const findFileWithMetadata = async (
 
 		const fetchResult = await fetchFile(newFilePathJoined)
 		if (!fetchResult.ok) {
-			return fetchResult
+			// Rewrap only the error string or else we expand the OK type downstream
+			return Err(fetchResult.value as string)
 		}
 
 		const res = fetchResult.value
@@ -144,7 +145,8 @@ export const getAssetData = async (
 	try {
 		const fetchResult = await fetchFile(newFilePath)
 		if (!fetchResult.ok) {
-			return fetchResult
+			// Rewrap only the error string or else we expand the OK type downstream
+			return Err(fetchResult.value as string)
 		}
 
 		const res = fetchResult.value
