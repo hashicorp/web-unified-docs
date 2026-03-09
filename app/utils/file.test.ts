@@ -11,7 +11,7 @@ vi.hoisted(() => {
 	process.env.VERCEL_URL = 'local-vercel-CDN'
 })
 
-import { fetchFile, FileType } from './file'
+import { fetchFile, FileType, ServedFrom } from './file'
 
 vi.mock('fs/promises', () => {
 	return {
@@ -60,7 +60,10 @@ describe('fetchFile — INCREMENTAL_BUILD not set', () => {
 			FileType.Content,
 		)
 
-		expect(result).toEqual({ ok: true, value: mockResponse })
+		expect(result).toEqual({
+			ok: true,
+			value: { response: mockResponse, servedFrom: ServedFrom.CurrentBuild },
+		})
 		expect(fetch).toHaveBeenCalledOnce()
 		expect(fetch).toHaveBeenCalledWith(
 			'https://local-vercel-CDN/content/vault/v1.21.x/docs/index.mdx',
@@ -123,7 +126,10 @@ describe('fetchFile — INCREMENTAL_BUILD=true', () => {
 			FileType.Content,
 		)
 
-		expect(result).toEqual({ ok: true, value: mockResponse })
+		expect(result).toEqual({
+			ok: true,
+			value: { response: mockResponse, servedFrom: ServedFrom.CurrentBuild },
+		})
 		expect(fetch).toHaveBeenCalledOnce()
 		expect(fetch).toHaveBeenCalledWith(
 			'https://local-vercel-CDN/content/vault/v1.21.x/docs/index.mdx',
@@ -147,7 +153,10 @@ describe('fetchFile — INCREMENTAL_BUILD=true', () => {
 			FileType.Content,
 		)
 
-		expect(result).toEqual({ ok: true, value: mockResponse })
+		expect(result).toEqual({
+			ok: true,
+			value: { response: mockResponse, servedFrom: ServedFrom.CurrentBuild },
+		})
 		expect(fetch).toHaveBeenCalledOnce()
 		expect(fetch).toHaveBeenCalledWith(
 			'https://local-vercel-CDN/content/vault/v1.21.x/docs/index.mdx',
@@ -167,7 +176,10 @@ describe('fetchFile — INCREMENTAL_BUILD=true', () => {
 			FileType.Content,
 		)
 
-		expect(result).toEqual({ ok: true, value: mockResponse })
+		expect(result).toEqual({
+			ok: true,
+			value: { response: mockResponse, servedFrom: ServedFrom.Production },
+		})
 		expect(fetch).toHaveBeenCalledOnce()
 		expect(fetch).toHaveBeenCalledWith(
 			'https://prod-vercel-CDN/content/vault/v1.21.x/docs/index.mdx',
@@ -191,7 +203,10 @@ describe('fetchFile — INCREMENTAL_BUILD=true', () => {
 			FileType.Asset,
 		)
 
-		expect(result).toEqual({ ok: true, value: mockResponse })
+		expect(result).toEqual({
+			ok: true,
+			value: { response: mockResponse, servedFrom: ServedFrom.CurrentBuild },
+		})
 		expect(fetch).toHaveBeenCalledWith(
 			'https://local-vercel-CDN/asset/vault/v1.21.x/img/foo.png',
 			expect.objectContaining({ cache: 'no-cache' }),
@@ -210,7 +225,10 @@ describe('fetchFile — INCREMENTAL_BUILD=true', () => {
 			FileType.Asset,
 		)
 
-		expect(result).toEqual({ ok: true, value: mockResponse })
+		expect(result).toEqual({
+			ok: true,
+			value: { response: mockResponse, servedFrom: ServedFrom.Production },
+		})
 		expect(fetch).toHaveBeenCalledWith(
 			'https://prod-vercel-CDN/asset/vault/v1.21.x/img/foo.png',
 			expect.objectContaining({ cache: 'no-cache' }),

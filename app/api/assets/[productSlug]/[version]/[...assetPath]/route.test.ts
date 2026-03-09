@@ -5,7 +5,7 @@
 
 import { expect, test, vi } from 'vitest'
 import { GET } from './route'
-import { getAssetData } from '#utils/file'
+import { getAssetData, ServedFrom } from '#utils/file'
 import { getProductVersionMetadata } from '#utils/contentVersions'
 import { mockRequest } from '#utils/mockRequest'
 
@@ -67,18 +67,19 @@ test('Return 200 and an image for a valid `product`, `version`, and `assetPath`'
 
 	const assetData: {
 		ok: true
-		value: { buffer: Buffer; contentType: string }
+		value: { buffer: Buffer; contentType: string; servedFrom: ServedFrom }
 	} = {
 		ok: true,
 		value: {
 			buffer: Buffer.from(new ArrayBuffer(0)),
 			contentType: 'image/png',
+			servedFrom: ServedFrom.CurrentBuild,
 		},
 	}
 
 	vi.mocked(getProductVersionMetadata).mockReturnValueOnce({
 		ok: true,
-		value: 'v1.1.x',
+		value: { version: 'v1.1.x', releaseStage: 'stable', isLatest: true },
 	})
 
 	vi.mocked(getAssetData).mockResolvedValueOnce(assetData)
@@ -88,6 +89,7 @@ test('Return 200 and an image for a valid `product`, `version`, and `assetPath`'
 	expect(response.status).toBe(200)
 	const buffer = Buffer.from(await response.arrayBuffer())
 	expect(buffer).toStrictEqual(assetData.value.buffer)
+	expect(response.headers.get('Served-From')).toBe(ServedFrom.CurrentBuild)
 })
 
 test('Return 200 and an image for the `version` being `latest` and the rest of the data valid', async () => {
@@ -99,18 +101,19 @@ test('Return 200 and an image for the `version` being `latest` and the rest of t
 
 	const assetData: {
 		ok: true
-		value: { buffer: Buffer; contentType: string }
+		value: { buffer: Buffer; contentType: string; servedFrom: ServedFrom }
 	} = {
 		ok: true,
 		value: {
 			buffer: Buffer.from(new ArrayBuffer(0)),
 			contentType: 'image/png',
+			servedFrom: ServedFrom.CurrentBuild,
 		},
 	}
 
 	vi.mocked(getProductVersionMetadata).mockReturnValueOnce({
 		ok: true,
-		value: 'v1.1.x',
+		value: { version: 'v1.1.x', releaseStage: 'stable', isLatest: true },
 	})
 
 	vi.mocked(getAssetData).mockResolvedValueOnce(assetData)
@@ -120,4 +123,5 @@ test('Return 200 and an image for the `version` being `latest` and the rest of t
 	expect(response.status).toBe(200)
 	const buffer = Buffer.from(await response.arrayBuffer())
 	expect(buffer).toStrictEqual(assetData.value.buffer)
+	expect(response.headers.get('Served-From')).toBe(ServedFrom.CurrentBuild)
 })

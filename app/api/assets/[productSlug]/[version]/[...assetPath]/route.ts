@@ -54,6 +54,7 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 	return new Response(assetData.value.buffer, {
 		headers: {
 			'Content-Type': assetData.value.contentType,
+			'Served-From': assetData.value.servedFrom,
 		},
 	})
 }

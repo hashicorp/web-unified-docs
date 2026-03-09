@@ -17,6 +17,11 @@ export enum FileType {
 	Asset = 'asset',
 }
 
+export enum ServedFrom {
+	CurrentBuild = 'current build',
+	Production = 'production',
+}
+
 const SELF_URL = process.env.VERCEL_URL
 	? `https://${process.env.VERCEL_URL}`
 	: `http://localhost:${process.env.UNIFIED_DOCS_PORT}`
@@ -39,7 +44,7 @@ const headers = process.env.VERCEL_URL
 export const fetchFile = async (
 	filePath: string,
 	fileType: FileType,
-): Promise<Result<Response, string>> => {
+): Promise<Result<{ response: Response; servedFrom: ServedFrom }, string>> => {
 	if (process.env.INCREMENTAL_BUILD === 'true') {
 		let changedFiles: {
 			added: string[]
@@ -53,6 +58,7 @@ export const fetchFile = async (
 			changedFiles = JSON.parse(changedFilesData)
 		} catch {
 			// TODO: This right now just downstreams to a 404, should this be a 500?
+			// Overall this should be a very rare case, as prebuild fail if it cannot generate the changedFiles.json successfully
 			return Err('Failed to read changedFiles.json for incremental build')
 		}
 
@@ -65,7 +71,6 @@ export const fetchFile = async (
 		}
 
 		if (changedFiles.removed.includes(localFilePath)) {
-			console.warn(`File ${filePath} removed in current build`)
 			return Err('File removed in current build')
 		}
 
@@ -73,33 +78,41 @@ export const fetchFile = async (
 			changedFiles.added.includes(localFilePath) ||
 			changedFiles.modified.includes(localFilePath)
 		) {
-			console.warn(`File ${filePath} added or modified in current build`)
-			const res = await fetch(`${SELF_URL}/${filePath}`, {
+			const response = await fetch(`${SELF_URL}/${filePath}`, {
 				cache: 'no-cache',
 				headers,
 			})
-			return Ok(res)
+			return Ok({
+				response,
+				servedFrom: ServedFrom.CurrentBuild,
+			})
 		}
 
 		// File not changed in this build — load from production
 		console.warn(
 			`File ${filePath} not changed in current build, loading from production`,
 		)
-		const res = await fetch(
+		const response = await fetch(
 			`${process.env.UNIFIED_DOCS_PROD_URL}/${filePath}`,
 			{
 				cache: 'no-cache',
 				headers,
 			},
 		)
-		return Ok(res)
+		return Ok({
+			response,
+			servedFrom: ServedFrom.Production,
+		})
 	}
 
-	const res = await fetch(`${SELF_URL}/${filePath}`, {
+	const response = await fetch(`${SELF_URL}/${filePath}`, {
 		cache: 'no-cache',
 		headers,
 	})
-	return Ok(res)
+	return Ok({
+		response,
+		servedFrom: ServedFrom.CurrentBuild,
+	})
 }
 
 /**
@@ -136,14 +149,17 @@ export const findFileWithMetadata = async (
 			return Err(fetchResult.value as string)
 		}
 
-		const res = fetchResult.value
-		if (!res.ok) {
+		const { response, servedFrom } = fetchResult.value
+		if (!response.ok) {
 			return Err(`Failed to read file at path: ${newFilePathJoined}`)
 		}
 
-		const text = await res.text()
+		const text = await response.text()
 
-		return Ok(text)
+		return Ok({
+			text,
+			servedFrom,
+		})
 	} catch {
 		return Err(
 			`Failed to read file at path: ${newFilePathJoined}, with options: ${JSON.stringify(options, null, 2)}`,
@@ -167,16 +183,17 @@ export const getAssetData = async (
 			return Err(fetchResult.value as string)
 		}
 
-		const res = fetchResult.value
-		if (!res.ok) {
+		const { response, servedFrom } = fetchResult.value
+		if (!response.ok) {
 			return Err(`Failed to read asset at path: ${newFilePath}`)
 		}
 
-		const buffer = await res.arrayBuffer()
+		const buffer = await response.arrayBuffer()
 
 		return Ok({
 			buffer: Buffer.from(buffer),
-			contentType: res.headers.get('Content-Type'),
+			contentType: response.headers.get('Content-Type'),
+			servedFrom,
 		})
 	} catch {
 		return Err(`Failed to read asset at path: ${newFilePath}`)
