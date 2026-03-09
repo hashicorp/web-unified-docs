@@ -1,5 +1,5 @@
 /**
- * Copyright IBM Corp. 2025
+ * Copyright IBM Corp. 2024, 2026
  * SPDX-License-Identifier: BUSL-1.1
  */
 
@@ -50,7 +50,9 @@ export async function buildMdxTransforms(
 	const allFiles = await listFiles(targetDir)
 	// Filter for `.mdx` files
 	const mdxFiles = allFiles.filter((filePath) => {
-		return path.extname(filePath) === '.mdx'
+		const relativePath = path.relative(targetDir, filePath)
+		const repoSlug = relativePath.split('/')[0]
+		return path.extname(filePath) === '.mdx' && repoSlug in PRODUCT_CONFIG
 	})
 	/**
 	 * Map over each `.mdx` file, and prepare the file for transformation

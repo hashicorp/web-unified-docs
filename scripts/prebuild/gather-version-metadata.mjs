@@ -1,5 +1,5 @@
 /**
- * Copyright IBM Corp. 2025
+ * Copyright IBM Corp. 2024, 2026
  * SPDX-License-Identifier: BUSL-1.1
  */
 
@@ -28,7 +28,10 @@ export async function gatherVersionMetadata(contentDir) {
 	 * Some products, such as Terraform, have multiple content source repos.
 	 */
 	const products = fs.readdirSync(contentDir).filter((file) => {
-		return fs.statSync(path.join(contentDir, file)).isDirectory()
+		return (
+			Object.keys(PRODUCT_CONFIG).includes(file) &&
+			fs.statSync(path.join(contentDir, file)).isDirectory()
+		)
 	})
 
 	// Iterate over each product directory, adding to `versionMetadata`
