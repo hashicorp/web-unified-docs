@@ -21,6 +21,70 @@ const headers = process.env.VERCEL_URL
 	: new Headers()
 
 /**
+ * Fetches a file by path, applying incremental build logic when
+ * `INCREMENTAL_BUILD` is set to `'true'`:
+ *   - Files in `removed`            → returns Err
+ *   - Files in `added` or `modified` → fetches from SELF_URL (current build)
+ *   - Files not in changedFiles.json  → fetches from UNIFIED_DOCS_PROD_URL
+ * Otherwise falls back to the standard SELF_URL fetch.
+ */
+const fetchFile = async (
+	filePath: string,
+): Promise<Result<Response, string>> => {
+	if (process.env.INCREMENTAL_BUILD === 'true') {
+		let changedFiles: {
+			added: string[]
+			modified: string[]
+			removed: string[]
+		}
+
+		try {
+			const changedFilesContent = await readFile('./changedFiles.json', 'utf-8')
+			changedFiles = JSON.parse(changedFilesContent).changedFiles
+		} catch {
+			console.warn('Failed to read changedFiles.json for incremental build')
+			return Err('Failed to read changedFiles.json for incremental build')
+		}
+
+		if (changedFiles.removed.includes(filePath)) {
+			console.warn(`File ${filePath} removed in current build`)
+			return Err('File removed in current build')
+		}
+
+		if (
+			changedFiles.added.includes(filePath) ||
+			changedFiles.modified.includes(filePath)
+		) {
+			console.warn(`File ${filePath} added or modified in current build`)
+			const res = await fetch(`${SELF_URL}/${filePath}`, {
+				cache: 'no-cache',
+				headers,
+			})
+			return Ok(res)
+		}
+
+		// File not changed in this build — load from production
+		console.warn(
+			`File ${filePath} not changed in current build, loading from production`,
+		)
+		const res = await fetch(
+			`${process.env.UNIFIED_DOCS_PROD_URL}/${filePath}`,
+			{
+				cache: 'no-cache',
+				headers,
+			},
+		)
+		return Ok(res)
+	}
+
+	const res = await fetch(`${SELF_URL}/${filePath}`, {
+		cache: 'no-cache',
+		headers,
+	})
+	return Ok(res)
+}
+
+/**
  * NOTE: we currently read files by fetching them from the `public` folder
  * via the Vercel CDN.
  *
@@ -37,20 +101,25 @@ export const findFileWithMetadata = async (
 		versionMetaData.releaseStage,
 	)
 
+	const newFilePathJoined = newFilePath.join('/')
+å
 	try {
+		// TODO: when we do inc builds locally we want to load all files from the content dir and transform them on demand if needed
 		if (options.loadFromContentDir) {
+			// Special join needed here to load the file from the local file system
 			const filePathString = joinFilePath(newFilePath)
 			const fileContent = await readFile(filePathString, 'utf-8')
 			return Ok(fileContent)
 		}
 
-		const res = await fetch(`${SELF_URL}/${newFilePath.join('/')}`, {
-			cache: 'no-cache',
-			headers,
-		})
+		const fetchResult = await fetchFile(newFilePathJoined)
+		if (!fetchResult.ok) {
+			return fetchResult
+		}
 
+		const res = fetchResult.value
 		if (!res.ok) {
-			return Err(`Failed to read file at path: ${newFilePath.join('/')}`)
+			return Err(`Failed to read file at path: ${newFilePathJoined}`)
 		}
 
 		const text = await res.text()
@@ -58,7 +127,7 @@ export const findFileWithMetadata = async (
 		return Ok(text)
 	} catch {
 		return Err(
-			`Failed to read file at path: ${newFilePath.join('/')}, with options: ${JSON.stringify(options, null, 2)}`,
+			`Failed to read file at path: ${newFilePathJoined}, with options: ${JSON.stringify(options, null, 2)}`,
 		)
 	}
 }
@@ -66,28 +135,21 @@ export const findFileWithMetadata = async (
 export const getAssetData = async (
 	filePath: string[],
 	versionMetaData: ProductVersionMetadata,
-): Promise<
-	Result<
-		{
-			buffer: Buffer
-			contentType: string
-		},
-		string
-	>
-> => {
+) => {
 	const newFilePath = ifNeededAddReleaseStageToPath(
 		filePath,
 		versionMetaData.releaseStage,
-	)
+	).join('/')
 
 	try {
-		const res = await fetch(`${SELF_URL}/${newFilePath.join('/')}`, {
-			cache: 'no-cache',
-			headers,
-		})
+		const fetchResult = await fetchFile(newFilePath)
+		if (!fetchResult.ok) {
+			return fetchResult
+		}
 
+		const res = fetchResult.value
 		if (!res.ok) {
-			return Err(`Failed to read asset at path: ${newFilePath.join('/')}`)
+			return Err(`Failed to read asset at path: ${newFilePath}`)
 		}
 
 		const buffer = await res.arrayBuffer()
@@ -97,7 +159,7 @@ export const getAssetData = async (
 			contentType: res.headers.get('Content-Type'),
 		})
 	} catch {
-		return Err(`Failed to read asset at path: ${newFilePath.join('/')}`)
+		return Err(`Failed to read asset at path: ${newFilePath}`)
 	}
 }
 
