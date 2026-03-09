@@ -47,7 +47,7 @@ export async function buildMdxTransforms(
 	versionMetadata,
 	changedFiles = null,
 ) {
-	let filesToCheck = changedFiles
+	const filesToCheck = changedFiles
 		? [...changedFiles.added, ...changedFiles.modified]
 		: await listFiles(targetDir)
 

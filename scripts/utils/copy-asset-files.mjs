@@ -24,7 +24,7 @@ export function isFileAnImage(file) {
  * Copy all asset files (images) from the source to the destination directory.
  */
 export async function copyAssetFiles(sourceDir, destDir, changedFiles = null) {
-	let filesToCheck = changedFiles
+	const filesToCheck = changedFiles
 		? [...changedFiles.added, ...changedFiles.modified]
 		: await listFiles(sourceDir)
 

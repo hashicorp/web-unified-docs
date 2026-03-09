@@ -18,7 +18,7 @@ export async function copyRedirectFiles(
 	destDir,
 	changedFiles = null,
 ) {
-	let filesToCheck = changedFiles
+	const filesToCheck = changedFiles
 		? [...changedFiles.added, ...changedFiles.modified]
 		: await listFiles(sourceDir)
 
