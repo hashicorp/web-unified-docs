@@ -141,7 +141,7 @@ describe('GET /[productSlug]/[version]/[...section]', () => {
 
 		// Fake some data returned from disk
 		vi.mocked(findFileWithMetadata).mockImplementation(async () => {
-			return Ok(invalidJson)
+			return Ok({ text: invalidJson, servedFrom: 'current build' })
 		})
 
 		// Fake some invalid markdown
@@ -184,7 +184,10 @@ describe('GET /[productSlug]/[version]/[...section]', () => {
 
 		// Fake content returned from the filesystem
 		vi.mocked(findFileWithMetadata).mockImplementation(async () => {
-			return Ok(JSON.stringify(sectionData))
+			return Ok({
+				text: JSON.stringify(sectionData),
+				servedFrom: 'current build',
+			})
 		})
 
 		// Force `parseJson()` to return our test data

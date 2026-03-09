@@ -46,7 +46,7 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 		return new Response('Not found', { status: 404 })
 	}
 
-	const redirects = parseJsonc(readFileResult.value)
+	const redirects = parseJsonc(readFileResult.value.text)
 	if (!redirects.ok) {
 		console.error(
 			`API Error: Product, ${productSlug}, redirects.jsonc could not be parsed`,
@@ -57,7 +57,8 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 
 	return new Response(JSON.stringify(redirects.value), {
 		headers: {
-			'content-type': 'application/json',
+			'Content-Type': 'application/json',
+			'Served-From': readFileResult.value.servedFrom,
 		},
 	})
 }
