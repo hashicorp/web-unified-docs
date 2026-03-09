@@ -58,10 +58,13 @@ function buildChangedFiles() {
 	}
 
 	// TODO: Remove only used for testing
-	// modified.push("content/vault/global/partials/alerts/compliance-letters.mdx")
-	// modified.push("content/terraform/v1.14.x/docs/intro/index.mdx")
-	// modified.push("content/vault/v1.21.x/img/gui/databases/pluginConfig.png")
-	// modified.push("content/nomad/v1.11.x/redirects.jsonc")
+	modified.push('content/vault/global/partials/alerts/compliance-letters.mdx')
+	modified.push('content/terraform/v1.14.x/docs/intro/index.mdx')
+
+	modified.push('content/vault/v1.21.x/img/gui/databases/pluginConfig.png')
+	// Used in content/vault/v1.20.x/content/docs/secrets/databases/index.mdx
+
+	modified.push('content/nomad/v1.11.x/redirects.jsonc')
 
 	// For any changed partial files, add all files that include them to the modified list.
 	const changedPartials = [...added, ...modified].filter((f) => {
