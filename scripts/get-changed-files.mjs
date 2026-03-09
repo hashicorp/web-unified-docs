@@ -14,14 +14,10 @@ const OUTPUT_FILE = './changedFiles.json'
  * then returns the list of changed files grouped by status.
  */
 function buildChangedFiles() {
-	// Find the common ancestor commit between HEAD and origin/main
-	const mergeBase = execSync('git merge-base HEAD origin/main', {
-		encoding: 'utf-8',
-	}).trim()
-
-	// Get the diff between the merge base and HEAD
+	// Get the diff between the merge base and HEAD using three-dot syntax,
+	// which automatically finds the common ancestor with origin/main.
 	// --name-status outputs lines like: A\tpath/to/file or R100\told/path\tnew/path
-	const diffOutput = execSync(`git diff --name-status ${mergeBase} HEAD`, {
+	const diffOutput = execSync('git diff --name-status origin/main...HEAD', {
 		encoding: 'utf-8',
 	}).trim()
 
