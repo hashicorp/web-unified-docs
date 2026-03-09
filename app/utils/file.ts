@@ -11,6 +11,11 @@ import { parse as jsoncParse } from 'jsonc-parser'
 import { Err, Ok, Result } from './result'
 import type { ProductVersionMetadata } from './contentVersions'
 
+const enum FileType {
+	Content = 'content',
+	Asset = 'asset',
+}
+
 const SELF_URL = process.env.VERCEL_URL
 	? `https://${process.env.VERCEL_URL}`
 	: `http://localhost:${process.env.UNIFIED_DOCS_PORT}`
@@ -31,6 +36,7 @@ const headers = process.env.VERCEL_URL
  */
 const fetchFile = async (
 	filePath: string,
+	fileType: FileType,
 ): Promise<Result<Response, string>> => {
 	if (process.env.INCREMENTAL_BUILD === 'true') {
 		let changedFiles: {
@@ -47,14 +53,22 @@ const fetchFile = async (
 			return Err('Failed to read changedFiles.json for incremental build')
 		}
 
-		if (changedFiles.removed.includes(filePath)) {
+		// For asset files, we need to adjust the file path to match the paths in changedFiles.json, which are based on the content directory structure. Specifically, we replace the first segment 'asset' with 'content' to align with how assets are referenced in the content directory versus how they are stored in the public directory for fetching.
+		let localFilePath = filePath
+		if (fileType === FileType.Asset) {
+			const parts = filePath.split('/')
+			parts[0] = 'content'
+			localFilePath = parts.join('/')
+		}
+
+		if (changedFiles.removed.includes(localFilePath)) {
 			console.warn(`File ${filePath} removed in current build`)
 			return Err('File removed in current build')
 		}
 
 		if (
-			changedFiles.added.includes(filePath) ||
-			changedFiles.modified.includes(filePath)
+			changedFiles.added.includes(localFilePath) ||
+			changedFiles.modified.includes(localFilePath)
 		) {
 			console.warn(`File ${filePath} added or modified in current build`)
 			const res = await fetch(`${SELF_URL}/${filePath}`, {
@@ -113,7 +127,7 @@ export const findFileWithMetadata = async (
 			return Ok(fileContent)
 		}
 
-		const fetchResult = await fetchFile(newFilePathJoined)
+		const fetchResult = await fetchFile(newFilePathJoined, FileType.Content)
 		if (!fetchResult.ok) {
 			// Rewrap the error string or else we expand the OK type downstream
 			return Err(fetchResult.value as string)
@@ -144,7 +158,7 @@ export const getAssetData = async (
 	).join('/')
 
 	try {
-		const fetchResult = await fetchFile(newFilePath)
+		const fetchResult = await fetchFile(newFilePath, FileType.Asset)
 		if (!fetchResult.ok) {
 			// Rewrap the error string or else we expand the OK type downstream
 			return Err(fetchResult.value as string)
