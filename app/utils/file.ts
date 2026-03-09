@@ -102,7 +102,7 @@ export const findFileWithMetadata = async (
 	)
 
 	const newFilePathJoined = newFilePath.join('/')
-å
+
 	try {
 		// TODO: when we do inc builds locally we want to load all files from the content dir and transform them on demand if needed
 		if (options.loadFromContentDir) {

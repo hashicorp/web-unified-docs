@@ -82,10 +82,15 @@ async function main() {
 		`Running prebuild script with args: ${JSON.stringify(args, null, 2)}\n`,
 	)
 
-	console.log(`Incremental build: ${process.env.INCREMENTAL_BUILD === 'true' ? 'true' : 'false'}\n`)
+	console.log(
+		`Incremental build: ${process.env.INCREMENTAL_BUILD === 'true' ? 'true' : 'false'}\n`,
+	)
 
+	let changedFiles = null
 	if (process.env.INCREMENTAL_BUILD === 'true') {
-		await getChangedFiles()
+		changedFiles = await getChangedFiles()
+
+		console.log(`Changed files: ${JSON.stringify(changedFiles, null, 2)}\n`)
 	}
 
 	// Gather and write out version metadata
