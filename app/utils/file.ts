@@ -2,7 +2,7 @@
  * Copyright IBM Corp. 2024, 2026
  * SPDX-License-Identifier: BUSL-1.1
  */
-import { promises as fs } from 'fs'
+import { readFile } from 'fs/promises'
 import path from 'path'
 
 import grayMatter from 'gray-matter'
@@ -44,7 +44,7 @@ const fetchFile = async (
 
 		try {
 			const changedFilesPath = path.join(process.cwd(), 'changedFiles.json')
-			const changedFilesData = await fs.readFile(changedFilesPath, 'utf8')
+			const changedFilesData = await readFile(changedFilesPath, 'utf8')
 			changedFiles = JSON.parse(changedFilesData)
 		} catch {
 			console.warn('Failed to read changedFiles.json for incremental build')
