@@ -13,7 +13,7 @@ const OUTPUT_FILE = './changedFiles.json'
  * Finds the merge base between the current branch and origin/main,
  * then returns the list of changed files grouped by status.
  */
-function getChangedFiles() {
+function buildChangedFiles() {
 	// Find the common ancestor commit between HEAD and origin/main
 	const mergeBase = execSync('git merge-base HEAD origin/main', {
 		encoding: 'utf-8',
@@ -58,23 +58,25 @@ function getChangedFiles() {
 	return { added, modified, removed }
 }
 
-async function main() {
-	const changedFiles = getChangedFiles()
+export async function getChangedFiles() {
+	try {
+		const changedFiles = buildChangedFiles()
 
-	const output = { changedFiles }
+		const output = { changedFiles }
 
-	const outputPath = path.join(process.cwd(), OUTPUT_FILE)
-	await fs.promises.writeFile(outputPath, JSON.stringify(output, null, 2), {
-		encoding: 'utf-8',
-	})
+		const outputPath = path.join(process.cwd(), OUTPUT_FILE)
+		await fs.promises.writeFile(outputPath, JSON.stringify(output, null, 2), {
+			encoding: 'utf-8',
+		})
 
-	console.log(`Changed files written to ${outputPath}`)
-	console.log(
-		`  Added: ${changedFiles.added.length}, Modified: ${changedFiles.modified.length}, Removed: ${changedFiles.removed.length}`,
-	)
+		console.log(`Changed files written to ${outputPath}`)
+		console.log(
+			`  Added: ${changedFiles.added.length}, Modified: ${changedFiles.modified.length}, Removed: ${changedFiles.removed.length}`,
+		)
+
+		return output
+	} catch (error) {
+		console.error('Error getting changed files:', error)
+		process.exit(1)
+	}
 }
-
-main().catch((err) => {
-	console.error(err)
-	process.exit(1)
-})

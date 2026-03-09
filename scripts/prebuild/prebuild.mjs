@@ -13,6 +13,7 @@ import { buildAlgoliaRecords } from '../algolia/build-algolia-records.mjs'
 import { copyNavDataFiles } from '#scriptUtils/copy-nav-data-files.mjs'
 import { copyRedirectFiles } from '#scriptUtils/copy-redirect-files.mjs'
 import { copyAllAssetFiles } from '#scriptUtils/copy-asset-files.mjs'
+import { getChangedFiles } from '../get-changed-files.mjs'
 
 const NUM_OF_MICROSEC_IN_NANOSEC = BigInt('1000')
 
@@ -80,6 +81,12 @@ async function main() {
 	console.log(
 		`Running prebuild script with args: ${JSON.stringify(args, null, 2)}\n`,
 	)
+
+	console.log(`Incremental build: ${process.env.INCREMENTAL_BUILD === 'true' ? 'true' : 'false'}\n`)
+
+	if (process.env.INCREMENTAL_BUILD === 'true') {
+		await getChangedFiles()
+	}
 
 	// Gather and write out version metadata
 	const versionMetadata = await gatherVersionMetadata(CONTENT_DIR)
