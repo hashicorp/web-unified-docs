@@ -157,7 +157,7 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 
 		// Fake the return of some invalid markdown from the filesystem
 		vi.mocked(findFileWithMetadata).mockReturnValue(
-			Promise.resolve(Ok(`[[test]`)),
+			Promise.resolve(Ok({ text: `[[test]`, servedFrom: 'current build' })),
 		)
 
 		// Fake some invalid markdown
@@ -197,7 +197,9 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 
 		// Fake content returned from the filesystem
 		vi.mocked(findFileWithMetadata).mockReturnValue(
-			Promise.resolve(Ok(markdownSource)),
+			Promise.resolve(
+				Ok({ text: markdownSource, servedFrom: 'current build' }),
+			),
 		)
 
 		// Mock markdown parser returning valid content
@@ -242,7 +244,9 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 
 		// Fake content returned from the filesystem
 		vi.mocked(findFileWithMetadata).mockReturnValue(
-			Promise.resolve(Ok(markdownSource)),
+			Promise.resolve(
+				Ok({ text: markdownSource, servedFrom: 'current build' }),
+			),
 		)
 
 		// Mock markdown parser returning valid content
@@ -280,7 +284,11 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 		// First attempt fails, second succeeds (testing index.mdx path)
 		vi.mocked(findFileWithMetadata)
 			.mockReturnValueOnce(Promise.resolve(Err('File not found')))
-			.mockReturnValueOnce(Promise.resolve(Ok(markdownSource)))
+			.mockReturnValueOnce(
+				Promise.resolve(
+					Ok({ text: markdownSource, servedFrom: 'current build' }),
+				),
+			)
 
 		vi.mocked(parseMarkdownFrontMatter).mockReturnValue(
 			Ok({ markdownSource, metadata: {} }),

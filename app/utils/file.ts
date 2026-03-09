@@ -140,7 +140,7 @@ export const findFileWithMetadata = async (
 			// Special join needed here to load the file from the local file system
 			const filePathString = joinFilePath(newFilePath)
 			const fileContent = await readFile(filePathString, 'utf-8')
-			return Ok(fileContent)
+			return Ok({ text: fileContent, servedFrom: ServedFrom.CurrentBuild })
 		}
 
 		const fetchResult = await fetchFile(newFilePathJoined, FileType.Content)

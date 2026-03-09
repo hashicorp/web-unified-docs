@@ -60,7 +60,10 @@ test("Return 404 if not redirect DOESN'T exists for `latest` on `productSlug`", 
 test('Return 200 and parse the jsonc into json if valid for UNVERSIONED product', async () => {
 	const readFileSpy = vi.spyOn(utilsFileModule, 'findFileWithMetadata')
 	readFileSpy.mockImplementation(() => {
-		return Promise.resolve({ ok: true, value: jsoncFixtureBefore })
+		return Promise.resolve({
+			ok: true,
+			value: { text: jsoncFixtureBefore, servedFrom: 'current build' },
+		})
 	})
 
 	const productSlug = 'terraform-docs-common'
@@ -74,7 +77,10 @@ test('Return 200 and parse the jsonc into json if valid for UNVERSIONED product'
 test('Return 200 and parse the jsonc into json if valid for VERSIONED product', async () => {
 	const readFileSpy = vi.spyOn(utilsFileModule, 'findFileWithMetadata')
 	readFileSpy.mockImplementation(() => {
-		return Promise.resolve({ ok: true, value: jsoncFixtureBefore })
+		return Promise.resolve({
+			ok: true,
+			value: { text: jsoncFixtureBefore, servedFrom: 'current build' },
+		})
 	})
 
 	const contentVersionsSpy = vi.spyOn(
