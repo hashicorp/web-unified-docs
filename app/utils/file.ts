@@ -40,7 +40,7 @@ const fetchFile = async (
 
 		try {
 			const changedFilesContent = await readFile('./changedFiles.json', 'utf-8')
-			changedFiles = JSON.parse(changedFilesContent).changedFiles
+			changedFiles = JSON.parse(changedFilesContent)
 		} catch {
 			console.warn('Failed to read changedFiles.json for incremental build')
 			return Err('Failed to read changedFiles.json for incremental build')
@@ -114,7 +114,7 @@ export const findFileWithMetadata = async (
 
 		const fetchResult = await fetchFile(newFilePathJoined)
 		if (!fetchResult.ok) {
-			// Rewrap only the error string or else we expand the OK type downstream
+			// Rewrap the error string or else we expand the OK type downstream
 			return Err(fetchResult.value as string)
 		}
 
@@ -145,7 +145,7 @@ export const getAssetData = async (
 	try {
 		const fetchResult = await fetchFile(newFilePath)
 		if (!fetchResult.ok) {
-			// Rewrap only the error string or else we expand the OK type downstream
+			// Rewrap the error string or else we expand the OK type downstream
 			return Err(fetchResult.value as string)
 		}
 
