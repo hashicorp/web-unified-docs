@@ -6,7 +6,7 @@
 import fs from 'fs'
 import path from 'path'
 import { execSync } from 'child_process'
-import { getFilesUsingPartial } from './utils/get-files-using-partial.mjs'
+import { getFilesUsingPartial } from './get-files-using-partial.mjs'
 
 const OUTPUT_FILE = './changedFiles.json'
 
@@ -65,6 +65,9 @@ function buildChangedFiles() {
 	// Used in content/vault/v1.20.x/content/docs/secrets/databases/index.mdx
 
 	modified.push('content/nomad/v1.11.x/redirects.jsonc')
+	modified.push(
+		'content/terraform-enterprise/1.2.x/data/enterprise-nav-data.json',
+	)
 
 	// For any changed partial files, add all files that include them to the modified list.
 	const changedPartials = [...added, ...modified].filter((f) => {

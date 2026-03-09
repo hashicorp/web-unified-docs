@@ -13,7 +13,7 @@ import { buildAlgoliaRecords } from '../algolia/build-algolia-records.mjs'
 import { copyNavDataFiles } from '#scriptUtils/copy-nav-data-files.mjs'
 import { copyRedirectFiles } from '#scriptUtils/copy-redirect-files.mjs'
 import { copyAssetFiles } from '#scriptUtils/copy-asset-files.mjs'
-import { getChangedFiles } from '../get-changed-files.mjs'
+import { getChangedFiles } from '#scriptUtils/get-changed-files.mjs'
 
 const NUM_OF_MICROSEC_IN_NANOSEC = BigInt('1000')
 
@@ -131,8 +131,12 @@ async function main() {
 	}
 
 	// Copy all `*-nav-data.json` files from `content` to `public/content`, using execSync
-	// TODO: During incremental builds, we should only copy nav data files that were changed, but since we also need to update paths/hrefs in the nav data with versions, it's simpler to just copy all nav data files every time. We can optimize this in the future if needed.
-	await copyNavDataFiles(CONTENT_DIR, CONTENT_DIR_OUT, versionMetadata)
+	await copyNavDataFiles(
+		CONTENT_DIR,
+		CONTENT_DIR_OUT,
+		versionMetadata,
+		incBuild ? changedFiles : null,
+	)
 
 	// Copy `redirects.jsonc` files from `content` to `public/content
 	await copyRedirectFiles(
