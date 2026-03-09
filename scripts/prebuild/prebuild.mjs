@@ -83,7 +83,7 @@ async function main() {
 		`Running prebuild script with args: ${JSON.stringify(args, null, 2)}\n`,
 	)
 
-	console.log(`Incremental build: ${incBuild === 'true' ? 'true' : 'false'}\n`)
+	console.log(`Incremental build: ${incBuild ? 'true' : 'false'}\n`)
 
 	let changedFiles = null
 	if (incBuild) {
@@ -111,8 +111,6 @@ async function main() {
 	)
 	const docsPathsAllVersionsJson = JSON.stringify(docsPathsAllVersions, null, 2)
 	fs.writeFileSync(DOCS_PATHS_ALL_VERSIONS_FILE, docsPathsAllVersionsJson)
-
-	console.log(changedFiles)
 
 	// Apply MDX transforms, writing out transformed MDX files to `public`
 	await buildMdxTransforms(
