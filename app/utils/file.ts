@@ -11,7 +11,8 @@ import { parse as jsoncParse } from 'jsonc-parser'
 import { Err, Ok, Result } from './result'
 import type { ProductVersionMetadata } from './contentVersions'
 
-const enum FileType {
+// Only exported for testing purposes
+export enum FileType {
 	Content = 'content',
 	Asset = 'asset',
 }
@@ -34,7 +35,8 @@ const headers = process.env.VERCEL_URL
  *   - Files not in changedFiles.json  → fetches from UNIFIED_DOCS_PROD_URL
  * Otherwise falls back to the standard SELF_URL fetch.
  */
-const fetchFile = async (
+// Only exported for testing purposes
+export const fetchFile = async (
 	filePath: string,
 	fileType: FileType,
 ): Promise<Result<Response, string>> => {
@@ -50,6 +52,7 @@ const fetchFile = async (
 			const changedFilesData = await readFile(changedFilesPath, 'utf8')
 			changedFiles = JSON.parse(changedFilesData)
 		} catch {
+			// TODO: This right now just downstreams to a 404, should this be a 500?
 			return Err('Failed to read changedFiles.json for incremental build')
 		}
 
