@@ -31,6 +31,9 @@ const headers = process.env.VERCEL_URL
 const fetchFile = async (
 	filePath: string,
 ): Promise<Result<Response, string>> => {
+	console.log(process.env.INCREMENTAL_BUILD, ' Incremental build env variable')
+	console.log(process.env.UNIFIED_DOCS_PROD_URL, ' UNIFIED_DOCS_PROD_URL')
+
 	if (process.env.INCREMENTAL_BUILD === 'true') {
 		let changedFiles: {
 			added: string[]
