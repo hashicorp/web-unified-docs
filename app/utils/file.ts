@@ -2,7 +2,8 @@
  * Copyright IBM Corp. 2024, 2026
  * SPDX-License-Identifier: BUSL-1.1
  */
-import { readFile } from 'node:fs/promises'
+import { promises as fs } from 'fs'
+import path from 'path'
 
 import grayMatter from 'gray-matter'
 import { parse as jsoncParse } from 'jsonc-parser'
@@ -31,8 +32,8 @@ const headers = process.env.VERCEL_URL
 const fetchFile = async (
 	filePath: string,
 ): Promise<Result<Response, string>> => {
-	console.log(process.env.INCREMENTAL_BUILD, ' Incremental build env variable')
-	console.log(process.env.UNIFIED_DOCS_PROD_URL, ' UNIFIED_DOCS_PROD_URL')
+	console.warn(process.env.INCREMENTAL_BUILD, ' Incremental build env variable')
+	console.warn(process.env.UNIFIED_DOCS_PROD_URL, ' UNIFIED_DOCS_PROD_URL')
 
 	if (process.env.INCREMENTAL_BUILD === 'true') {
 		let changedFiles: {
@@ -42,8 +43,9 @@ const fetchFile = async (
 		}
 
 		try {
-			const changedFilesContent = await readFile('./changedFiles.json', 'utf-8')
-			changedFiles = JSON.parse(changedFilesContent)
+			const changedFilesPath = path.join(process.cwd(), 'changedFiles.json')
+			const changedFilesData = await fs.readFile(changedFilesPath, 'utf8')
+			changedFiles = JSON.parse(changedFilesData)
 		} catch {
 			console.warn('Failed to read changedFiles.json for incremental build')
 			return Err('Failed to read changedFiles.json for incremental build')
