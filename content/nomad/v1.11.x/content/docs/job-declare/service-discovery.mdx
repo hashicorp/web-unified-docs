@@ -4,8 +4,8 @@ page_title: Service Discovery
 description: |-
   Nomad service discovery helps you automatically connect workloads. Compare Nomad's built-in service discovery feature to Consul service discovery. Learn about health checks, configuring tags in job specification service blocks, and how to specify tags for canary and blue/green allocations.
 # START AUTO GENERATED METADATA, DO NOT EDIT
-created_at: 2026-03-09T16:40:21.000Z
-last_modified: 2026-03-09T16:40:21.000Z
+created_at: 2026-03-09T12:02:15-05:00
+last_modified: 2026-03-10T21:37:38.000Z
 # END AUTO GENERATED METADATA
 ---
 
@@ -17,158 +17,558 @@ You have two options for service discovery:
   the default option for service discovery.
 - Nomad service discovery, which requires no additional infrastructure.
 
-For a comparison of service discovery options and use cases, refer to the
-[Service discovery in Nomad documentation](/nomad/docs/networking/service-discovery).
+Refer to the [Service discovery in Nomad
+documentation](/nomad/docs/networking/service-discovery) for a comparison of
+Nomad and Consul service discovery options.
 
-## Common configuration
-
-This section highlights configuration that is common to both Consul and Nomad
-service discovery.
-
-### Declare the service discovery provider
+## Consul service discovery
 
 In both options, use the [`service`
 block](/nomad/docs/job-specification/service), with the [`provider` parameter](/nomad/docs/job-specification/service#provider)
-declaring the service discovery option to use. 
-
-<Tabs>
-<Tab heading="Consul" group="consul">
-
-This example uses Consul service discovery. 
-
-```hcl
-job "database" {
-  # ...
-  group "..." {
-    service {
-      name     = "database"
-      port     = "db"
-      provider = "consul"
-      # ...
-    }
-    # ...
-  }
-}
-```
-
-You may omit the `provider` parameter because `consul` is the default service
+declaring the service discovery option to use.  You may omit the `provider` parameter because `consul` is the default service
 discovery provider.
 
-</Tab>
-<Tab heading="Nomad" group="nomad">
+If you are using Consul for service discovery and have not enabled service mesh
+features, then use the DNS to discover services and nodes in the Consul catalog.
 
-This example uses Nomad service discovery.
+`<service_name>.service.<consul_datacenter>.<consul_domain>`
+
+Consul's default datacenter is `dc1` and default domain is `consul`. Those
+values are configurable, so verify those values with your Consul admin.
+
+This example illustrates an application with a web UI that connects to a backend
+service. It assumes you are running Nomad and Consul on AWS EC2 instances. 
+
+https://github.com/hashicorp/demo-consul-101/blob/master/services/dashboard-service/README.md
+
+<details>
+<summary style={{ cursor: "pointer" }}>
+  Expand to review the full <code>countdash.nomad.hcl</code> job specification.
+</summary>
+
+<CodeBlockConfig lineNumbers="true" filename="countdash.nomad.hcl">
 
 ```hcl
-job "database" {
-  # ...
-  group "..." {
-    service {
-      name     = "database"
-      port     = "db"
-      provider = "nomad"
-      # ...
+variable "countdash-api-port" {
+  description = "Countdash API Port"
+  default = 9001
+}
+variable "countdash-web-port" {
+  description = "Countdash web port"
+  default = 9002
+}
+
+job "countdash" {
+
+  group "countdash-api" {
+    count = 1
+
+    network {
+      port "countdash-api" {
+        static = var.countdash-api-port
+      }
+      dns {
+      	servers = ["172.17.0.1"] 
+      }
     }
-    # ...
+
+    service {
+      name = "countdash-api"
+      provider = "consul"
+      port = "countdash-api"      
+      address  = attr.unique.platform.aws.local-ipv4
+      # address = attr.unique.network.ip-address
+
+      check {
+        name     = "Countdash API ready" 
+        type     = "http"
+        path     = "/actuator/health"
+        interval  = "5s"
+				timeout   = "5s"
+
+        check_restart {
+          limit = 0
+        }
+      }      
+    }
+
+    task "countdash-api" {
+      driver = "docker"
+
+      constraint {
+        attribute = "${meta.nodeRole}"
+        operator  = "!="
+        value     = "ingress"
+      }
+
+      meta {
+        service = "countdash-api"
+      }
+
+      config {
+        image = "hashicorpdev/counter-api:v3"
+        ports = ["countdash-api"]
+        mount {
+          type   = "bind"
+          source = "local/application.properties"
+          target = "/application.properties"
+        }
+      }
+      template {
+        data = "server.port=${var.countdash-api-port}"
+        destination = "local/application.properties"
+      }
+      resources {
+        memory = 500
+      }
+    }
+  }
+
+  group "countdash-web" {
+
+    count = 1
+
+    network {
+      port "countdash-web" {
+        static = var.countdash-web-port
+      }
+      dns {
+      	servers = ["172.17.0.1"] 
+      }
+    }
+
+    service {
+      name = "countdash-web"
+      provider = "consul"
+      port = "countdash-web"
+      address  = attr.unique.platform.aws.public-hostname
+      check {
+        name      = "Countdash web ready"
+        type      = "http"
+        path			= "/"
+        interval  = "5s"
+        timeout   = "5s"
+      }
+    }
+
+    task "countdash-web" {
+      driver = "docker"
+      constraint {
+        attribute = "${meta.nodeRole}"
+        operator  = "="
+        value     = "ingress"
+      }
+      meta {
+        service = "countdash-web"
+      }
+      env {
+        COUNTING_SERVICE_URL = "http://countdash-api.service.dc1.consul:${var.countdash-api-port}"
+        PORT="${var.countdash-web-port}"
+      }
+
+      config {
+        image          = "hashicorpdev/counter-dashboard:v3"
+        auth_soft_fail = true
+        ports = ["countdash-web"]
+      }
+    }
   }
 }
 ```
 
+</CodeBlockConfig>
+
+</details>
+
+## Nomad service discovery
+
+This section illustrates Nomad service discovery using parts of the Countdash
+example job specification. The application has a frontend `countdash-web`
+service that communicates with a backend `countdash-api` service.
+
+You may view the complete job spec in the
+[Countdash job specification section](#countdash-job-specification).
+
+### Declare the service provider
+
+Because Consul is the default service provider, you must configure the `service`
+block's [`provider` parameter](/nomad/docs/job-specification/service#provider)
+to use Nomad service discovery.  
+
+<CodeBlockConfig lineNumbers="true" highlight="4" filename="countdash.nomad.hcl">
+
+```hcl
+job "countdash" {
+  group "countdash-api" {
+    service {
+      provider = "nomad"
+    }
+  }
+}
+```
+
+</CodeBlockConfig>
+
+### Configure health checks
+
+Define health checks with the [`check`
+block](/nomad/docs/job-specification/check) to make sure that the service
+catalog only returns healthy instances.
+
+<Tabs>
+
+<Tab heading="countdash-api">
+
+<CodeBlockConfig lineNumbers="true" 
+                 filename="countdash.nomad.hcl"
+                 highlight="7-16" >
+
+```hcl
+job "countdash" {
+  group "countdash-api" {
+    service {
+      name = "countdash-api"
+      provider = "nomad"
+
+      check {
+        name     = "Countdash API ready" 
+        type     = "http"
+        path     = "/actuator/health"
+        interval  = "5s"
+        timeout   = "5s"
+
+        check_restart {
+          limit = 0
+        }
+      }          
+    }
+  }
+}
+```
+
+</CodeBlockConfig>
+
+</Tab>
+<Tab heading="countdash-web">
+
+<CodeBlockConfig lineNumbers="true" 
+                 filename="countdash.nomad.hcl"
+                 highlight="7-13" >
+
+```hcl
+job "countdash" {
+  group "countdash-web" {
+    service {
+      name = "countdash-web"
+      provider = "nomad"
+
+      check {
+        name      = "Countdash web ready"
+        type      = "http"
+        path			= "/"
+        interval  = "5s"
+        timeout   = "5s"
+      }      
+    }
+  }
+}
+```
+
+</CodeBlockConfig>
 </Tab>
 </Tabs>
 
+### Configure access to other services
 
-### Access services
-
-To access other services, use [`template`
-blocks](/nomad/docs/job-specification/template#examples) blocks with a Consul
-Template service function to query the service discovery catalog.
-
- The `template` can then be used as a
-configuration file or have its content loaded as environment variables to
-configure connection information in applications.
-
-<Tabs>
-<Tab heading="Consul" group="consul">
-
-Use the Consul Template [`service`
-function](/consul/docs/reference/consul-template/go#service) to locate services
-in the Consul service discovery catalog.
-
-In this example, the "api" job uses the `service` function to locate a service
-called "database".
-
-```hcl
-job "api" {
-  # ...
-  group "..." {
-    task "api" {
-      template {
-        data = <<EOF
-{{ range service "database" }}
-DB_CONNECTION="host={{ .Address }} port={{ .Port }} user=user password=password dbname=db_name"
-{{ end }}
-EOF
-        destination = "local/env.txt"
-        env         = true
-      }
-    }
-    # ...
-  }
-}
-```
-
-</Tab>
-<Tab heading="Nomad" group="nomad">
-
-https://developer.hashicorp.com/consul/docs/reference/consul-template/go#nomadservice
-
-Use the Consul Template [`nomadService`
+Use [`template`
+blocks](/nomad/docs/job-specification/template#nomad-services) blocks with the
+Consul Template [`nomadService`
 function](/consul/docs/reference/consul-template/go#service) to locate services
 in the Nomad service discovery catalog.
 
-In this example, the "api" job uses the `service` function to locate a service
-called "database".
+The `countdash-web` service needs to communicate with its backend
+`countdash-api` service. The template block code searches for
+`countdash-api` and assigns the result to the `COUNTING_SERVICE_URL` variable.
 
-https://developer.hashicorp.com/nomad/docs/job-specification/template#nomad-services
-
-
+<CodeBlockConfig lineNumbers="true" 
+                 filename="countdash.nomad.hcl"
+                 highlight="4-13" >
 
 ```hcl
-job "api" {
-  # ...
-  group "api" {
-    task "api" {
+job "countdash" {
+  group "countdash-web" {
+    task "countdash-web" {
       template {
-        data = <<EOF
-{{ range nomadService "database" }}
-DB_CONNECTION="host={{ .Address }} port={{ .Port }} user=user password=password dbname=db_name"
+        data = <<EOH
+        BIND_ADDRESS = ":${var.countdash-api-port}"
+{{ range nomadService "countdash-api" }}
+COUNTING_SERVICE_URL = "http://{{ .Address }}:{{ .Port }}"
 {{ end }}
-EOF
+EOH
         destination = "local/env.txt"
         env         = true
       }
     }
-    # ...
   }
 }
 ```
 
+</CodeBlockConfig>
+
+The `template` can then be used as a configuration file or have its content
+loaded as environment variables to configure connection information in
+applications.
+
+### Countdash job specification
+
+<details>
+<summary style={{ cursor: "pointer" }}>
+  Expand to review the full <code>countdash.nomad.hcl</code> job specification.
+</summary>
+
+This job specification deploys a job called "countdash" to a Nomad cluster
+running on AWS. You may review the frontend and backend service code in the
+[HashiCorp `demo-consul-101`
+repository](https://github.com/hashicorp/demo-consul-101/blob/main/services/README.md).
+
+The web application runs on port 9002, so make sure to open that port in your
+AWS security group.
+
+If you want to run the job on your localhost Nomad Linux installation with the
+`sudo nomad agent -dev` command, you need to update each group's
+`service.address` parameter value to `attr.unique.network.ip-address`.
+
+
+<CodeBlockConfig lineNumbers="true" 
+                 filename="countdash.nomad.hcl"
+                 highlight="23,27-38,78,82-88,107-116">
+
+```hcl
+variable "countdash-api-port" {
+  description = "Countdash API Port"
+  default = 9001
+}
+variable "countdash-web-port" {
+  description = "Countdash web port"
+  default = 9002
+}
+
+job "countdash" {
+
+  group "countdash-api" {
+    count = 1
+
+    network {
+      port "countdash-api" {
+        static = var.countdash-api-port
+      }
+    }
+
+    service {
+      name = "countdash-api"
+      provider = "nomad"
+      port = "countdash-api"      
+      address  = attr.unique.platform.aws.local-ipv4
+
+      check {
+        name      = "Countdash API ready" 
+        type      = "http"
+        path      = "/actuator/health"
+        interval  = "5s"
+        timeout   = "5s"
+
+        check_restart {
+          limit = 0
+        }
+      }          
+     }    
+
+    task "countdash-api" {
+      driver = "docker"      
+
+      meta {
+        service = "countdash-api"
+      }
+
+      config {
+        image = "hashicorpdev/counter-api:v3"
+        ports = ["countdash-api"]
+        mount {
+          type   = "bind"
+          source = "local/application.properties"
+          target = "/application.properties"
+        }
+      }
+      template {
+        data = "server.port=${var.countdash-api-port}"
+        destination = "local/application.properties"
+      }
+      resources {
+        memory = 500
+      }
+    }
+  }
+
+  group "countdash-web" {
+
+    count = 1
+
+    network {
+      port "countdash-web" {
+        static = var.countdash-web-port
+      }
+    }
+
+    service {
+      name = "countdash-web"
+      provider = "nomad"
+      port = "countdash-web"
+      address  = attr.unique.platform.aws.public-hostname
+
+      check {
+        name      = "Countdash web ready"
+        type      = "http"
+        path      = "/"
+        interval  = "5s"
+        timeout   = "5s"
+      }
+    }
+
+    task "countdash-web" {
+      driver = "docker"
+
+      meta {
+        service = "countdash-web"
+      }
+      env {
+        PORT="${var.countdash-web-port}"
+      }
+
+      config {
+        image          = "hashicorpdev/counter-dashboard:v3"
+        auth_soft_fail = true
+        ports = ["countdash-web"]
+      }
+
+      template {
+        data = <<EOH
+        BIND_ADDRESS = ":${var.countdash-api-port}"
+{{ range nomadService "countdash-api" }}
+COUNTING_SERVICE_URL = "http://{{ .Address }}:{{ .Port }}"
+{{ end }}
+EOH
+        destination = "local/env.txt"
+        env         = true
+      }
+    }
+  }
+}
+```
+
+</CodeBlockConfig>
+</details>
+
+
+### Find services
+
+<Tabs>
+<Tab heading="CLI">
+
+Use the [`nomad service list` command](/nomad/commands/service/list) to fetch a list of services.
+
+```shell-script
+$ nomad service list
+Service Name   Tags
+countdash-api  []
+countdash-web  []
+```
+
+Use the [`nomad service info` command](/nomad/commands/service/info) to fetch
+details for a specific service. This example retrieves information about the
+`countdash-web` service and formats the output as JSON. Note that the `Address`
+value is the public IPv4 address.
+
+```shell-script
+$ nomad service info -json countdash-web
+[
+    {
+        "Address": "ec2-3-21-113-32.us-east-2.compute.amazonaws.com",
+        "AllocID": "b1d44744-1592-4241-e904-6a4654a40898",
+        "CreateIndex": 849,
+        "Datacenter": "dc1",
+        "ID": "_nomad-task-b1d44744-1592-4241-e904-6a4654a40898-group-countdash-web-countdash-web-countdash-web",
+        "JobID": "countdash",
+        "ModifyIndex": 849,
+        "Namespace": "default",
+        "NodeID": "b348d8ac-1020-1b9a-fbb8-0d4a9dbeb5ca",
+        "Port": 9002,
+        "ServiceName": "countdash-web",
+        "Tags": []
+    }
+]
+```
+
+</Tab>
+<Tab heading="UI">
+
+1. Access the **Jobs** screen.
+1. Click the **countdash** job name. The job details screen opens to the **Overview** tab.
+1. Click the **Services** tab to review a list of services deployed by the job.
+1. Click **countdash-web** to view the public IP address. 
+
 </Tab>
 </Tabs>
 
-### Declare health checks
 
+## Use service tags
 
-### Use service tags
+You may specify `service` blocks multiple times with the same name but for
+different ports. All instances are returned when the service name is queried.
+To restrict results, you may assign [`tags`][] to services to group them. When
+querying the service, you may provide tag values as part of the service name.
 
+This example exposes an application on two ports for different protocols.
 
+```hcl
+job "..." {
+  # ...
+  group "..." {
+    network {
+      port "http" {}
+      port "grpc" {}
+    }
 
+    service {
+      name = "my-app"
+      port = "http"
+      tags = ["http"]
+      # ...
+    }
 
-## Consul service discovery examples
+    service {
+      name = "my-app"
+      port = "grpc"
+      tags = ["grpc"]
+      # ...
+    }
+  }
+}
+```
 
+By assigning different tags, you may reach the port for each protocol with
+the `http.my-app` and `grpc.my-app` service queries.
 
+### Canary deployments
 
-## Nomad service discovery examples
+When using [canary][jobspec_update_canary] or
+[blue/green][jobspec_update_blue_green] upgrades you can specify a different
+set of tags for the canary allocations using the [`canary_tags`][]
+configuration.
 
+During a deployment, the new allocations are registered with the tags set in
+`canary_tags` while non-canaries have the values in `tags`. Having different
+sets of tags allow you to create separate [load balancing][learn_lb] routing
+rules to preview canaries.
 
+-> **Note**: Services are registered with either `tags` or `canary_tags`. In
+  order to share values they must be set in both fields.
