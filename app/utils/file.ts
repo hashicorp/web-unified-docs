@@ -53,16 +53,21 @@ export const fetchFile = async (
 		}
 
 		try {
-			const changedFilesPath = path.join(process.cwd(), 'changedFiles.json')
+			const changedFilesPath = path.join(
+				process.cwd(),
+				'changedContentFiles.json',
+			)
 			const changedFilesData = await readFile(changedFilesPath, 'utf8')
 			changedFiles = JSON.parse(changedFilesData)
 		} catch {
 			// TODO: This right now just downstreams to a 404, should this be a 500?
-			// Overall this should be a very rare case, as prebuild fail if it cannot generate the changedFiles.json successfully
-			return Err('Failed to read changedFiles.json for incremental build')
+			// Overall this should be a very rare case, as prebuild fail if it cannot generate the changedContentFiles.json successfully
+			return Err(
+				'Failed to read changedContentFiles.json for incremental build',
+			)
 		}
 
-		// For asset files, we need to adjust the file path to match the paths in changedFiles.json, which are based on the content directory structure. Specifically, we replace the first segment 'asset' with 'content' to align with how assets are referenced in the content directory versus how they are stored in the public directory for fetching.
+		// For asset files, we need to adjust the file path to match the paths in changedContentFiles.json, which are based on the content directory structure. Specifically, we replace the first segment 'asset' with 'content' to align with how assets are referenced in the content directory versus how they are stored in the public directory for fetching.
 		let localFilePath = filePath
 		if (fileType === FileType.Asset) {
 			const parts = filePath.split('/')

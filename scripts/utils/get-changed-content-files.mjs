@@ -8,13 +8,13 @@ import path from 'path'
 import { execSync } from 'child_process'
 import { getFilesUsingPartial } from './get-files-using-partial.mjs'
 
-const OUTPUT_FILE = './changedFiles.json'
+const OUTPUT_FILE = './changedContentFiles.json'
 
 /**
  * Finds the merge base between the current branch and origin/main,
  * then returns the list of changed files grouped by status.
  */
-function buildChangedFiles() {
+function buildChangedContentFiles() {
 	// In CI (GitHub Actions), BASE_SHA is set from github.event.pull_request.base.sha.
 	let mergeBase = process.env.BASE_SHA
 	if (!mergeBase) {
@@ -24,10 +24,10 @@ function buildChangedFiles() {
 	}
 
 	// Get the diff between the merge base and HEAD.
-	// --name-status outputs lines like: A\tpath/to/file or R100\told/path\tnew/path
-	const diffOutput = execSync(`git diff --name-status ${mergeBase} HEAD`, {
-		encoding: 'utf-8',
-	}).trim()
+	const diffOutput = execSync(
+		`git diff --name-status ${mergeBase} HEAD -- content/`,
+		{ encoding: 'utf-8' },
+	).trim()
 
 	const added = []
 	const modified = []
@@ -57,18 +57,6 @@ function buildChangedFiles() {
 		}
 	}
 
-	// TODO: Remove only used for testing
-	modified.push('content/vault/global/partials/alerts/compliance-letters.mdx')
-	modified.push('content/terraform/v1.14.x/docs/intro/index.mdx')
-
-	modified.push('content/vault/v1.21.x/img/gui/databases/pluginConfig.png')
-	// Used in content/vault/v1.20.x/content/docs/secrets/databases/index.mdx
-
-	modified.push('content/nomad/v1.11.x/redirects.jsonc')
-	modified.push(
-		'content/terraform-enterprise/1.2.x/data/enterprise-nav-data.json',
-	)
-
 	// For any changed partial files, add all files that include them to the modified list.
 	const changedPartials = [...added, ...modified].filter((f) => {
 		return f.includes('/partials/')
@@ -87,9 +75,9 @@ function buildChangedFiles() {
 	return { added, modified, removed }
 }
 
-export async function getChangedFiles() {
+export async function getChangedContentFiles() {
 	try {
-		const changedFiles = buildChangedFiles()
+		const changedFiles = buildChangedContentFiles()
 
 		const outputPath = path.join(process.cwd(), OUTPUT_FILE)
 		await fs.promises.writeFile(
