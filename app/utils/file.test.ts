@@ -187,9 +187,9 @@ describe('fetchFile — INCREMENTAL_BUILD=true', () => {
 		)
 	})
 
-	test('asset file: changed file has first segment replaced with "content" for changedFiles lookup', async () => {
+	test('asset file: changed file has first segment replaced with "content" for changedContentFiles lookup', async () => {
 		// Asset paths come in as e.g. "asset/vault/v1.21.x/img/foo.png"
-		// but changedFiles.json records them under "content/vault/v1.21.x/img/foo.png"
+		// but changedContentFiles.json records them under "content/vault/v1.21.x/img/foo.png"
 		vi.mocked(readFile).mockResolvedValue(
 			JSON.stringify(
 				makeChangedFiles({ modified: ['content/vault/v1.21.x/img/foo.png'] }),
