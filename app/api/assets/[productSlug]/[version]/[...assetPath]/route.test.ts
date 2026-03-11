@@ -89,7 +89,7 @@ test('Return 200 and an image for a valid `product`, `version`, and `assetPath`'
 	expect(response.status).toBe(200)
 	const buffer = Buffer.from(await response.arrayBuffer())
 	expect(buffer).toStrictEqual(assetData.value.buffer)
-	expect(response.headers.get('Served-From')).toBe(ServedFrom.CurrentBuild)
+	expect(response.headers.get('served-from')).toBe(ServedFrom.CurrentBuild)
 })
 
 test('Return 200 and an image for the `version` being `latest` and the rest of the data valid', async () => {
@@ -123,5 +123,5 @@ test('Return 200 and an image for the `version` being `latest` and the rest of t
 	expect(response.status).toBe(200)
 	const buffer = Buffer.from(await response.arrayBuffer())
 	expect(buffer).toStrictEqual(assetData.value.buffer)
-	expect(response.headers.get('Served-From')).toBe(ServedFrom.CurrentBuild)
+	expect(response.headers.get('served-from')).toBe(ServedFrom.CurrentBuild)
 })

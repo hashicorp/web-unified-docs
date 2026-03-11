@@ -58,8 +58,8 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 		JSON.stringify({ result: { navData: navDataResult.value } }),
 		{
 			headers: {
-				'Content-Type': 'application/json',
-				'Served-From': readFileResult.value.servedFrom,
+				'content-type': 'application/json',
+				'served-from': readFileResult.value.servedFrom,
 			},
 		},
 	)
