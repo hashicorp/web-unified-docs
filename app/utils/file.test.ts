@@ -78,7 +78,7 @@ describe('fetchFile — INCREMENTAL_BUILD=true', () => {
 		vi.stubEnv('UNIFIED_DOCS_PROD_URL', 'https://prod-vercel-CDN')
 	})
 
-	test('returns Err when changedFiles.json cannot be read', async () => {
+	test('returns Err when changedContentFiles.json cannot be read', async () => {
 		vi.mocked(readFile).mockRejectedValue(new Error('ENOENT'))
 
 		const result = await fetchFile(
