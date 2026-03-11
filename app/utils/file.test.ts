@@ -88,7 +88,7 @@ describe('fetchFile — INCREMENTAL_BUILD=true', () => {
 
 		expect(result).toEqual({
 			ok: false,
-			value: 'Failed to read changedFiles.json for incremental build',
+			value: 'Failed to read changedContentFiles.json for incremental build',
 		})
 		expect(fetch).not.toHaveBeenCalled()
 	})

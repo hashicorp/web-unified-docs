@@ -13,7 +13,7 @@ import { buildAlgoliaRecords } from '../algolia/build-algolia-records.mjs'
 import { copyNavDataFiles } from '#scriptUtils/copy-nav-data-files.mjs'
 import { copyRedirectFiles } from '#scriptUtils/copy-redirect-files.mjs'
 import { copyAssetFiles } from '#scriptUtils/copy-asset-files.mjs'
-import { getChangedFiles } from '#scriptUtils/get-changed-files.mjs'
+import { getChangedContentFiles } from '#scriptUtils/get-changed-content-files.mjs'
 
 const NUM_OF_MICROSEC_IN_NANOSEC = BigInt('1000')
 
@@ -87,7 +87,7 @@ async function main() {
 
 	let changedFiles = null
 	if (incBuild) {
-		changedFiles = await getChangedFiles()
+		changedFiles = await getChangedContentFiles()
 
 		console.log(`Changed files: ${JSON.stringify(changedFiles, null, 2)}\n`)
 	}
