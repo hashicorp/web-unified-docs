@@ -89,7 +89,9 @@ async function main() {
 	if (incBuild) {
 		changedFiles = await getChangedContentFiles()
 
-		console.log(`Changed files: ${JSON.stringify(changedFiles, null, 2)}\n`)
+		console.log(
+			`Changed content files: ${JSON.stringify(changedFiles, null, 2)}\n`,
+		)
 	}
 
 	// Gather and write out version metadata

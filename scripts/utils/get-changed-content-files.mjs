@@ -88,14 +88,14 @@ export async function getChangedContentFiles() {
 			},
 		)
 
-		console.log(`Changed files written to ${outputPath}`)
+		console.log(`Changed content files written to ${outputPath}`)
 		console.log(
 			`  Added: ${changedFiles.added.length}, Modified: ${changedFiles.modified.length}, Removed: ${changedFiles.removed.length}`,
 		)
 
 		return changedFiles
 	} catch (error) {
-		console.error('Error getting changed files:', error)
+		console.error('Error getting changed content files:', error)
 		process.exit(1)
 	}
 }
