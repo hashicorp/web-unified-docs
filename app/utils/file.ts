@@ -37,7 +37,7 @@ const headers = process.env.VERCEL_URL
  * `INCREMENTAL_BUILD` is set to `'true'`:
  *   - Files in `removed`            → returns Err
  *   - Files in `added` or `modified` → fetches from SELF_URL (current build)
- *   - Files not in changedFiles.json  → fetches from UNIFIED_DOCS_PROD_URL
+ *   - Files not in changedContentFiles.json  → fetches from UNIFIED_DOCS_PROD_URL
  * Otherwise falls back to the standard SELF_URL fetch.
  */
 // Only exported for testing purposes
