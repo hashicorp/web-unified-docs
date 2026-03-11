@@ -53,8 +53,8 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 	// TODO: should we add caching headers?
 	return new Response(assetData.value.buffer, {
 		headers: {
-			'Content-Type': assetData.value.contentType,
-			'Served-From': assetData.value.servedFrom,
+			'content-type': assetData.value.contentType,
+			'served-from': assetData.value.servedFrom,
 		},
 	})
 }

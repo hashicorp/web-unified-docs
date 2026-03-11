@@ -156,8 +156,8 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 		}),
 		{
 			headers: {
-				'Content-Type': 'application/json',
-				'Served-From': servedFrom,
+				'content-type': 'application/json',
+				'served-from': servedFrom,
 			},
 		},
 	)

@@ -57,8 +57,8 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 
 	return new Response(JSON.stringify(redirects.value), {
 		headers: {
-			'Content-Type': 'application/json',
-			'Served-From': readFileResult.value.servedFrom,
+			'content-type': 'application/json',
+			'served-from': readFileResult.value.servedFrom,
 		},
 	})
 }
