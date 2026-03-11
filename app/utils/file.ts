@@ -197,7 +197,7 @@ export const getAssetData = async (
 
 		return Ok({
 			buffer: Buffer.from(buffer),
-			contentType: response.headers.get('Content-Type'),
+			contentType: response.headers.get('content-type'),
 			servedFrom,
 		})
 	} catch {
