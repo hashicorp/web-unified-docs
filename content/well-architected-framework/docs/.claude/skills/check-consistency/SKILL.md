@@ -2,7 +2,6 @@
 name: check-consistency
 description: Ensure terminology, naming, and style consistency across WAF documents. Critical for maintaining unified voice and professional documentation.
 argument-hint: <directory-path> [--fix]
-disable-model-invocation: true
 ---
 
 # Check Consistency Skill
