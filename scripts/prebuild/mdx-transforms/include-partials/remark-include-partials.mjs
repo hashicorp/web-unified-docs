@@ -96,11 +96,6 @@ export function remarkIncludePartialsPlugin({ partialsDir, filePath }) {
 				includePath = path.join(partialsDir, resolvedPath)
 			}
 
-			console.log({
-				isGlobalAlias,
-				resolvedPath,
-				includePath,
-			})
 			try {
 				includeContents = fs.readFileSync(includePath, 'utf8')
 			} catch {
