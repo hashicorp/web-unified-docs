@@ -4,13 +4,13 @@ description: >-
   Learn how to create and manage users in HCP Terraform.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2025-05-27T14:28:51-04:00
-last_modified: 2025-11-04T11:51:26-08:00
+last_modified: 2026-03-12T03:10:34.000Z
 # END AUTO GENERATED METADATA
 ---
 
 [organizations]: /terraform/cloud-docs/users-teams-organizations/organizations
 [teams]: /terraform/cloud-docs/users-teams-organizations/teams
-[invite]: /terraform/cloud-docs/users-teams-organizations/organizations#users
+[invite]: /terraform/cloud-docs/users-teams-organizations/organizations#invite-users-to-the-organization
 [owners]: /terraform/cloud-docs/users-teams-organizations/teams#the-owners-team
 
 # Create and manage users
@@ -56,7 +56,7 @@ To use HCP Terraform or Enterprise, you must create an account through one of th
 - **Invitation Email:** When a user sends you an invitation to join an existing HCP Terraform organization, the email includes a sign-up link. After you create an account, you can automatically join that organization and can begin using HCP Terraform.
 - **Sign-Up Page:** Creating an account requires a username, an email address, and a password. [Sign up on HCP Terraform](https://app.terraform.io/public/signup/account) or if you have a Terraform Enterprise instance, go to `https://<TFE HOSTNAME>/public/signup/account`.
 
-After you create an account, you do not belong to any organizations. To begin using HCP Terraform, you can either [create an organization](/terraform/cloud-docs/users-teams-organizations/organizations#creating-organizations) or ask an organization owner to send you an invitation email to join their organization.
+After you create an account, you do not belong to any organizations. To begin using HCP Terraform, you can either [create an organization](/terraform/cloud-docs/users-teams-organizations/organizations#create-an-organization) or ask an organization owner to send you an invitation email to join their organization.
 
 <!-- BEGIN: TFC:only -->
 
@@ -66,7 +66,7 @@ We recommend logging into HCP Terraform [with your HCP account](#log-in-with-you
 
 ## Joining organizations and teams
 
-An organization owner or a user with [**Manage Membership**](/terraform/cloud-docs/users-teams-organizations/permissions/organization#manage-membership) permissions enabled must [invite you to join their organization](/terraform/cloud-docs/users-teams-organizations/organizations#users) and [add you to one or more teams](/terraform/cloud-docs/users-teams-organizations/teams/manage#manage-team-membership).
+An organization owner or a user with [**Manage Membership**](/terraform/cloud-docs/users-teams-organizations/permissions/organization#manage-membership) permissions enabled must [invite you to join their organization](/terraform/cloud-docs/users-teams-organizations/organizations#invite-users-to-the-organization) and [add you to one or more teams](/terraform/cloud-docs/users-teams-organizations/teams/manage#manage-team-membership).
 
 [permissions-citation]: #intentionally-unused---keep-for-maintainers
 
@@ -136,7 +136,7 @@ Any of these actions requires you to re-authenticate regardless of session timeo
 
 Click **Organizations** in the sidebar to view a list of the organizations where you are a member. If you are on the [owners team][owners], the organization is marked with an **OWNER** badge.
 
-To leave an organization, click the ellipses (**...**) next to the organization and select **Leave organization**. You do not need permission from the owners to leave an organization, but you cannot leave if you are the last member of the owners team. Either add a new owner and then leave, or [delete the organization](/terraform/cloud-docs/users-teams-organizations/organizations#general).
+To leave an organization, click the ellipses (**...**) next to the organization and select **Leave organization**. You do not need permission from the owners to leave an organization, but you cannot leave if you are the last member of the owners team. Either add a new owner and then leave, or [delete the organization](/terraform/cloud-docs/users-teams-organizations/organizations/settings#general).
 
 ### Password
 
