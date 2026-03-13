@@ -2,107 +2,35 @@
 page_title: Security model for Vault Kubernetes KMS 
 description: >-
    Learn about the Vault Kubernetes KMS security model and data process flow.
+
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2026-02-25T13:23:40-08:00
-last_modified: 2026-03-11T04:47:27.000Z
+last_modified: 2026-03-13T00:44:53.000Z
 # END AUTO GENERATED METADATA
 ---
 
 # Security model for Vault Kubernetes KMS
 
-## Overview
-
-The Kubernetes KMS plugin uses Vault as an external key encryption key (KEK)
-provider to securely encrypt Kubernetes secrets and other etcd-stored resources.
-
-## Envelope encryption
-
 The Kubernetes KMS plugin uses the Vault Transit secrets engine plugin as an
-external key encryption key (KEK) provider to provide envelope encryption of
-Kubernetes secrets and other etcd resources.
-
-Envelope encryption is a two-layer encryption scheme that encrypts data with a
-Data Encryption Key (DEK) then encrypts the DEK itself with a second Key
-Encryption Key (KEK). Envelope encryption efficiently encrypts large amounts of
-data while enabling centralized key management and rotation.
-
-## Kubernetes KMS v2 protocol
-
-The Kubernetes KMS v2 protocol defines the interface between a Kubernetes API
-server and an external key management service like Vault. Unlike KMS v1, which
-generated a new DEK for every encryption operation, KMS v2 uses a DEK seed
-approach.
-
-When you use the Kubernetes KMS plugin with Vault:
-
-1. The Kubernetes API server generates a single DEK seed at startup.
-1. The Kubernetes KMS plugin requests an external KEK from the Vault Transit plugin.
-1. The Kubernetes KMS plugin encrypts the seed using the external KEK.
-1. The Kubernetes API server derives single-use DEKs from the seed using an
-   HMAC-based key derivation function (HKDF).
-
-The Kubernetes API server only calls the KMS plugin during startup and when
-it determines that the KEK was rotated in the Transit plugin.
-
-## DEK seeds and KEK management
-
-The Kubernetes API server generates the DEK seed as a cryptographic secret then
-uses HKDF to combine the seed with random data and derive unique DEKs for each
-encryption operation.
-
-The Kubernetes KMS plugin encrypts the seed and stores it alongside the
-encrypted data in etcd. Vault does not store the data or the seed.
-
-Vault manages the KEK with the Transit plugin, which encrypts and decrypts the
-DEK seeds. The KEK never leaves Vault and all cryptographic operations involving
-the KEK happen within the Transit plugin.
-
-## The Transit plugin
-
-The Transit plugin is a secrets engine that provides encryption as a service
-(EaaS) cryptographic operations without exposing the underlying keys. The engine
-supports key rotation, convergent encryption, and multiple key types including
-AES-256-GCM96.
+external KEK provider for envelope encryption. Envelope encryption is a
+two-layer encryption scheme that encrypts data with a data encryption key (DEK)
+then encrypts the DEK itself with a second key encryption key (KEK). Envelope
+encryption efficiently encrypts large amounts of data while enabling centralized
+key management and rotation.
 
 
-## Process flow and component overview
 
-The Kubernetes API server and the KMS plugin use Unix sockets to provide
-process-to-process communication with kernel-enforced access controls based on
-filesystem permissions.
+## Vault Kubernetes KMS overview
 
-@include 'ld-images/k8s-kms/plugin-flow.mdx'
-
-1. The Kubernetes API server sends encrypt/decrypt requests over a Unix domain
-   socket using gRPC.
-   
-1. The Vault Kubernetes KMS process receives the request through the Unix domain
-   socket.
-
-1. Vault Kubernetes KMS connects to your Vault server over TLS and authenticates
-   using AppRole authentication.
-
-1. Vault Kubernetes KMS forwards the encrypt/decrypt request to the Vault server.
-
-1. The Transit plugin on the Vault server performs the requested cryptographic
-   operations with the key encryption key (KEK).
-
-1. The Vault server returns the cryptographic result to the Vault Kubernetes KMS
-   process over TLS.
-
-1. The Vault Kubernetes KMS process forwards the result to the Kubernetes API
-   server.
-
-1. The Kubernetes API server stores the data encryption keys used to encrypt
-   data alongside the data in `etcd`.
-
-
-### Vault Kubernetes KMS (gRPC Server)
-
-The core component that implements the Kubernetes
+Vault Kubernetes KMS is a gRPC server that uses the Kubernetes
 [KMS v2](https://kubernetes.io/docs/tasks/administer-cluster/kms-provider/#implementing-a-kms-plugin)
-interface. The Vault Kubernetes KMS process runs on the Kubernetes control plane as a
-static Pod and:
+protocol to act as an interface between a Kubernetes API server and an external
+key management service like Vault to support envelope encryption of Kubernetes
+secrets and other `etcd` resources. Unlike KMS v1, which generated a new DEK for
+every encryption operation, KMS v2 uses a DEK seed approach.
+
+The Vault Kubernetes KMS process runs on the Kubernetes control plane as a
+static Pod. The process:
 
 - Listens on a Unix domain socket for gRPC requests from the API server.
 - Authenticates to Vault using AppRole authentication.
@@ -110,34 +38,80 @@ static Pod and:
 - Caches the Vault client with automatic token renewal.
 - Reports health status and current KEK version to Kubernetes.
 
-
-### The Unix domain socket
-
-Vault Kubernetes KMS creates a Unix socket at a configurable path  
-(default: `/tmp/vault-kube-kms.socket`) with read/write/execute permissions for  the 
-owner and group (`0770`). The default permissions protect the Kubernets plugin  
-by restricting access to just the process itself (the owner) and other processes  
-running in the same group.  
+To communicate with the Kubernetes API server, Vault Kubernetes KMS creates a
+Unix socket at a configurable path (default: `/tmp/vault-kube-kms.socket`) with
+read/write/execute permissions for the owner and group (`0770`). The default
+permissions protect the Kubernets plugin by restricting access to the process
+itself (the owner) and other processes running in the same group.  
 
 
-### The Vault client
 
-The Kubernetes API server caches a Vault client that:
+## Process flow
 
-- Authenticates using AppRole (role ID + secret ID from filesystem).
-- Automatically renews tokens before expiration.
-- Re-authenticates if tokens exceed max TTL.
+The Vault Kubernetes KMS process runs on the same Kubernetes control plane node
+as the Kubernetes API server and listens on a Unix domain socket for gRPC
+requests. Process-to-process communication uses kernel-enforced access controls
+based on filesystem permissions.
 
 
-### AppRole authentication
+@include 'ld-images/k8s-kms/plugin-flow.mdx'
 
-Vault Kubernetes KMS uses AppRole authentication through the Vault AppRole
-plugin:
 
-- **The role ID** is a non-sensitive identifier that you can configure with a
-  flag or environment variable.
-- **The secret ID** is a sensitive credential read by the Kubernetes plugin from
-  a filesystem path.
+Before startup:
+
+1. The Vault administrator uses the Transit plugin to create the KEK as a named
+   encryption key in Vault and limits access with a Vault policy.
+
+1. The Vault administrator ties authentication (AppRole) to the policy and
+   provides the associated appRole ID and secret ID to the Kubernetes
+   administrator.
+   - **The role ID** is a non-sensitive identifier that you can configure with a
+     flag or environment variable.
+   - **The secret ID** is a sensitive credential stored on the Kubernetes API
+     server and read by Vault Kubernetes KMS from a filesystem path.
+
+1. The Kubernetes administrator uses the Vault server address, appRole ID, and
+   secret ID to configure a Vault client that will authenticate connection to
+   Vault Kubernetes KMS, automatically renew authentication tokens, and handle
+   re-authentication if the token expires.
+
+1. The Kubernetes administrator configures a Unix socket for gRPC communication
+   between the Kubernetes API server and Vault Kubernetes KMS.
+
+On startup:
+
+1. The Kubernetes API server creates and caches the Vault client.
+
+1. The Kubernetes API server generates a single DEK seed and uses the client to
+   request encryption from Vault Kubernetes KMS.
+
+1. Vault Kubernetes KMS creates and caches a Vault client that authenticates to
+   Vault, automatically renew authentication tokens, and handles
+   re-authentication if the token expires.
+
+1. The Vault client connects to the Vault server over TLS and authenticates
+   using the AppRole authentication details provided by the Kubernetes API
+   server.
+
+1. Once authenticated, Vault Kubernetes KMS sends the seed to the Transit plugin
+   for encryption. **The KEK never leaves Vault and all cryptographic operations
+   involving the KEK happen within the Transit plugin**.
+
+1. The Transit plugin returns the encrypted seed to Vault Kubernetes KMS.
+
+1. Vault Kubernetes KMS Reports forwards the encrypted seed to the Kubernetes
+   API server along with health status and the current KEK version.
+
+1. The Kubernetes API server derives unique, single-use DEKs from the seed using
+   random data and an HMAC-based key derivation function (HKDF).
+
+1. The Kubernetes API server stores the data encryption keys alongside the
+   encrypted data in `etcd`. **Vault does not store the data or the seed**.
+
+
+After startup, the Kubernetes API server only connects to Vault Kubernetes KMS
+when it detects a KEK rotation event.
+
 
 
 ## Security controls
