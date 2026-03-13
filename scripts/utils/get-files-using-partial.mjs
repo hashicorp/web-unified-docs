@@ -31,18 +31,35 @@ function walkMdxFiles(dir) {
 }
 
 /**
- * Filters a list of files to those whose content includes any of the given strings.
+ * Escapes regex metacharacters in a string.
+ *
+ * @param {string} value - String to escape
+ * @returns {string} Escaped string safe for use in a RegExp pattern
+ */
+function escapeRegExp(value) {
+	return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/**
+ * Filters a list of files to those whose content matches any of the given patterns.
  *
  * @param {string[]} files - List of file paths to search
- * @param {...string} searchStrings - One or more substrings, matched with OR logic
- * @returns {string[]} Files that contain at least one of the search strings
+ * @param {...(string | RegExp)} searchPatterns - One or more string or regex patterns, matched with OR logic
+ * @returns {string[]} Files that contain at least one of the search patterns
  */
-function filesContaining(files, ...searchStrings) {
+function filesContaining(files, ...searchPatterns) {
 	return files
 		.filter((file) => {
 			const content = fs.readFileSync(file, 'utf-8')
-			return searchStrings.some((s) => {
-				return content.includes(s)
+			return searchPatterns.some((pattern) => {
+				if (pattern instanceof RegExp) {
+					if (pattern.global || pattern.sticky) {
+						pattern.lastIndex = 0
+					}
+					return pattern.test(content)
+				}
+
+				return content.includes(pattern)
 			})
 		})
 		.map((f) => {
@@ -102,10 +119,13 @@ export function getFilesUsingPartial(partialPath) {
 	// between the quotes, not the quotes themselves.
 	if (parts[2] === 'global' && parts[3] === 'partials') {
 		const relPath = parts.slice(4).join('/')
-		const includeSubstring = `global/partials/${relPath}`
 		const allFiles = walkMdxFiles(`content/${product}`)
+		const relPathPattern = escapeRegExp(relPath)
+		const searchPattern = RegExp(
+			`@include\\s+["'](?:\\.\\./)+global/partials/${relPathPattern}["']`,
+		)
 
-		return filesContaining(allFiles, includeSubstring)
+		return filesContaining(allFiles, searchPattern)
 	}
 
 	// ── Scenario 1: Normal Partial ─────────────────────────────────────────────
