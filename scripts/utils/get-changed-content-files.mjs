@@ -9,6 +9,13 @@ import { execSync } from 'child_process'
 import { getFilesUsingPartial } from './get-files-using-partial.mjs'
 
 const OUTPUT_FILE = './changedContentFiles.json'
+const GIT_STATUS = {
+	ADDED: 'A',
+	MODIFIED: 'M',
+	DELETED: 'D',
+	RENAMED: 'R',
+	COPIED: 'C',
+}
 
 /**
  * Finds the merge base between the current branch and origin/main,
@@ -41,17 +48,17 @@ function buildChangedContentFiles() {
 		const parts = line.split('\t')
 		const status = parts[0]
 
-		if (status === 'A') {
+		if (status === GIT_STATUS.ADDED) {
 			added.push(parts[1])
-		} else if (status === 'M') {
+		} else if (status === GIT_STATUS.MODIFIED) {
 			modified.push(parts[1])
-		} else if (status === 'D') {
+		} else if (status === GIT_STATUS.DELETED) {
 			removed.push(parts[1])
-		} else if (status.startsWith('R')) {
+		} else if (status.startsWith(GIT_STATUS.RENAMED)) {
 			// Rename: treat old path as removed, new path as added
 			removed.push(parts[1])
 			added.push(parts[2])
-		} else if (status.startsWith('C')) {
+		} else if (status.startsWith(GIT_STATUS.COPIED)) {
 			// Copy: treat the destination as added
 			added.push(parts[2])
 		}
