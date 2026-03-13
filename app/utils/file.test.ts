@@ -4,6 +4,7 @@
  */
 
 import { expect, test, vi, beforeEach, afterEach, describe } from 'vitest'
+import { ServedFrom } from '#api/types'
 
 // Must run before the module is evaluated so the module-level SELF_URL constant
 // picks up VERCEL_URL at load time.
@@ -11,7 +12,7 @@ vi.hoisted(() => {
 	process.env.VERCEL_URL = 'local-vercel-CDN'
 })
 
-import { fetchFile, FileType, ServedFrom } from './file'
+import { fetchFile, FileType } from './file'
 
 vi.mock('fs/promises', () => {
 	return {

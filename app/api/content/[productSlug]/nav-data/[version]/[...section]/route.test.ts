@@ -14,6 +14,7 @@ import {
 } from 'vitest'
 import { GET } from './route'
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
+import { ServedFrom } from '#api/types'
 import { Err, Ok } from '#utils/result'
 import { getProductVersionMetadata } from '#utils/contentVersions'
 import { findFileWithMetadata, parseJson } from '#utils/file'
@@ -141,7 +142,7 @@ describe('GET /[productSlug]/[version]/[...section]', () => {
 
 		// Fake some data returned from disk
 		vi.mocked(findFileWithMetadata).mockImplementation(async () => {
-			return Ok({ text: invalidJson, servedFrom: 'current build' })
+			return Ok({ text: invalidJson, servedFrom: ServedFrom.CurrentBuild })
 		})
 
 		// Fake some invalid markdown
@@ -186,7 +187,7 @@ describe('GET /[productSlug]/[version]/[...section]', () => {
 		vi.mocked(findFileWithMetadata).mockImplementation(async () => {
 			return Ok({
 				text: JSON.stringify(sectionData),
-				servedFrom: 'current build',
+				servedFrom: ServedFrom.CurrentBuild,
 			})
 		})
 

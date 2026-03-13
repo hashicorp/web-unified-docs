@@ -6,6 +6,7 @@
 import { expect, test, vi } from 'vitest'
 import { GET } from './route'
 
+import { ServedFrom } from '#api/types'
 import * as utilsFileModule from '#utils/file'
 import * as utilsContentVersionsModule from '#utils/contentVersions'
 import { mockRequest } from '#utils/mockRequest'
@@ -62,7 +63,7 @@ test('Return 200 and parse the jsonc into json if valid for UNVERSIONED product'
 	readFileSpy.mockImplementation(() => {
 		return Promise.resolve({
 			ok: true,
-			value: { text: jsoncFixtureBefore, servedFrom: 'current build' },
+			value: { text: jsoncFixtureBefore, servedFrom: ServedFrom.CurrentBuild },
 		})
 	})
 
@@ -79,7 +80,7 @@ test('Return 200 and parse the jsonc into json if valid for VERSIONED product', 
 	readFileSpy.mockImplementation(() => {
 		return Promise.resolve({
 			ok: true,
-			value: { text: jsoncFixtureBefore, servedFrom: 'current build' },
+			value: { text: jsoncFixtureBefore, servedFrom: ServedFrom.CurrentBuild },
 		})
 	})
 

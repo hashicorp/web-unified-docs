@@ -8,6 +8,7 @@ import path from 'path'
 import grayMatter from 'gray-matter'
 import { parse as jsoncParse } from 'jsonc-parser'
 
+import { ServedFrom } from '#api/types'
 import { Err, Ok, Result } from './result'
 import type { ProductVersionMetadata } from './contentVersions'
 
@@ -15,11 +16,6 @@ import type { ProductVersionMetadata } from './contentVersions'
 export enum FileType {
 	Content = 'content',
 	Asset = 'asset',
-}
-
-export enum ServedFrom {
-	CurrentBuild = 'current build',
-	Production = 'production',
 }
 
 const SELF_URL = process.env.VERCEL_URL

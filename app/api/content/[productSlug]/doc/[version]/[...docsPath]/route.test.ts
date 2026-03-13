@@ -13,6 +13,7 @@ import {
 	MockInstance,
 } from 'vitest'
 import { GET } from './route'
+import { ServedFrom } from '#api/types'
 import { Err, Ok } from '#utils/result'
 import { getProductVersionMetadata } from '#utils/contentVersions'
 import { PRODUCT_CONFIG } from '__fixtures__/productConfig.mjs'
@@ -157,7 +158,9 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 
 		// Fake the return of some invalid markdown from the filesystem
 		vi.mocked(findFileWithMetadata).mockReturnValue(
-			Promise.resolve(Ok({ text: `[[test]`, servedFrom: 'current build' })),
+			Promise.resolve(
+				Ok({ text: `[[test]`, servedFrom: ServedFrom.CurrentBuild }),
+			),
 		)
 
 		// Fake some invalid markdown
@@ -198,7 +201,7 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 		// Fake content returned from the filesystem
 		vi.mocked(findFileWithMetadata).mockReturnValue(
 			Promise.resolve(
-				Ok({ text: markdownSource, servedFrom: 'current build' }),
+				Ok({ text: markdownSource, servedFrom: ServedFrom.CurrentBuild }),
 			),
 		)
 
@@ -245,7 +248,7 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 		// Fake content returned from the filesystem
 		vi.mocked(findFileWithMetadata).mockReturnValue(
 			Promise.resolve(
-				Ok({ text: markdownSource, servedFrom: 'current build' }),
+				Ok({ text: markdownSource, servedFrom: ServedFrom.CurrentBuild }),
 			),
 		)
 
@@ -286,7 +289,7 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 			.mockReturnValueOnce(Promise.resolve(Err('File not found')))
 			.mockReturnValueOnce(
 				Promise.resolve(
-					Ok({ text: markdownSource, servedFrom: 'current build' }),
+					Ok({ text: markdownSource, servedFrom: ServedFrom.CurrentBuild }),
 				),
 			)
 
