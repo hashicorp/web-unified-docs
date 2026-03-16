@@ -18,7 +18,7 @@ Policies are rules that HCP Terraform enforces on Terraform runs. You can define
 
 <!-- END: TFC:only name:pnp-callout -->
 
-Policy sets are collections of policies you can apply globally or to specific [projects](/terraform/cloud-docs/projects/manage) and workspaces in your organization. For each run in the applicable workspaces, HCP Terraform checks the Terraform plan against the policy set. Depending on the [enforcement level](#policy-enforcement-levels), failed policies can stop a run in a workspace. If you do not want to enforce a policy set on a specific workspace, you can exclude the workspace from that set.
+Policy sets are collections of policies you can apply globally or to specific [projects](/terraform/cloud-docs/projects/manage) and workspaces in your organization. For each run in the applicable workspaces, HCP Terraform checks the Terraform plan against the policy set. Depending on the [enforcement level](#policy-enforcement-levels), failed policies can stop a run in a workspace. If you do not want to enforce a policy set on a specific project or workspace, you can exclude the project or workspace from that set.
 
 ## Policy checks versus policy evaluations
 
