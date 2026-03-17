@@ -105,6 +105,8 @@ jobs:
       preview_url_to_fetch_deployment: ${{ steps.unified_docs_preview_url.outputs.preview_url_to_fetch_deployment }}
       inspector_url: ${{ steps.unified_docs_inspector_url.outputs.inspector_url }}
       created_utc: ${{ steps.unified_docs_preview_url.outputs.created_utc }}
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
     steps:
       - name: Initial comment on PR
         uses: marocchino/sticky-pull-request-comment@52423e01640425a022ef5fd42c6fb5f633a02728 # v2.9.1
@@ -122,6 +124,11 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
+
+      # Fetch the exact base commit object so git diff can compare against BASE_SHA.
+      # We can't rely on fetching origin/main since main may have advanced past the commit where this PR branched off
+      - name: Fetch base SHA
+        run: git fetch --no-tags --filter=blob:none --depth=1 origin ${{ env.BASE_SHA }}
 
       - name: Add commit link to summary
         run: |
@@ -148,14 +155,46 @@ jobs:
       - name: Pull Vercel Environment Information
         run: vercel pull --yes --environment=preview --token=${{ secrets.VERCEL_TOKEN }}
 
+      - name: Check PR Labels and Set Build Type
+        id: build-type
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          labels=$(gh api \
+            "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}" \
+            --jq '[.labels[].name] | join(" ")')
+
+          echo "PR labels:"
+          echo "$labels" | tr ' ' '\n'
+
+          # full-build overrides everything else
+          if echo "$labels" | grep -qw "full-build"; then
+            echo "INCREMENTAL_BUILD=false" >> $GITHUB_ENV
+            echo "Build type: Full (forced by 'full-build' label)" >> $GITHUB_STEP_SUMMARY
+          elif echo "$labels" | grep -qw "inc-build"; then
+            echo "INCREMENTAL_BUILD=true" >> $GITHUB_ENV
+            echo "Build type: Incremental" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "INCREMENTAL_BUILD=false" >> $GITHUB_ENV
+            echo "Build type: Full" >> $GITHUB_STEP_SUMMARY
+          fi
+
       - name: Build Project Artifacts
-        run: vercel build --target=preview --token=${{ secrets.VERCEL_TOKEN }}
+        run: |
+          vercel build \
+            --target=preview \
+            --token=${{ secrets.VERCEL_TOKEN }}
 
       - name: Deploy Project Artifacts and Set GitHub Outputs
         id: unified_docs_preview_url
         # save preview url from deployment and save copy of the preview url w/o https to fetch the deployment via Vercel REST API in next step
         run: |
-          preview_url=$(vercel deploy --prebuilt --target=preview --token=${{ secrets.VERCEL_TOKEN }} --archive=tgz)
+          preview_url=$(vercel deploy \
+            --prebuilt \
+            --target=preview \
+            --token=${{ secrets.VERCEL_TOKEN }} \
+            --archive=tgz \
+            --env INCREMENTAL_BUILD=${{ env.INCREMENTAL_BUILD }})
           echo "preview_url=$preview_url" >> $GITHUB_OUTPUT
 
           created_utc=$(date -u)
@@ -164,10 +203,10 @@ jobs:
           preview_url_to_fetch_deployment=$(echo "$preview_url" | sed 's/^https:\/\///')
           echo "preview_url_to_fetch_deployment=$preview_url_to_fetch_deployment" >> $GITHUB_OUTPUT
 
-
           echo "deployment url is $preview_url"
           echo "deployment url for REST API request is $preview_url_to_fetch_deployment"
           echo "created at is $created_utc"
+
       # as of March 2025, the Vercel CLI does not return the inspect URL in the output of the vercel deploy command, which is needed for the PR comment
       # we need to fetch the deployment info via the Vercel REST API using the preview_url_to_fetch_deployment output from the last step and parse the inspect URL from it (inspectorUrl prop name)
       - name: Vercel REST API Request to Fetch Inspect URL and Set GitHub Output
@@ -182,6 +221,9 @@ jobs:
           echo "inspector_url=$inspector_url" >> $GITHUB_OUTPUT
 
           echo "Inspect URL is $inspector_url"
+
+          echo "unified docs preview url is ${{ steps.unified_docs_preview_url.outputs.preview_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "unified docs inspect url is $inspector_url" >> $GITHUB_STEP_SUMMARY
 
       - name: Update Comment with Unified Docs API Data
         uses: marocchino/sticky-pull-request-comment@52423e01640425a022ef5fd42c6fb5f633a02728 # v2.9.1
@@ -277,6 +319,9 @@ jobs:
           echo "inspector_url=$inspector_url" >> $GITHUB_OUTPUT
 
           echo "Inspect URL is $inspector_url"
+
+          echo "dev portal preview url is ${{ steps.deploy_dev_portal_preview.outputs.preview_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "dev portal inspect url is $inspector_url" >> $GITHUB_STEP_SUMMARY
 
       - name: Update PR Comment with Dev Portal Data
         uses: marocchino/sticky-pull-request-comment@52423e01640425a022ef5fd42c6fb5f633a02728 # v2.9.1
