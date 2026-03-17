@@ -2,8 +2,9 @@
  * Copyright IBM Corp. 2024, 2026
  * SPDX-License-Identifier: BUSL-1.1
  */
-import { readFile } from 'fs/promises'
-import path from 'path'
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 import grayMatter from 'gray-matter'
 import { parse as jsoncParse } from 'jsonc-parser'
@@ -11,8 +12,6 @@ import { parse as jsoncParse } from 'jsonc-parser'
 import { ServedFrom } from '#api/types'
 import { Err, Ok, Result } from './result'
 import type { ProductVersionMetadata } from './contentVersions'
-
-import { buildMdxTransforms } from '#prebuild/mdx-transforms/build-mdx-transforms.mjs'
 
 // Only exported for testing purposes
 export enum FileType {
@@ -137,7 +136,7 @@ export const fetchFile = async (
 		})
 	} else if (incBuildLocalDev) {
 		const markdownFileExtensions = ['.md', '.mdx']
-		const isMarkdownFile = markdownFileExtensions.some((ext) => {
+		const isMarkdownFile = markdownFileExtensions.some((ext: string) => {
 			return filePath.toLowerCase().endsWith(ext)
 		})
 
@@ -152,6 +151,20 @@ export const fetchFile = async (
 			const CWD = process.cwd()
 			const CONTENT_DIR = path.join(CWD, 'content')
 			const CONTENT_DIR_OUT = path.join(CWD, 'public', 'content')
+			const MDX_TRANSFORMS_FILE = path.join(
+				CWD,
+				'scripts',
+				'prebuild',
+				'mdx-transforms',
+				'build-mdx-transforms.mjs',
+			)
+
+			// Use a runtime file URL and webpackIgnore so Next.js does not statically
+			// trace the prebuild remark-mdx/@babel dependencies into API bundles.
+			// This is fine as we only do this in local dev, not preview or prod
+			const { buildMdxTransforms } = await import(
+				/* webpackIgnore: true */ pathToFileURL(MDX_TRANSFORMS_FILE).href
+			)
 
 			// load the file app/api/versionMetadata.json
 			const versionMetadataPath = path.join(
