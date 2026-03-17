@@ -5,7 +5,7 @@ description: >-
 tfc_only: true
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2025-05-27T14:28:51-04:00
-last_modified: 2025-11-19T09:33:54-08:00
+last_modified: 2026-03-12T03:10:29.000Z
 # END AUTO GENERATED METADATA
 ---
 
@@ -223,7 +223,7 @@ Terraform does not persist ephemeral values to plan or state files. However, Ter
 
 ### Enforce strong authentication
 
-HCP Terraform supports [two factor authentication](/terraform/cloud-docs/users-teams-organizations/2fa) via SMS or TOTP. Organizations can configure mandatory 2FA for all members in the [organization settings](/terraform/cloud-docs/users-teams-organizations/organizations#authentication). Organizations may choose to configure [SSO for their organization](/terraform/cloud-docs/users-teams-organizations/single-sign-on).
+HCP Terraform supports [two factor authentication](/terraform/cloud-docs/users-teams-organizations/2fa) via SMS or TOTP. Organizations can configure mandatory 2FA for all members in the [organization settings](/terraform/cloud-docs/users-teams-organizations/organizations/settings#authentication). Organizations may choose to configure [SSO for their organization](/terraform/cloud-docs/users-teams-organizations/single-sign-on).
 
 ### Minimize the number of users in the owners team
 
