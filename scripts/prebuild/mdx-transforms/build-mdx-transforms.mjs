@@ -13,7 +13,6 @@ import grayMatter from 'gray-matter'
 
 import semver from 'semver'
 
-import { listFiles } from '#scriptUtils/list-files.mjs'
 import { batchPromises } from '#scriptUtils/batch-promises.mjs'
 
 import { paragraphCustomAlertsPlugin } from './paragraph-custom-alert/paragraph-custom-alert.mjs'
@@ -45,17 +44,11 @@ export async function buildMdxTransforms(
 	targetDir,
 	outputDir,
 	versionMetadata,
-	changedFiles = null,
+	filesToCheck,
 ) {
-	const filesToCheck = changedFiles
-		? [...changedFiles.added, ...changedFiles.modified]
-		: await listFiles(targetDir)
-
 	// Filter for `.mdx` files
 	const mdxFiles = filesToCheck.filter((filePath) => {
-		const relativePath = path.relative(targetDir, filePath)
-		const repoSlug = relativePath.split('/')[0]
-		return path.extname(filePath) === '.mdx' && repoSlug in PRODUCT_CONFIG
+		return path.extname(filePath) === '.mdx'
 	})
 	/**
 	 * Map over each `.mdx` file, and prepare the file for transformation
