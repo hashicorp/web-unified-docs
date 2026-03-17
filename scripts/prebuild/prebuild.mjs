@@ -93,7 +93,7 @@ async function main() {
 
 	let changedFiles = null
 	if (incBuildPRPreview) {
-		changedFiles = await getChangedContentFiles()
+		changedFiles = getChangedContentFiles()
 
 		console.log(
 			`Changed content files: ${JSON.stringify(changedFiles, null, 2)}\n`,
