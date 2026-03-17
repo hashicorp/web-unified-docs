@@ -177,9 +177,22 @@ export const fetchFile = async (
 				await readFile(versionMetadataPath, 'utf-8'),
 			)
 
-			await buildMdxTransforms(CONTENT_DIR, CONTENT_DIR_OUT, versionMetadata, [
-				localFilePath,
-			])
+			try {
+				// See if the file exist as MDX files can exist in the path of
+				// "doc.mdx" or "doc/index.mdx" and we often have to check for both
+				await readFile(localFilePath)
+
+				await buildMdxTransforms(
+					CONTENT_DIR,
+					CONTENT_DIR_OUT,
+					versionMetadata,
+					[localFilePath],
+				)
+			} catch (error) {
+				return Err(
+					`Failed to read local file at path: ${localFilePath}, error: ${error}`,
+				)
+			}
 
 			// Add /public to the path for markdown files to match the transformed output directory
 			const parts = filePath.split('/')
