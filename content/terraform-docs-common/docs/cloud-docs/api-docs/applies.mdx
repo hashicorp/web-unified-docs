@@ -4,7 +4,7 @@ description: >-
   Use the HCP Terraform API's `/applies` endpoint to read the results of a Terraform apply and to recover any failed state uploads after applying.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2025-05-27T14:28:51-04:00
-last_modified: 2025-11-04T10:14:18-08:00
+last_modified: 2026-03-16T23:04:08.000Z
 # END AUTO GENERATED METADATA
 ---
 
@@ -20,8 +20,8 @@ last_modified: 2025-11-04T10:14:18-08:00
 
 # Applies API reference
 
-An apply represents the results of applying a Terraform workspace execution plan. <!-- BEGIN: TFC:only name:stacks-tfe --> 
-If you are using a Stack and want to interact with Stack deployment runs, refer to [deployment runs](/terraform/cloud-docs/stacks/runs). <!-- END: TFC:only name:stacks-tfe -->
+An apply represents the results of applying a Terraform workspace execution plan.  
+If you are using a Stack and want to interact with Stack deployment runs, refer to [deployment runs](/terraform/cloud-docs/stacks/runs). 
 
 ## Attributes
 

@@ -4,7 +4,7 @@ description: >-
   Use OpenID Connect to get short-term credentials for the Kubernetes and Helm Terraform providers in your HCP Terraform runs.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2025-06-26T16:53:09-07:00
-last_modified: 2025-09-05T12:41:13-07:00
+last_modified: 2026-03-16T23:04:10.000Z
 # END AUTO GENERATED METADATA
 ---
 
@@ -15,8 +15,8 @@ last_modified: 2025-09-05T12:41:13-07:00
 You can use HCP Terraform’s native OpenID Connect integration with Kubernetes to use [dynamic credentials](/terraform/cloud-docs/dynamic-provider-credentials) for the Kubernetes and Helm providers in your HCP Terraform runs. Configuring the integration requires the following steps:
 
 1. **[Configure Kubernetes](#configure-kubernetes):** Set up a trust configuration between Kubernetes and HCP Terraform. Next, create Kubernetes role bindings for your HCP Terraform identities.
-2. **[Configure HCP Terraform](#configure-hcp-terraform):** Add environment variables to the HCP Terraform workspaces where you want to use dynamic credentials.<!-- BEGIN: TFC:only name:stacks-tfe --> If you are configuring a Stack, refer to [Authenticate a Stack](/terraform/language/stacks/deploy/authenticate).<!-- END: TFC:only name:stacks-tfe -->
-3. **[Configure the Kubernetes or Helm provider](#configure-the-provider)**: Set the required attributes on the provider block.
+1. **[Configure HCP Terraform](#configure-hcp-terraform):** Add environment variables to the HCP Terraform workspaces where you want to use dynamic credentials. If you are configuring a Stack, refer to [Authenticate a Stack](/terraform/language/stacks/deploy/authenticate).
+1. **[Configure the Kubernetes or Helm provider](#configure-the-provider)**: Set the required attributes on the provider block.
 
 Once you complete the setup, HCP Terraform automatically authenticates to Kubernetes during each run. The Kubernetes and Helm providers' authentication is valid for the length of a plan or apply operation.
 
@@ -88,11 +88,7 @@ If binding with "User" subjects, be aware that plan and apply phases are assigne
 
 ## Configure HCP Terraform
 
-<!-- BEGIN: TFC:only name:stacks-tfe -->
-
 If you are configuring a Stack, refer to [Authenticate a Stack](/terraform/language/stacks/deploy/authenticate) to learn how to use the `identity_token` block to authenticate your Stack deployments with dynamic credentials.
-
-<!-- END: TFC:only name:stacks-tfe -->
 
 You must set certain environment variables in your HCP Terraform workspace to configure HCP Terraform to authenticate with Kubernetes or Helm using dynamic credentials. You can set these as workspace variables, or if you’d like to share one Kubernetes role across multiple workspaces, you can use a variable set. When you configure dynamic provider credentials with multiple provider configurations of the same type, use either a default variable or a tagged alias variable name for each provider configuration. Refer to [Specifying Multiple Configurations](#specifying-multiple-configurations) for more details.
 
