@@ -1,0 +1,195 @@
+name: Forward Port PR
+
+on:
+  workflow_dispatch:
+    inputs:
+      sourceBranch:
+        description: 'The branch to forward-port from'
+        required: true
+      targetBranch:
+        description: 'The branch to forward-port to'
+        required: true
+      targetVersion:
+        description: 'The target version for the forward-port'
+        required: true
+
+  pull_request:
+    types:
+      - closed
+    branches:
+      - 'rn-forward-porting-test-ga'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  create-forward-port-pr:
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true &&
+      contains(github.event.pull_request.labels.*.name, 'forward-port'))
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TARGET_BRANCH: ${{ inputs.targetBranch }}
+      TARGET_VERSION: ${{ inputs.targetVersion }}
+
+      MERGED_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+      SOURCE_PR_NUMBER: ${{ github.event.pull_request.number }}
+      SOURCE_PR_TITLE: ${{ github.event.pull_request.title }}
+      SOURCE_PR_URL: ${{ github.event.pull_request.html_url }}
+      SOURCE_PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+
+    steps:
+      - name: Derive source PR details in workflow_dispatch
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          PR_JSON="$(gh pr list \
+            --repo "${{ github.repository }}" \
+            --base "${{ inputs.sourceBranch }}" \
+            --state merged \
+            --limit 5 \
+            --json number,title,url,mergeCommitSha,author,mergedAt \
+            --jq 'sort_by(.mergedAt) | reverse | .[0]')"
+
+          if [ -z "${PR_JSON}" ] || [ "${PR_JSON}" = "null" ]; then
+            echo "::error::No recently merged PR found on branch ${{ inputs.sourceBranch }}"
+            exit 1
+          fi
+
+          {
+            echo "MERGED_SHA=$(echo "${PR_JSON}" | jq -r '.mergeCommitSha')"
+            echo "SOURCE_PR_NUMBER=$(echo "${PR_JSON}" | jq -r '.number')"
+            echo "SOURCE_PR_TITLE=$(echo "${PR_JSON}" | jq -r '.title')"
+            echo "SOURCE_PR_URL=$(echo "${PR_JSON}" | jq -r '.url')"
+            echo "SOURCE_PR_AUTHOR=$(echo "${PR_JSON}" | jq -r '.author.login')"
+          } >> "$GITHUB_ENV"
+
+      - name: Resolve TARGET_BRANCH and TARGET_VERSION from PR labels
+        if: github.event_name != 'workflow_dispatch'
+        run: |
+          CONFIG_FILE="/tmp/forward-port-config.yml"
+          CONFIG_BRANCH="rn-forward-porting-test-ga"
+
+          # Fetch config from the config branch
+          gh api "repos/${{ github.repository }}/contents/.github/forward-port-config.yml?ref=${CONFIG_BRANCH}" \
+            --header "Accept: application/vnd.github.raw" > "${CONFIG_FILE}"
+
+          # Get all label names from the merged PR
+          PR_LABELS=$(echo '${{ toJSON(github.event.pull_request.labels.*.name) }}' | jq -r '.[]')
+
+          # Install yq for parsing the config file
+          wget https://github.com/mikefarah/yq/releases/download/v4.53.2/yq_linux_amd64 -O /usr/local/bin/yq
+          chmod +x /usr/local/bin/yq
+
+          MATCHED=""
+          while IFS= read -r LABEL; do
+            # Look up the label as a top-level key in the config
+            TARGET_BRANCH=$(yq e ".\"${LABEL}\".targetBranch // \"\"" "${CONFIG_FILE}")
+            TARGET_VERSION=$(yq e ".\"${LABEL}\".targetVersion // \"\"" "${CONFIG_FILE}")
+
+            if [ -n "${TARGET_BRANCH}" ] && [ -n "${TARGET_VERSION}" ]; then
+              echo "Matched label '${LABEL}' → targetBranch=${TARGET_BRANCH}, targetVersion=${TARGET_VERSION}"
+              {
+                echo "TARGET_BRANCH=${TARGET_BRANCH}"
+                echo "TARGET_VERSION=${TARGET_VERSION}"
+              } >> "$GITHUB_ENV"
+              MATCHED="true"
+              break
+            fi
+          done <<< "${PR_LABELS}"
+
+          if [ -z "${MATCHED}" ]; then
+            echo "::error::No PR label matched a product in ${CONFIG_FILE}. Labels found: ${PR_LABELS}"
+            exit 1
+          fi
+
+      - name: Verify target branch exists
+        run: |
+          if ! gh api "repos/${{ github.repository }}/branches/${TARGET_BRANCH}" --silent 2>/dev/null; then
+            echo "::error::Target branch '${TARGET_BRANCH}' does not exist"
+            exit 1
+          fi
+
+      - name: Check out target branch
+        uses: actions/checkout@0ad4b8fadaa221de15dcec353f45205ec38ea70b # v4.1.4
+        with:
+          ref: ${{ env.TARGET_BRANCH }}
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "team-rel-eng@hashicorp.com"
+
+      - name: Create forward-port branch
+        id: forward-port-branch
+        run: |
+          FORWARD_PORT_BRANCH="forward-port/pr-${SOURCE_PR_NUMBER}-to-${TARGET_BRANCH}"
+          git checkout -b "${FORWARD_PORT_BRANCH}"
+          echo "name=${FORWARD_PORT_BRANCH}" >> "$GITHUB_OUTPUT"
+
+      - name: Check for existing forward-port PR
+        id: existing-pr
+        run: |
+          EXISTING_PR="$(gh pr list \
+            --base "${TARGET_BRANCH}" \
+            --head "${{ steps.forward-port-branch.outputs.name }}" \
+            --state open \
+            --json number \
+            --jq '.[0].number')"
+
+          if [ -n "${EXISTING_PR}" ] && [ "${EXISTING_PR}" != "null" ]; then
+            gh pr comment "${SOURCE_PR_NUMBER}" \
+              --body "@${SOURCE_PR_AUTHOR} A forward-port of this PR already exists: #${EXISTING_PR}. Please check it for updates." \
+              --create-if-none \
+              --edit-last
+            exit 1
+          fi
+
+      - name: Cherry-pick merged commit
+        id: cherry-pick
+        run: |
+          PARENT_COUNT="$(git rev-list --parents -n 1 "${MERGED_SHA}" | wc -w | tr -d ' ')"
+          if [ "${PARENT_COUNT}" -gt 2 ]; then
+            git cherry-pick -m 1 "${MERGED_SHA}"
+          else
+            git cherry-pick "${MERGED_SHA}"
+          fi
+
+      - name: Notify author of cherry-pick failure
+        if: failure() && steps.cherry-pick.outcome == 'failure'
+        run: |
+          gh pr comment "${SOURCE_PR_NUMBER}" \
+            --body "@${SOURCE_PR_AUTHOR} Cherry-pick of merge commit \`${MERGED_SHA}\` to \`${TARGET_BRANCH}\` failed due to conflicts. Please forward-port manually." \
+            --create-if-none \
+            --edit-last
+
+          exit 1
+
+      - name: Push forward-port branch
+        run: |
+          git push --set-upstream origin "${{ steps.forward-port-branch.outputs.name }}"
+
+      - name: Create forward-port pull request
+        id: create-pr
+        run: |
+          PR_BODY="$(printf "This PR forward-ports changes from #%s\n\nSource PR Author: @%s" "${SOURCE_PR_NUMBER}" "${SOURCE_PR_AUTHOR}")"
+
+          PR_URL="$(gh pr create \
+            --base "${TARGET_BRANCH}" \
+            --head "${{ steps.forward-port-branch.outputs.name }}" \
+            --title "[FORWARD-PORT] #${SOURCE_PR_NUMBER} ${SOURCE_PR_TITLE}" \
+            --label "auto-port" \
+            --assignee "${SOURCE_PR_AUTHOR}" \
+            --body "${PR_BODY}")"
+          echo "url=${PR_URL}" >> "$GITHUB_OUTPUT"
+
+      - name: Comment on source PR
+        run: |
+          FORWARD_PORT_URL="${{ steps.create-pr.outputs.url }}"
+          gh pr comment "${SOURCE_PR_NUMBER}" \
+            --body "@${SOURCE_PR_AUTHOR} Ported to ${TARGET_BRANCH} in ${FORWARD_PORT_URL}" \
+            --create-if-none \
+            --edit-last
