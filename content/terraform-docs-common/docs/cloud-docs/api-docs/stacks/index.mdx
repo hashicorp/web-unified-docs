@@ -1,10 +1,9 @@
 ---
 page_title: /stacks API reference for HCP Terraform
 description: Use the HCP Terraform API's `/stacks` to create, read, update, and delete Stacks.
-tfc_only: true
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2025-09-19T13:41:08-07:00
-last_modified: 2025-10-29T08:59:16-07:00
+last_modified: 2026-03-16T23:10:23.000Z
 # END AUTO GENERATED METADATA
 ---
 
