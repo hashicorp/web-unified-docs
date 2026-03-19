@@ -27,7 +27,7 @@ export const loadRedirects = async (version = 'default', redirectsDir) => {
 
 	let redirectsSource = []
 
-	// Attempt to load from redirects.js
+	// Attempt to load from redirects.jsonc
 	try {
 		const redirectsPath = path.join(redirectsDir, 'redirects.jsonc')
 		const redirectsString = await readFile(redirectsPath, 'utf-8')
