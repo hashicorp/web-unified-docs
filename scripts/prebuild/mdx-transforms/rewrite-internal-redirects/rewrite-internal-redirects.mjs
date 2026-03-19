@@ -19,6 +19,7 @@ import * as pathToRegexp from 'path-to-regexp'
  * Loads redirects from the file-system and "caches" them in memory.
  */
 const cachedRedirects = {}
+const loggedRedirectErrorPaths = new Set()
 export const loadRedirects = async (version = 'default', redirectsDir) => {
 	// Return the cached redirects if they are already present
 	if (cachedRedirects[version]?.length > 0) {
@@ -37,8 +38,12 @@ export const loadRedirects = async (version = 'default', redirectsDir) => {
 			allowTrailingComma: true,
 		})
 
-		if (parserError.length > 0) {
-			console.log(`Failed to load redirects from ${redirectsPath}`)
+		if (
+			parserError.length > 0 &&
+			!loggedRedirectErrorPaths.has(redirectsPath)
+		) {
+			loggedRedirectErrorPaths.add(redirectsPath)
+			console.log(`\n❌ Failed to load redirects from ${redirectsPath}\n`)
 		}
 
 		if (Array.isArray(redirects)) {
