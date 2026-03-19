@@ -38,7 +38,7 @@ export const loadRedirects = async (version = 'default', redirectsDir) => {
 		})
 
 		if (parserError.length > 0) {
-			console.log(`JSONC parse errors: ${JSON.stringify(parserError, null, 2)}`)
+			console.log(`Failed to load redirects from ${redirectsPath}`)
 		}
 
 		if (Array.isArray(redirects)) {
