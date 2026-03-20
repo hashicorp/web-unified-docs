@@ -12,7 +12,8 @@ import { gatherAllVersionsDocsPaths } from './gather-all-versions-docs-paths.mjs
 import { buildAlgoliaRecords } from '../algolia/build-algolia-records.mjs'
 import { copyNavDataFiles } from '#scriptUtils/copy-nav-data-files.mjs'
 import { copyRedirectFiles } from '#scriptUtils/copy-redirect-files.mjs'
-import { copyAllAssetFiles } from '#scriptUtils/copy-asset-files.mjs'
+import { copyAssetFiles } from '#scriptUtils/copy-asset-files.mjs'
+import { getChangedContentFiles } from '#scriptUtils/get-changed-content-files.mjs'
 
 const NUM_OF_MICROSEC_IN_NANOSEC = BigInt('1000')
 
@@ -74,12 +75,24 @@ async function main() {
 	let skipTraceFile = false
 	const startTime = process.hrtime.bigint()
 	const traceId = Math.random().toString(16).slice(2, 18)
+	const incBuild = process.env.INCREMENTAL_BUILD === 'true'
 
 	const args = getCommandLineArgs()
 
 	console.log(
 		`Running prebuild script with args: ${JSON.stringify(args, null, 2)}\n`,
 	)
+
+	console.log(`Incremental build: ${incBuild ? 'true' : 'false'}\n`)
+
+	let changedFiles = null
+	if (incBuild) {
+		changedFiles = await getChangedContentFiles()
+
+		console.log(
+			`Changed content files: ${JSON.stringify(changedFiles, null, 2)}\n`,
+		)
+	}
 
 	// Gather and write out version metadata
 	const versionMetadata = await gatherVersionMetadata(CONTENT_DIR)
@@ -102,7 +115,12 @@ async function main() {
 	fs.writeFileSync(DOCS_PATHS_ALL_VERSIONS_FILE, docsPathsAllVersionsJson)
 
 	// Apply MDX transforms, writing out transformed MDX files to `public`
-	await buildMdxTransforms(CONTENT_DIR, CONTENT_DIR_OUT, versionMetadata)
+	await buildMdxTransforms(
+		CONTENT_DIR,
+		CONTENT_DIR_OUT,
+		versionMetadata,
+		incBuild ? changedFiles : null,
+	)
 
 	if (args.buildAlgoliaIndex) {
 		// This only happens in non-deployment CI builds so skip the trace file
@@ -115,13 +133,26 @@ async function main() {
 	}
 
 	// Copy all `*-nav-data.json` files from `content` to `public/content`, using execSync
-	await copyNavDataFiles(CONTENT_DIR, CONTENT_DIR_OUT, versionMetadata)
+	await copyNavDataFiles(
+		CONTENT_DIR,
+		CONTENT_DIR_OUT,
+		versionMetadata,
+		incBuild ? changedFiles : null,
+	)
 
-	// Copy all `redirects.jsonc` files from `content` to `public/content
-	await copyRedirectFiles(CONTENT_DIR, CONTENT_DIR_OUT)
+	// Copy `redirects.jsonc` files from `content` to `public/content
+	await copyRedirectFiles(
+		CONTENT_DIR,
+		CONTENT_DIR_OUT,
+		incBuild ? changedFiles : null,
+	)
 
 	// Copy all asset files from `content` to `public/assets`
-	await copyAllAssetFiles(CONTENT_DIR, CONTENT_DIR_OUT_ASSETS)
+	await copyAssetFiles(
+		CONTENT_DIR,
+		CONTENT_DIR_OUT_ASSETS,
+		incBuild ? changedFiles : null,
+	)
 
 	if (skipTraceFile) {
 		return

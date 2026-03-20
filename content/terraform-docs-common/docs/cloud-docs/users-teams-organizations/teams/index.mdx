@@ -3,14 +3,13 @@ page_title: Teams overview
 description: Teams are a group of users within an organization. Learn about managing teams, team membership, team permissions, and more.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2025-05-27T14:28:51-04:00
-last_modified: 2025-09-24T15:24:15-07:00
+last_modified: 2026-03-16T23:04:16.000Z
 # END AUTO GENERATED METADATA
 ---
 
 
 [organizations]: /terraform/cloud-docs/users-teams-organizations/organizations
 
-[organization settings]: /terraform/cloud-docs/users-teams-organizations/organizations#organization-settings
 
 [users]: /terraform/cloud-docs/users-teams-organizations/users
 
@@ -62,7 +61,7 @@ Refer to [organization owners](/terraform/cloud-docs/users-teams-organizations/p
 
 ## Manage teams
 
-You can manage many things about teams, including creating and deleting a team, team membership, and team access to workspaces, projects,<!-- BEGIN: TFC:only name:stacks-tfe --> Stacks,<!-- END: TFC:only name:stacks-tfe --> and organizations. Refer to [Manage teams](/terraform/cloud-docs/users-teams-organizations/teams/manage) to learn more.
+You can manage many things about teams, including creating and deleting a team, team membership, and team access to workspaces, projects, Stacks, and organizations. Refer to [Manage teams](/terraform/cloud-docs/users-teams-organizations/teams/manage) to learn more.
 
 ## Team notifications
 

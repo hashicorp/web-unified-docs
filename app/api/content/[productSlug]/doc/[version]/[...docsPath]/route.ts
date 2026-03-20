@@ -83,12 +83,13 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 		],
 	]
 
-	let foundContent, githubFile, createdAt
+	let foundContent, servedFrom, githubFile, createdAt
 	for (const loc of possibleContentLocations) {
 		const readFileResult = await findFileWithMetadata(loc, versionMetadata)
 
 		if (readFileResult.ok) {
-			foundContent = readFileResult.value
+			foundContent = readFileResult.value.text
+			servedFrom = readFileResult.value.servedFrom
 			githubFile = loc.join('/')
 			const productDocsPaths =
 				docsPathsAllVersions[productSlug][versionMetadata.version]
@@ -131,25 +132,33 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 
 	const { metadata, markdownSource } = markdownFrontMatterResult.value
 
-	return Response.json({
-		meta: {
-			status_code: 200,
-			status_text: 'OK',
+	return new Response(
+		JSON.stringify({
+			meta: {
+				status_code: 200,
+				status_text: 'OK',
+			},
+			result: {
+				fullPath: parsedDocsPath,
+				product: productSlug,
+				version: PRODUCT_CONFIG[productSlug].versionedDocs
+					? versionMetadata.version
+					: 'v0.0.x',
+				metadata,
+				subpath: 'docs', // TODO: I guess we could grab the first part of the rawDocsPath? Is there something I am missing here?
+				markdownSource,
+				// check mdx frontmatter metadata first, if not then fallback to docsPathsAllVersions.json
+				created_at: metadata.created_at || createdAt,
+				last_modified: metadata.last_modified || null,
+				sha: '', // TODO: Do we really need this?
+				githubFile,
+			},
+		}),
+		{
+			headers: {
+				'content-type': 'application/json',
+				'served-from': servedFrom,
+			},
 		},
-		result: {
-			fullPath: parsedDocsPath,
-			product: productSlug,
-			version: PRODUCT_CONFIG[productSlug].versionedDocs
-				? versionMetadata.version
-				: 'v0.0.x',
-			metadata,
-			subpath: 'docs', // TODO: I guess we could grab the first part of the rawDocsPath? Is there something I am missing here?
-			markdownSource,
-			// check mdx frontmatter metadata first, if not then fallback to docsPathsAllVersions.json
-			created_at: metadata.created_at || createdAt,
-			last_modified: metadata.last_modified || null,
-			sha: '', // TODO: Do we really need this?
-			githubFile,
-		},
-	})
+	)
 }
