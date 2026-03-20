@@ -239,148 +239,281 @@ optional parameters to further secure cluster access:
   use this token to join the cluster.
 - TTL: Token expiration. The token is not valid after expiration.
 
-### Create a client introduction token
+Before you can use client introduction tokens, you need to bootstrap the ACL
+system and have your management token saved for use with the CLI or API. Refer
+to the [Bootstrap the ACL system guide](/nomad/docs/secure/acl/bootstrap) for
+instructions.
 
 Follow these steps to use client node introduction tokens:
 
-1. [Create an ACL node policy](#create-an-acl-policy).   
-1. [Create an ACL role from the policy](#create-an-acl-role).
-1. [Generate a client introduction token](#generate-a-client-introduction-token).
-1. [Update your Nomad server configuration to use client introduction](#update-your-nomad-server-configuration).
-1. [Start the Nomad server](#start-the-nomad-server).
-1. [Monitor client join failures](#monitor-client-join-failures).
+1. Configure your Nomad server's `server.client_introduction` block. 
 
-### Prerequisites
+   This example sets strict enforcement, which means the server rejects any
+   client without a valid token. Refer to the [`server.client_introduction`
+   block
+   documentation](/nomad/docs/configuration/server#client_introduction-parameters)
+   for additional enforcement options.
 
-You bootstrapped the ACL system and configured the CLI to use your management
-token. Refer to the [Bootstrap the ACL system
-guide](/nomad/docs/secure/acl/bootstrap) for instructions.
-
-### Create an ACL policy
-
-This example creates the `node:write` policy required to generate tokens.
-
-1. Create a policy file called `client-introduction.hcl`.
+   <CodeBlockConfig highlight="8-12" filename="nomad.hcl">
 
    ```hcl
-   node {
-    policy = "write"
+   data_dir = "/opt/nomad/"
+   acl {
+     enabled = true
+   }
+   server {
+     enabled          = true
+     bootstrap_expect = 1
+     client_introduction {
+       enforcement          = "strict" # Default = "warn"
+       default_identity_ttl = "5m"     # Default = "5m"
+       max_identity_ttl     = "30m"    # Default = "30m"
+     }
+   }
+   tls {
+     http = true
+     rpc  = true
+     ca_file   = "/opt/nomad/tls/nomad-agent-ca.pem"
+     cert_file = "/opt/nomad/tls/global-server-nomad.pem"
+     key_file  = "/opt/nomad/tls/global-server-nomad-key.pem"
    }
    ```
 
-1. Add the policy to the cluster.
+   </CodeBlockConfig>
+
+   If your Nomad servers are already running, you need to restart the server agent to apply the configuration changes.
+
+   No additional configuration is required on the client node.
+
+1. Create an ACL policy that allows the generation of client introduction
+   tokens. The policy must include `node` scope with `write` permission, which
+   is the least amount of privilege that you need for a client introduction
+   token.
+   
+   <Tabs>
+      <Tab heading="CLI" group="cli">
+
+      Create a node policy for the cluster. Save the file as
+      `client-introduction.hcl`.      
+     
+      ```hcl
+      node {
+        policy = "write"
+      }
+      ```
+
+      Use the [`nomad acl policy apply`
+      command](/nomad/commands/acl/policy/apply) to create a policy called
+      `client-introduction` from the `client-introduction.hcl` file.  
+
+     ```shell-session
+     $ nomad acl policy apply client-introduction client-introduction.hcl
+     ```
+
+      </Tab>
+      <Tab heading="API" group="api">
+
+      Create a node policy for the cluster. Save the file as `client-introduction.json`.      
+        
+      ```json
+      {
+        "Name": "client-introduction",
+        "Rules": {
+          "node": {
+            "*": {
+              "policy": "write"
+            } 
+          }
+        }
+      }
+      ```
+
+      Use the [`/v1/acl/policy/:policy_name` API endpoint](/nomad/api-docs/acl/policies#create-or-update-policy) to create the policy in your cluster.
+
+      Replace the `<MANAGEMENT_TOKEN>` and `<NOMAD_IP>` placeholders with your management token's value and your Nomad IP address.
+      
+      ```shell-script
+      $ curl \
+          --request POST \
+          --data @client-introduction.json \
+          --header "X-Nomad-Token: <MANAGEMENT_TOKEN>" \
+          https://<NOMAD_IP>:4646/v1/acl/policy/client-introduction
+      ```        
+
+      </Tab>
+   </Tabs>
+
+1. Create an ACL role with the `client-introduction` policy that you created in
+   the previous step.
+
+   <Tabs>
+   <Tab heading="CLI" group="cli">
+
+   Use the [`nomad acl role create` command](/nomad/commands/acl/role/create) to
+   create a role called `client-introduction` that uses the
+   `client-introduction` policy.
 
    ```shell-session
-   nomad acl policy apply client-introduction client-introduction.hcl
+   $ nomad acl role create --tls-skip-verify -name="client-introduction" \
+      -policy="client-introduction"
+   ```
+  
+   The output describes the ACL role, including its attached policies and the
+   Raft index at its creation.
+
+   ```shell-session
+   ID           = cf0b4a43-b00f-cc30-b656-b34d66151b04
+   Name         = client-introduction
+   Description  = <none>
+   Policies     = client-introduction
+   Create Index = 117
+   Modify Index = 117
    ```
 
-### Create an ACL role
+   </Tab>
+   <Tab heading="API" group="api">
 
-Create an ACL role with the `client-introduction` policy.
+   Use the [`/v1/acl/role` API endpoint](/nomad/api-docs/acl/roles#create-role)
+   to create the `client-introduction` role.
 
-```shell-session
-nomad acl role create --tls-skip-verify -name="client-introduction" \
--policy="client-introduction"
-```
+   Create a `client-introduction-role.json` file to define the ACL role and link
+   the `client-introduction` policy to the role.
 
-The output describes the ACL role, including its attached policies and the Raft
-index at its creation.
+   ```json
+   {
+    "Name": "client-introduction",
+    "Policies": [
+      {
+        "Name": "client-introduction"
+      }
+    ]
+   }
+   ```
 
-```shell-session
-ID           = cf0b4a43-b00f-cc30-b656-b34d66151b04
-Name         = client-introduction
-Description  = <none>
-Policies     = client-introduction
-Create Index = 117
-Modify Index = 117
-```
+   Create the role in your cluster. Replace the `<MANAGEMENT_TOKEN>` and `<NOMAD_IP>` placeholders with your management token's value and your Nomad IP address.
 
-### Generate a client introduction token
+   ```shell-session
+   $ curl \
+    --request POST \
+    --header "X-Nomad-Token: <MANAGEMENT_TOKEN>" \
+    --data @client-introduction-role.json \
+    https://<NOMAD_IP>:4646/v1/acl/role
+    ```
 
-Use the [`nomad node intro create` command](/nomad/commands/node/intro/create)
-to generate the client introduction token, which is a JSON Web Token (JWT).
+    The response describes the ACL role, including its attached policies and the
+    Raft index at its creation.
 
-This example scopes the token to a node pool named `staging` and writes the
-result to a file called `intro_token.jwt`.
+    ```json
+    {
+      "CreateIndex": 117,
+      "Description": "my example ACL Role",
+      "ID": "cf0b4a43-b00f-cc30-b656-b34d66151b04",
+      "ModifyIndex": 117,
+      "Name": "client-introduction",
+      "Policies": [
+        {
+          "Name": "client-introduction"
+        }
+      ]
+   }
+   ```
 
-```shell-session
-nomad node intro create -node-pool=staging  > intro_token.jwt
-```
+   </Tab>
+   </Tabs>
 
-The `intro-token.jwt` file contains the JWT.
+1. Generate a client introduction token, which is a JSON Web Token (JWT).
 
-```shell-session
- "eyJhbGciOiJSUzI1NiIsImtpZCI6IjljZDgy..."
-```
+   This example scopes the token to a node pool named `staging`. Scoping to a node pool is optional.
 
-### Update your Nomad server configuration
+   <Tabs>
+   <Tab heading="CLI" group="cli">
 
-Configure your Nomad server's `server.client_introduction` block. This example
-sets strict enforcement, which means the server rejects any client without a
-valid token. Refer to the [`server.client_introduction` block
-documentation](/nomad/docs/configuration/server#client_introduction-parameters)
-for additional enforcement options.
+   Use the [`nomad node intro create`
+   command](/nomad/commands/node/intro/create) to generate the client
+   introduction token.  This example writes the result to a file called
+   `intro_token.jwt`.
+   
+   ```shell-session
+   $ nomad node intro create -node-pool=staging  > intro_token.jwt
+   ```
 
-<CodeBlockConfig highlight="8-12">
+   The `intro-token.jwt` file contains the JWT.
 
-```hcl
-data_dir = "/opt/nomad/"
-acl {
-  enabled = true
-}
-server {
-  enabled          = true
-  bootstrap_expect = 1
-  client_introduction {
-    enforcement          = "strict" # Default = "warn"
-    default_identity_ttl = "5m"     # Default = "5m"
-    max_identity_ttl     = "30m"    # Default = "30m"
-  }
-}
-tls {
-  http = true
-  rpc  = true
-  ca_file   = "/opt/nomad/tls/nomad-agent-ca.pem"
-  cert_file = "/opt/nomad/tls/global-server-nomad.pem"
-  key_file  = "/opt/nomad/tls/global-server-nomad-key.pem"
-}
-```
+   ```shell-session
+   "eyJhbGciOiJSUzI1NiIsImtpZCI6IjljZDgy..."
+   ```
 
-</CodeBlockConfig>
+   </Tab>
+   <Tab heading="API" group="api">
 
-No additional configuration is required on the client node.
+   Use the [`/v1/acl/identity/client-introduction-token` API
+   endpoint](/nomad/api-docs/acl/identities#create-client-introduction-identity)
+   to create the client introduction token.
 
-### Start the Nomad server
+   This example scopes the token to a node pool named `staging`. Scoping to a
+   node pool is optional.
+   
+   Create a `client-introduction-token.json` file to define the node pool.
 
-You have the following options for passing the client introduction token to the
-Nomad server:
+   ```json
+   {
+   "NodePool": "staging"
+   }
+   ```
 
-- Set the token as the value of a `NOMAD_CLIENT_INTRO_TOKEN` environment
-  variable.
-- Use the [`-client-intro-token`
-  parameter](/nomad/commands/agent#client-intro-token) of the `nomad agent`
-  command.
-- Place the `intro_token.jwt` file in the client's state directory, which is by
-  default [the `<data_dir>/client_state_dir>` directory](/nomad/docs/configuration/client#state_dir).
+   Create the client introduction token. Replace the `<MANAGEMENT_TOKEN>` and
+   `<NOMAD_IP>` placeholders with your management token's value and your Nomad
+   IP address.
+   
+   ```shell-session
+   $ curl \
+      --request POST \
+      --header "X-Nomad-Token: <MANAGEMENT_TOKEN>" \
+      --data @client-introduction-token.json \
+      https://<NOMAD_IP>:4646/v1/acl/identity/client-introduction-token
+   ```
 
-This example starts the server with the client introduction token passed in the
-`-client-intro-token` parameter.
+   The response is the JSON Web Token.
 
-```shell-session
-nomad agent -config /etc/nomad.d/nomad.hcl \
--client-intro-token "eyJhbGciOiJSUzI1NiIsImtpZCI6IjljZDgy..."
-```
+   ```json
+   {
+    "JWT": "eyJhbGciOiJSUzI1NiIsImtpZCI6IjljZDgy..."
+   }
+   ```
 
-### Monitor client join failures
+   </Tab>
+   </Tabs>
 
-You have the following options to determine when client registration fails:
+1. Start the Nomad client with the client introduction token.
+   
+   Provide the client introduction token to the Nomad client using one
+   of these options:
 
-- Check the server logs for `[ERROR] nomad.client: node registration without
+   - Set the token as the value of a `NOMAD_CLIENT_INTRO_TOKEN` environment variable.
+   - Use the [`-client-intro-token`
+     parameter](/nomad/commands/agent#client-intro-token) of the `nomad agent`
+     command.
+   - Place the `intro_token.jwt` file in the client's state directory, which is
+     by default [the `<data_dir>/client_state_dir>`
+     directory](/nomad/docs/configuration/client#state_dir).
+
+   This example starts the client with the client introduction token passed in
+   the `-client-intro-token` parameter.
+
+   ```shell-session
+   $ nomad agent -config /etc/nomad.d/nomad.hcl \
+   -client-intro-token "eyJhbGciOiJSUzI1NiIsImtpZCI6IjljZDgy..."
+   ```
+
+1. Monitor for client join failures.
+
+   You have the following options to determine when client registration fails:
+
+   - Check the server logs for `[ERROR] nomad.client: node registration without
   introduction token` messages.
-- Monitor the [`nomad.client.introduction.enforcement`
+   - Monitor the [`nomad.client.introduction.enforcement`
   counter](/nomad/docs/monitor#client-introduction), which increments when a
   client tries to join without a valid client introduction token.
-
 
 
 [`consul` stanza]: /nomad/docs/configuration/consul
