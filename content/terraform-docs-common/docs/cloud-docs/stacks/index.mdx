@@ -2,10 +2,9 @@
 page_title: Stacks overview - HCP Terraform
 description: >-
     Stacks are a configuration layer that simplify managing infrastructure modules. Learn how Stacks help you provision and coordinate your infrastructure lifecycle at scale.
-tfc_only: true
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2025-05-27T14:28:51-04:00
-last_modified: 2025-09-23T14:21:47-07:00
+last_modified: 2026-03-16T23:13:27.000Z
 # END AUTO GENERATED METADATA
 ---
 
