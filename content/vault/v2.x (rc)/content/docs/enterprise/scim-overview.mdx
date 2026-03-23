@@ -1,0 +1,192 @@
+---
+layout: docs
+page_title: Vault SCIM 2.0 user guide
+description: >-
+  Configure Vault Enterprise as a SCIM 2.0 server so your identity platform can provision, update, and de-provision users and groups in Vault.
+---
+
+
+# Vault SCIM 2.0 user guide
+
+@include 'alerts/enterprise-only.mdx'
+
+
+## What this guide covers
+
+Use this guide to configure **Vault Enterprise** as a **SCIM 2.0 (System for Cross-domain Identity Management) server** so your identity platform can provision, update, and de-provision users and groups in Vault.
+
+Using SCIM in Hashicorp Vault The value of SCIM 
+Improve operational efficiency by reducing the time spent to setup and manage users in Vault
+Improve security and governance by logging user, and group lifecycle management to accommodate for joiners, movers and leavers in your organization
+The increase in automation and visibility for Vault operators makes Vault easier to use and manage as your organization grows and Vault usage scales across application teams. 
+
+SCIM is only available in public beta for Hashicorp Vault Enterprise and Dedicated customers. 
+Please note that SCIM can only be used for users, groups and user group membership movement only. Policy management is not in scope for management via SCIM. 
+—
+
+This guide focuses on core tasks for enabling SCIM with Vault Enterprise. 
+
+- Enabling SCIM support
+- Creating SCIM client configurations
+- Authenticating SCIM clients
+- Managing users and groups over SCIM
+- Understanding how **IGA** and **IdP** clients behave differently
+- Troubleshooting common setup and request errors
+
+## Before you begin
+
+Make sure you have:
+
+- A running **Vault Enterprise** cluster
+- Permission to enable auth methods and manage identity resources
+- At least one Vault auth method that your SCIM client can use to obtain a Vault token
+- A way to send SCIM requests, such as `curl`, Postman, or your identity platform's built-in SCIM connector
+
+SCIM support is not active until you explicitly enable it.
+
+## Enable SCIM support
+
+Run the activation command before configuring SCIM clients or sending SCIM requests:
+
+```bash
+vault write -f sys/activation-flags/enable-scim/activate
+```
+
+After activation, Vault exposes SCIM endpoints under the following APIs:
+
+- `/v1/identity/scim/v2/Users`
+- `/v1/identity/scim/v2/Groups`
+- `/v1/identity/scim/v2/ServiceProviderConfig`
+- `/v1/identity/scim/v2/Schemas`
+- `/v1/identity/scim/v2/ResourceTypes`
+
+## How SCIM clients authenticate
+
+A SCIM client does not authenticate with a separate SCIM secret. Instead, it authenticates to Vault through a supported auth method and then uses the resulting **Vault token** for SCIM API calls.
+
+The high-level flow looks like this:
+
+1. Create a Vault **Entity** to represent the SCIM client application.
+2. Create an **entity alias** on an auth method for that Entity.
+3. Create a SCIM client configuration that points to the Entity.
+4. Authenticate through the auth method and use the Vault token as a bearer token for SCIM requests.
+
+Example:
+
+```bash
+vault auth enable userpass
+vault auth list -format=json
+vault write identity/entity name="scim-sailpoint-connector"
+vault write identity/entity-alias \
+ name="scim-sailpoint-user" \
+ mount_accessor="<userpass_accessor>" \
+ canonical_id="<entity_id>"
+vault write auth/userpass/users/scim-sailpoint-user password="changeme"
+```
+
+Then authenticate and save the token:
+
+
+## Configure a SCIM client
+
+Create SCIM client configurations and SCIM client roles depending on your integration. Note that you can only have single SCIM client per auth mount. Use IGA for tools like Sailpoint, and IdP for products like Okta. 
+
+
+| **IGA** | Governance and provisioning tools such as SailPoint | `client_role`, `access_grant_principal` | Manages canonical user ownership in Vault |
+| **IdP** | Identity providers such as Okta or Azure AD | `client_role`, `access_grant_principal`, `alias_mount_accessor` | Can create users and aliases tied to the configured auth mount |
+
+
+
+
+Note that when you’re setting SCIM configuration to take note of the following rules:
+
+- **IGA** clients must not set `alias_mount_accessor`.
+- **IdP** clients must set `alias_mount_accessor`.
+- `client_role` is immutable after creation.
+- `alias_mount_accessor` is immutable after creation.
+- `access_grant_principal` must point to a valid Vault Entity.
+- A single `access_grant_principal` cannot be reused by multiple SCIM clients.
+
+
+Using SCIM with an IGA or IdP, you can provision and manage users, deactivate a user via PATCH, delete a user, create and list groups, delete groups, provision and manage groups.  
+Please refer to our API documentation for details on how to provision user, groups, and aliases through SCIM. 
+
+
+
+## Understand IGA and IdP behavior
+
+The biggest customer-facing difference is **ownership**. An **IGA** client acts as the system of record for the users and groups it owns. An **IdP** client is tied to a specific auth mount through `alias_mount_accessor` and can create users, 
+
+The difference between IGA and IdP SCIM clients is outlined below. 
+Both IDA and IdP SCIM clients can only create, update, and delete users, groups and entities that were created by that specific SCIM client. You cannot use one SCIM client to update user, groups, and entities of another. 
+
+
+### Cross-client mapping with `externalId`
+
+Vault uses `externalId` to correlate identities across clients.
+
+A common pattern looks like this:
+
+1. Your IGA creates a user in Vault with `externalId = "bob-ext-001"`.
+2. Your IdP later sends a SCIM `POST /Users` request with the same `externalId`.
+3. Vault links that request to the existing user instead of creating a second entity.
+4. The IdP gains an alias relationship for that identity on its configured auth mount.
+
+This behavior helps you avoid duplicate users when multiple identity systems manage the same person.
+
+## Group visibility and membership rules
+
+Groups are also scoped by client ownership.
+
+Customers should expect the following behavior:
+
+- A client sees the groups it owns.
+- A client cannot read, update, or delete a group owned by a different SCIM client.
+- A client can only add members it is allowed to reference.
+- If a client tries to add a member it does not own or cannot access, the request fails.
+
+This matters most in mixed environments where an IGA and one or more IdPs operate against the same Vault cluster.
+
+## What happens if you delete a SCIM client configuration
+
+Deleting a SCIM client configuration stops future SCIM operations for that client.
+
+Customers should expect this behavior:
+
+- Existing identities created earlier remain in Vault.
+- Existing SCIM bearer tokens for that client no longer resolve to a valid SCIM client.
+- Requests made with that old client context fail with authorization errors.
+
+If you plan to retire a SCIM client, review the users and groups it manages before removing the configuration.
+
+
+
+## Supported and unsupported request patterns
+
+Based on the current behavior described in the source notes, customers should design integrations with these expectations:
+
+- SCIM requests should use standard SCIM media types and payload shapes.
+- PATCH support is limited to supported operations and fields such as .
+- Multiple PATCH operations in a single request may not be supported.
+- Unsupported PATCH operations return SCIM-compliant errors.
+- Malformed JSON and missing required attributes return SCIM-compliant `400` responses.
+
+If your identity platform lets you customize PATCH behavior, keep requests narrow and predictable.
+
+## Troubleshooting checklist
+
+If SCIM requests fail, check these items in order:
+
+1. Confirm SCIM is enabled through the SCIM feature flag.
+1. Confirm the SCIM client configuration exists.
+1. Confirm the client authenticated through an auth method that maps back to the configured `access_grant_principal`.
+1. Confirm the bearer token is current.
+1. For IdP SCIM clients, confirm `alias_mount_accessor` still points to an enabled auth mount.
+1. Confirm the target user or group is owned by the client making the request.
+1. Confirm the request body includes the correct SCIM schema and required attributes.
+1. Confirm `externalId` values match your intended correlation model across systems.
+
+
+That gives you confidence that Vault, your auth mount configuration, and your upstream identity systems all agree on how identities should be managed.
+
+
