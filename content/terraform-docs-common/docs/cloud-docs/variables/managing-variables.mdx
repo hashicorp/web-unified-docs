@@ -4,13 +4,13 @@ description: >-
   Use workspace variables and variable sets to customize HCP Terraform runs.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2025-06-26T16:53:09-07:00
-last_modified: 2025-11-19T09:33:54-08:00
+last_modified: 2026-03-16T23:04:16.000Z
 # END AUTO GENERATED METADATA
 ---
 
 # Manage variables and variable sets
 
-You can set variables specifically for each workspace or you can create variable sets to reuse the same variables across multiple workspaces<!-- BEGIN: TFC:only name:stacks-tfe --> and Stacks<!-- END: TFC:only name:stacks-tfe -->. Refer to the [variables overview](/terraform/cloud-docs/variables) for more information about variable types, scope, and precedence. You can also set variable values specifically for each workspace run on the command line.
+You can set variables specifically for each workspace or you can create variable sets to reuse the same variables across multiple workspaces and Stacks. Refer to the [variables overview](/terraform/cloud-docs/variables) for more information about variable types, scope, and precedence. You can also set variable values specifically for each workspace run on the command line.
 
 You can create and edit workspace-specific variables through:
 
@@ -99,7 +99,7 @@ You can only do this with files ending in `auto.tfvars` or `terraform.tfvars`. Y
 
 > **Hands On:** Try the [Manage Variable Sets in HCP Terraform tutorial](/terraform/tutorials/cloud/cloud-multiple-variable-sets) tutorial.
 
-Variable sets are reusable collections of variables that you can apply to multiple workspaces<!-- BEGIN: TFC:only name:stacks-tfe --> and Stacks<!-- END: TFC:only name:stacks-tfe -->. You can create variable sets under an organization or a project. Whether the variable set is owned by an organization or a project determines the permissions required to manage that set. Learn more about [variable set permissions](#permissions).
+Variable sets are reusable collections of variables that you can apply to multiple workspaces and Stacks. You can create variable sets under an organization or a project. Whether the variable set is owned by an organization or a project determines the permissions required to manage that set. Learn more about [variable set permissions](#permissions).
 
 HCP Terraform does not evaluate variable sets during Terraform runs for workspaces configured with `Local` [execution mode](/terraform/cloud-docs/workspaces/settings#execution-mode).
 
@@ -124,10 +124,10 @@ To create a variable set:
 1. Choose a variable set scope:
    - Organization-owned
       - **Apply globally:** HCP Terraform automatically applies this global variable set to all existing and future workspaces.
-      - **Apply to specific projects<!-- BEGIN: TFC:only name:stacks-tfe -->, Stacks,<!-- END: TFC:only name:stacks-tfe --> or workspaces:** Use the text fields to search for and select workspaces<!-- BEGIN: TFC:only name:stacks-tfe -->, Stacks,<!-- END: TFC:only name:stacks-tfe --> and projects to apply this variable set to. This affects all current and future workspaces<!-- BEGIN: TFC:only name:stacks-tfe --> and Stacks<!-- END: TFC:only name:stacks-tfe --> for any selected projects. After creation, users can also [add this variable set to their workspaces](#apply-or-remove-variable-sets-from-inside-a-workspace).
+      - **Apply to specific projects, Stacks, or workspaces:** Use the text fields to search for and select workspaces, Stacks, and projects to apply this variable set to. This affects all current and future workspaces and Stacks for any selected projects. After creation, users can also [add this variable set to their workspaces](#apply-or-remove-variable-sets-from-inside-a-workspace).
    - Project-owned
-      - **Apply to the entire project:** HCP Terraform automatically applies this variable set to all existing and future workspaces<!-- BEGIN: TFC:only name:stacks-tfe --> and Stacks<!-- END: TFC:only name:stacks-tfe --> in the project.
-      - **Apply to specific workspaces<!-- BEGIN: TFC:only name:stacks-tfe --> and Stacks<!-- END: TFC:only name:stacks-tfe --> in the project:** Use the text fields to search for and select workspaces<!-- BEGIN: TFC:only name:stacks-tfe --> and Stacks<!-- END: TFC:only name:stacks-tfe --> to apply this variable set to. After creation, users can also [add this variable set to their workspaces](#apply-or-remove-variable-sets-from-inside-a-workspace).
+      - **Apply to the entire project:** HCP Terraform automatically applies this variable set to all existing and future workspaces and Stacks in the project.
+      - **Apply to specific workspaces and Stacks in the project:** Use the text fields to search for and select workspaces and Stacks to apply this variable set to. After creation, users can also [add this variable set to their workspaces](#apply-or-remove-variable-sets-from-inside-a-workspace).
 
 1. Add one or more variables: Click **+ Add variable**, choose a variable type (Terraform or environment), optionally mark the variable as [sensitive](#sensitive-values), and enter a variable name, value, and optional description. Then, click **Save variable**.
 
@@ -149,7 +149,7 @@ To edit or remove a variable set:
 
 ### Delete variable sets
 
-Deleting a variable set can be a disruptive action, especially if the variables are required to execute runs. We recommend informing organization, project<!-- BEGIN: TFC:only name:stacks-tfe --> ,Stack,<!-- END: TFC:only name:stacks-tfe --> and workspace owners before removing a variable set.
+Deleting a variable set can be a disruptive action, especially if the variables are required to execute runs. We recommend informing organization, project ,Stack, and workspace owners before removing a variable set.
 
 To delete a variable set:
 
@@ -157,7 +157,7 @@ To delete a variable set:
 
 1. Click **Variable Sets**.
 
-1. Select **Delete variable set**. Enter the variable set name and click **Delete variable set** to confirm this action. HCP Terraform deletes the variable set. Runs within those workspaces<!-- BEGIN: TFC:only name:stacks-tfe --> and Stacks<!-- END: TFC:only name:stacks-tfe --> can no longer use the variables from the variable set.
+1. Select **Delete variable set**. Enter the variable set name and click **Delete variable set** to confirm this action. HCP Terraform deletes the variable set. Runs within those workspaces and Stacks can no longer use the variables from the variable set.
 
 ### Apply or remove variable sets from inside a workspace
 
@@ -172,9 +172,6 @@ To remove a variable set from within a workspace:
 1. Navigate to the workspace and click the **Variables** tab. The **Variables** page appears, showing all workspace-specific variables and variable sets applied to the workspace.
 1. Click the ellipses button next to the variable set and select **Remove variable set**.
 1. Click **Remove variable set** in the dialog box. HCP Terraform removes the variable set from this workspace, but it remains available to other workspaces in the organization.
-
-
-<!-- BEGIN: TFC:only name:stacks-tfe -->
 
 ## Variable sets and Stacks
 
@@ -210,9 +207,6 @@ Stacks reference variable sets during deployment runs, so any changes to variabl
 Because Stacks reference variable sets directly by name or ID, variable [precedence](/terraform/cloud-docs/variables#precedence) does not affect Stacks. If a Stack references a variable set, the Stack always uses the values from that set, even if there are organization-level variables or other variable sets with variables that have the same name.
 
 To learn more about authenticating Stacks using values from variable sets, refer to [Authenticate a Stack](/terraform/language/stacks/deploy/authenticate). To learn more about the syntax of referencing variable sets with examples, refer to [the `store` block reference](/terraform/language/stacks/tfdeploy/store).
-
-<!-- END: TFC:only name:stacks-tfe -->
-
 
 ## Overwrite variable sets
 
