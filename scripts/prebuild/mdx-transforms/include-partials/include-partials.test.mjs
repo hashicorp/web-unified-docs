@@ -104,17 +104,52 @@ This is the end of the test file.
 	})
 
 	test('throws an error when an include escapes the allowed partials roots', async () => {
-		const mdxString = `# Hello\n\n@include "../../../outside.mdx"\n`
-
-		await expect(includePartials(mdxString, partialsDir, 'test-file.mdx')).rejects.toThrow(
-			'@include path escapes allowed partials directories',
+		const tempRoot = fs.mkdtempSync(
+			path.join(process.cwd(), 'tmp-include-partials-'),
 		)
+		const localPartialsDir = path.join(
+			tempRoot,
+			'content',
+			'vault',
+			'v1.20.x',
+			'docs',
+			'partials',
+		)
+		const outsideFile = path.join(tempRoot, 'outside.mdx')
+		const mdxString = `# Hello\n\n@include "../../../../../outside.mdx"\n`
+
+		fs.mkdirSync(localPartialsDir, { recursive: true })
+		fs.writeFileSync(
+			outsideFile,
+			'This should stay outside the partials roots.\n',
+		)
+
+		await expect(
+			includePartials(mdxString, localPartialsDir, 'test-file.mdx'),
+		).rejects.toThrow('@include path escapes allowed partials directories')
+
+		fs.rmSync(tempRoot, { recursive: true, force: true })
 	})
 
 	test('allows includes from product global partials', async () => {
-		const tempRoot = fs.mkdtempSync(path.join(process.cwd(), 'tmp-include-partials-'))
-		const localPartialsDir = path.join(tempRoot, 'content', 'vault', 'v1.20.x', 'docs', 'partials')
-		const productGlobalDir = path.join(tempRoot, 'content', 'vault', 'global', 'partials')
+		const tempRoot = fs.mkdtempSync(
+			path.join(process.cwd(), 'tmp-include-partials-'),
+		)
+		const localPartialsDir = path.join(
+			tempRoot,
+			'content',
+			'vault',
+			'v1.20.x',
+			'docs',
+			'partials',
+		)
+		const productGlobalDir = path.join(
+			tempRoot,
+			'content',
+			'vault',
+			'global',
+			'partials',
+		)
 
 		fs.mkdirSync(localPartialsDir, { recursive: true })
 		fs.mkdirSync(productGlobalDir, { recursive: true })
@@ -137,20 +172,32 @@ This is the end of the test file.
 	})
 
 	test('throws an error when a partial symlink escapes the allowed roots', async () => {
-		const tempRoot = fs.mkdtempSync(path.join(process.cwd(), 'tmp-include-partials-'))
-		const localPartialsDir = path.join(tempRoot, 'content', 'vault', 'v1.20.x', 'docs', 'partials')
+		const tempRoot = fs.mkdtempSync(
+			path.join(process.cwd(), 'tmp-include-partials-'),
+		)
+		const localPartialsDir = path.join(
+			tempRoot,
+			'content',
+			'vault',
+			'v1.20.x',
+			'docs',
+			'partials',
+		)
 		const outsideFile = path.join(tempRoot, 'outside.mdx')
 		const linkedPartial = path.join(localPartialsDir, 'linked.mdx')
 
 		fs.mkdirSync(localPartialsDir, { recursive: true })
-		fs.writeFileSync(outsideFile, 'This should stay outside the partials roots.\n')
+		fs.writeFileSync(
+			outsideFile,
+			'This should stay outside the partials roots.\n',
+		)
 		fs.symlinkSync(outsideFile, linkedPartial)
 
 		const mdxString = `# Hello\n\n@include "linked.mdx"\n`
 
-		await expect(includePartials(mdxString, localPartialsDir, 'test-file.mdx')).rejects.toThrow(
-			'@include path escapes allowed partials directories',
-		)
+		await expect(
+			includePartials(mdxString, localPartialsDir, 'test-file.mdx'),
+		).rejects.toThrow('@include path escapes allowed partials directories')
 
 		fs.rmSync(tempRoot, { recursive: true, force: true })
 	})
@@ -161,6 +208,15 @@ This is the end of the test file.
 
 		test(`resolves global alias to global partials directory`, async () => {
 			const mdxString = `# Hello\n\n@include "${PARTIALS_ALIAS.GLOBAL}/${globalPartialName}"\n`
+			const originalRealpathSync = fs.realpathSync
+
+			vi.spyOn(fs, 'realpathSync').mockImplementation((targetPath) => {
+				if (String(targetPath).endsWith(globalPartialName)) {
+					return String(targetPath)
+				}
+
+				return originalRealpathSync(targetPath)
+			})
 			vi.spyOn(fs, 'readFileSync').mockImplementationOnce(() => {
 				return globalPartialContent
 			})

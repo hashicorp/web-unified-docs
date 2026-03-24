@@ -79,7 +79,11 @@ const resolveIncludeFilePath = ({
 		})
 	) {
 		throw new Error(
-			`@include path escapes allowed partials directories. Please ensure the referenced file "${rawPath}" stays within one of: ${allowedRoots.map(({ displayPath }) => `"${displayPath}"`).join(', ')}.`,
+			`@include path escapes allowed partials directories. Please ensure the referenced file "${rawPath}" stays within one of: ${allowedRoots
+				.map(({ displayPath }) => {
+					return `"${displayPath}"`
+				})
+				.join(', ')}.`,
 		)
 	}
 
