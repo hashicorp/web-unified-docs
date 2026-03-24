@@ -136,6 +136,25 @@ This is the end of the test file.
 		fs.rmSync(tempRoot, { recursive: true, force: true })
 	})
 
+	test('throws an error when a partial symlink escapes the allowed roots', async () => {
+		const tempRoot = fs.mkdtempSync(path.join(process.cwd(), 'tmp-include-partials-'))
+		const localPartialsDir = path.join(tempRoot, 'content', 'vault', 'v1.20.x', 'docs', 'partials')
+		const outsideFile = path.join(tempRoot, 'outside.mdx')
+		const linkedPartial = path.join(localPartialsDir, 'linked.mdx')
+
+		fs.mkdirSync(localPartialsDir, { recursive: true })
+		fs.writeFileSync(outsideFile, 'This should stay outside the partials roots.\n')
+		fs.symlinkSync(outsideFile, linkedPartial)
+
+		const mdxString = `# Hello\n\n@include "linked.mdx"\n`
+
+		await expect(includePartials(mdxString, localPartialsDir, 'test-file.mdx')).rejects.toThrow(
+			'@include path escapes allowed partials directories',
+		)
+
+		fs.rmSync(tempRoot, { recursive: true, force: true })
+	})
+
 	describe(`${PARTIALS_ALIAS.GLOBAL} alias`, () => {
 		const globalPartialName = 'global-test-partial.mdx'
 		const globalPartialContent = 'Hey this is some partial content!'
