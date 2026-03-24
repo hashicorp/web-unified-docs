@@ -67,6 +67,15 @@ This is the end of the test file.
 		expect(transformed).toContain(transformedText)
 	})
 
+	test('should include root-relative local partial', async () => {
+		const mdxString = `# Hello\n\n@include "/test-partial.mdx"\n`
+		const transformed = await includePartials(mdxString, partialsDir)
+
+		expect(transformed).toContain(
+			'Hey, this is some text in a `partial` MDX file!',
+		)
+	})
+
 	test('should throw error when partial is missing', async () => {
 		// Set up paths to the test data
 		const testFilePath = path.join(
@@ -92,6 +101,39 @@ This is the end of the test file.
 		await expect(includePartials()).rejects.toThrow(
 			'Error in remarkIncludePartials: The partialsDir argument is required. Please provide the path to the partials directory.',
 		)
+	})
+
+	test('throws an error when an include escapes the allowed partials roots', async () => {
+		const mdxString = `# Hello\n\n@include "../../../outside.mdx"\n`
+
+		await expect(includePartials(mdxString, partialsDir, 'test-file.mdx')).rejects.toThrow(
+			'@include path escapes allowed partials directories',
+		)
+	})
+
+	test('allows includes from product global partials', async () => {
+		const tempRoot = fs.mkdtempSync(path.join(process.cwd(), 'tmp-include-partials-'))
+		const localPartialsDir = path.join(tempRoot, 'content', 'vault', 'v1.20.x', 'docs', 'partials')
+		const productGlobalDir = path.join(tempRoot, 'content', 'vault', 'global', 'partials')
+
+		fs.mkdirSync(localPartialsDir, { recursive: true })
+		fs.mkdirSync(productGlobalDir, { recursive: true })
+		fs.writeFileSync(
+			path.join(productGlobalDir, 'shared.mdx'),
+			'This came from product global partials.\n',
+		)
+
+		const mdxString = `# Hello\n\n@include "../../../global/partials/shared.mdx"\n`
+		const transformed = await includePartials(
+			mdxString,
+			localPartialsDir,
+			'test-file.mdx',
+			{ productGlobalPartialsDir: productGlobalDir },
+		)
+
+		expect(transformed).toContain('This came from product global partials.')
+
+		fs.rmSync(tempRoot, { recursive: true, force: true })
 	})
 
 	describe(`${PARTIALS_ALIAS.GLOBAL} alias`, () => {

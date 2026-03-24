@@ -61,11 +61,19 @@ export async function buildFileMdxTransforms(filePath) {
 		repoSlug,
 		verifiedVersion,
 	)
+	const productGlobalPartialsDir = path.join(
+		targetDir,
+		repoSlug,
+		'global',
+		'partials',
+	)
 	const outPath = path.join(outputDir, relativePath)
 
 	const entry = {
+		repoSlug,
 		filePath,
 		partialsDir,
+		productGlobalPartialsDir,
 		outPath,
 		version,
 		redirectsDir,
@@ -96,7 +104,14 @@ export async function buildFileMdxTransforms(filePath) {
  */
 export async function applyFileMdxTransforms(entry, versionMetadata = {}) {
 	try {
-		const { filePath, partialsDir, outPath, version, redirectsDir } = entry
+		const {
+			filePath,
+			partialsDir,
+			productGlobalPartialsDir,
+			outPath,
+			version,
+			redirectsDir,
+		} = entry
 		const redirects = await loadRedirects(version, redirectsDir)
 
 		const fileString = fs.readFileSync(filePath, 'utf8')
@@ -112,7 +127,11 @@ export async function applyFileMdxTransforms(entry, versionMetadata = {}) {
 			.use(remarkMdx)
 			// Process partials first, then content exclusion
 			// This ensures exclusion directives in global
-			.use(remarkIncludePartialsPlugin, { partialsDir, filePath })
+			.use(remarkIncludePartialsPlugin, {
+				partialsDir,
+				filePath,
+				productGlobalPartialsDir,
+			})
 
 		// Make sure the content exclusion process skips looking through
 		// the global partial filepath (it should only be processed once the global
