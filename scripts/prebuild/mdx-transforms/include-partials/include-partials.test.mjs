@@ -94,6 +94,20 @@ This is the end of the test file.
 		)
 	})
 
+	test('does not allow directory traversal outside of partialsDir', async () => {
+		const testMdxString = `# Hello world!
+
+This is a test file. Here's a partial file included in this file:
+
+@include "@global../outside-partial.mdx"
+
+This is the end of the test file.
+`
+		await expect(includePartials(testMdxString, partialsDir)).rejects.toThrow(
+			'@include file not found',
+		)
+	})
+
 	describe(`${PARTIALS_ALIAS.GLOBAL} alias`, () => {
 		const globalPartialName = 'global-test-partial.mdx'
 		const globalPartialContent = 'Hey this is some partial content!'
