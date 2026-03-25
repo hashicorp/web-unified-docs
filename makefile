@@ -34,11 +34,28 @@ install-gen-deps: ## Install dependencies for code generation
 	@GO111MODULE=on go install github.com/dmarkham/enumer@master
 	@go install github.com/hashicorp/packer-plugin-sdk/cmd/packer-sdc@latest
 
+# Environment variables for packer cloning:
+# PACKER_REPO: Repository URL or local directory path
+#              Default: https://github.com/hashicorp/packer
+#              Example (local):  PACKER_REPO=/path/to/local/packer
+#              Note: Local paths will copy all files including uncommitted changes
+# PACKER_BRANCH: Branch name to clone (only used for remote repos)
+#                Default: main
+#                Example: PACKER_BRANCH=feature-branch
+PACKER_REPO ?= https://github.com/hashicorp/packer
+PACKER_BRANCH ?= main
+
 .PHONY: clone-packer
 clone-packer: ## Clone the Packer repository for code generation
 	rm -rf .content-source-repos/packer
-	@echo "==> Cloning Packer repository..."
-	git clone --depth=1 --filter=blob:none https://github.com/hashicorp/packer .content-source-repos/packer
+	@echo "==> Cloning Packer repository from $(PACKER_REPO)..."
+	@if echo "$(PACKER_REPO)" | grep -qE "^https://|^git@|^ssh://"; then \
+		echo "Cloning from remote repository (branch: $(PACKER_BRANCH))..."; \
+		git clone --depth=1 --filter=blob:none --branch=$(PACKER_BRANCH) $(PACKER_REPO) .content-source-repos/packer; \
+	else \
+		echo "Copying from local directory (includes uncommitted changes)..."; \
+		cp -r $(PACKER_REPO) .content-source-repos/packer; \
+	fi
 	@echo "Packer repository cloned into .content-source-repos/packer"
 
 .PHONY: generate
