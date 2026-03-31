@@ -133,7 +133,7 @@ export const findFileWithMetadata = async (
 		versionMetaData.releaseStage,
 	)
 
-	const newFilePathJoined = newFilePath.join('/')
+	const newFilePathJoined = newFilePath.filter(Boolean).join('/')
 
 	try {
 		// TODO: when we do inc builds locally we want to load all files from the content dir and transform them on demand if needed
