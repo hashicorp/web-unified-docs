@@ -18,24 +18,12 @@ This file contains **writing standards, content patterns, and examples** for cre
 
 When adding or updating rules in AGENTS.md:
 
-1. **Search for existing rules first** - Use multiple related search terms, not just exact phrases
-   - Example: Search "resources", "structure", "multi-tool", "formatting", "link patterns"
-   - Use grep with multiple keywords to find related sections
+1. **Search for existing rules first** - Use grep with multiple related keywords before adding anything new
+2. **View in context** - Read the surrounding section to understand full scope
+3. **Consolidate, don't duplicate** - Enhance existing sections rather than creating new ones
+4. **Skills are the source of truth for validation rules** - If a rule is enforced by a skill, a brief summary + skill reference is sufficient here
 
-2. **Check these key sections for existing guidance**:
-   - Document ending structure (~line 188)
-   - HashiCorp resources section formatting (~line 391)
-   - Link Description Patterns (~line 416)
-   - Code example standards (~line 183)
-   - Voice and tone standards (~line 70)
-
-3. **View in context** - Read 50-100 lines around any found section to understand full scope
-
-4. **Consolidate, don't duplicate** - If related rules exist, enhance them rather than creating new sections
-
-5. **Ask before creating new sections** - Confirm no related guidance exists elsewhere in the file
-
-**Why this matters:** Duplicate or conflicting rules create confusion and make the file harder to maintain. One comprehensive section is always better than multiple partial sections.
+**Why this matters:** Duplicate or conflicting rules create confusion. One comprehensive section is always better than multiple partial sections.
 
 ---
 
@@ -252,19 +240,7 @@ HashiCorp is part of the IBM portfolio alongside Red Hat (Ansible, OpenShift) an
 
 ## SEO & AI/LLM Optimization
 
-**For complete SEO and AI/LLM optimization guidance, use the `/seo-optimize` skill.**
-
-The skill covers:
-- Meta descriptions (150-160 characters)
-- Title optimization
-- First paragraph hooks
-- H2 heading optimization
-- Link descriptions
-- AI/LLM retrieval patterns
-- Topic sentences and relationships
-- Question-answer patterns
-
-Run `/seo-optimize <file>` when optimizing for search engines and AI systems.
+Run `/seo-optimize <file>` when optimizing for search engines and AI systems. The skill is the complete source of truth for SEO criteria (meta descriptions, titles, headings, link descriptions, keyword density, readability, and more).
 
 
 ## Resources
@@ -278,284 +254,17 @@ Run `/seo-optimize <file>` when optimizing for search engines and AI systems.
 
 ### HashiCorp Resources Section Patterns
 
-The "HashiCorp resources" section at the end of documents should follow these organization and writing patterns for consistency:
-
-#### Organization Structure
-
-**Balance beginner and advanced links** with clear progression:
-
-1. **WAF cross-references** - Links to related WAF documents (always first)
-2. **Get started section** - For beginners (tutorials, introductions, getting started guides)
-3. **Core concepts section** - For intermediate users (documentation, CLI, key features)
-4. **Advanced features section** - For advanced users (integrations, advanced configurations)
-5. **Tool-specific sections** - When covering multiple tools, organize by tool with clear headings
-
-#### When to Group Resources vs. Keep Flat
-
-**Use a single flat `HashiCorp resources:` section when:**
-- Links are similar in nature (mostly WAF cross-references)
-- Document focuses on a single tool
-- Total links are under 8
-- Grouping would not improve readability
-
-**Group resources under descriptive subheadings when:**
-- Document covers multiple HashiCorp products (Packer, Nomad, Kubernetes, Vault)
-- Links naturally fall into distinct categories by tool or purpose
-- Total links exceed 8-10 and organization helps readability
-- Users would benefit from quickly finding tool-specific resources
-
-**Grouped subheading format:** Use descriptive names with colon, no `##` or `###`
-- ✅ `Packer for containers:`
-- ✅ `Nomad deployment resources:`
-- ✅ `Kubernetes deployment resources:`
-- ❌ `### Packer for containers`
-
-Use your judgment. When in doubt, ask whether grouping helps the reader find what they need faster.
-
-**HashiCorp resources section formatting:**
-
-The HashiCorp resources section should be organized to help readers find relevant content efficiently.
-
-**Structure options:**
-
-1. **Simple list** - Use when resources are related and don't need categorization:
-   ```markdown
-   ## HashiCorp resources
-   
-   - [Related WAF page](/path/to/page)
-   - Learn about [concept](/path)
-   - Get started with [tutorials](/path)
-   ```
-
-2. **Categorized with introductory text** - Use when resources fall into distinct topics or multiple tools:
-   ```markdown
-   ## HashiCorp resources
-   
-   - [WAF cross-reference links]
-   
-   Learn about specific topic:
-   
-   - Learn how to [do thing](/path)
-   - Read the [documentation](/path)
-   
-   Deploy to specific platform:
-   
-   - Deploy [specific thing](/path)
-   - Read the [provider documentation](/path)
-   ```
-
-**Formatting rules:**
-
-- Start with WAF cross-references (other pillar pages)
-- Use action verbs: "Learn", "Read", "Get started with", "Deploy", "Use", "Create", "Implement", "Explore"
-- Group related links under plain text introductions (not headings with ##)
-- Plain text introductions should end with a colon
-- Keep link descriptions concise and action-oriented
-- Multiple related providers can be listed in one bullet with commas
-
-**Example structure for single-tool documents:**
-```markdown
-## HashiCorp resources
-
-- [WAF cross-reference links]
-
-Get started with [Tool]:
-
-- Get started with [[Tool] tutorials] for hands-on examples
-- Read the [[Tool] documentation] for comprehensive features
-
-[Tool] for [use case]:
-
-- [Tool-specific implementation links]
-- [Integration links]
-
-[Tool] advanced features:
-
-- [Advanced configuration links]
-- [Integration links]
-```
-
-**Example structure for multi-tool documents:**
-```markdown
-## HashiCorp resources
-
-- [WAF cross-reference links]
-
-Get started with automation tools:
-
-- Get started with [Terraform tutorials] and read the [Terraform introduction] for infrastructure as code
-- Get started with [Packer tutorials] and read the [Packer introduction] for image building
-- Get started with [Vault tutorials] and read the [Vault introduction] for secrets management
-
-Terraform for [use case]:
-
-- [Terraform-specific links]
-
-Packer for [use case]:
-
-- [Packer-specific links]
-
-Vault for [use case]:
-
-- [Vault-specific links]
-```
-
-**Real-world examples:**
-
-Categorized resources:
-```markdown
-To learn how to deploy applications to Kubernetes with Terraform:
-
-- Learn how to deploy [Federated Multi-Cloud Kubernetes Clusters](/path)
-- Read the [Terraform Kubernetes provider documentation](https://example.com)
-```
-
-Multiple providers in one bullet:
-```markdown
-- Review the artifact management Terraform providers: [Artifactory](url), [Nexus](url), and [CodeArtifact](url)
-```
-
-**Don't use subsection headings (##):**
-```markdown
-### Deploy to Kubernetes  ← DON'T DO THIS
-
-- Learn how to deploy...
-```
-
-Use plain text with colon instead:
-```markdown
-Deploy to Kubernetes:  ← DO THIS
-
-- Learn how to deploy...
-```
-
-#### Link Description Patterns
-
-**Always place verbs OUTSIDE the link brackets:**
-- ✅ "Read the [Terraform documentation] for comprehensive features"
-- ❌ "Read the [Terraform documentation for comprehensive features]"
-- ✅ "Get started with [Terraform tutorials] for hands-on examples"
-- ❌ "[Get started with Terraform tutorials] for hands-on examples"
-
-**Split combined documentation and tutorial links** into separate bullets:
-- ❌ "Learn X with the [documentation] and [tutorials]"
-- ✅ Two bullets:
-  - "Read the [documentation] for core concepts"
-  - "Follow hands-on [tutorials] for examples"
-
-**Add context directly in the sentence** (no dashes after links):
-- ✅ "Read the [Terraform Kubernetes provider documentation] for resource syntax and configuration options"
-- ❌ "Read the [Terraform Kubernetes provider documentation] - for resource syntax and configuration"
-- ✅ "Learn about [Nomad job specifications] for container workloads"
-- ❌ "Learn about [Nomad job specifications] - for containers"
-
-**Use specific, descriptive link text** that explains what users will find:
-- ✅ "Explore [Kubernetes tutorials] for deployment patterns and workflows"
-- ❌ "Browse [Kubernetes tutorials] for additional examples"
-- ✅ "Read the [Sentinel documentation] for policy as code concepts"
-- ❌ "Read the [Sentinel documentation] and learn more"
-
-**Standard patterns for common link types:**
-
-Documentation links:
-- "Read the [Tool documentation] for comprehensive features"
-- "Read the [Tool documentation] for [specific feature area]"
-- "Read the [Tool introduction] to understand [core concept]"
-
-Tutorial links:
-- "Get started with [Tool tutorials] for hands-on examples"
-- "Follow hands-on [Tool tutorials] for [specific use case]"
-- "Explore [Tool tutorials] for [deployment patterns/workflows/examples]"
-
-Feature-specific links:
-- "Learn about [Feature] for [specific benefit]"
-- "Use [Feature] to [accomplish specific task]"
-- "Configure [Feature] for [specific outcome]"
-
-Provider/Integration links:
-- "Read the [Provider documentation] for [resource type] and configuration"
-- "Use [Integration] for [specific purpose]"
-- "Manage [resources] with the [Provider]"
-
-#### Common Link Descriptions by Tool
-
-**Standard beginner format (all tools):**
-- "Learn [Tool] with the [[Tool] tutorials] and read the [[Tool] documentation]"
-- Examples: Terraform, Vault, Packer, Consul, Nomad, Boundary
-
-**Tool-specific examples:**
-- Terraform: "Get started with [AWS], [Azure], or [GCP]" | "Learn the [Terraform language]" | "Learn about [Terraform state]"
-- Packer: "Learn about [Packer builders]" | "Use [Packer provisioners]"
-- Vault: "Learn about [Vault dynamic secrets]" | "Use [Vault with Terraform]"
-- Consul: "Learn about [Consul service mesh]"
-- Nomad: "Learn about [Nomad job specifications]"
-- Sentinel: "Learn the [Sentinel language syntax]"
-- HCP: "Get started with [HCP Terraform]" | "Learn about [HCP Packer]" | "Use [HCP Packer channels]"
-
-#### Section Naming Conventions
-
-Use clear, descriptive section headers that indicate the learning level or purpose:
-
-**Beginner sections:**
-- "Get started with [Tool]"
-- "Get started with automation tools"
-- "[Tool] foundations for [use case]"
-
-**Intermediate sections:**
-- "[Tool] core concepts"
-- "[Tool] documentation and tutorials"
-- "[Tool] for [specific use case]"
-
-**Advanced sections:**
-- "[Tool] advanced features"
-- "[Tool] integrations"
-- "Automating [use case]"
-- "[Tool] CI/CD automation"
-
-**Multi-tool sections:**
-- "[Tool] for [use case]" (e.g., "Terraform for GitOps", "Packer for containers")
-- "[Feature area]" (e.g., "Monitoring and observability", "Policy enforcement")
-
-#### Avoid These Anti-Patterns
-
-❌ **Generic verbs without context:**
-- "Browse [tutorials]"
-- "Learn more about [X]"
-- "Check out [X]"
-
-❌ **Dashes after links:**
-- "Read the [documentation] - comprehensive guide"
-- "Learn about [X] - for specific use case"
-
-❌ **Verbs inside brackets:**
-- "[Learn about Terraform state]"
-- "[Configure backends for state]"
-
-❌ **Combined links without separation:**
-- "Learn X with the [documentation] and [tutorials]"
-
-❌ **Missing context:**
-- "Read the [Terraform Kubernetes provider documentation]" (what will they learn?)
-- "Use [HCP Packer channels]" (for what purpose?)
-
-❌ **Tool name repetition:**
-- "Learn Packer with the Packer [documentation] and [tutorials]"
-- Better: "Read the Packer [documentation] for core concepts"
-
-#### Checklist for HashiCorp Resources Section
-
-- [ ] WAF cross-reference links appear first
-- [ ] Clear "Get started" section for beginners
-- [ ] Progressive organization from beginner to advanced
-- [ ] Verbs are outside link brackets
-- [ ] Documentation and tutorial links are separate bullets
-- [ ] Context is in the sentence, not after a dash
-- [ ] Link descriptions explain what users will find
-- [ ] Section names clearly indicate learning level
-- [ ] No generic verbs like "browse" or "learn more"
-- [ ] Tool-specific sections use consistent naming
-- [ ] 5-8+ links per document (more for multi-tool docs)
-- [ ] Links are specific, not generic dashboards
+The `check-resources` skill is the complete source of truth for resources section validation. Run `/check-resources <file>` to validate or fix formatting.
+
+**Key principles (for writing):**
+
+- Start with WAF cross-references, then progress from beginner to advanced
+- Use action verbs **outside** link brackets: `Read the [Terraform documentation] for...` not `[Read the Terraform documentation]`
+- Add context in the sentence, not after a dash: `...for resource syntax` not `- for resource syntax`
+- Keep documentation and tutorial links as separate bullets
+- Use plain text with colon for subheadings, not `##` headings: `Packer for containers:` not `### Packer for containers`
+- Target 5-8+ links; use grouped subheadings when covering multiple tools or 8+ links
+- **Consider video tutorial links** when relevant (complex visual workflows, tool introductions, conference talks)
 
 ---
 
@@ -590,43 +299,19 @@ Watch for these frequent content issues (formatting rules are detailed in Writin
 
 ## Code Example Patterns
 
-Use these patterns to ensure code examples are realistic and actionable:
+Run `/check-code-examples <file>` to validate. Key requirements for writing:
 
-### Packer Examples Must Include
-```hcl
-# GOOD - Shows actual application packaging
-build {
-  sources = ["source.docker.ubuntu"]
+### Packer examples must include
+- Provisioners that copy application files and install dependencies (not just empty source blocks)
+- A post-processor to tag/version the image for tracking
+- Realistic application content
 
-  # Copy application files
-  provisioner "file" {
-    source      = "dist/"
-    destination = "/app"
-  }
-
-  # Install dependencies
-  provisioner "shell" {
-    inline = [
-      "apt-get update",
-      "apt-get install -y nodejs npm",
-      "cd /app && npm install --production"
-    ]
-  }
-
-  # Tag for registry
-  post-processor "docker-tag" {
-    repository = "myregistry/myapp"
-    tags       = ["1.0.0"]
-  }
-}
-```
-
-### Terraform Examples Must Show
+### Terraform examples must show
 - **Data sources** to query dynamic values (AMI IDs, image tags) instead of hardcoded values
-- **Realistic values** with context (not "ami-12345678" but "ami built by Packer with data source query")
-- **Connection to workflow** - explain where values come from and what happens next
+- **Realistic values** with context (not "ami-12345678" but a data source query)
+- **Connection to workflow** — explain where values come from and what happens next
 
-### Example Summaries Must Explain
+### Code block summaries must explain
 1. **What the code does** - "This template copies application files and installs dependencies"
 2. **What it produces** - "Running `packer build` produces AMI ami-0abc123"
 3. **How to use the output** - "Reference this AMI in Terraform using a data source"
@@ -672,31 +357,7 @@ WAF documents should be:
 
 ## Tool-Specific Documentation Patterns
 
-Different HashiCorp tools need different documentation approaches:
-
-### Packer Documents Must Show
-- Complete build blocks with provisioners (not just source definitions)
-- How application code gets into images
-- How to tag/version images for tracking
-- How outputs connect to deployment tools (Terraform, Kubernetes, Nomad)
-
-### Terraform Documents Must Show
-- Backend configuration for state management
-- Data sources for querying dynamic values (not hardcoded IDs)
-- How to reference artifacts from other tools (Packer AMIs, container images)
-- Resource tags for organization and filtering
-
-### Sentinel Documents Must Show
-- Complete policies with imports and rules
-- How policies evaluate plans (what gets checked)
-- What happens when policies fail (blocks apply, shows violations)
-- How to test policies before deploying them
-
-### Integration Documents (Multi-Tool) Must Show
-- Clear workflow sequence (Tool A → Tool B → Tool C)
-- How outputs from one tool become inputs to the next
-- Example values that match across all tools
-- End-to-end example showing complete flow
+See [templates/reference/PATTERNS.md](./templates/reference/PATTERNS.md) for per-tool requirements (Packer, Terraform, Sentinel, multi-tool integration documents).
 
 ---
 
@@ -719,6 +380,7 @@ Different HashiCorp tools need different documentation approaches:
 ## Supporting Files and References
 
 ### Core Documentation Files
+- [templates/SKILL_WORKFLOW.md](./templates/SKILL_WORKFLOW.md) - Skill workflow for existing documents (what to run, in what order)
 - [templates/REVIEW_PHASES.md](./templates/REVIEW_PHASES.md) - Phase-based review process
 - [templates/styleguide.md](./templates/styleguide.md) - HashiCorp style guide (full)
 - [templates/QUICK_REFERENCE.md](./templates/QUICK_REFERENCE.md) - Quick reference: patterns, checklist, skills, troubleshooting
