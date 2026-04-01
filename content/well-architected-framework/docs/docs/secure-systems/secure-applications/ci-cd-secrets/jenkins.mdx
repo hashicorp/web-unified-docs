@@ -1,47 +1,84 @@
 ---
 page_title: Jenkins
-description: Learn how to integrate Jenkins with HashiCorp Vault for secure secrets management.
+description: Integrate Jenkins pipelines with HashiCorp Vault using AppRole authentication. Retrieve secrets with the Vault plugin, credentials binding, or Vault Agent for automated masking and dynamic credentials.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2025-07-16T16:24:50-05:00
+last_modified: 2026-01-29T10:31:53-06:00
+# END AUTO GENERATED METADATA
 ---
 
 # Jenkins
 
-Jenkins uses plugins to integrate with third-party tools. Traditionally, you would manage Jenkins secrets for pipelines with
-[Jenkins credential management](https://docs.cloudbees.com/docs/cloudbees-ci/latest/cloud-secure-guide/injecting-secrets)
-in the Jenkins Controller. This approach binds all secrets to environment variables, and masks these variables when they appear in pipeline logs. However, this conventional approach can lead to secret sprawl with external system credentials (like tokens, database credentials, and other pipeline secrets) duplicated in Jenkins. The Jenkins Controller also relies on the Jenkins user database for role based access control (RBAC) rather than implementing more secure granular access control lists (ACLs) based on credential paths.
+Jenkins pipelines can authenticate with Vault using [AppRole](/vault/docs/auth/approle), [JWT](/vault/docs/auth/jwt), or [LDAP](/vault/docs/auth/ldap) to securely retrieve secrets during pipeline execution. Instead of storing all credentials in the Jenkins Controller, pipelines authenticate to Vault at runtime and retrieve secrets on demand.
 
-## Use a best practice approach
+Traditionally, Jenkins manages secrets through [credential management](https://www.jenkins.io/doc/book/using/using-credentials/) in the Jenkins Controller. The Controller binds secrets to environment variables and masks variables in pipeline logs. However, this approach leads to secret sprawl when external system credentials — tokens, database passwords, and API keys — are duplicated across Jenkins. The Jenkins Controller relies on its user database for role-based access control (RBAC), which lacks the granular, path-based access control that Vault provides.
 
-A more secure method to inject and use credentials during pipeline runs is to use API integration with Vault for each pipeline step. When you use this approach in your pipelines, you gain the following:
+## Why integrate Jenkins with Vault
 
-1. Vault manages authorization for stored secrets based on externally authenticated identities.
-1. The Jenkins Credentials Plugin secures the Vault authentication process.
-1. Vault auth methods (like AppRole or JWT) benefit from the Credentials Management plugin's binding capabilities.
-1. Authenticated pipelines can make API calls to Vault, and retrieve just the necessary secrets for completing specific jobs.
+Integrating Jenkins with Vault addresses the following critical security and operational challenges in pipeline automation:
 
-This integration enables stronger security controls, while reducing secret sprawl throughout your organization.
+**Eliminate secret sprawl across pipelines:** Jenkins credential management stores secrets in the Controller, requiring teams to duplicate credentials when multiple pipelines and environments need the same access. Vault centralizes secret storage so pipelines retrieve credentials on demand from a single source. When a credential requires rotation, a single Vault update propagates to all pipelines rather than requiring changes in every Jenkins credential configuration.
 
-## Use the Jenkins Vault plugin and other methods
+**Prevent credential exposure in pipeline logs:** Jenkins masks credentials bound through the Credentials Plugin, but echoed commands, error messages, and API responses can leak secrets in plain text. The Jenkins Vault plugin automatically masks any secret retrieved from Vault in pipeline logs, providing an additional layer of protection beyond native masking. Logs shipped to centralized observability platforms compound exposure risk when secrets appear in plain text.
 
-Depending on your security requirements for protecting secrets in Jenkins pipeline logs, you can choose from several approaches to authenticate to Vault:
+**Enable short-lived dynamic credentials:** Static credentials stored in the Jenkins Controller persist until manually rotated, creating extended exposure windows. Vault generates dynamic credentials per pipeline run with configurable time-to-live (TTL) values. A compromised credential expires automatically without requiring emergency rotation, and each pipeline run receives unique credentials traceable through audit logs.
 
-### Jenkins Vault plugin
+**Enforce granular access control:** The Jenkins Controller applies RBAC at the credential level but lacks path-based restrictions tied to pipeline identity. Vault policies control access to specific secret paths based on authenticated identities, such as AppRole role IDs mapped to specific Jenkins jobs or folders. Administrators can restrict production secrets to specific pipelines and Vault [namespaces](/vault/docs/enterprise/namespaces), preventing unauthorized jobs from accessing sensitive credentials.
 
-The Jenkins Vault plugin serves as an authentication helper, and provides secret binding during pipeline execution. This approach offers significant advantages:
+## Choose an integration approach
 
-- Automatically masks any secret retrieved from Vault in the pipeline logs
-- Provides a streamlined and declarative syntax for secret retrieval
-- Seamlessly integrates with Jenkins credentials management
+Choose from the following approaches based on your security requirements and infrastructure:
 
-### CloudBees CI Vault plugin
+| Approach | Auth Method | Log Masking | Setup Complexity | Best For |
+|----------|-------------|-------------|------------------|----------|
+| [Jenkins Vault plugin](https://plugins.jenkins.io/hashicorp-vault-plugin) | AppRole, Token | Automatic | Low | Teams wanting declarative secret retrieval with automatic masking |
+| [CloudBees CI Vault plugin](https://docs.cloudbees.com/docs/cloudbees-ci/latest/secure/hashicorp-vault-plugin) | AppRole, Token | Automatic | Low | CloudBees CI users wanting managed credential lifecycle |
+| [Credentials binding with REST API](#retrieve-secrets-with-credentials-binding) | AppRole, Token, LDAP | Credential-level | Medium | Teams needing flexible, multi-path secret retrieval |
+| [Vault Agent sidecar](#use-vault-agent-on-jenkins-agents) | AppRole, Kubernetes | Requires configuration | Medium | Containerized or ephemeral agents without plugins |
 
-CloudBees CI provides a shared, centrally managed, self-service experience for development teams running Jenkins either on-premise or in the cloud. You can use the [CloudBees HashiCorp Vault Plugin](https://docs.cloudbees.com/plugins/ci/cloudbees-hashicorp-vault) to manage the lifecycle of your Cloud Bees controller static or dynamic Vault credentials. Learn how to install and configure the HashiCorp Vault plugin with the Jenkins CLI or Plugin Manager in the [CloudBees HashiCorp Vault Plugin documentation](https://docs.cloudbees.com/docs/cloudbees-ci/latest/secure/hashicorp-vault-plugin).
+AppRole is the recommended authentication method for Jenkins-Vault integration. AppRole provides machine-to-machine authentication with role IDs and secret IDs that map to specific Jenkins jobs. Jenkins also supports [JWT](/vault/docs/auth/jwt) authentication when OIDC providers are available, and [LDAP](/vault/docs/auth/ldap) when organizations use directory services for centralized identity management.
 
-Here are some example code snippets that demonstrate how to use secrets in CloudBees CI pipelines.
+## Retrieve secrets with the Vault plugin
+
+The [Jenkins Vault plugin](https://plugins.jenkins.io/hashicorp-vault-plugin) provides a `withVault` pipeline step that authenticates to Vault, retrieves secrets, and automatically masks retrieved values in pipeline logs.
+
+In the following example, the pipeline authenticates to Vault with an AppRole credential and retrieves a database password from the KV v2 secrets engine.
+
+```groovy title="Declarative secret retrieval with auto-masking"
+stage('Deploy') {
+  steps {
+    withVault(
+      configuration: [
+        vaultCredentialId: 'my-vault-approle',
+        vaultUrl: 'https://vault.example.com:8200'
+      ],
+      vaultSecrets: [
+        [
+          path: 'secret/data/myapp/production',
+          engineVersion: 2,
+          secretValues: [
+            [envVar: 'DB_PASSWORD', vaultKey: 'password']
+          ]
+        ]
+      ]
+    ) {
+      sh 'deploy-app --db-password "${DB_PASSWORD}"'
+    }
+  }
+}
+```
+
+The plugin logs in to Vault using the AppRole credentials stored in Jenkins, reads the specified secret path, and sets the environment variable for use within the closure. After the closure completes, the plugin revokes the Vault token. The `engineVersion: 2` parameter tells the plugin to use KV version 2 semantics for the secret path.
+
+## CloudBees CI Vault plugin
+
+You can use the [CloudBees HashiCorp Vault Plugin](https://docs.cloudbees.com/plugins/ci/cloudbees-hashicorp-vault) to manage the lifecycle of your CloudBees controller static or dynamic Vault credentials. Learn how to install and configure the plugin in the [CloudBees HashiCorp Vault Plugin documentation](https://docs.cloudbees.com/docs/cloudbees-ci/latest/secure/hashicorp-vault-plugin).
+
+The following code snippets demonstrate how to use secrets in CloudBees CI pipelines.
 
 Add a secret for the username and password auth method:
 
-
-```plaintext
+```groovy title="Username and password credentials"
 withCredentials([usernamePassword(credentialsId: 'vault-creds', passwordVariable: 'PASS', usernameVariable: 'USER')]) {
     sh 'echo USER=$USER'
     sh 'echo PASS=$PASS'
@@ -50,97 +87,148 @@ withCredentials([usernamePassword(credentialsId: 'vault-creds', passwordVariable
 
 Use a static secret from a Vault key/value secrets engine:
 
-```plaintext
+```groovy title="Static secret retrieval"
 withCredentials([string(credentialsId: 'vault-creds', variable: 'TOKEN')]) {
     sh 'echo TOKEN=$TOKEN'
 }
 ```
 
-Consult the [CloudBees HashiCorp Vault Plugin documentation](https://docs.cloudbees.com/docs/cloudbees-ci/latest/secure/hashicorp-vault-plugin) for more details.
+Read the [CloudBees HashiCorp Vault Plugin documentation](https://docs.cloudbees.com/docs/cloudbees-ci/latest/secure/hashicorp-vault-plugin) for complete configuration details.
 
-### External resources
+## Retrieve secrets with credentials binding
 
-- [CloudBees HashiCorp Vault Plugin](https://docs.cloudbees.com/docs/cloudbees-ci/latest/secure/hashicorp-vault-plugin)
-- [Using HashiCorp Vault With CloudBees CI](https://www.youtube.com/watch?v=05Rw1Qkjz4c) (video)
+You can use Jenkins [credentials binding](https://www.jenkins.io/doc/pipeline/steps/credentials-binding/) to securely manage Vault environment variables such as `VAULT_TOKEN`, `VAULT_ADDR`, and `VAULT_NAMESPACE`. Credentials binding masks bound variables in pipeline logs and provides flexibility for complex secret retrieval patterns.
 
-### Credentials binding with REST API
+In the following example, the pipeline uses the `VaultTokenCredentialBinding` to authenticate to Vault and makes REST API calls to retrieve secrets from multiple paths.
 
-You can use Jenkins credentials binding to securely manage environment variables, like `VAULT_TOKEN`, `VAULT_ADDR`, and `VAULT_NAMESPACE`. The credentials binding solution provides these features in your pipelines:
-
-- Masks environment variables in the pipeline logs
-- Allows you to make REST API calls to Vault with the bound credentials
-- Offers more flexibility for complex secret retrieval patterns where an application might need several types of credentials from different paths, and which use function abstraction, structured secret organization, secret composition, and Enterprise namespaces.
-
-### Vault Agent sidecar
-
-When you implement Vault Agent directly on Jenkins Agents, you create a powerful pattern for accessing secrets across pipelines. Some advantages from using this approach include:
-
-- Remove the need for extra Jenkins plugins
-- Works well with ephemeral agents using a Vault Agent sidecar configuration
-- Simplifies secret retrieval for containerized workloads
-
-<Note>
-
-Secrets retrieved from Vault with this method can appear in pipeline logs without adding specific masking configuration.
-
-</Note>
-
-The approach that best suits your environment depends on your organization's security requirements, infrastructure configuration, and operational preferences.
-
-## How to use Vault dynamic secrets in Jenkins
-
-You can use the Jenkins Vault plugin to retrieve and protect dynamic Vault secrets in the pipeline logs.
-These secrets include for example: Terraform API tokens, GCP keys, and database credentials. You can do this in the
-[pipeline as code definition](https://www.jenkins.io/doc/book/pipeline/syntax/) by specifying the
-`engine version 1` specification of the plugin, like in the following example:
-
-```plaintext
-stage ('My Stage') {
+```groovy title="Credentials binding with REST API"
+stage('Deploy') {
   steps {
-    withVault(configuration: [
-  vaultCredentialId: "my-vault-creds",
-  vaultUrl: "http://vault:8200"],
-        vaultSecrets: [
-  [
-    path: "terraform/creds/tfe-role",
-    engineVersion: 1,
-    secretValues: [
-      [envVar: "tfe_token", vaultKey: "token"]
-    ]
-          ]) {
-      curl -H "Authorization: Bearer ${env.tfe_token}" \
-      -H "Content-Type: application/vnd.api+json" \
-      -X GET \
-      "https://app.terraform.io/api/v2/workspaces/"
-      }
+    withCredentials([
+      [$class: 'VaultTokenCredentialBinding',
+       credentialsId: 'vault-approle-creds',
+       addrVariable: 'VAULT_ADDR',
+       tokenVariable: 'VAULT_TOKEN',
+       vaultAddr: 'https://vault.example.com:8200']
+    ]) {
+      sh '''
+        DB_PASSWORD=$(curl -s \
+          -H "X-Vault-Token: ${VAULT_TOKEN}" \
+          "${VAULT_ADDR}/v1/secret/data/myapp/production" \
+          | jq -r '.data.data.password')
+        deploy-app --db-password "${DB_PASSWORD}"
+      '''
+    }
   }
 }
 ```
 
-If you do not use the Jenkins Vault plugin, it is possible to do a REST API call to Vault and mask the
-`VAULT_TOKEN` environment variable in the pipeline logs. Masking the
-`VAULT_TOKEN` environment variable is possible using the Credentials Management in Jenkins.
-You can also use the Vault Agent plugin to manage the token caching, avoiding the usage of any plugin in that case.
+The `VaultTokenCredentialBinding` authenticates to Vault using the stored AppRole credentials and exposes the resulting token and address as environment variables. Jenkins masks `VAULT_TOKEN` in pipeline logs to prevent accidental exposure.
 
-An external process executed in the Jenkins Agent, like an admin pipeline or init process, (it can be an admin or operator pipeline, or an init process),
-can manage the Vault login that retrieves the token value specified in the
-`VAULT_TOKEN` environment variable and puts it in a Jenkins credential.
+## Use Vault Agent on Jenkins agents
 
-Community resources:
+Vault Agent runs directly on Jenkins agents and handles token lifecycle management, including authentication, renewal, and caching. Vault Agent authenticates using methods such as [AppRole](/vault/docs/auth/approle) or [Kubernetes](/vault/docs/auth/kubernetes) and writes a cached token to a sink file that Jenkins pipelines read to authenticate API calls. The sidecar pattern is effective for Kubernetes-based Jenkins deployments where each agent pod includes a Vault Agent container.
 
-- Learn how to secure CI/CD pipeline secrets in Jenkins on Kubernetes in this project by David Cañadillas. [Code examples](https://github.com/dcanadillas/hashi-cicd?tab=readme-ov-file)
+The following advantages make Vault Agent suitable for containerized deployments:
 
-### External resources
+- **Remove plugin dependencies:** Vault Agent handles authentication and token management outside of Jenkins, reducing the Jenkins plugin footprint
+- **Support ephemeral agents:** Vault Agent sidecar containers initialize alongside Jenkins agent containers and handle secret retrieval without persistent credential storage
+- **Simplify containerized workloads:** Vault Agent can render secrets as files using templates, which applications read directly without environment variable injection
+
+<Note>
+
+Secrets retrieved from Vault through Vault Agent are not automatically masked in Jenkins pipeline logs. Add specific masking configuration or use the Credentials Binding plugin alongside Vault Agent to prevent secrets from appearing in log output.
+
+</Note>
+
+An external process running on the Jenkins agent, such as an admin pipeline or init process, can manage the Vault login that retrieves the token and stores the value in a Jenkins credential for pipeline use. Read the [Vault Agent documentation](/vault/docs/agent-and-proxy/agent) for configuration and deployment details.
+
+## Retrieve dynamic secrets
+
+The Jenkins Vault plugin retrieves and protects dynamic Vault secrets in pipeline logs. Dynamic secrets include Terraform API tokens, cloud provider keys, and database credentials that Vault generates on demand with a limited TTL.
+
+In the following example, the pipeline retrieves a temporary HCP Terraform API token from Vault's Terraform secrets engine. The plugin uses `engineVersion: 1` because the path semantics for dynamic secrets engines are compatible with the plugin's version 1 mode.
+
+```groovy title="Dynamic Terraform credentials"
+stage('Terraform Plan') {
+  steps {
+    withVault(
+      configuration: [
+        vaultCredentialId: 'my-vault-approle',
+        vaultUrl: 'https://vault.example.com:8200'
+      ],
+      vaultSecrets: [
+        [
+          path: 'terraform/creds/tfe-role',
+          engineVersion: 1,
+          secretValues: [
+            [envVar: 'TFE_TOKEN', vaultKey: 'token']
+          ]
+        ]
+      ]
+    ) {
+      sh '''
+        curl -H "Authorization: Bearer ${TFE_TOKEN}" \
+          -H "Content-Type: application/vnd.api+json" \
+          -X GET \
+          "https://app.terraform.io/api/v2/workspaces/"
+      '''
+    }
+  }
+}
+```
+
+The pipeline authenticates to Vault, requests a Terraform credential from the `terraform/creds/tfe-role` path, and uses the generated token to make API calls. Vault generates a unique token for each pipeline run with a TTL defined in the Vault role configuration. After the TTL expires, the credential is automatically revoked.
+
+## Best practices
+
+The following best practices help you secure Vault integration with Jenkins:
+
+- **Use AppRole over static tokens:** Configure [AppRole authentication](/vault/docs/auth/approle) with role IDs and wrapped secret IDs instead of storing long-lived Vault tokens in Jenkins credentials. AppRole enables Jenkins jobs to authenticate with scoped, renewable tokens. Read the [AppRole best practices tutorial](/vault/tutorials/auth-methods/approle-best-practices) for secure distribution patterns.
+
+- **Scope Vault policies per job or folder:** Use the Jenkins Vault plugin's [policy templating](https://plugins.jenkins.io/hashicorp-vault-plugin) with variables like `${job_base_name}` and `${job_folder}` to assign Vault policies per pipeline. Separate policies for build, test, and deploy stages ensure each job accesses only the secrets it requires.
+
+- **Use dynamic secrets for cloud and database credentials:** Retrieve cloud provider and database credentials from Vault's secrets engines rather than storing static credentials. Dynamic secrets expire automatically after the pipeline completes, eliminating the need for manual rotation.
+
+- **Set short token TTLs:** Configure `token_explicit_max_ttl` on Vault AppRole roles to limit how long the Vault token remains valid. A TTL of 60 to 300 seconds is sufficient for most pipeline jobs and limits the window of exposure if a token is compromised.
+
+- **Verify secret masking in pipeline logs:** The Jenkins Vault plugin automatically masks secrets, but credentials binding and Vault Agent approaches require explicit masking configuration. Test pipeline output to confirm that secrets do not appear in logs, especially when logs are shipped to centralized observability platforms.
+
+- **Use Vault namespaces for multi-tenant isolation:** For organizations running multiple teams on shared Jenkins infrastructure, use Vault Enterprise [namespaces](/vault/docs/enterprise/namespaces) to isolate secrets between teams. Configure the `VAULT_NAMESPACE` variable through credentials binding or plugin configuration.
+
+## HashiCorp resources
 
 Jenkins and Vault integration:
 
-<VideoEmbed url="https://www.hashicorp.com/en/resources/building-efficient-ci-pipelines-with-nomad-vault-and-jenkins"/>
+- Read the [AppRole auth method documentation](/vault/docs/auth/approle) for machine-to-machine authentication configuration
+- Follow [AppRole usage best practices](/vault/tutorials/auth-methods/approle-best-practices) for securely distributing AppRole credentials to Jenkins
+- Read the [Vault Agent documentation](/vault/docs/agent-and-proxy/agent) for sidecar deployments on Jenkins agents
+- Follow the [Vault Agent with Kubernetes tutorial](/vault/tutorials/kubernetes/agent-kubernetes) for Vault Agent sidecar patterns with containerized Jenkins agents
 
-Additional resources:
+Vault authentication:
 
-- Read the [CloudBees HashiCorp Vault Plugin](https://docs.cloudbees.com/docs/cloudbees-ci/latest/secure/hashicorp-vault-plugin) documentation
-- Watch [Using HashiCorp Vault With CloudBees CI](https://www.youtube.com/watch?v=05Rw1Qkjz4c) for CloudBees integration guide
+- Read the [JWT/OIDC auth method documentation](/vault/docs/auth/jwt) for token-based authentication with OIDC providers
+- Read the [LDAP auth method documentation](/vault/docs/auth/ldap) for directory service authentication
+- Review the [Terraform Vault provider](https://registry.terraform.io/providers/hashicorp/vault/latest/docs) for automating Vault configuration as code
+
+Vault secrets engines:
+
+- Read the [KV secrets engine documentation](/vault/docs/secrets/kv) for static secret storage and versioning
+- Read the [AWS secrets engine documentation](/vault/docs/secrets/aws) for dynamic AWS credentials
+- Read the [database secrets engine documentation](/vault/docs/secrets/databases) for dynamic database credentials
+- Read the [Terraform Cloud secrets engine documentation](/vault/docs/secrets/terraform) for dynamic HCP Terraform API tokens
+
+### External resources
+
+- Read the [Jenkins Vault plugin documentation](https://plugins.jenkins.io/hashicorp-vault-plugin) for installation, configuration, and pipeline step reference
+- Read the [Jenkins Credentials Binding plugin documentation](https://www.jenkins.io/doc/pipeline/steps/credentials-binding/) for VaultTokenCredentialBinding and other credential types
+- Read the [CloudBees HashiCorp Vault Plugin documentation](https://docs.cloudbees.com/docs/cloudbees-ci/latest/secure/hashicorp-vault-plugin) for CloudBees CI-specific integration
+- Watch [Using HashiCorp Vault With CloudBees CI](https://www.youtube.com/watch?v=05Rw1Qkjz4c) for a video walkthrough of CloudBees Vault integration
+- Explore the [Jenkins on Kubernetes with Vault](https://github.com/dcanadillas/hashi-cicd?tab=readme-ov-file) example project by David Cañadillas for CI/CD secrets patterns
 
 ## Next steps
 
 In this section of [managing CI/CD secrets](/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets), you learned about Jenkins and Vault integration. Jenkins and Vault integration is part of the [Secure systems pillar](/well-architected-framework/secure-systems).
+
+- Review the [CI/CD secrets overview](/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets) for architectural guidance across platforms
+- Compare [dynamic and static secrets in CI/CD](/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets/dynamic-and-static-secrets) to choose the right secrets strategy

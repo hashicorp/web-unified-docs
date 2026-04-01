@@ -19,12 +19,17 @@ Custom documentation skills are located in `.claude/skills/` directory.
 - `/check-resources` - HashiCorp resources section formatting and links
 - `/check-consistency` - Ensure terminology and naming consistency across documents
 - `/gap-analysis` - Identify content and concept gaps in documentation
+- `/publish-gate` - **🚦 Fast go/no-go pre-publish check** (6 critical gates, binary PASS/FAIL, <30s)
 
 **Intelligence & Analysis:**
 - `/doc-health-dashboard` - Generate comprehensive health dashboard with visual indicators
 - `/skill-advisor` - Context-aware skill recommendations based on detected issues
+- `/readability` - Reading level, jargon density, and sentence complexity scoring
+- `/content-dedup` - Find duplicated content across documents that should be consolidated
+- `/pillar-report` - Run checks across an entire pillar with aggregated rankings
 
-**Content Management:**
+**Link & Content Quality:**
+- `/link-check` - Validate internal/external links actually resolve (broken links, stale domains)
 - `/add-resources` - Enhance HashiCorp resources sections
 
 **Document Creation:**
@@ -62,6 +67,25 @@ Custom documentation skills are located in `.claude/skills/` directory.
 
 # 3. Final review
 /review-doc docs/file.mdx
+
+# 4. Pre-commit gate check
+/publish-gate docs/file.mdx
+```
+
+### Pillar-Wide Quality Management
+
+```bash
+# Check an entire pillar — ranked report of all docs
+/pillar-report docs/secure-systems/ --check all
+
+# Focus on worst 10 docs for a specific check
+/pillar-report docs/secure-systems/ --check resources --top 10
+
+# Find duplicated content across a pillar
+/content-dedup docs/secure-systems/
+
+# Validate all links in a pillar
+/link-check docs/secure-systems/ --internal-only
 ```
 
 ### QMD Database

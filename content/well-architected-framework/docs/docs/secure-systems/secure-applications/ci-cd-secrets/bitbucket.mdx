@@ -19,117 +19,53 @@ Integrating Bitbucket Pipelines with Vault addresses the following security and 
 
 **Enable dynamic credential support:** Static secrets stored in Bitbucket variables remain valid indefinitely, creating a larger attack surface compared to short-lived dynamic credentials that expire automatically. Vault generates temporary credentials for each pipeline run that automatically expire, minimizing exposure windows.
 
-## Prerequisites
+## Choose an integration approach
 
-Before integrating Bitbucket Pipelines with Vault, you need the following:
+Bitbucket Pipelines supports two approaches for integrating with Vault. Choose from the following approaches based on your security requirements and infrastructure:
 
-- A Vault instance or HCP Vault accessible from Bitbucket Pipelines over the network
-- Bitbucket workspace with administrator access to configure pipelines and repository settings
-- A Vault JWT auth method configured to trust Bitbucket's OIDC issuer
-- Vault policies that grant Bitbucket Pipelines the necessary read permissions for your secrets. Each policy should follow the principle of least privilege by specifying exact secret paths rather than using wildcards. Policies must be attached to JWT auth method roles that bind to specific Bitbucket claims like repository UUID, workspace UUID, or branch patterns.
-- We recommend TLS encryption between Bitbucket Pipelines and Vault
-
-## Integration pattern
-
-Bitbucket Pipelines authenticates to Vault using native OIDC tokens generated for each pipeline step:
-
-1. **Enable OIDC:** Configure pipeline step with `oidc: true` to enable Bitbucket OIDC token generation for that step
-2. **Authenticate:** Pipeline uses the automatically generated `$BITBUCKET_STEP_OIDC_TOKEN` to authenticate to Vault using the JWT auth method
-3. **Retrieve secrets:** Pipeline calls Vault API to retrieve secrets from KV engine or dynamic credentials from secrets engines
-4. **Use in deployment:** Secrets are available as environment variables in pipeline scripts
-
-The following example shows a minimal OIDC authentication pattern for Bitbucket Pipelines:
-
-```yaml
-pipelines:
-  default:
-    - step:
-        name: Deploy with Vault secrets
-        oidc: true
-        script:
-          # Authenticate to Vault with OIDC token
-          - export VAULT_ADDR="https://vault.example.com:8200"
-          - export VAULT_TOKEN=$(vault write -field=token auth/jwt/login role=bitbucket-role jwt=$BITBUCKET_STEP_OIDC_TOKEN)
-
-          # Retrieve database password from Vault
-          - export DB_PASSWORD=$(vault kv get -field=password secret/database/production)
-
-          # Use secret in deployment
-          - ./deploy.sh
-```
-
-The pipeline enables OIDC for the step, authenticates to Vault using the Bitbucket-generated OIDC token, retrieves a database password from Vault's KV secrets engine, and uses it in deployment. The OIDC token is automatically generated for each pipeline run and requires no manual credential management.
-
-For complete implementation guidance including Vault configuration, pipeline YAML examples, and OIDC setup instructions, review the [Bitbucket OIDC documentation](https://support.atlassian.com/bitbucket-cloud/docs/integrate-pipelines-with-resource-servers-using-oidc/) and HashiCorp resources below.
-
-## Alternative: AppRole authentication
-
-If OIDC authentication is not available in your environment or you need to support legacy pipeline configurations, you can use the [AppRole auth method](/vault/docs/auth/approle) as a fallback. AppRole uses a role ID and secret ID pair stored as Bitbucket repository variables to authenticate pipelines to Vault.
-
-The following example shows AppRole authentication for Bitbucket Pipelines:
-
-```yaml
-pipelines:
-  default:
-    - step:
-        name: Deploy with Vault secrets using AppRole
-        script:
-          # Authenticate to Vault with AppRole credentials
-          - export VAULT_ADDR="https://vault.example.com:8200"
-          - export VAULT_TOKEN=$(vault write -field=token auth/approle/login role_id=$VAULT_ROLE_ID secret_id=$VAULT_SECRET_ID)
-
-          # Retrieve database password from Vault
-          - export DB_PASSWORD=$(vault kv get -field=password secret/database/production)
-
-          # Use secret in deployment
-          - ./deploy.sh
-```
-
-When using AppRole authentication, store the `VAULT_ROLE_ID` as a standard Bitbucket repository variable and `VAULT_SECRET_ID` as a secured repository variable to protect the secret ID from exposure. The role ID is not considered highly sensitive, while the secret ID must be protected.
-
-We strongly recommend OIDC authentication over AppRole when available because OIDC eliminates the need to store long-lived credentials in Bitbucket variables and provides automatic token rotation for each pipeline run.
+| Approach | Setup Complexity | Security Posture | Credential Storage | Best For |
+|----------|-----------------|------------------|-------------------|----------|
+| [OIDC (JWT auth)](/vault/docs/auth/jwt) | Medium | Excellent | None | Teams wanting strongest security without stored credentials |
+| [AppRole](/vault/docs/auth/approle) | Low | Good | Bitbucket repository variables | Legacy pipelines or environments without OIDC support |
 
 ## Best practices
 
-The following best practices help you secure and operationalize Vault integration with Bitbucket Pipelines:
+The following best practices help you secure Vault integration with Bitbucket Pipelines:
 
-- **Configure JWT roles with bound claims:** When using OIDC authentication, configure Vault JWT auth method roles with bound claims that restrict authentication to specific repositories, workspaces, or branch patterns. Use `bound_claims` to match Bitbucket's repository UUID, workspace UUID, or other OIDC token claims to ensure only authorized pipelines can authenticate.
+- **Configure JWT roles with bound claims:** When using OIDC authentication, configure Vault JWT auth method roles with `bound_claims` that restrict authentication to specific repositories, workspaces, or branch patterns. Use Bitbucket's repository UUID or workspace UUID claims to ensure only authorized pipelines can authenticate. Read the [JWT/OIDC auth method documentation](/vault/docs/auth/jwt) for bound claims configuration details.
 
-- **Set appropriate token TTLs:** Configure Vault token time-to-live (TTL) values that match your pipeline execution duration. Short TTLs (5-15 minutes) work well for most pipelines and reduce the risk window if tokens are compromised, while longer TTLs may be needed for extended deployment workflows.
+- **Set short token TTLs:** Configure Vault token TTL values that match your pipeline execution duration — typically 5-15 minutes for most pipelines. Short TTLs reduce the risk window if tokens are compromised. Longer TTLs may be needed for extended deployment workflows.
 
-- **Implement least-privilege policies per pipeline:** Write Vault policies that grant each pipeline or repository the minimum permissions required for its operation. Grant read access only to the specific secret paths each pipeline needs, avoiding wildcard permissions or broad path access.
+- **Enforce least-privilege policies per pipeline:** Create Vault policies that grant each pipeline or repository the minimum permissions required. Grant read access only to the specific secret paths each pipeline needs, avoiding wildcard permissions.
 
-- **Use bound audiences to restrict token usage:** Configure the `bound_audiences` parameter in JWT auth method roles to ensure Bitbucket OIDC tokens can only be used for Vault authentication. Set this to your Vault's expected audience value to prevent token reuse across different systems.
-
-- **Use dynamic secrets where possible:** Prefer dynamic secrets over static secrets for database credentials, cloud provider credentials, and other infrastructure access. Dynamic secrets provide automatic rotation, time-limited credentials, and better audit trails without requiring manual rotation workflows in your pipelines.
-
-- **Audit pipeline secret access regularly:** Enable Vault audit logging and regularly review which pipelines accessed which secrets. Monitor for unexpected access patterns, failed authentication attempts, or secrets accessed by pipelines that should not need them for security investigations and compliance reporting.
+- **Use dynamic secrets for infrastructure credentials:** Retrieve database and cloud credentials from Vault's dynamic secrets engines rather than static KV secrets. Dynamic secrets expire automatically after the pipeline completes, eliminating manual rotation.
 
 ## HashiCorp resources
 
 Vault authentication for CI/CD:
 
-- Read the [Vault authentication methods documentation](/vault/docs/auth) for an overview of available auth methods
-- Learn about [JWT/OIDC auth method](/vault/docs/auth/jwt) for token-based pipeline authentication
-- Complete the [OIDC auth method tutorial](/vault/tutorials/auth-methods/oidc-auth) to understand OIDC authentication patterns
-- Read the [AppRole auth method documentation](/vault/docs/auth/approle) for credential-based authentication as a fallback option
+- Learn about [JWT/OIDC auth method](/vault/docs/auth/jwt) for token-based pipeline authentication and bound claims configuration
+- Learn about the [AppRole auth method](/vault/docs/auth/approle) for credential-based authentication as a fallback option
+- Read [AppRole recommended pattern](/vault/docs/auth/approle/approle-pattern) for CI/CD-specific patterns including wrapped SecretID delivery
+- Follow [AppRole usage best practices](/vault/tutorials/auth-methods/approle-best-practices) for securely distributing AppRole credentials to Vault clients
 
-Vault secrets and dynamic credentials:
+Vault secrets and policies:
 
-- Understand [dynamic and static secrets](/vault/tutorials/get-started/understand-static-dynamic-secrets) to choose the right approach for your pipelines
+- Learn about [dynamic and static secrets](/vault/tutorials/get-started/understand-static-dynamic-secrets) to choose the right approach for your pipelines
 - Read the [KV secrets engine documentation](/vault/docs/secrets/kv) for static secret storage
 - Learn about [AWS secrets engine](/vault/docs/secrets/aws) for dynamic cloud credentials
-- Explore [database secrets engine](/vault/docs/secrets/databases) for dynamic database credentials
+- Learn about [database secrets engine](/vault/docs/secrets/databases) for dynamic database credentials
+- Read the [Vault policies documentation](/vault/docs/concepts/policies) for ACL policy syntax and least-privilege patterns
 
 ### External resources
 
 - Read the [Bitbucket Pipelines OIDC documentation](https://support.atlassian.com/bitbucket-cloud/docs/integrate-pipelines-with-resource-servers-using-oidc/) for token configuration and identity provider setup
-- Review the [Bitbucket Pipelines configuration reference](https://support.atlassian.com/bitbucket-cloud/docs/bitbucket-pipelines-configuration-reference/) for pipeline YAML syntax
+- Read the [Bitbucket Pipelines configuration reference](https://support.atlassian.com/bitbucket-cloud/docs/bitbucket-pipelines-configuration-reference/) for pipeline YAML syntax
 - Learn about [Bitbucket deployment environments](https://support.atlassian.com/bitbucket-cloud/docs/set-up-and-monitor-deployments/) for environment-scoped variable management
 
 ## Next steps
 
-In this section of [managing CI/CD secrets](/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets), you learned about Bitbucket Pipelines and Vault integration. Bitbucket Pipelines and Vault integration is part of the [Secure systems pillar](/well-architected-framework/secure-systems).
+In this section of [Managing CI/CD secrets](/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets), you learned about Bitbucket Pipelines and Vault integration. Bitbucket Pipelines and Vault integration is part of the [Secure systems pillar](/well-architected-framework/secure-systems).
 
 - Review the [CI/CD secrets overview](/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets) for architectural guidance across platforms
 - Compare [dynamic and static secrets in CI/CD](/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets/dynamic-and-static-secrets) to choose the right secrets strategy
