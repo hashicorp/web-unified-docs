@@ -1,0 +1,152 @@
+---
+layout: docs
+page_title: Rotation policies
+description: >-
+  Rotation policies let you define tailored retry logic and tell Vault how to
+  process failing rotation entries in the rotation manager.
+---
+
+# Rotation policies
+
+@include 'alerts/enterprise-and-hcp.mdx'
+
+Vault includes a rotation manager to enforce automated, scheduled or
+period-based rotations for onboarded credentials. You can define how the
+rotation manager handles execution failures and retry logic by configuring
+rotation policies. Rotation policies specify limits for backoff attempts and
+requeue cycles before Vault marks a rotation as orphaned. Rotation policies do
+not affect Vault access [policies](/vault/docs/concepts/policies).
+
+Vault currently supports policy rotation for the following workflows:
+- LDAP secrets static roles <EnterpriseAlert inline="true" />
+- OS secrets accounts <EnterpriseAlert inline="true" />
+
+Once you create a rotation policy, you can assign that policy to new and existing
+roles. The rotation manager uses the policy instructions to manage retry
+and failure logic when automatically rotating credentials for the associated role.
+
+!> Vault marks a rotation entry as orphaned when it exceeds the
+maximum retry limits defined in a rotation policy. Orphaning halts automated
+rotation attempts, and requires manual intervention to resolve the error. Consider
+your maximum retry limits carefully when you define your rotation policy.
+
+## Rotation policy parameters
+
+Vault defines rotation policies in JSON and supports the following configuration parameters:
+
+- `max_retries_per_cycle` (`int:<required>`) - The maximum number of times the
+  rotation manager should apply backoff for rotation entries after a rotation failure.
+
+- `max_retry_cycles` (`int:<required>`) - The maximum number of times the
+  rotation manager should requeue rotation entries after reaching the
+  `max_retries_per_cycle` limit. The rotation manager re-queues rotation entries to their
+  next scheduled rotation.
+
+## Example rotation policy
+
+```json
+{
+  "max_retry_cycles": 3,
+  "max_retries_per_cycle": 3
+}
+```
+
+The example policy limits exponential backoff for a single rotation cycle to 3
+attempts within a single retry cycle. If rotations fail after 3 attempts, the rotation manager will
+requeue the rotation entry with its original schedule and repeat the exponential backoff retry cycle.
+The example policy also limits the number of requeue attempts to a total of 3
+times. If the rotation entry still fails after all 3 requeue attempts (total of 9 retry attempts), the
+rotation manager marks the credential rotation as orphaned and halts any further
+automated rotation attempts.
+
+## Default rotation policy
+
+Vault applies a default rotation policy for supported plugins if you choose not
+to assign a custom rotation policy. The default policy limits retries with a backoff
+to 6 attempts and re-queues with the original rotation schedule to 3 attempts:
+
+```json
+{
+  "max_retry_cycles": 3,
+  "max_retries_per_cycle": 6
+}
+```
+
+## Usage
+
+First, create the rotation policy:
+
+```shell-session
+vault write sys/policies/rotation/custom-ldap-policy \
+    max_retry_cycles=4 \
+    max_retries_per_cycle=5
+```
+
+Once Vault stores the policy, you can assign rotation policies when
+configuring a new credential. For example, to associate the rotation policy
+`custom-ldap-policy` with a new LDAP role named `alice`:
+
+```shell-session
+vault write ldap/static-role/alice \
+    dn="cn=alice,ou=users,dc=example,dc=com" \
+    username="alice" \
+    rotation_period="24h" \
+    rotation_policy="custom-ldap-policy"
+```
+
+If you do not provide a rotation policy when creating a role, Vault uses
+the default policy. You can unset an assigned policy and force Vault to use the
+default policy by updating the role to unset the `rotation_policy` field:
+
+```
+vault write ldap/static-role/alice \
+    dn="cn=alice,ou=users,dc=example,dc=com" \
+    username="alice" \
+    rotation_period="24h" \
+    rotation_policy=""
+```
+
+The rotation manager fetches the latest policy updates on each requeue cycle,
+which means you may not see policy updates reflected immediately in Vault behavior.
+
+## Exponential backoff
+
+When a rotation fails, the rotation manager re-queues the rotation entry using an
+exponential backoff schedule to prevent continuous high-frequency retries from
+stressing the system. The backoff schedule also includes a randomized factor
+(jitter) to help ensure a more even load distribution. The backoff schedule
+has 3 elements:
+
+1. **Initial delay** - the first retry attempt uses a minimum delay of 10 seconds.
+1. **Doubling interval** - Subsequent delays double the previous backoff interval
+(e.g., 10s, 20s, 40s, 80s) and apply jitter to further stagger the retry attempt.
+1. **Maximum cap** - Vault caps the delay for any single retry at 5 minutes (300
+seconds).
+
+## Orphaned rotation attempts
+
+To avoid becoming clogged with persistent errors, the rotation manager marks a
+rotation entry as **orphaned** if it exceeds the maximum retry limits in the
+associated rotation policy. Orphaning a rotation entry halts all further
+automated rotation attempts for the associated credential.
+
+Restoring an orphaned rotation entry requires manual intervention:
+1. Resolve any underlying errors that caused the rotation manager to orphan the
+   credential.
+1. Update the credential to reassign the rotation policy and re-register the entry
+   with the rotation manager. You can use the same original configuration
+   command to reregister the entry without changing the other configuration data.
+
+For example, to reregister credentials for the `alice` role, you can reuse the
+previous command:
+
+```
+vault write ldap/static-role/alice \
+    dn="cn=alice,ou=users,dc=example,dc=com" \
+    username="alice" \
+    rotation_period="24h" \
+    rotation_policy="custom-ldap-policy"
+```
+
+You can check for orphans using the
+[`sys/rotation-orphans`](/vault/api-docs/system/rotation-orphans) endpoint.
