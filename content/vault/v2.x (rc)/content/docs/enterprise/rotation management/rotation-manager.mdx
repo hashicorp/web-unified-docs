@@ -1,0 +1,182 @@
+---
+layout: docs
+page_title: Rotation manager
+description: >-
+  Rotation manager is Vault Enterprise's centralized system to automate 
+  credential rotation on a scheduled basis with configurable retry behavior
+  and fault-tolerant queue management.
+---
+
+# Rotation manager
+
+@include 'alerts/enterprise-and-hcp.mdx'
+
+Vault Enterprise includes rotation manager, a system that runs in the background to
+automate schedule-based credential rotation. The rotation manager maintains a
+priority queue of credentials, checks for pending rotations every 5 seconds,
+and dispatches rotation requests to the appropriate plugin. All rotation state
+persists to storage for recovery after restarts or failovers.
+
+The rotation manager marks a rotation entry as orphaned when it
+exceeds the maximum retry limits defined in a rotation policy. Orphaning halts
+the rotation attempts and requires manual intervention to resolve the
+error. Refer to the [rotation orphan documentation](/vault/api-docs/system/rotation-orphans)
+for more information.
+
+## Configuration parameters
+
+The plugins that support rotation manager include common configuration parameters to control
+the rotation behavior. The `rotation_period` or `rotation_schedule` parameter let you set
+the rotation frequency, `rotation_policy` lets you specify the retry behavior based on policies
+you've defined in Vault.
+
+@include 'partials/rotationfields.mdx'
+
+## Example configurations
+
+A rotation schedule with a 1-hour window, allowing Vault to rotate the credential beginning at 11PM
+every day. For example, a postgres database secrets engine config:
+
+```shell-session
+$ vault write database/config/my-database \
+  plugin_name=postgresql-database-plugin \
+  rotation_schedule="0 23 * * *" \
+  rotation_window="3600s" \
+  ...
+```
+
+A rotation period of 604,800 seconds, allowing Vault to rotate the credential every 7 days from the 
+time of creation. For example, an AWS secrets engine config:
+
+```shell-session
+$ vault write aws/config/root \
+  access_key="AKIAIOSFODNN7EXAMPLE" \
+  rotation_period="604800s" \
+  ...
+```
+
+A rotation policy named "minimal" that allows for a single retry attempt and only requeues the
+rotation once. For example, an LDAP secrets engine static role:
+
+```shell-session
+$ vault write sys/policies/rotation/minimal \
+  policy=<<<EOF
+{
+  "max_retry_cycles": 1,
+  "max_retries_per_cycle": 1
+}
+EOF
+```
+
+```shell-session
+$ vault write ldap/static-role/my-role \
+  url="ldap://127.0.0.1:389" \
+  rotation_period="12h" \
+  rotation_policy="minimal" \
+  ...
+```
+
+## Check rotation status
+
+Read the role or credential in the plugin to check the rotation status. The response includes
+the fields `last_vault_rotation` which states the timestamp of the last successful rotation
+performed by Vault. The field is updated when an automated rotation succeeds and if a manual
+rotation occurs between scheduled rotations. The response also includes `next_vault_rotation`
+which states the timestamp of the next scheduled automatic rotation. For example, reading
+an LDAP static role:
+
+```shell-session
+$ vault read ldap/static-cred/my-role
+```
+
+```
+Key					     Value
+---					     -----
+last_vault_rotation    2026-04-02T23:30:00Z
+next_vault_rotation    2026-04-03T11:30:00Z
+...
+```
+
+## Exponential backoff
+
+When a rotation fails, the rotation manager re-queues the rotation entry using
+an exponential backoff schedule with randomized jitter to prevent continuous
+high-frequency retries and overlapping attempts from stressing the system.
+
+After exhausting the `max_retries_per_cycle` attempts, rotation manager waits
+until the next scheduled rotation time and resets the retry counter. This cycle
+repeats up to `max_retry_cycles` times before becoming orphaned.
+
+## Orphaned rotation entries
+
+To avoid persistent errors, the rotation manager marks a rotation entry as orphaned
+if it exceeds the maximum retry limits in the associated rotation policy. Orphaning
+a rotation entry deregisters the rotation job from the active queue and halts all
+further automated rotation attempts for the associated credential.
+
+Restoring an orphaned rotation entry requires manual intervention:
+
+1. Resolve any underlying errors that caused the rotation manager to orphan the
+   credential.
+1. Update the credential in the plugin to reassign the rotation configuration and
+   re-register the entry with the rotation manager.
+
+For example, to re-register an AWS config credential that was orphaned:
+
+```shell-session
+$ vault write aws/config/root \
+  access_key="AKIAIOSFODNN7EXAMPLE" \
+  rotation_period="604800s" \
+  ...
+```
+
+You can check for orphaned entries using the
+[`sys/rotation-manager/orphans`](/vault/api-docs/system/rotation-orphans.mdx)
+endpoint.
+
+## High availability
+
+The rotation manager runs only on the active node of a cluster. When leadership
+changes, the active node restores rotation state from storage and resumes
+processing the queue.
+
+For replicated clusters:
+
+- **Shared mounts**: Rotations occur on the primary cluster's active node.
+- **Local mounts**: Rotations occur on each cluster's active node independently.
+
+## Troubleshooting
+
+If credentials are not rotating at the scheduled time, verify the following:
+
+1. Confirm the Vault node is active by running `vault status`.
+1. Check that the credential configuration includes rotation parameters by
+  reading the configuration endpoint.
+1. Check Vault logs for errors or more information.
+
+The following log messages indicate rotation manager activity:
+
+```
+[INFO] vault.rotation-job-manager: successfully rotated job: rotationID=database/config/my-database
+[ERROR] vault.rotation-job-manager: rotation failed, attempting to re-queue: rotationID=database/config/my-database error="connection refused"
+[ERROR] vault.rotation-job-manager: orphaning item, please re-register after resolving the error: rotationID=database/config/my-database
+```
+
+## Migration from legacy rotation
+
+For certain plugins that support automated static role rotation prior to Vault Enterprise 2.0.0, Vault
+must migration the plugin-managed rotation entries to the rotation manager system.
+
+The migration process runs in the background and does not prevent ordinary operation of the plugin.
+Vault pauses individual static role rotations until the role migrates. Once the role migrates, the
+normal rotation schedule resumes.
+
+<Warning>
+
+See the plugin's API documentation for more details on managing the migration process. We recommend
+monitoring the migration process through the plugin's static-migration API endpoint until it completes.
+
+For example, the LDAP secrets engine static role migration uses the
+[`/static-migration`](/vault/api-docs/secret/ldap#static-role-migration) endpoint.
+
+</Warning>
