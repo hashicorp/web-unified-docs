@@ -5,10 +5,13 @@
 import path from 'node:path'
 import { URL } from 'node:url'
 
+import { readFile } from 'node:fs/promises'
+
 import remark from 'remark'
 import remarkMdx from 'remark-mdx'
 import flatMap from 'unist-util-flatmap'
 import is from 'unist-util-is'
+import { parse as jsoncParse } from 'jsonc-parser'
 
 import * as pathToRegexp from 'path-to-regexp'
 
@@ -16,6 +19,7 @@ import * as pathToRegexp from 'path-to-regexp'
  * Loads redirects from the file-system and "caches" them in memory.
  */
 const cachedRedirects = {}
+const loggedRedirectErrorPaths = new Set()
 export const loadRedirects = async (version = 'default', redirectsDir) => {
 	// Return the cached redirects if they are already present
 	if (cachedRedirects[version]?.length > 0) {
@@ -24,12 +28,26 @@ export const loadRedirects = async (version = 'default', redirectsDir) => {
 
 	let redirectsSource = []
 
-	// Attempt to load from redirects.js
+	// Attempt to load from redirects.jsonc
 	try {
-		const redirectsPath = path.join(redirectsDir, 'redirects.js')
-		const { default: imports } = await import(redirectsPath)
-		if (Array.isArray(imports)) {
-			redirectsSource = imports
+		const redirectsPath = path.join(redirectsDir, 'redirects.jsonc')
+		const redirectsString = await readFile(redirectsPath, 'utf-8')
+
+		const parserError = []
+		const redirects = jsoncParse(redirectsString, parserError, {
+			allowTrailingComma: true,
+		})
+
+		if (
+			parserError.length > 0 &&
+			!loggedRedirectErrorPaths.has(redirectsPath)
+		) {
+			loggedRedirectErrorPaths.add(redirectsPath)
+			console.log(`\n❌ Failed to load redirects from ${redirectsPath}\n`)
+		}
+
+		if (Array.isArray(redirects)) {
+			redirectsSource = redirects
 		}
 	} catch {
 		// noop
