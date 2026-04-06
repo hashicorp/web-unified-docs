@@ -1,10 +1,25 @@
 # Resource Staleness — Likely Broken or Redirecting Links
 
-Documents with external links pointing to **known stale domains** (old HashiCorp URLs that now redirect, deprecated products). These create a poor user experience and signal unmaintained content.
+Documents with external links pointing to **known stale domains** (old HashiCorp URLs that now redirect, deprecated products).
 
 **Generated:** 2026-03-31
 **Documents with stale links:** 29
 **Documents with zero external links:** 24
+
+## Scoring System
+
+This report does not use a numeric score. Instead, it flags documents based on two criteria:
+
+| Check | What It Detects |
+|-------|-----------------|
+| **Stale domains** | External links pointing to domains that have been retired, redirected, or deprecated (see domain list). Ranked by count of stale links per document — more stale links = higher maintenance debt. |
+| **Zero external links** | Documents with no external links at all. These likely lack a HashiCorp resources section or have no implementation references for readers. |
+
+**How to fix stale links:**
+- `learn.hashicorp.com/...` → `developer.hashicorp.com/terraform/tutorials/...` (or vault, consul, etc.)
+- `www.terraform.io/docs/...` → `developer.hashicorp.com/terraform/docs/...`
+- `www.vaultproject.io/docs/...` → `developer.hashicorp.com/vault/docs/...`
+- `registry.terraform.io/...` → Verify module/provider still exists at that path
 
 ## Stale domains checked
 

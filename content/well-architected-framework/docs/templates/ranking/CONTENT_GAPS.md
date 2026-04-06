@@ -7,9 +7,25 @@ Compares WAF coverage against **industry-standard Well-Architected topics** from
 **Currently covered:** 18
 **Gaps identified:** 10
 
-## Gaps — Topics to Create
+## Scoring System
 
-Ordered by estimated search volume. These are topics users actively search for that competing WAF frameworks cover.
+This report checks whether each expected topic is covered somewhere in the WAF documentation.
+
+| Step | What Happens |
+|------|-------------|
+| **1. Define expected topics** | 28 topics were compiled from AWS Well-Architected Framework pillars, Azure Well-Architected Framework, and GCP Architecture Framework best practices. Each topic is assigned a best-fit WAF pillar and an estimated search volume tier. |
+| **2. Keyword matching** | Each topic title is split into keywords. We search all document titles, descriptions, and H2 headings for those keywords. |
+| **3. Coverage threshold** | If 60%+ of a topic's keywords appear across WAF content, it is marked as "covered." Below 60% = gap. |
+| **4. Prioritization** | Gaps are sorted by estimated search volume (High > Medium > Low). High-volume gaps represent the biggest missed opportunities. |
+
+**Search volume tiers:**
+- 🔴 **High** — Thousands of monthly searches. Competitors (AWS, Azure, GCP) have dedicated pages for these topics.
+- 🟡 **Medium** — Hundreds of monthly searches. Important for practitioners but more niche.
+- ⚪ **Low** — Emerging or specialized topics.
+
+**Limitations:** Keyword matching may miss documents that cover a topic under a different name (e.g., "drift detection" covered as "configuration consistency"). Review gaps manually before treating them as confirmed.
+
+## Gaps — Topics to Create
 
 | Priority | Search Vol | Best Pillar | Topic | What to Cover |
 |----------|-----------|-------------|-------|---------------|
@@ -26,10 +42,10 @@ Ordered by estimated search volume. These are topics users actively search for t
 
 ## Covered Topics (for reference)
 
-These topics have adequate coverage in existing WAF documents.
+These topics have adequate coverage.
 
-| Topic | Pillar Fit | Coverage Score |
-|-------|-----------|----------------|
+| Topic | Pillar Fit | Coverage |
+|-------|-----------|----------|
 | Cost optimization strategies | Optimize | 100% |
 | Tagging and resource organization | Optimize | 100% |
 | Multi-region deployment | Design Resilient | 100% |

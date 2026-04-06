@@ -13,34 +13,47 @@ Custom documentation skills are located in `.claude/skills/` directory.
 **Review & Validation:**
 - `/review-doc` - Multi-phase documentation review (uses REVIEW_PHASES.md)
 - `/code-review` - Comprehensive code review for documentation
-- `/quick-styleguide` - **⚡ Fast HashiCorp style validation** (Top 12 + Critical, QMD-powered, ~2K tokens, 10-15s)
-- `/full-styleguide` - **📋 Comprehensive HashiCorp style validation** (All 18 sections, 200+ rules, QMD-powered, ~5-8K tokens, 30-60s)
+- `/quick-styleguide` - **Fast HashiCorp style validation** (Top 12 + Critical, QMD-powered, ~2K tokens, 10-15s)
+- `/qmd-styleguide` - **Comprehensive HashiCorp style validation** (All 18 sections, 200+ rules, QMD-powered, ~5-8K tokens, 30-60s)
 - `/check-code-examples` - Code example completeness and summaries
 - `/check-resources` - HashiCorp resources section formatting and links
 - `/check-consistency` - Ensure terminology and naming consistency across documents
+- `/check-hashicorp-style` - Validate against HashiCorp style guide (active voice, word choice, tense, formatting)
+- `/check-structure` - Validate WAF document structure (Why sections, list intros, workflow connections, ending order)
 - `/gap-analysis` - Identify content and concept gaps in documentation
-- `/publish-gate` - **🚦 Fast go/no-go pre-publish check** (6 critical gates, binary PASS/FAIL, <30s)
+- `/publish-gate` - **Fast go/no-go pre-publish check** (6 critical gates, binary PASS/FAIL, <30s)
 
 **Intelligence & Analysis:**
 - `/doc-health-dashboard` - Generate comprehensive health dashboard with visual indicators
 - `/skill-advisor` - Context-aware skill recommendations based on detected issues
 - `/readability` - Reading level, jargon density, and sentence complexity scoring
 - `/content-dedup` - Find duplicated content across documents that should be consolidated
+- `/content-freshness` - Track content freshness (version references, technology currency, link validity)
+- `/persona-coverage` - Analyze document coverage balance for decision-makers and implementers
+- `/smart-cross-reference` - Auto-detect workflow sequences, suggest bidirectional links, find orphans, score link strength
 - `/pillar-report` - Run checks across an entire pillar with aggregated rankings
 
-**Link & Content Quality:**
+**SEO & Content Quality:**
+- `/seo-optimize` - SEO optimization for meta descriptions, titles, headings, and links
 - `/link-check` - Validate internal/external links actually resolve (broken links, stale domains)
 - `/add-resources` - Enhance HashiCorp resources sections
 
-**Document Creation:**
+**Document Creation & Management:**
 - `/create-doc` - Create new documents from templates
+- `/create-jira` - Create WAF JIRA tickets for documentation work
 
 **Maintenance:**
 - `/update-paths` - Update file paths across documents
+- `/update-redirects` - Manage redirects.jsonc when moving or renaming documentation
+
+**Documentation Index (Grounded Docs MCP):**
+- `/docs-search` - Search and query the documentation index for API references and code examples
+- `/doc-manage` - Manage the documentation index (scrape, index, refresh, remove)
+- `/docs-fetch-url` - Fetch a single URL and convert its content to Markdown
 
 **Utilities:**
 - `/qmd` - Search local documentation database (indexed templates/styleguide.md)
-- `/humanizer` - Remove AI-generated writing patterns, make text sound natural
+- `/scrub` - Identify and remove AI-generated writing patterns from documentation
 - `/keybindings-help` - Customize keyboard shortcuts and keybindings
 
 ### Style Guide Workflows
@@ -54,7 +67,7 @@ Custom documentation skills are located in `.claude/skills/` directory.
 **Pre-Publication (Comprehensive):**
 ```bash
 # Full validation before publishing (100% coverage, all 18 sections)
-/full-styleguide docs/file.mdx --fix
+/qmd-styleguide docs/file.mdx --fix
 ```
 
 **Complete Review Workflow:**
@@ -63,7 +76,7 @@ Custom documentation skills are located in `.claude/skills/` directory.
 /quick-styleguide docs/file.mdx --fix
 
 # 2. Pre-publication comprehensive
-/full-styleguide docs/file.mdx --fix
+/qmd-styleguide docs/file.mdx --fix
 
 # 3. Final review
 /review-doc docs/file.mdx
@@ -103,13 +116,13 @@ qmd ls hashicorp-styleguide
 
 ### Style Guide Skill Comparison
 
-| Feature | /quick-styleguide | /full-styleguide |
+| Feature | /quick-styleguide | /qmd-styleguide |
 |---------|------------------|------------------|
 | **Scope** | Top 12 + Critical (~40 rules) | All 18 sections (200+ rules) |
 | **Speed** | 10-15 seconds | 30-60 seconds |
 | **Tokens** | ~2,000 | ~5,000-8,000 |
 | **Cost** | Low | Moderate |
 | **Best For** | Daily workflow | Pre-publication |
-| **Auto-fix** | ✅ Yes | ✅ Yes |
+| **Auto-fix** | Yes | Yes |
 
 Run skills with the Skill tool or by name (e.g., "/review-doc", "/quick-styleguide").

@@ -5,7 +5,26 @@ WAF docs should serve both **decision-makers** (CTOs, architects) and **implemen
 **Generated:** 2026-03-31
 **Documents analyzed:** 107 (index pages excluded)
 
-**Scoring:** Decision-maker signals include strategic/business language. Implementer signals include tool names, commands, code. Balance measures how evenly split the signals are.
+## Scoring System
+
+Each document is scored for two personas by counting keyword signals in the body text.
+
+| Persona | Signal Words (partial list) | What These Indicate |
+|---------|---------------------------|---------------------|
+| **Decision-Maker** | strategy, strategic, decision, business, organization, compliance, governance, risk, roi, cost... | Strategic language — document explains *why* to adopt a practice |
+| **Implementer** | terraform, vault, consul, nomad, packer, boundary, sentinel, hcl, cli, command... | Tool/action language — document explains *how* to implement |
+
+**Classification rules:**
+
+| Classification | Rule |
+|----------------|------|
+| **Decision-Maker heavy** | Decision-maker signals > 70% of total |
+| **Leans Decision-Maker** | Decision-maker signals > implementer, gap > 20% |
+| **Balanced** | Neither persona exceeds the other by more than 20% |
+| **Leans Implementer** | Implementer signals > decision-maker, gap > 20% |
+| **Implementer heavy** | Implementer signals > 70% of total |
+
+**Limitations:** Keyword counting is a rough proxy. A document can mention "terraform" 50 times in a strategic discussion and still score as implementer-heavy. Use this report as a starting point, not a definitive judgment.
 
 ## Summary
 
@@ -13,7 +32,7 @@ WAF docs should serve both **decision-makers** (CTOs, architects) and **implemen
 |--------------|-------|---|
 | Implementer heavy | 82 | 76% |
 | Leans Implementer | 10 | 9% |
-| Balanced ✓ | 8 | 7% |
+| Balanced | 8 | 7% |
 | Decision-Maker heavy | 4 | 3% |
 | Leans Decision-Maker | 3 | 2% |
 
@@ -40,7 +59,7 @@ These documents jump into tools/code without explaining the *why* for decision-m
 | Define & Automate | containers.mdx | 0 | 47 | No | 385 |
 | Define & Automate | service-mesh.mdx | 0 | 23 | No | 275 |
 | Secure | manage-tls-iac.mdx | 0 | 38 | No | 464 |
-| Define & Automate | continuous-learning.mdx | 1 | 9 | No | 318 |
+| Define & Automate | continuous-learning.mdx | 1 | 9 | No | 319 |
 | Define & Automate | cicd.mdx | 1 | 31 | No | 378 |
 | Define & Automate | monitoring.mdx | 1 | 24 | No | 203 |
 | Define & Automate | security.mdx | 1 | 28 | No | 298 |

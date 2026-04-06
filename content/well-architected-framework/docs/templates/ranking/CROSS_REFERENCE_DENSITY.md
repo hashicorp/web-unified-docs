@@ -5,7 +5,25 @@ Documents with the fewest connections to other WAF docs. Orphan pages are hard t
 **Generated:** 2026-03-31
 **Documents analyzed:** 119
 
-**Scoring:** Total connectivity = incoming references + outgoing internal links. Lower = more isolated.
+## Scoring System
+
+Connectivity is measured by counting how many other WAF documents reference this one, and how many WAF documents this one links to.
+
+| Metric | What It Counts |
+|--------|----------------|
+| **Incoming (In)** | Other WAF documents that reference this document by title or URL slug |
+| **Outgoing (Out)** | Internal links, relative links, and `<a>` cross-reference tags in this document |
+| **Total** | In + Out — overall connectivity score |
+
+**How we detect references:** For each document, we search all other documents for its title (case-insensitive) and its URL slug (filename without extension). This catches `<a>Title</a>` tags, markdown links, and plain-text references.
+
+**Score interpretation:**
+- **0–3:** Orphan — effectively invisible to readers browsing related content
+- **4–6:** Weakly connected — may need more cross-references
+- **7–12:** Well connected — appears in related document flows
+- **13+:** Hub page — central to a topic cluster
+
+## Most Isolated Documents (orphans)
 
 | Rank | Total | In | Out | Pillar | Title | Index? |
 |------|-------|----|-----|--------|-------|--------|
@@ -56,8 +74,8 @@ These docs are heavily cross-referenced — good candidates to use as entry poin
 
 | Rank | Total | In | Out | Pillar | Title |
 |------|-------|----|-----|--------|-------|
-| 1 | 125 | 94 | 31 | Define & Automate | infrastructure.mdx |
-| 2 | 110 | 94 | 16 | Define & Automate | infrastructure.mdx |
+| 1 | 123 | 92 | 31 | Define & Automate | infrastructure.mdx |
+| 2 | 108 | 92 | 16 | Define & Automate | infrastructure.mdx |
 | 3 | 104 | 81 | 23 | Define & Automate | applications.mdx |
 | 4 | 94 | 76 | 18 | Secure | terraform.mdx |
 | 5 | 85 | 82 | 3 | Define & Automate | security.mdx |
