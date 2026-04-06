@@ -258,3 +258,45 @@ it('handles short versions', async () => {
 	const result = await gatherVersionMetadata('/content')
 	expect(result).toStrictEqual(expected)
 })
+
+it('reads latest/versionMetadata.json when latest directory exists', async () => {
+	const expected = {
+		terraform: [
+			{ version: 'v1.21.x', releaseStage: 'stable', isLatest: true },
+			{ version: 'v1.20.x', releaseStage: 'stable', isLatest: false },
+		],
+	}
+
+	vol.fromJSON(
+		{
+			'./terraform/v1.20.x/': null,
+			'./terraform/latest/versionMetadata.json': JSON.stringify({
+				version: 'v1.21.x',
+				releaseStage: 'stable',
+				isLatest: true,
+			}),
+		},
+		'/content',
+	)
+
+	const result = await gatherVersionMetadata('/content')
+	expect(result).toStrictEqual(expected)
+})
+
+it('throws when latest directory is missing versionMetadata.json', async ({
+	expect,
+}: {
+	expect: any
+}) => {
+	vol.fromJSON(
+		{
+			'./terraform/v1.20.x/': null,
+			'./terraform/latest/': null,
+		},
+		'/content',
+	)
+
+	await expect(gatherVersionMetadata('/content')).rejects.toThrow(
+		'Missing versionMetadata.json for latest version folder',
+	)
+})

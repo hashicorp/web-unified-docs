@@ -3,7 +3,10 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-import { getProductVersionMetadata } from '#utils/contentVersions'
+import {
+	getProductVersionMetadata,
+	getVersionDirectoryCandidates,
+} from '#utils/contentVersions'
 import { findFileWithMetadata, parseJsonc } from '#utils/file'
 import { errorResultToString } from '#utils/result'
 import { ProductParam } from '#api/types'
@@ -31,17 +34,23 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 	}
 
 	const { value: versionMetadata } = productVersionResult
-
-	const filePath = [
-		'content',
+	const versionDirectories = getVersionDirectoryCandidates(
 		productSlug,
-		versionMetadata.version,
-		'redirects.jsonc',
-	]
+		'latest',
+		versionMetadata,
+	)
 
-	const readFileResult = await findFileWithMetadata(filePath, versionMetadata, {
-		loadFromContentDir: process.env.NODE_ENV === 'development',
-	})
+	let readFileResult
+	for (const versionDir of versionDirectories) {
+		const filePath = ['content', productSlug, versionDir, 'redirects.jsonc']
+		readFileResult = await findFileWithMetadata(filePath, versionMetadata, {
+			loadFromContentDir: process.env.NODE_ENV === 'development',
+		})
+
+		if (readFileResult.ok) {
+			break
+		}
+	}
 	if (!readFileResult.ok) {
 		return new Response('Not found', { status: 404 })
 	}

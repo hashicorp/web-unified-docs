@@ -4,7 +4,11 @@
  */
 
 import { expect, test, vi, afterEach } from 'vitest'
-import { gatherAllVersionsDocsPaths } from './gather-all-versions-docs-paths.mjs'
+import fs from 'node:fs'
+import {
+	gatherAllVersionsDocsPaths,
+	resolveVersionDirectoryName,
+} from './gather-all-versions-docs-paths.mjs'
 import * as repoConfig from '#productConfig.mjs'
 
 afterEach(() => {
@@ -61,4 +65,33 @@ test('gatherAllDocsPaths throws an error if no version metadata is found for a p
 	await expect(gatherAllVersionsDocsPaths(versionMetadata)).rejects.toThrow(
 		'No version metadata found for product',
 	)
+})
+
+test('resolveVersionDirectoryName uses latest directory for latest metadata when it exists', () => {
+	vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({
+		terraform: {
+			assetDir: 'img',
+			basePaths: ['terraform'],
+			contentDir: 'docs',
+			dataDir: 'data',
+			productSlug: 'terraform',
+			semverCoerce: () => {},
+			versionedDocs: true,
+			websiteDir: 'website',
+		},
+	})
+	vi.spyOn(fs, 'existsSync').mockReturnValue(true)
+	vi.spyOn(fs, 'statSync').mockReturnValue({
+		isDirectory: () => {
+			return true
+		},
+	})
+
+	const resolvedDirectory = resolveVersionDirectoryName('terraform', {
+		version: 'v1.21.x',
+		releaseStage: 'stable',
+		isLatest: true,
+	})
+
+	expect(resolvedDirectory).toBe('latest')
 })

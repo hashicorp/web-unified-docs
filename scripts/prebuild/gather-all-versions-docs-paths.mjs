@@ -49,7 +49,7 @@ export async function gatherAllVersionsDocsPaths(
 		console.log(`Gathering file information for ${product}...`)
 
 		for (const metadata of allVersions) {
-			let versionPath = metadata.version
+			let versionPath = resolveVersionDirectoryName(product, metadata)
 			let versionName = metadata.version
 
 			// If the product is not versioned, we set it's version to 'v0.0.x' but keep the path empty
@@ -58,7 +58,7 @@ export async function gatherAllVersionsDocsPaths(
 				versionPath = ''
 			}
 
-			if (metadata.releaseStage !== 'stable') {
+			if (metadata.releaseStage !== 'stable' && versionPath !== 'latest') {
 				versionPath = `${metadata.version} (${metadata.releaseStage})`
 				versionName = metadata.version
 			}
@@ -87,6 +87,20 @@ export async function gatherAllVersionsDocsPaths(
 	)
 	// Return the paths
 	return allDocsPaths
+}
+
+export function resolveVersionDirectoryName(product, metadata) {
+	if (PRODUCT_CONFIG[product].versionedDocs !== false && metadata.isLatest) {
+		const latestDirectoryPath = path.join('./content', product, 'latest')
+		if (
+			fs.existsSync(latestDirectoryPath) &&
+			fs.statSync(latestDirectoryPath).isDirectory()
+		) {
+			return 'latest'
+		}
+	}
+
+	return metadata.version
 }
 
 export async function getProductPaths(

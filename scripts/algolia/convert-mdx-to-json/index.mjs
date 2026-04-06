@@ -27,7 +27,20 @@ export async function getLatestProductVersionDirectories(dir, versionMetadata) {
 	// Iterate over product directories and return the list of latest version directories
 	const productDirectories = await Promise.all(
 		directories.map(async (directory) => {
+			if (!directory.isDirectory()) {
+				return null
+			}
+
 			const directoryPath = path.join(dir, directory.name)
+			const childEntries = await readdir(directoryPath, { withFileTypes: true })
+			const hasLatestDirectory = childEntries.some((entry) => {
+				return entry.isDirectory() && entry.name === 'latest'
+			})
+
+			if (hasLatestDirectory) {
+				return path.join(directoryPath, 'latest')
+			}
+
 			const latestProductVersion = getLatestVersion(
 				directoryPath,
 				versionMetadata,
@@ -40,5 +53,5 @@ export async function getLatestProductVersionDirectories(dir, versionMetadata) {
 				: path.join(directoryPath, latestProductVersion)
 		}),
 	)
-	return productDirectories
+	return productDirectories.filter(Boolean)
 }

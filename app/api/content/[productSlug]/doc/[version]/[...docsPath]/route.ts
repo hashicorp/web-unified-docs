@@ -8,7 +8,10 @@ import {
 	joinFilePath,
 	parseMarkdownFrontMatter,
 } from '#utils/file'
-import { getProductVersionMetadata } from '#utils/contentVersions'
+import {
+	getProductVersionMetadata,
+	getVersionDirectoryCandidates,
+} from '#utils/contentVersions'
 import { errorResultToString } from '#utils/result'
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
 import docsPathsAllVersions from '#api/docsPathsAllVersions.json'
@@ -44,6 +47,11 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 	}
 
 	const { value: versionMetadata } = productVersionResult
+	const versionDirectories = getVersionDirectoryCandidates(
+		productSlug,
+		version,
+		versionMetadata,
+	)
 
 	let parsedDocsPath = joinFilePath(docsPath)
 	if (parsedDocsPath.endsWith('.mdx')) {
@@ -65,23 +73,19 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 	 * - `.../${contentDir}/${docsPath.join("/")}.mdx`. We'd be able to remove
 	 * one of the two locations below.
 	 */
-	const possibleContentLocations = [
-		[
-			`content`,
-			productSlug,
-			versionMetadata.version,
-			contentDir,
-			`${parsedDocsPath}.mdx`,
-		],
-		[
-			`content`,
-			productSlug,
-			versionMetadata.version,
-			contentDir,
-			parsedDocsPath,
-			`index.mdx`,
-		],
-	]
+	const possibleContentLocations = versionDirectories.flatMap((versionDir) => {
+		return [
+			[`content`, productSlug, versionDir, contentDir, `${parsedDocsPath}.mdx`],
+			[
+				`content`,
+				productSlug,
+				versionDir,
+				contentDir,
+				parsedDocsPath,
+				`index.mdx`,
+			],
+		]
+	})
 
 	let foundContent, servedFrom, githubFile, createdAt
 	for (const loc of possibleContentLocations) {
