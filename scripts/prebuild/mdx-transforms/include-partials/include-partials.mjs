@@ -20,12 +20,22 @@ import { remarkIncludePartialsPlugin } from './remark-include-partials.mjs'
  * @param {string} mdxString The MDX string in which `@include` partials will be processsed
  * @param {string} partialsDir The directory in which partials are located
  * @param {string} filePath The file path to the MDX file being processed, used to log errors.
+ * @param {object} options Additional options for include resolution.
  * @returns {Promise<string>} the provided mdxString with partials inlined
  */
-export async function includePartials(mdxString, partialsDir, filePath) {
+export async function includePartials(
+	mdxString,
+	partialsDir,
+	filePath,
+	options = {},
+) {
 	const contents = await remark()
 		.use(remarkMdx)
-		.use(remarkIncludePartialsPlugin, { partialsDir, filePath })
+		.use(remarkIncludePartialsPlugin, {
+			partialsDir,
+			filePath,
+			...options,
+		})
 		.process(mdxString)
 	return String(contents)
 }

@@ -83,8 +83,22 @@ export async function buildMdxTransforms(
 			'partials',
 		)
 		const redirectsDir = path.join(targetDir, repoSlug, verifiedVersion)
+		const productGlobalPartialsDir = path.join(
+			targetDir,
+			repoSlug,
+			'global',
+			'partials',
+		)
 		const outPath = path.join(outputDir, relativePath)
-		return { repoSlug, filePath, partialsDir, outPath, version, redirectsDir }
+		return {
+			repoSlug,
+			filePath,
+			partialsDir,
+			productGlobalPartialsDir,
+			outPath,
+			version,
+			redirectsDir,
+		}
 	})
 
 	console.log(`Running MDX transforms on ${mdxFileEntries.length} files...`)
@@ -130,7 +144,14 @@ export async function buildMdxTransforms(
  */
 async function applyMdxTransforms(entry, versionMetadata = {}) {
 	try {
-		const { filePath, partialsDir, outPath, version, redirectsDir } = entry
+		const {
+			filePath,
+			partialsDir,
+			productGlobalPartialsDir,
+			outPath,
+			version,
+			redirectsDir,
+		} = entry
 		const redirects = await loadRedirects(version, redirectsDir)
 
 		const fileString = fs.readFileSync(filePath, 'utf8')
@@ -145,7 +166,11 @@ async function applyMdxTransforms(entry, versionMetadata = {}) {
 			.use(remarkMdx)
 			// Process partials first, then content exclusion
 			// This ensures exclusion directives in global partials are properly evaluated
-			.use(remarkIncludePartialsPlugin, { partialsDir, filePath })
+			.use(remarkIncludePartialsPlugin, {
+				partialsDir,
+				filePath,
+				productGlobalPartialsDir,
+			})
 
 		// Make sure the content exclusion process skips looking through
 		// the global partial filepath (it should only be processed once the global

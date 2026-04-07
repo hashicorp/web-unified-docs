@@ -22,6 +22,74 @@ export const PARTIALS_ALIAS = {
 	GLOBAL: '@global',
 }
 
+const isPathWithinRoot = (rootPath, candidatePath) => {
+	const relativePath = path.relative(rootPath, candidatePath)
+
+	return (
+		relativePath === '' ||
+		(!relativePath.startsWith('..') && !path.isAbsolute(relativePath))
+	)
+}
+
+const stripLeadingSlash = (includePath) => {
+	return includePath.replace(/^\/+/, '')
+}
+
+const getCanonicalPath = (targetPath) => {
+	return fs.realpathSync(targetPath)
+}
+
+const resolveIncludeFilePath = ({
+	rawPath,
+	partialsDir,
+	productGlobalPartialsDir,
+	topLevelPartialsDir,
+}) => {
+	const globalPrefix = `${PARTIALS_ALIAS.GLOBAL}/`
+	const isGlobalAlias = rawPath.startsWith(globalPrefix)
+	const requestedPath = stripLeadingSlash(
+		isGlobalAlias ? rawPath.slice(globalPrefix.length) : rawPath,
+	)
+	const includeBaseDir = isGlobalAlias ? topLevelPartialsDir : partialsDir
+	const allowedRoots = (
+		isGlobalAlias
+			? [topLevelPartialsDir]
+			: [partialsDir, productGlobalPartialsDir]
+	)
+		.filter(Boolean)
+		.flatMap((rootPath) => {
+			try {
+				return [
+					{
+						displayPath: rootPath,
+						canonicalPath: getCanonicalPath(rootPath),
+					},
+				]
+			} catch {
+				return []
+			}
+		})
+
+	const attemptedPath = path.resolve(includeBaseDir, requestedPath)
+	const includePath = getCanonicalPath(attemptedPath)
+
+	if (
+		!allowedRoots.some(({ canonicalPath }) => {
+			return isPathWithinRoot(canonicalPath, includePath)
+		})
+	) {
+		throw new Error(
+			`@include path escapes allowed partials directories. Please ensure the referenced file "${rawPath}" stays within one of: ${allowedRoots
+				.map(({ displayPath }) => {
+					return `"${displayPath}"`
+				})
+				.join(', ')}.`,
+		)
+	}
+
+	return includePath
+}
+
 /**
  * A remark plugin that allows including "partials" into other files.
  *
@@ -39,7 +107,11 @@ export const PARTIALS_ALIAS = {
  * top-level partials directory (`content/global/partials`).
  * Example: `@include "{{global}}/my-partial.mdx"`
  */
-export function remarkIncludePartialsPlugin({ partialsDir, filePath }) {
+export function remarkIncludePartialsPlugin({
+	partialsDir,
+	filePath,
+	productGlobalPartialsDir,
+}) {
 	// If the partialsDir has not been provided, throw an error.
 	if (!partialsDir) {
 		throw new Error(
@@ -83,24 +155,37 @@ export function remarkIncludePartialsPlugin({ partialsDir, filePath }) {
 			 */
 
 			const [, rawPath] = includeMatch
-			const globalPrefix = PARTIALS_ALIAS.GLOBAL + '/'
-			const isGlobalAlias = rawPath.startsWith(globalPrefix)
-			const resolvedPath = isGlobalAlias ? rawPath.slice(globalPrefix.length) : rawPath
 			let includePath, includeContents
 
-			if(isGlobalAlias){
-				// {{global}} paths resolve only against topLevelPartialsDir — no local fallback,
-				// to prevent name conflicts with product-specific partials.
-				includePath = path.join(topLevelPartialsDir, resolvedPath)
-			} else {
-				includePath = path.join(partialsDir, resolvedPath)
+			try {
+				includePath = resolveIncludeFilePath({
+					rawPath,
+					partialsDir,
+					productGlobalPartialsDir,
+					topLevelPartialsDir,
+				})
+			} catch (error) {
+				if (
+					error instanceof Error &&
+					error.message.startsWith(
+						'@include path escapes allowed partials directories.',
+					)
+				) {
+					throw new Error(
+						`${error.message} In "${filePath}", on line ${node.position.start.line}, column ${node.position.start.column}.`,
+					)
+				}
+
+				throw new Error(
+					`@include file not found. In "${filePath}", on line ${node.position.start.line}, column ${node.position.start.column}, please ensure the referenced file "${rawPath}" resolves to an existing file inside the allowed partials directories.`,
+				)
 			}
 
 			try {
 				includeContents = fs.readFileSync(includePath, 'utf8')
 			} catch {
 				throw new Error(
-					`@include file not found. In "${filePath}", on line ${node.position.start.line}, column ${node.position.start.column}, please ensure the referenced file "${includePath}" exists.`,
+					`@include file not found. In "${filePath}", on line ${node.position.start.line}, column ${node.position.start.column}, please ensure the referenced file "${rawPath}" resolves to an existing file inside the allowed partials directories.`,
 				)
 			}
 
@@ -116,7 +201,11 @@ export function remarkIncludePartialsPlugin({ partialsDir, filePath }) {
 			const isMarkdownOrMdx = includePath.match(/\.md(?:x)?$/)
 			if (isMarkdownOrMdx) {
 				const processor = remark()
-				processor.use(remarkIncludePartialsPlugin, { partialsDir })
+				processor.use(remarkIncludePartialsPlugin, {
+					partialsDir,
+					filePath,
+					productGlobalPartialsDir,
+				})
 				const ast = processor.parse(includeContents)
 				return processor.runSync(ast, includeContents).children
 			} else {
