@@ -4,7 +4,7 @@ description: >-
   Use OpenID Connect to get short-term credentials for the Vault Terraform provider in your HCP Terraform runs.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2025-06-26T16:53:09-07:00
-last_modified: 2025-09-05T12:41:13-07:00
+last_modified: 2026-03-16T23:04:11.000Z
 # END AUTO GENERATED METADATA
 ---
 
@@ -17,11 +17,7 @@ You can use HCP Terraform’s native OpenID Connect integration with Vault to ge
 1. **[Configure Vault](#configure-vault):** Set up a trust configuration between Vault and HCP Terraform. Then, you must create Vault roles and policies for your HCP Terraform workspaces.
 2. **[Configure HCP Terraform](#configure-hcp-terraform):** Add environment variables to the HCP Terraform workspaces where you want to use Dynamic Credentials.
 
-<!-- BEGIN: TFC:only name:stacks-tfe -->
-
 If you are configuring a Stack, refer to [Authenticate a Stack](/terraform/language/stacks/deploy/authenticate) to learn about the workflow of authenticating your Stack deployments with dynamic credentials.
-
-<!-- END: TFC:only name:stacks-tfe -->
 
 Once you complete the setup, HCP Terraform automatically authenticates to Vault during each run. The Vault provider authentication is valid for the length of the plan or apply. Vault does not revoke authentication until the run is complete.
 
@@ -124,13 +120,10 @@ To understand all the available options for matching bound claims, refer to the 
 We recommend creating a role which issues a renewable token, and setting `token_ttl` to a relatively short value, such as 20 minutes. HCP Terraform can renew the token periodically until the plan or apply is complete, then revoke it to prevent it from being used further.
 
 If you use a non-renewable token with HCP Terraform, the `token_ttl` has a maximum limit of 2 hours. If you use a non-renewable token with Terraform Enterprise, then the `token_ttl` of that token must match or exceed the [run phase timeout](/terraform/enterprise/application-administration/general#terraform-run-timeout-settings).
+
 ## Configure HCP Terraform
 
-<!-- BEGIN: TFC:only name:stacks-tfe -->
-
 If you are configuring a Stack, refer to [Authenticate a Stack](/terraform/language/stacks/deploy/authenticate) to learn how to use the `identity_token` block to authenticate your Stack deployments with dynamic credentials.
-
-<!-- END: TFC:only name:stacks-tfe -->
 
 You’ll need to set some environment variables in your HCP Terraform workspace in order to configure HCP Terraform to authenticate with Vault using dynamic credentials. You can set these as workspace variables, or if you’d like to share one Vault role across multiple workspaces, you can use a variable set. When you configure dynamic provider credentials with multiple provider configurations of the same type, use either a default variable or a tagged alias variable name for each provider configuration. Refer to [Specifying Multiple Configurations](#specifying-multiple-configurations) for more details.
 
