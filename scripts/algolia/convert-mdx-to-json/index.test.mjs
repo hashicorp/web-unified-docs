@@ -17,22 +17,25 @@ vi.mock('node:fs/promises', () => {
 
 describe('getLatestProductVersionDirectories', () => {
 	test('should return the latest version directories for versioned products', async () => {
-		readdir.mockResolvedValue([
-			{
-				name: 'terraform-plugin-mux',
-				path: 'public/content',
-				isDirectory: () => {
-					return true
+		readdir
+			.mockResolvedValueOnce([
+				{
+					name: 'terraform-plugin-mux',
+					path: 'public/content',
+					isDirectory: () => {
+						return true
+					},
 				},
-			},
-			{
-				name: 'terraform-enterprise',
-				path: 'public/content',
-				isDirectory: () => {
-					return true
+				{
+					name: 'terraform-enterprise',
+					path: 'public/content',
+					isDirectory: () => {
+						return true
+					},
 				},
-			},
-		])
+			])
+			.mockResolvedValueOnce([])
+			.mockResolvedValueOnce([])
 
 		const result = await getLatestProductVersionDirectories(
 			'public/content',
@@ -45,14 +48,16 @@ describe('getLatestProductVersionDirectories', () => {
 	})
 
 	test('should return the directory path for versionless products', async () => {
-		readdir.mockResolvedValue([
-			{
-				name: 'terraform-docs-common',
-				isDirectory: () => {
-					return true
+		readdir
+			.mockResolvedValueOnce([
+				{
+					name: 'terraform-docs-common',
+					isDirectory: () => {
+						return true
+					},
 				},
-			},
-		])
+			])
+			.mockResolvedValueOnce([])
 
 		const result = await getLatestProductVersionDirectories(
 			'public/content',
@@ -71,5 +76,35 @@ describe('getLatestProductVersionDirectories', () => {
 			versionMetadata,
 		)
 		expect(result).toEqual([])
+	})
+
+	test('should return latest directory when product has a latest folder', async () => {
+		readdir
+			.mockResolvedValueOnce([
+				{
+					name: 'terraform-plugin-mux',
+					path: 'public/content',
+					isDirectory: () => {
+						return true
+					},
+				},
+			])
+			.mockResolvedValueOnce([
+				{
+					name: 'latest',
+					isDirectory: () => {
+						return true
+					},
+				},
+			])
+
+		const result = await getLatestProductVersionDirectories(
+			'public/content',
+			versionMetadata,
+		)
+
+		expect(result).toEqual([
+			path.join('public/content', 'terraform-plugin-mux', 'latest'),
+		])
 	})
 })

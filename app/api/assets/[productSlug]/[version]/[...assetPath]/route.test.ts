@@ -7,7 +7,10 @@ import { expect, test, vi } from 'vitest'
 import { GET } from './route'
 import { ServedFrom } from '#api/types'
 import { getAssetData } from '#utils/file'
-import { getProductVersionMetadata } from '#utils/contentVersions'
+import {
+	getProductVersionMetadata,
+	getVersionDirectoryCandidates,
+} from '#utils/contentVersions'
 import { mockRequest } from '#utils/mockRequest'
 
 vi.mock('#utils/file')
@@ -82,6 +85,7 @@ test('Return 200 and an image for a valid `product`, `version`, and `assetPath`'
 		ok: true,
 		value: { version: 'v1.1.x', releaseStage: 'stable', isLatest: true },
 	})
+	vi.mocked(getVersionDirectoryCandidates).mockReturnValueOnce(['v1.1.x'])
 
 	vi.mocked(getAssetData).mockResolvedValueOnce(assetData)
 
@@ -116,6 +120,10 @@ test('Return 200 and an image for the `version` being `latest` and the rest of t
 		ok: true,
 		value: { version: 'v1.1.x', releaseStage: 'stable', isLatest: true },
 	})
+	vi.mocked(getVersionDirectoryCandidates).mockReturnValueOnce([
+		'latest',
+		'v1.1.x',
+	])
 
 	vi.mocked(getAssetData).mockResolvedValueOnce(assetData)
 

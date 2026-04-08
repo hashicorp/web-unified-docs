@@ -4,7 +4,10 @@
  */
 
 import { findFileWithMetadata, parseJson } from '#utils/file'
-import { getProductVersionMetadata } from '#utils/contentVersions'
+import {
+	getProductVersionMetadata,
+	getVersionDirectoryCandidates,
+} from '#utils/contentVersions'
 import { errorResultToString } from '#utils/result'
 import { VersionedProduct } from '#api/types'
 
@@ -27,19 +30,31 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 	}
 
 	const { value: versionMetadata } = productVersionResult
+	const versionDirectories = getVersionDirectoryCandidates(
+		productSlug,
+		version,
+		versionMetadata,
+	)
 
 	const sectionPath = section.join('/')
 
-	const readFileResult = await findFileWithMetadata(
-		[
-			'content',
-			productSlug,
-			versionMetadata.version,
-			'data',
-			`${sectionPath}-nav-data.json`,
-		],
-		versionMetadata,
-	)
+	let readFileResult
+	for (const versionDir of versionDirectories) {
+		readFileResult = await findFileWithMetadata(
+			[
+				'content',
+				productSlug,
+				versionDir,
+				'data',
+				`${sectionPath}-nav-data.json`,
+			],
+			versionMetadata,
+		)
+
+		if (readFileResult.ok) {
+			break
+		}
+	}
 
 	if (!readFileResult.ok) {
 		console.error(errorResultToString('API', readFileResult))

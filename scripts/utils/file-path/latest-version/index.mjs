@@ -36,6 +36,13 @@ export function isLatestVersion(filePath, versionMetadata) {
 	}
 	// check that the file path version exists in the version metadata and is the latest version
 	const filePathVersion = getVersionFromFilePath(filePath)
+
+	if (filePathVersion === 'latest') {
+		return productVersions.some((version) => {
+			return version.isLatest
+		})
+	}
+
 	const isLatestVersion = productVersions.find((version) => {
 		return version.version === filePathVersion && version.isLatest
 	})

@@ -259,4 +259,23 @@ describe('findFileWithMetadata', () => {
 
 		expect(fetch.mock.calls[0][0]).not.toContain('//docs')
 	})
+
+	test('does not append release stage suffix to latest directory', async () => {
+		const filePath = ['content', 'terraform', 'latest', 'docs', 'index.mdx']
+		const versionMetaData = {
+			releaseStage: 'beta',
+			version: 'v1.15.x',
+			isLatest: true,
+		}
+
+		const mockResponse = new Response('body')
+		vi.mocked(fetch).mockResolvedValue(mockResponse)
+
+		await findFileWithMetadata(filePath, versionMetaData)
+
+		expect(fetch.mock.calls[0][0]).toContain(
+			'/content/terraform/latest/docs/index.mdx',
+		)
+		expect(fetch.mock.calls[0][0]).not.toContain('latest (beta)')
+	})
 })

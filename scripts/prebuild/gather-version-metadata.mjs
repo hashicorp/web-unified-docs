@@ -62,10 +62,24 @@ export async function gatherVersionMetadata(contentDir) {
 		 *   versions will be sorted alphabetically.
 		 */
 		const productDir = path.join(contentDir, product)
-		const rawVersions = fs.readdirSync(productDir).filter((version) => {
-			// filter out non-version directories
-			return semver.valid(semver.coerce(version))
+		const productDirectories = fs
+			.readdirSync(productDir, { withFileTypes: true })
+			.filter((entry) => {
+				return entry.isDirectory()
+			})
+
+		const hasLatestDirectory = productDirectories.some((entry) => {
+			return entry.name === 'latest'
 		})
+
+		const rawVersions = productDirectories
+			.map((entry) => {
+				return entry.name
+			})
+			.filter((version) => {
+				// filter out non-version directories and the special `latest` directory
+				return version !== 'latest' && semver.valid(semver.coerce(version))
+			})
 
 		// Sort versions by semver if possible, otherwise sort alphabetically
 		const isAllSemver = rawVersions.every((v) => {
@@ -151,9 +165,79 @@ export async function gatherVersionMetadata(contentDir) {
 				isLatest: idx === latestVersionIndex,
 			})
 		}
+
+		if (hasLatestDirectory && PRODUCT_CONFIG[product].versionedDocs !== false) {
+			const latestMetadata = getLatestVersionMetadata(productDir, product)
+
+			const withoutDuplicateVersion = versionMetadata[product].filter(
+				(entry) => {
+					return (
+						entry.version !== latestMetadata.version ||
+						entry.releaseStage !== latestMetadata.releaseStage
+					)
+				},
+			)
+
+			versionMetadata[product] = [
+				latestMetadata,
+				...withoutDuplicateVersion.map((entry) => {
+					return {
+						...entry,
+						isLatest: false,
+					}
+				}),
+			]
+		}
 	}
 	// Return the version metadata
 	return versionMetadata
+}
+
+function getLatestVersionMetadata(productDir, product) {
+	const latestVersionMetadataPath = path.join(
+		productDir,
+		'latest',
+		'versionMetadata.json',
+	)
+
+	if (!fs.existsSync(latestVersionMetadataPath)) {
+		throw new Error(
+			`Missing versionMetadata.json for latest version folder in product "${product}". Expected at: ${latestVersionMetadataPath}`,
+		)
+	}
+
+	const latestVersionMetadataText = fs.readFileSync(
+		latestVersionMetadataPath,
+		'utf-8',
+	)
+	const latestVersionMetadata = JSON.parse(latestVersionMetadataText)
+
+	if (!latestVersionMetadata.version) {
+		throw new Error(
+			`Missing "version" in latest/versionMetadata.json for product "${product}".`,
+		)
+	}
+
+	const releaseStage = latestVersionMetadata.releaseStage || 'stable'
+	const acceptedReleaseStagesWithStable = ['stable', ...acceptedReleaseStages]
+
+	if (!acceptedReleaseStagesWithStable.includes(releaseStage)) {
+		throw new Error(
+			`Invalid release stage "${releaseStage}" in latest/versionMetadata.json for product "${product}". Accepted stages are: ${acceptedReleaseStagesWithStable.join(', ')}.`,
+		)
+	}
+
+	if (latestVersionMetadata.isLatest !== true) {
+		throw new Error(
+			`Expected "isLatest" to be true in latest/versionMetadata.json for product "${product}".`,
+		)
+	}
+
+	return {
+		version: latestVersionMetadata.version,
+		releaseStage,
+		isLatest: true,
+	}
 }
 
 /**

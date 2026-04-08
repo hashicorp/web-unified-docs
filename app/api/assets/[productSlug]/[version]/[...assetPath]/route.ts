@@ -4,7 +4,10 @@
  */
 
 import { getAssetData, joinFilePath } from '#utils/file'
-import { getProductVersionMetadata } from '#utils/contentVersions'
+import {
+	getProductVersionMetadata,
+	getVersionDirectoryCandidates,
+} from '#utils/contentVersions'
 import { errorResultToString } from '#utils/result'
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
 import { VersionedProduct } from '#api/types'
@@ -34,19 +37,28 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 	}
 
 	const { value: versionMetadata } = productVersionResult
+	const versionDirectories = getVersionDirectoryCandidates(
+		productSlug,
+		version,
+		versionMetadata,
+	)
 
 	const parsedAssetPath = joinFilePath(assetPath)
 
-	const assetLoc = [
-		`assets`,
-		productSlug,
-		versionMetadata.version,
-		parsedAssetPath,
-	]
-	const assetData = await getAssetData(assetLoc, versionMetadata)
+	let assetData
+	for (const versionDir of versionDirectories) {
+		const assetLoc = [`assets`, productSlug, versionDir, parsedAssetPath]
+		assetData = await getAssetData(assetLoc, versionMetadata)
+
+		if (assetData.ok) {
+			break
+		}
+	}
 
 	if (!assetData.ok) {
-		console.error(`API Error: No asset found at ${assetLoc}`)
+		console.error(
+			`API Error: No asset found at product ${productSlug}, version candidates: ${versionDirectories.join(', ')}, path: ${parsedAssetPath}`,
+		)
 		return new Response('Not found', { status: 404 })
 	}
 

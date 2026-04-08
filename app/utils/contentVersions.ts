@@ -63,6 +63,31 @@ export const getProductVersionMetadata = (
 	return Ok({ version: parsedVersion, releaseStage, isLatest })
 }
 
+export const getVersionDirectoryCandidates = (
+	productSlug: string,
+	requestedVersion: string,
+	resolvedVersionMetadata: ProductVersionMetadata,
+) => {
+	if (!PRODUCT_CONFIG[productSlug].versionedDocs) {
+		return ['']
+	}
+
+	const candidates: string[] = []
+	const { version, releaseStage, isLatest } = resolvedVersionMetadata
+
+	if (isLatest || requestedVersion === 'latest') {
+		candidates.push('latest')
+	}
+
+	if (releaseStage !== 'stable') {
+		candidates.push(`${version} (${releaseStage})`)
+	} else {
+		candidates.push(version)
+	}
+
+	return [...new Set(candidates.filter(Boolean))]
+}
+
 export const getProductMetadata = (
 	productSlug: string,
 	versionMetaData: VersionMetadataMap = versionMetadata,

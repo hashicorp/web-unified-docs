@@ -7,6 +7,7 @@ import { expect, test, vi, afterEach } from 'vitest'
 import {
 	getProductMetadata,
 	getProductVersionMetadata,
+	getVersionDirectoryCandidates,
 } from '#utils/contentVersions'
 import { findDocVersions } from './findDocVersions'
 import versionMetadata from '__fixtures__/versionMetadata.json'
@@ -198,4 +199,24 @@ test('should handle directory not found (ENOENT error)', async () => {
 		expect.stringContaining('Product, nonexistent, not found in docs paths'),
 	)
 	consoleLogSpy.mockRestore()
+})
+
+test('getVersionDirectoryCandidates includes latest for latest stable version', () => {
+	const result = getVersionDirectoryCandidates('terraform', 'latest', {
+		version: 'v1.14.x',
+		releaseStage: 'stable',
+		isLatest: true,
+	})
+
+	expect(result).toStrictEqual(['latest', 'v1.14.x'])
+})
+
+test('getVersionDirectoryCandidates includes release stage directory for prerelease', () => {
+	const result = getVersionDirectoryCandidates('terraform', 'v1.15.x', {
+		version: 'v1.15.x',
+		releaseStage: 'beta',
+		isLatest: false,
+	})
+
+	expect(result).toStrictEqual(['v1.15.x (beta)'])
 })

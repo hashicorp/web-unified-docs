@@ -243,7 +243,11 @@ function ifNeededAddReleaseStageToPath(
 	releaseStage: string,
 ) {
 	const newFilePath = [...filePath]
-	if (releaseStage !== 'stable' && newFilePath[2]) {
+	if (
+		releaseStage !== 'stable' &&
+		newFilePath[2] &&
+		newFilePath[2] !== 'latest'
+	) {
 		newFilePath[2] = `${newFilePath[2]} (${releaseStage})`
 	}
 
