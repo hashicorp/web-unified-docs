@@ -76,20 +76,10 @@ class Changelog
   end
 
   def format_line(message, pr)
-    # Check if this PR has an original PR reference (backport case)
-    if pr.respond_to?(:original_pr) && pr.original_pr
-      original = pr.original_pr
-      author = "-- **@#{original.user.login}**"
-      backport_link = "[#{@repo}##{pr.number}](https://github.com/hashicorp/#{@repo}/pull/#{pr.number})"
-      original_link = "[##{original.number}](https://github.com/hashicorp/#{@repo}/pull/#{original.number})"
-      
-      ["1.", message.strip, author, backport_link, "(backport of", "#{original_link})"].join(" ")
-    else
-      author = "-- **@#{pr.user.login}**"
-      link = "[#{@repo}##{pr.number}](https://github.com/hashicorp/#{@repo}/pull/#{pr.number})"
-      
-      ["1.", message.strip, author, link].join(" ")
-    end
+    author = "-- **@#{pr.user.login}**"
+    link = "[#{@repo}##{pr.number}](https://github.com/hashicorp/#{@repo}/pull/#{pr.number})"
+
+    ["1.", message.strip, author, link].join(" ")
   end
 end
 
