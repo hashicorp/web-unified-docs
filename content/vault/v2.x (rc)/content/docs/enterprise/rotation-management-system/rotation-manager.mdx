@@ -23,58 +23,30 @@ the rotation attempts and requires manual intervention to resolve the
 error. Refer to the [rotation orphan documentation](/vault/api-docs/system/rotation-orphans)
 for more information.
 
-## Configuration parameters
+## High availability
 
-The plugins that support rotation manager include common configuration parameters to control
-the rotation behavior. The `rotation_period` or `rotation_schedule` parameter let you set
-the rotation frequency, `rotation_policy` lets you specify the retry behavior based on policies
-you've defined in Vault.
+The rotation manager runs only on the active node of a cluster. When leadership
+changes, the active node restores rotation state from storage and resumes
+processing the queue.
 
-@include 'rotationfields.mdx'
+For replicated clusters:
 
-## Example configurations
+- **Shared mounts**: Rotations occur on the primary cluster's active node.
+- **Local mounts**: Rotations occur on each cluster's active node independently.
 
-A rotation schedule with a 1-hour window, allowing Vault to rotate the credential beginning at 11PM
-every day. For example, a postgres database secrets engine config:
+## Exponential backoff
 
-```shell-session
-$ vault write database/config/my-database \
-  plugin_name=postgresql-database-plugin \
-  rotation_schedule="0 23 * * *" \
-  rotation_window="3600s" \
-  ...
-```
+When a rotation fails, the rotation manager re-queues the rotation entry using an
+exponential backoff schedule to prevent continuous high-frequency retries from
+stressing the system. The backoff schedule also includes a randomized factor
+(jitter) to help ensure a more even load distribution. The backoff schedule
+has 3 elements:
 
-A rotation period of 604,800 seconds, allowing Vault to rotate the credential every 7 days from the 
-time of creation. For example, an AWS secrets engine config:
-
-```shell-session
-$ vault write aws/config/root \
-  access_key="AKIAIOSFODNN7EXAMPLE" \
-  rotation_period="604800s" \
-  ...
-```
-
-A rotation policy named "minimal" that allows for a single retry attempt and only requeues the
-rotation once. For example, an LDAP secrets engine static role:
-
-```shell-session
-$ vault write sys/policies/rotation/minimal \
-  policy=- <<EOF
-{
-  "max_retry_cycles": 1,
-  "max_retries_per_cycle": 1
-}
-EOF
-```
-
-```shell-session
-$ vault write ldap/static-role/my-role \
-  url="ldap://127.0.0.1:389" \
-  rotation_period="12h" \
-  rotation_policy="minimal" \
-  ...
-```
+1. **Initial delay** - the first retry attempt uses a minimum delay of 10 seconds.
+1. **Doubling interval** - Subsequent delays double the previous backoff interval
+(e.g., 10s, 20s, 40s, 80s) and apply jitter to further stagger the retry attempt.
+1. **Maximum cap** - Vault caps the delay for any single retry at 5 minutes (300
+seconds).
 
 ## Check rotation status
 
@@ -90,76 +62,26 @@ $ vault read ldap/static-cred/my-role
 ```
 
 ```
-Key					     Value
----					     -----
+Key					           Value
+---					           -----
 last_vault_rotation    2026-04-02T23:30:00Z
 next_vault_rotation    2026-04-03T11:30:00Z
+ttl                    84600
 ...
 ```
 
-## Exponential backoff
-
-When a rotation fails, the rotation manager re-queues the rotation entry using
-an exponential backoff schedule with randomized jitter to prevent continuous
-high-frequency retries and overlapping attempts from stressing the system.
-
-After exhausting the `max_retries_per_cycle` attempts, rotation manager waits
-until the next scheduled rotation time and resets the retry counter. This cycle
-repeats up to `max_retry_cycles` times before becoming orphaned.
-
-## Orphaned rotation entries
-
-To avoid persistent errors, the rotation manager marks a rotation entry as orphaned
-if it exceeds the maximum retry limits in the associated rotation policy. Orphaning
-a rotation entry deregisters the rotation job from the active queue and halts all
-further automated rotation attempts for the associated credential.
-
-Restoring an orphaned rotation entry requires manual intervention:
-
-1. Resolve any underlying errors that caused the rotation manager to orphan the
-  credential.
-1. Update the credential in the plugin to reassign the rotation configuration and
-  re-register the entry with the rotation manager.
-
-For example, to re-register an AWS config credential that was orphaned:
-
-```shell-session
-$ vault write aws/config/root \
-  access_key="AKIAIOSFODNN7EXAMPLE" \
-  rotation_period="604800s" \
-  ...
-```
-
-You can check for orphaned entries using the
-[`sys/rotation-manager/orphans`](/vault/api-docs/system/rotation-orphans.mdx)
-endpoint.
-
-## High availability
-
-The rotation manager runs only on the active node of a cluster. When leadership
-changes, the active node restores rotation state from storage and resumes
-processing the queue.
-
-For replicated clusters:
-
-- **Shared mounts**: Rotations occur on the primary cluster's active node.
-- **Local mounts**: Rotations occur on each cluster's active node independently.
-
 ## Troubleshooting
 
-If credentials are not rotating at the scheduled time, verify the following:
+Rotation manager logs rotation activity to the Vault server logs such as successful rotations,
+rotation failures, retry attempts, and orphaning. Metadata is included in the log statements
+to identify the credential being rotated and error information in the case of a failure.
 
-1. Confirm the Vault node is active by running `vault status`.
-1. Check that the credential configuration includes rotation parameters by
-  reading the configuration endpoint.
-1. Check Vault logs for errors or more information.
-
-The following log messages indicate rotation manager activity:
+Example log statements for a database secrets engine config may look like:
 
 ```
-[INFO] vault.rotation-job-manager: successfully rotated job: rotationID=database/config/my-database
-[ERROR] vault.rotation-job-manager: rotation failed, attempting to re-queue: rotationID=database/config/my-database error="connection refused"
-[ERROR] vault.rotation-job-manager: orphaning item, please re-register after resolving the error: rotationID=database/config/my-database
+[INFO]  rotation-job-manager: successfully rotated job: rotationID=database/config/my-database
+[ERROR] rotation-job-manager: rotation failed, attempting to re-queue: rotationID=database/config/my-database error="connection refused"
+[ERROR] rotation-job-manager: orphaning item, please re-register after resolving the error: rotationID=database/config/my-database
 ```
 
 ## Migration from legacy rotation system in plugins
