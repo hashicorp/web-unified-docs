@@ -3,7 +3,10 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-/** Matches semantic-like versions with a leading v, including two-part aliases like v2.x. */
+/**
+ * Matches semantic-like versions with(or without) a leading v,
+ * including two-part aliases like v2.x. or 2.x
+ */
 export const VERSION_IN_PATH_REGEX = /^v?\d+\.(?:\d+|\w+)(?:\.(?:\d+|\w+))?$/i
 
 /** Matches Terraform Enterprise release versions like v202410-1. */
