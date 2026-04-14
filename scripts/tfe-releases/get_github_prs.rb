@@ -65,74 +65,8 @@ class PullRequest
 
   def get_prs_from_github(pr_numbers)
     pr_numbers.reverse.map do |pr_number|
-      pr = $github.pull_request(@repo.to_s, pr_number.to_i)
-      
-      # Check if this is a backport PR and find the original
-      original_pr = find_original_pr(pr)
-      
-      if original_pr
-        # Add original PR metadata to the backport PR object
-        pr.define_singleton_method(:original_pr) { original_pr }
-        pr
-      else
-        pr
-      end
+      # puts "retrieving pr #{pr_number}"
+      $github.pull_request(@repo.to_s, pr_number.to_i)
     end
-  end
-
-  def find_original_pr(pr)
-    return nil unless pr.body
-
-    # Look for auto-generated backport pattern (most common):
-    # "This PR is auto-generated from #471" or "auto-generated from #471"
-    auto_generated_match = pr.body.match(/auto-generated from #(\d+)/i)
-    
-    if auto_generated_match
-      original_pr_number = auto_generated_match[1].to_i
-      
-      begin
-        original_pr = $github.pull_request(@repo.to_s, original_pr_number)
-        return original_pr
-      rescue Octokit::NotFound
-        STDERR.puts "#{@repo}: Warning - Original PR ##{original_pr_number} not found"
-        return nil
-      end
-    end
-
-    # Look for other common backport patterns in PR body:
-    # - "Backport of #1234"
-    # - "Backport: #1234"
-    # - "Cherry-pick of #1234"
-    # - "Backports #1234"
-    backport_match = pr.body.match(/(?:backport|cherry-pick)(?:\s+of)?(?:\s*:)?\s*#(\d+)/i)
-    
-    if backport_match
-      original_pr_number = backport_match[1].to_i
-      
-      begin
-        original_pr = $github.pull_request(@repo.to_s, original_pr_number)
-        return original_pr
-      rescue Octokit::NotFound
-        STDERR.puts "#{@repo}: Warning - Original PR ##{original_pr_number} not found"
-        return nil
-      end
-    end
-
-    # Also check PR title for backport patterns
-    title_match = pr.title.match(/(?:backport|cherry-pick)(?:\s+of)?(?:\s*:)?\s*#(\d+)/i)
-    
-    if title_match
-      original_pr_number = title_match[1].to_i
-      
-      begin
-        original_pr = $github.pull_request(@repo.to_s, original_pr_number)
-        return original_pr
-      rescue Octokit::NotFound
-        STDERR.puts "#{@repo}: Warning - Original PR ##{original_pr_number} not found"
-        return nil
-      end
-    end
-
-    nil
   end
 end

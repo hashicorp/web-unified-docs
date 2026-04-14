@@ -32,19 +32,33 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          changed_mdx_files=$(gh api \
-            "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
-            --paginate \
-            --jq '[.[] | select(.filename | test("^content/.*\\.mdx$")) | .filename] | join(" ")')
+          git init --bare /tmp/check-files && cd /tmp/check-files
+          git fetch --depth=1 --filter=blob:none \
+            https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git \
+            ${{ github.event.pull_request.base.sha }} \
+            ${{ github.event.pull_request.head.sha }}
 
-          changed_mdx_files_count=$(echo "$changed_mdx_files" | tr ' ' '\n' | grep -c . || true)
+          changed_mdx_files_lines=$(git diff --name-only \
+            ${{ github.event.pull_request.base.sha }} \
+            ${{ github.event.pull_request.head.sha }} \
+            | grep '^content/.*\.mdx$' || true)
+
+          if [ -z "$changed_mdx_files_lines" ]; then
+            changed_mdx_files_count=0
+            changed_mdx_files=""
+          else
+            changed_mdx_files_count=$(printf '%s\n' "$changed_mdx_files_lines" | grep -c .)
+            changed_mdx_files=$(printf '%s\n' "$changed_mdx_files_lines" \
+            | sed 's/"/\\"/g; s/.*/"&"/' \
+            | paste -sd' ' -)
+          fi
 
           echo "changed_mdx_files=$changed_mdx_files" >> $GITHUB_OUTPUT
           echo "changed_mdx_files_count=$changed_mdx_files_count" >> $GITHUB_OUTPUT
 
           echo "Changed .mdx files count: $changed_mdx_files_count"
           echo "Changed .mdx files:"
-          echo "$changed_mdx_files" | tr ' ' '\n'
+          echo "$changed_mdx_files"
 
   security-check:
     name: Security Check
@@ -54,34 +68,35 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          non_content_files_changed=$(gh api \
-            "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
-            --paginate \
-            --jq '[.[] | select(.filename | startswith("content/") | not) | .filename] | join(" ")')
+          # Fetch only tree objects for the two commits — no blobs, no working tree
+          git init --bare /tmp/check && cd /tmp/check
+          git fetch --depth=1 --filter=blob:none \
+            https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git \
+            ${{ github.event.pull_request.base.sha }} \
+            ${{ github.event.pull_request.head.sha }}
 
-          non_content_files_changed_count=$(echo "$non_content_files_changed" | tr ' ' '\n' | grep -c . || true)
+          non_content_files_changed=$(git diff --name-only \
+            ${{ github.event.pull_request.base.sha }} \
+            ${{ github.event.pull_request.head.sha }} \
+            | grep -v '^content/' || true)
+
+          if [ -z "$non_content_files_changed" ]; then
+            non_content_files_changed_count=0
+          else
+            non_content_files_changed_count=$(echo "$non_content_files_changed" | grep -c .)
+          fi
 
           echo "Changed files outside of /content count: $non_content_files_changed_count"
           echo "Changed files outside of /content:"
-          echo "$non_content_files_changed" | tr ' ' '\n'
+          echo "$non_content_files_changed"
 
-          : # Cases:
-          : # 1. PR from forked repo, changes outside of content/**; fail
-          if [ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ] && [ "$non_content_files_changed_count" -gt 0 ]; then
+          is_fork=${{ github.event.pull_request.head.repo.full_name != github.repository }}
 
+          if [ "$is_fork" = "true" ] && [ "$non_content_files_changed_count" -gt 0 ]; then
             echo "❌ This is a PR from a forked repo with changes outside of content/\*\*. **Please only edit files in the content/\*\* directory.**" >> $GITHUB_STEP_SUMMARY
             exit 1
-
-          : # 2. PR from forked repo, changes only in content/**; pass
-          elif [ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ] && [ "$non_content_files_changed_count" -eq 0 ]; then
-
-            echo "✅ This is a PR from a forked repo with NO changes outside of content/\*\*. Proceeding with the workflow." >> $GITHUB_STEP_SUMMARY
-            exit 0
-
           fi
 
-          : # 3. PR from internal repo, changes outside of content/**; pass
-          : # 4. PR from internal repo, changes only in content/**; pass
           echo "✅ This is an internal PR. Proceeding with the workflow." >> $GITHUB_STEP_SUMMARY
           exit 0
 
@@ -94,9 +109,11 @@ jobs:
       preview_url_to_fetch_deployment: ${{ steps.unified_docs_preview_url.outputs.preview_url_to_fetch_deployment }}
       inspector_url: ${{ steps.unified_docs_inspector_url.outputs.inspector_url }}
       created_utc: ${{ steps.unified_docs_preview_url.outputs.created_utc }}
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
     steps:
       - name: Initial comment on PR
-        uses: marocchino/sticky-pull-request-comment@52423e01640425a022ef5fd42c6fb5f633a02728 # v2.9.1
+        uses: marocchino/sticky-pull-request-comment@447031a6bb83f7438d890bb0136932be78342022 # v3.0.0
         with:
           header: preview-notice
           message: |
@@ -107,23 +124,28 @@ jobs:
             | Unified Docs API | 🔄 Building ([Inspect](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})) | --- | --- |
 
       - name: Checkout hashicorp/web-unified-docs
-        uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
+
+      # Fetch the exact base commit object so git diff can compare against BASE_SHA.
+      # We can't rely on fetching origin/main since main may have advanced past the commit where this PR branched off
+      - name: Fetch base SHA
+        run: git fetch --no-tags --filter=blob:none --depth=1 origin ${{ env.BASE_SHA }}
 
       - name: Add commit link to summary
         run: |
           echo "[Built using commit $(echo ${{ github.event.pull_request.head.sha }} | cut -c -7)](https://github.com/${{ github.repository }}/pull/${{ github.event.pull_request.number }}/commits/${{ github.event.pull_request.head.sha }})" >> $GITHUB_STEP_SUMMARY
 
       - name: Setup Node.js
-        uses: actions/setup-node@1d0ff469b7ec7b3cb9d8673fde0c81c44821de2a # v4.2.0
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           cache: 'npm'
           node-version-file: 'package.json'
 
       - name: Cache Next.js build
-        uses: actions/cache@d4323d4df104b026a6aa633fdb11d772146be0bf # v4.2.2
+        uses: actions/cache@a7833574556fa59680c1b7cb190c1735db73ebf0 # v5.0.0
         with:
           path: ${{ github.workspace }}/.next/cache
           key: ${{ runner.os }}-nextjs-build-${{ hashFiles('package-lock.json', 'next.config.js') }}
@@ -137,14 +159,46 @@ jobs:
       - name: Pull Vercel Environment Information
         run: vercel pull --yes --environment=preview --token=${{ secrets.VERCEL_TOKEN }}
 
+      - name: Check PR Labels and Set Build Type
+        id: build-type
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          labels=$(gh api \
+            "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}" \
+            --jq '[.labels[].name] | join(" ")')
+
+          echo "PR labels:"
+          echo "$labels" | tr ' ' '\n'
+
+          # full-build overrides everything else
+          if echo "$labels" | grep -qw "full-build"; then
+            echo "INCREMENTAL_BUILD=false" >> $GITHUB_ENV
+            echo "Build type: Full (forced by 'full-build' label)" >> $GITHUB_STEP_SUMMARY
+          elif echo "$labels" | grep -qw "inc-build"; then
+            echo "INCREMENTAL_BUILD=true" >> $GITHUB_ENV
+            echo "Build type: Incremental" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "INCREMENTAL_BUILD=false" >> $GITHUB_ENV
+            echo "Build type: Full" >> $GITHUB_STEP_SUMMARY
+          fi
+
       - name: Build Project Artifacts
-        run: vercel build --target=preview --token=${{ secrets.VERCEL_TOKEN }}
+        run: |
+          vercel build \
+            --target=preview \
+            --token=${{ secrets.VERCEL_TOKEN }}
 
       - name: Deploy Project Artifacts and Set GitHub Outputs
         id: unified_docs_preview_url
         # save preview url from deployment and save copy of the preview url w/o https to fetch the deployment via Vercel REST API in next step
         run: |
-          preview_url=$(vercel deploy --prebuilt --target=preview --token=${{ secrets.VERCEL_TOKEN }} --archive=tgz)
+          preview_url=$(vercel deploy \
+            --prebuilt \
+            --target=preview \
+            --token=${{ secrets.VERCEL_TOKEN }} \
+            --archive=tgz \
+            --env INCREMENTAL_BUILD=${{ env.INCREMENTAL_BUILD }})
           echo "preview_url=$preview_url" >> $GITHUB_OUTPUT
 
           created_utc=$(date -u)
@@ -153,10 +207,10 @@ jobs:
           preview_url_to_fetch_deployment=$(echo "$preview_url" | sed 's/^https:\/\///')
           echo "preview_url_to_fetch_deployment=$preview_url_to_fetch_deployment" >> $GITHUB_OUTPUT
 
-
           echo "deployment url is $preview_url"
           echo "deployment url for REST API request is $preview_url_to_fetch_deployment"
           echo "created at is $created_utc"
+
       # as of March 2025, the Vercel CLI does not return the inspect URL in the output of the vercel deploy command, which is needed for the PR comment
       # we need to fetch the deployment info via the Vercel REST API using the preview_url_to_fetch_deployment output from the last step and parse the inspect URL from it (inspectorUrl prop name)
       - name: Vercel REST API Request to Fetch Inspect URL and Set GitHub Output
@@ -172,8 +226,11 @@ jobs:
 
           echo "Inspect URL is $inspector_url"
 
+          echo "unified docs preview url is ${{ steps.unified_docs_preview_url.outputs.preview_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "unified docs inspect url is $inspector_url" >> $GITHUB_STEP_SUMMARY
+
       - name: Update Comment with Unified Docs API Data
-        uses: marocchino/sticky-pull-request-comment@52423e01640425a022ef5fd42c6fb5f633a02728 # v2.9.1
+        uses: marocchino/sticky-pull-request-comment@447031a6bb83f7438d890bb0136932be78342022 # v3.0.0
         with:
           header: preview-notice
           message: |
@@ -191,21 +248,21 @@ jobs:
       preview_url: ${{ steps.deploy_dev_portal_preview.outputs.preview_url }}
     steps:
       - name: Checkout hashicorp/dev-portal (Frontend)
-        uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: hashicorp/dev-portal
           path: ./unified-docs-frontend-preview
           fetch-depth: 1
 
       - name: Setup Node.js
-        uses: actions/setup-node@1d0ff469b7ec7b3cb9d8673fde0c81c44821de2a # v4.2.0
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           cache: 'npm'
           cache-dependency-path: 'unified-docs-frontend-preview/package-lock.json'
           node-version-file: 'unified-docs-frontend-preview/package.json'
 
       - name: Cache Next.js build
-        uses: actions/cache@d4323d4df104b026a6aa633fdb11d772146be0bf # v4.2.2
+        uses: actions/cache@a7833574556fa59680c1b7cb190c1735db73ebf0 # v5.0.0
         with:
           path: ${{ github.workspace }}/unified-docs-frontend-preview/.next/cache
           key: ${{ runner.os }}-nextjs-build-devportal-${{ hashFiles('unified-docs-frontend-preview/package-lock.json', 'unified-docs-frontend-preview/next.config.js') }}
@@ -224,7 +281,7 @@ jobs:
           echo "VERCEL_AUTOMATION_BYPASS_SECRET=${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}" >> .env
 
       - name: Build dev-portal
-        uses: nick-fields/retry@7152eba30c6575329ac0576536151aca5a72780e # v3.0.0
+        uses: nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60 # v4.0.0
         env:
           # Used to read docs from private repos, once all docs are in UDR we can remove this
           GITHUB_TOKEN: ${{ secrets.CI_GITHUB_TOKEN }}
@@ -267,8 +324,11 @@ jobs:
 
           echo "Inspect URL is $inspector_url"
 
+          echo "dev portal preview url is ${{ steps.deploy_dev_portal_preview.outputs.preview_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "dev portal inspect url is $inspector_url" >> $GITHUB_STEP_SUMMARY
+
       - name: Update PR Comment with Dev Portal Data
-        uses: marocchino/sticky-pull-request-comment@52423e01640425a022ef5fd42c6fb5f633a02728 # v2.9.1
+        uses: marocchino/sticky-pull-request-comment@447031a6bb83f7438d890bb0136932be78342022 # v3.0.0
         with:
           header: preview-notice
           message: |
@@ -284,7 +344,7 @@ jobs:
     if: needs.get-changed-files.outputs.changed_content_files_count > 0
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
@@ -293,18 +353,21 @@ jobs:
       - name: Checking links in files
         run: |
           echo "Checking links in files:"
-          echo "${{ needs.get-changed-files.outputs.changed_markdown_content_files }}" | tr ' ' '\n'
+          echo ${{ needs.get-changed-files.outputs.changed_markdown_content_files }}
 
-      - name: Run lychee link checker
-        id: lychee
+      - name: Run lychee link checker for internal links
+        id: lychee-internal
         uses: lycheeverse/lychee-action@f613c4a64e50d792e0b31ec34bbcbba12263c6a6 # v2.3.0
         with:
+          output: ./internal.md
           args: >-
             ${{ needs.get-changed-files.outputs.changed_markdown_content_files }}
             -b ${{ needs.deploy-dev-portal-preview.outputs.preview_url }}
             --exclude-all-private
             --exclude '\.(svg|gif|jpg|png)'
-            --exclude 'gnu\.org'
+            --exclude '^https?://'
+            --include ${{ needs.deploy-dev-portal-preview.outputs.preview_url }}
+            --include 'https?://(www\.)?developer\.hashicorp\.com'
             --accept 200,408,429
             --timeout=60
             --max-concurrency 24
@@ -316,6 +379,57 @@ jobs:
         env:
           GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
 
+      - name: Run lychee link checker for external links
+        id: lychee-external
+        uses: lycheeverse/lychee-action@f613c4a64e50d792e0b31ec34bbcbba12263c6a6 # v2.3.0
+        with:
+          output: ./external.md
+          args: >-
+            ${{ needs.get-changed-files.outputs.changed_markdown_content_files }}
+            -b ${{ needs.deploy-dev-portal-preview.outputs.preview_url }}
+            --exclude-all-private
+            --exclude '\.(svg|gif|jpg|png)'
+            --exclude 'gnu\.org'
+            --exclude ${{ needs.deploy-dev-portal-preview.outputs.preview_url }}
+            --exclude 'https?://(www\.)?developer\.hashicorp\.com'
+            --accept 200,408,429
+            --timeout=60
+            --max-concurrency 24
+            --no-progress
+            --verbose
+          fail: false
+          failIfEmpty: false
+        env:
+          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+
+      - name: Combine lychee outputs and set exit code
+        id: lychee
+        run: |
+          mkdir -p ./lychee
+          echo "Combining lychee outputs and determining exit code..."
+
+          # Combine outputs
+          > ./lychee/out.md
+
+          if [ -f ./internal.md ]; then
+            printf '## Internal Links\n\n' >> ./lychee/out.md
+            cat ./internal.md >> ./lychee/out.md
+            printf '\n\n' >> ./lychee/out.md
+          fi
+
+          if [ -f ./external.md ]; then
+            printf '## External Links\n\n' >> ./lychee/out.md
+            cat ./external.md >> ./lychee/out.md
+          fi
+
+          # Determine exit code (0 if both are 0, otherwise 1)
+          if [ "${{ steps.lychee-internal.outputs.exit_code }}" -eq 0 ] && [ "${{ steps.lychee-external.outputs.exit_code }}" -eq 0 ]; then
+            echo "exit_code=0" >> $GITHUB_OUTPUT
+            echo "No broken links found."
+          else
+            echo "exit_code=1" >> $GITHUB_OUTPUT
+            echo "Broken links detected."
+          fi
       - name: Print lychee exit code
         run: |
           echo "Lychee exit code:"
@@ -347,7 +461,7 @@ jobs:
       # Get length of lychee output
       - name: lychee output size check
         id: char-count
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         if: steps.lychee.outputs.exit_code != 0
         with:
           script: |
@@ -362,14 +476,14 @@ jobs:
       - name: Upload lychee report to GitHub artifacts
         id: upload-artifact
         if: steps.lychee.outputs.exit_code != 0 && fromJson(steps.char-count.outputs.size) >= fromJson(vars.BROKEN_LINK_REPORT_CHAR_MAX)
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # 4.6.2
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           path: ./lychee/out.md
           name: Link Checker Report
 
       - name: Comment on PR with link to full link checker report
         if: steps.lychee.outputs.exit_code != 0 && fromJson(steps.char-count.outputs.size) >= fromJson(vars.BROKEN_LINK_REPORT_CHAR_MAX)
-        uses: marocchino/sticky-pull-request-comment@52423e01640425a022ef5fd42c6fb5f633a02728 # v2.9.1
+        uses: marocchino/sticky-pull-request-comment@447031a6bb83f7438d890bb0136932be78342022 # v3.0.0
         with:
           header: Link Checker Report
           message: |
@@ -378,7 +492,7 @@ jobs:
 
       - name: Comment on PR with link checker report
         if: steps.lychee.outputs.exit_code != 0 && fromJson(steps.char-count.outputs.size) < fromJson(vars.BROKEN_LINK_REPORT_CHAR_MAX)
-        uses: marocchino/sticky-pull-request-comment@52423e01640425a022ef5fd42c6fb5f633a02728 # v2.9.1
+        uses: marocchino/sticky-pull-request-comment@447031a6bb83f7438d890bb0136932be78342022 # v3.0.0
         with:
           header: Link Checker Report
           path: ./lychee/out.md
@@ -386,7 +500,8 @@ jobs:
       # Note: PRs never fail due to broken links - this is informational only
       # If all previous Github actions run (indicating success), this one will run and overwrite the comment with a success message
       - name: Comment on PR about successful link check
-        uses: marocchino/sticky-pull-request-comment@52423e01640425a022ef5fd42c6fb5f633a02728 # v2.9.1
+        if: steps.lychee.outputs.exit_code == 0
+        uses: marocchino/sticky-pull-request-comment@447031a6bb83f7438d890bb0136932be78342022 # v3.0.0
         with:
           header: Link Checker Report
           message: |
@@ -401,7 +516,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Update PR comment
-        uses: marocchino/sticky-pull-request-comment@52423e01640425a022ef5fd42c6fb5f633a02728 # v2.9.1
+        uses: marocchino/sticky-pull-request-comment@447031a6bb83f7438d890bb0136932be78342022 # v3.0.0
         with:
           header: Link Checker Report
           delete: true
