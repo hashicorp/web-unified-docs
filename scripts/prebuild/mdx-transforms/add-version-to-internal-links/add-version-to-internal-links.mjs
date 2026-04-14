@@ -21,10 +21,10 @@ import { PRODUCT_CONFIG } from '#productConfig.mjs'
  */
 export const rewriteInternalLinksPlugin = ({ entry, versionMetadata }) => {
 	/** This REGEX is used to parse a product version from a URL */
-	const VERSION_IN_PATH_REGEX = /^v\d+\.\d+\.(\d+|\w+)/i
+	const VERSION_IN_PATH_REGEX = /^v\d+\.(?:\d+|\w+)(?:\.(?:\d+|\w+))?$/i
 
 	/** This REGEX is used to parse a product version that does not include 'v' at the beginning */
-	const NO_V_VERSION_IN_PATH_REGEX = /^\d+\.\d+\.(\d+|\w+)/i
+	const NO_V_VERSION_IN_PATH_REGEX = /^\d+\.(?:\d+|\w+)(?:\.(?:\d+|\w+))?$/i
 
 	/** This REGEX is used to parse a Terraform Enterprise version from a URL */
 	const TFE_VERSION_IN_PATH_REGEXP = /^v[0-9]{6}-\d+/i
