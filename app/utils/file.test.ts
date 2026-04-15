@@ -12,8 +12,6 @@ vi.hoisted(() => {
 	process.env.VERCEL_URL = 'local-vercel-CDN'
 })
 
-import { fetchFile, findFileWithMetadata, FileType } from './file'
-
 vi.mock('fs/promises', () => {
 	return {
 		readFile: vi.fn(),
