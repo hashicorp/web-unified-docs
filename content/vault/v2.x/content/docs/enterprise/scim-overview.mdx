@@ -1,0 +1,285 @@
+---
+layout: docs
+page_title: Provision Vault identities with SCIM
+description: >-
+  Configure Vault Enterprise as a SCIM 2.0 server so identity platforms can provision and manage users and groups in Vault.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-04-15T00:15:22.000Z
+last_modified: 2026-04-15T00:15:22.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Provision Vault identities with SCIM
+
+@include 'alerts/enterprise-only.mdx'
+
+@include 'alerts/beta.mdx'
+
+Vault Enterprise supports System for Cross-domain Identity Management (SCIM)
+2.0 as a beta feature for provisioning identity users and groups from external
+identity platforms.
+
+Vault exposes SCIM through the identity secrets engine.
+
+- SCIM users map to Vault
+  [entities](/vault/docs/concepts/identity#entities-and-aliases).
+- When you configure `alias_mount_accessor`, SCIM users also create
+  mount-bound [entity aliases](/vault/docs/concepts/identity#mount-bound-aliases).
+- SCIM groups map to Vault
+  [internal identity groups](/vault/docs/concepts/identity#external-vs-internal-groups).
+- A SCIM client can only see and manage the users and groups it created.
+- SCIM does not manage Vault policies.
+
+
+## Before you start
+
+- You must have Vault Enterprise 2.x.x or later.
+- You must have permissions to enable auth methods and manage identity resources.
+- You should know the auth method you want to use for the SCIM client.
+
+Any Vault auth method can work for SCIM if authentication resolves to the Vault
+entity configured as the access grant principal (`access_grant_principal`) for the SCIM client.
+
+Some SCIM clients only support a static bearer token. In those cases, token
+auth usually gives you the simplest setup because you can mint a token tied to
+an entity alias and pass that token directly to the connector.
+
+## Activate SCIM
+
+Vault gates SCIM functionality behind an activation flag. Vault returns errors for SCIM
+configuration and protocol requests until you activate the feature.
+
+<Tabs>
+
+<Tab heading="CLI" group="cli">
+
+```shell-session
+$ vault write -f sys/activation-flags/enable-scim/activate
+```
+
+</Tab>
+
+<Tab heading="API" group="api">
+
+```shell-session
+$ curl \
+    --request PUT \
+    --header "X-Vault-Token: ..." \
+    http://127.0.0.1:8200/v1/sys/activation-flags/enable-scim/activate
+```
+
+</Tab>
+
+</Tabs>
+
+Activating the SCIM flag is a one-time action.
+
+Refer to the [activation flags API](/vault/api-docs/system/activation-flags)
+for details.
+
+## SCIM endpoints and namespaces
+
+After activation, Vault exposes SCIM endpoints under the following endpoints:
+
+- `/v1/identity/scim/v2`: SCIM base path for `/Users`, `/Groups`, `/ServiceProviderConfig`, `/Schemas` and `/ResourceTypes`.
+- `/v1/identity/scim/client` (and `/clients`): management of Vault SCIM clients.
+
+If you use Vault Enterprise namespaces, you can address SCIM in either of these
+ways:
+
+- Put the namespace in the request path, such as
+  `/v1/admin/identity/scim/v2/Users`.
+- Use the standard Vault namespace header with the non-namespaced path.
+
+## Configure a SCIM client
+
+Create a SCIM client before you send SCIM protocol requests.
+
+Each SCIM client represents one external provisioning system. The SCIM client
+configuration consists of these fields:
+
+- `client_name` (part of the URL): Namespace-scoped name for the external system.
+- `access_grant_principal`: ID of the Vault entity that authorizes SCIM API
+  requests for that client.
+- `alias_mount_accessor`: Optional auth mount accessor. When set, Vault also
+  creates a mount-bound entity alias for each SCIM user.
+
+Vault enforces these rules:
+
+- `access_grant_principal` must refer to an existing entity in the same
+  namespace.
+- `alias_mount_accessor`, when set, must refer to an existing non-local auth
+  mount in the same namespace.
+- `alias_mount_accessor` is immutable after creation.
+- A SCIM client can only manage the users and groups it created.
+
+Vault currently limit `alias_mount_accessor` supports to non-local
+auth mounts.
+
+## Authentication model
+
+A SCIM client authenticates to Vault through a supported auth method, gets
+a Vault token, and uses that token for SCIM requests. Vault infers the SCIM
+client identity based on the token entity.
+
+At a high level:
+
+1. Create a Vault entity to represent the SCIM client.
+1. Bind the entity to a SCIM client with `access_grant_principal`.
+1. Authenticate through an auth method that resolves to that entity.
+1. Use the resulting Vault token for SCIM API calls.
+
+Vault rejects SCIM requests if the token does not resolve to the configured entity or the entity does not have an associated SCIM client.
+
+## Simple bearer-token setup
+
+The following example uses the token auth method because it is easy to connect
+to SCIM products that expect a static bearer token. But you can use any auth
+method that maps back to the configured entity for the SCIM client.
+
+### 1. Create a policy for the SCIM client token
+
+```shell-session
+$ vault policy write scim-client - <<'EOF'
+path "identity/scim/v2/*" {
+  capabilities = ["create", "read", "update", "delete", "list"]
+}
+EOF
+```
+
+### 2. Create the Vault entity for the SCIM client
+
+```shell-session
+$ vault write -format=json identity/entity name="scim-client"
+```
+
+Save the returned entity ID.
+
+### 3. Create the SCIM client configuration
+
+```shell-session
+$ vault write identity/scim/client/example-client \
+    access_grant_principal="<entity_id>"
+```
+
+If you want Vault to create aliases for provisioned users as well, include the
+`alias_mount_accessor` parameter. For example:
+
+
+### 4. Create an entity alias on the token auth mount
+
+List auth mounts and record the accessor for `token/`.
+
+```shell-session
+$ vault auth list
+```
+
+Create an alias on that mount for the SCIM client entity.
+
+```shell-session
+$ vault write identity/entity-alias \
+    name="example-client" \
+    mount_accessor="<token_mount_accessor>" \
+    canonical_id="<entity_id>"
+```
+
+### 5. Create a token role and mint a bearer token
+
+```shell-session
+$ vault write auth/token/roles/example-scim \
+    allowed_entity_aliases="example-client" \
+    orphan=true \
+    token_no_default_policy=true
+
+$ vault token create \
+    -role=example-scim \
+    -entity-alias=example-client \
+    -policy=scim-client \
+    -no-default-policy
+```
+
+Use the returned token value as the bearer token for SCIM requests.
+
+We strongly recommend planning token renewal or rotation around the TTL configured on
+your token auth mount.
+
+## Send SCIM requests
+
+Use the Vault token in the request header to call the SCIM endpoint:
+
+```shell-session
+$ curl \
+    --header "X-Vault-Token: ${VAULT_TOKEN}" \
+    --header "Content-Type: application/scim+json" \
+    ${VAULT_ADDR}/v1/identity/scim/v2/ServiceProviderConfig
+```
+
+
+## How Vault maps SCIM resources
+
+| SCIM resource | Vault resource | Behavior |
+| --- | --- | --- |
+| `User` | Entity | `userName` maps to the entity name and `externalId` maps to the entity external ID. |
+| `Group` | Internal identity group | `displayName` maps to the group name. |
+
+Important behavior:
+
+- `externalId` is required when you create a SCIM user.
+- `externalId` stays fixed after creation.
+- Group members must reference Vault user resource IDs.
+- Group membership is limited to users owned by the same SCIM client.
+
+If the SCIM client sets `alias_mount_accessor`, Vault creates a mount-bound
+entity alias for each provisioned user and keeps the alias name aligned with
+the SCIM `userName`.
+
+## Supported protocol surface
+
+Vault supports these SCIM areas:
+
+- SCIM client configuration through `/identity/scim/client`
+- User create, read, list, replace, patch, and delete
+- Group create, read, list, replace, patch, and delete
+- Discovery endpoints for `Schemas`, `ResourceTypes`, and
+  `ServiceProviderConfig`
+
+Vault returns SCIM responses as `application/scim+json`.
+
+## Current limitations
+
+- Vault does not support `/Me`.
+- Vault does not support SCIM bulk operations.
+- Vault does not support sort, ETag, or change password operations.
+- User `PATCH` only supports a single `replace` operation for `active`.
+- Group `PATCH` only supports member add and remove operations.
+- Vault supports simple `eq` filters on `/Users` for `userName`, `externalId`,
+  and `active`.
+- Vault does not support group filters or complex SCIM filter expressions.
+- Group members must use Vault user resource IDs, not `userName` or
+  `externalId`.
+- `externalId` is required when you create a user and you cannot update it
+  later.
+- `alias_mount_accessor` is immutable after client creation and remains tied to
+  the auth mount strategy you choose for that client.
+
+Vault advertises general filtering as unsupported in
+`ServiceProviderConfig`. Test filtered user lookups with your SCIM client
+before you depend on them.
+
+## Deleting a SCIM client
+
+Deleting a SCIM client starts an asynchronous cleanup workflow.
+
+- Vault blocks new SCIM requests for that client.
+- Vault removes the users and groups owned by that client.
+- Cleanup continues in the background until Vault finishes deleting the managed
+  resources and the SCIM client configuration.
+
+Review the resources owned by a SCIM client before you delete it.
+
+
+## Related documentation
+
+- [Identity concepts](/vault/docs/concepts/identity)
+- [Identity secrets engine](/vault/docs/secrets/identity)
+- [SCIM API](/vault/api-docs/secret/identity/scim)
