@@ -1,0 +1,266 @@
+---
+page_title: Secure Tekton CI/CD secrets with HashiCorp Vault
+description: Manage secrets in Tekton CI/CD pipelines with HashiCorp Vault.
+---
+
+# Secure Tekton CI/CD secrets with HashiCorp Vault
+
+Tekton runs natively on Kubernetes, which changes the threat model compared
+to hosted CI/CD platforms. Pipelines execute as pods with service accounts —
+identities that already exist in the Kubernetes cluster and can be cryptographically
+verified by Vault without introducing long-lived credentials. This makes
+Kubernetes auth the natural fit for most Tekton deployments, eliminating the
+bootstrapping problem that plagues other auth methods in pipeline contexts.
+
+## Architecture
+
+The pipeline-to-Vault authentication flow follows a similar pattern regardless of
+which auth method you use: 
+
+- The pipeline authenticates with Vault using an identity credential
+- Receives a short-lived token scoped to a least-privilege policy
+- Uses the token to retrieve only the secrets required for that job
+- The token expires at a predefined TTL; no credential rotation is needed
+
+┌─────────────────────────────────────────────────────────────┐
+│  Kubernetes Cluster                                         │
+│                                                             │
+│  ┌──────────────┐   1. Auth request    ┌────────────────┐   │
+│  │  Tekton Pod  │ ──────────────────►  │  Vault         │   │
+│  │  (Pipeline)  │                      │                │   │
+│  │              │ ◄──────────────────  │  - Auth method │   │
+│  │              │   2. Scoped token    │  - Policy      │   │
+│  │              │                      │  - KV / PKI /  │   │
+│  │              │ ──────────────────►  │    Dynamic     │   │
+│  │              │   3. Secret request  │    engines     │   │
+│  │              │ ◄──────────────────  │                │   │
+│  └──────────────┘   4. Secret value    └────────────────┘   │
+│                                                             │
+│  Step 1: Vault validates the pod's identity credential      │
+│  Step 2: Token is scoped to paths allowed by the role       │
+│  Step 3: Pipeline requests only what it needs               │
+│  Step 4: Secret delivered; token expires at pipeline end    │
+└─────────────────────────────────────────────────────────────┘
+
+## Authentication options
+
+Use Kubernetes auth for pipelines running inside the same cluster as Vault or a
+cluster with network access to Vault. The pod's service account token is already
+available, the identity is verifiable by the Kubernetes API, and no additional
+credential material needs to be provisioned. Each pipeline can have its own
+service account, enabling per-pipeline secret scoping with no shared
+credentials.
+
+For pipelines in multi-cluster or multi-cloud environments, JWT/OIDC auth is the
+appropriate escalation — it works across trust boundaries where Kubernetes auth
+is unavailable.
+
+AppRole and TLS cert auth address specific operational scenarios covered in the
+decision matrix below.
+
+| Auth Method | Security Posture | Credential Lifecycle | Best Suited For |
+|---|---|---|---|
+| Kubernetes | Highest for in-cluster | Token auto-rotated by K8s | Pipelines running in same cluster or trusted cluster with Vault access |
+| JWT / OIDC | High; identity federates across trust boundaries | Token issued per job, short-lived | Multi-cluster, external runners, or where SPIFFE/SPIRE workload identity is in use |
+| TLS Certificate | High; mutual authentication | Certificate with defined expiry; requires rotation process | Long-lived pipeline infrastructure (e.g., dedicated build agents) where mTLS is already part of the security posture |
+| AppRole | Moderate; requires secure secret ID delivery | Secret ID is single-use with response wrapping; RoleID is long-lived | Pipelines in environments where neither K8s nor JWT is available; legacy infrastructure integration |
+
+<Tabs>
+<Tab heading="Kubernetes">
+
+Vault validates the pipeline pod's projected service account token against the
+Kubernetes API.
+
+### Role configuration
+
+The role definition enforces which namespaces and service
+accounts are permitted, making this the primary control against one pipeline
+impersonating another.
+
+```hcl
+# Vault role — binds to a specific service account and namespace
+# This is the critical security control: without bound_service_account_names
+# and bound_service_account_namespaces, any pod in the cluster can authenticate
+vault write auth/kubernetes/role/tekton-build \
+  bound_service_account_names=tekton-pipeline-sa \
+  bound_service_account_namespaces=tekton-pipelines \
+  policies=tekton-build-policy \
+  ttl=1h
+```
+
+</Tab>
+<Tab heading="JWT / OIDC">
+
+JWT auth is the right choice when pipelines run outside the cluster boundary.
+
+### Role configuration
+
+The security-critical configuration here is bound_claims. Without it, any valid
+JWT issued by the configured provider can authenticate. Bound claims restrict
+authentication to JWTs containing specific values.
+
+```hcl
+# Vault JWT role with bound_claims
+# Without bound_claims this role accepts any JWT from the issuer
+vault write auth/jwt/role/tekton-deploy \
+  role_type=jwt \
+  bound_audiences="https://vault.example.com" \
+  bound_claims='{"spiffe.io/trust-domain": "example.com", "sub": "spiffe://example.com/ns/tekton-pipelines/sa/deploy-sa"}' \
+  user_claim=sub \
+  policies=tekton-deploy-policy \
+  ttl=15m
+```
+
+### Policy
+
+</Tab>
+<Tab heading="TLS Certificate">
+
+TLS cert auth is appropriate when pipelines run on dedicated, long-lived build
+agents rather than ephemeral pods — for example, a fleet of Tekton remote
+runners or build farm nodes where the agent infrastructure itself has a managed
+certificate lifecycle. Vault validates the client certificate presented during
+the TLS handshake. 
+
+### Role configuration
+
+The certificate's CN or SANs serve the same function as
+bound_service_account_names in Kubernetes auth — they identify which specific
+infrastructure is allowed to authenticate. Vault can be configured to allow only
+certificates issued by a specific CA, or to further restrict by CNThe
+certificate's CN or SANs serve the same function as bound_service_account_names
+in Kubernetes auth — they identify which specific infrastructure is allowed to
+authenticate. Vault can be configured to allow only certificates issued by a
+specific CA, or to further restrict by CN.
+
+```hcl
+# Vault TLS cert role — restrict to certificates from the internal CA
+# with a CN matching the build agent naming pattern
+vault write auth/cert/certs/tekton-agent \
+  display_name=tekton-agent \
+  certificate=@/path/to/internal-ca.crt \
+  allowed_common_names="tekton-agent-*.infra.example.com" \
+  policies=tekton-agent-policy \
+  ttl=4h
+```
+
+</Tab>
+<Tab heading="AppRole">
+
+AppRole is appropriate when neither Kubernetes nor JWT auth is available — for
+example, pipelines in air-gapped environments or integrations with legacy
+infrastructure that can't participate in token-based identity federation.
+
+### Role configuration
+
+The critical operational concern with AppRole is secure initial delivery of the
+secret_id. Always use response wrapping: the secret_id is wrapped in a
+single-use token so that even if the delivery mechanism is observed, the
+credential can only be unwrapped once.
+
+Without response wrapping, AppRole secret IDs in pipelines are effectively
+long-lived shared credentials — which largely defeats the purpose.
+
+```hcl
+# Vault AppRole role — short TTL on secret_id, single use
+vault write auth/approle/role/tekton-pipeline \
+  role_name=tekton-pipeline \
+  secret_id_ttl=10m \
+  secret_id_num_uses=1 \
+  token_ttl=1h \
+  token_max_ttl=2h \
+  policies=tekton-pipeline-policy
+```
+
+</Tab>
+</Tabs>
+
+## Policy
+
+The Vault policy for any role should follow least privilege. A pipeline that
+deploys to production should not be able to read staging secrets, and vice
+versa.
+
+```hcl
+# Vault policy: scope to exactly the paths this pipeline needs
+path "secret/data/ci/production/db" {
+  capabilities = ["read"]
+}
+
+# Deny access to everything else implicitly
+```
+
+## Security considerations
+
+There are several security considerations you need to align with your
+organizational risk tolerance and operational constraints: 
+
+- **Namespace and service account isolation:** Every distinct pipeline workload
+  should have its own service account with its own Vault role. A shared service
+  account across pipelines is a lateral movement path — if one pipeline is
+  compromised, it can access secrets scoped to any other pipeline sharing that
+  identity. 
+- **Policy least privilege:** Vault policies for CI/CD roles should grant read
+  access only to the specific paths that pipeline needs. Wildcard paths
+  (secret/ci/*) are convenient but should be avoided for production pipelines —
+  the blast radius of a compromised pipeline token is the entire subtree. 
+- **Token TTL alignment:** Pipeline token TTLs should be set to slightly exceed
+  the expected maximum pipeline duration, not to a round number like 24h. A
+  token that outlives the pipeline it was issued for is a credential left on the
+  table. 
+- **Log masking:** When using Vault Agent sidecar patterns with Vault Agent
+  templates, secrets written to files are not automatically masked in Tekton
+  step logs. Any step that reads a secret from a file and logs it — directly or
+  via a misconfigured tool — will expose it. Use environment variable injection
+  where log masking is available, and treat Vault audit logs as the source of
+  truth for secret access, not pipeline logs.
+- **bound_claims enforcement:** For JWT auth, always configure bound_claims with
+  the most specific values possible. An unconstrained JWT role that accepts any
+  token from the issuer allows any workload with access to that OIDC provider to
+  authenticate as a Vault client. 
+- **Namespace isolation for multi-team environments:** In organizations where
+  multiple teams share a Tekton cluster, Vault namespaces provide hard isolation
+  boundaries for secrets, policies, and auth methods per team. This prevents a
+  team from accidentally or intentionally accessing another team's Vault
+  configuration.
+
+## HashiCorp resources
+
+### Vault 
+
+- [Auth methods](/vault/docs/auth)
+- [Transit secrets engine](/vault/docs/secrets/transit)
+- [Response wrapping](/vault/docs/concepts/response-wrapping)
+- [Vault Agent on Kubernetes](/vault/docs/deploy/kubernetes/helm/examples/injector-tls-cert-manager)
+
+### HCP Vault Radar
+
+- [What is HCP Vault Radar](/hcp/docs/vault-radar)
+- [Add a Azure DevOps data source](/hcp/docs/vault-radar/get-started/add-data-sources/azure-devops)
+- [Add a Bitbucket data source](/hcp/docs/vault-radar/get-started/add-data-sources/bitbucket)
+- [Add a GitHub data source](/hcp/docs/vault-radar/get-started/add-data-sources/github)
+- [Add a GitLab data source](/hcp/docs/vault-radar/get-started/add-data-sources/gitlab)
+
+### Tutorials
+
+- [Get started with Vault](/vault/tutorials/get-started)
+- [Get started with HCP Vault Radar](/hcp/tutorials/get-started-hcp-vault-radar)
+- [Vault Agent with Kubernetes](/vault/tutorials/kubernetes-introduction/agent-kubernetes)
+- [Dynamic secrets: database credentials](vault/tutorials/db-credentials)
+- [Generate cloud provider credentials with Vault](/vault/tutorials/secrets-management/azure-secrets)
+
+## External resources
+
+- [Tekton Chains signing](https://tekton.dev/docs/chains/signed-provenance-tutorial/)
+- [SPIFFE/SPIRE workload identity](https://spiffe.io/docs/latest/spire-about/spire-concepts/)
+
+## Next steps
+
+If your pipelines run across multiple clusters or cloud providers, review
+JWT/OIDC auth with SPIFFE for a federated identity approach that removes the
+need to manage credentials across trust boundaries. 
+
+If supply chain compliance
+is a driver, the Validate software integrity section covers how Chains
+attestations fit into a broader software assurance posture. If you're assessing
+your current exposure before migration, start with HCP Vault Radar.
