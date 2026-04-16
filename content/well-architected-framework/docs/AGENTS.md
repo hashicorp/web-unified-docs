@@ -223,6 +223,7 @@ Based on successful WAF documents, use these patterns:
 - Use absolute URLs for internal links
 - Include untested code examples
 - Make assumptions - always ask for clarification
+- Edit any content under `# START AUTO GENERATED METADATA, DO NOT EDIT` in MDX files — this section is auto-generated and must not be modified manually
 
 ## IBM portfolio tools guidance
 
