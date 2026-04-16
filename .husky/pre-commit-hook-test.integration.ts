@@ -3,6 +3,11 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
+// To run this locally, temporarily rename this file to:
+//   .husky/pre-commit-hook-test.test.ts
+// Then run:
+//   npx vitest run .husky/pre-commit-hook-test.test.ts
+
 import { execSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
