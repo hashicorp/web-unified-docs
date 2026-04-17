@@ -4,13 +4,13 @@ description: >-
   Learn about the project permissions that you can grant to let your users interact with your project's resources and settings.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2025-09-18T18:02:13-07:00
-last_modified: 2025-09-26T14:05:50-07:00
+last_modified: 2026-03-16T23:04:15.000Z
 # END AUTO GENERATED METADATA
 ---
 
 # Project permissions
 
-Project-level permissions apply to all workspaces<!-- BEGIN: TFC:only name:stacks-tfe --> and Stacks<!-- END: TFC:only name:stacks-tfe --> within a specific project.
+Project-level permissions apply to all workspaces and Stacks within a specific project.
 
 ## Background
 
@@ -68,53 +68,49 @@ In an HCP Europe organization, you can grant permissions at the project-level th
 
 ### Project admin
 
-Each project has a group of permissions under the **Admin** role. This role grants permissions for the project and the workspaces<!-- BEGIN: TFC:only name:stacks-tfe --> and Stacks<!-- END: TFC:only name:stacks-tfe --> that belong to that project.
+Each project has a group of permissions under the **Admin** role. This role grants permissions for the project and the workspaces and Stacks that belong to that project.
 
-Members of teams with **Admin** permissions for a project have [general workspace permissions](#workspace-permissions) for every workspace<!-- BEGIN: TFC:only name:stacks-tfe -->, as well as **Admin** access for every Stack,<!-- END: TFC:only name:stacks-tfe --> in the project, and the ability to do the following:
+Members of teams with **Admin** permissions for a project have [general workspace permissions](#workspace-permissions) for every workspace, as well as **Admin** access for every Stack, in the project, and the ability to do the following:
 - Read and update project settings.
 - Delete the project.
-- Move workspaces<!-- BEGIN: TFC:only name:stacks-tfe --> and Stacks<!-- END: TFC:only name:stacks-tfe --> into or out of the project. This also requires project admin permissions for the source or destination project.
+- Move workspaces and Stacks into or out of the project. This also requires project admin permissions for the source or destination project.
 - Grant or revoke project permissions for visible teams. Project admins cannot view or manage access for teams that are [secret](/terraform/cloud-docs/users-teams-organizations/teams/manage#team-visibility), unless those admins are also organization owners.
-- Admin access for all workspaces<!-- BEGIN: TFC:only name:stacks-tfe --> and Stacks<!-- END: TFC:only name:stacks-tfe --> in this project, including the ability to:
-  - Create, read, update, and delete workspaces<!-- BEGIN: TFC:only name:stacks-tfe --> and Stacks<!-- END: TFC:only name:stacks-tfe --> in this project.
-  - Initiate, cancel, or apply runs for workspaces<!-- BEGIN: TFC:only name:stacks-tfe --> and Stacks<!-- END: TFC:only name:stacks-tfe --> in the project.
+- Admin access for all workspaces and Stacks in this project, including the ability to:
+  - Create, read, update, and delete workspaces and Stacks in this project.
+  - Initiate, cancel, or apply runs for workspaces and Stacks in the project.
 
 ### Project maintain
 
-Assign the **Maintain** role when users are responsible for managing existing infrastructure in a single project. The role also grants the ability to create new workspaces<!-- BEGIN: TFC:only name:stacks-tfe --> and Stacks<!-- END: TFC:only name:stacks-tfe --> in that project. **Maintain** access grants full control of everything in the project, including the following permissions:
+Assign the **Maintain** role when users are responsible for managing existing infrastructure in a single project. The role also grants the ability to create new workspaces and Stacks in that project. **Maintain** access grants full control of everything in the project, including the following permissions:
 - Read the project name.
-- Admin access for all workspaces<!-- BEGIN: TFC:only name:stacks-tfe --> and Stacks<!-- END: TFC:only name:stacks-tfe --> in this project, including the ability to:
-  - Create, read, update, and delete workspaces<!-- BEGIN: TFC:only name:stacks-tfe --> and Stacks<!-- END: TFC:only name:stacks-tfe --> in this project.
-  - Initiate, cancel, or apply runs for workspaces<!-- BEGIN: TFC:only name:stacks-tfe --> and Stacks<!-- END: TFC:only name:stacks-tfe --> in the project.
+- Admin access for all workspaces and Stacks in this project, including the ability to:
+  - Create, read, update, and delete workspaces and Stacks in this project.
+  - Initiate, cancel, or apply runs for workspaces and Stacks in the project.
 
 
 ### Project write
 
 Assign the **Write** role when users are responsible for most of the day-to-day work of provisioning and modifying managed infrastructure. **Write** access grants the following permissions:
 - Read the project name.
-- Write access for all workspaces<!-- BEGIN: TFC:only name:stacks-tfe --> and Stacks<!-- END: TFC:only name:stacks-tfe --> in this project, including the ability to:
-  - Read workspaces<!-- BEGIN: TFC:only name:stacks-tfe --> and Stacks<!-- END: TFC:only name:stacks-tfe --> in this project.
-  - Initiate, cancel, or apply runs for workspaces<!-- BEGIN: TFC:only name:stacks-tfe --> and Stacks<!-- END: TFC:only name:stacks-tfe --> in the project.
+- Write access for all workspaces and Stacks in this project, including the ability to:
+  - Read workspaces and Stacks in this project.
+  - Initiate, cancel, or apply runs for workspaces and Stacks in the project.
 
 ### Project read
 
 Assign the **Read** role to users who need to view information about the status and configuration of managed infrastructure but are not responsible for maintaining that infrastructure. **Read** access grants the permissions to:
 - Read the project name.
-- Read access for all workspaces<!-- BEGIN: TFC:only name:stacks-tfe --> and Stacks<!-- END: TFC:only name:stacks-tfe --> in this project.
+- Read access for all workspaces and Stacks in this project.
 
 ### Custom project role
 
 Custom permissions enable you to assign specific and granular permissions to a team. You can use custom permission sets to create task-focused permission sets and control sensitive information.
-
-<!-- BEGIN: TFC:only name:stacks-tfe -->
 
 <Note>
 
 Stacks do not support custom group permissions.
 
 </Note>
-
-<!-- END: TFC:only name:stacks-tfe -->
 
 You can create a set of custom permissions using any of the permissions listed in the [Project roles and permissions](#project-roles-and-permissions) table.
 
@@ -172,7 +168,7 @@ Allows users to move workspaces out of the project. A user must have this permis
 
 Allows users to delete workspaces in the project.
 
-Depending on the [organization's settings](/terraform/cloud-docs/users-teams-organizations/organizations#general), workspace admins may only be able to delete the workspace if it is not actively managing infrastructure. Refer to [Deleting a Workspace With Resources Under Management](/terraform/cloud-docs/workspaces/settings#deleting-a-workspace-with-resources-under-management) for details.
+Depending on the [organization's settings](/terraform/cloud-docs/users-teams-organizations/organizations/settings#general), workspace admins may only be able to delete the workspace if it is not actively managing infrastructure. Refer to [Deleting a Workspace With Resources Under Management](/terraform/cloud-docs/workspaces/settings#deleting-a-workspace-with-resources-under-management) for details.
 
 <!-- BEGIN: TFC:only name:hcp-eu -->
 

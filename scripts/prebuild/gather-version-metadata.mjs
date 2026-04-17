@@ -9,6 +9,7 @@ import path from 'node:path'
 import semver from 'semver'
 
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
+import { TFE_VERSION_IN_PATH_REGEX } from '#scriptUtils/version-regex.mjs'
 
 const acceptedReleaseStages = ['alpha', 'beta', 'rc']
 
@@ -28,7 +29,10 @@ export async function gatherVersionMetadata(contentDir) {
 	 * Some products, such as Terraform, have multiple content source repos.
 	 */
 	const products = fs.readdirSync(contentDir).filter((file) => {
-		return fs.statSync(path.join(contentDir, file)).isDirectory()
+		return (
+			Object.keys(PRODUCT_CONFIG).includes(file) &&
+			fs.statSync(path.join(contentDir, file)).isDirectory()
+		)
 	})
 
 	// Iterate over each product directory, adding to `versionMetadata`
@@ -161,13 +165,11 @@ export async function gatherVersionMetadata(contentDir) {
  * @returns {string} The normalized version string
  */
 function normalizeVersion(version) {
-	const TFE_VERSION_IN_PATH_REGEXP = /v[0-9]{6}-\d+/i
-
 	const cleanVersion = version
 		.replace(/\s*\([^)]+\)/, '') // Remove any release stage in parentheses
 		.replace(/\.x$/, '.0') // Replace trailing `.x` with `.0`
 
-	if (TFE_VERSION_IN_PATH_REGEXP.test(cleanVersion)) {
+	if (TFE_VERSION_IN_PATH_REGEX.test(cleanVersion)) {
 		return cleanVersion
 	}
 
