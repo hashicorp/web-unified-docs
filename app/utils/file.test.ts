@@ -269,6 +269,13 @@ describe('fetchFile - INCREMENTAL_BUILD=true', () => {
 
 describe('findFileWithMetadata', () => {
 	test('removes empty segments from URL path', async () => {
+		const { findFileWithMetadata } = await loadFileModuleWithEnv({
+			VERCEL_URL: 'local-vercel-CDN',
+			INCREMENTAL_BUILD: undefined,
+			VERCEL_ENV: undefined,
+			UNIFIED_DOCS_PROD_URL: undefined,
+		})
+
 		const filePath = [
 			'content',
 			'terraform-docs-common',

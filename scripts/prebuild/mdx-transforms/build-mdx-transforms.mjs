@@ -11,8 +11,7 @@ import remark from 'remark'
 import remarkMdx from 'remark-mdx'
 import grayMatter from 'gray-matter'
 
-import semver from 'semver'
-
+import { listFiles } from '#scriptUtils/list-files.mjs'
 import { batchPromises } from '#scriptUtils/batch-promises.mjs'
 
 import { paragraphCustomAlertsPlugin } from './paragraph-custom-alert/paragraph-custom-alert.mjs'
@@ -44,11 +43,17 @@ export async function buildMdxTransforms(
 	targetDir,
 	outputDir,
 	versionMetadata,
-	filesToCheck,
+	changedFiles = null,
 ) {
+	const filesToCheck = changedFiles
+		? [...changedFiles.added, ...changedFiles.modified]
+		: await listFiles(targetDir)
+
 	// Filter for `.mdx` files
 	const mdxFiles = filesToCheck.filter((filePath) => {
-		return path.extname(filePath) === '.mdx'
+		const relativePath = path.relative(targetDir, filePath)
+		const repoSlug = relativePath.split('/')[0]
+		return path.extname(filePath) === '.mdx' && repoSlug in PRODUCT_CONFIG
 	})
 	/**
 	 * Map over each `.mdx` file, and prepare the file for transformation
@@ -56,18 +61,15 @@ export async function buildMdxTransforms(
 	const mdxFileEntries = mdxFiles.map((filePath) => {
 		const relativePath = path.relative(targetDir, filePath)
 		const [repoSlug, version, contentDir] = relativePath.split('/')
+		const isVersionedDocs = PRODUCT_CONFIG[repoSlug].versionedDocs
 		/**
 		 * handles version and content dir for versionless docs
 		 * these values are index based
 		 * if versionless, version becomes the content dir
 		 * which will cause an error when trying resolve partials
 		 */
-		const verifiedVersion = PRODUCT_CONFIG[repoSlug].versionedDocs
-			? version
-			: ''
-		const verifiedContentDir = semver.valid(semver.coerce(version))
-			? contentDir
-			: version
+		const verifiedVersion = isVersionedDocs ? version : ''
+		const verifiedContentDir = isVersionedDocs ? contentDir : version
 		const partialsDir = path.join(
 			targetDir,
 			repoSlug,

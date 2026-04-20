@@ -10,7 +10,6 @@ import path from 'node:path'
 import remark from 'remark'
 import remarkMdx from 'remark-mdx'
 import grayMatter from 'gray-matter'
-import semver from 'semver'
 
 import { paragraphCustomAlertsPlugin } from './paragraph-custom-alert/paragraph-custom-alert.mjs'
 import { rewriteInternalLinksPlugin } from './add-version-to-internal-links/add-version-to-internal-links.mjs'
@@ -38,16 +37,15 @@ export async function buildFileMdxTransforms(filePath) {
 
 	const relativePath = path.relative(targetDir, filePath)
 	const [repoSlug, version, contentDir] = relativePath.split('/')
+	const isVersionedDocs = PRODUCT_CONFIG[repoSlug].versionedDocs
 	/**
 	 * handles version and content dir for versionless docs
 	 * these values are index based
 	 * if versionless, version becomes the content dir
 	 * which will cause an error when trying resolve partials
 	 */
-	const verifiedVersion = PRODUCT_CONFIG[repoSlug].versionedDocs ? version : ''
-	const verifiedContentDir = semver.valid(semver.coerce(version))
-		? contentDir
-		: version
+	const verifiedVersion = isVersionedDocs ? version : ''
+	const verifiedContentDir = isVersionedDocs ? contentDir : version
 	const partialsDir = path.join(
 		targetDir,
 		repoSlug,
