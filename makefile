@@ -31,7 +31,7 @@ help:
 
 .PHONY: install-gen-deps
 install-gen-deps: ## Install dependencies for code generation
-	@GO111MODULE=on go install github.com/dmarkham/enumer@v1.6.1
+	@GO111MODULE=on go install github.com/dmarkham/enumer@master
 	@go install github.com/hashicorp/packer-plugin-sdk/cmd/packer-sdc@latest
 
 # Environment variables for packer cloning:
