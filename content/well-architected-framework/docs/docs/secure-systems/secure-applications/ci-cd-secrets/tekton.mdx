@@ -76,6 +76,33 @@ vault write auth/kubernetes/role/tekton-build \
   ttl=1h
 ```
 
+### Workflow configuration
+
+This example assumes the `TaskRun` uses a dedicated Kubernetes service account
+and a step in the task logs in to Vault with the projected service account
+token.
+
+```yaml
+apiVersion: tekton.dev/v1
+kind: TaskRun
+metadata:
+  name: build-with-vault-kubernetes-auth
+spec:
+  serviceAccountName: tekton-pipeline-sa
+  taskSpec:
+    steps:
+      - name: read-secret
+        image: hashicorp/vault:1.19
+        script: |
+          #!/usr/bin/env sh
+          export VAULT_ADDR=https://vault.example.com
+          VAULT_TOKEN="$(vault write -field=token auth/kubernetes/login \
+            role=tekton-build \
+            jwt=@/var/run/secrets/kubernetes.io/serviceaccount/token)"
+          export VAULT_TOKEN
+          vault kv get -field=password secret/ci/build/registry > /workspace/registry-password
+```
+
 </Tab>
 <Tab heading="JWT / OIDC">
 
@@ -107,6 +134,38 @@ This example assumes the JWT contains SPIFFE-style claims. If your identity
 provider issues different claims, bind the role to the claim names and values
 that uniquely identify the pipeline workload in your environment.
 
+### Workflow configuration
+
+This example assumes another component writes a short-lived workload JWT to the
+task filesystem before the step that authenticates to Vault runs.
+
+```yaml
+apiVersion: tekton.dev/v1
+kind: TaskRun
+metadata:
+  name: deploy-with-vault-jwt-auth
+spec:
+  taskSpec:
+    volumes:
+      - name: workload-token
+        secret:
+          secretName: tekton-workload-jwt
+    steps:
+      - name: read-secret
+        image: hashicorp/vault:1.19
+        volumeMounts:
+          - name: workload-token
+            mountPath: /var/run/tekton/tokens
+            readOnly: true
+        script: |
+          #!/usr/bin/env sh
+          export VAULT_ADDR=https://vault.example.com
+          JWT="$(cat /var/run/tekton/tokens/token)"
+          VAULT_TOKEN="$(vault write -field=token auth/jwt/login role=tekton-deploy jwt="$JWT")"
+          export VAULT_TOKEN
+          vault kv get -field=key secret/ci/production/api > /workspace/api-key
+```
+
 </Tab>
 <Tab heading="TLS Certificate">
 
@@ -132,6 +191,40 @@ vault write auth/cert/certs/tekton-agent \
   allowed_common_names="tekton-agent-*.infra.example.com" \
   policies=tekton-agent-policy \
   ttl=4h
+```
+
+### Workflow configuration
+
+This example assumes the task mounts a client certificate and key that were
+provisioned to the workload by your PKI workflow.
+
+```yaml
+apiVersion: tekton.dev/v1
+kind: TaskRun
+metadata:
+  name: build-with-vault-cert-auth
+spec:
+  taskSpec:
+    volumes:
+      - name: vault-client-cert
+        secret:
+          secretName: tekton-vault-client-cert
+    steps:
+      - name: read-secret
+        image: hashicorp/vault:1.19
+        volumeMounts:
+          - name: vault-client-cert
+            mountPath: /etc/vault/tls
+            readOnly: true
+        script: |
+          #!/usr/bin/env sh
+          export VAULT_ADDR=https://vault.example.com
+          VAULT_TOKEN="$(vault login -method=cert -token-only \
+            name=tekton-agent \
+            -client-cert=/etc/vault/tls/tls.crt \
+            -client-key=/etc/vault/tls/tls.key)"
+          export VAULT_TOKEN
+          vault kv get -field=key secret/ci/build/signing > /workspace/signing-key
 ```
 
 </Tab>
@@ -160,6 +253,44 @@ vault write auth/approle/role/tekton-pipeline \
   token_ttl=1h \
   token_max_ttl=2h \
   policies=tekton-pipeline-policy
+```
+
+### Workflow configuration
+
+This example assumes the `role_id` and single-use wrapping token are provided to
+the `TaskRun` as Kubernetes secrets and unwrapped at runtime.
+
+```yaml
+apiVersion: tekton.dev/v1
+kind: TaskRun
+metadata:
+  name: build-with-vault-approle
+spec:
+  taskSpec:
+    params:
+      - name: VAULT_ROLE_ID
+        value: $(params.VAULT_ROLE_ID)
+    steps:
+      - name: read-secret
+        image: hashicorp/vault:1.19
+        env:
+          - name: VAULT_ROLE_ID
+            valueFrom:
+              secretKeyRef:
+                name: tekton-vault-approle
+                key: role_id
+          - name: VAULT_WRAP_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: tekton-vault-approle
+                key: wrapping_token
+        script: |
+          #!/usr/bin/env sh
+          export VAULT_ADDR=https://vault.example.com
+          SECRET_ID="$(VAULT_TOKEN="$VAULT_WRAP_TOKEN" vault unwrap -field=secret_id)"
+          VAULT_TOKEN="$(vault write -field=token auth/approle/login role_id="$VAULT_ROLE_ID" secret_id="$SECRET_ID")"
+          export VAULT_TOKEN
+          vault kv get -field=password secret/ci/build/registry > /workspace/registry-password
 ```
 
 </Tab>
