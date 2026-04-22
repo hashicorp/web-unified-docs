@@ -45,12 +45,17 @@ export async function buildMdxTransforms(
 	targetDir,
 	outputDir,
 	versionMetadata,
+	changedFiles = null,
 ) {
-	// Walk the directory to get a list of all files
-	const allFiles = await listFiles(targetDir)
+	const filesToCheck = changedFiles
+		? [...changedFiles.added, ...changedFiles.modified]
+		: await listFiles(targetDir)
+
 	// Filter for `.mdx` files
-	const mdxFiles = allFiles.filter((filePath) => {
-		return path.extname(filePath) === '.mdx'
+	const mdxFiles = filesToCheck.filter((filePath) => {
+		const relativePath = path.relative(targetDir, filePath)
+		const repoSlug = relativePath.split('/')[0]
+		return path.extname(filePath) === '.mdx' && repoSlug in PRODUCT_CONFIG
 	})
 	/**
 	 * Map over each `.mdx` file, and prepare the file for transformation

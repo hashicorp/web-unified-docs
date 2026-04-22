@@ -4,7 +4,7 @@ description: >-
  Learn how to connect policies to policy sets in your HCP Terraform organization.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2026-01-06T15:00:20-08:00
-last_modified: 2026-02-04T15:28:47-06:00
+last_modified: 2026-03-12T03:10:35.000Z
 # END AUTO GENERATED METADATA
 ---
 
@@ -43,7 +43,7 @@ This page contains all of the policy sets available in the organization, includi
 1. Specify a unique and descriptive name for the policy set. You can use any combination of letters, numbers, `-`, and `_`. A name is required.
 1. It is optional, but you can add a description. We recommend adding a description so that the purpose of the policy set is clear to team members.
 1. Choose a policy set scope:
-   - Enable the **Policies enforced globally** option to automatically enforce this policy set on all of the organization's existing and future workspaces. You can optionally click **Add exclusions** and choose workspaces to exempt from the policy set. 
+   - Enable the **Policies enforced globally** option to automatically enforce this policy set on all of the organization's existing and future workspaces. You can optionally click **Add exclusions** and choose projects or workspaces to exempt from the policy set.
    - Enable the **Policies enforced on selected projects and workspaces** option to enforce the policy set on specific workspaces or all workspaces in project. This affects all current and future workspaces for any projects you choose.  
 1. For Sentinal policy sets, choose a policy execution mode. Refer to [Policy set execution modes](#policy-set-execution-modes) for details about each option. For OPA policy sets, configure the following settings:
    - Choose an OPA version from the **Runtime version** drop-down menu.
@@ -82,7 +82,7 @@ When a policy run starts, HCP Terraform or Terraform Enterprise checks the works
 
 When your workspace exeuction mode is also set to **Agent**, HCP Terraform and Terraform Enterprise use the same agent instance to evaluate policies and run Terraform operations. When the workspace execution mode is set to **Local** or **Remote**, HCP Terraform or Terraform Enterprise starts a new agent to evaluate the policy.
 
-You can explicitly set your workspace execution mode to **Agent** or configure your workspace to inherit an execution mode from [project settings](/terraform/cloud-docs/projects#execution-mode) or [organization settings](/terraform/cloud-docs/users-teams-organizations/organizations#organization-settings).    
+You can explicitly set your workspace execution mode to **Agent** or configure your workspace to inherit an execution mode from [project settings](/terraform/cloud-docs/projects#execution-mode) or [organization settings](/terraform/cloud-docs/users-teams-organizations/organizations/settings).    
 
 Use HCP Terraform Agent mode to execute your policy set using a specific version of Sentinel. Because your policies run in an isolated environment, you can also use this mode to offload resource consumption from HCP Terraform or Terraform Enterprise. 
 
