@@ -1,6 +1,6 @@
 ---
 page_title: Secure Jenkins CI/CD secrets with HashiCorp Vault
-description: Manage secrets in Jenkins pipelines with HashiCorp Vault.
+description: Learn how to secure Jenkins CI/CD secrets with HashiCorp Vault using agent-based auth patterns, self-hosted identities, and least-privilege Vault access.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2025-07-16T16:24:50-05:00
 last_modified: 2026-01-29T10:31:53-06:00
@@ -30,10 +30,20 @@ retrieve the secrets it needs for the job it is running.
 The pipeline-to-Vault authentication flow follows the same high-level pattern
 regardless of auth method, but the verification step differs by method:
 
-1. The Jenkins workload presents an identity to Vault
+1. The Jenkins agent presents an identity to Vault
 1. Vault validates that identity directly or through the relevant platform
 1. Vault maps the validated identity to a role
 1. Vault issues a token scoped to the policies attached to that role
+
+<Info>
+
+Unlike CI/CD platforms that provide a native workload identity model (such as
+GitHub Actions OIDC or GitLab JWT), Jenkins has no single preferred auth
+method. The steps above describe the general Vault authentication flow. The
+specific method your pipeline uses depends on where your Jenkins agents run —
+see [Where Jenkins runs affects auth method selection](#where-jenkins-runs-affects-auth-method-selection).
+
+</Info>
 
 ![Diagram showing authentication workflow between workloads like Jenkins, to
 Vault, to the platform identity provider](/img/well-architected-framework/diagram-auth-workload-dark.png#dark-theme-only)
@@ -44,7 +54,7 @@ Vault, to the platform identity provider](/img/well-architected-framework/diagra
 
 Jenkins controllers usually orchestrate work, but Jenkins agents execute the
 pipeline steps that need secrets. For that reason, the agent runtime should
-usually determine the Vault auth method:
+determine the Vault auth method:
 
 - If agents run on Kubernetes, use Kubernetes auth.
 - If agents run on AWS, Azure, or GCP with native machine identity, use the
@@ -55,8 +65,8 @@ usually determine the Vault auth method:
   use JWT/OIDC auth.
 
 The Jenkins Vault plugin, the CloudBees HashiCorp Vault plugin, Jenkins
-credentials binding, and Vault Agent sidecars affect how secrets are retrieved
-and masked in pipelines. They do not change the underlying identity model. Pick
+credentials binding, and Vault Agent sidecars affect how agents retrieve secrets
+and mask them in pipelines. Those integrations do not change the underlying identity model. Pick
 the auth method based on the agent runtime, then decide how Jenkins should
 consume the resulting Vault token and secrets.
 
@@ -71,7 +81,7 @@ agent already has.
 Jenkins integrates with Vault through the following patterns:
 
 - The Jenkins Vault plugin provides declarative secret retrieval and masks
-  retrieved secrets in pipeline logs, making it a low-friction option when
+  retrieved secrets in pipeline logs, making it a practical option when
   teams want plugin-managed secret access.
 - The CloudBees HashiCorp Vault plugin provides a similar pattern for CloudBees
   CI controllers that follow the same underlying Vault auth model and use the
@@ -89,13 +99,339 @@ The following table summarizes when each auth method fits best.
 
 | Auth method | Security posture | Credential lifecycle | Best suited for |
 |---|---|---|---|
-| AppRole | Moderate; requires secure secret ID delivery | Secret ID is single-use with response wrapping; RoleID is long-lived | Traditional self-hosted Jenkins agents where no stronger platform identity exists |
-| Cloud provider auth methods | High when bound to native cloud identity | Short-lived cloud identity or metadata-backed login | Jenkins agents running on AWS, Azure, or GCP |
 | JWT / OIDC | High; identity federates across trust boundaries | Token issued per job or workload, typically short-lived | Jenkins agents running on platforms that can issue OIDC-compatible workload tokens |
+| Cloud provider auth methods | High when bound to native cloud identity | Short-lived cloud identity or metadata-backed login | Jenkins agents running on AWS, Azure, or GCP |
 | Kubernetes | Highest for in-cluster | Short-lived projected token on modern Kubernetes; legacy patterns vary | Jenkins agents running as pods in Kubernetes |
 | TLS Certificate | High; mutual authentication | Certificate with defined expiry; requires rotation process | Long-lived Jenkins agents where mTLS is already part of the security posture |
+| AppRole | Moderate; requires secure secret ID delivery | Secret ID is single-use with response wrapping; RoleID is long-lived | Traditional self-hosted Jenkins agents where no stronger platform identity exists |
 
 <Tabs>
+<Tab heading="JWT / OIDC">
+
+JWT/OIDC auth is the right choice when Jenkins agents run on a platform that
+can issue OIDC-compatible workload tokens. Jenkins itself does not issue these
+tokens natively, so this pattern depends on the surrounding platform, workload
+identity broker, or federation layer.
+
+### Role configuration
+
+The security-critical configuration here is workload-specific role
+constraints. `bound_claims` is the most flexible option, but you can also use
+constraints such as `bound_audiences` and `bound_subject`. Without these
+restrictions, a broader set of issuer-valid JWTs may authenticate than you
+intend.
+
+```hcl
+# Vault JWT role with workload-specific claim bindings
+vault write auth/jwt/role/jenkins-deploy \
+  role_type=jwt \
+  bound_audiences="https://vault.example.com" \
+  bound_claims='{"sub": "jenkins-agent-prod", "pipeline": "deploy"}' \
+  user_claim=sub \
+  token_policies=jenkins-deploy-policy \
+  ttl=15m
+```
+
+### Workflow configuration
+
+The example assumes an external identity component writes a short-lived JWT to
+the agent filesystem before the build step runs.
+
+```groovy
+pipeline {
+  agent any
+
+  environment {
+    WORKLOAD_JWT_FILE = '/var/run/jenkins/workload/token'
+  }
+
+  stages {
+    stage('Read secret from Vault') {
+      steps {
+        sh '''
+          JWT="$(cat "$WORKLOAD_JWT_FILE")"
+          VAULT_TOKEN="$(vault write -field=token auth/jwt/login role=jenkins-deploy jwt="$JWT")"
+          API_KEY="$(VAULT_TOKEN="$VAULT_TOKEN" vault kv get -field=key secret/ci/production/api)"
+          ./deploy.sh
+        '''
+      }
+    }
+  }
+}
+```
+
+The agent reads the short-lived workload token from the local filesystem,
+exchanges it for a Vault token, and retrieves only the secret required for the
+deployment.
+
+</Tab>
+<Tab heading="Cloud provider auth methods">
+
+Use cloud provider auth methods when Jenkins agents run on cloud VMs or managed
+compute that already have native cloud identity. This avoids storing cloud
+credentials in Jenkins just to bootstrap Vault login.
+
+<Tabs>
+<Tab heading="AWS">
+
+AWS auth is appropriate for Jenkins agents running on EC2 or other AWS compute
+with an instance profile or IAM role. Prefer the `iam` auth type for most
+Jenkins use cases.
+
+### Role configuration
+
+The primary control is binding the Vault role to the expected IAM principal ARN.
+
+```hcl
+# Vault AWS role — bound to the Jenkins agent instance profile role
+vault write auth/aws/role/jenkins-aws \
+  auth_type=iam \
+  bound_iam_principal_arn="arn:aws:iam::123456789012:role/jenkins-agent-role" \
+  token_policies=jenkins-build-policy \
+  ttl=1h
+```
+
+### Workflow configuration
+
+The example assumes the Jenkins agent already has AWS credentials from its
+instance profile or workload role.
+
+```groovy
+pipeline {
+  agent any
+
+  stages {
+    stage('Read secret from Vault') {
+      steps {
+        sh '''
+          VAULT_TOKEN="$(vault login -method=aws -token-only \
+            header_value=vault.example.com \
+            role=jenkins-aws)"
+          DB_PASSWORD="$(VAULT_TOKEN="$VAULT_TOKEN" vault kv get -field=password secret/ci/production/db)"
+          ./build.sh
+        '''
+      }
+    }
+  }
+}
+```
+
+The agent authenticates with its AWS identity and retrieves only the secret it
+needs for the build. This avoids storing a bootstrap credential in Jenkins.
+
+</Tab>
+<Tab heading="Azure">
+
+Azure auth is appropriate for Jenkins agents running on Azure VMs or other Azure
+resources with managed identities.
+
+### Role configuration
+
+The role should bind to the expected Azure subscription, resource group, and
+service principal or managed identity.
+
+```hcl
+# Vault Azure role — bound to the Jenkins agent managed identity
+vault write auth/azure/role/jenkins-azure \
+  token_policies=jenkins-build-policy \
+  bound_subscription_ids="6a1d5988-5917-4221-b224-904cd7e24a25" \
+  bound_resource_groups="jenkins-runners" \
+  bound_service_principal_ids="3cb88732-1356-4782-b671-4877166be01a" \
+  ttl=1h
+```
+
+### Workflow configuration
+
+The example assumes the Jenkins agent can query the Azure Instance Metadata
+Service for its managed identity token and instance metadata.
+
+```groovy
+pipeline {
+  agent any
+
+  stages {
+    stage('Read secret from Vault') {
+      steps {
+        sh '''
+          JWT="$(curl -s 'http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https%3A%2F%2Fmanagement.azure.com%2F' -H Metadata:true | jq -r '.access_token')"
+          # bound_service_principal_ids is set on the role — no VM metadata required
+          VAULT_TOKEN="$(vault write -field=token auth/azure/login role=jenkins-azure jwt="$JWT")"
+          API_KEY="$(VAULT_TOKEN="$VAULT_TOKEN" vault kv get -field=key secret/ci/production/api)"
+          ./deploy.sh
+        '''
+      }
+    }
+  }
+}
+```
+
+The agent retrieves an Azure access token from IMDS, exchanges it for a Vault
+token, and reads only the secret needed for the deployment.
+
+</Tab>
+<Tab heading="GCP">
+
+GCP auth is appropriate for Jenkins agents running on Google Cloud. For most
+Jenkins use cases, `iam` roles bound to service accounts are the most direct fit.
+
+### Role configuration
+
+The primary control is binding the Vault role to the expected Google Cloud
+service account.
+
+```hcl
+# Vault GCP role — bound to the Jenkins agent service account
+vault write auth/gcp/role/jenkins-gcp \
+  type="iam" \
+  token_policies="jenkins-build-policy" \
+  bound_service_accounts="jenkins-agent@my-project.iam.gserviceaccount.com" \
+  ttl=1h
+```
+
+### Workflow configuration
+
+The example assumes the Jenkins agent runs on Google Cloud with a service
+account that can mint the JWT required by Vault.
+
+```groovy
+pipeline {
+  agent any
+
+  stages {
+    stage('Read secret from Vault') {
+      steps {
+        sh '''
+          VAULT_TOKEN="$(vault login -method=gcp -token-only role=jenkins-gcp)"
+          REGISTRY_PASSWORD="$(VAULT_TOKEN="$VAULT_TOKEN" vault kv get -field=password secret/ci/build/registry)"
+          ./build.sh
+        '''
+      }
+    }
+  }
+}
+```
+
+The agent logs in with its Google Cloud identity instead of using a bootstrap
+credential stored in Jenkins. The resulting Vault token is then used only for
+the required secret read.
+
+</Tab>
+</Tabs>
+
+</Tab>
+<Tab heading="Kubernetes">
+
+Kubernetes auth is appropriate when Jenkins agents run as pods in Kubernetes.
+The agent pod's service account token is already present, and Vault can verify
+that identity against the Kubernetes API without introducing an extra bootstrap
+credential.
+
+### Role configuration
+
+The role definition enforces which Kubernetes namespaces and service accounts
+Vault allows to authenticate, making this the primary control against one agent
+pod impersonating another.
+
+```hcl
+# Vault role — binds to a specific service account and namespace
+vault write auth/kubernetes/role/jenkins-agent \
+  bound_service_account_names=jenkins-build-sa \
+  bound_service_account_namespaces=jenkins-agents \
+  token_policies=jenkins-build-policy \
+  ttl=1h
+```
+
+### Workflow configuration
+
+The example assumes the Jenkins Kubernetes plugin launches the agent pod with a
+dedicated service account.
+
+```groovy
+pipeline {
+  agent {
+    kubernetes {
+      yaml '''
+apiVersion: v1
+kind: Pod
+spec:
+  serviceAccountName: jenkins-build-sa
+'''
+    }
+  }
+
+  stages {
+    stage('Read secret from Vault') {
+      steps {
+        sh '''
+          VAULT_TOKEN="$(vault write -field=token auth/kubernetes/login \
+            role=jenkins-agent \
+            jwt=@/var/run/secrets/kubernetes.io/serviceaccount/token)"
+          REGISTRY_PASSWORD="$(VAULT_TOKEN="$VAULT_TOKEN" vault kv get -field=password secret/ci/build/registry)"
+          ./build.sh
+        '''
+      }
+    }
+  }
+}
+```
+
+The agent authenticates with the pod's projected service account token and
+retrieves only the secret required for the build. This keeps the trust boundary
+inside the Kubernetes cluster.
+
+</Tab>
+<Tab heading="TLS Certificate">
+
+TLS cert auth applies when Jenkins agents are long-lived systems and client
+certificates are already part of the infrastructure security posture.
+
+### Role configuration
+
+Trust in the issuing CA is the primary control in cert auth. CN or SAN
+restrictions then narrow authentication to the specific certificate subjects you
+expect.
+
+```hcl
+# Vault TLS cert role for a named Jenkins agent fleet
+vault write auth/cert/certs/jenkins-agent-fleet \
+  display_name=jenkins-agent-fleet \
+  certificate=@/path/to/internal-ca.crt \
+  allowed_common_names="jenkins-agent-*.infra.example.com" \
+  token_policies=jenkins-agent-policy \
+  ttl=4h
+```
+
+### Workflow configuration
+
+The pattern assumes the agent certificate and private key are provisioned on
+the Jenkins agent by your PKI workflow.
+
+```groovy
+pipeline {
+  agent any
+
+  stages {
+    stage('Read secret from Vault') {
+      steps {
+        sh '''
+          VAULT_TOKEN="$(vault login -method=cert -token-only \
+            name=jenkins-agent-fleet \
+            -client-cert=/etc/vault/tls/client.crt \
+            -client-key=/etc/vault/tls/client.key)"
+          SIGNING_KEY="$(VAULT_TOKEN="$VAULT_TOKEN" vault kv get -field=key secret/ci/build/signing)"
+          ./sign.sh
+        '''
+      }
+    }
+  }
+}
+```
+
+The agent authenticates with its client certificate and retrieves only the
+secret needed for the signing workflow. This pattern fits persistent agents that
+already participate in an mTLS-based operating model.
+
+</Tab>
 <Tab heading="AppRole">
 
 AppRole is the right default when Jenkins agents run on self-hosted VMs or bare
@@ -118,8 +454,11 @@ vault write auth/approle/role/jenkins-build \
   secret_id_num_uses=1 \
   token_ttl=1h \
   token_max_ttl=2h \
-  policies=jenkins-build-policy
+  token_policies=jenkins-build-policy
 ```
+
+The AppRole configuration constrains bootstrap material to short-lived,
+single-use delivery and limits the Vault token lifetime for the job.
 
 ### Workflow configuration
 
@@ -153,309 +492,9 @@ pipeline {
 }
 ```
 
-</Tab>
-<Tab heading="Cloud provider auth methods">
-
-Use cloud provider auth methods when Jenkins agents run on cloud VMs or managed
-compute that already have native cloud identity. This avoids storing cloud
-credentials in Jenkins just to bootstrap Vault login.
-
-<Tabs>
-<Tab heading="AWS">
-
-AWS auth is appropriate for Jenkins agents running on EC2 or other AWS compute
-with an instance profile or IAM role. Prefer the `iam` auth type for most
-Jenkins use cases.
-
-### Role configuration
-
-The primary control is binding the Vault role to the expected IAM principal ARN.
-
-```hcl
-# Vault AWS role — bound to the Jenkins agent instance profile role
-vault write auth/aws/role/jenkins-aws \
-  auth_type=iam \
-  bound_iam_principal_arn="arn:aws:iam::123456789012:role/jenkins-agent-role" \
-  policies=jenkins-build-policy \
-  ttl=1h
-```
-
-### Workflow configuration
-
-This example assumes the Jenkins agent already has AWS credentials from its
-instance profile or workload role.
-
-```groovy
-pipeline {
-  agent any
-
-  stages {
-    stage('Read secret from Vault') {
-      steps {
-        sh '''
-          VAULT_TOKEN="$(vault login -method=aws -token-only \
-            header_value=vault.example.com \
-            role=jenkins-aws)"
-          DB_PASSWORD="$(VAULT_TOKEN="$VAULT_TOKEN" vault kv get -field=password secret/ci/production/db)"
-          ./build.sh
-        '''
-      }
-    }
-  }
-}
-```
-
-</Tab>
-<Tab heading="Azure">
-
-Azure auth is appropriate for Jenkins agents running on Azure VMs or other Azure
-resources with managed identities.
-
-### Role configuration
-
-The role should bind to the expected Azure subscription, resource group, and
-service principal or managed identity.
-
-```hcl
-# Vault Azure role — bound to the Jenkins agent managed identity
-vault write auth/azure/role/jenkins-azure \
-  policies=jenkins-build-policy \
-  bound_subscription_ids="6a1d5988-5917-4221-b224-904cd7e24a25" \
-  bound_resource_groups="jenkins-runners" \
-  bound_service_principal_ids="3cb88732-1356-4782-b671-4877166be01a"
-```
-
-### Workflow configuration
-
-This example assumes the Jenkins agent can query the Azure Instance Metadata
-Service for its managed identity token and instance metadata.
-
-```groovy
-pipeline {
-  agent any
-
-  stages {
-    stage('Read secret from Vault') {
-      steps {
-        sh '''
-          JWT="$(curl -s 'http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https%3A%2F%2Fmanagement.azure.com%2F' -H Metadata:true | jq -r '.access_token')"
-          SUBSCRIPTION_ID="$(curl -s -H Metadata:true 'http://169.254.169.254/metadata/instance?api-version=2017-08-01' | jq -r '.compute.subscriptionId')"
-          RESOURCE_GROUP="$(curl -s -H Metadata:true 'http://169.254.169.254/metadata/instance?api-version=2017-08-01' | jq -r '.compute.resourceGroupName')"
-          VM_NAME="$(curl -s -H Metadata:true 'http://169.254.169.254/metadata/instance?api-version=2017-08-01' | jq -r '.compute.name')"
-          VAULT_TOKEN="$(vault write -field=token auth/azure/login role=jenkins-azure jwt="$JWT" subscription_id="$SUBSCRIPTION_ID" resource_group_name="$RESOURCE_GROUP" vm_name="$VM_NAME")"
-          API_KEY="$(VAULT_TOKEN="$VAULT_TOKEN" vault kv get -field=key secret/ci/production/api)"
-          ./deploy.sh
-        '''
-      }
-    }
-  }
-}
-```
-
-</Tab>
-<Tab heading="GCP">
-
-GCP auth is appropriate for Jenkins agents running on Google Cloud. For most
-Jenkins use cases, `iam` roles bound to service accounts are the most direct fit.
-
-### Role configuration
-
-The primary control is binding the Vault role to the expected Google Cloud
-service account.
-
-```hcl
-# Vault GCP role — bound to the Jenkins agent service account
-vault write auth/gcp/role/jenkins-gcp \
-  type="iam" \
-  policies="jenkins-build-policy" \
-  bound_service_accounts="jenkins-agent@my-project.iam.gserviceaccount.com"
-```
-
-### Workflow configuration
-
-This example assumes the Jenkins agent runs on Google Cloud with a service
-account that can mint the JWT required by Vault.
-
-```groovy
-pipeline {
-  agent any
-
-  stages {
-    stage('Read secret from Vault') {
-      steps {
-        sh '''
-          VAULT_TOKEN="$(vault login -method=gcp -token-only role=jenkins-gcp)"
-          REGISTRY_PASSWORD="$(VAULT_TOKEN="$VAULT_TOKEN" vault kv get -field=password secret/ci/build/registry)"
-          ./build.sh
-        '''
-      }
-    }
-  }
-}
-```
-
-</Tab>
-</Tabs>
-
-</Tab>
-<Tab heading="JWT / OIDC">
-
-JWT/OIDC auth is the right choice when Jenkins agents run on a platform that
-can issue OIDC-compatible workload tokens. Jenkins itself does not issue these
-tokens natively, so this pattern depends on the surrounding platform, workload
-identity broker, or federation layer.
-
-### Role configuration
-
-The security-critical configuration here is workload-specific role
-constraints. `bound_claims` is the most flexible option, but you can also use
-constraints such as `bound_audiences` and `bound_subject`. Without these
-restrictions, a broader set of issuer-valid JWTs may authenticate than you
-intend.
-
-```hcl
-# Vault JWT role with workload-specific claim bindings
-vault write auth/jwt/role/jenkins-deploy \
-  role_type=jwt \
-  bound_audiences="https://vault.example.com" \
-  bound_claims='{"sub": "jenkins-agent-prod", "pipeline": "deploy"}' \
-  user_claim=sub \
-  policies=jenkins-deploy-policy \
-  ttl=15m
-```
-
-### Workflow configuration
-
-This example assumes an external identity component writes a short-lived JWT to
-the agent filesystem before the build step runs.
-
-```groovy
-pipeline {
-  agent any
-
-  environment {
-    WORKLOAD_JWT_FILE = '/var/run/jenkins/workload/token'
-  }
-
-  stages {
-    stage('Read secret from Vault') {
-      steps {
-        sh '''
-          JWT="$(cat "$WORKLOAD_JWT_FILE")"
-          VAULT_TOKEN="$(vault write -field=token auth/jwt/login role=jenkins-deploy jwt="$JWT")"
-          API_KEY="$(VAULT_TOKEN="$VAULT_TOKEN" vault kv get -field=key secret/ci/production/api)"
-          ./deploy.sh
-        '''
-      }
-    }
-  }
-}
-```
-
-</Tab>
-<Tab heading="Kubernetes">
-
-Kubernetes auth is appropriate when Jenkins agents run as pods in Kubernetes.
-The agent pod's service account token is already present, and Vault can verify
-that identity against the Kubernetes API without introducing an extra bootstrap
-credential.
-
-### Role configuration
-
-The role definition enforces which Kubernetes namespaces and service accounts
-Vault allows to authenticate, making this the primary control against one agent
-pod impersonating another.
-
-```hcl
-# Vault role — binds to a specific service account and namespace
-vault write auth/kubernetes/role/jenkins-agent \
-  bound_service_account_names=jenkins-build-sa \
-  bound_service_account_namespaces=jenkins-agents \
-  policies=jenkins-build-policy \
-  ttl=1h
-```
-
-### Workflow configuration
-
-This example assumes the Jenkins Kubernetes plugin launches the agent pod with a
-dedicated service account.
-
-```groovy
-pipeline {
-  agent {
-    kubernetes {
-      yaml '''
-apiVersion: v1
-kind: Pod
-spec:
-  serviceAccountName: jenkins-build-sa
-'''
-    }
-  }
-
-  stages {
-    stage('Read secret from Vault') {
-      steps {
-        sh '''
-          VAULT_TOKEN="$(vault write -field=token auth/kubernetes/login \
-            role=jenkins-agent \
-            jwt=@/var/run/secrets/kubernetes.io/serviceaccount/token)"
-          REGISTRY_PASSWORD="$(VAULT_TOKEN="$VAULT_TOKEN" vault kv get -field=password secret/ci/build/registry)"
-          ./build.sh
-        '''
-      }
-    }
-  }
-}
-```
-
-</Tab>
-<Tab heading="TLS Certificate">
-
-TLS cert auth applies when Jenkins agents are long-lived systems and client
-certificates are already part of the infrastructure security posture.
-
-### Role configuration
-
-Trust in the issuing CA is the primary control in cert auth. CN or SAN
-restrictions then narrow authentication to the specific certificate subjects you
-expect.
-
-```hcl
-# Vault TLS cert role for a named Jenkins agent fleet
-vault write auth/cert/certs/jenkins-agent-fleet \
-  display_name=jenkins-agent-fleet \
-  certificate=@/path/to/internal-ca.crt \
-  allowed_common_names="jenkins-agent-*.infra.example.com" \
-  policies=jenkins-agent-policy \
-  ttl=4h
-```
-
-### Workflow configuration
-
-This approach assumes the agent certificate and private key are provisioned on
-the Jenkins agent by your PKI workflow.
-
-```groovy
-pipeline {
-  agent any
-
-  stages {
-    stage('Read secret from Vault') {
-      steps {
-        sh '''
-          VAULT_TOKEN="$(vault login -method=cert -token-only \
-            name=jenkins-agent-fleet \
-            -client-cert=/etc/vault/tls/client.crt \
-            -client-key=/etc/vault/tls/client.key)"
-          SIGNING_KEY="$(VAULT_TOKEN="$VAULT_TOKEN" vault kv get -field=key secret/ci/build/signing)"
-          ./sign.sh
-        '''
-      }
-    }
-  }
-}
-```
+The pipeline unwraps the single-use `secret_id` just before login and exchanges
+it for a short-lived Vault token. The job then uses that token only for the
+secret reads authorized by the AppRole policy.
 
 </Tab>
 </Tabs>
@@ -463,8 +502,8 @@ pipeline {
 ## Policy
 
 The Vault policy for any role should follow least privilege. A pipeline that
-deploys to production should not be able to read staging secrets, and vice
-versa.
+deploys to production should not be able to read staging secrets, and a staging
+pipeline should not be able to read production secrets.
 
 An example Vault policy for a production deployment pipeline might look like
 this:
@@ -477,6 +516,10 @@ path "secret/data/ci/production/db" {
 
 # Deny access to everything else implicitly
 ```
+
+The policy limits the job to the exact production secret path it needs. Use
+separate policies for other environments and job types so unrelated pipelines do
+not inherit broader access.
 
 Dynamic secrets are a strong fit for Jenkins because the pipeline can retrieve
 database credentials, Terraform tokens, or cloud credentials immediately before
@@ -507,9 +550,6 @@ CI/CD secrets management strategy:
 - **Shared agent isolation:** Do not reuse workspaces, home directories, or
   cached token files across unrelated jobs on shared agents. A leftover Vault
   token on disk can expose another pipeline's secrets.
-- **Policy least privilege:** Vault policies should grant access only to the
-  secret paths a job needs. Build jobs, deployment jobs, and administration jobs
-  should not share the same Vault role unless they truly need the same access.
 
 For a list of additional security considerations, refer to the [CI/CD security
 considerations](/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets/security-considerations)
