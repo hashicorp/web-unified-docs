@@ -1,6 +1,6 @@
 ---
 page_title: Secure GitHub Actions secrets with HashiCorp Vault
-description: Learn how to integrate GitHub Actions with HashiCorp Vault for secure secrets management.
+description: Learn how to secure GitHub Actions CI/CD secrets with HashiCorp Vault using JWT/OIDC, self-hosted runner auth patterns, and workflow-scoped Vault access.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2025-07-16T16:24:50-05:00
 last_modified: 2026-01-29T10:31:53-06:00
@@ -19,33 +19,59 @@ environment, and workflow file.
 
 ## Architecture
 
-The action-to-Vault authentication flow using JWT/OIDC tokens follows common
-patterns for OIDC authentication:
+The action-to-Vault authentication flow is based on GitHub-issued OIDC tokens:
 
-1. Runner requests a JWT from GitHub's OIDC provider
-1. OIDC provider issues a JWT to the runner
-1. Runner sends the JWT to Vault's OIDC auth method endpoint
-1. Vault validates the JWT and issues a Vault token
-1. Runner uses the Vault token to access secrets based on policies attached to
-   the token
+1. Runner requests a JWT from GitHub's OIDC provider (`token.actions.githubusercontent.com`) — requires `id-token: write` declared on the job
+1. GitHub issues a JWT containing claims for the repository, branch, environment, and workflow file
+1. Runner sends the JWT to Vault's JWT auth endpoint
+1. Vault fetches signing keys from GitHub's shared OIDC discovery URL and validates the token signature
+1. Vault evaluates `bound_claims` — repository, environment, ref, or `job_workflow_ref` — against the configured role
+1. Vault issues a short-lived token scoped to the policies attached to the matching role
+
+The runner uses the Vault token to retrieve the secrets authorized for that role.
 
 ![Diagram showing OIDC authentication flow between GitHub Actions and Vault](/img/well-architected-framework/diagram-cicd-github-actions-auth.png#light-theme-only)
 ![Diagram showing OIDC authentication flow between GitHub Actions and Vault](/img/well-architected-framework/diagram-cicd-github-actions-auth-dark.png#dark-theme-only)
+
+### Runner hosting and auth method selection
+
+The right auth method depends on where GitHub Actions runners execute. JWT/OIDC
+auth works for all runner types because GitHub issues an OIDC token for any job
+with `id-token: write` permission, regardless of the underlying infrastructure.
+However, when jobs run on infrastructure you control, additional auth methods
+become available that can provide stronger identity guarantees or remove the
+dependency on reaching GitHub's OIDC endpoint.
+
+- **GitHub-hosted runners** — JWT/OIDC is the only practical option. You do
+  not control the underlying infrastructure, so there is no instance or pod
+  identity to leverage.
+- **Self-hosted runners on Kubernetes (Actions Runner Controller)** — Kubernetes
+  auth is available in addition to JWT. The runner pod's service account token
+  is verified directly by the cluster API, independent of GitHub.
+- **Self-hosted runners on AWS, Azure, or GCP** — Cloud provider auth methods
+  (AWS IAM, Azure Managed Identity, GCP IAM) are available. The runner instance
+  already has a platform identity that Vault can validate against the cloud
+  provider's API — no credential to provision or rotate.
+- **Self-hosted runners on bare metal or air-gapped environments** — AppRole
+  with response wrapping, or TLS certificate auth for persistent runner fleets.
+  In air-gapped environments where GitHub's OIDC endpoint
+  (`token.actions.githubusercontent.com`) is unreachable, AppRole becomes the
+  required fallback.
 
 ## Authentication options
 
 Because GitHub Actions has native OIDC token issuance, use JWT/OIDC auth for all
 GitHub-hosted runners and internet-connected self-hosted runners. GitHub's
 per-job OIDC tokens are the purpose-built mechanism for the Vault integration.
-They provide the following benefits:
+The tokens provide the following benefits:
 
 - No long-lived, static credentials
 - Fine-grained `bound_claims` that can restrict authentication to a specific
   repository, branch, deployment environment, or workflow file
 
 The [hashicorp/vault-action](https://github.com/hashicorp/vault-action) GitHub
-Action wraps the OIDC exchange and secret retrieval into a single workflow step,
-making this a low-friction Vault integration pattern. The security controls live
+Action wraps the OIDC exchange and secret retrieval into a single workflow step.
+The security controls live
 on the Vault side, in how roles bind to GitHub's JWT claims — not in GitHub
 itself.
 
@@ -60,10 +86,11 @@ The following table summarizes when each auth method fits best.
 
 | Auth method | Security posture | Credential lifecycle | Best suited for |
 |---|---|---|---|
-| JWT / OIDC | High; identity federates across trust boundaries | Token issued per job or workload, typically short-lived | Multi-cluster, external runners, or where OIDC-compatible workload identity is in use |
-| Kubernetes | Highest for in-cluster | Short-lived projected token on modern Kubernetes; legacy patterns vary | Pipelines running in same cluster or trusted cluster with Vault access |
-| TLS Certificate | High; mutual authentication | Certificate with defined expiry; requires rotation process | Long-lived pipeline infrastructure (e.g., dedicated build agents) where mTLS is already part of the security posture |
-| AppRole | Moderate; requires secure secret ID delivery | Secret ID is single-use with response wrapping; RoleID is long-lived | Pipelines in environments where neither K8s nor JWT is available; legacy infrastructure integration |
+| JWT / OIDC | High; per-job identity bound to GitHub repository, environment, and workflow metadata | Token issued per job by GitHub, no rotation needed | GitHub-hosted runners and internet-connected self-hosted runners |
+| Cloud provider auth methods | Highest for cloud-hosted runners; identity is the platform infrastructure itself | Managed by cloud provider; no rotation required | Self-hosted runners on EC2, Azure VMs, or GCE instances with an assigned instance identity |
+| Kubernetes | Highest for in-cluster; service account token verified directly by the cluster API | Short-lived projected service account token, auto-rotated by Kubernetes | Self-hosted runners managed by Actions Runner Controller on Kubernetes |
+| TLS Certificate | High; mutual authentication | Certificate with defined expiry; requires rotation process | Long-lived, persistent runner fleets where mTLS is part of the existing security posture |
+| AppRole | Moderate; requires secure secret ID delivery | Secret ID is single-use with response wrapping; RoleID is long-lived | Air-gapped self-hosted runners where neither cloud identity nor JWT is available |
 
 <Tabs>
 <Tab heading="JWT / OIDC">
@@ -99,9 +126,13 @@ vault write auth/jwt/role/github-actions-deploy \
   bound_audiences="https://github.com/your-org" \
   bound_subject="repo:your-org/your-repo:environment:production" \
   user_claim=repository \
-  policies=deploy-production-policy \
+  token_policies=deploy-production-policy \
   ttl=15m
 ```
+
+The role binds Vault access to a specific repository and deployment environment.
+Vault then issues a short-lived token only when the workflow presents the
+expected GitHub identity.
 
 ### Workflow configuration
 
@@ -135,6 +166,167 @@ jobs:
             secret/data/ci/production/api key | API_KEY
 ```
 
+The workflow requests a GitHub OIDC token only for the job that needs Vault
+access. The Vault GitHub Action then exchanges that token for a Vault token and
+retrieves only the secrets required for the deployment.
+
+</Tab>
+<Tab heading="Cloud provider auth methods">
+
+When self-hosted GitHub Actions runners execute on cloud infrastructure, the
+instance already has a platform identity that Vault can validate against the
+cloud provider's API. This avoids storing cloud credentials in GitHub just to
+bootstrap Vault login.
+
+<Tabs>
+<Tab heading="AWS">
+
+Self-hosted runners on EC2 instances or ECS tasks with an IAM role attached can
+authenticate to Vault using the AWS auth method. Vault calls AWS STS to validate
+the instance or task role identity. No credential needs to be provisioned on the
+runner.
+
+### Role configuration
+
+Bind the Vault role to the specific IAM role ARN attached to your runner
+instances. The `iam` auth type is preferred over `ec2` — it works for both
+EC2 and ECS and validates against the assumed-role ARN.
+
+```hcl
+# Vault role bound to the IAM role attached to GitHub Actions runner instances
+vault write auth/aws/role/github-runner \
+  auth_type=iam \
+  bound_iam_principal_arn=arn:aws:iam::123456789012:role/github-runner-role \
+  token_policies=github-runner-policy \
+  ttl=1h
+```
+
+The role binds Vault authentication to the IAM role attached to the runner.
+Vault issues a token only when the runner proves that AWS identity.
+
+### Workflow configuration
+
+```yaml
+jobs:
+  build:
+    runs-on: self-hosted  # EC2 instance with IAM role attached
+    steps:
+      - name: Retrieve secrets via AWS IAM auth
+        uses: hashicorp/vault-action@v3
+        with:
+          url: https://vault.example.com
+          method: aws
+          role: github-runner
+          secrets: |
+            secret/data/ci/build/registry password | REGISTRY_PASSWORD
+```
+
+The runner authenticates with its AWS identity — no credential needs to be
+stored in GitHub. If Vault is configured with `iam_server_id_header_value`,
+add the matching `awsIamServerId` input to the vault-action step.
+
+</Tab>
+<Tab heading="Azure">
+
+Self-hosted runners on Azure VMs or Azure Container Instances with a managed
+identity assigned can authenticate to Vault using the Azure auth method. Vault
+validates the identity against the Azure Instance Metadata Service (IMDS). No
+credential needs to be provisioned on the runner.
+
+### Role configuration
+
+Bind the Vault role to the managed identity's service principal ID. This ensures
+only runners with that specific managed identity can authenticate.
+
+```hcl
+# Vault role bound to the managed identity assigned to GitHub Actions runner VMs
+vault write auth/azure/role/github-runner \
+  token_policies=github-runner-policy \
+  bound_subscription_ids=your-subscription-id \
+  bound_resource_groups=your-resource-group \
+  bound_service_principal_ids=your-managed-identity-object-id \
+  ttl=1h
+```
+
+The role binds Vault authentication to the managed identity assigned to the
+runner. Vault issues a token only when the runner presents the expected Azure
+identity.
+
+### Workflow configuration
+
+```yaml
+jobs:
+  build:
+    runs-on: self-hosted  # Azure VM with managed identity assigned
+    steps:
+      - name: Retrieve secrets via Azure Managed Identity auth
+        run: |
+          AZURE_JWT=$(curl -s -H "Metadata: true" \
+            "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://management.azure.com/" \
+            | jq -r '.access_token')
+
+          # bound_service_principal_ids is set on the role — no VM metadata required
+          export VAULT_TOKEN=$(vault write -field=token auth/azure/login \
+            role=github-runner \
+            jwt=$AZURE_JWT)
+
+          vault kv get -field=password secret/ci/build/registry \
+            | echo "REGISTRY_PASSWORD=$(cat)" >> $GITHUB_ENV
+```
+
+The runner retrieves an Azure access token from IMDS, exchanges it for a Vault
+token, and reads only the secret needed for the build.
+
+</Tab>
+<Tab heading="GCP">
+
+Self-hosted runners on Google Compute Engine instances with a service account
+attached can authenticate to Vault using the GCP auth method. Vault validates
+the runner's identity against Google Cloud. Use an `iam` role type to bind
+authentication to the attached service account identity. No credential needs to
+be provisioned on the runner.
+
+### Role configuration
+
+Bind the Vault role to the specific GCP service account email attached to your
+runner instances.
+
+```hcl
+# Vault role bound to the service account attached to GitHub Actions runner instances
+vault write auth/gcp/role/github-runner \
+  type=iam \
+  token_policies=github-runner-policy \
+  bound_service_accounts=github-runner@your-project.iam.gserviceaccount.com \
+  ttl=1h
+```
+
+The role binds Vault authentication to the Google Cloud service account attached
+to the runner. Vault issues a token only when the runner presents that GCP
+identity.
+
+### Workflow configuration
+
+```yaml
+jobs:
+  build:
+    runs-on: self-hosted  # GCE instance with service account attached
+    steps:
+      - name: Retrieve secrets via GCP IAM auth
+        run: |
+          export VAULT_TOKEN=$(vault login -method=gcp -token-only \
+            role=github-runner)
+
+          vault kv get -field=password secret/ci/build/registry \
+            | echo "REGISTRY_PASSWORD=$(cat)" >> $GITHUB_ENV
+```
+
+The runner logs in with its Google Cloud identity instead of using a bootstrap
+credential stored in GitHub. The resulting Vault token is then used only for the
+required secret read.
+
+</Tab>
+</Tabs>
+
 </Tab>
 <Tab heading="Kubernetes">
 
@@ -154,7 +346,7 @@ the same pattern as any other Kubernetes workload.
 vault write auth/kubernetes/role/github-runner \
   bound_service_account_names=arc-runner-sa \
   bound_service_account_namespaces=arc-runners \
-  policies=github-runner-policy \
+  token_policies=github-runner-policy \
   ttl=1h
 ```
 
@@ -181,6 +373,10 @@ jobs:
             secret/data/ci/build/registry password | REGISTRY_PASSWORD
 ```
 
+The runner authenticates with the pod's projected service account token and
+retrieves only the secret required for the build. This keeps the trust boundary
+inside the Kubernetes cluster.
+
 </Tab>
 <Tab heading="AppRole">
 
@@ -205,8 +401,11 @@ vault write auth/approle/role/github-runner-airgapped \
   secret_id_num_uses=1 \
   token_ttl=1h \
   token_max_ttl=2h \
-  policies=github-runner-policy
+  token_policies=github-runner-policy
 ```
+
+The AppRole configuration constrains bootstrap material to short-lived,
+single-use delivery and limits the Vault token lifetime for the job.
 
 ### Workflow configuration
 
@@ -232,6 +431,10 @@ jobs:
             secret/data/ci/build/registry password | REGISTRY_PASSWORD
 ```
 
+The workflow unwraps the single-use bootstrap material and exchanges it for a
+short-lived Vault token. The job then uses that token only for the secret reads
+authorized by the AppRole policy.
+
 </Tab>
 <Tab heading="TLS Certificate">
 
@@ -240,8 +443,8 @@ agents rather than ephemeral pods.
 
 ### Role configuration
 
-Vault validates the client certificate
-presented during the connection, with the certificate's CN or SANs serving as
+Vault validates the client certificate presented during the connection, with the
+certificate's CN or SANs serving as
 the identity binding. Certificate lifecycle management for these runners should
 itself use Vault's PKI secrets engine to keep rotation automated.
 
@@ -251,16 +454,16 @@ vault write auth/cert/certs/github-runner-fleet \
   display_name=github-runner-fleet \
   certificate=@/path/to/runner-fleet-ca.crt \
   allowed_common_names="runner-*.build.example.com" \
-  policies=github-runner-fleet-policy \
+  token_policies=github-runner-fleet-policy \
   ttl=4h
 ```
 
 ### Workflow configuration
 
 The workflow authenticates to Vault using the client certificate provisioned on
-the runner. This approach assumes the runner's TLS cert is already managed and
-rotated by Vault's PKI secrets engine. The workflow needs to reference the
-cert and key from GitHub Secrets (or another secure store) to use for authentication.
+the runner. The pattern assumes the runner's TLS cert is already managed and
+rotated by Vault's PKI secrets engine. The workflow needs to reference the cert
+and key from GitHub Secrets or another secure store.
 
 ```yaml
 jobs:
@@ -272,12 +475,16 @@ jobs:
         with:
           url: https://vault.example.com
           method: cert
-          # Certificate and key provisioned on runner by Vault PKI + cert-manager
+          # Certificate and key path provisioned on runner by Vault PKI engine
           clientKey: ${{ secrets.RUNNER_TLS_KEY }}
           clientCertificate: ${{ secrets.RUNNER_TLS_CERT }}
           secrets: |
             secret/data/ci/build/signing key | SIGNING_KEY
 ```
+
+The runner authenticates with its client certificate and retrieves only the
+secret needed for the signing workflow. This pattern fits persistent runners
+that already participate in an mTLS-based operating model.
 
 </Tab>
 </Tabs>
@@ -285,8 +492,8 @@ jobs:
 ## Policy
 
 The Vault policy for any role should follow least privilege. A pipeline that
-deploys to production should not be able to read staging secrets, and vice
-versa.
+deploys to production should not be able to read staging secrets, and a staging
+pipeline should not be able to read production secrets.
 
 <VideoEmbed url="https://www.youtube.com/watch?v=Mmyvybxm30w"/>
 
@@ -301,11 +508,15 @@ path "secret/data/ci/production/db" {
 # Deny access to everything else implicitly
 ```
 
+The policy limits the workflow to the exact production secret path it needs.
+Use separate policies for other environments so unrelated workflows do not
+inherit broader access.
+
 ## Security considerations
 
 There are several security considerations you need to align with your
 organizational risk tolerance and operational constraints when designing your
-CI/CD secrets management strategy:
+GitHub Actions secrets management strategy:
 
 - **JWT role constraints:** Bind Vault roles as tightly as possible with
   `bound_subject`, `bound_claims`, or both. A role that accepts any valid token
@@ -318,9 +529,6 @@ CI/CD secrets management strategy:
   targets, bind roles to specific workflow files with `job_workflow_ref`.
   Without that restriction, any workflow in the repository with `id-token:
   write` may be able to authenticate to a repository-scoped role.
-- **Policy least privilege:** Vault policies should grant access only to the
-  secret paths the job needs. A deployment workflow should not inherit access to
-  build, staging, or unrelated production secrets.
 
 For a list of additional security considerations, refer to the [CI/CD security
 considerations](/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets/security-considerations)
@@ -346,7 +554,7 @@ Radar.
 
 Vault Secrets Sync provides an alternative solution for managing GitHub Actions
 pipeline secrets that is useful in cases where using the GitHub OIDC provider is
-not a feasible approach. This approach simplifies configuration, and allows you
+not a feasible approach. Vault Secrets Sync simplifies configuration and lets you
 to select specific secrets or secret paths for synchronization from Vault to
 GitHub as repository or environment secrets.
 
