@@ -1,6 +1,6 @@
 ---
 page_title: Secure TeamCity CI/CD secrets with HashiCorp Vault
-description: Manage secrets in TeamCity pipelines with HashiCorp Vault.
+description: Learn how to secure TeamCity CI/CD secrets with HashiCorp Vault using server-scoped auth patterns, remote parameters, and project-scoped Vault access.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2025-07-16T16:24:50-05:00
 last_modified: 2026-01-29T10:31:53-06:00
@@ -29,11 +29,12 @@ the other CI/CD integrations in this section, but TeamCity's built-in
 integration splits responsibility between the server and the build agent:
 
 1. The TeamCity server authenticates to Vault using the configured connection
-1. Vault issues a short-lived wrapped token for the requested secret access
-1. TeamCity passes the wrapped token to the build agent that runs the build
-1. The build agent unwraps the token and retrieves the authorized secret value
-1. The build uses the secret through a TeamCity remote parameter
-1. TeamCity revokes the agent token when the build finishes
+1. TeamCity requests the secret value from Vault with response wrapping enabled
+1. Vault returns a single-use wrapping token instead of the secret directly
+1. TeamCity passes the wrapping token to the build agent that runs the build
+1. The build agent calls Vault to unwrap the token and retrieve the secret value
+1. The wrapping token is consumed and cannot be reused
+1. TeamCity revokes the server's Vault connection token when the build finishes
 
 ![Diagram showing authentication workflow between workloads like TeamCity, to
 Vault, to the platform identity provider](/img/well-architected-framework/diagram-auth-workload-dark.png#dark-theme-only)
@@ -44,7 +45,7 @@ Vault, to the platform identity provider](/img/well-architected-framework/diagra
 
 With TeamCity's built-in Vault integration, the TeamCity server authenticates to
 Vault and agents consume wrapped tokens at build time. For that reason, the
-Vault auth method should usually match the most authoritative identity available
+Vault auth method should match the most authoritative identity available
 to the TeamCity server:
 
 - If the TeamCity server runs in AWS with an IAM role, use AWS IAM auth.
@@ -63,8 +64,8 @@ connection regardless of which agent executes the build.
 TeamCity's native Vault integration supports the following auth methods for the
 Vault connection:
 
-- AppRole
 - AWS IAM role
+- AppRole
 - LDAP
 
 Unlike some other CI/CD platforms in this section, TeamCity's built-in Vault
@@ -83,11 +84,82 @@ The following table summarizes when each auth method fits best.
 
 | Auth method | Security posture | Credential lifecycle | Best suited for |
 |---|---|---|---|
-| AppRole | Moderate; requires secure secret ID delivery | Secret ID is single-use with response wrapping; RoleID is long-lived | TeamCity servers where no stronger shared platform identity exists |
 | AWS IAM role | High; identity is the server's AWS role | Managed by AWS; no manual rotation for the server identity | TeamCity servers running on EC2 or other AWS compute with an attached IAM role |
+| AppRole | Moderate; requires secure secret ID delivery | Secret ID is single-use with response wrapping; RoleID is long-lived | TeamCity servers where no stronger shared platform identity exists |
 | LDAP | Moderate; uses shared server-scoped static credentials rather than workload identity | Long-lived username/password managed through directory rotation policy | Existing TeamCity environments that already standardize on Vault LDAP auth and need a compatibility option |
 
 <Tabs>
+<Tab heading="AWS IAM role">
+
+AWS IAM auth is appropriate when the TeamCity server runs on EC2 or other AWS
+compute with an attached IAM role. This avoids storing a static bootstrap secret
+in TeamCity just to authenticate the server to Vault.
+
+### Role configuration
+
+The primary control is binding the Vault role to the expected IAM principal ARN.
+The `iam` auth type is preferred for most TeamCity use cases.
+
+```hcl
+# Vault AWS role — bound to the TeamCity server IAM role
+vault write auth/aws/role/teamcity-server \
+  auth_type=iam \
+  bound_iam_principal_arn="arn:aws:iam::123456789012:role/teamcity-server-role" \
+  token_policies=teamcity-build-policy \
+  ttl=1h
+```
+
+The role binds Vault authentication to the IAM role attached to the TeamCity
+server. Vault issues a token only when the server proves that AWS identity.
+
+### Workflow configuration
+
+In TeamCity, configure the Vault connection to authenticate with the TeamCity
+server's AWS IAM role. The server's IAM role is used automatically — no
+credentials are stored in the connection configuration.
+
+```kotlin
+project {
+    features {
+        hashiCorpVaultConnection {
+            id = "TeamCityVaultAws"
+            name = "HashiCorp Vault (AWS)"
+            url = "https://vault.example.com"
+            authMethod = aws {
+                // No credentials required — the server's IAM role is used automatically
+            }
+        }
+    }
+}
+```
+
+The connection configuration lets the TeamCity server authenticate to Vault
+without storing a static bootstrap secret in TeamCity. The server then uses that
+identity whenever builds resolve remote parameters through the connection.
+
+After the connection is in place, create a remote parameter to reference the
+required Vault value.
+
+```kotlin
+project {
+    params {
+        hashiCorpVaultParameter {
+            name = "env.AWS_SECRET_ACCESS_KEY"
+            query = "secret/data/awscreds!/secret_key"
+            vaultId = "TeamCityVaultAws"
+        }
+    }
+}
+```
+
+The remote parameter links a build-time environment variable to the specific
+Vault value the project needs. TeamCity resolves that value through the named
+Vault connection when the build runs.
+
+If Vault is configured with `iam_server_id_header_value`, include the matching
+server ID value in the Vault AWS auth configuration for the TeamCity connection.
+
+</Tab>
 <Tab heading="AppRole">
 
 AppRole is appropriate when the TeamCity server needs a Vault identity but no
@@ -110,12 +182,12 @@ vault write auth/approle/role/teamcity-server \
   secret_id_num_uses=1 \
   token_ttl=1h \
   token_max_ttl=2h \
-  policies=teamcity-build-policy
+  token_policies=teamcity-build-policy
 ```
 
 ### Workflow configuration
 
-This example uses TeamCity Kotlin DSL to define a Vault connection that
+The example uses TeamCity Kotlin DSL to define a Vault connection that
 authenticates with AppRole. TeamCity uses the connection to resolve remote
 parameters at build time.
 
@@ -128,13 +200,19 @@ project {
             url = "http://127.0.0.1:8200/"
             vaultNamespace = "enterprise/vault/namespace"
             authMethod = appRole {
-                roleId = "..."
-                secretId = "..."
+                roleId = "your-role-id"
+                // Provide the secret_id through a TeamCity secure parameter
+                // (e.g. %vault.secret_id%) rather than a plaintext literal
+                secretId = "%vault.secret_id%"
             }
         }
     }
 }
 ```
+
+The connection definition tells TeamCity how to authenticate the server to
+Vault with AppRole. The secure parameter keeps the `secret_id` out of plaintext
+project configuration.
 
 After you define the connection, create a remote parameter that references the
 Vault path TeamCity should resolve during the build.
@@ -151,47 +229,9 @@ project {
 }
 ```
 
-</Tab>
-<Tab heading="AWS IAM role">
-
-AWS IAM auth is appropriate when the TeamCity server runs on EC2 or other AWS
-compute with an attached IAM role. This avoids storing a static bootstrap secret
-in TeamCity just to authenticate the server to Vault.
-
-### Role configuration
-
-The primary control is binding the Vault role to the expected IAM principal ARN.
-The `iam` auth type is preferred for most TeamCity use cases.
-
-```hcl
-# Vault AWS role — bound to the TeamCity server IAM role
-vault write auth/aws/role/teamcity-server \
-  auth_type=iam \
-  bound_iam_principal_arn="arn:aws:iam::123456789012:role/teamcity-server-role" \
-  policies=teamcity-build-policy \
-  ttl=1h
-```
-
-### Workflow configuration
-
-In TeamCity, configure the Vault connection to authenticate with the TeamCity
-server's AWS IAM role. After the connection is in place, use a remote parameter
-to reference the required Vault value.
-
-```kotlin
-project {
-    params {
-        hashiCorpVaultParameter {
-            name = "env.AWS_SECRET_ACCESS_KEY"
-            query = "secret/data/awscreds!/secret_key"
-            vaultId = "TeamCityVaultAws"
-        }
-    }
-}
-```
-
-If Vault is configured with `iam_server_id_header_value`, include the matching
-server ID value in the Vault AWS auth configuration for the TeamCity connection.
+The remote parameter maps the requested Vault value into the build environment
+through the configured TeamCity connection. This keeps the secret value in Vault
+instead of storing it directly in TeamCity parameters.
 
 </Tab>
 <Tab heading="LDAP">
@@ -217,6 +257,10 @@ path "secret/data/ci/teamcity/*" {
 }
 ```
 
+The policy limits the TeamCity LDAP-backed connection to the secret paths it
+needs. Keep those paths narrow because LDAP auth uses a shared server-scoped
+credential rather than workload identity.
+
 ### Workflow configuration
 
 In TeamCity, configure the Vault connection to use a dedicated non-human LDAP
@@ -235,6 +279,10 @@ project {
     }
 }
 ```
+
+The remote parameter lets TeamCity resolve the requested value through the LDAP-
+backed Vault connection at build time. This keeps the password in Vault while
+still fitting TeamCity's parameter model.
 
 </Tab>
 </Tabs>
@@ -255,6 +303,10 @@ path "secret/data/ci/teamcity/production/api" {
   capabilities = ["read"]
 }
 ```
+
+The policy limits the TeamCity project to the exact production secret paths it
+needs. Use separate policies for other projects and environments so unrelated
+builds do not inherit broader access.
 
 TeamCity can retrieve values from Vault KV/KV2 and dynamic secret engines such
 as AWS or Google Cloud through remote parameters. Dynamic secrets are a strong
@@ -287,9 +339,6 @@ with your organizational risk tolerance and operational constraints:
   parent projects and subprojects. Put a connection in the Root project only if
   multiple projects truly need it. Otherwise, keep the connection scoped to the
   narrowest project boundary possible.
-- **Least privilege for parameter queries:** Remote parameters should point only
-  to the exact Vault paths and keys a build requires. Avoid patterns that let a
-  single TeamCity project read broad secret prefixes without a strong reason.
 
 For a list of additional security considerations, refer to the [CI/CD security
 considerations](/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets/security-considerations)
