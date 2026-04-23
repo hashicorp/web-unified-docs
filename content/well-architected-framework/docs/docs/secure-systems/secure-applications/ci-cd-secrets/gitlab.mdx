@@ -1,6 +1,6 @@
 ---
 page_title: Secure GitLab CI/CD secrets with HashiCorp Vault
-description: Learn how to integrate GitLab CI/CD with HashiCorp Vault for secure secrets management.
+description: Learn how to secure GitLab CI/CD secrets with HashiCorp Vault using JWT/OIDC, self-hosted runner auth patterns, and GitLab-scoped access controls.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2025-07-16T16:24:50-05:00
 last_modified: 2026-01-29T10:31:53-06:00
@@ -25,16 +25,15 @@ both cases.
 
 ## Architecture
 
-The pipeline-to-Vault authentication flow follows the same high-level pattern
-as the other CI/CD integrations in this section, but the verification step here
-is based on GitLab-issued JWTs:
+The pipeline-to-Vault authentication flow is based on GitLab-issued JWT tokens:
 
-1. The pipeline job obtains a GitLab-issued identity token
-1. The job presents that token to Vault
-1. Vault validates the token signature and claim set against the configured JWT role
-1. Vault maps the validated identity to a role
-1. Vault issues a token scoped to the policies attached to that role
-1. The job uses the Vault token to retrieve only the secrets authorized for that role
+1. GitLab generates a signed JWT when it dispatches the job and delivers it to the runner as part of the job payload; the runner exposes it as the environment variable declared in the `id_tokens` block
+1. The job presents the JWT to Vault's JWT auth endpoint
+1. Vault fetches signing keys from the GitLab instance's JWKS endpoint (`https://gitlab.example.com/-/jwks`) and validates the token signature
+1. Vault evaluates `bound_claims` — `project_path`, `namespace_path`, `ref`, `environment`, or `pipeline_source` — against the configured role
+1. Vault issues a short-lived token scoped to the policies attached to the matching role
+
+The job uses the Vault token to retrieve the secrets authorized for that role.
 
 ![Diagram showing JWT authentication flow between GitLab CI/CD and Vault](/img/well-architected-framework/diagram-cicd-gitlab-auth.png#light-theme-only)
 ![Diagram showing JWT authentication flow between GitLab CI/CD and Vault](/img/well-architected-framework/diagram-cicd-gitlab-auth-dark.png#dark-theme-only)
@@ -44,13 +43,16 @@ is based on GitLab-issued JWTs:
 The right auth method for your GitLab deployment depends on where runners
 execute, not on your GitLab tier. JWT/OIDC auth works for all runner types
 because GitLab issues a JWT regardless of where the runner runs. However,
-when runners execute on infrastructure you control, additional auth methods
-become available that can provide stronger identity guarantees or eliminate
-the dependency on GitLab's token issuer entirely.
+JWT requires Vault to reach your GitLab instance's JWKS endpoint at runtime —
+if Vault cannot reach `https://your-gitlab.example.com/-/jwks`, JWT auth is not
+viable regardless of runner placement. When runners execute on infrastructure
+you control, additional auth methods become available that can provide stronger
+identity guarantees or eliminate the dependency on GitLab's token issuer entirely.
 
-- **GitLab.com shared runners** — JWT/OIDC is the only viable option. You do
-  not control the underlying infrastructure, so there is no instance or pod
-  identity to leverage.
+- **GitLab.com shared runners** — JWT/OIDC is the only viable option. GitLab.com
+  shared runners run on Google Cloud infrastructure, but the platform identity
+  is not assignable or accessible to individual tenants, so there is no instance
+  identity you can configure Vault to trust.
 - **Self-hosted runners on Kubernetes** — Kubernetes auth is available in
   addition to JWT. The runner pod's service account token is verified directly
   by the cluster API, independent of GitLab.
@@ -58,8 +60,11 @@ the dependency on GitLab's token issuer entirely.
   (AWS IAM, Azure Managed Identity, GCP IAM) are available. The runner
   instance or container already has a platform identity that Vault can validate
   against the cloud provider's API — no credential to provision or rotate.
-- **Self-hosted runners on bare metal or air-gapped environments** — AppRole
-  with response wrapping, or TLS certificate auth for persistent runner fleets.
+- **Self-hosted runners on bare metal or on-premises networks** — AppRole with
+  response wrapping, or TLS certificate auth for persistent runner fleets. These
+  are the primary auth options in this environment, not fallbacks — no cloud or
+  cluster identity is available, and Vault may not be able to reach a self-hosted
+  GitLab JWKS endpoint depending on network segmentation.
 
 ## Authentication options
 
@@ -73,10 +78,10 @@ The following table summarizes when each auth method fits best.
 | Auth method | Security posture | Credential lifecycle | Best suited for |
 |---|---|---|---|
 | JWT / OIDC | High; per-job identity bound to GitLab project metadata | Token issued per job by GitLab, no rotation needed | GitLab.com shared runners; any self-hosted runner with access to GitLab's JWKS endpoint |
-| Kubernetes | Highest for in-cluster | Short-lived projected service account token, auto-rotated by Kubernetes | Self-hosted runners deployed as pods in a Kubernetes cluster |
 | Cloud provider auth methods | High; identity is the platform infrastructure itself | Managed by cloud provider; no rotation required | Self-hosted runners on EC2, Azure VMs/ACI, or GCE instances with an assigned instance identity |
+| Kubernetes | Highest for in-cluster | Short-lived projected service account token, auto-rotated by Kubernetes | Self-hosted runners deployed as pods in a Kubernetes cluster |
 | TLS Certificate | High; mutual authentication | Certificate with defined expiry; requires rotation process | Long-lived, persistent runner fleets where mTLS is part of the existing security posture |
-| AppRole | Moderate; requires secure secret ID delivery | Secret ID is single-use with response wrapping; RoleID is long-lived | Air-gapped runners or environments where no platform identity is available |
+| AppRole | Moderate; requires secure secret ID delivery | Secret ID is single-use with response wrapping; RoleID is long-lived | Bare metal or on-premises runners where no cloud or cluster identity is available |
 
 <Tabs>
 <Tab heading="JWT / OIDC">
@@ -103,6 +108,24 @@ controls. It lets you restrict a Vault role to jobs triggered by a `push`
 event, preventing scheduled pipelines, manually triggered jobs, or pipeline API
 triggers from authenticating to production-scoped roles.
 
+### Auth mount configuration
+
+Before configuring roles, enable the JWT auth method and point it at your
+GitLab instance's JWKS endpoint. Set `bound_issuer` to restrict the mount to
+tokens issued by your GitLab instance:
+
+```shell
+vault write auth/jwt/config \
+  jwks_url="https://gitlab.example.com/-/jwks" \
+  bound_issuer="https://gitlab.example.com"
+```
+
+The auth mount configuration tells Vault where to fetch signing keys for your
+GitLab instance and which issuer to trust. Vault can then validate GitLab-issued
+job tokens before it evaluates role constraints.
+
+For GitLab.com, use `https://gitlab.com` as the issuer and JWKS base URL.
+
 ### Role configuration
 
 The Vault role's `bound_claims` are where you translate these into access
@@ -125,9 +148,13 @@ vault write auth/jwt/role/gitlab-production-deploy \
     "pipeline_source": "push"
   }' \
   user_claim=project_path \
-  policies=gitlab-production-deploy-policy \
+  token_policies=gitlab-production-deploy-policy \
   ttl=15m
 ```
+
+The role binds Vault access to a specific project, branch, environment, and
+trigger type. Vault issues a short-lived token only when the GitLab job presents
+the expected identity and pipeline context.
 
 ### Workflow configuration
 
@@ -161,6 +188,10 @@ deploy_production:
     - deploy.sh
 ```
 
+The `secrets:vault` configuration lets GitLab exchange the job token and inject
+the requested KV values without extra CLI logic in the job script. This pattern
+fits static secret retrieval in Premium and Ultimate pipelines.
+
 For dynamic secrets, use the Vault CLI directly in the job script after
 authenticating with the `id_tokens` block:
 
@@ -182,6 +213,10 @@ deploy_production:
     - export AWS_SESSION_TOKEN=$(echo $AWS_CREDS | jq -r '.data.security_token')
     - deploy.sh
 ```
+
+The job exchanges the GitLab token for a Vault token and then requests dynamic
+AWS credentials for the deployment. This pattern is useful when the pipeline
+needs leased credentials rather than static KV values.
 
 </Tab>
 <Tab heading="Community Edition">
@@ -208,6 +243,10 @@ deploy_production:
     - deploy.sh
 ```
 
+The job authenticates with the GitLab-issued token and retrieves only the secret
+needed for the deployment. Community Edition uses explicit CLI steps, but the
+underlying Vault auth flow remains the same.
+
 For dynamic secrets, the same Vault CLI pattern applies after the token exchange:
 
 ```yaml
@@ -229,51 +268,12 @@ deploy_production:
     - deploy.sh
 ```
 
+The Community Edition job uses the same token exchange pattern before it reads
+dynamic credentials from Vault. This keeps secret access tied to the GitLab job
+identity rather than a long-lived bootstrap credential.
+
 </Tab>
 </Tabs>
-
-</Tab>
-<Tab heading="Kubernetes">
-
-When GitLab runners are deployed as pods in a Kubernetes cluster using the
-[GitLab Runner Helm chart](https://docs.gitlab.com/runner/install/kubernetes.html),
-each runner pod has a projected service account token that Vault can validate
-directly against the Kubernetes API. This is more authoritative than the GitLab
-JWT in that context and does not introduce a dependency on GitLab's token issuer.
-
-### Role configuration
-
-The Vault role binds to the runner's service account and namespace, following
-the same pattern as any other Kubernetes workload.
-
-```hcl
-# Vault role for GitLab runner pods managed by the GitLab Runner Helm chart
-vault write auth/kubernetes/role/gitlab-runner \
-  bound_service_account_names=gitlab-runner-sa \
-  bound_service_account_namespaces=gitlab-runners \
-  policies=gitlab-runner-policy \
-  ttl=1h
-```
-
-### Workflow configuration
-
-The runner pod already has the service account token mounted at the default
-path. Authenticate to Vault using the Kubernetes auth method directly in
-the job script:
-
-```yaml
-build_image:
-  image: hashicorp/vault:1.19
-  variables:
-    VAULT_ADDR: https://vault.example.com
-  script:
-    # Authenticate using the pod's projected service account token
-    - export VAULT_TOKEN=$(vault write -field=token auth/kubernetes/login
-        role=gitlab-runner
-        jwt=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token))
-    - export REGISTRY_PASSWORD=$(vault kv get -field=password secret/ci/build/registry)
-    - build.sh
-```
 
 </Tab>
 <Tab heading="Cloud provider auth methods">
@@ -304,9 +304,12 @@ the instance document, which is more precise.
 vault write auth/aws/role/gitlab-runner \
   auth_type=iam \
   bound_iam_principal_arn=arn:aws:iam::123456789012:role/gitlab-runner-role \
-  policies=gitlab-runner-policy \
+  token_policies=gitlab-runner-policy \
   ttl=1h
 ```
+
+The role binds Vault authentication to the IAM role attached to the runner.
+Vault issues a token only when the runner proves that AWS identity.
 
 ### Workflow configuration
 
@@ -324,6 +327,9 @@ build_image:
     - build.sh
 ```
 
+The runner authenticates with its AWS identity and retrieves only the secret it
+needs for the build. This avoids storing a bootstrap credential in GitLab.
+
 </Tab>
 <Tab heading="Azure">
 
@@ -335,17 +341,22 @@ Vault validates the identity against the Azure Instance Metadata Service
 ### Role configuration
 
 Bind the Vault role to the managed identity's object ID and Azure subscription.
-This ensures only runners with that specific managed identity can authenticate.
+That binding ensures only runners with that specific managed identity can
+authenticate.
 
 ```hcl
 # Vault role bound to the managed identity assigned to GitLab runner VMs
 vault write auth/azure/role/gitlab-runner \
-  policies=gitlab-runner-policy \
+  token_policies=gitlab-runner-policy \
   bound_subscription_ids=your-subscription-id \
   bound_resource_groups=your-resource-group \
-  bound_managed_principal_ids=your-managed-identity-object-id \
+  bound_service_principal_ids=your-managed-identity-object-id \
   ttl=1h
 ```
+
+The role binds Vault authentication to the managed identity assigned to the
+runner. Vault issues a token only when the runner presents the expected Azure
+identity.
 
 ### Workflow configuration
 
@@ -359,15 +370,16 @@ build_image:
     - AZURE_JWT=$(curl -s -H "Metadata: true"
         "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://management.azure.com/"
         | jq -r '.access_token')
+    # bound_service_principal_ids is set on the role — no VM metadata required
     - export VAULT_TOKEN=$(vault write -field=token auth/azure/login
         role=gitlab-runner
-        jwt=$AZURE_JWT
-        subscription_id=$AZURE_SUBSCRIPTION_ID
-        resource_group_name=$AZURE_RESOURCE_GROUP
-        vm_name=$AZURE_VM_NAME)
+        jwt=$AZURE_JWT)
     - export REGISTRY_PASSWORD=$(vault kv get -field=password secret/ci/build/registry)
     - build.sh
 ```
+
+The runner retrieves an Azure access token from IMDS, exchanges it for a Vault
+token, and then reads only the secret needed for the build.
 
 </Tab>
 <Tab heading="GCP">
@@ -387,10 +399,14 @@ your runner instances.
 # Vault role bound to the service account attached to GitLab runner instances
 vault write auth/gcp/role/gitlab-runner \
   type=iam \
-  policies=gitlab-runner-policy \
+  token_policies=gitlab-runner-policy \
   bound_service_accounts=gitlab-runner@your-project.iam.gserviceaccount.com \
   ttl=1h
 ```
+
+The role binds Vault authentication to the Google Cloud service account attached
+to the runner. Vault issues a token only when the runner presents that GCP
+identity.
 
 ### Workflow configuration
 
@@ -400,22 +416,70 @@ build_image:
   variables:
     VAULT_ADDR: https://vault.example.com
   script:
-    # Retrieve signed JWT from GCE metadata server for Vault authentication
-    - SERVICE_ACCOUNT=$(curl -s
-        "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/email"
-        -H "Metadata-Flavor: Google")
-    - GCP_JWT=$(curl -s
-        "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience=vault&format=full"
-        -H "Metadata-Flavor: Google")
-    - export VAULT_TOKEN=$(vault write -field=token auth/gcp/login
-        role=gitlab-runner
-        jwt=$GCP_JWT)
+    # No credentials required — the GCP metadata service provides identity
+    - export VAULT_TOKEN=$(vault login -method=gcp -token-only
+        role=gitlab-runner)
     - export REGISTRY_PASSWORD=$(vault kv get -field=password secret/ci/build/registry)
     - build.sh
 ```
 
+The runner logs in with its Google Cloud identity instead of using a bootstrap
+credential stored in GitLab. The resulting Vault token is then used only for the
+required secret read.
+
 </Tab>
 </Tabs>
+
+</Tab>
+<Tab heading="Kubernetes">
+
+When GitLab runners are deployed as pods in a Kubernetes cluster using the
+[GitLab Runner Helm chart](https://docs.gitlab.com/runner/install/kubernetes.html),
+each runner pod has a projected service account token that Vault can validate
+directly against the Kubernetes API. This is more authoritative than the GitLab
+JWT in that context and does not introduce a dependency on GitLab's token issuer.
+
+### Role configuration
+
+The Vault role binds to the runner's service account and namespace, following
+the same pattern as any other Kubernetes workload.
+
+```hcl
+# Vault role for GitLab runner pods managed by the GitLab Runner Helm chart
+vault write auth/kubernetes/role/gitlab-runner \
+  bound_service_account_names=gitlab-runner-sa \
+  bound_service_account_namespaces=gitlab-runners \
+  token_policies=gitlab-runner-policy \
+  ttl=1h
+```
+
+The role ties Vault access to a specific Kubernetes service account and
+namespace. Vault accepts only runner pod identities from that workload
+boundary.
+
+### Workflow configuration
+
+The runner pod already has the service account token mounted at the default
+path. Authenticate to Vault using the Kubernetes auth method directly in
+the job script:
+
+```yaml
+build_image:
+  image: hashicorp/vault:1.19
+  variables:
+    VAULT_ADDR: https://vault.example.com
+  script:
+    # Authenticate using the pod's projected service account token
+    - export VAULT_TOKEN=$(vault write -field=token auth/kubernetes/login
+        role=gitlab-runner
+        jwt=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token))
+    - export REGISTRY_PASSWORD=$(vault kv get -field=password secret/ci/build/registry)
+    - build.sh
+```
+
+The runner authenticates with the pod's projected service account token and
+retrieves only the secret required for the build. This keeps the trust boundary
+inside the Kubernetes cluster.
 
 </Tab>
 <Tab heading="TLS Certificate">
@@ -435,9 +499,13 @@ vault write auth/cert/certs/gitlab-runner-fleet \
   display_name=gitlab-runner-fleet \
   certificate=@/path/to/runner-fleet-ca.crt \
   allowed_common_names="runner-*.build.example.com" \
-  policies=gitlab-runner-fleet-policy \
+  token_policies=gitlab-runner-fleet-policy \
   ttl=4h
 ```
+
+The certificate role binds Vault access to runners that present certificates
+from the expected trust chain and matching allowed names. Vault then applies the
+runner fleet policy to the token it issues.
 
 ### Workflow configuration
 
@@ -455,6 +523,10 @@ build_image:
     - export SIGNING_KEY=$(vault kv get -field=key secret/ci/build/signing)
     - build.sh
 ```
+
+The runner authenticates with its client certificate and retrieves only the
+secret needed for the signing workflow. This pattern fits persistent runners
+that already participate in an mTLS-based operating model.
 
 </Tab>
 <Tab heading="AppRole">
@@ -478,8 +550,11 @@ vault write auth/approle/role/gitlab-runner-airgapped \
   secret_id_num_uses=1 \
   token_ttl=1h \
   token_max_ttl=2h \
-  policies=gitlab-runner-policy
+  token_policies=gitlab-runner-policy
 ```
+
+The AppRole configuration constrains bootstrap material to short-lived,
+single-use delivery and limits the Vault token lifetime for the job.
 
 ### Workflow configuration
 
@@ -498,6 +573,10 @@ build_image:
     - deploy.sh
 ```
 
+The runner unwraps the single-use `secret_id` just before login and exchanges it
+for a short-lived Vault token. The job then uses that token only for the secret
+reads authorized by the AppRole policy.
+
 The `VAULT_ROLE_ID` and `VAULT_WRAPPING_TOKEN` variables should be stored as
 protected CI/CD variables in GitLab, scoped to the specific environment or
 branch that needs them.
@@ -508,8 +587,8 @@ branch that needs them.
 ## Policy
 
 The Vault policy for any role should follow least privilege. A pipeline that
-deploys to production should not be able to read staging secrets, and vice
-versa. Because GitLab JWT claims can encode both the environment and the
+deploys to production should not be able to read staging secrets, and a staging
+pipeline should not be able to read production secrets. Because GitLab JWT claims can encode both the environment and the
 `pipeline_source`, you can enforce this on the Vault role rather than relying
 solely on GitLab's access controls.
 
@@ -529,6 +608,10 @@ path "secret/data/ci/staging/*" {
 }
 ```
 
+The policy limits the job to the exact production secret paths it needs.
+Explicit deny rules are useful when path structures overlap and you want to
+prevent accidental access to staging data.
+
 ## Security considerations
 
 There are several GitLab-specific security considerations to align with your
@@ -537,7 +620,7 @@ organizational risk tolerance and operational constraints:
 - **`pipeline_source` restricts access by trigger type.** Binding a production
   role to `pipeline_source: push` prevents scheduled pipelines, manually
   triggered jobs, and pipeline API triggers from authenticating to that role.
-  This matters when scheduled or manually triggered pipelines run in a different
+  The distinction matters when scheduled or manually triggered pipelines run in a different
   security context than deployment pipelines but share the same project and
   branch.
 - **GitLab protected environments.** When binding a Vault role to the
@@ -553,9 +636,9 @@ organizational risk tolerance and operational constraints:
   and forks, which expands the blast radius if a pipeline is compromised.
 - **Secret masking in CE pipelines.** The `secrets:vault` keyword in Premium
   and Ultimate automatically masks retrieved secret values in job logs. Community
-  Edition pipelines using the Vault CLI directly do not get this automatically —
-  take care that pipeline scripts do not inadvertently log secret values, and
-  treat Vault's audit log as the authoritative record of what was accessed and when.
+  Edition pipelines using the Vault CLI directly do not get this behavior from
+  the GitLab integration layer. If you use CLI-based retrieval in those
+  pipelines, you need to handle log exposure and output discipline explicitly.
 
 For a list of additional security considerations, refer to the [CI/CD security
 considerations](/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets/security-considerations)
