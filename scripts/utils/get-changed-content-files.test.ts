@@ -4,26 +4,24 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import fs from 'fs'
-import { execSync } from 'child_process'
+
+import { writeFileSync } from 'node:fs'
+import { execSync } from 'node:child_process'
+
 import { getFilesUsingPartial } from './get-files-using-partial.mjs'
 import { getChangedContentFiles } from './get-changed-content-files.mjs'
 
 const TERRAFORM_V1_14_PATH = 'content/terraform/v1.14.x'
 
-vi.mock('child_process', () => {
+vi.mock('node:child_process', () => {
 	return {
 		execSync: vi.fn(),
 	}
 })
 
-vi.mock('fs', () => {
+vi.mock('node:fs', () => {
 	return {
-		default: {
-			promises: {
-				writeFile: vi.fn(),
-			},
-		},
+		writeFileSync: vi.fn(),
 	}
 })
 
@@ -38,14 +36,16 @@ describe('getChangedContentFiles', () => {
 		vi.clearAllMocks()
 		delete process.env.BASE_SHA
 		vi.spyOn(process, 'cwd').mockReturnValue('/mocked/path')
-		vi.mocked(fs.promises.writeFile).mockResolvedValue(undefined)
+		vi.mocked(writeFileSync).mockImplementation(() => {
+			return undefined
+		})
 	})
 
 	afterEach(() => {
 		vi.restoreAllMocks()
 	})
 
-	it('builds changed file groups from git diff and resolves partial usage', async () => {
+	it('builds changed file groups from git diff and resolves partial usage', () => {
 		vi.mocked(execSync).mockReturnValueOnce('merge-base-sha\n')
 			.mockReturnValueOnce(`A\t${TERRAFORM_V1_14_PATH}/docs/new.mdx
 M\t${TERRAFORM_V1_14_PATH}/docs/edited.mdx
@@ -75,7 +75,7 @@ A\t${TERRAFORM_V1_14_PATH}/docs/partials/alpha.mdx`)
 			},
 		)
 
-		const result = await getChangedContentFiles()
+		const result = getChangedContentFiles()
 
 		expect(execSync).toHaveBeenNthCalledWith(
 			1,
@@ -117,21 +117,21 @@ A\t${TERRAFORM_V1_14_PATH}/docs/partials/alpha.mdx`)
 			],
 		})
 
-		expect(fs.promises.writeFile).toHaveBeenCalledWith(
+		expect(writeFileSync).toHaveBeenCalledWith(
 			'/mocked/path/changedContentFiles.json',
 			JSON.stringify(result, null, 2),
 			{ encoding: 'utf-8' },
 		)
 	})
 
-	it('uses BASE_SHA when present', async () => {
+	it('uses BASE_SHA when present', () => {
 		process.env.BASE_SHA = 'from-env'
 		vi.mocked(execSync).mockReturnValue(
 			`M\t${TERRAFORM_V1_14_PATH}/docs/index.mdx`,
 		)
 		vi.mocked(getFilesUsingPartial).mockReturnValue([])
 
-		const result = await getChangedContentFiles()
+		const result = getChangedContentFiles()
 
 		expect(execSync).toHaveBeenCalledTimes(1)
 		expect(execSync).toHaveBeenCalledWith(
@@ -145,18 +145,18 @@ A\t${TERRAFORM_V1_14_PATH}/docs/partials/alpha.mdx`)
 		})
 	})
 
-	it('returns empty groups when there is no diff output', async () => {
+	it('returns empty groups when there is no diff output', () => {
 		process.env.BASE_SHA = 'from-env'
 		vi.mocked(execSync).mockReturnValue('\n')
 
-		const result = await getChangedContentFiles()
+		const result = getChangedContentFiles()
 
 		expect(getFilesUsingPartial).not.toHaveBeenCalled()
 		expect(result).toEqual({ added: [], modified: [], removed: [] })
-		expect(fs.promises.writeFile).toHaveBeenCalledTimes(1)
+		expect(writeFileSync).toHaveBeenCalledTimes(1)
 	})
 
-	it('logs and exits when building changed files fails', async () => {
+	it('logs and exits when building changed files fails', () => {
 		const error = new Error('git failed')
 		const consoleErrorSpy = vi
 			.spyOn(console, 'error')
@@ -172,7 +172,9 @@ A\t${TERRAFORM_V1_14_PATH}/docs/partials/alpha.mdx`)
 			},
 		)
 
-		await expect(getChangedContentFiles()).rejects.toThrow('process.exit(1)')
+		expect(() => {
+			return getChangedContentFiles()
+		}).toThrow('process.exit(1)')
 		expect(consoleErrorSpy).toHaveBeenCalledWith(
 			'Error getting changed content files:',
 			error,

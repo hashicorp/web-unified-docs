@@ -2,8 +2,9 @@
  * Copyright IBM Corp. 2024, 2026
  * SPDX-License-Identifier: BUSL-1.1
  */
-import { readFile } from 'fs/promises'
-import path from 'path'
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 import grayMatter from 'gray-matter'
 import { parse as jsoncParse } from 'jsonc-parser'
@@ -28,6 +29,35 @@ const headers = process.env.VERCEL_URL
 		})
 	: new Headers()
 
+const incBuild = process.env.INCREMENTAL_BUILD === 'true'
+const incBuildPRPreview = incBuild && process.env.VERCEL_ENV === 'preview'
+const incBuildLocalDev =
+	incBuild && process.env.NODE_ENV === 'development' && !incBuildPRPreview
+
+const EXT_TO_CONTENT_TYPE: Record<string, string> = {
+	'.avif': 'image/avif',
+	'.gif': 'image/gif',
+	'.jpeg': 'image/jpeg',
+	'.jpg': 'image/jpeg',
+	'.json': 'application/json; charset=utf-8',
+	'.md': 'text/markdown; charset=utf-8',
+	'.mdx': 'text/markdown; charset=utf-8',
+	'.png': 'image/png',
+	'.svg': 'image/svg+xml',
+	'.txt': 'text/plain; charset=utf-8',
+	'.webp': 'image/webp',
+}
+
+const contentTypeFromPath = (filePath: string): string => {
+	const ext = path.extname(filePath).toLowerCase()
+	if (EXT_TO_CONTENT_TYPE[ext]) {
+		return EXT_TO_CONTENT_TYPE[ext]
+	}
+
+	// Default to text/plain for unknown file types
+	return 'text/plain; charset=utf-8'
+}
+
 /**
  * Fetches a file by path, applying incremental build logic when
  * `INCREMENTAL_BUILD` is set to `'true'`:
@@ -41,7 +71,7 @@ export const fetchFile = async (
 	filePath: string,
 	fileType: FileType,
 ): Promise<Result<{ response: Response; servedFrom: ServedFrom }, string>> => {
-	if (process.env.INCREMENTAL_BUILD === 'true') {
+	if (incBuildPRPreview) {
 		let changedFiles: {
 			added: string[]
 			modified: string[]
@@ -104,6 +134,90 @@ export const fetchFile = async (
 			response,
 			servedFrom: ServedFrom.Production,
 		})
+	} else if (incBuildLocalDev) {
+		const markdownFileExtensions = ['.md', '.mdx']
+		const isMarkdownFile = markdownFileExtensions.some((ext: string) => {
+			return filePath.toLowerCase().endsWith(ext)
+		})
+
+		let localFilePath = filePath
+		if (fileType === FileType.Asset) {
+			// Adjust the file path to match the paths in the content directory
+			const parts = filePath.split('/')
+			parts[0] = 'content'
+			localFilePath = parts.join('/')
+		} else if (isMarkdownFile) {
+			// Apply MDX transforms, writing out transformed MDX files to `public`
+			const CWD = process.cwd()
+			const CONTENT_DIR = path.join(CWD, 'content')
+			const CONTENT_DIR_OUT = path.join(CWD, 'public', 'content')
+			const MDX_TRANSFORMS_FILE = path.join(
+				CWD,
+				'scripts',
+				'prebuild',
+				'mdx-transforms',
+				'build-mdx-transforms.mjs',
+			)
+
+			// Use a runtime file URL and webpackIgnore so Next.js does not statically
+			// trace the prebuild remark-mdx/@babel dependencies into API bundles.
+			// This is fine as we only do this in local dev, not preview or prod
+			const { buildMdxTransforms } = await import(
+				/* webpackIgnore: true */ pathToFileURL(MDX_TRANSFORMS_FILE).href
+			)
+
+			// load the file app/api/versionMetadata.json
+			const versionMetadataPath = path.join(
+				CWD,
+				'app',
+				'api',
+				'versionMetadata.json',
+			)
+			const versionMetadata = JSON.parse(
+				await readFile(versionMetadataPath, 'utf-8'),
+			)
+
+			try {
+				// See if the file exist as MDX files can exist in the path of
+				// "doc.mdx" or "doc/index.mdx" and we often have to check for both
+				await readFile(localFilePath)
+
+				await buildMdxTransforms(
+					CONTENT_DIR,
+					CONTENT_DIR_OUT,
+					versionMetadata,
+					[localFilePath],
+				)
+			} catch (error) {
+				return Err(
+					`Failed to read local file at path: ${localFilePath}, error: ${error}`,
+				)
+			}
+
+			// Add /public to the path for markdown files to match the transformed output directory
+			const parts = filePath.split('/')
+			parts.unshift('public')
+			localFilePath = parts.join('/')
+		}
+
+		try {
+			const fileContent =
+				fileType === FileType.Asset
+					? await readFile(localFilePath)
+					: await readFile(localFilePath, 'utf-8')
+
+			// Wrap the file content in a Response object to mimic the fetch API's Response which is expected downstream.
+
+			// @ts-expect-error:2345 - TS wants Uint8Array, but a Buffer is fine
+			const response = new Response(fileContent, {
+				headers: {
+					'content-type': contentTypeFromPath(localFilePath),
+				},
+			})
+			return Ok({ response, servedFrom: ServedFrom.CurrentBuild })
+		} catch {
+			return Err(`Failed to read local file at path: ${localFilePath}`)
+		}
 	}
 
 	const response = await fetch(`${SELF_URL}/${filePath}`, {
@@ -133,17 +247,9 @@ export const findFileWithMetadata = async (
 		versionMetaData.releaseStage,
 	)
 
-	const newFilePathJoined = newFilePath.filter(Boolean).join('/')
+	const newFilePathJoined = joinFilePath(newFilePath)
 
 	try {
-		// TODO: when we do inc builds locally we want to load all files from the content dir and transform them on demand if needed
-		if (options.loadFromContentDir) {
-			// Special join needed here to load the file from the local file system
-			const filePathString = joinFilePath(newFilePath)
-			const fileContent = await readFile(filePathString, 'utf-8')
-			return Ok({ text: fileContent, servedFrom: ServedFrom.CurrentBuild })
-		}
-
 		const fetchResult = await fetchFile(newFilePathJoined, FileType.Content)
 		if (!fetchResult.ok) {
 			// Rewrap the error string or else we expand the OK type downstream
@@ -175,10 +281,12 @@ export const getAssetData = async (
 	const newFilePath = ifNeededAddReleaseStageToPath(
 		filePath,
 		versionMetaData.releaseStage,
-	).join('/')
+	)
+
+	const newFilePathJoined = joinFilePath(newFilePath)
 
 	try {
-		const fetchResult = await fetchFile(newFilePath, FileType.Asset)
+		const fetchResult = await fetchFile(newFilePathJoined, FileType.Asset)
 		if (!fetchResult.ok) {
 			// Rewrap the error string or else we expand the OK type downstream
 			return Err(fetchResult.value as string)
@@ -186,7 +294,7 @@ export const getAssetData = async (
 
 		const { response, servedFrom } = fetchResult.value
 		if (!response.ok) {
-			return Err(`Failed to read asset at path: ${newFilePath}`)
+			return Err(`Failed to read asset at path: ${newFilePathJoined}`)
 		}
 
 		const buffer = await response.arrayBuffer()
@@ -197,7 +305,7 @@ export const getAssetData = async (
 			servedFrom,
 		})
 	} catch {
-		return Err(`Failed to read asset at path: ${newFilePath}`)
+		return Err(`Failed to read asset at path: ${newFilePathJoined}`)
 	}
 }
 
@@ -251,6 +359,7 @@ function ifNeededAddReleaseStageToPath(
 }
 
 export const joinFilePath = (path: string[] = []): string => {
+	// Filter out duplicate slashes and empty segments
 	return path
 		.filter(Boolean)
 		.join('/')

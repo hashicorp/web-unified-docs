@@ -3,9 +3,10 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-import fs from 'fs'
-import path from 'path'
-import { execSync } from 'child_process'
+import { writeFileSync } from 'node:fs'
+import path from 'node:path'
+import { execSync } from 'node:child_process'
+
 import { getFilesUsingPartial } from './get-files-using-partial.mjs'
 
 const OUTPUT_FILE = './changedContentFiles.json'
@@ -82,18 +83,14 @@ function buildChangedContentFiles() {
 	return { added, modified, removed }
 }
 
-export async function getChangedContentFiles() {
+export function getChangedContentFiles() {
 	try {
 		const changedFiles = buildChangedContentFiles()
 
 		const outputPath = path.join(process.cwd(), OUTPUT_FILE)
-		await fs.promises.writeFile(
-			outputPath,
-			JSON.stringify(changedFiles, null, 2),
-			{
-				encoding: 'utf-8',
-			},
-		)
+		writeFileSync(outputPath, JSON.stringify(changedFiles, null, 2), {
+			encoding: 'utf-8',
+		})
 
 		console.log(`Changed content files written to ${outputPath}`)
 		console.log(
