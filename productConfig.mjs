@@ -472,6 +472,17 @@ export const PRODUCT_CONFIG = {
 		websiteDir: 'website',
 		supportsExclusionDirectives: true,
 	},
+	'vault-radar-hcp': {
+		assetDir: 'img',
+		basePaths: ['cloud'],
+		contentDir: 'docs',
+		dataDir: 'data',
+		productSlug: 'vault-radar/cloud',
+		semverCoerce: semver.coerce,
+		versionedDocs: false,
+		websiteDir: '.',
+		supportsExclusionDirectives: true,
+	},
 	'well-architected-framework': {
 		/**
 		 * ✅ Initial migration attempt: SEEMS TO WORK

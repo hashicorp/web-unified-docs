@@ -417,6 +417,17 @@ export const PRODUCT_CONFIG = {
 		versionedDocs: true,
 		websiteDir: 'website',
 	},
+	'vault-radar-hcp': {
+		assetDir: 'img',
+		basePaths: ['cloud'],
+		contentDir: 'docs',
+		dataDir: 'data',
+		productSlug: 'vault-radar/cloud',
+		semverCoerce: semver.coerce,
+		versionedDocs: false,
+		websiteDir: '.',
+		supportsExclusionDirectives: true,
+	},
 	// vagrant: {
 	// 	/**
 	// 	 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
