@@ -474,10 +474,10 @@ export const PRODUCT_CONFIG = {
 	},
 	'vault-radar-hcp': {
 		assetDir: 'img',
-		basePaths: ['cloud/vault-radar'],
+		basePaths: ['cloud'],
 		contentDir: 'docs',
 		dataDir: 'data',
-		productSlug: 'vault/cloud/vault-radar',
+		productSlug: 'vault-radar/cloud',
 		semverCoerce: semver.coerce,
 		versionedDocs: false,
 		websiteDir: '.',
