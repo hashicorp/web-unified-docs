@@ -32,9 +32,8 @@ Check each area and report issues with line numbers:
 12. **Entity recognition** - Product names consistently capitalized (Vault, Terraform, Packer), versions specified when relevant
 13. **Featured snippets** - Direct 40-60 word answers to "what is"/"how to" questions, question-style H2s
 14. **Term definitions** - Technical terms defined on first mention using "X is a Y that..." pattern
-15. **Prerequisites** - "Before you begin" section with version requirements and dependencies
-16. **Readability** - 15-20 word sentence average, 3-5 sentence paragraphs, no 25+ word sentences
-17. **External links** - HTTPS, authoritative sources, current versions
+15. **Readability** - 15-20 word sentence average, 3-5 sentence paragraphs, no 25+ word sentences
+16. **External links** - HTTPS, authoritative sources, current versions
 
 ## Auto-Fixable Issues
 
@@ -47,7 +46,7 @@ Check each area and report issues with line numbers:
 ## Execution
 
 1. Read target file(s)
-2. Check each of the 17 areas above
+2. Check each of the 16 areas above
 3. Report: status per area (✅ PASS / ❌ FAIL / ⚠️ WARNING), line numbers, specific fixes
 4. Tally auto-fixable vs manual review items
 5. Provide overall score 1-10
