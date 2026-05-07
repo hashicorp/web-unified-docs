@@ -2,8 +2,8 @@
 page_title: Resources - List
 description: Implementing List on an SDKv2 resource.
 # START AUTO GENERATED METADATA, DO NOT EDIT
-created_at: 2026-03-05T16:17:41.000Z
-last_modified: 2026-03-05T16:17:41.000Z
+created_at: 2026-03-11T10:18:18-04:00
+last_modified: 2026-04-03T02:52:08.000Z
 # END AUTO GENERATED METADATA
 ---
 
@@ -47,6 +47,8 @@ func (r *ThingListResource) RawV5Schemas(ctx context.Context, req list.RawV5Sche
 
 The [`list.ListResource` interface `List` method](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/list#ListResource.List) is where the actual list API call is made and the resulting resource state is returned to the framework.
 
+The [`list.ListRequest` type](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/list#ListRequest) also includes the `IncludeResource` field. Terraform can set this field when the practitioner enables the `include_resource` argument in HCL or when the query is run with the `-generate-config-out` flag. Check this field early in the `List` method so the provider can avoid unnecessary requests or response processing when Terraform only needs resource identity data.
+
 The results that are returned must be framework types. To simplify the conversion of identity and resource data on SDKv2 objects to framework types, the following two methods were added on `schema.ResourceData`:
 
 - [`TfTypeIdentityState()`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema#ResourceData.TfTypeIdentityState) - Converts the identity data on the `ResourceData` to a `tftypes.Value`.
@@ -82,7 +84,7 @@ func (r *ThingListResource) List(ctx context.Context, req list.ListRequest, stre
 	var data ThingListResourceModel
 
 	// Read list config data into the model
-	diags := request.Config.Get(ctx, &data)
+	diags := req.Config.Get(ctx, &data)
 	if diags.HasError() {
 		stream.Results = list.ListResultsStreamDiagnostics(diags)
 		return
@@ -91,6 +93,18 @@ func (r *ThingListResource) List(ctx context.Context, req list.ListRequest, stre
 	// Typically lists will make external calls here using data from the config
 	// as input. For brevity, we assume the `things` slice below was returned by an
 	// API call here
+
+	// Check IncludeResource before making remote requests so the provider can
+	// avoid unnecessary work when Terraform only needs identity data.
+	var things []Thing
+
+	if req.IncludeResource {
+		// Fetch full resource data because Terraform requested it.
+		things = client.ListThingsWithResourceData(ctx)
+	} else {
+		// Fetch only the data needed to populate identities and display names.
+		things = client.ListThings(ctx)
+	}
 
 	// Define the function that will push results into the stream
 	stream.Results = func(push func(list.ListResult) bool) {
@@ -121,11 +135,6 @@ func (r *ThingListResource) List(ctx context.Context, req list.ListRequest, stre
 
 			identity.Set("an_identity_attribute", thing.IdentityAttribute)
 
-			// Set the attributes of interest into the resource state
-			rd.Set("name", thing.Name)
-			rd.Set("attribute_one", thing.AttributeOne)
-			rd.Set("attribute_two", thing.AttributeTwo)
-
 			// Convert and set the identity and resource state into the result
 			tfTypeIdentity, err := rd.TfTypeIdentityState()
 			if err != nil {
@@ -139,23 +148,31 @@ func (r *ThingListResource) List(ctx context.Context, req list.ListRequest, stre
 				result.Diagnostics.AddError(
                     "Setting identity data",
                     "An error was encountered when setting the identity data: "+err.Error(),
-                )
+				)
 			}
 
-			// Convert and set the resource state into the result
-			tfTypeResource, err := rd.TfTypeResourceState()
-			if err != nil {
-				result.Diagnostics.AddError(
+			// Only set full resource data when Terraform requested it.
+			if req.IncludeResource {
+				// Set the attributes of interest into the resource state.
+				rd.Set("name", thing.Name)
+				rd.Set("attribute_one", thing.AttributeOne)
+				rd.Set("attribute_two", thing.AttributeTwo)
+
+				// Convert and set the resource state into the result.
+				tfTypeResource, err := rd.TfTypeResourceState()
+				if err != nil {
+					result.Diagnostics.AddError(
                     "Converting resource state",
                     "An error was encountered when converting the resource state: "+err.Error(),
                 )
-			}
+				}
 
-			if err := result.Resource.Set(ctx, *tfTypeResource); err != nil {
-				result.Diagnostics.AddError(
+				if err := result.Resource.Set(ctx, *tfTypeResource); err != nil {
+					result.Diagnostics.AddError(
                     "Setting resource state",
                     "An error was encountered when setting the resource state: "+err.Error(),
                 )
+				}
 			}
 
             // Send the result to the stream.
