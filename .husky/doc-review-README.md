@@ -1,7 +1,5 @@
 # Doc scoring pre-commit hook
 
-Following the steps in this README will overwrite existing pre-commit hooks.
-
 ## Overview
 
 The pre-commit hook in this directory uses the unified style guide (derived from
@@ -39,7 +37,7 @@ There are several preqs required to set up the script.
 1. Add your IBM Copilot account.
 
    ```shell-session
-   $ opnecode auth login
+   $ opencode auth login
    ```
 
 1. Select `GitHub Copilot`.
@@ -93,16 +91,10 @@ There are several preqs required to set up the script.
 
    The pre-commit script uses `github-copilot/claude-sonnet-4.6`.
 
-1. Update your Git configuration to set `core.hooksPath` to `.githooks`.
+1. Enable the doc review pre-commit hook.
 
    ```shell-session
-   $ git config core.hooksPath .githooks
-   ```
-
-1. Add the execute bit to the pre-commit script.
-
-   ```shell-session
-   $ chmod +x .githooks/pre-commit
+   $ git config --local doc-review.enabled true
    ```
 
 OpenCode will scan any `.md` or `.mdx` file added to a directory configured in the pre-commit
