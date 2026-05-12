@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Use this file as the default operating guide for AI agents that contribute to `hashicorp/web-unified-docs`.
+Use this file as the default operating guide for AI agents that contribute to the architectural/process code behind `hashicorp/web-unified-docs`.
 
 This file should help an agent:
 
@@ -230,6 +230,7 @@ Use the following documents as starting points:
 - `docs/BROKEN_LINK_MONITORING.md`
 - `docs/.research/BUILD_DEPLOY_WORKFLOWS.md`
 - `docs/.research/PRODUCT_SPECIFIC_WORKFLOWS_RESEARCH.md`
+- `docs/images/` for architecture diagrams — use the image-viewing tool to load and interpret them when understanding the system architecture or deployment flow
 
 Do not treat the research docs as authoritative without verifying them.
 
