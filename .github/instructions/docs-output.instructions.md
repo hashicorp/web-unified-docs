@@ -1,5 +1,5 @@
 ---
-applyTo: "**/*.md,**/*.mdx"
+applyTo: "content/**/*.md,content/**/*.mdx"
 ---
 
 # Documentation Review Output Contract

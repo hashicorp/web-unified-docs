@@ -1,5 +1,5 @@
 ---
-applyTo: "**/*.md,**/*.mdx"
+applyTo: "content/**/*.md,content/**/*.mdx"
 ---
 
 # Docs PR comment guard
