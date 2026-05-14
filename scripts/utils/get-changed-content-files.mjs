@@ -23,12 +23,9 @@ const GIT_STATUS = {
  */
 function buildChangedContentFiles() {
 	// In CI (GitHub Actions), BASE_SHA is set from github.event.pull_request.base.sha.
-	let mergeBase = process.env.BASE_SHA
-	if (!mergeBase) {
-		mergeBase = execSync('git merge-base HEAD origin/main', {
-			encoding: 'utf-8',
-		}).trim()
-	}
+	const mergeBase = execSync('git merge-base HEAD origin/main', {
+		encoding: 'utf-8',
+	}).trim()
 
 	// Get the diff between the merge base and HEAD.
 	const diffOutput = execSync(
