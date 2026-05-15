@@ -1463,7 +1463,7 @@ Automating [use case]:
 - [ ] Section names clearly indicate learning level
 - [ ] No generic verbs like "browse" or "learn more"
 - [ ] Tool-specific sections use consistent naming
-- [ ] 5-8+ links per document (more for multi-tool docs)
+- [ ] Links are relevant to the document topic and help implementers
 - [ ] Links are specific, not generic dashboards
 
 ---
@@ -2207,7 +2207,7 @@ build {
 **How to fix:**
 - Add "Why [topic]" section with 3-4 challenges
 - Include representative code example
-- Provide 5-8 HashiCorp resource links
+- Include relevant HashiCorp resource links that help users implement the topic
 - Expand implementation guidance
 - Compare to similar existing documents
 
@@ -2247,8 +2247,7 @@ Document titled "Deploy applications with blue/green strategy" but contains only
 - Product documentation (reference)
 
 **Target:**
-- 5-8 links for single-tool documents
-- 8-12+ links for multi-tool documents
+- Include links that genuinely help users implement the topic — don't pad, don't omit useful resources
 
 **Example good resources section:**
 ```markdown
@@ -2312,7 +2311,7 @@ Use this checklist to avoid common pitfalls:
 - [ ] Document is 700-1,200 words (or more if needed)
 - [ ] Has "Why" section with 3-4 challenges
 - [ ] Implementation guides include code examples
-- [ ] 5-8+ HashiCorp resource links
+- [ ] HashiCorp resource links are relevant and help users implement the topic
 - [ ] Comparable depth to similar documents
 
 ### Both Personas Served

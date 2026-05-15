@@ -72,7 +72,7 @@ This guide shows you exactly what to do, in what order, using which tools (Claud
    ```
    - Automatically suggests relevant resources
    - *Manual review* - Verify suggestions fit the document
-   - Ensure 5-8+ links total
+   - Ensure links genuinely help users implement the topic
    - Check organization (beginner → advanced)
 
 6. **Add cross-references** (5 min)
@@ -157,7 +157,7 @@ This guide shows you exactly what to do, in what order, using which tools (Claud
     - [ ] Frontmatter complete (title, description)
     - [ ] Why section with 3-4 challenges
     - [ ] Code examples complete with summaries (if applicable)
-    - [ ] 5-8+ HashiCorp resource links
+    - [ ] HashiCorp resource links are relevant and help users implement the topic
     - [ ] Document ends: Resources → Next steps
     - [ ] No broken links
     - [ ] Reads naturally
@@ -477,7 +477,7 @@ Before you consider a document "done," verify:
 - [ ] "Why [topic]" section with 3-4 **Bold challenge:** items
 - [ ] Implementation guidance sections
 - [ ] Code examples (if implementation guide) with summaries
-- [ ] HashiCorp resources section (5-8+ links)
+- [ ] HashiCorp resources section (relevant links for implementers)
 - [ ] Next steps section
 
 ### Quality markers

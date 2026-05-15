@@ -26,6 +26,7 @@ export function processVaultBlock(directive, block, tree, options) {
 	// Parse Vault version directive pattern: >=v1.21.x or >=v2.x
 	const versionMatch =
 		directive.match(/^(<=|>=|<|>|=)v(\d+\.\d+\.x)$/) ||
+		directive.match(/^(<=|>=|<|>|=)v(\d+\.x\.x)$/) ||
 		directive.match(/^(<=|>=|<|>|=)v(\d+\.x)$/)
 	if (versionMatch) {
 		processVaultVersionDirective(versionMatch, block, tree, options)

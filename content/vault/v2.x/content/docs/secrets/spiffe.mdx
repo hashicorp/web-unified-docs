@@ -1,0 +1,87 @@
+---
+layout: docs
+page_title: SPIFFE secrets engine
+description: >-
+  The SPIFFE secrets engine allows users to mint SPIFFE JWT-SVIDs
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-04-15T00:15:52.000Z
+last_modified: 2026-04-15T00:15:52.000Z
+# END AUTO GENERATED METADATA
+---
+
+# SPIFFE secrets engine
+
+@include 'alerts/enterprise-only.mdx'
+
+The `spiffe` secrets engine allows for minting [SPIFFE](https://spiffe.io/) JWT-SVIDS using a
+template that can interpolate identity information about the requesting entity.
+Since the JWTs are OIDC-compatible, you can use them like JWT tokens minted using the identity engine.
+
+## Setup
+
+Each SPIFFE backend instance has a single trust domain. The plugin uses roles to
+define templates that determine the claims in the minted JWTs.
+
+1. Enable the SPIFFE secrets engine.
+
+```shell
+$ vault secrets enable spiffe
+Success! Enabled the spiffe secrets engine at: spiffe/
+```
+
+2. Configure its trust domain.
+
+```shell
+$ vault write spiffe/config trust_domain=example.org
+Key                            Value
+---                            -----
+bundle_refresh_hint            3600
+jwt_issuer_url                 n/a
+jwt_oidc_compatibility_mode    false
+jwt_signing_algorithm          RS256
+key_lifetime                   86400
+trust_domain                   example.org
+```
+
+3. Configure a role.
+
+```shell
+$ vault write spiffe/role/role1 template='{"sub": "spiffe://example.org/workload"}' ttl=5m
+Key              Value
+---              -----
+name             role1
+template         {"sub": "spiffe://example.org/workload"}
+ttl              300
+use_jti_claim    false
+```
+
+## Usage
+
+Minting a SVID JWT just requires specifying an audience.
+
+```shell
+$ vault write spiffe/role/role1/mintjwt audience=my-aud
+```
+
+## Integrate with another Vault's SPIFFE auth method
+
+The SPIFFE secrets engine has an endpoint `trust_bundle/web` that serves
+the trust bundle. Clients can call the trust endpoint to fetch the public keys
+needed to validate JWTs minted by the plugin. This allows using minted JWT SVIDs
+to auth to another Vault cluster running the [SPIFFE auth method](../auth/spiffe).
+
+At this time it's not possible to integrate SPIFFE secrets with SPIRE federation,
+since that requires x509 SVID support.
+
+## Integrate with OIDC
+
+The SPIFFE secrets engine includes two endpoints that allow OIDC providers to
+validate the JWTs it mints:
+
+- `.well-known/openid-configuration`
+- `.well-known/keys` .
+
+## SPIFFE secrets engine API
+
+The SPIFFE secrets engine has a full HTTP API. Refer to the
+[SPIFFE secrets engine documentation](/vault/api-docs/secret/spiffe) for more details.
