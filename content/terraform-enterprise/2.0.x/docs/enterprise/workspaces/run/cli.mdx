@@ -1,0 +1,319 @@
+---
+page_title: The CLI-driven remote run workflow for Terraform Enterprise
+description: >-
+  Configure the Terraform CLI to trigger remote runs in Terraform Enterprise
+  from your terminal.
+source: terraform-docs-common
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-02-02T17:54:50Z
+last_modified: 2026-02-02T17:54:50Z
+# END AUTO GENERATED METADATA
+---
+
+[private]: /terraform/enterprise/registry
+
+[speculative plan]: /terraform/enterprise/workspaces/run/remote-operations#speculative-plans
+
+[tfe-provider]: https://registry.terraform.io/providers/hashicorp/tfe/latest/docs
+
+# The CLI-driven remote run workflow
+
+> **Hands-on:** Try the [Log in to HCP Terraform from the CLI](/terraform/tutorials/0-13/cloud-login) tutorial.
+
+HCP Terraform has three workflows for managing Terraform runs.
+
+-   The [UI/VCS-driven run workflow](/terraform/enterprise/workspaces/run/ui), which is the primary mode of operation.
+-   The [API-driven run workflow](/terraform/enterprise/workspaces/run/api), which is more flexible but requires you to create some tooling.
+-   The CLI-driven run workflow described below, which uses Terraform's standard CLI tools to execute runs in HCP Terraform.
+
+## Summary
+
+The [CLI integration](/terraform/cli/cloud) brings HCP Terraform's collaboration features into the familiar Terraform CLI workflow. It offers the best of both worlds to developers who are already comfortable with using the Terraform CLI, and it can work with existing CI/CD pipelines.
+
+You can start runs with the standard `terraform plan` and `terraform apply` commands and then watch the progress of the run from your terminal. These runs execute remotely in HCP Terraform, use variables from the appropriate workspace, enforce any applicable [Sentinel or OPA policies](/terraform/enterprise/policy-enforcement), and can access HCP Terraform's [private registry][private] and remote state inputs.
+
+HCP Terraform offers a few types of CLI-driven runs, to support different stages of your workflow:
+
+-   `terraform plan` starts a [speculative plan][] in an HCP Terraform workspace, using configuration files from a local directory. You can quickly check the results of edits (including compliance with Sentinel policies) without needing to copy sensitive variables to your local machine.
+
+    Speculative plans work with all workspaces, and can co-exist with the [VCS-driven workflow](/terraform/enterprise/workspaces/run/ui).
+
+-   `terraform apply` starts a standard plan and apply in an HCP Terraform workspace, using configuration files from a local directory.
+
+    Remote `terraform apply` is for workspaces without a linked VCS repository. It replaces the VCS-driven workflow with a more traditional CLI workflow.
+
+-   `terraform plan -out <FILE>` and `terraform apply <FILE>` perform a two-part [saved plan run](/terraform/enterprise/workspaces/run/modes-and-options/#saved-plans) in an HCP Terraform workspace, using configuration files from a local directory. The first command performs and saves the plan, and the second command applies it. You can use `terraform show <FILE>` to inspect a saved plan.
+
+      Like remote `terraform apply`, remote saved plans are for workspaces without a linked VCS repository.
+
+      Saved plans require at least Terraform CLI v1.6.0.
+
+To supplement these remote operations, you can also use the optional [Terraform Enterprise Provider][tfe-provider], which interacts with the HCP Terraform-supported resources. This provider is useful for editing variables and workspace settings through the Terraform CLI.
+
+## Configuration
+
+To enable the CLI-driven workflow, you must:
+
+1.  Create an account or sign in to [HCP Terraform](https://app.terraform.io/).
+
+2.  Run `terraform login` to authenticate with HCP Terraform. Alternatively, you can manually configure credentials in the CLI config file or through environment variables. Refer to [CLI Configuration](/terraform/cli/config/config-file#environment-variable-credentials) for details.
+
+    <!-- BEGIN: TFC:only name:hcp-eu -->
+
+    <Note>
+
+    If you are in an HCP Europe organization, login to the HCP Europe environment by specifying the hostname:
+
+    ```shell-session
+    $ terraform login app.terraform.io/eu
+    ```
+
+    To learn more about HCP Europe, refer to [Use HCP Terraform in Europe](/terraform/enterprise/europe).
+
+    </Note>
+
+    <!-- END: TFC:only name:hcp-eu -->
+
+3.  Add the `cloud` block to your Terraform configuration. You can define its arguments directly in your configuration file or supply them through environment variables, which can be useful for [non-interactive workflows](#non-interactive-workflows). Refer to [Using HCP Terraform](/terraform/cli/cloud) for configuration details.
+
+    The following example shows how to map CLI workspaces to HCP Terraform workspaces with a specific tag.
+
+        terraform {
+          cloud {
+            organization = "my-org"
+            workspaces {
+              tags = ["networking"]
+            }
+          }
+        }
+
+    -> **Note:** The `cloud` block is available in Terraform v1.1 and later. Previous versions can use the [`remote` backend](/terraform/language/settings/backends/remote) to configure the CLI workflow and migrate state.
+
+4.  Run `terraform init`.
+
+        $ terraform init
+
+        Initializing HCP Terraform...
+
+        Initializing provider plugins...
+        - Reusing previous version of hashicorp/random from the dependency lock file
+        - Using previously-installed hashicorp/random v3.0.1
+
+        HCP Terraform has been successfully initialized!
+
+        You may now begin working with HCP Terraform. Try running "terraform plan"
+        to see any changes that are required for your infrastructure.
+
+        If you ever set or change modules or Terraform Settings,
+        run "terraform init" again to reinitialize your working directory.
+
+### Implicit Workspace Creation
+
+If you configure the `cloud` block to use a workspace that doesn't yet exist in your organization, HCP Terraform will create a new workspace with that name when you run `terraform init`. The output of `terraform init` will inform you when this happens.
+
+Automatically created workspaces might not be immediately ready to use, so use HCP Terraform's UI to check a workspace's settings and data before performing any runs. In particular, note that:
+
+-   No Terraform variables or environment variables are created by default, unless your organization has configured one or more [global variable sets](/terraform/enterprise/variables#scope). HCP Terraform will use `*.auto.tfvars` files if they are present, but you will usually still need to set some workspace-specific variables.
+-   The execution mode defaults to "Remote," so that runs occur within HCP Terraform's infrastructure instead of on your workstation.
+-   New workspaces are not automatically connected to a VCS repository and do not have a working directory specified.
+-   A new workspace's Terraform version defaults to the most recent release of Terraform at the time the workspace was created.
+
+### Implicit Project Creation
+
+If you configure the [`workspaces` block](/terraform/cli/cloud/settings#workspaces) to use a [project](/terraform/cli/cloud/settings#project) that does not yet exist in your organization, HCP Terraform will attempt to create a new project with that name when you run `terraform init` and notify you in the command output.
+
+If you specify both the `project` argument and [`TF_CLOUD_PROJECT`](/terraform/cli/cloud/settings#tf_cloud_project) environment variable, the `project` argument takes precedence.
+
+## Variables in CLI-Driven Runs
+
+Remote runs in HCP Terraform use:
+
+-   Run-specific variables set through the command line or in your local environment. Terraform can use shell environment variables prefixed with `TF_VAR_` as input variables for the run, but you must still set all required environment variables, like provider credentials, inside the workspace.
+-   Workspace-specific Terraform and environment variables set in the workspace.
+-   Any variable sets applied globally, on the project containing the workspace, or on the workspace itself.
+-   Terraform variables from any `*.auto.tfvars` files included in the configuration.
+
+Refer to [Variables](/terraform/enterprise/variables) for more details about variable types, variable scopes, variable precedence, and how to set run-specific variables through the command line.
+
+## Remote Working Directories
+
+If you manage your Terraform configurations in self-contained repositories, the remote working directory always has the same content as the local working directory.
+
+If you use a combined repository and [specify a working directory on workspaces](/terraform/enterprise/workspaces/settings#terraform-working-directory), you can run Terraform from either the real working directory or from the root of the combined configuration directory. In both cases, Terraform will upload the entire combined configuration directory.
+
+## Excluding Files from Upload
+
+-> **Version note:** `.terraformignore` support was added in Terraform 0.12.11.
+
+CLI-driven runs upload an archive of your configuration directory
+to HCP Terraform. If the directory contains files you want to exclude from upload,
+you can do so by defining a [`.terraformignore` file in your configuration directory](/terraform/cli/cloud/settings).
+
+## Remote Speculative Plans
+
+You can run speculative plans in any workspace where you have [permission to queue plans](/terraform/enterprise/users-teams-organizations/permissions). Speculative plans use the configuration code from the local working directory, but will use variable values from the specified workspace.
+
+To run a [speculative plan][] on your configuration, use the `terraform plan` command. The plan will run in HCP Terraform, and the logs will stream back to the command line along with a URL to view the plan in the HCP Terraform UI.
+
+    $ terraform plan
+
+    Running plan in HCP Terraform. Output will stream here. Pressing Ctrl-C
+    will stop streaming the logs, but will not stop the plan running remotely.
+
+    Preparing the remote plan...
+
+    To view this run in a browser, visit:
+    https://app.terraform.io/app/hashicorp-learn/docs-workspace/runs/run-cfh2trDbvMU2Rkf1
+
+    Waiting for the plan to start...
+
+    [...]
+
+    Plan: 1 to add, 0 to change, 0 to destroy.
+
+    Changes to Outputs:
+      + pet_name = (known after apply)
+
+[permissions-citation]: #intentionally-unused---keep-for-maintainers
+
+## Remote Applies
+
+In workspaces that are not connected to a VCS repository, users with [permission to apply runs](/terraform/enterprise/users-teams-organizations/permissions/workspace) can use the CLI to trigger remote applies. Remote applies use the configuration code from the local working directory, but use the variable values from the specified workspace.
+
+~> **Note:** You cannot run remote applies in workspaces that are linked to a VCS repository, since the repository serves as the workspace’s source of truth. To apply changes in a VCS-linked workspace, merge your changes to the designated branch.
+
+When you are ready to apply configuration changes, use the `terraform apply` command. HCP Terraform will plan your changes, and the command line will prompt you for approval before applying them.
+
+    $ terraform apply
+
+    Running apply in HCP Terraform. Output will stream here. Pressing Ctrl-C
+    will cancel the remote apply if it's still pending. If the apply started it
+    will stop streaming the logs, but will not stop the apply running remotely.
+
+    Preparing the remote apply...
+
+    To view this run in a browser, visit:
+    https://app.terraform.io/app/hashicorp-learn/docs-workspace/runs/run-Rcc12TkNW1PDa7GH
+
+    Waiting for the plan to start...
+
+    [...]
+
+    Plan: 1 to add, 0 to change, 0 to destroy.
+
+    Changes to Outputs:
+      + pet_name = (known after apply)
+
+    Do you want to perform these actions in workspace "docs-workspace"?
+      Terraform will perform the actions described above.
+      Only 'yes' will be accepted to approve.
+
+      Enter a value: yes
+
+    [...]
+
+    Apply complete! Resources: 1 added, 0 changed, 0 destroyed.
+
+### Non-Interactive Workflows
+
+> **Hands On:** Try the [Deploy Infrastructure with HCP Terraform and CircleCI](/terraform/tutorials/automation/circle-ci) tutorial.
+
+External systems cannot run the traditional apply workflow because Terraform requires console input from the user to approve plans. We recommend using the [API-driven Run Workflow](/terraform/enterprise/workspaces/run/api) for non-interactive workflows when possible.
+
+If you prefer to use the CLI in a non-interactive environment, we recommend first running a [speculative plan](/terraform/enterprise/workspaces/run/remote-operations#speculative-plans) to preview the changes Terraform will make to your infrastructure. Then, use one of the following approaches with the `-auto-approve` flag based on the [execution mode](/terraform/enterprise/workspaces/settings#execution-mode) of your workspace. The [`-auto-approve`](/terraform/cli/commands/apply#auto-approve) flag skips prompting you to approve the plan.
+
+-   **Local Execution:**  Save the approved speculative plan and then run `terraform apply -auto-approve` with the saved plan.
+-   **Remote Execution:** HCP Terraform does not support uploading saved plans for remote execution, so we recommend running `terraform apply -auto-approve` immediately after approving the speculative plan to prevent the plan from becoming stale.
+
+    !> **Warning:** Remote execution with non-interactive workflows requires auto-approved deployments. Minimize the risk of unpredictable infrastructure changes and configuration drift by making sure that no one can change your infrastructure outside of your automated build pipeline.
+
+[permissions-citation]: #intentionally-unused---keep-for-maintainers
+
+## Remote Saved Plans
+
+-> **Version note:** Saved plans require at least Terraform CLI v1.6.0.
+
+In workspaces that support `terraform apply`, you also have the option of performing the plan and apply as separate steps, using the standard variations of the relevant Terraform commands:
+
+-   `terraform plan -out <FILE>` performs and saves a plan.
+-   `terraform apply <FILE>` applies a previously saved plan.
+-   `terraform show <FILE>` (and `terraform show -json <FILE>`) inspect a plan you previously saved.
+
+Saved plan runs are halfway between [speculative plans](#remote-speculative-plans) and standard [plan and apply runs](#remote-applies). They allow you to:
+
+-   Perform cheap exploratory plans while retaining the option of applying a specific plan you are satisfied with.
+-   Perform other tasks in your terminal between the plan and apply stages.
+-   Perform the plan and apply operations on separate machines (as is common in continuous integration workflows).
+
+Saved plans become _stale_ once the state Terraform planned them against is no longer valid (usually due to someone applying a different run). In HCP Terraform, stale saved plan runs are automatically detected and discarded. When examining a remote saved plan, the `terraform show` command (without the `-json` option) informs you if a plan has been discarded or is otherwise unable to be applied.
+
+### File Contents and Permissions
+
+You can only apply remote saved plans in the same remote HCP Terraform workspace that performed the plan. Additionally, you can not apply locally executed saved plans in a remote workspace.
+
+In order to abide by HCP Terraform's permissions model, remote saved plans do not use the same local file format as locally executed saved plans. Instead, remote saved plans are a thin reference to a remote run, and the Terraform CLI relies on authenticated network requests to inspect and apply remote plans. This helps avoid the accidental exposure of credentials or other sensitive information.
+
+The `terraform show -json` command requires [workspace admin permissions](/terraform/enterprise/users-teams-organizations/permissions/workspace#workspace-admin) to inspect a remote saved plan; this is because the [machine-readable JSON plan format](/terraform/internals/json-format) contains unredacted sensitive information (alongside redaction hints for use by systems that consume the format). The human-readable version of `terraform show` only requires the read runs permission, because it uses pre-redacted information.
+
+[permissions-citation]: #intentionally-unused---keep-for-maintainers
+
+## Policy Enforcement
+
+<!-- BEGIN: TFC:only name:pnp-callout -->
+
+@include 'tfc-package-callouts/policies.mdx'
+
+<!-- END: TFC:only name:pnp-callout -->
+
+Policies are rules that HCP Terraform enforces on Terraform runs. You can use two policy-as-code frameworks to define fine-grained, logic-based policies: Sentinel and Open Policy Agent (OPA).
+
+If the specified workspace uses policies, HCP Terraform runs those policies against all speculative plans and remote applies in that workspace. Failed policies can pause or prevent an apply, depending on the enforcement level. Refer to [Policy Enforcement](/terraform/enterprise/policy-enforcement) for details.
+
+For Sentinel, the Terraform CLI prints policy results for CLI-driven runs. CLI support for policy results is not available for OPA.
+
+The following example shows Sentinel policy output in the terminal.
+
+    $ terraform apply
+
+    [...]
+
+    Plan: 1 to add, 0 to change, 1 to destroy.
+
+    ------------------------------------------------------------------------
+
+    Organization policy check:
+
+    Sentinel Result: false
+
+    Sentinel evaluated to false because one or more Sentinel policies evaluated
+    to false. This false was not due to an undefined value or runtime error.
+
+    1 policies evaluated.
+    ## Policy 1: my-policy.sentinel (soft-mandatory)
+
+    Result: false
+
+    FALSE - my-policy.sentinel:1:1 - Rule "main"
+
+    Do you want to override the soft failed policy check?
+      Only 'override' will be accepted to override.
+
+      Enter a value: override
+
+## Options for Plans and Applies
+
+[Run Modes and Options](/terraform/enterprise/workspaces/run/modes-and-options) contains more details about the various options available for plans and applies when you use the CLI-driven workflow.
+
+## Networking/Connection Issues
+
+Sometimes during a CLI-driven run, errors relating to network connectivity issues arise. Examples of these kinds of errors include:
+
+-   `Client.Timeout exceeded while awaiting headers`
+-   `context deadline exceeded`
+-   `TLS handshake timeout`
+
+Sometimes there are network problems beyond our control. If you have network errors, verify your network connection is operational. Then, check the following common configuration settings:
+
+-   Determine if any firewall software on your system blocks the `terraform` command and explicitly approve it.
+-   Verify that you have a valid DNS server IP address.
+-   Remove any expired TLS certificates for your system.
