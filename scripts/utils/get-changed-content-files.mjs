@@ -23,9 +23,19 @@ const GIT_STATUS = {
  */
 function buildChangedContentFiles() {
 	// In CI (GitHub Actions), BASE_SHA is set from github.event.pull_request.base.sha.
-	const mergeBase = execSync('git merge-base HEAD origin/main', {
-		encoding: 'utf-8',
-	}).trim()
+	// When the PR targets a non-main branch, BASE_SHA is the tip of that branch — not a
+	// point on main. To capture all changes since the branch chain diverged from main
+	// (not just changes in this PR), find the merge base of BASE_SHA and origin/main.
+	let mergeBase
+	if (process.env.BASE_SHA) {
+		mergeBase = execSync(`git merge-base ${process.env.BASE_SHA} origin/main`, {
+			encoding: 'utf-8',
+		}).trim()
+	} else {
+		mergeBase = execSync('git merge-base HEAD origin/main', {
+			encoding: 'utf-8',
+		}).trim()
+	}
 
 	// Get the diff between the merge base and HEAD.
 	const diffOutput = execSync(
