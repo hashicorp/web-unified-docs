@@ -22,13 +22,12 @@ const GIT_STATUS = {
  * then returns the list of changed files grouped by status.
  */
 function buildChangedContentFiles() {
-	// In CI (GitHub Actions), BASE_SHA is set from github.event.pull_request.base.sha.
-	let mergeBase = process.env.BASE_SHA
-	if (!mergeBase) {
-		mergeBase = execSync('git merge-base HEAD origin/main', {
-			encoding: 'utf-8',
-		}).trim()
-	}
+	// Find where the current branch chain diverged from origin/main. Using HEAD (rather
+	// than BASE_SHA) means this works correctly even when the PR targets a non-main branch —
+	// all accumulated changes since the branch chain left main are included.
+	const mergeBase = execSync('git merge-base HEAD origin/main', {
+		encoding: 'utf-8',
+	}).trim()
 
 	// Get the diff between the merge base and HEAD.
 	const diffOutput = execSync(
