@@ -20,12 +20,9 @@ Examples include:
 
 - Allow autoscaling only during business hours.
 - Use more aggressive scaling during peak traffic windows.
-- Apply a temporary fixed-size override for a known event.
 - Disable a specific check outside a planned maintenance window.
 
-Schedules are evaluated in UTC and use strict 5-field cron expressions.
-
-## What this feature adds
+## Overview
 
 Schedule support is available at two levels:
 
@@ -41,13 +38,14 @@ A schedule supports two forms:
 
 ## How schedules work
 
+Schedules behave differently depending on whether you apply them at the policy level or the check level.
+
 ### Policy-level schedule
 
 When a policy has a `schedule` block:
 
-- The Autoscaler continues running normally.
-- Outside the active schedule window, the policy evaluation has no effect.
-- No scaling action is taken for that policy outside its active window.
+- The autoscaler continues running normally.
+- Outside the active schedule window, the policy has no effect.
 
 Use a policy-level schedule when the whole policy should only matter during a
 specific recurring window.
@@ -56,9 +54,9 @@ specific recurring window.
 
 When an individual check has a `schedule` block:
 
-- The check is evaluated only while its schedule is active.
-- Outside the schedule window, that check is ignored for the current
-  evaluation cycle.
+- The autoscaler evaluates the check only while its schedule is active.
+- Outside the schedule window, the autoscaler ignores that check for the
+  current evaluation cycle.
 - Other checks in the same policy can still run and determine the final action.
 
 Use a check-level schedule when you want different scaling behavior at
@@ -66,13 +64,7 @@ different times of day without disabling the whole policy.
 
 ## Important behavior
 
-A check outside its schedule window does not participate in winner selection.
-
-That means the check:
-
-- Does not behave like a `ScaleNone` action.
-- Does not block another active check.
-- Is treated as if it did not take part in that evaluation cycle.
+A check outside its schedule window is excluded from the scaling decision for that cycle and does not block another active check.
 
 If all checks in a policy are inactive because they are outside their schedule
 windows, the policy produces no scaling action.
@@ -83,10 +75,12 @@ A schedule block can be defined in either form:
 
 ```hcl
 schedule {
-  start = "0 9 * * 1-5"
-  end   = "0 17 * * 1-5"
+  start = "0 9 * * MON-FRI"
+  end   = "0 17 * * MON-FRI"
 }
 ```
+
+Use `duration` instead of `end` to define the window length as a relative offset from `start`:
 
 ```hcl
 schedule {
@@ -113,7 +107,6 @@ A valid schedule must follow all of these rules:
 - Only one `schedule` block is allowed per `check` block.
 - `start` and `end` must use strict 5-field cron format.
 - `duration` must be a valid positive duration.
-- Schedule times are evaluated in UTC.
 
 ## Cron format
 
@@ -126,19 +119,21 @@ minute hour day-of-month month day-of-week
 Examples:
 
 - `0 9 * * *` means every day at 09:00 UTC.
-- `30 18 * * 1-5` means Monday to Friday at 18:30 UTC.
+- `30 18 * * MON-FRI` means Monday to Friday at 18:30 UTC.
 - `0 0 1 * *` means the first day of every month at 00:00 UTC.
 
 Schedules do not use seconds and do not use a year field.
 
 ## UTC behavior
 
-All schedules are evaluated in UTC.
+The autoscaler evaluates all schedules in UTC.
 
 If your team thinks in local time, convert your intended schedule to UTC before
 writing the policy. This is important around daylight saving time.
 
 ## Examples
+
+The following examples show common ways to use schedule blocks in autoscaling policies.
 
 ### Restrict an entire policy to business hours
 
@@ -153,8 +148,8 @@ scaling "web_policy" {
 
   policy {
     schedule {
-      start = "0 9 * * 1-5"
-      end   = "0 17 * * 1-5"
+      start = "0 9 * * MON-FRI"
+      end   = "0 17 * * MON-FRI"
     }
 
     check "cpu" {
@@ -169,7 +164,7 @@ scaling "web_policy" {
 }
 ```
 
-Behavior:
+The schedule produces the following behavior:
 
 - Inside the schedule window, the policy evaluates normally.
 - Outside the schedule window, the policy has no effect.
@@ -200,8 +195,8 @@ scaling "api_policy" {
       query  = "sum(rate(requests_total[5m]))"
 
       schedule {
-        start = "0 15 * * 1-5"
-        end   = "0 20 * * 1-5"
+        start = "0 15 * * MON-FRI"
+        end   = "0 20 * * MON-FRI"
       }
 
       strategy "target-value" {
@@ -212,77 +207,8 @@ scaling "api_policy" {
 }
 ```
 
-Behavior:
+The schedule produces the following behavior:
 
 - The baseline check is always active.
 - The peak-hours check participates only during its schedule window.
 - Outside that window, the peak-hours check is ignored.
-
-### Use a scheduled fixed-value override
-
-This example keeps normal autoscaling and adds a fixed-value check for a known
-window.
-
-```hcl
-scaling "launch_policy" {
-  enabled = true
-  min     = 2
-  max     = 50
-
-  policy {
-    check "baseline_cpu" {
-      source = "prometheus"
-      query  = "avg(cpu_usage)"
-
-      strategy "target-value" {
-        target = 70
-      }
-    }
-
-    check "launch_override" {
-      schedule {
-        start    = "0 16 * * *"
-        duration = "2h"
-      }
-
-      strategy "fixed-value" {
-        value = 30
-      }
-    }
-  }
-}
-```
-
-Behavior:
-
-- Baseline autoscaling remains active.
-- During the launch window, the fixed-value check also participates.
-- Outside the launch window, the fixed-value check is ignored.
-
-`fixed-value` does not require a metric query, so `source` and `query` are not
-needed for that check.
-
-## Troubleshooting
-
-### My schedule is rejected
-
-Check for common mistakes:
-
-- Missing `start`.
-- Defining both `end` and `duration`.
-- Defining neither `end` nor `duration`.
-- Defining multiple `schedule` blocks in one `policy` or one `check`.
-- Using 6-field cron instead of strict 5-field cron.
-- Using an invalid duration such as `0s` or malformed values.
-
-### The policy does not scale outside a schedule window
-
-This is expected when:
-
-- A policy-level schedule is inactive.
-- All checks in the policy are outside their schedule windows.
-
-### A check is not affecting the final result
-
-A check outside its schedule window is ignored for that cycle. It does not cast
-`ScaleNone` and does not block active checks.
