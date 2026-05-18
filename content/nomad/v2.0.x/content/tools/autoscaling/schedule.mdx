@@ -1,0 +1,215 @@
+---
+layout: docs
+page_title: Schedule-based autoscaling
+description: >-
+  Use schedules to control when an autoscaling policy or individual check has
+  effect.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-04-20T00:00:00-00:00
+last_modified: 2026-04-20T00:00:00-00:00
+# END AUTO GENERATED METADATA
+---
+
+# Schedule-based autoscaling
+
+Schedule-based autoscaling lets you control when a policy, or an individual
+check in a policy, is allowed to have effect.
+
+This is useful when scaling behavior depends on time as well as metrics.
+Use cases include the following:
+
+- Allowing autoscaling only during business hours.
+- Using more aggressive scaling during peak traffic windows.
+- Disabling a specific check outside a planned maintenance window.
+
+## Overview
+
+Schedule support is available at two levels:
+
+- Policy-level schedule: controls when the entire policy has effect.
+- Check-level schedule: controls when one specific check has effect.
+
+A schedule supports two forms:
+
+- `start` + `end`: Use cron expressions to define the start and end boundaries
+  of a recurring window.
+- `start` + `duration`: Use a cron expression for the start time and a
+  relative duration such as `30m` or `8h`.
+
+## How schedules work
+
+Schedules behave differently depending on whether you apply them at the policy level or the check level.
+
+### Policy-level schedule
+
+When a policy has a `schedule` block:
+
+- The autoscaler continues running normally.
+- Outside the active schedule window, the policy has no effect.
+
+Use a policy-level schedule when the whole policy should only matter during a
+specific recurring window.
+
+### Check-level schedule
+
+When an individual check has a `schedule` block:
+
+- The autoscaler evaluates the check only while its schedule is active.
+- Outside the schedule window, the autoscaler ignores that check for the
+  current evaluation cycle.
+- Other checks in the same policy can still run and determine the final action.
+
+Use a check-level schedule when you want different scaling behavior at
+different times of day without disabling the whole policy.
+
+## Important behavior
+
+A check outside its schedule window is excluded from the scaling decision for that cycle and does not block another active check.
+
+If all checks in a policy are inactive because they are outside their schedule
+windows, the policy produces no scaling action.
+
+## Schedule syntax
+
+A schedule block can be defined in either form:
+
+```hcl
+schedule {
+  start = "0 9 * * MON-FRI"
+  end   = "0 17 * * MON-FRI"
+}
+```
+
+Use `duration` instead of `end` to define the window length as a relative offset from `start`:
+
+```hcl
+schedule {
+  start    = "30 13 * * *"
+  duration = "90m"
+}
+```
+
+### Fields
+
+- `start` - Required. A strict 5-field cron expression.
+- `end` - Optional. A strict 5-field cron expression. Use this instead of
+  `duration`.
+- `duration` - Optional. A Go `time.Duration` string such as `30m`, `1h`, or
+  `8h`. Use this instead of `end`.
+
+### Validation rules
+
+A valid schedule must follow all of these rules:
+
+- `start` is required.
+- Define exactly one of `end` or `duration`.
+- Only one `schedule` block is allowed per `policy` block.
+- Only one `schedule` block is allowed per `check` block.
+- `start` and `end` must use strict 5-field cron format.
+- `duration` must be a valid positive duration.
+
+## Cron format
+
+Schedules use strict 5-field cron expressions:
+
+```text
+minute hour day-of-month month day-of-week
+```
+
+Examples:
+
+- `0 9 * * *` means every day at 09:00 UTC.
+- `30 18 * * MON-FRI` means Monday to Friday at 18:30 UTC.
+- `0 0 1 * *` means the first day of every month at 00:00 UTC.
+
+Schedules do not use seconds and do not use a year field.
+
+## UTC behavior
+
+The autoscaler evaluates all schedules in UTC.
+
+If your team thinks in local time, convert your intended schedule to UTC before
+writing the policy. This is important if your location observes daylight saving
+time.
+
+## Examples
+
+The following examples show common ways to use schedule blocks in autoscaling policies.
+
+### Restrict an entire policy to business hours
+
+This example allows the policy to have effect only on weekdays from 09:00 to
+17:00 UTC.
+
+```hcl
+scaling "web_policy" {
+  enabled = true
+  min     = 2
+  max     = 20
+
+  policy {
+    schedule {
+      start = "0 9 * * MON-FRI"
+      end   = "0 17 * * MON-FRI"
+    }
+
+    check "cpu" {
+      source = "prometheus"
+      query  = "avg(cpu_usage)"
+
+      strategy "target-value" {
+        target = 70
+      }
+    }
+  }
+}
+```
+
+The schedule produces the following behavior:
+
+- Inside the schedule window, the policy evaluates normally.
+- Outside the schedule window, the policy has no effect.
+
+### Add a scheduled check during peak hours
+
+This example keeps a baseline check always active and adds a second check that
+participates only during peak hours.
+
+```hcl
+scaling "api_policy" {
+  enabled = true
+  min     = 2
+  max     = 30
+
+  policy {
+    check "baseline_cpu" {
+      source = "prometheus"
+      query  = "avg(cpu_usage)"
+
+      strategy "target-value" {
+        target = 70
+      }
+    }
+
+    check "peak_requests" {
+      source = "prometheus"
+      query  = "sum(rate(requests_total[5m]))"
+
+      schedule {
+        start = "0 15 * * MON-FRI"
+        end   = "0 20 * * MON-FRI"
+      }
+
+      strategy "target-value" {
+        target = 300
+      }
+    }
+  }
+}
+```
+
+The schedule produces the following behavior:
+
+- The baseline check is always active.
+- The peak-hours check participates only during its schedule window.
+- Outside that window, the peak-hours check is ignored.
