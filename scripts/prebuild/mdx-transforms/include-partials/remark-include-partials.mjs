@@ -4,10 +4,37 @@
  */
 
 import fs from 'fs'
-import path from 'node:path'
+import path, { resolve, join, relative, isAbsolute } from 'node:path'
 
 import remark from 'remark'
 import flatMap from 'unist-util-flatmap'
+
+/**
+ * Checks if a given path resolves to be inside a specific base directory.
+ *
+ * @param targetPath The path to check (e.g., '../../../../foo.mdx')
+ * @param baseDir The directory it should be inside of
+ * @returns boolean indicating if the target is within the base directory
+ */
+export function isPathInside(targetPath, baseDir) {
+	// Resolve both to absolute paths
+	const absoluteBase = resolve(baseDir)
+	const absoluteTarget = resolve(join(baseDir, targetPath))
+
+	// Get the relative path from the base to the target
+	const relativePath = relative(absoluteBase, absoluteTarget)
+
+	console.log(absoluteTarget.startsWith(absoluteBase), {
+		absoluteBase,
+		absoluteTarget,
+		relativePath,
+	})
+
+	// If the relative path starts with '..' or is an absolute path,
+	// it means the target resolved outside of the base directory.
+	// We also handle the case where the relative path is empty (meaning they are the same directory).
+	return !relativePath.startsWith('..') && !isAbsolute(relativePath)
+}
 
 /**
  * Magic configurable string tokens used to rewrite include paths to partials dirs.
@@ -85,10 +112,12 @@ export function remarkIncludePartialsPlugin({ partialsDir, filePath }) {
 			const [, rawPath] = includeMatch
 			const globalPrefix = PARTIALS_ALIAS.GLOBAL + '/'
 			const isGlobalAlias = rawPath.startsWith(globalPrefix)
-			const resolvedPath = isGlobalAlias ? rawPath.slice(globalPrefix.length) : rawPath
+			const resolvedPath = isGlobalAlias
+				? rawPath.slice(globalPrefix.length)
+				: rawPath
 			let includePath, includeContents
 
-			if(isGlobalAlias){
+			if (isGlobalAlias) {
 				// {{global}} paths resolve only against topLevelPartialsDir — no local fallback,
 				// to prevent name conflicts with product-specific partials.
 				includePath = path.join(topLevelPartialsDir, resolvedPath)
