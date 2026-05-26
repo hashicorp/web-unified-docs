@@ -134,18 +134,15 @@ A\t${TERRAFORM_V1_14_PATH}/docs/partials/alpha.mdx`)
 	})
 
 	it('uses an explicit mergeBase override when provided (forward-port mode)', async () => {
-		const previousBaseSha = process.env.BASE_SHA
-		process.env.BASE_SHA = 'base-sha-from-env'
-
 		vi.mocked(execSync).mockReturnValueOnce(`A\t${TERRAFORM_V1_14_PATH}/docs/new.mdx`)
 
 		const result = await getChangedContentFiles({
-			mergeBase: process.env.BASE_SHA,
+			mergeBase: 'explicit-sha',
 		})
 
 		expect(execSync).toHaveBeenCalledTimes(1)
 		expect(execSync).toHaveBeenCalledWith(
-			'git diff --name-status base-sha-from-env HEAD -- content/',
+			'git diff --name-status explicit-sha HEAD -- content/',
 			{ encoding: 'utf-8' },
 		)
 		expect(result).toEqual({
@@ -153,12 +150,6 @@ A\t${TERRAFORM_V1_14_PATH}/docs/partials/alpha.mdx`)
 			modified: [],
 			removed: [],
 		})
-
-		if (previousBaseSha === undefined) {
-			delete process.env.BASE_SHA
-		} else {
-			process.env.BASE_SHA = previousBaseSha
-		}
 	})
 
 	it('can disable partial fan-out when includePartials is false', async () => {
