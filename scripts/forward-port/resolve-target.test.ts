@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-import { execSync } from 'node:child_process'
+import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -88,34 +88,32 @@ describe('resolve-target', () => {
 		}: { allowFailure?: boolean; commentFile?: string | null } = {},
 	): string {
 		const args = [
-			'node',
-			JSON.stringify(RESOLVE_TARGET_SCRIPT),
+			RESOLVE_TARGET_SCRIPT,
 			'--config',
-			JSON.stringify(configPath),
+			configPath,
 			'--labels',
-			JSON.stringify(JSON.stringify(labels)),
+			JSON.stringify(labels),
 		]
 		if (commentFile) {
-			args.push('--comment-file', JSON.stringify(commentFile))
+			args.push('--comment-file', commentFile)
 		}
-		try {
-			return execSync(args.join(' '), {
-				encoding: 'utf-8',
-				stdio: 'pipe',
-				env: {
-					...process.env,
-					GITHUB_ENV: githubEnvPath,
-				},
-			}).trim()
-		} catch (error: any) {
+		const result = spawnSync('node', args, {
+			encoding: 'utf-8',
+			env: {
+				...process.env,
+				GITHUB_ENV: githubEnvPath,
+			},
+		})
+		if (result.status !== 0) {
 			if (allowFailure) {
-				return [error.stdout?.toString(), error.stderr?.toString()]
+				return [result.stdout, result.stderr]
 					.filter(Boolean)
 					.join('\n')
 					.trim()
 			}
-			throw error
+			throw new Error(result.stderr || result.stdout)
 		}
+		return (result.stdout ?? '').trim()
 	}
 
 	function readGithubEnv(): Record<string, string> {

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-import { execSync } from 'node:child_process'
+import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -29,12 +29,15 @@ describe.sequential('apply-forward-port-changes integration', () => {
 		fs.rmSync(repoPath, { recursive: true, force: true })
 	})
 
-	function runCommand(command: string): string {
-		return execSync(command, {
+	function runCommand(args: string[]): string {
+		const result = spawnSync(args[0], args.slice(1), {
 			cwd: repoPath,
 			encoding: 'utf-8',
-			stdio: 'pipe',
-		}).trim()
+		})
+		if (result.status !== 0) {
+			throw new Error(result.stderr || result.stdout || `Process exited with status ${result.status}`)
+		}
+		return (result.stdout ?? '').trim()
 	}
 
 	function writeRepoFile(relativePath: string, content: string): void {
@@ -76,20 +79,18 @@ describe.sequential('apply-forward-port-changes integration', () => {
 			'utf-8',
 		)
 
-		runCommand(
-			[
-				'node',
-				JSON.stringify(APPLY_FORWARD_PORT_CHANGES_SCRIPT),
-				'--changes-file',
-				JSON.stringify(changesFilePath),
-				'--target-product',
-				'terraform',
-				'--source-version',
-				'v1.14.x',
-				'--target-version',
-				'v1.15.x',
-			].join(' '),
-		)
+		runCommand([
+			'node',
+			APPLY_FORWARD_PORT_CHANGES_SCRIPT,
+			'--changes-file',
+			changesFilePath,
+			'--target-product',
+			'terraform',
+			'--source-version',
+			'v1.14.x',
+			'--target-version',
+			'v1.15.x',
+		])
 
 		expect(readRepoFile('content/terraform/v1.15.x/docs/new.mdx')).toBe(
 			'new source content\n',
@@ -125,20 +126,18 @@ describe.sequential('apply-forward-port-changes integration', () => {
 			'utf-8',
 		)
 
-		runCommand(
-			[
-				'node',
-				JSON.stringify(APPLY_FORWARD_PORT_CHANGES_SCRIPT),
-				'--changes-file',
-				JSON.stringify(changesFilePath),
-				'--target-product',
-				'terraform',
-				'--source-version',
-				'v1.14.x',
-				'--target-version',
-				'v1.15.x',
-			].join(' '),
-		)
+		runCommand([
+			'node',
+			APPLY_FORWARD_PORT_CHANGES_SCRIPT,
+			'--changes-file',
+			changesFilePath,
+			'--target-product',
+			'terraform',
+			'--source-version',
+			'v1.14.x',
+			'--target-version',
+			'v1.15.x',
+		])
 
 		expect(
 			fs.existsSync(path.join(repoPath, 'content/terraform/v1.15.x/docs/tf-file.mdx')),
@@ -167,20 +166,18 @@ describe.sequential('apply-forward-port-changes integration', () => {
 
 		// Should not throw — zero matches is not an error
 		expect(() => {
-			runCommand(
-				[
-					'node',
-					JSON.stringify(APPLY_FORWARD_PORT_CHANGES_SCRIPT),
-					'--changes-file',
-					JSON.stringify(changesFilePath),
-					'--target-product',
-					'terraform',
-					'--source-version',
-					'v1.14.x',
-					'--target-version',
-					'v1.15.x',
-				].join(' '),
-			)
+			runCommand([
+				'node',
+				APPLY_FORWARD_PORT_CHANGES_SCRIPT,
+				'--changes-file',
+				changesFilePath,
+				'--target-product',
+				'terraform',
+				'--source-version',
+				'v1.14.x',
+				'--target-version',
+				'v1.15.x',
+			])
 		}).not.toThrow()
 
 		expect(
@@ -218,20 +215,18 @@ describe.sequential('apply-forward-port-changes integration', () => {
 			'utf-8',
 		)
 
-		runCommand(
-			[
-				'node',
-				JSON.stringify(APPLY_FORWARD_PORT_CHANGES_SCRIPT),
-				'--changes-file',
-				JSON.stringify(changesFilePath),
-				'--target-product',
-				'vault',
-				'--source-version',
-				'v1.14.x',
-				'--target-version',
-				'v1.15.x',
-			].join(' '),
-		)
+		runCommand([
+			'node',
+			APPLY_FORWARD_PORT_CHANGES_SCRIPT,
+			'--changes-file',
+			changesFilePath,
+			'--target-product',
+			'vault',
+			'--source-version',
+			'v1.14.x',
+			'--target-version',
+			'v1.15.x',
+		])
 
 		// Vault changes should be applied
 		expect(readRepoFile('content/vault/v1.15.x/docs/new.mdx')).toBe('vault new\n')
@@ -273,20 +268,18 @@ describe.sequential('apply-forward-port-changes integration', () => {
 			'utf-8',
 		)
 
-		runCommand(
-			[
-				'node',
-				JSON.stringify(APPLY_FORWARD_PORT_CHANGES_SCRIPT),
-				'--changes-file',
-				JSON.stringify(changesFilePath),
-				'--target-product',
-				'terraform',
-				'--source-version',
-				'v1.14.x',
-				'--target-version',
-				'v1.15.x',
-			].join(' '),
-		)
+		runCommand([
+			'node',
+			APPLY_FORWARD_PORT_CHANGES_SCRIPT,
+			'--changes-file',
+			changesFilePath,
+			'--target-product',
+			'terraform',
+			'--source-version',
+			'v1.14.x',
+			'--target-version',
+			'v1.15.x',
+		])
 
 		// terraform/ file should be ported
 		expect(

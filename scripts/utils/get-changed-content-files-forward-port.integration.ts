@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-import { execSync } from 'node:child_process'
+import { execSync, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -37,6 +37,18 @@ describe.sequential('get-changed-content-files CLI integration', () => {
 		}).trim()
 	}
 
+	function runScript(args: string[], extraEnv: Record<string, string> = {}): string {
+		const result = spawnSync(args[0], args.slice(1), {
+			cwd: repoPath,
+			encoding: 'utf-8',
+			env: { ...process.env, ...extraEnv },
+		})
+		if (result.status !== 0) {
+			throw new Error(result.stderr || result.stdout || `Process exited with status ${result.status}`)
+		}
+		return (result.stdout ?? '').trim()
+	}
+
 	function writeRepoFile(relativePath: string, content: string): void {
 		const absolutePath = path.join(repoPath, relativePath)
 		fs.mkdirSync(path.dirname(absolutePath), { recursive: true })
@@ -62,18 +74,19 @@ describe.sequential('get-changed-content-files CLI integration', () => {
 		writeRepoFile('content/terraform/v1.14.x/docs/new.mdx', 'new\n')
 		writeRepoFile('content/terraform/v1.14.x/docs/partials/alpha.mdx', 'alpha changed\n')
 		runCommand('git add content/terraform/v1.14.x/docs/new.mdx content/terraform/v1.14.x/docs/partials/alpha.mdx')
+		runCommand('git commit -qm "forward-port changes"')
 
-		runCommand(
+		runScript(
 			[
-				`BASE_SHA=${baseSha}`,
 				'node',
-				JSON.stringify(GET_CHANGED_CONTENT_FILES_SCRIPT),
+				GET_CHANGED_CONTENT_FILES_SCRIPT,
 				'--merge-base',
 				baseSha,
 				'--include-partials=false',
 				'--output',
-				JSON.stringify(outputPath),
-			].join(' '),
+				outputPath,
+			],
+			{ BASE_SHA: baseSha },
 		)
 
 		expect(fs.existsSync(outputPath)).toBe(true)
