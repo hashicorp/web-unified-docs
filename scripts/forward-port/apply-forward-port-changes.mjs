@@ -5,21 +5,29 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { program } from 'commander'
+import { parseArgs } from 'node:util'
 
-program
-	.requiredOption('--changes-file <path>', 'Path to changedContentFiles.json')
-	.requiredOption('--target-product <product>', 'Target product, e.g. vault, boundary, etc.')
-	.requiredOption('--source-version <version>', 'Source version directory segment, e.g. v1.14.x')
-	.requiredOption('--target-version <version>', 'Target version directory segment, e.g. v1.15.x')
-	.option(
-		'--source-dir <path>',
-		'Base directory to read source files from (default: current working directory). ' +
-			'Use this when the source files were saved to a temp location before switching checkouts.',
-	)
-	.parse()
+const { values } = parseArgs({
+	options: {
+		'changes-file': { type: 'string' },
+		'target-product': { type: 'string' },
+		'source-version': { type: 'string' },
+		'target-version': { type: 'string' },
+		'source-dir': { type: 'string' },
+	},
+	strict: true,
+})
 
-const { changesFile, targetProduct, sourceVersion, targetVersion, sourceDir } = program.opts()
+if (!values['changes-file'] || !values['target-product'] || !values['source-version'] || !values['target-version']) {
+	console.error('Error: --changes-file, --target-product, --source-version, and --target-version are required')
+	process.exit(1)
+}
+
+const changesFile = values['changes-file']
+const targetProduct = values['target-product']
+const sourceVersion = values['source-version']
+const targetVersion = values['target-version']
+const sourceDir = values['source-dir']
 
 
 
