@@ -3,15 +3,15 @@ name: Forward Port PR
 on:
   workflow_dispatch:
     inputs:
-      sourceBranch:
-        description: 'The branch to forward-port from'
+      prNumber:
+        description: 'Number of the already-merged PR to forward-port'
         required: true
-      targetBranch:
-        description: 'The branch to forward-port to'
-        required: true
-      targetVersion:
-        description: 'The target version for the forward-port'
-        required: true
+      labelSlug:
+        description: 'Config slug to look up (e.g. vault-next). Use this OR overrideJson, not both.'
+        required: false
+      overrideJson:
+        description: 'JSON object with routing fields, e.g. {"sourceVersionFolder":"v1.0.0","targetProduct":"Vault","targetBranch":"vault-next","targetVersionFolder":"v1.1.0"}. Use this OR labelSlug, not both.'
+        required: false
 
   pull_request:
     types:
@@ -28,12 +28,10 @@ jobs:
     if: |
       github.event_name == 'workflow_dispatch' ||
       (github.event.pull_request.merged == true &&
-      contains(github.event.pull_request.labels.*.name, 'forward-port'))
+      contains(join(github.event.pull_request.labels.*.name, ' '), 'forward-port:'))
     runs-on: ubuntu-latest
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      TARGET_BRANCH: ${{ inputs.targetBranch }}
-      TARGET_VERSION: ${{ inputs.targetVersion }}
 
       MERGED_SHA: ${{ github.event.pull_request.merge_commit_sha }}
       SOURCE_PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -42,19 +40,34 @@ jobs:
       SOURCE_PR_AUTHOR: ${{ github.event.pull_request.user.login }}
 
     steps:
-      - name: Derive source PR details in workflow_dispatch
+      # Gotta validate the inputs for the manual dispatch process so there's no confusion about where to read forward-port info from
+      - name: Validate workflow_dispatch inputs
         if: github.event_name == 'workflow_dispatch'
         run: |
-          PR_JSON="$(gh pr list \
+          if [ -n "${{ inputs.labelSlug }}" ] && [ -n "${{ inputs.overrideJson }}" ]; then
+            echo "::error::Provide either labelSlug or overrideJson, not both."
+            exit 1
+          fi
+          if [ -z "${{ inputs.labelSlug }}" ] && [ -z "${{ inputs.overrideJson }}" ]; then
+            echo "::error::Provide either labelSlug (to pull routing from config) or overrideJson (raw routing fields)."
+            exit 1
+          fi
+
+      - name: Derive source PR details from prNumber (workflow_dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          PR_JSON="$(gh pr view '${{ inputs.prNumber }}' \
             --repo "${{ github.repository }}" \
-            --base "${{ inputs.sourceBranch }}" \
-            --state merged \
-            --limit 3 \
-            --json number,title,url,mergeCommitSha,author,mergedAt \
-            --jq 'sort_by(.mergedAt) | reverse | .[0]')"
+            --json number,title,url,mergeCommitSha,author,state)"
 
           if [ -z "${PR_JSON}" ] || [ "${PR_JSON}" = "null" ]; then
-            echo "::error::No recently merged PR found on branch ${{ inputs.sourceBranch }}"
+            echo "::error::PR #${{ inputs.prNumber }} not found."
+            exit 1
+          fi
+
+          PR_STATE="$(echo "${PR_JSON}" | jq -r '.state')"
+          if [ "${PR_STATE}" != "MERGED" ]; then
+            echo "::error::PR #${{ inputs.prNumber }} is not merged (state: ${PR_STATE})."
             exit 1
           fi
 
@@ -66,51 +79,149 @@ jobs:
             echo "SOURCE_PR_AUTHOR=$(echo "${PR_JSON}" | jq -r '.author.login')"
           } >> "$GITHUB_ENV"
 
-      - name: Resolve TARGET_BRANCH and TARGET_VERSION from PR labels
+      # Check out at the merge commit so that (a) the forward-port scripts exist
+      # on disk and (b) the source-version content files are present for diffing.
+      - name: Check out at merge commit
+        uses: actions/checkout@0ad4b8fadaa221de15dcec353f45205ec38ea70b # v4.1.4
+        with:
+          ref: ${{ env.MERGED_SHA }}
+          fetch-depth: 0
+
+      # ******************************************************************************************
+      # ************ If the PR was merged (forward-port gha not manually dispatched): ************
+      # ******************************************************************************************
+      # PR event: resolve routing from the forward-port:* label + config.
+      # In the situation that this is running automatically after the PR has been merged, if the slug is 
+      # not in the config, falls back to a /forward-port comment on the PR. This is necessary
+      # to not leak information on unreleased content
+      # The comment must start with "/forward-port forward-port:<slug>" to be matched.
+      # Writes TARGET_BRANCH, SOURCE_VERSION_FOLDER, TARGET_VERSION_FOLDER, TARGET_PRODUCT to GITHUB_ENV.
+      - name: Resolve routing from PR labels
         if: github.event_name != 'workflow_dispatch'
         run: |
-          CONFIG_FILE="/tmp/forward-port-config.yml"
-          CONFIG_BRANCH="rn-forward-porting-test-ga"
+          LABELS_JSON='${{ toJSON(github.event.pull_request.labels.*.name) }}'
 
-          # Fetch config from the config branch
-          gh api "repos/${{ github.repository }}/contents/.github/forward-port-config.yml?ref=${CONFIG_BRANCH}" \
-            --header "Accept: application/vnd.github.raw" > "${CONFIG_FILE}"
-
-          # Get all label names from the merged PR
-          PR_LABELS=$(echo '${{ toJSON(github.event.pull_request.labels.*.name) }}' | jq -r '.[]')
-
-          # Install yq for parsing the config file
-          wget https://github.com/mikefarah/yq/releases/download/v4.53.2/yq_linux_amd64 -O /usr/local/bin/yq
-          chmod +x /usr/local/bin/yq
-
-          MATCHED=""
-          while IFS= read -r LABEL; do
-            # Look up the label as a top-level key in the config
-            TARGET_BRANCH=$(yq e ".\"${LABEL}\".targetBranch // \"\"" "${CONFIG_FILE}")
-            TARGET_VERSION=$(yq e ".\"${LABEL}\".targetVersion // \"\"" "${CONFIG_FILE}")
-
-            if [ -n "${TARGET_BRANCH}" ] && [ -n "${TARGET_VERSION}" ]; then
-              echo "Matched label '${LABEL}' → targetBranch=${TARGET_BRANCH}, targetVersion=${TARGET_VERSION}"
-              {
-                echo "TARGET_BRANCH=${TARGET_BRANCH}"
-                echo "TARGET_VERSION=${TARGET_VERSION}"
-              } >> "$GITHUB_ENV"
-              MATCHED="true"
-              break
-            fi
-          done <<< "${PR_LABELS}"
-
-          if [ -z "${MATCHED}" ]; then
-            echo "::error::No PR label matched a product in ${CONFIG_FILE}. Labels found: ${PR_LABELS}"
+          # Guard: exactly one forward-port:* label must be present.
+          FP_LABEL_COUNT=$(echo "${LABELS_JSON}" | jq '[.[] | select(startswith("forward-port:"))] | length')
+          if [ "${FP_LABEL_COUNT}" -gt 1 ]; then
+            FP_LABELS=$(echo "${LABELS_JSON}" | jq -r '[.[] | select(startswith("forward-port:"))] | join(", ")')
+            echo "::error::Multiple forward-port:* labels found: ${FP_LABELS}. Remove all but one and re-run."
+            gh pr comment "${SOURCE_PR_NUMBER}" \
+              --body "@${SOURCE_PR_AUTHOR} :x: Forward-port failed: multiple \`forward-port:*\` labels found (\`${FP_LABELS}\`). Remove all but one and re-run the workflow." \
+              --create-if-none \
+              --edit-last || true
             exit 1
           fi
 
+          SLUG=$(echo "${LABELS_JSON}" | jq -r '.[] | select(startswith("forward-port:"))' | sed 's/^forward-port://')
+
+          CONFIG_FILE="/tmp/forward-port-config.yml"
+          CONFIG_BRANCH="rn-forward-porting-test-ga"
+
+          gh api "repos/${{ github.repository }}/contents/.github/forward-port-config.yml?ref=${CONFIG_BRANCH}" \
+            --header "Accept: application/vnd.github.raw" > "${CONFIG_FILE}"
+
+          # Fetch the /forward-port comment for this specific slug, if one exists.
+          # The comment must start with "/forward-port forward-port:<slug>" to be matched.
+          COMMENT_FILE="/tmp/forward-port-comment.txt"
+          gh api "repos/${{ github.repository }}/issues/${SOURCE_PR_NUMBER}/comments" \
+            --jq "[.[] | select(.body | startswith(\"/forward-port forward-port:${SLUG}\"))] | last | .body // empty" \
+            > "${COMMENT_FILE}" 2>/dev/null || true
+
+          RESOLVE_ARGS="--config ${CONFIG_FILE} --labels '${LABELS_JSON}'"
+          if [ -s "${COMMENT_FILE}" ]; then
+            RESOLVE_ARGS="${RESOLVE_ARGS} --comment-file ${COMMENT_FILE}"
+          fi
+
+          node scripts/forward-port/resolve-target.mjs ${RESOLVE_ARGS}
+
+      # ***********************************************************************
+      # ************ If forward-port gha was manually dispatched): ************
+      # ***********************************************************************
+      # workflow_dispatch path: routing comes from overrideJson, labelSlug (config lookup),
+      # workflow_dispatch: routing comes from explicit inputs only — no comment lookup- too much of
+      # a headache to try to flesh out right now for this situation because in this case the manual
+      # dispatch is expected to be ran multiple times on the same PR
+      # For example, imagine a repo sync PR that contains changes lots of different teams want 
+      # forward-ported, then they will run the manual dispatch multiple times on the same PR
+      # that's already been merged.
+      # Either overrideJson (raw fields written directly to GITHUB_ENV) or labelSlug
+      # (config lookup only) must be provided. Validated by the first step in the job.
+      - name: Resolve routing for workflow_dispatch
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          if [ -n "${{ inputs.overrideJson }}" ]; then
+            # Parse the JSON object and write fields directly to GITHUB_ENV.
+            echo '${{ inputs.overrideJson }}' | jq -r '
+              "TARGET_BRANCH=" + .targetBranch,
+              "SOURCE_VERSION_FOLDER=" + .sourceVersionFolder,
+              "TARGET_VERSION_FOLDER=" + .targetVersionFolder,
+              "TARGET_PRODUCT=" + .targetProduct
+            ' >> "$GITHUB_ENV"
+          else
+            # labelSlug: look up the slug in the config file. No comment fallback search for now.
+            CONFIG_FILE="/tmp/forward-port-config.yml"
+            CONFIG_BRANCH="rn-forward-porting-test-ga"
+
+            gh api "repos/${{ github.repository }}/contents/.github/forward-port-config.yml?ref=${CONFIG_BRANCH}" \
+              --header "Accept: application/vnd.github.raw" > "${CONFIG_FILE}"
+
+            node scripts/forward-port/resolve-target.mjs \
+              --config "${CONFIG_FILE}" \
+              --labels "[\"forward-port:${{ inputs.labelSlug }}\"]"
+          fi
+
+      # After grabbing the necessary routing info from the config/comment, validate the info
       - name: Verify target branch exists
         run: |
           if ! gh api "repos/${{ github.repository }}/branches/${TARGET_BRANCH}" --silent 2>/dev/null; then
             echo "::error::Target branch '${TARGET_BRANCH}' does not exist"
+            gh pr comment "${SOURCE_PR_NUMBER}" \
+              --body "@${SOURCE_PR_AUTHOR} :x: Forward-port failed: target branch \`${TARGET_BRANCH}\` does not exist on this repo. Please check the config or your \`/forward-port\` comment." \
+              --create-if-none \
+              --edit-last || true
             exit 1
           fi
+
+      # Determine the correct diff base SHA.
+      # - PR event:          use github.event.pull_request.base.sha (the state of the
+      #                      repo before the PR's commits landed; origin/main has already
+      #                      advanced past this point after the merge, so we cannot use
+      #                      git merge-base HEAD origin/main here).
+      # - workflow_dispatch: use the first parent of MERGED_SHA (same concept,
+      #                      reconstructed from git history).
+      - name: Compute diff base SHA
+        id: diff-base
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "sha=$(git rev-parse "${MERGED_SHA}^1")" >> "$GITHUB_OUTPUT"
+          else
+            echo "sha=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Get changed content files from source PR
+        run: |
+          node scripts/utils/get-changed-content-files-cli.mjs \
+            --merge-base "${{ steps.diff-base.outputs.sha }}" \
+            --include-partials false \
+            --output /tmp/changedContentFiles.json || {
+            gh pr comment "${SOURCE_PR_NUMBER}" \
+              --body "@${SOURCE_PR_AUTHOR} :x: Forward-port failed while computing changed files. Check the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details." \
+              --create-if-none \
+              --edit-last || true
+            exit 1
+          }
+
+      # Copy the changed source-version files to a temp location before the
+      # working directory is replaced by the target-branch checkout below.
+      - name: Save source files for forward-porting
+        run: |
+          jq -r '(.added + .modified)[]' /tmp/changedContentFiles.json | \
+          while IFS= read -r f; do
+            dest="/tmp/forward-port-source/${f}"
+            mkdir -p "$(dirname "${dest}")"
+            [ -f "${f}" ] && cp "${f}" "${dest}"
+          done
 
       - name: Check out target branch
         uses: actions/checkout@0ad4b8fadaa221de15dcec353f45205ec38ea70b # v4.1.4
@@ -148,29 +259,56 @@ jobs:
             exit 1
           fi
 
-      - name: Cherry-pick merged commit
-        id: cherry-pick
+      # Apply changed files from the source version directory to the target
+      # version directory, rewriting the version segment in each relevant path.
+      # SOURCE_VERSION_FOLDER comes from resolve-target (PR event) or workflow_dispatch inputs.
+      # Source files were saved to /tmp before the target-branch checkout.
+      - name: Apply forward-port changes
         run: |
-          PARENT_COUNT="$(git rev-list --parents -n 1 "${MERGED_SHA}" | wc -w | tr -d ' ')"
-          if [ "${PARENT_COUNT}" -gt 2 ]; then
-            git cherry-pick -m 1 "${MERGED_SHA}"
-          else
-            git cherry-pick "${MERGED_SHA}"
+          if [ -z "${SOURCE_VERSION_FOLDER}" ]; then
+            echo "::error::SOURCE_VERSION_FOLDER is not set — check resolve-target step or workflow_dispatch inputs"
+            gh pr comment "${SOURCE_PR_NUMBER}" \
+              --body "@${SOURCE_PR_AUTHOR} :x: Forward-port failed: \`SOURCE_VERSION_FOLDER\` was not set. This is a bug — please file an issue." \
+              --create-if-none \
+              --edit-last || true
+            exit 1
           fi
 
-      - name: Notify author of cherry-pick failure
-        if: failure() && steps.cherry-pick.outcome == 'failure'
-        run: |
-          gh pr comment "${SOURCE_PR_NUMBER}" \
-            --body "@${SOURCE_PR_AUTHOR} Cherry-pick of merge commit \`${MERGED_SHA}\` to \`${TARGET_BRANCH}\` failed due to conflicts. Please forward-port manually." \
-            --create-if-none \
-            --edit-last
+          node scripts/forward-port/apply-forward-port-changes.mjs \
+            --changes-file /tmp/changedContentFiles.json \
+            --target-product "${TARGET_PRODUCT}" \
+            --source-version "${SOURCE_VERSION_FOLDER}" \
+            --target-version "${TARGET_VERSION_FOLDER}" \
+            --source-dir /tmp/forward-port-source || {
+            gh pr comment "${SOURCE_PR_NUMBER}" \
+              --body "@${SOURCE_PR_AUTHOR} :x: Forward-port failed while applying changes (\`apply-forward-port-changes.mjs\` exited non-zero). Check the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details." \
+              --create-if-none \
+              --edit-last || true
+            exit 1
+          }
 
-          exit 1
+      - name: Commit forward-port changes
+        run: |
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to commit after forward-port"
+            gh pr comment "${SOURCE_PR_NUMBER}" \
+              --body "@${SOURCE_PR_AUTHOR} :warning: Forward-port ran but produced no file changes. This may mean the source version directory had no matching files. Check the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details." \
+              --create-if-none \
+              --edit-last || true
+            exit 0
+          fi
+          git commit -m "[FORWARD-PORT] PR #${SOURCE_PR_NUMBER}: ${SOURCE_PR_TITLE}"
 
       - name: Push forward-port branch
         run: |
-          git push --set-upstream origin "${{ steps.forward-port-branch.outputs.name }}"
+          git push --set-upstream origin "${{ steps.forward-port-branch.outputs.name }}" || {
+            gh pr comment "${SOURCE_PR_NUMBER}" \
+              --body "@${SOURCE_PR_AUTHOR} :x: Forward-port failed: could not push branch \`${{ steps.forward-port-branch.outputs.name }}\`. Check the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details." \
+              --create-if-none \
+              --edit-last || true
+            exit 1
+          }
 
       - name: Create forward-port pull request
         id: create-pr
@@ -183,7 +321,13 @@ jobs:
             --title "[FORWARD-PORT] #${SOURCE_PR_NUMBER} ${SOURCE_PR_TITLE}" \
             --label "auto-port" \
             --assignee "${SOURCE_PR_AUTHOR}" \
-            --body "${PR_BODY}")"
+            --body "${PR_BODY}")" || {
+            gh pr comment "${SOURCE_PR_NUMBER}" \
+              --body "@${SOURCE_PR_AUTHOR} :x: Forward-port failed: could not create the forward-port PR. Check the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details." \
+              --create-if-none \
+              --edit-last || true
+            exit 1
+          }
           echo "url=${PR_URL}" >> "$GITHUB_OUTPUT"
 
       - name: Comment on source PR
