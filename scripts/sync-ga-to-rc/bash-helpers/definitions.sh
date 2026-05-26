@@ -39,7 +39,6 @@ prBody="Draft PR created by \`sync-ga-to-rc.mjs\` to push recent GA updates to t
 
 
 # Helper function to convert an ISO time string to UTC
-#
 function getUTCDate {
 
   local dateString="${1}"
