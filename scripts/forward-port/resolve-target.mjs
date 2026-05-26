@@ -4,21 +4,25 @@
  */
 
 import fs from 'node:fs'
-import { program } from 'commander'
+import { parseArgs } from 'node:util'
 
-program
-	.requiredOption('--config <path>', 'Path to forward-port-config.yml')
-	.requiredOption(
-		'--labels <json>',
-		'JSON array of PR label name strings, e.g. \'["forward-port:vault-label","auto-merge"]\'',
-	)
-	.option(
-		'--comment-file <path>',
-		'Path to a file containing a /forward-port PR comment (used as fallback when the slug is not in the config)',
-	)
-	.parse()
+const { values } = parseArgs({
+	options: {
+		config: { type: 'string' },
+		labels: { type: 'string' },
+		'comment-file': { type: 'string' },
+	},
+	strict: true,
+})
 
-const { config: configPath, labels: labelsJson, commentFile } = program.opts()
+if (!values.config || !values.labels) {
+	console.error('Error: --config and --labels are required')
+	process.exit(1)
+}
+
+const configPath = values.config
+const labelsJson = values.labels
+const commentFile = values['comment-file']
 
 // --- Read config file ---
 let configText
