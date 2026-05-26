@@ -6,8 +6,6 @@
 import fs from 'fs'
 import path from 'path'
 import { execSync } from 'child_process'
-import { fileURLToPath } from 'url'
-import { program } from 'commander'
 import { getFilesUsingPartial } from './get-files-using-partial.mjs'
 
 const OUTPUT_FILE = './changedContentFiles.json'
@@ -132,18 +130,4 @@ export async function getChangedContentFiles(options = {}) {
 	}
 }
 
-// CLI entrypoint — only runs when this file is executed directly.
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-	program
-		.option('--merge-base <sha>', 'Explicit diff base SHA (skips git merge-base computation)')
-		.option('--include-partials <bool>', 'Fan out partial file changes (default: true)', 'true')
-		.option('--output <path>', 'Override output file path')
-		.parse()
 
-	const opts = program.opts()
-	await getChangedContentFiles({
-		mergeBase: opts.mergeBase,
-		includePartials: opts.includePartials !== 'false',
-		outputFile: opts.output,
-	})
-}
