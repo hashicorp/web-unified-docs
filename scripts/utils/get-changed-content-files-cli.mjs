@@ -3,20 +3,22 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-import { program } from 'commander'
+import { parseArgs } from 'node:util'
 import { getChangedContentFiles } from './get-changed-content-files.mjs'
 
-program
-	.option('--merge-base <sha>', 'Explicit diff base SHA (skips git merge-base computation)')
-	.option('--include-partials <bool>', 'Fan out partial file changes (default: true)', 'true')
-	.option('--output <path>', 'Override output file path')
-	.parse()
+const { values } = parseArgs({
+	options: {
+		'merge-base': { type: 'string' },
+		'include-partials': { type: 'string', default: 'true' },
+		output: { type: 'string' },
+	},
+	strict: true,
+})
 
-const opts = program.opts()
 ;(async () => {
 	await getChangedContentFiles({
-		mergeBase: opts.mergeBase,
-		includePartials: opts.includePartials !== 'false',
-		outputFile: opts.output,
+		mergeBase: values['merge-base'],
+		includePartials: values['include-partials'] !== 'false',
+		outputFile: values.output,
 	})
 })()
