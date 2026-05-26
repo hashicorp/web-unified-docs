@@ -122,7 +122,7 @@ describe('resolve-target', () => {
 			content
 				.split('\n')
 				.filter(Boolean)
-				.map((line) => {
+				.map((line: string) => {
 					const eq = line.indexOf('=')
 					return [line.slice(0, eq), line.slice(eq + 1)]
 				}),
