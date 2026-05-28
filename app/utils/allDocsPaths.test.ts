@@ -62,6 +62,27 @@ test('getDocsPaths should return filtered docs paths when a non-empty productSlu
 	expect(response).toEqual({ ok: true, value: mockValue })
 })
 
+test('getDocsPaths should exclude internal products from sitemap paths', async () => {
+	const metadata = {
+		version: 'v1.14.x',
+		isLatest: false,
+		releaseStage: 'stable',
+	}
+
+	vi.mocked(getProductVersionMetadata).mockReturnValue(Ok(metadata))
+
+	const response = await getDocsPaths(
+		['test-product', 'terraform-plugin-framework'],
+		docsPathsMock,
+	)
+
+	const expectedPaths = Object.values(
+		docsPathsMock['terraform-plugin-framework']['v1.14.x'],
+	).flat()
+
+	expect(response).toEqual({ ok: true, value: expectedPaths })
+})
+
 test('getDocsPaths should return an error if there are no paths for a non-empty productSlugs array', async () => {
 	const mockConsole = vi.spyOn(console, 'error').mockImplementation(() => {})
 
