@@ -14,6 +14,7 @@ import { copyNavDataFiles } from '#scriptUtils/copy-nav-data-files.mjs'
 import { copyRedirectFiles } from '#scriptUtils/copy-redirect-files.mjs'
 import { copyAssetFiles } from '#scriptUtils/copy-asset-files.mjs'
 import { getChangedContentFiles } from '#scriptUtils/get-changed-content-files.mjs'
+import { buildLlmsTxt } from './generate-llms-txt.mjs'
 
 const NUM_OF_MICROSEC_IN_NANOSEC = BigInt('1000')
 
@@ -153,6 +154,9 @@ async function main() {
 		CONTENT_DIR_OUT_ASSETS,
 		incBuild ? changedFiles : null,
 	)
+
+	// Generate llms.txt for all products
+	await buildLlmsTxt(CONTENT_DIR, path.join(CWD, 'public'), versionMetadata)
 
 	if (skipTraceFile) {
 		return
