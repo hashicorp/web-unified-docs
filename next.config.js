@@ -6,6 +6,17 @@
 /** @type {import("next").NextConfig} */
 const nextConfig = {
 	reactStrictMode: true,
+	async headers() {
+		return [
+			{
+				source: '/:path*.md',
+				headers: [
+					{ key: 'X-Robots-Tag', value: 'noindex' },
+					{ key: 'Content-Type', value: 'text/markdown; charset=utf-8' },
+				],
+			},
+		]
+	},
 }
 
 module.exports = nextConfig
