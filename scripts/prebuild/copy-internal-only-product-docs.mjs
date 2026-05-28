@@ -1,3 +1,8 @@
+/**
+ * Copyright IBM Corp. 2024, 2026
+ * SPDX-License-Identifier: BUSL-1.1
+ */
+
 import fs from 'node:fs'
 import path from 'node:path'
 import { listFiles } from '#scriptUtils/list-files.mjs'
