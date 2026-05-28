@@ -387,6 +387,105 @@ Welcome to Boundary docs.
 		})
 	})
 
+	describe('partials are inlined by MDX transform (pre-condition)', () => {
+		it('outputs complete content when reading from transformed source (partials resolved)', async () => {
+			// Simulate post-MDX-transform state: @include directives are already
+			// resolved and the partial content is inlined in the consuming file.
+			writeFixture(
+				'boundary/v0.13.x/content/docs/commands/list.mdx',
+				`---
+page_title: List command
+---
+
+# List
+
+List all resources.
+
+<Tip title="CLI options">
+
+In addition to the command specific options, there are options common to all
+CLI commands and subcommands:
+
+- [Connection options](/boundary/docs/commands/#connection-options)
+- [Client options](/boundary/docs/commands/#client-options)
+
+</Tip>
+`,
+			)
+
+			// The partials directory should still exist but not produce output files
+			writeFixture(
+				'boundary/v0.13.x/content/docs/partials/cmd-option-note.mdx',
+				`<Tip title="CLI options">
+
+In addition to the command specific options, there are options common to all
+CLI commands and subcommands:
+
+- [Connection options](/boundary/docs/commands/#connection-options)
+- [Client options](/boundary/docs/commands/#client-options)
+
+</Tip>`,
+			)
+
+			const versionMetadata = {
+				boundary: [{ version: 'v0.13.x', isLatest: true }],
+			}
+
+			await buildMdRoutes(contentDir, outputDir, versionMetadata)
+
+			// The page output should contain the inlined partial content
+			const content = fs.readFileSync(
+				path.join(outputDir, 'boundary/docs/commands/list.md'),
+				'utf-8',
+			)
+			expect(content).toContain('# List')
+			expect(content).toContain('In addition to the command specific options')
+			expect(content).toContain('[Connection options]')
+			expect(content).not.toContain('@include')
+
+			// The partial itself should NOT be emitted as a standalone .md file
+			expect(
+				fs.existsSync(
+					path.join(outputDir, 'boundary/docs/partials/cmd-option-note.md'),
+				),
+			).toBe(false)
+		})
+
+		it('would leave @include unresolved if reading from raw source (documents pipeline dependency)', async () => {
+			// This test documents that reading from raw content (before MDX transforms)
+			// would leave @include directives unresolved. This is expected — the script
+			// MUST run after buildMdxTransforms in the pipeline.
+			writeFixture(
+				'boundary/v0.13.x/content/docs/commands/create.mdx',
+				`---
+page_title: Create command
+---
+
+# Create
+
+Create a new resource.
+
+@include 'cmd-option-note.mdx'
+`,
+			)
+
+			const versionMetadata = {
+				boundary: [{ version: 'v0.13.x', isLatest: true }],
+			}
+
+			await buildMdRoutes(contentDir, outputDir, versionMetadata)
+
+			const content = fs.readFileSync(
+				path.join(outputDir, 'boundary/docs/commands/create.md'),
+				'utf-8',
+			)
+
+			// Unresolved @include remains — this is the raw-source scenario.
+			// In production this never happens because buildMdxTransforms runs first.
+			expect(content).toContain("@include 'cmd-option-note.mdx'")
+		})
+	})
+
 	describe('fallback version resolution', () => {
 		it('falls back to sorting version dirs when no versionMetadata', async () => {
 			writeFixture(
