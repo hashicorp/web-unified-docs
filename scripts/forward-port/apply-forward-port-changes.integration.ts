@@ -164,7 +164,10 @@ describe.sequential('apply-forward-port-changes integration', () => {
 			'utf-8',
 		)
 
-		// Should not throw — zero matches is not an error
+		// Should not throw — at this script's level, zero matches is not an error:
+		// its job is to copy whatever files match, and copying nothing is not a crash.
+		// Deciding that "nothing to port" should stop the run is handled one layer up,
+		// in the workflow (the "Commit forward-port changes" step exits non-zero).
 		expect(() => {
 			runCommand([
 				'node',
