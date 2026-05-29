@@ -9,8 +9,9 @@
  * These tests simulate what the forward-port-pr.yml GitHub Actions workflow
  * does when a PR with a product label is merged:
  *
- *   1. resolve-target.mjs   — reads the config and PR labels, writes TARGET_BRANCH
- *                              and TARGET_VERSION to GITHUB_ENV
+ *   1. resolve-target.mjs   — reads the config and PR labels, prints the routing
+ *                              (TARGET_BRANCH, TARGET_VERSION, etc.) as JSON to stdout
+ *                              for the workflow to write into GITHUB_ENV
  *   2. get-changed-content-files.mjs
  *                           — diffs against github.event.pull_request.base.sha
  *                              (the pre-merge base), writes changedContentFiles.json
@@ -127,16 +128,25 @@ describe.sequential('Forward-port pipeline — happy path (add + modify + remove
 		const result = spawnSync(
 			'node',
 			[RESOLVE_TARGET, '--config', configPath, '--labels', labels],
-			{ encoding: 'utf-8', env: { ...process.env, GITHUB_ENV: githubEnvPath } },
+			{ encoding: 'utf-8' },
 		)
 
 		expect(result.status, result.stderr).toBe(0)
 
-		const output = fs.readFileSync(githubEnvPath, 'utf-8')
-		expect(output).toContain('TARGET_BRANCH=rn-forward-porting-test-rc')
-		expect(output).toContain('TARGET_VERSION_FOLDER=v1.15.x')
-		expect(output).toContain('SOURCE_VERSION_FOLDER=v1.14.x')
-		expect(output).toContain('TARGET_PRODUCT=terraform')
+		// Script now outputs JSON to stdout
+		const routing = JSON.parse(result.stdout.trim())
+		expect(routing.TARGET_BRANCH).toBe('rn-forward-porting-test-rc')
+		expect(routing.TARGET_VERSION_FOLDER).toBe('v1.15.x')
+		expect(routing.SOURCE_VERSION_FOLDER).toBe('v1.14.x')
+		expect(routing.TARGET_PRODUCT).toBe('terraform')
+
+		// Simulate what the workflow shell does: write KEY=VALUE lines to
+		// githubEnvPath so Step 3 can read them (mirrors jq parsing in the workflow).
+		fs.writeFileSync(
+			githubEnvPath,
+			Object.entries(routing).map(([k, v]) => `${k}=${v}`).join('\n') + '\n',
+			'utf-8',
+		)
 	})
 
 	it('Step 2 — get-changed-content-files: diffs against pre-merge base SHA, excludes partial fan-out', () => {
@@ -167,7 +177,8 @@ describe.sequential('Forward-port pipeline — happy path (add + modify + remove
 	})
 
 	it('Step 3 — apply-forward-port-changes: ports files into target version using --source-dir (simulating post-checkout state)', () => {
-		// Read TARGET_VERSION and SOURCE_VERSION from what step 1 wrote to GITHUB_ENV.
+		// Read TARGET_VERSION and SOURCE_VERSION from the GITHUB_ENV file step 1 wrote
+		// after parsing resolve-target's JSON output.
 		// In the real workflow these become shell env vars for subsequent steps.
 		const envContent = fs.readFileSync(githubEnvPath, 'utf-8')
 		const targetVersion = envContent.match(/TARGET_VERSION_FOLDER=(.+)/)?.[1].trim()
@@ -247,22 +258,19 @@ describe('Forward-port pipeline — failure cases', () => {
 		fs.rmSync(tmpDir, { recursive: true, force: true })
 	})
 
-	it('pipeline halts at Step 1 when no PR label matches the config — exits 1, GITHUB_ENV untouched', () => {
-		const githubEnv = path.join(tmpDir, 'github_env_no_match')
-		fs.writeFileSync(githubEnv, '')
-
+	it('pipeline halts at Step 1 when no PR label matches the config — exits 1, no JSON output', () => {
 		const labels = JSON.stringify(['some-label', 'some-unlisted-team-label'])
 
 		const result = spawnSync(
 			'node',
 			[RESOLVE_TARGET, '--config', configPath, '--labels', labels],
-			{ encoding: 'utf-8', env: { ...process.env, GITHUB_ENV: githubEnv } },
+			{ encoding: 'utf-8' },
 		)
 
 		expect(result.status).toBe(1)
 		expect(result.stderr).toContain('No forward-port:*')
-		// Nothing should have been written to GITHUB_ENV
-		expect(fs.readFileSync(githubEnv, 'utf-8')).toBe('')
+		// No JSON should be written to stdout on failure
+		expect(result.stdout.trim()).toBe('')
 	})
 
 	it('Step 2 with no diff — produces empty arrays, Step 3 exits cleanly as a no-op', () => {

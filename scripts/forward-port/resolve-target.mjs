@@ -194,7 +194,7 @@ if (configEntry) {
 		targetVersionFolder: configEntry.targetVersionFolder,
 		source: 'config',
 	}
-	console.log(
+	console.warn(
 		`Matched slug '${slug}' in config → targetBranch=${matched.targetBranch}, ` +
 			`sourceVersionFolder=${matched.sourceVersionFolder}, targetVersionFolder=${matched.targetVersionFolder}, ` +
 			`targetProduct=${matched.targetProduct}`,
@@ -218,27 +218,21 @@ if (configEntry) {
 	}
 
 	matched = parseForwardPortComment(commentText, commentFile, slug)
-	console.log(
+	console.warn(
 		`Using /forward-port comment → targetBranch=${matched.targetBranch}, ` +
 			`sourceVersionFolder=${matched.sourceVersionFolder}, targetVersionFolder=${matched.targetVersionFolder}, ` +
 			`targetProduct=${matched.targetProduct}`,
 	)
 }
 
-// --- Write to GITHUB_ENV ---
-// When running in GitHub Actions, GITHUB_ENV is a file path. Each line written
-// to it as KEY=VALUE sets that env var for all subsequent steps in the job.
-const githubEnv = process.env.GITHUB_ENV
-if (!githubEnv) {
-	console.error('GITHUB_ENV env var is not set')
-	process.exit(1)
-}
-
-fs.appendFileSync(
-	githubEnv,
-	`TARGET_BRANCH=${matched.targetBranch}\n` +
-		`SOURCE_VERSION_FOLDER=${matched.sourceVersionFolder}\n` +
-		`TARGET_VERSION_FOLDER=${matched.targetVersionFolder}\n` +
-		`TARGET_PRODUCT=${matched.targetProduct}\n`,
-	'utf-8',
+// --- Output JSON to stdout ---
+// The calling shell (GHA workflow step) is responsible for parsing this JSON
+// and writing the values to GITHUB_ENV.
+console.log(
+	JSON.stringify({
+		TARGET_BRANCH: matched.targetBranch,
+		SOURCE_VERSION_FOLDER: matched.sourceVersionFolder,
+		TARGET_VERSION_FOLDER: matched.targetVersionFolder,
+		TARGET_PRODUCT: matched.targetProduct,
+	}),
 )
