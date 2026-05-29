@@ -10,7 +10,7 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 const GET_CHANGED_CONTENT_FILES_SCRIPT = path.resolve(
-	'scripts/utils/get-changed-content-files-cli.mjs',
+	'scripts/utils/get-changed-content-files.mjs',
 )
 
 describe.sequential('get-changed-content-files CLI integration', () => {

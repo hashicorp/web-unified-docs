@@ -29,7 +29,7 @@ import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 const RESOLVE_TARGET = path.resolve('scripts/forward-port/resolve-target.mjs')
-const GET_CHANGED = path.resolve('scripts/utils/get-changed-content-files-cli.mjs')
+const GET_CHANGED = path.resolve('scripts/utils/get-changed-content-files.mjs')
 const APPLY_CHANGES = path.resolve('scripts/forward-port/apply-forward-port-changes.mjs')
 
 const FORWARD_PORT_CONFIG = `

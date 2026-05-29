@@ -6,6 +6,8 @@
 import fs from 'fs'
 import path from 'path'
 import { execSync } from 'child_process'
+import { parseArgs } from 'node:util'
+import { pathToFileURL } from 'node:url'
 import { getFilesUsingPartial } from './get-files-using-partial.mjs'
 
 const OUTPUT_FILE = './changedContentFiles.json'
@@ -99,6 +101,18 @@ function buildChangedContentFiles({ mergeBase, includePartials = true } = {}) {
 }
 
 /**
+ * Returns true when this module is executed directly by Node, e.g.
+ * `node scripts/utils/get-changed-content-files.mjs`.
+ */
+function isRunFromCommandLine() {
+	if (!process.argv[1]) {
+		return false
+	}
+
+	return import.meta.url === pathToFileURL(process.argv[1]).href
+}
+
+/**
  * @param {object} [options]
  * @param {string} [options.mergeBase] - Explicit diff base SHA (forward-port mode).
  * @param {boolean} [options.includePartials=true] - Whether to fan out partial changes.
@@ -128,6 +142,22 @@ export async function getChangedContentFiles(options = {}) {
 		console.error('Error getting changed content files:', error)
 		process.exit(1)
 	}
+}
+
+if (isRunFromCommandLine()) {
+	const { values } = parseArgs({
+		options: {
+			'merge-base': { type: 'string' },
+			'include-partials': { type: 'string', default: 'true' },
+			output: { type: 'string' },
+		},
+		strict: true,
+	})
+	void getChangedContentFiles({
+		mergeBase: values['merge-base'],
+		includePartials: values['include-partials'] !== 'false',
+		outputFile: values.output,
+	})
 }
 
 
