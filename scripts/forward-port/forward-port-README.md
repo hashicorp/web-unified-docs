@@ -112,7 +112,7 @@ Only files under `content/<targetProduct>/` are ported. Files from other product
 
 - **Added / modified** files are copied from the source version directory to the target version directory.
 - **Deleted** files are deleted from the target version directory.
-- Partial files (`/partials/`) are excluded — only directly-changed files are ported.
+- Partial files are included- however we do not extend these changes to files that the partial will fan out to- that happens separately during the build process. That is useful during incremental builds, but not here. 
 
 If the PR touched no files under the target product's directory, the workflow exits cleanly with a warning comment on the PR.
 
