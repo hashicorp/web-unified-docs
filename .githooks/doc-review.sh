@@ -162,8 +162,15 @@ EOF
 )
 
   local output
-  # NOTE: Verify 'opencode run' is the correct non-interactive flag for your
-  # installed version. Alternatives: --print, --no-tui, -p
+  # --agent plan   : run opencode read-only (no file edits) for the review.
+  # OPENCODE_CONFIG_CONTENT '{"snapshot": false}' : disable opencode's git
+  #   snapshot/checkpoint feature for THIS invocation only. That feature writes
+  #   worktree files into the git index using objects it doesn't reliably
+  #   persist; in a non-interactive pre-commit run it would stage untracked
+  #   files and leave the index pointing at a missing blob, causing
+  #   "error: Error building trees" and a stuck/aborted commit. It runs
+  #   regardless of --agent, so disabling the snapshot is the actual fix.
+  #   Scoped inline so it does not affect interactive opencode usage.
   if ! output=$(OPENCODE_CONFIG_CONTENT='{"snapshot": false}' opencode run --agent plan --model "$CLI_MODEL" "$prompt" 2>&1); then
     echo "❌ opencode exited with an error for $file:"
     echo "$output"
