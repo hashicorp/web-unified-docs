@@ -164,7 +164,7 @@ EOF
   local output
   # NOTE: Verify 'opencode run' is the correct non-interactive flag for your
   # installed version. Alternatives: --print, --no-tui, -p
-  if ! output=$(opencode run --agent plan --model "$CLI_MODEL" "$prompt" 2>&1); then
+  if ! output=$(OPENCODE_CONFIG_CONTENT='{"snapshot": false}' opencode run --agent plan --model "$CLI_MODEL" "$prompt" 2>&1); then
     echo "❌ opencode exited with an error for $file:"
     echo "$output"
     FAILED_FILES+=("$file | opencode error — see above")
