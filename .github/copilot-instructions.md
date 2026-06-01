@@ -23,7 +23,7 @@ When that guidance applies:
 
 - Review only changed `.md` and `.mdx` files located under `content/`.
 - Ignore Markdown files outside `content/` (for example, root-level `README.md`
-  or `CONTRIBUTING.md`, and anything under `docs/`).
+  or `CONTRIBUTING.md`, etc...).
 - Include both required tables: the quality score table and the issues table.
 - Keep findings specific to the changed files and cite file paths.
 
