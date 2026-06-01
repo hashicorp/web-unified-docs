@@ -160,7 +160,11 @@ export function remarkIncludePartialsPlugin({
 			const isMarkdownOrMdx = includePath.match(/\.md(?:x)?$/)
 			if (isMarkdownOrMdx) {
 				const processor = remark()
-				processor.use(remarkIncludePartialsPlugin, { partialsDir, targetDir })
+				processor.use(remarkIncludePartialsPlugin, {
+					partialsDir,
+					targetDir,
+					filePath,
+				})
 				const ast = processor.parse(includeContents)
 				return processor.runSync(ast, includeContents).children
 			} else {
