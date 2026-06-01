@@ -228,6 +228,12 @@ if (configEntry) {
 // --- Output JSON to stdout ---
 // The calling shell (GHA workflow step) is responsible for parsing this JSON
 // and writing the values to GITHUB_ENV.
+//
+// IMPORTANT: stdout must contain exactly this one line of JSON and nothing else.
+// The shell captures stdout with $(...) and pipes it straight into `jq`; any
+// extra output (including accidental console.log calls) will corrupt the parse.
+// All diagnostic / informational output in this file uses console.warn() or
+// console.error() — both of which write to stderr, not stdout — to keep stdout clean.
 console.log(
 	JSON.stringify({
 		TARGET_BRANCH: matched.targetBranch,
