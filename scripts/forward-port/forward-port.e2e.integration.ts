@@ -134,7 +134,7 @@ describe.sequential('Forward-port pipeline — happy path (add + modify + remove
 		expect(result.status, result.stderr).toBe(0)
 
 		// Script now outputs JSON to stdout
-		const routing = JSON.parse(result.stdout.trim())
+		const routing = JSON.parse(result.stdout.trim()) as Record<string, string>
 		expect(routing.TARGET_BRANCH).toBe('rn-forward-porting-test-rc')
 		expect(routing.TARGET_VERSION_FOLDER).toBe('v1.15.x')
 		expect(routing.SOURCE_VERSION_FOLDER).toBe('v1.14.x')
