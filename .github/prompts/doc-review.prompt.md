@@ -15,7 +15,7 @@ Review the attached documentation file using the process below. Do not skip any 
 Before doing anything else, read these files in full:
 
 1. **Style guide**: `/docs/style-guide/`
-2. **Example doc**: `/slack.mdx`
+2. **Example doc**: `/content/hcp-docs/content/docs/vault-radar/get-started/add-data-sources/slack.mdx`
    - This is a well-formatted doc. Note its frontmatter fields, heading hierarchy, tone, code block usage, admonition style, link formatting, and overall structure.
 
 If style guide cannot be found, stop and report the missing path to the user. The example doc is that - just an example, not a strict template that must be enforced in every detail. But it should serve as a concrete model for how to apply the style guide rules in practice. If there are contradictions between the style guide and the example doc, default to the style guide but flag the conflict for review. If the style guide is silent on something that is handled in the example doc, note the gap but do not invent a new rule.
