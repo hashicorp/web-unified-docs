@@ -36,7 +36,6 @@ vi.mock('./get-files-using-partial.mjs', () => {
 describe('getChangedContentFiles', () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
-		delete process.env.BASE_SHA
 		vi.spyOn(process, 'cwd').mockReturnValue('/mocked/path')
 		vi.mocked(fs.promises.writeFile).mockResolvedValue(undefined)
 	})
@@ -124,29 +123,7 @@ A\t${TERRAFORM_V1_14_PATH}/docs/partials/alpha.mdx`)
 		)
 	})
 
-	it('uses BASE_SHA when present', async () => {
-		process.env.BASE_SHA = 'from-env'
-		vi.mocked(execSync).mockReturnValue(
-			`M\t${TERRAFORM_V1_14_PATH}/docs/index.mdx`,
-		)
-		vi.mocked(getFilesUsingPartial).mockReturnValue([])
-
-		const result = await getChangedContentFiles()
-
-		expect(execSync).toHaveBeenCalledTimes(1)
-		expect(execSync).toHaveBeenCalledWith(
-			'git diff --name-status from-env HEAD -- content/',
-			{ encoding: 'utf-8' },
-		)
-		expect(result).toEqual({
-			added: [],
-			modified: [`${TERRAFORM_V1_14_PATH}/docs/index.mdx`],
-			removed: [],
-		})
-	})
-
 	it('returns empty groups when there is no diff output', async () => {
-		process.env.BASE_SHA = 'from-env'
 		vi.mocked(execSync).mockReturnValue('\n')
 
 		const result = await getChangedContentFiles()
