@@ -112,9 +112,9 @@ Only files under `content/<targetProduct>/` are ported. Files from other product
 
 - **Added / modified** files are copied from the source version directory to the target version directory.
 - **Deleted** files are deleted from the target version directory.
-- Partial files (`/partials/`) are excluded — only directly-changed files are ported.
+- Partial files are included- however we do not extend these changes to files that the partial will fan out to- that happens separately during the build process. That is useful during incremental builds, but not here. 
 
-If the PR touched no files under the target product's directory, the workflow exits cleanly with a warning comment on the PR.
+If the PR touched no files under the target product's directory, the workflow posts a comment and fails — there is nothing to port, so no forward-port PR is opened.
 
 ---
 
@@ -128,7 +128,7 @@ If the PR touched no files under the target product's directory, the workflow ex
 | Comment is missing a required routing field | Workflow fails listing the missing field. |
 | `targetBranch` does not exist in the repo | Workflow fails; error comment posted on the PR. |
 | A forward-port PR for this source PR already exists (open) | Workflow exits early and links to the existing PR. |
-| No content files changed after filtering by `targetProduct` | Workflow exits with a warning comment — no PR is opened. |
+| No content files changed after filtering by `targetProduct` | Workflow posts a comment and fails — nothing to port, so no PR is opened. |
 | `workflow_dispatch` with both `labelSlug` and `overrideJson` set | Workflow fails immediately with a validation error — provide only one. |
 | `workflow_dispatch` with neither `labelSlug` nor `overrideJson` set | Workflow fails immediately with a validation error — provide one. |
 

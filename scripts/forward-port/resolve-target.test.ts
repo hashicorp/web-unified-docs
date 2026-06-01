@@ -66,14 +66,11 @@ targetVersionFolder: v1.2.0`
 describe('resolve-target', () => {
 	let tmpDir: string
 	let configPath: string
-	let githubEnvPath: string
 
 	beforeEach(() => {
 		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'resolve-target-'))
 		configPath = path.join(tmpDir, 'forward-port-config.yml')
-		githubEnvPath = path.join(tmpDir, 'github-env')
 		fs.writeFileSync(configPath, SAMPLE_CONFIG, 'utf-8')
-		fs.writeFileSync(githubEnvPath, '', 'utf-8')
 	})
 
 	afterEach(() => {
@@ -97,13 +94,7 @@ describe('resolve-target', () => {
 		if (commentFile) {
 			args.push('--comment-file', commentFile)
 		}
-		const result = spawnSync('node', args, {
-			encoding: 'utf-8',
-			env: {
-				...process.env,
-				GITHUB_ENV: githubEnvPath,
-			},
-		})
+		const result = spawnSync('node', args, { encoding: 'utf-8' })
 		if (result.status !== 0) {
 			if (allowFailure) {
 				return [result.stdout, result.stderr]
@@ -116,25 +107,11 @@ describe('resolve-target', () => {
 		return (result.stdout ?? '').trim()
 	}
 
-	function readGithubEnv(): Record<string, string> {
-		const content = fs.readFileSync(githubEnvPath, 'utf-8')
-		return Object.fromEntries(
-			content
-				.split('\n')
-				.filter(Boolean)
-				.map((line: string) => {
-					const eq = line.indexOf('=')
-					return [line.slice(0, eq), line.slice(eq + 1)]
-				}),
-		)
-	}
-
 	// ── Scenario A: config-driven (slug found in config) ─────────────────────
 
 	it('writes TARGET_BRANCH, TARGET_VERSION_FOLDER, SOURCE_VERSION_FOLDER, and TARGET_PRODUCT when a forward-port:* label matches the config', () => {
-		runScript(['forward-port:tf-forward-porting-testing'])
+		const output = JSON.parse(runScript(['forward-port:tf-forward-porting-testing']))
 
-		const output = readGithubEnv()
 		expect(output.TARGET_BRANCH).toBe('rn-forward-porting-test-rc')
 		expect(output.TARGET_VERSION_FOLDER).toBe('v1.15.x')
 		expect(output.SOURCE_VERSION_FOLDER).toBe('v1.14.x')
@@ -142,9 +119,8 @@ describe('resolve-target', () => {
 	})
 
 	it('matches on label regardless of its position in the labels array', () => {
-		runScript(['some-other-label', 'forward-port:vault-test'])
+		const output = JSON.parse(runScript(['some-other-label', 'forward-port:vault-test']))
 
-		const output = readGithubEnv()
 		expect(output.TARGET_BRANCH).toBe('rn-test-vault')
 		expect(output.TARGET_VERSION_FOLDER).toBe('v1.20.x')
 		expect(output.SOURCE_VERSION_FOLDER).toBe('v1.19.x')
@@ -155,10 +131,8 @@ describe('resolve-target', () => {
 		const commentPath = path.join(tmpDir, 'comment.txt')
 		fs.writeFileSync(commentPath, VALID_COMMENT, 'utf-8')
 
-		runScript(['forward-port:vault-test'], { commentFile: commentPath })
-
 		// Config wins — not the comment's boundary values
-		const output = readGithubEnv()
+		const output = JSON.parse(runScript(['forward-port:vault-test'], { commentFile: commentPath }))
 		expect(output.TARGET_BRANCH).toBe('rn-test-vault')
 		expect(output.TARGET_PRODUCT).toBe('vault')
 	})
@@ -169,9 +143,7 @@ describe('resolve-target', () => {
 		const commentPath = path.join(tmpDir, 'comment.txt')
 		fs.writeFileSync(commentPath, VALID_COMMENT, 'utf-8')
 
-		runScript(['forward-port:boundary-1.0'], { commentFile: commentPath })
-
-		const output = readGithubEnv()
+		const output = JSON.parse(runScript(['forward-port:boundary-1.0'], { commentFile: commentPath }))
 		expect(output.TARGET_BRANCH).toBe('boundary-test')
 		expect(output.TARGET_VERSION_FOLDER).toBe('v1.2.0')
 		expect(output.SOURCE_VERSION_FOLDER).toBe('v1.1.0')
@@ -185,8 +157,6 @@ describe('resolve-target', () => {
 
 		expect(output).toContain('not found in config')
 		expect(output).toContain('comment file')
-		const githubEnv = readGithubEnv()
-		expect(githubEnv.TARGET_BRANCH).toBeUndefined()
 	})
 
 	it('exits with code 1 when the comment first line has the wrong slug', () => {
@@ -200,8 +170,6 @@ describe('resolve-target', () => {
 		})
 
 		expect(output).toContain('forward-port:boundary-2.0')
-		const githubEnv = readGithubEnv()
-		expect(githubEnv.TARGET_BRANCH).toBeUndefined()
 	})
 
 	it('exits with code 1 when the comment first line is bare /forward-port without a slug', () => {
@@ -218,8 +186,6 @@ describe('resolve-target', () => {
 		})
 
 		expect(output).toContain('forward-port:boundary-1.0')
-		const githubEnv = readGithubEnv()
-		expect(githubEnv.TARGET_BRANCH).toBeUndefined()
 	})
 
 	it('exits with code 1 when the comment file is missing a required field', () => {
@@ -237,8 +203,6 @@ describe('resolve-target', () => {
 		})
 
 		expect(output).toContain('targetBranch')
-		const githubEnv = readGithubEnv()
-		expect(githubEnv.TARGET_BRANCH).toBeUndefined()
 	})
 
 	// ── Error cases ───────────────────────────────────────────────────────────
@@ -249,8 +213,6 @@ describe('resolve-target', () => {
 		})
 
 		expect(output).toContain('forward-port:')
-		const githubEnv = readGithubEnv()
-		expect(githubEnv.TARGET_BRANCH).toBeUndefined()
 	})
 
 	// Intentional for now to avoid potential complex edge cases
@@ -261,9 +223,6 @@ describe('resolve-target', () => {
 		)
 
 		expect(output).toContain('Multiple')
-		const githubEnv = readGithubEnv()
-		expect(githubEnv.TARGET_BRANCH).toBeUndefined()
-		expect(githubEnv.SOURCE_VERSION_FOLDER).toBeUndefined()
 	})
 
 	it('exits with code 1 when a matching config entry is missing sourceVersionFolder', () => {
@@ -277,8 +236,6 @@ describe('resolve-target', () => {
 			allowFailure: true,
 		})
 		expect(output).toContain('sourceVersionFolder')
-		const githubEnv = readGithubEnv()
-		expect(githubEnv.TARGET_BRANCH).toBeUndefined()
 	})
 
 	it('exits with code 1 when the config file does not exist', () => {
@@ -290,30 +247,26 @@ describe('resolve-target', () => {
 	// ── Version format tests ──────────────────────────────────────────────────
 
 	it('resolves a semver targetVersionFolder (v1.1.0) correctly', () => {
-		runScript(['forward-port:tf-test'])
-		const output = readGithubEnv()
+		const output = JSON.parse(runScript(['forward-port:tf-test']))
 		expect(output.TARGET_BRANCH).toBe('TF-test')
 		expect(output.TARGET_VERSION_FOLDER).toBe('v1.1.0')
 		expect(output.SOURCE_VERSION_FOLDER).toBe('v1.0.0')
 	})
 
 	it('resolves a pre-release targetVersionFolder (v1.1.0-beta) correctly', () => {
-		runScript(['forward-port:tf-test-beta'])
-		const output = readGithubEnv()
+		const output = JSON.parse(runScript(['forward-port:tf-test-beta']))
 		expect(output.TARGET_VERSION_FOLDER).toBe('v1.1.0-beta')
 		expect(output.SOURCE_VERSION_FOLDER).toBe('v1.0.0')
 	})
 
 	it('resolves a release-candidate targetVersionFolder (v1.1.0-rc) correctly', () => {
-		runScript(['forward-port:tf-test-rc'])
-		const output = readGithubEnv()
+		const output = JSON.parse(runScript(['forward-port:tf-test-rc']))
 		expect(output.TARGET_VERSION_FOLDER).toBe('v1.1.0-rc')
 		expect(output.SOURCE_VERSION_FOLDER).toBe('v1.0.0')
 	})
 
 	it('resolves a double-wildcard targetVersionFolder (v10.x.x) correctly', () => {
-		runScript(['forward-port:tf-10'])
-		const output = readGithubEnv()
+		const output = JSON.parse(runScript(['forward-port:tf-10']))
 		expect(output.TARGET_VERSION_FOLDER).toBe('v10.x.x')
 		expect(output.SOURCE_VERSION_FOLDER).toBe('v9.x.x')
 	})

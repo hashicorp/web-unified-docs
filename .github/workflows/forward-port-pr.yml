@@ -31,7 +31,7 @@ jobs:
       contains(join(github.event.pull_request.labels.*.name, ' '), 'forward-port:'))
     runs-on: ubuntu-latest
     env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_TOKEN: ${{ secrets.CI_GITHUB_TOKEN }}
 
       MERGED_SHA: ${{ github.event.pull_request.merge_commit_sha }}
       SOURCE_PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -91,6 +91,7 @@ jobs:
         with:
           ref: ${{ env.MERGED_SHA }}
           fetch-depth: 0
+          token: ${{ secrets.CI_GITHUB_TOKEN }}
 
       # ******************************************************************************************
       # ************ If the PR was merged (forward-port gha not manually dispatched): ************
@@ -100,7 +101,8 @@ jobs:
       # not in the config, falls back to a /forward-port comment on the PR. This is necessary
       # to not leak information on unreleased content
       # The comment must start with "/forward-port forward-port:<slug>" to be matched.
-      # Writes TARGET_BRANCH, SOURCE_VERSION_FOLDER, TARGET_VERSION_FOLDER, TARGET_PRODUCT to GITHUB_ENV.
+      # resolve-target.mjs prints the routing as JSON to stdout; this step captures it
+      # and writes TARGET_BRANCH, SOURCE_VERSION_FOLDER, TARGET_VERSION_FOLDER, TARGET_PRODUCT to GITHUB_ENV.
       - name: Resolve routing from PR labels
         if: github.event_name != 'workflow_dispatch'
         run: |
@@ -112,9 +114,7 @@ jobs:
             FP_LABELS=$(echo "${LABELS_JSON}" | jq -r '[.[] | select(startswith("forward-port:"))] | join(", ")')
             echo "::error::Multiple forward-port:* labels found: ${FP_LABELS}. Remove all but one and re-run."
             gh pr comment "${SOURCE_PR_NUMBER}" \
-              --body "@${SOURCE_PR_AUTHOR} :x: Forward-port failed: multiple \`forward-port:*\` labels found (\`${FP_LABELS}\`). Remove all but one and re-run the workflow." \
-              --create-if-none \
-              --edit-last || true
+              --body "@${SOURCE_PR_AUTHOR} :x: Forward-port failed: multiple \`forward-port:*\` labels found (\`${FP_LABELS}\`). Remove all but one and re-run the workflow."
             exit 1
           fi
 
@@ -138,7 +138,13 @@ jobs:
             RESOLVE_ARGS+=("--comment-file" "${COMMENT_FILE}")
           fi
 
-          node scripts/forward-port/resolve-target.mjs "${RESOLVE_ARGS[@]}"
+          ROUTING_JSON=$(node scripts/forward-port/resolve-target.mjs "${RESOLVE_ARGS[@]}")
+          echo "${ROUTING_JSON}" | jq -r '
+            "TARGET_BRANCH=" + .TARGET_BRANCH,
+            "SOURCE_VERSION_FOLDER=" + .SOURCE_VERSION_FOLDER,
+            "TARGET_VERSION_FOLDER=" + .TARGET_VERSION_FOLDER,
+            "TARGET_PRODUCT=" + .TARGET_PRODUCT
+          ' >> "$GITHUB_ENV"
 
       # ***********************************************************************
       # ************ If forward-port gha was manually dispatched): ************
@@ -174,9 +180,15 @@ jobs:
             gh api "repos/${{ github.repository }}/contents/.github/forward-port-config.yml?ref=${CONFIG_BRANCH}" \
               --header "Accept: application/vnd.github.raw" > "${CONFIG_FILE}"
 
-            node scripts/forward-port/resolve-target.mjs \
+            ROUTING_JSON=$(node scripts/forward-port/resolve-target.mjs \
               --config "${CONFIG_FILE}" \
-              --labels "[\"forward-port:${LABEL_SLUG}\"]"
+              --labels "[\"forward-port:${LABEL_SLUG}\"]")
+            echo "${ROUTING_JSON}" | jq -r '
+              "TARGET_BRANCH=" + .TARGET_BRANCH,
+              "SOURCE_VERSION_FOLDER=" + .SOURCE_VERSION_FOLDER,
+              "TARGET_VERSION_FOLDER=" + .TARGET_VERSION_FOLDER,
+              "TARGET_PRODUCT=" + .TARGET_PRODUCT
+            ' >> "$GITHUB_ENV"
           fi
 
       # After grabbing the necessary routing info from the config/comment, validate the info
@@ -185,9 +197,7 @@ jobs:
           if ! gh api "repos/${{ github.repository }}/branches/${TARGET_BRANCH}" --silent 2>/dev/null; then
             echo "::error::Target branch '${TARGET_BRANCH}' does not exist"
             gh pr comment "${SOURCE_PR_NUMBER}" \
-              --body "@${SOURCE_PR_AUTHOR} :x: Forward-port failed: target branch \`${TARGET_BRANCH}\` does not exist on this repo. Please check the config or your \`/forward-port\` comment." \
-              --create-if-none \
-              --edit-last || true
+              --body "@${SOURCE_PR_AUTHOR} :x: Forward-port failed: target branch \`${TARGET_BRANCH}\` does not exist on this repo. Please check the config or your \`/forward-port\` comment."
             exit 1
           fi
 
@@ -209,14 +219,12 @@ jobs:
 
       - name: Get changed content files from source PR
         run: |
-          node scripts/utils/get-changed-content-files-cli.mjs \
+          node scripts/utils/get-changed-content-files.mjs \
             --merge-base "${{ steps.diff-base.outputs.sha }}" \
             --include-partials false \
             --output /tmp/changedContentFiles.json || {
             gh pr comment "${SOURCE_PR_NUMBER}" \
-              --body "@${SOURCE_PR_AUTHOR} :x: Forward-port failed while computing changed files. Check the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details." \
-              --create-if-none \
-              --edit-last || true
+              --body "@${SOURCE_PR_AUTHOR} :x: Forward-port failed while computing changed files. Check the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details."
             exit 1
           }
 
@@ -243,6 +251,7 @@ jobs:
         with:
           ref: ${{ env.TARGET_BRANCH }}
           fetch-depth: 0
+          token: ${{ secrets.CI_GITHUB_TOKEN }}
 
       - name: Configure git
         run: |
@@ -268,9 +277,7 @@ jobs:
 
           if [ -n "${EXISTING_PR}" ] && [ "${EXISTING_PR}" != "null" ]; then
             gh pr comment "${SOURCE_PR_NUMBER}" \
-              --body "@${SOURCE_PR_AUTHOR} A forward-port of this PR already exists: #${EXISTING_PR}. Please check it for updates." \
-              --create-if-none \
-              --edit-last
+              --body "@${SOURCE_PR_AUTHOR} A forward-port of this PR already exists: #${EXISTING_PR}. Please check it for updates."
             exit 1
           fi
 
@@ -283,9 +290,7 @@ jobs:
           if [ -z "${SOURCE_VERSION_FOLDER}" ]; then
             echo "::error::SOURCE_VERSION_FOLDER is not set — check resolve-target step or workflow_dispatch inputs"
             gh pr comment "${SOURCE_PR_NUMBER}" \
-              --body "@${SOURCE_PR_AUTHOR} :x: Forward-port failed: \`SOURCE_VERSION_FOLDER\` was not set. This is a bug — please file an issue." \
-              --create-if-none \
-              --edit-last || true
+              --body "@${SOURCE_PR_AUTHOR} :x: Forward-port failed: \`SOURCE_VERSION_FOLDER\` was not set. This is a bug — please file an issue."
             exit 1
           fi
 
@@ -296,9 +301,7 @@ jobs:
             --target-version "${TARGET_VERSION_FOLDER}" \
             --source-dir /tmp/forward-port-source || {
             gh pr comment "${SOURCE_PR_NUMBER}" \
-              --body "@${SOURCE_PR_AUTHOR} :x: Forward-port failed while applying changes (\`apply-forward-port-changes.mjs\` exited non-zero). Check the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details." \
-              --create-if-none \
-              --edit-last || true
+              --body "@${SOURCE_PR_AUTHOR} :x: Forward-port failed while applying changes (\`apply-forward-port-changes.mjs\` exited non-zero). Check the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details."
             exit 1
           }
 
@@ -308,10 +311,8 @@ jobs:
           if git diff --cached --quiet; then
             echo "No changes to commit after forward-port"
             gh pr comment "${SOURCE_PR_NUMBER}" \
-              --body "@${SOURCE_PR_AUTHOR} :warning: Forward-port ran but produced no file changes. This may mean the source version directory had no matching files. Check the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details." \
-              --create-if-none \
-              --edit-last || true
-            exit 0
+              --body "@${SOURCE_PR_AUTHOR} :x: Forward-port produced no file changes — nothing to port, so no PR was opened. This usually means the source version directory had no files matching the target product. Check the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details."
+            exit 1
           fi
           git commit -m "[FORWARD-PORT] PR #${SOURCE_PR_NUMBER}: ${SOURCE_PR_TITLE}"
 
@@ -319,9 +320,7 @@ jobs:
         run: |
           git push --set-upstream origin "${{ steps.forward-port-branch.outputs.name }}" || {
             gh pr comment "${SOURCE_PR_NUMBER}" \
-              --body "@${SOURCE_PR_AUTHOR} :x: Forward-port failed: could not push branch \`${{ steps.forward-port-branch.outputs.name }}\`. Check the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details." \
-              --create-if-none \
-              --edit-last || true
+              --body "@${SOURCE_PR_AUTHOR} :x: Forward-port failed: could not push branch \`${{ steps.forward-port-branch.outputs.name }}\`. Check the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details."
             exit 1
           }
 
@@ -338,9 +337,7 @@ jobs:
             --assignee "${SOURCE_PR_AUTHOR}" \
             --body "${PR_BODY}")" || {
             gh pr comment "${SOURCE_PR_NUMBER}" \
-              --body "@${SOURCE_PR_AUTHOR} :x: Forward-port failed: could not create the forward-port PR. Check the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details." \
-              --create-if-none \
-              --edit-last || true
+              --body "@${SOURCE_PR_AUTHOR} :x: Forward-port failed: could not create the forward-port PR. Check the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details."
             exit 1
           }
           echo "url=${PR_URL}" >> "$GITHUB_OUTPUT"
@@ -349,6 +346,4 @@ jobs:
         run: |
           FORWARD_PORT_URL="${{ steps.create-pr.outputs.url }}"
           gh pr comment "${SOURCE_PR_NUMBER}" \
-            --body "@${SOURCE_PR_AUTHOR} Ported to ${TARGET_BRANCH} in ${FORWARD_PORT_URL}" \
-            --create-if-none \
-            --edit-last
+            --body "@${SOURCE_PR_AUTHOR} Ported to ${TARGET_BRANCH} in ${FORWARD_PORT_URL}"
