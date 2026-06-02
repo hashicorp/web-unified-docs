@@ -40,7 +40,7 @@ tf-forward-porting-testing:
   targetBranch: rn-forward-porting-test-rc
   targetVersionFolder: v1.15.x
 
-vault-next:
+vault-test:
   sourceVersionFolder: v1.19.x
   targetProduct: vault
   targetBranch: rn-test-vault
@@ -144,7 +144,11 @@ describe.sequential('Forward-port pipeline — happy path (add + modify + remove
 		// githubEnvPath so Step 3 can read them (mirrors jq parsing in the workflow).
 		fs.writeFileSync(
 			githubEnvPath,
-			Object.entries(routing).map(([k, v]) => `${k}=${v}`).join('\n') + '\n',
+			Object.entries(routing)
+				.map(([k, v]: [string, string]): string => {
+					return `${k}=${v}`
+				})
+				.join('\n') + '\n',
 			'utf-8',
 		)
 	})
