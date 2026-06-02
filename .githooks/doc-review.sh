@@ -167,15 +167,32 @@ EOF
 )
 
   local output
-  # --agent plan   : run opencode read-only (no file edits) for the review.
-  # OPENCODE_CONFIG_CONTENT '{"snapshot": false}' : disable opencode's git
-  #   snapshot/checkpoint feature for THIS invocation only. That feature writes
-  #   worktree files into the git index using objects it doesn't reliably
-  #   persist; in a non-interactive pre-commit run it would stage untracked
-  #   files and leave the index pointing at a missing blob, causing
+  # ╔══════════════════════════════════════════════════════════════════════════╗
+  # ║  DO NOT REMOVE `--agent plan` OR THE `snapshot: false` ENV VAR BELOW.     ║
+  # ║  These are the TWO protections that make this pre-commit hook safe and    ║
+  # ║  non-destructive. If you "simplify" the opencode call and drop either     ║
+  # ║  one, this hook can MODIFY OR CORRUPT THE USER'S REPO during a commit.    ║
+  # ║  READ THIS in full before changing the line below.                       ║
+  # ╚══════════════════════════════════════════════════════════════════════════╝
+  #
+  # --agent plan  ── READ-ONLY GUARANTEE
+  #   Runs opencode in its read-only "plan" agent: it may READ files to perform
+  #   the review, but it CANNOT create, edit, or delete anything. Without this,
+  #   opencode runs in its default (full-access) agent and is free to rewrite or
+  #   delete files in the working tree mid-commit. This flag is the only thing
+  #   keeping the review side-effect-free. Do not remove it.
+  #
+  # OPENCODE_CONFIG_CONTENT='{"snapshot": false}'  ── INDEX-INTEGRITY GUARANTEE
+  #   Disables opencode's git snapshot/checkpoint feature for THIS invocation
+  #   only. That feature writes worktree files into the git index using objects
+  #   it doesn't reliably persist; in a non-interactive pre-commit run it stages
+  #   untracked files and leaves the index pointing at a missing blob, causing
   #   "error: Error building trees" and a stuck/aborted commit. It runs
-  #   regardless of --agent, so disabling the snapshot is the actual fix.
-  #   Scoped inline so it does not affect interactive opencode usage.
+  #   regardless of --agent, so this env var is the ACTUAL fix — `--agent plan`
+  #   alone does not prevent it. Scoped inline so it does not affect your
+  #   interactive opencode usage. Do not remove it.
+  #
+  # If you must edit the command below, KEEP BOTH protections intact.
   if ! output=$(OPENCODE_CONFIG_CONTENT='{"snapshot": false}' opencode run --agent plan --model "$CLI_MODEL" "$prompt" 2>&1); then
     echo "❌ opencode exited with an error for $file:"
     echo "$output"
