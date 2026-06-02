@@ -157,7 +157,12 @@ Output ONLY the ## Output Format section defined in the skill:
 - Issues Found table
 - Overall Assessment
 
-Do not output anything before or after the report.
+CRITICAL OUTPUT RULES:
+- Respond with exactly ONE text message: the final report, and nothing else.
+- Do NOT narrate or "think out loud". Do NOT emit any interstitial text
+  between tool calls (no "Now let me read...", "Let me check...", etc.).
+- Use your tools silently, then produce the report as your single reply.
+- Output nothing before or after the report.
 EOF
 )
 
