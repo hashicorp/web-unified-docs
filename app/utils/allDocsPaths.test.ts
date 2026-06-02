@@ -8,6 +8,7 @@ import { getDocsPaths } from './allDocsPaths'
 import docsPathsMock from '__fixtures__/docsPathsAllVersionsMock.json'
 import { getProductVersionMetadata } from './contentVersions'
 import { Ok } from '#utils/result'
+import * as repoConfig from '#productConfig.mjs'
 
 // I tried to use the same import path as in the actual file
 // (#utils/contentVersions) but Vitest was not picking up the mock,
@@ -63,6 +64,30 @@ test('getDocsPaths should return filtered docs paths when a non-empty productSlu
 })
 
 test('getDocsPaths should exclude internal products from sitemap paths', async () => {
+	vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({
+		'test-product': {
+			assetDir: 'public',
+			contentDir: 'content',
+			dataDir: 'data',
+			navDataPath: '',
+			internalProduct: true,
+			productSlug: 'test-product',
+			semverCoerce: () => {},
+			versionedDocs: true,
+			websiteDir: 'website',
+		},
+		'terraform-plugin-framework': {
+			assetDir: 'img',
+			basePaths: ['plugin/framework'],
+			contentDir: 'docs',
+			navDataPath: '',
+			dataDir: 'data',
+			productSlug: 'terraform',
+			semverCoerce: () => {},
+			versionedDocs: true,
+			websiteDir: 'website',
+		},
+	})
 	const metadata = {
 		version: 'v1.14.x',
 		isLatest: false,
