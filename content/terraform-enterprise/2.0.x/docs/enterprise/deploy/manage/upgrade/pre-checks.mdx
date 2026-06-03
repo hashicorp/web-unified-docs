@@ -1,0 +1,251 @@
+---
+page_title: Pre-upgrade checks
+description: Learn how to run Terraform Enterprise pre-upgrade checks for each supported deployment runtime and where to find runtime-specific runbooks.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-04-16T10:55:27+02:00
+last_modified: 2026-04-16T16:24:58.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Pre-upgrade checks
+
+Pre-upgrade checks help you validate Terraform Enterprise configuration and dependency readiness before applying an upgrade.
+
+
+## Overview
+
+Complete the following steps to run pre-upgrade checks for your runtime:
+
+1. Pull the target image: Obtain the Terraform Enterprise image for the version you plan to upgrade to.
+1. Replicate your configuration: Use the same environment variables, secrets, volumes, and network settings as your running deployment.
+1. Override the entrypoint: Run the container with `/usr/local/bin/preupgrade-check` as the entrypoint instead of the default application startup.
+1. Review the output: Examine the logs to identify any configuration issues, dependency problems, or warnings.
+1. Clean up: Remove temporary resources created for the check.
+
+Refer to the instructions for your runtime for details. 
+
+## Requirements
+
+Run the pre-upgrade check using the same Terraform Enterprise configuration as your live deployment: 
+
+- core database settings
+- license
+- hostname
+- object storage settings
+- Redis settings when applicable
+- Vault settings
+
+Additionally, you must include any mounted CA bundles or mTLS certificate files that your deployment uses.
+
+## Nomad
+
+You must run the check as a batch job. Nomad variables are path-scoped, so you must create a separate Nomad variable for the `preupgrade-check` job to provide access to the necessary secrets. Copy the same environment variables, secret values, and mounted certificate files that your running Terraform Enterprise job uses.
+
+1. Read the secrets from your existing Terraform Enterprise job and create a matching variable for the batch job. Include any registry credentials that the pre-upgrade job needs to pull the target Terraform Enterprise image. The following example uses placeholder values for the `Items` object. Replace these with the actual secrets from your original job:
+
+   ```shell
+   NAMESPACE="terraform-enterprise"
+
+   # View existing secrets to copy the values
+   nomad var get -namespace="$NAMESPACE" nomad/jobs/tfe-job/tfe-group/tfe-task
+
+   # Create the variable for the pre-upgrade check
+   cat > /tmp/preupgrade-var.json << 'EOF'
+   {
+     "Namespace": "terraform-enterprise",
+     "Path": "nomad/jobs/preupgrade-check",
+     "Items": {
+       "db_password": "<same-as-tfe-job>",
+       "redis_password": "<same-as-tfe-job>",
+       "redis_sidekiq_password": "<same-as-tfe-job>",
+       "registry_username": "<registry-username>",
+       "registry_password": "<registry-password>",
+       "tfe_license": "<tfe-license-content>"
+     }
+   }
+   EOF
+
+   # Submit the new variable
+   curl -s -X PUT -H "X-Nomad-Token: $NOMAD_TOKEN" \
+     "$NOMAD_ADDR/v1/var/nomad/jobs/preupgrade-check?namespace=$NAMESPACE" \
+     -d @/tmp/preupgrade-var.json
+
+   # Remove the temporary JSON file
+   rm /tmp/preupgrade-var.json
+   ```
+
+1. Create a `preupgrade-check.nomad.json` batch job file. Copy the environment variables from your running Terraform Enterprise job and use the same host volume for your TLS certificates. Ensure the Docker driver configuration uses `entrypoint` instead of `command`. If your Terraform Enterprise image requires registry authentication, add the Docker `auth` block shown in the following example. The example contains placeholder values and variable references that you must update for your environment.
+
+   ```json
+   {
+     "Job": {
+       "ID": "preupgrade-check",
+       "Name": "preupgrade-check",
+       "Type": "batch",
+       "TaskGroups": [
+         {
+           "Name": "check-group",
+           "Count": 1,
+           "Tasks": [
+             {
+               "Name": "preupgrade-check",
+               "Driver": "docker",
+               "Config": {
+                 "image": "images.releases.hashicorp.com/hashicorp/terraform-enterprise:<target-version>",
+                 "entrypoint": ["/usr/local/bin/preupgrade-check"],
+                 "auth": {
+                   "username": "${REGISTRY_USERNAME}",
+                   "password": "${REGISTRY_PASSWORD}"
+                 }
+               },
+               "Templates": [
+                 {
+                   "DestPath": "/secrets/secrets.env",
+                   "Envvars": true,
+                   "EmbeddedTmpl": "{{- with nomadVar \"nomad/jobs/preupgrade-check\" -}}\nREGISTRY_USERNAME=\"{{ .registry_username }}\"\nREGISTRY_PASSWORD=\"{{ .registry_password }}\"\nTFE_DATABASE_PASSWORD=\"{{ .db_password }}\"\n... (abbreviated) ...\nTFE_LICENSE={{ .tfe_license }}\n{{- end -}}"
+                 }
+               ],
+               "Env": {
+                 "TFE_DATABASE_HOST": "<rds-endpoint>:5432",
+                 "TFE_DATABASE_NAME": "hashicorp",
+                 "...": "...",
+                 "TFE_OPERATIONAL_MODE": "active-active"
+               }
+             }
+           ]
+         }
+       ]
+     }
+   }
+   ```
+
+1. Submit the batch job:
+
+   ```shell
+   nomad job run -namespace="$NAMESPACE" preupgrade-check.nomad.json
+   ```
+
+1. Review the output logs for the job. Nomad garbage-collects completed batch allocations, so you must retrieve the logs promptly before they are deleted:
+
+   ```shell
+   # Get the allocation ID
+   ALLOC_ID=$(nomad job allocs -namespace="$NAMESPACE" -json preupgrade-check | jq -r '.[0].ID')
+
+   # Stream logs in real-time
+   nomad alloc logs -f -namespace="$NAMESPACE" "$ALLOC_ID"
+   ```
+
+1. Clean up the batch job and optionally remove the variable:
+
+   ```shell
+   nomad job stop -namespace="$NAMESPACE" -purge preupgrade-check
+
+   # Optional: remove the Nomad variable
+   nomad var purge -namespace="$NAMESPACE" nomad/jobs/preupgrade-check
+   ```
+
+## Kubernetes
+
+Terraform Enterprise on Kubernetes uses a Helm-based pre-upgrade workflow.
+
+1. Enable the check for the validation run by setting `preupgradeCheck.enabled=true` in your override values.
+1. Choose validation mode:
+   - Add `preupgradeCheck.tfeNamespace=true` to your values enable existing namespace mode. Use this mode for non-mutating validation in the live namespace.
+   - Add `preupgradeCheck.tfeNamespace=false` to your values file to enable fresh namespace mode. Use this mode for isolated validation and simple cleanup.
+1. Run the pre-upgrade check and review the output before starting the upgrade.
+
+For complete commands and examples, refer to the Helm chart runbook:
+
+- [Terraform Enterprise Helm chart upgrade and pre-upgrade checks](https://github.com/hashicorp/terraform-enterprise-helm/blob/main/docs/upgrades_and_rollback.md)
+
+## OpenShift
+
+OpenShift deployments use the same Helm-based pre-upgrade check workflow as Kubernetes.
+
+In addition to enabling pre-upgrade checks, set `openshift.enabled=true` in your override values for OpenShift environments.
+
+For command-level instructions, refer to the same Helm runbook:
+
+- [Terraform Enterprise Helm chart upgrade and pre-upgrade checks](https://github.com/hashicorp/terraform-enterprise-helm/blob/main/docs/upgrades_and_rollback.md)
+
+## Podman
+
+The Podman workflow is identical to Docker. Replace `docker` with `podman` in the commands in the [Docker section](#docker).
+
+If you use Quadlet to manage Terraform Enterprise, you can create a one-shot `.container` unit file to run the check. Otherwise, use `podman compose` or the standalone `podman run` workflow.
+
+## Docker
+
+You can run the pre-upgrade check using Docker Compose or standalone Docker commands. We recommend using a Docker Compose override so you can run the pre-upgrade check with the same environment variables, volumes, and network settings as your existing deployment.
+
+### Docker Compose
+
+1. Pull the target image:
+
+   ```shell
+   docker pull images.releases.hashicorp.com/hashicorp/terraform-enterprise:<target-version>
+   ```
+
+1. Create an override compose file:
+
+   ```shell
+   cat > compose.preupgrade.yaml << 'EOF'
+   services:
+      tfe:
+         image: images.releases.hashicorp.com/hashicorp/terraform-enterprise:<target-version>
+         entrypoint: ["/usr/local/bin/preupgrade-check"]
+         ports: []
+         restart: "no"
+   EOF
+   ```
+
+1. Run the check:
+
+   ```shell
+   docker compose -f compose.yaml -f compose.preupgrade.yaml run --rm tfe
+   ```
+
+1. Remove the override file:
+
+   ```shell
+   rm compose.preupgrade.yaml
+   ```
+
+### Standalone Docker
+
+If you do not use Docker Compose, you can run the check directly with `docker run`. Start by extracting the Terraform Enterprise environment variables from the running container, then add any other runtime environment variables that your deployment depends on. In particular, if your deployment uses an HTTP proxy to reach external services, include the appropriate proxy variables, such as `http_proxy`, `https_proxy`, and `no_proxy`.
+
+1. Create an environment file using the running container as a starting point:
+
+   ```shell
+   docker exec <tfe-container-name> env | grep '^TFE_' > /tmp/tfe.env
+   ```
+
+1. Review `/tmp/tfe.env` and add any additional environment variables required by your environment, such as HTTP proxy configuration variables.
+
+1. Run the check:
+
+   ```shell
+   docker run --rm \
+     --entrypoint /usr/local/bin/preupgrade-check \
+     --env-file /tmp/tfe.env \
+     -v /etc/tfe/ssl:/etc/ssl/private/terraform-enterprise:ro \
+     images.releases.hashicorp.com/hashicorp/terraform-enterprise:<target-version>
+   ```
+
+1. Remove the environment file:
+
+   ```shell
+   rm /tmp/tfe.env
+   ```
+
+## Interpret the results
+
+After you run the check, review the output logs to determine the status of your configuration, license, and external dependencies. The process exits with one of the following codes:
+
+| Exit code | Description | Status |
+| --- | --- | --- |
+| `0` | All checks passed with no warnings. | Clear to upgrade. |
+| `1` | One or more checks failed. | Fix the listed errors and rerun the check before upgrading. |
+| `2` | A bootstrap error occurred. The check could not run due to a configuration problem or unreachable infrastructure. | Resolve the configuration or connectivity issue, then rerun the check. |
+| `3` | All checks passed but generated warnings. | Review the warnings before proceeding. |
