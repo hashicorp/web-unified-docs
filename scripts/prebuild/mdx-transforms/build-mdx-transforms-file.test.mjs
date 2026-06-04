@@ -11,8 +11,14 @@ import {
 } from './build-mdx-transforms-file.mjs'
 import versionMetadata from '__fixtures__/versionMetadata.json'
 import * as repoConfig from '#productConfig.mjs'
+import { copyInternalOnlyProductDocs } from '../copy-internal-only-product-docs.mjs'
 
 vi.mock('node:fs')
+vi.mock('../copy-internal-only-product-docs.mjs', () => {
+	return {
+		copyInternalOnlyProductDocs: vi.fn(),
+	}
+})
 
 const mdxContent = `---
 page_title: 'Plugin Development - Framework: Paths'
@@ -63,4 +69,23 @@ test('test applyFileMdxTransforms', async () => {
 
 	const transformedContent = fs.readFileSync(entry.outPath, 'utf8')
 	expect(transformedContent.trim()).toContain(transformedMdxContent.trim())
+})
+
+test('buildFileMdxTransforms copies internal-only docs for internal products', async () => {
+	vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({
+		terraform: {
+			versionedDocs: true,
+			internalProduct: true,
+			basePaths: ['cli', 'internals', 'intro', 'language'],
+		},
+	})
+
+	await buildFileMdxTransforms('content/terraform/v1.19.x/test.mdx')
+
+	expect(copyInternalOnlyProductDocs).toHaveBeenCalledOnce()
+	expect(copyInternalOnlyProductDocs).toHaveBeenCalledWith(
+		'content',
+		'public/content',
+		expect.stringMatching(/public\/assets$/),
+	)
 })
