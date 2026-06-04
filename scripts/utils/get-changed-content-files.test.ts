@@ -134,7 +134,9 @@ A\t${TERRAFORM_V1_14_PATH}/docs/partials/alpha.mdx`)
 	})
 
 	it('uses an explicit mergeBase override when provided (forward-port mode)', async () => {
-		vi.mocked(execSync).mockReturnValueOnce(`A\t${TERRAFORM_V1_14_PATH}/docs/new.mdx`)
+		vi.mocked(execSync).mockReturnValueOnce(
+			`A\t${TERRAFORM_V1_14_PATH}/docs/new.mdx`,
+		)
 
 		const result = await getChangedContentFiles({
 			mergeBase: 'explicit-sha',
@@ -172,13 +174,12 @@ A\t${TERRAFORM_V1_14_PATH}/docs/partials/alpha.mdx`)
 	})
 
 	it('logs and exits when building changed files fails', async () => {
-		const error = new Error('git failed')
 		const consoleErrorSpy = vi
 			.spyOn(console, 'error')
 			.mockImplementation(() => {})
 
 		vi.mocked(execSync).mockImplementation(() => {
-			throw error
+			throw new Error('git failed')
 		})
 
 		vi.spyOn(process, 'exit').mockImplementation(
@@ -190,7 +191,11 @@ A\t${TERRAFORM_V1_14_PATH}/docs/partials/alpha.mdx`)
 		await expect(getChangedContentFiles()).rejects.toThrow('process.exit(1)')
 		expect(consoleErrorSpy).toHaveBeenCalledWith(
 			'Error getting changed content files:',
-			error,
+			expect.objectContaining({
+				message: expect.stringContaining(
+					'Failed to find merge-base with origin/main',
+				),
+			}),
 		)
 	})
 })
