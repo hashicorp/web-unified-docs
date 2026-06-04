@@ -1,0 +1,278 @@
+---
+layout: docs
+page_title: Deploy a Boundary controller using a Helm chart
+description: >-
+ Discover resources for deploying a Boundary controller using a Helm chart.
+---
+
+# Deploy a Boundary controller using a Helm chart
+
+Before installing the chart, make sure the following are available:
+
+- A Kubernetes cluster supported by the chart.
+- Helm 3.x configured with access to the target Kubernetes cluster.
+- A reachable PostgreSQL database for Boundary controller state.
+- A valid Boundary controller HCL configuration.
+- KMS configuration for the `root`, `recovery`, and `worker-auth` purposes.
+- An existing Kubernetes Secret containing the database URL and Boundary Enterprise license.
+- An existing Kubernetes Secret containing `admin-username` and `admin-password` when `bootstrapAdmin.enabled=true`.
+- A Kubernetes TLS Secret containing `tls.crt` and `tls.key` when `tls.disabled=false`.
+- A ServiceAccount that the controller Deployment and hook Jobs can use.
+
+The controller chart deploys a stateless Boundary control plane. Persistent controller state is stored in PostgreSQL, not on the controller pods.
+
+## Add the HashiCorp Helm repository
+
+Add the Helm repository and confirm the chart is visible:
+
+```shell
+helm repo add hashicorp https://helm.releases.hashicorp.com
+helm repo update
+helm search repo hashicorp/boundary-controller
+```
+
+Example output:
+
+```text
+NAME                          CHART VERSION   APP VERSION   DESCRIPTION
+hashicorp/boundary-controller 0.1.0           0.21-ent      Boundary controller Helm chart
+```
+
+## Create the controller Secret
+
+The chart reads sensitive values from an existing Kubernetes Secret referenced by `secretRefs.secretName`. At minimum, create a Secret with the database URL and Boundary Enterprise license. Include bootstrap admin credentials when bootstrap admin creation is enabled.
+
+```shell
+kubectl create secret generic boundary-controller-secrets \
+  --namespace boundary \
+  --from-literal=database-url='postgres://boundary:password@postgres:5432/boundary?sslmode=require' \
+  --from-literal=license='<boundary-enterprise-license>' \
+  --from-literal=admin-username='admin' \
+  --from-literal=admin-password='<strong-password>'
+```
+
+If your `controller.config` uses `migration_url = "env://BOUNDARY_PG_MIGRATION_URL"`, also add the migration URL key expected by `secretRefs.keys.migrationUrl`.
+
+## Create the TLS Secret when TLS is enabled
+
+If `tls.disabled=false`, create the Kubernetes TLS Secret before installation:
+
+```shell
+kubectl create secret tls boundary-controller-tls \
+  --namespace boundary \
+  --cert=tls.crt \
+  --key=tls.key
+```
+
+When TLS is disabled, the chart does not mount this Secret.
+
+## Prepare the controller configuration
+
+The chart reads raw Boundary HCL from `controller.config`. Embed the HCL in a values file and pass it with `-f`.
+
+Start from the controller configuration guidance in [Configure controllers](https://developer.hashicorp.com/boundary/docs/configuration/controller) if you need a base controller configuration.
+
+At minimum, a usable controller configuration usually includes:
+
+- An API listener.
+- A cluster listener.
+- An operations listener.
+- A `controller` block with `license` and `database.url`.
+- `public_cluster_addr` so workers can reach the cluster listener.
+- KMS stanzas for `root`, `recovery`, and `worker-auth`.
+
+Example controller configuration using AWS KMS:
+
+```hcl
+disable_mlock = true
+
+listener "tcp" {
+  address = "0.0.0.0:9200"
+  purpose = "api"
+  tls_disable = true
+}
+
+listener "tcp" {
+  address = "0.0.0.0:9201"
+  purpose = "cluster"
+}
+
+listener "tcp" {
+  address = "0.0.0.0:9203"
+  purpose = "ops"
+  tls_disable = true
+}
+
+controller {
+  name = "boundary-controller"
+  description = "Boundary controller running in Kubernetes"
+  public_cluster_addr = "boundary-controller-cluster.boundary.svc.cluster.local:9201"
+  license = "env://BOUNDARY_LICENSE"
+
+  database {
+    url = "env://BOUNDARY_PG_URL"
+  }
+}
+
+kms "awskms" {
+  purpose    = "root"
+  region     = "us-east-1"
+  kms_key_id = "alias/boundary-root"
+}
+
+kms "awskms" {
+  purpose    = "recovery"
+  region     = "us-east-1"
+  kms_key_id = "alias/boundary-recovery"
+}
+
+kms "awskms" {
+  purpose    = "worker-auth"
+  region     = "us-east-1"
+  kms_key_id = "alias/boundary-worker-auth"
+}
+```
+
+Note: Keep `disable_mlock = true` with the chart's default security model. The containers run without the elevated privileges required for memory locking.
+
+## Create a namespace
+
+```shell
+kubectl create namespace boundary
+```
+
+## List available chart versions
+
+To see available published versions:
+
+```shell
+helm search repo hashicorp/boundary-controller -l
+```
+
+## Install a Boundary controller
+
+Create a values file that contains `controller.config` and the Kubernetes overrides you need:
+
+```yaml
+secretRefs:
+  secretName: boundary-controller-secrets
+
+serviceAccount:
+  name: default
+
+tls:
+  disabled: true
+
+controller:
+  config: |
+    disable_mlock = true
+
+    listener "tcp" {
+      address = "0.0.0.0:9200"
+      purpose = "api"
+      tls_disable = true
+    }
+
+    listener "tcp" {
+      address = "0.0.0.0:9201"
+      purpose = "cluster"
+    }
+
+    listener "tcp" {
+      address = "0.0.0.0:9203"
+      purpose = "ops"
+      tls_disable = true
+    }
+
+    controller {
+      name = "boundary-controller"
+      public_cluster_addr = "boundary-controller-cluster.boundary.svc.cluster.local:9201"
+      license = "env://BOUNDARY_LICENSE"
+
+      database {
+        url = "env://BOUNDARY_PG_URL"
+      }
+    }
+
+    kms "awskms" {
+      purpose    = "root"
+      region     = "us-east-1"
+      kms_key_id = "<KMS ROOT KEY ID>"
+    }
+
+    kms "awskms" {
+      purpose    = "recovery"
+      region     = "us-east-1"
+      kms_key_id = "<KMS RECOVERY KEY ID>"
+    }
+
+    kms "awskms" {
+      purpose    = "worker-auth"
+      region     = "us-east-1"
+      kms_key_id = "<KMS WORKER AUTH KEY ID>"
+    }
+
+  service:
+    api:
+      type: LoadBalancer
+    cluster:
+      type: LoadBalancer
+    ops:
+      type: ClusterIP
+```
+
+Install the release:
+
+```shell
+helm install boundary-controller hashicorp/boundary-controller \
+  --version 0.1.0 \
+  --namespace boundary \
+  --create-namespace \
+  -f my-values.yaml
+```
+
+## Verify the deployment
+
+Check the rendered resources after installation:
+
+```shell
+kubectl get deployment,pods,svc,jobs,pdb -n boundary
+kubectl logs -n boundary deployment/boundary-controller
+```
+
+Confirm that:
+
+- The database initialization Job completes successfully when `database.init.enabled=true`.
+- The bootstrap admin Job completes successfully when `bootstrapAdmin.enabled=true`.
+- The controller pods become Ready.
+- The API, cluster, and ops Services match your intended exposure model.
+- Boundary API requests succeed against the controller API listener.
+- Workers can reach `public_cluster_addr` and register successfully.
+
+## Upgrade with database migration
+
+When the Boundary version requires a database migration, run the upgrade in a controlled sequence:
+
+1. Scale controller replicas to zero.
+2. Take a PostgreSQL backup.
+3. Run the upgrade with `database.migrate.enabled=true`.
+
+Example:
+
+```shell
+helm upgrade boundary-controller hashicorp/boundary-controller \
+  --version 0.1.0 \
+  --namespace boundary \
+  -f my-values.yaml \
+  --set controller.replicas=0
+```
+
+```shell
+helm upgrade boundary-controller hashicorp/boundary-controller \
+  --version 0.1.0 \
+  --namespace boundary \
+  -f my-values.yaml \
+  --set database.migrate.enabled=true
+```
+
+If you need to run a repair migration, also set `database.repair.version` to the Boundary migration version you need to repair.
