@@ -6,6 +6,8 @@
 import fs from 'fs'
 import path from 'path'
 import { execSync } from 'child_process'
+import { parseArgs } from 'node:util'
+import { pathToFileURL } from 'node:url'
 import { getFilesUsingPartial } from './get-files-using-partial.mjs'
 
 const OUTPUT_FILE = './changedContentFiles.json'
@@ -18,20 +20,33 @@ const GIT_STATUS = {
 }
 
 /**
- * Finds the merge base between the current branch and origin/main,
- * then returns the list of changed files grouped by status.
+ * Finds the merge base between the current branch and origin/main (or uses an
+ * explicit mergeBase override), then returns the list of changed files grouped
+ * by status.
+ *
+ * @param {object} [options]
+ * @param {string} [options.mergeBase] - If provided, skip the git merge-base
+ *   computation and use this SHA directly as the diff base. Use this in
+ *   forward-port mode where the merge has already landed and origin/main has
+ *   advanced past the base commit.
+ * @param {boolean} [options.includePartials=true] - When false, skip the
+ *   partial fan-out step. Use this in forward-port mode where only the
+ *   directly-changed files should be ported.
  */
-function buildChangedContentFiles() {
-	// Find where the current branch chain diverged from origin/main. Using HEAD (rather
-	// than BASE_SHA) means this works correctly even when the PR targets a non-main branch —
-	// all accumulated changes since the branch chain left main are included.
-	const mergeBase = execSync('git merge-base HEAD origin/main', {
-		encoding: 'utf-8',
-	}).trim()
+function buildChangedContentFiles({ mergeBase, includePartials = true } = {}) {
+	// If an explicit mergeBase is provided (e.g. github.event.pull_request.base.sha
+	// passed from the forward-port workflow), use it directly. Otherwise find
+	// where the current branch chain diverged from origin/main — this handles the
+	// stacked-branch case correctly for incremental builds.
+	const resolvedMergeBase =
+		mergeBase ??
+		execSync('git merge-base HEAD origin/main', {
+			encoding: 'utf-8',
+		}).trim()
 
 	// Get the diff between the merge base and HEAD.
 	const diffOutput = execSync(
-		`git diff --name-status ${mergeBase} HEAD -- content/`,
+		`git diff --name-status ${resolvedMergeBase} HEAD -- content/`,
 		{ encoding: 'utf-8' },
 	).trim()
 
@@ -63,17 +78,21 @@ function buildChangedContentFiles() {
 		}
 	}
 
-	// For any changed partial files, add all files that include them to the modified list.
-	const changedPartials = [...added, ...modified].filter((f) => {
-		return f.includes('/partials/')
-	})
+	// For any changed partial files, add all files that include them to the
+	// modified list. This is skipped in forward-port mode (includePartials=false)
+	// because only the directly-changed files should be ported.
+	if (includePartials) {
+		const changedPartials = [...added, ...modified].filter((f) => {
+			return f.includes('/partials/')
+		})
 
-	for (const partial of changedPartials) {
-		const filesUsingPartial = getFilesUsingPartial(partial)
-		for (const file of filesUsingPartial) {
-			// If the file isn't already in added or modified, add it to modified.
-			if (!modified.includes(file) && !added.includes(file)) {
-				modified.push(file)
+		for (const partial of changedPartials) {
+			const filesUsingPartial = getFilesUsingPartial(partial)
+			for (const file of filesUsingPartial) {
+				// If the file isn't already in added or modified, add it to modified.
+				if (!modified.includes(file) && !added.includes(file)) {
+					modified.push(file)
+				}
 			}
 		}
 	}
@@ -81,11 +100,30 @@ function buildChangedContentFiles() {
 	return { added, modified, removed }
 }
 
-export async function getChangedContentFiles() {
-	try {
-		const changedFiles = buildChangedContentFiles()
+/**
+ * Returns true when this module is executed directly by Node, e.g.
+ * `node scripts/utils/get-changed-content-files.mjs`.
+ */
+function isRunFromCommandLine() {
+	if (!process.argv[1]) {
+		return false
+	}
 
-		const outputPath = path.join(process.cwd(), OUTPUT_FILE)
+	return import.meta.url === pathToFileURL(process.argv[1]).href
+}
+
+/**
+ * @param {object} [options]
+ * @param {string} [options.mergeBase] - Explicit diff base SHA (forward-port mode).
+ * @param {boolean} [options.includePartials=true] - Whether to fan out partial changes.
+ * @param {string} [options.outputFile] - Override the output file path.
+ */
+export async function getChangedContentFiles(options = {}) {
+	const { mergeBase, includePartials = true, outputFile } = options
+	try {
+		const changedFiles = buildChangedContentFiles({ mergeBase, includePartials })
+
+		const outputPath = outputFile ?? path.join(process.cwd(), OUTPUT_FILE)
 		await fs.promises.writeFile(
 			outputPath,
 			JSON.stringify(changedFiles, null, 2),
@@ -105,3 +143,21 @@ export async function getChangedContentFiles() {
 		process.exit(1)
 	}
 }
+
+if (isRunFromCommandLine()) {
+	const { values } = parseArgs({
+		options: {
+			'merge-base': { type: 'string' },
+			'include-partials': { type: 'string', default: 'true' },
+			output: { type: 'string' },
+		},
+		strict: true,
+	})
+	void getChangedContentFiles({
+		mergeBase: values['merge-base'],
+		includePartials: values['include-partials'] !== 'false',
+		outputFile: values.output,
+	})
+}
+
+
