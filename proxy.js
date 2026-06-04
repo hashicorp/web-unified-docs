@@ -16,7 +16,7 @@ import { NextResponse } from 'next/server'
  *
  * @return {NextResponse}
  */
-export function middleware({ url }) {
+export function proxy({ url }) {
 	return NextResponse.rewrite(
 		new URL(url.replace('ptfe-releases', 'terraform-enterprise')),
 	)
