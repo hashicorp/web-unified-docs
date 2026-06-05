@@ -48,13 +48,39 @@ async function readTraceFile(traceFilePath) {
  * Submit build metrics to datadog
  * @param {BuildEvent[]} metrics
  */
-function captureMetric({ name, duration, timestamp, tags }) {
-	return {
-		host: '',
-		metric: name,
-		points: [[timestamp ?? Math.round(Date.now() / 1e3), duration]],
-		tags,
-		type: 'gauge',
+const submitDatadogMetrics = async (metrics) => {
+	const configuration = client.createConfiguration()
+	const api = new v1.MetricsApi(configuration)
+
+	try {
+		// Send metrics to datadog API
+		await api.submitMetrics({
+			body: {
+				// Convert the build events into a format datadog understands
+				series: metrics.map(({ timestamp, tags, ...event }) => {
+					return {
+						host: '',
+						metric: `build.${event.name}`,
+						points: [
+							[
+								timestamp ?? Math.round(Date.now() / 1e3),
+								Math.round(event.duration / 1e3),
+							],
+						],
+						tags,
+						type: 'gauge',
+					}
+				}),
+			},
+		})
+
+		const [{ tags }] = metrics
+		console.log(
+			`\n〽️ Submitted build metrics to Datadog:\n${JSON.stringify(tags, null, 2)}\n`,
+		)
+	} catch {
+		// Swallow any errors, we don't want to impact the build or make it seem like there's been an error in the
+		// actual app if something goes wrong when sending metrics
 	}
 }
 
@@ -68,47 +94,36 @@ async function main() {
 			path: fs.existsSync(envLocalPath) ? [envLocalPath, '.env'] : '.env',
 		})
 
-		const configuration = client.createConfiguration()
-		const api = new v1.MetricsApi(configuration)
-
+		// It's important that this remains a constant variable rather than
+		// being incorprated into the `.map()` call as we don't want it to be
+		// re-evaluated for each run through the loop. We want it to remain fixed
 		const timestamp = Math.round(Date.now() / 1e3)
 
 		// Read trace files
 		const nextjsTrace = await readTraceFile(NEXTJS_TRACE_FILE)
 		const prebuildTrace = await readTraceFile(PREBUILD_TRACE_FILE)
 
-		const filteredEvents = [...nextjsTrace, ...prebuildTrace].filter(
-			(event) => {
-				return EVENTS.includes(event.name)
-			},
-		)
-
 		const environment = process.env.CI ? 'ci' : 'local'
 		const buildType = incBuild ? 'incremental' : 'full'
-		const tags = [
-			`app:${appName}`,
-			`environment:${environment}`,
-			`buildType:${buildType}`,
-		]
 
-		const structuredMetrics = filteredEvents.map((event) => {
-			return captureMetric({
-				name: `build.${event.name}`,
-				duration: Math.round(event.duration / 1e3),
-				timestamp,
-				tags,
+		const filteredEvents = [...nextjsTrace, ...prebuildTrace]
+			.filter((event) => {
+				return EVENTS.includes(event.name)
 			})
-		})
+			.map((event) => {
+				return {
+					...event,
+					tags: [
+						`app:${appName}`,
+						`environment:${environment}`,
+						`buildType:${buildType}`,
+					],
+					timestamp,
+				}
+			})
 
-		await api.submitMetrics({
-			body: {
-				series: structuredMetrics,
-			},
-		})
-
-		console.log(
-			`\n〽️ Submitted build metrics to Datadog:\n${JSON.stringify(tags, null, 2)}\n`,
-		)
+		// Submit metrics to monitoring platforms in parallel
+		await Promise.all([submitDatadogMetrics(filteredEvents)])
 	} catch {
 		// Swallow errors
 		// we don't want to impact the build or make it seem like there's been an error in the actual app if something goes wrong when sending metrics
