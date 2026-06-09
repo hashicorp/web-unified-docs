@@ -52,40 +52,34 @@ const submitDatadogMetrics = async (metrics) => {
 	const configuration = client.createConfiguration()
 	const api = new v1.MetricsApi(configuration)
 
-	try {
-		// Send metrics to datadog API
-		await api.submitMetrics({
-			body: {
-				// Convert the build events into a format datadog understands
-				series: metrics.map(({ timestamp, tags, ...event }) => {
-					return {
-						host: '',
-						metric: `build.${event.name}`,
-						points: [
-							[
-								timestamp ?? Math.round(Date.now() / 1e3),
-								Math.round(event.duration / 1e3),
-							],
+	// Send metrics to datadog API
+	await api.submitMetrics({
+		body: {
+			// Convert the build events into a format datadog understands
+			series: metrics.map(({ timestamp, tags, ...event }) => {
+				return {
+					host: '',
+					metric: `build.${event.name}`,
+					points: [
+						[
+							timestamp ?? Math.round(Date.now() / 1e3),
+							Math.round(event.duration / 1e3),
 						],
-						tags: tags.map(([key, value]) => {
-							return `${key}:${value}`
-						}),
-						type: 'gauge',
-					}
-				}),
-			},
-		})
-
-		const tags = metrics[0].tags.map(([key, value]) => {
-			return `${key}:${value}`
-		})
-		console.log(
-			`〽️ Submitted build metrics to Datadog:\n${JSON.stringify(tags, null, 2)}`,
-		)
-	} catch {
-		// Swallow any errors, we don't want to impact the build or make it seem like there's been an error in the
-		// actual app if something goes wrong when sending metrics
-	}
+					],
+					tags: tags.map(([key, value]) => {
+						return `${key}:${value}`
+					}),
+					type: 'gauge',
+				}
+			}),
+		},
+	})
+	const tags = metrics[0].tags.map(([key, value]) => {
+		return `${key}:${value}`
+	})
+	console.log(
+		`〽️ Submitted build metrics to Datadog:\n${JSON.stringify(tags, null, 2)}`,
+	)
 }
 
 /**
@@ -156,14 +150,10 @@ const submitInstanaMetrics = async (metrics) => {
 			body: JSON.stringify(payload),
 		},
 	)
-	if ([200, 202].includes(response.status)) {
-		const [{ tags }] = metrics
-		console.log(
-			`〽️ Submitted build metrics to Instana:\n${JSON.stringify({ url: response.url, tags }, null, 2)}`,
-		)
-	} else {
-		console.error(
-			`Failed to submit metrics to Instana. Status: ${response.status}, Response: ${await response.json()}`,
+	if (![200, 202].includes(response.status)) {
+		const responseText = await response.text()
+		throw new Error(
+			`Failed to submit metrics to Instana. Status: ${response.status}, Response: ${responseText}`,
 		)
 	}
 
@@ -213,14 +203,28 @@ async function main() {
 				}
 			})
 
-		// Submit metrics to monitoring platforms in parallel
-		await Promise.all([
+		const results = await Promise.allSettled([
 			submitDatadogMetrics(filteredEvents),
 			submitInstanaMetrics(filteredEvents),
 		])
-	} catch {
+
+		const failedSubmissions = results
+			.filter(({ status }) => {
+				return status === 'rejected'
+			})
+			.map(({ reason }) => {
+				return reason
+			})
+		if (failedSubmissions.length > 0) {
+			throw new AggregateError(failedSubmissions)
+		}
+	} catch (error) {
 		// Swallow errors
-		// we don't want to impact the build or make it seem like there's been an error in the actual app if something goes wrong when sending metrics
+		// we don't want to impact the build or make it seem like there's been
+		// an error in the actual app if something goes wrong when sending metrics
+		if (process.env.NODE_ENV === 'development') {
+			throw error
+		}
 	}
 }
 
