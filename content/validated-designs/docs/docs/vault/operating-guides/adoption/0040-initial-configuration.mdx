@@ -1,0 +1,238 @@
+---
+title: Initial configuration
+description: Configure audit logs and establish namespace design for Vault Enterprise after installation and initialization.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-06-09T20:55:54.000Z
+last_modified: 2026-06-09T20:55:54.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Initial configuration
+
+This section describes how the product will be configured after installation (in case of self-hosted) and how it will be configured after the initial admin account is created.
+
+## Overview
+
+Before you start populating Vault with secrets, there are initial configuration tasks that you should complete. This document covers configuration for both HCP Vault and Vault Enterprise and we make a note if any of the configuration items do not apply to a certain product type.
+
+Tasks in this section are below.
+
+- The process of configuring the audit logs - For Vault Enterprise only.
+- Namespace design and recommended structure.
+
+### Prerequisites
+
+- You have reviewed and implemented the HashiCorp Validated Document (HVD) for Vault Solution Design.
+- You have a running Vault cluster that is initialized and unsealed.
+- You have a valid root token for your Vault cluster.
+
+## Configure audit logs
+
+<Note>
+
+You do not need to configure audit logs for HCP Vault. Audit logs are accessible to production tier clusters, they are stored in an encrypted Amazon S3 bucket in the same region as the cluster. HCP Vault supports streaming audit logs to a variety of <a href="https://developer.hashicorp.com/hcp/docs/vault/integrations#audit-log-streaming">destinations</a>.
+
+</Note>
+
+Audit logs are critical for Vault administrators to ensure proper usage, access, and compliance with established security policy. In this section, you will learn about the different types of audit devices and how to enable audit logging in your Vault cluster.
+
+Each line in the audit log is a JSON object containing all of the information for any given request and corresponding response. By default, sensitive information is hashed before it is logged. Audit logs can be used by administrators to monitor the health of the service and to troubleshoot issues, or by compliance auditors to ensure secrets are being accessed and used securely. Each audit log entry contains data such as client IP address, the time of the request, the requested action, and the resulting data from Vault.
+
+<Note>
+
+Audit device logs are separate and unrelated to Vault operational logs. Operational logs are typically gathered by the operating system journal from standard output and standard error while Vault is running, and hold a different set of information.
+
+</Note>
+
+When you enable an audit device in Vault, most strings contained within requests and responses are hashed with a salt using HMAC-SHA256. The purpose of the hash is so that secrets are not in plaintext within your audit logs. However, you are still able to check the value of secrets by generating HMACs yourself; this can be done with the audit device's hash function and salt by using the `/sys/audit-hash` <a href="https://developer.hashicorp.com/vault/api-docs/system/audit-hash" target="_blank" rel="noopener">API endpoint</a>.
+
+Audit logs are enabled in Vault by configuring an audit device. Audit devices define the destination for audit log data. There are three types of audit devices: file, syslog, and socket.
+
+### Types of audit devices
+#### File audit device
+
+The file audit device writes logs to a file. New logs are appended to the log file. The device does not support log rotation. It is up to the operator to use third-party tools such as _logrotate_ to manage log rotation. Sending a SIGHUP to the Vault process will cause file audit devices to close and re-open their underlying file, which can assist with log rotation needs.
+
+<Warning>
+
+It is important to rotate and archive audit log files to prevent it from growing to a size that consumes the entire disk space. Vault will not respond to any API requests if there is a <a href="https://developer.hashicorp.com/vault/tutorials/monitoring/blocked-audit-devices#blocked-file-audit-device">blocked file audit device</a>.
+
+</Warning>
+
+Configuration details for this option can be found <a href="https://developer.hashicorp.com/vault/docs/audit/file" target="_blank" rel="noopener">here</a>.
+
+##### Log file rotation
+
+`logrotate` is a common Linux system utility designed to ease administration of systems that generate large numbers of log files. It allows automatic rotation, compression, removal, and mailing of log files. Each log file may be handled daily, weekly, monthly, or when it grows too large. `logrotate` is available on many Linux distributions, although the default configuration may vary between distributions. Normally, it is run as a daily `cron` job. It will not modify a log more than once in one day unless the criterion for that log is based on the log's size and `logrotate` is being run more than once each day, or unless the `-f` or `--force` option is used.
+
+Below is an example of `logrotate` configuration (adjust the retention and path to systemctl for your environment):
+
+```
+/opt/vault/log/vault_audit.log {
+  daily
+  rotate 7
+  notifempty
+  missingok
+  compress
+  delaycompress
+  postrotate
+    # systemd unit file should be set to send SIGHUP to Vault process on reload, i.e. ExecReload=/bin/kill --signal HUP $MAINPID
+    /bin/systemctl reload vault 2> /dev/null || true
+  endscript
+  create 0644 vault vault
+}
+```
+
+Since the audit log is verbose, we recommend that you only keep a few days of audit logs locally and export old logs to archive storage.
+
+#### Syslog audit device
+
+The `syslog` audit device writes audit logs to `syslog`. It does not support remote `syslog` destinations and always sends audit logs to a local `syslog` agent. The `syslog` audit device is usually configured to write to a local file for either log collection or as a second option for audit device configuration.
+
+Configuration details for this option can be found <a href="https://developer.hashicorp.com/vault/docs/audit/syslog" target="_blank" rel="noopener">here</a>
+
+#### Socket audit device
+
+The `socket` audit device writes to a TCP, UDP, or UNIX socket. Due to the unreliable nature of the underlying protocol, we do not recommend enabling the `socket` audit device unless it is absolutely necessary. If you do enable it, always enable a secondary non-socket audit device to ensure accuracy and to guarantee that audit logs will not be lost.
+
+Configuration details for this option can be found <a href="https://developer.hashicorp.com/vault/docs/audit/socket" target="_blank" rel="noopener">here</a>.
+
+### Multiple audit devices
+
+An otherwise-successful request will fail if it cannot be logged to at least one configured audit device. Failure to log to at least one audit device will prevent Vault from servicing requests (see <a href="https://developer.hashicorp.com/vault/tutorials/monitoring/blocked-audit-devices" target="_blank" rel="noopener">blocked audit device</a>). This is by design to ensure that all requests and responses are captured correctly.
+
+We strongly recommend that you enable at least two audit devices of different types for two reasons:
+
+**Improved Availability**
+
+There are two types of audit device failures: blocking and non-blocking.
+- A blocking failure is one where an attempt to write to the audit device stalls without returning an error. This is unlikely with a local disk device, but could occur with a network-based audit device.
+- A non-blocking failure is one where an attempt to write to the audit device returns an error and no audit log is written.
+
+When multiple audit devices are enabled, if any of them fail in a non-blocking fashion, Vault requests can still complete successfully provided at least one audit device successfully writes the audit record. If any of the audit devices fail in a blocking fashion however, Vault requests will hang until the blocking is resolved.
+
+**Checking and verification**
+
+Configuring multiple audit devices provides you not only with redundant copies, but also a way to check for data tampering in the logs themselves. We recommend that you set up one audit log for analysis, and another for secure storage and archiving. In case there are concerns about the integrity of the analysis logs, you can refer to the archived logs for verification. For archival purposes, a second audit device should be enabled to write to a filesystem or syslog destination which is configured with strict access control permissions. Read-only access to these logs can be granted in the case where there is a need to reconcile with the main audit log, but otherwise these logs can remain untouched. This ensures there is an unaltered version of the audit log for security review. When writing to a `file` audit backend it is important to monitor disk space on the disk where the logs are being written. If disk space fills up, it will result in a blocked audit device, preventing Vault from responding to requests.
+
+### Enabling an audit device
+
+When a Vault server is first initialized, no auditing is enabled. Audit devices must be enabled by a root user using the CLI, API, or Terraform.
+
+<Note>
+
+Audit device configuration is replicated to all nodes within a cluster by default, and to performance/DR secondaries for Vault Enterprise clusters. Each node in the cluster writes to its own audit log, in the same locations as the active node. Before enabling an audit device, ensure that all nodes within the cluster(s), including your DR and performance secondary clusters, will be able to successfully log to the audit device to avoid Vault being blocked from serving requests. Audit logs from all nodes in a Vault cluster need to be analyzed to audit any event. Thus it is best practice to use a centralized logging solution. An audit device can also be limited to only the nodes within the cluster using the <a href="https://developer.hashicorp.com/vault/api-docs/system/audit#local">local</a> parameter. This is useful if you want to have different audit device configurations on replicated clusters.
+
+</Note>
+
+We recommend that you enable a `file` audit device as well as a `syslog` audit device (see [Multiple Audit Devices](#multiple-audit-devices)).
+
+#### Step 1: Ensure you have the correct system permissions
+
+It is important to ensure that the Vault process user has the correct system permissions to write to the configured audit device.
+
+For the `file` audit device, the Vault process user must have write access to the location of the file.
+For the `syslog` audit device, the Vault process user must have the correct <a href="http://man7.org/linux/man-pages/man7/capabilities.7.html" target="_blank" rel="noopener">capabilities</a> such as `CAP_SYSLOG` and permissions where required to write to the system log.
+
+#### Step 2: Enable the audit device
+
+First, set your root token using the Vault CLI.
+
+```
+$ export VAULT_ADDR=https://<vault FQDN>:8200
+$ export VAULT_TOKEN=<your root token>
+```
+
+<Note>
+
+The `VAULT_TOKEN` environment variable sets the authentication token that the Vault CLI will use for all subsequent requests. The `VAULT_ADDR` environment variable tells the Vault CLI where to send all subsequent requests. See our <a href="https://developer.hashicorp.com/vault/docs/commands#environment-variables">documentation</a> for a list of valid environment variables.
+
+</Note>
+
+The following command enables a `file` audit device. The output logs are stored in the `/vault/vault-audit.log` file.
+
+```
+$ vault audit enable file file_path=/vault/vault-audit.log
+```
+
+If the Vault process user does not have permission to write to the file provided in the `file_path` parameter, you can observe the error below.
+
+```
+Error enabling audit device: Error making API request.
+
+URL: PUT http://localhost:8200/v1/sys/audit/file
+Code: 400. Errors:
+
+* sanity check failed; unable to open "/vault/vault-audit.log" for writing: open /vault/vault-audit.log: permission denied
+```
+
+The following command enables a `syslog` audit device, specifying the syslog facility and tag to use.
+
+```
+$ vault audit enable syslog tag="vault" facility="AUTH"
+```
+
+If syslog is not accessible on the system, you can observe errors in the operational log like this when Vault tries to write to it, and when you first try to enable it.
+
+```
+[ERROR] enable audit mount failed: path=syslog/ error="Unix syslog delivery error"
+[ERROR] core: failed to audit response: request_path=sys/audit/syslog error=1 error occurred:
+* no audit backend succeeded in logging the response
+```
+
+The error `Unix syslog delivery error` can mean that the syslog service is not enabled on the host or that Vault is not able to access it. This can often be due to restrictions imposed by SELinux configuration on the host, for example. In order to check whether SELinux is actively prohibiting access to a resource, the operating mode can temporarily be changed to permissive using the `setenforce` utility. A more permanent solution would include enabling SELinux debugging and using packages such as `setools` and `settroubleshoot` to obtain information about specific operation denials.
+
+<Warning>
+
+Audit messages generated for some operations can be quite large, and can be larger than a <a href="https://tools.ietf.org/html/rfc5426#section-3.1">maximum-size single UDP packet</a>. Because UDP is a connectionless protocol, if a log message is larger than the maximum size UDP packet, then that audit log message will fail silently. Vault will have no knowledge that the message was too large. If possible with your syslog daemon, configure a TCP listener. Because TCP protocol is "connection-oriented" Vault will have awareness whether syslog messages have been successfully received. This can result in a blocked audit device if the TCP connections are unsuccessful. To avoid this possibility, consider using a `file` backend and having syslog configured to read entries from the file.
+
+</Warning>
+
+<Note>
+
+A typical audit log entry can be 1kb-3kb, meaning a node servicing 10,000 requests an hour can write 10-30mb of data. We recommend using a log rotation solution such as `logrotate` or equivalent to avoid the local file system logs from becoming full, and transfer the logs to external storage in the event the node loses a disk or is compromised. We also recommend that you configure the audit logs to write to a separate logical volume to avoid any disk IO contention with Vault's internal storage when using integrated storage.
+
+</Note>
+
+For more information on how to use the audit log, please refer to the [Audit Usage](/validated-designs/vault-operating-guides-adoption/observability-and-management#vault-audit-log) section of this document.
+
+## Namespaces
+
+After configuring the audit log, the next step is to think about how to organize the data within Vault. Many organizations opt to implement Vault as a service, where a central platform team is responsible for the day-to-day operations of Vault, while development teams simply utilize Vault's capabilities. To enable this model, you need a mechanism to isolate groups of resources within a single cluster, and this is where Vault namespaces fit in. Read, and map your organization's plans for multi-tenancy in Vault to the <a href="https://developer.hashicorp.com/vault/tutorials/enterprise/namespace-structure" target="_blank" rel="noopener">Vault Namespace and Mount Structuring Guide</a>.
+
+### What are Vault namespaces
+
+Namespaces are a method by which a single Vault cluster can be divided into multiple sub-clusters and managed individually. Each namespace can be assigned different login paths and support creating and managing data isolated to their namespace.
+
+### When to use Vault namespaces
+
+Namespaces are designed to address two use cases.
+
+**Tenant isolation**
+
+There is a need for isolation between the users in policies, secrets, and identities, typically as a result of compliance regulations such as <a href="https://gdpr.eu/" target="_blank" rel="noopener">GDPR</a> or internal security policy.
+
+**Self-management**
+
+There is a need to provide delegated administrative privileges for a team to author their own policies and manage their own namespace. For example, if you have a development team who is comfortable with Vault and wishes to self-manage and operate in their own namespace.
+
+**Namespace antipatterns**
+
+Vault namespaces are subject to <a href="https://developer.hashicorp.com/vault/docs/internals/limits#namespace-limits" target="_blank" rel="noopener">limits and maximums</a> within Vault's backend storage. The effective storage limit on the number of Vault namespaces is a result of the fact that each namespace must have at least two secret engine mounts (for sys and identity), one local secret engine (cubbyhole) and one auth engine mount (token). Depending on your organizations namespace structure (ie. how many auth engines and secret engines you mount under each namespace) the effective storage maximum will vary.
+
+Additionally, administering a large number of namespaces can become difficult and any restructuring can be problematic. There are a few anti-patterns that should be avoided when planning Vault Enterprise namespaces:
+
+- Not clearly defining criteria for a namespace: If namespaces are created ad-hoc without a clear plan or criteria, the namespace structure in an enterprise deployment will quickly become difficult to manage.
+- Strong misalignment to organizational structure: Vault namespaces should ideally be roughly aligned to the level of granularity across lines of businesses (LOBs), divisions, teams, services, apps that needs to be reflected in Vault's end-state design. If the namespace layout bears no resemblance to the level of self-service required in the organization, management can become difficult.
+- Non-scalable model or over-segmentation: If an organization plans on provisioning a namespace for each application, but the organization has 10,000 applications to onboard, then Vault's storage limits will be hit and management of a large number of namespaces will be difficult.
+
+**Namespace performance impacts**
+
+In addition to the storage limits listed above, large numbers of namespaces can also have performance impacts on specific Vault workflows. For example, if the number of leases is also growing linearly or exponentially with the number of namespaces and mounts, then API requests might become slower if the growth is unbounded.
+
+Additionally, a large list of namespaces can impact the time to complete a leader election. In order for a node to become an active leader in a Vault cluster, it has to load up all the namespaces and mounts. A large number of namespaces will potentially impact the amount of time it takes to complete this process. <a href="https://developer.hashicorp.com/vault/docs/enterprise/namespaces/namespace-limits" target="_blank" rel="noopener">This document</a> should be referred to should your organization be planning on creating a large number of namespaces mapped to individual app teams where large numbers of the same secret engine mounts will be used.
+
+### Useful resources
+
+- <a href="https://developer.hashicorp.com/vault/docs/enterprise/namespaces" target="_blank" rel="noopener">Vault Enterprise namespaces</a>
+- <a href="https://developer.hashicorp.com/vault/tutorials/enterprise/namespaces" target="_blank" rel="noopener">Secure multi-tenancy with namespaces</a>

@@ -1,0 +1,756 @@
+---
+title: Public key Infrastructure management
+description: Automate X.509 certificate lifecycle management using Vault's PKI secrets engine with short-lived certificates and automatic renewal.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-06-09T20:55:56.000Z
+last_modified: 2026-06-09T20:55:56.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Public key infrastructure certificate management with Vault
+
+## Overview
+
+The public key infrastructure (PKI) secrets engine dynamically issues X.509 certificates, allowing clients to obtain certificates without manually generating key pairs, submitting certificate signing requests (CSRs), or waiting for approval workflows, which enhances agility. Vault's authentication and authorization mechanisms act as an identity-driven PKI registration authority, enforcing role-based access control (RBAC) and policy-based request validation to ensure tightly controlled certificate issuance.
+
+Each application instance receives a cryptographically unique certificate (and optionally, private key), eliminating shared credentials and simplifying both certificate and key lifecycle management. By adopting short-lived certificates, organizations not only bolster their security posture but can also minimize the need for revocation, reducing, or eliminating reliance on certificate revocation lists (CRLs) and improving scalability.
+
+While the Vault PKI secrets engine provides the foundation for secure, automated certificate issuance (the producer), a complete solution also requires a client-side mechanism (the consumer) to handle retrieval, renewal, and integration with applications. A Vault Agent solution, a client library, or a custom service via a spectrum of supported protocols can fulfill this role. Together, the producer and consumer enable workloads to automatically obtain, renew, and apply certificates with minimal effort.
+
+## A pattern for automatic certificate renewal
+
+This page includes guidance on the configuration of HashiCorp Vault's PKI secrets engine, CA hierarchy design, and access control best practices. We focus on using Vault Agent for seamless certificate retrieval and renewal, enabling secure and efficient management of ephemeral X.509 certificates. See the related resources section at the end of the page for other consumption workflows.
+
+The primary benefits of this approach include:
+
+* **Enhanced compliance**: Enforce strong, consistent, identity-based security controls and streamline certificate issuance to meet regulatory and organizational policies.  
+* **Downtime prevention**: Automate certificate renewal and integrate post-rotation actions to maintain secure, uninterrupted service operations.  
+* **Cost optimization**: Minimize manual effort and administrative overhead by automating routine certificate lifecycle management tasks.  
+* **Reduced risk**: Mitigate the possibility of certificate or key compromise by enforcing short lifetimes and automating rotation, limiting the impact of leaked secrets.
+
+## Producers and consumers of certificates
+
+We recommend a producer/consumer model for Vault PKI, applying the following roles to improve the security posture of certificate management.
+
+* **Platform operator**: Maintains and scales the Vault platform from an infrastructure perspective. This role may reside within security-focused teams or broader infrastructure platform groups.  
+* **Secrets producer**: Configures and manages PKI secrets and operational patterns in Vault. Responsibilities include configuration of certificate authorities, setting up certificate issuance policies, defining access controls, and ensuring compliance with applicable regulations or controls. This role may include Vault administrators, PKI specialists, or security engineers.  
+* **Secrets consumer**: Integrates Vault-issued certificates with various applications. This category includes DevOps engineers, application developers, and service owners who rely on certificates for secure communications.
+
+## People and process considerations
+
+Implementing automatic certificate renewal with a producer and consumer model requires coordination across multiple roles and a shared understanding of responsibilities. Successful adoption depends not only on technical integration but also on effective collaboration, change management, and knowledge sharing.
+
+### Cross-team collaboration
+
+* Establish shared workflows between platform and application teams and define ownership boundaries clearly, for example, who is responsible for debugging failed certificate renewals or policy misconfigurations.  
+* Regularly review access controls, PKI roles, and machine identity configurations as part of security posture assessments.
+
+### Change management
+
+* Integrate automated testing, such as through CI/CD pipelines, to validate consumption behaviors and ensure reliable certificate issuance.  
+* Use a version-controlled repository to manage PKI configurations and policies. Where possible, define these through Terraform to support auditability, repeatability, and safe change rollouts.
+
+### Enablement and documentation
+
+* Provide onboarding guides and training for application teams integrating with Vault for the first time.  
+* Maintain a centralized knowledge base that includes instructions for debugging common issues, configuring PKI roles, and validating certificates.
+
+### Monitoring and alerting
+
+* Monitor certificate issuance frequency and details via Vault’s audit logs.  
+* Set up alerts for failures in the renewal process, and on certificate expiration especially those used in critical systems.  
+* Use dashboards to visualize certificate usage trends, identify outliers, and inform capacity planning.
+
+## Validated architecture
+
+### PKI hierarchy
+
+Vault namespaces provide administrative isolation, making them well-suited for multi-tenancy scenarios. While namespaces are often used to separate resources and configurations at the organizational level, such as lines of business or large deployments with distinct administrative practices, namespaces can also serve as strong boundaries for CA isolation. Each namespace can host one or more PKI secrets engines, enabling organizations to define separate certificate authorities and issuance policies tailored to specific use cases and business practices.
+
+In the diagram below, we propose the following namespace structure for an enterprise CA hierarchy:
+
+* Admin namespace: Hosts a centralized, Vault-managed subordinate CA (signed by an external root CA), used to sign issuing CA certificates  
+* Tenant namespaces: Hosts intermediate CAs used to issue leaf certificates for application workloads
+
+![PKI hierarchy and Vault namespace design](/img/vault/operating-guides/scaling/vault-og-scaling-pki-hierachy.png)  
+
+#### Root CA
+
+While Vault is perfectly capable of acting as a root, keep the root CA and corresponding key material outside of Vault while managing any intermediate and issuing CAs within Vault. This approach aligns with industry best practices and reduces the risk of compromise of the root CA, which should be strongly protected by a secure key management system or hardware security module (HSM). HSM systems may optionally be air-gapped (offline), depending on your specific environment and compliance requirements.
+
+By isolating the root CA while leveraging Vault for certificate issuance, organizations enhance security, improve resiliency through automation, and enable high performance for consuming applications.
+
+Regardless of the specific approach to root CA management, the root CA should never directly issue leaf certificates; instead, it should delegate this responsibility to intermediate CAs managed by Vault.
+
+#### Vault-managed signing CA
+
+Within Vault, a central signing CA (an intermediate CA signed by the root) resides in the administrative namespace and is responsible for signing subordinate issuing CAs. Since its primary role is to sign intermediate CAs rather than leaf certificates directly, you configure it with a relatively long lifespan, or time-to-live (TTL) value. This design enhances flexibility and simplifies the maintenance of the certificate hierarchy, avoiding the complexity and process that often accompany root CA interactions.
+
+Consider the following factors for the Vault-managed signing CA:
+
+* Single issuer: The signing CA should only sign Intermediate CA requests from tenant-specific PKI secrets engines.  
+* Key type: Elliptic Curve (EC) private keys (for example, P-384 for CAs and P-256 for leaf certificates) provide a good balance of security, performance, and compatibility across use cases (for example, IoT, web servers). Ultimately, the choice of key type may depend on your organization's preferences by your organization’s preferences and standard practices. See the Vault documentation for all available options.  
+* Long TTL: The Vault-managed signing CA should have a relatively long TTL, as it is only used for signing tenant issuing CAs (intermediate CAs). However, its TTL should not be so long that its certificate expires simultaneously with the root CA. For example, if your Root CA has a TTL of 10 years, set the maximum TTL for the Vault-managed signing CA to 5-7 years to ensure staggered certificate renewals. Your prevailing organizational practices and security policies should inform this decision.  
+* Security restrictions: Keep the managed central signing CA under strict security controls; similar to the root CA, you should never use it to issue leaf certificates directly, and any interactions should be closely monitored.
+
+Once the Vault-managed central signing CA generates a Certificate Signing Request (CSR), your external root CA must sign it. Use your organization’s established methods for signing CSRs, which may involve collaboration with other teams or individuals who manage PKI infrastructure, approvals, and processes.
+
+#### Issuing CA per tenant namespace
+
+You can delegate the administration of the issuing CAs to namespace administrators (tenants) while maintaining the centralized management and integrity of the central signing CA.
+
+When generating the tenant issuing CAs, the signing CA can impose strong restrictions on the resulting capabilities of the issuers. For example, various URI and DNS domain constraints, exclusions, and path length controls you can and should enforce according to the desired governance model.
+
+Tenant administrators should have the ability to configure and manage their PKI engines according to their needs, within the constraints set by the signing CA. Clients of a given namespace should only be able to interact with the PKI engine in their namespace, subject to the localized governance model and access controls appropriate for that environment.
+
+You can use Sentinel policies to enforce universal governance of PKI engine configurations at the platform level for tenant administrators and consumers. Examples of these controls include:
+
+* Setting a global maximum TTL for certificates  
+* Enforcing or restricting the storage of certificates within Vault  
+* Restricting hostnames, subdomains, and wildcards to specific values
+
+Outside global controls, each tenant namespace should host its own issuing CA to prevent certificate issuance across trust boundaries. Apply the following best practices for PKI administrators configuring issuing CAs:
+
+* Certificate lifetimes: Keep application leaf certificate TTLs short (≤30 days) to minimize reliance on CRLs and enhance security posture.  
+* Automatic tidying: If storing certificates, enable automatic cleanup of expired or revoked certificates in the storage backend.  
+* Automatic certificate revocation list (CRL) rebuilding: If using CRLs, automatically manage CRL rotation on a schedule to avoid expiration.  
+* Storage settings:  
+  * Use store mode where required, such as for Automatic Certificate Management Environment (ACME) challenge validation.  
+  * Use no-store mode when you do not need to persist certificates, as is typical in cases with ephemeral application instances or other scenarios where rapid issuance and expiration are desirable.
+
+### Securing CA key material
+
+For enhanced security, use Vault’s *managed key* feature to store the CA key material in an HSM (using Vault’s PKCS\#11 integration) or cloud-based KMS solution. This ensures key material never leaves tamper-resistant hardware.
+
+![PKI managed keys with HSM or Cloud KMS](/img/vault/operating-guides/scaling/vault-og-scaling-pki-managed-keys.png)
+
+While offloading key material storage and signing operations to a trusted external system may enhance security and help you achieve certain policy requirements, doing so introduces a performance tradeoff in the form of increased latency. This latency is outside of Vault’s control and is a byproduct of both the required network communication and the chosen HSM or KMS solution’s performance capabilities. Selecting elliptic curve key types, which are considerably more efficient, and avoiding certificate storage (covered in the following section) can help offset this latency, but you should test in your environment to determine optimal configurations.
+
+In some cases, customers may decide to optimize performance by using managed keys only for the centralized signing CA, while allowing Vault to store and manage the individual issuing CA key material. For cases where managed keys are not used, you can configure the PKI secrets engine with seal wrapping to enhance key protection. In addition to standard keyring-based encryption, seal wrapping also encrypts private keys using the seal device before storage, adding an extra layer of data security. With seal wrap enabled, Vault caches the private key in memory while in use to optimize the performance of signing operations.
+
+### Certificate storage
+
+While Vault never retains private keys even when configured to generate them for clients, it can optionally store issued leaf certificates in its storage backend on a per-role basis. This behavior is configurable and often depends on the use case. A later section of this document covers details about PKI role configuration.
+
+Several factors should inform the decision to store certificates, including the certificate’s validity period, revocation workflow requirements, and any applicable internal policies or prevailing governance requirements.
+
+In general, the shorter the certificate’s TTL, the less critical revocation becomes. For example, if a certificate is valid for only 10 minutes, the process of revoking it, updating the CRL, and distributing that new CRL before the certificate naturally expires is often impractical and resource-intensive. In such cases, the cost of revocation may outweigh the benefits. It is up to you and your organization to determine what TTL threshold may justify the elimination of certificate storage in Vault.
+
+The standard method for revoking certificates in Vault is to use the certificate's serial number, which requires the certificate to be present in Vault’s storage. When certificates are not stored (that is, `no_store=true`), this administrative revocation path is unavailable.
+
+Vault supports revocation with CRLs or Online Certificate Status Protocol (OCSP), even when certificates are not stored. Vault’s Bring Your Own Certificate (BYOC) feature enables this, which allows you to supply the full certificate material (PEM-formatted data) at revocation time. This capability may influence whether you choose to persist certificates, depending on your preferred approach to revocation and audit requirements.
+
+Disabling certificate storage (`no_store=true`) also improves PKI issuance performance, as Vault can issue certificates without writing to storage. This allows performance standby nodes to service issuance requests directly without proxying to the cluster leader, resulting in significant performance gains in high-throughput environments. Internal testing demonstrates a 3-5x improvement in leaf issuance rates when certificates are not stored. For more information about how engine configuration influences performance, see the [PKI secrets engine considerations](https://developer.hashicorp.com/vault/docs/secrets/pki/considerations#cluster-performance-and-key-types) documentation.
+
+### Revocation considerations
+
+It is important to consider that verification of certificate validity and revoked status is a client responsibility that is not inherent or automatic. You should investigate whether certificate status is actively and consistently verified by clients that operate in your environment, and if so, what protocol they use (CRL or OCSP). Often, organizations believe that they must support revocation and certificate storage for compliance purposes, only to find out that no clients respect the CRL or OCSP information contained in leaf certificates. If clients do not check for revocation, there is arguably no need to maintain a CRL or run OCSP responders. We still recommend that you enable and configure CRL and OCSP so that revocation remains an option, regardless of whether you store certificates.
+
+### Unified CRL and OCSP with cross-cluster revocation
+
+In performance replication topologies, where you use multiple Vault clusters for horizontal scaling, each cluster maintains its own certificate and lease storage, as well as CRL. Even though they share CA configurations and key material, clusters execute signing and issuance operations independently. Configure Authority Information Access (AIA) and CRL Distribution Point URLs for each issuer to ensure consistent revocation data across all clusters. These configurations allow unified CRLs and Online Certificate Status Protocol (OCSP) responses to be uniformly accessible across different clusters.
+
+Consider the following key factors:
+
+* AIA templates: Configure AIA URLs to support unified CRLs across replicated topologies and ACME services. This ensures that clients can accurately validate certificates regardless of which cluster issued the certificate.  
+* Cross-cluster revocation: Enable cross-cluster revocation to synchronize revocation data across all clusters when using performance replication.  
+* OCSP support: Configure OCSP endpoints to provide real-time certificate status information, enhancing the efficiency of the revocation process.  
+* If the CRL becomes excessively large, there are potential performance penalties to consider. In a high-volume environment where revocation support is necessary, forgoing CRLs in favor of a unified (cross-cluster) OCSP view may prove to be the best option. See the [PKI considerations reference](https://developer.hashicorp.com/vault/docs/secrets/pki/considerations#spectrum-of-revocation-support) for additional details.
+
+### Automatic CRL rebuilding and rotation
+
+Enable automatic CRL rebuilding (`auto_rebuild=true`) to ensure consistent, timely rotation and to prevent CRLs from expiring unexpectedly. The latter can occur if no revocations occur for a span of time that extends beyond the CRL expiration date. However, enabling this setting disables the default behavior of immediately rebuilding the CRL upon each certificate revocation. In this case, if you revoke a certificate and must reflect it in the CRL right away, you must trigger a manual CRL rebuild.
+
+For the most accurate, real-time revocation status, consider using OCSP in your environment. Unlike CRLs, OCSP responders provide immediate, up-to-date revocation information for individual certificates.
+
+### Tidying operations
+
+Regular tidying operations are essential to maintain the performance and reliability of PKI deployments when you store certificates or utilize CRLs. Tidying is the process of automatically cleaning up expired certificates, issuers, revocation data, and associated metadata, ensuring that the certificate store remains efficient and uncluttered.
+
+Regular tidying provides the following benefits:
+
+* Performance improvement: Removing outdated certificates and metadata reduces storage burden and improves query performance.  
+* Scalability: Continuous tidying ensures that Vault can handle large-scale deployments without degradation over time.  
+* Operational efficiency: Automating tidying minimizes manual intervention, enhancing overall system reliability.
+
+Apply the following best practices:
+
+* Set appropriate tidying intervals based on deployment size and certificate issuance rate (for example, `24h`.) Use daily tidying as a starting point which you can adjust according to your need.  
+* Regularly monitor the performance impact of tidying operations and adjust intervals as needed.  
+* Enable tidying for all tenant PKI mounts to maintain consistency across your environment.
+
+## Access controls
+
+This section aligns with the namespace-based PKI architecture outlined earlier, ensuring that each tenant namespace has a dedicated PKI secrets engine that hosts an issuer. A Vault-wide intermediate CA residing in the `admin` namespace signs these issuing CAs, which are responsible for issuing application leaf certificates.
+
+Vault relies on machine identity to authenticate application workloads and authorize access to secrets. See the [Vault documentation](https://developer.hashicorp.com/vault/docs/auth) to learn more about available auth methods.
+
+1. Machine authentication per tenant  
+   * Each tenant namespace (for example, `tenant-1`) hosts one or more machine authentication mounts that are specific to the designated consuming application ecosystem (for example, AWS auth method).  
+   * Applications authenticate using this method to obtain access to the PKI secrets engine and request certificates.  
+2. Policy-based access to PKI roles  
+   * Upon successful authentication, Vault issues clients a time-bound token with an associated policy that grants access to specific API paths and methods. In this case, the policy permits access to one or more PKI engine roles.  
+   * Policies are dynamically mapped based on the business segment/team (for example, `team-a`), and every business segment has a designated role.  
+3. Simplified policy management with path templating  
+   * Use ACL policy path templating to dynamically assign access based on entity metadata.  
+   * This approach reduces manual policy configuration overhead while maintaining strict role-based access controls.
+
+![Access control with Vault ACL polices and entity metadata](/img/vault/operating-guides/scaling/vault-og-scaling-pki-access-control.png)
+
+### PKI roles
+
+A PKI role granularly defines the rules and constraints for certificate issuance, similar to a certificate *template* or *policy* in alternative PKI solutions. Use roles to configure certificate attributes such as key type, bit length, and usages, as well as allowed domains, SANs, and other standard X.509 metadata. A single PKI engine and corresponding CA can support many roles with differing configurations based on your requirements. Create multiple roles, each scoped to a specific application or use case, rather than create overly permissive roles that allow unnecessary latitude in request criteria. Access to each role is tightly controlled through ACL policies.
+
+Among [many other controls](https://developer.hashicorp.com/vault/api-docs/secret/pki#create-update-role), you configure certificate lifetimes (X.509 `NotAfter` constraints) on a per-role basis via TTL parameters. Adopt a short-lived leaf certificate pattern to minimize reliance on CRLs (if in use) and enhance security. Use Vault Agent or a similar solution to ensure certificate lifecycles are reliably automated.
+
+Depending on the engine and role configurations, certificate issuance can be a resource-intensive operation, requiring writes to Vault’s storage backend that Vault must forward to the leader node. However, you can avoid these limitations by disabling certificate storage (and lease generation) where it is not required. When certificates are not stored, performance standby nodes can issue certificates independently, without consulting the cluster leader.
+
+* Performance standby node behavior:  
+  * By default, only the active node handles PKI certificate issuance requests.  
+  * To distribute the workload, performance standby nodes can handle requests if certificates are not stored in Vault.  
+  * This setup requires a Vault Enterprise license and an appropriate load balancer configuration that distributes traffic across all cluster nodes.
+
+* Disabling certificate storage for performance:  
+  * By setting `no_store=true`, Vault does not store certificates and does not generate leases, reducing storage and performance overhead.
+  * Performance standby nodes can process requests, [significantly improving issuance rates](https://developer.hashicorp.com/vault/docs/secrets/pki/considerations#cluster-scalability).  
+  * Note: It is still possible to revoke a certificate even if not stored in Vault via the [BYOC](https://developer.hashicorp.com/vault/api-docs/secret/pki#certificate-1) method. You can optionally configure your audit device to write issued certificate PEM data in plaintext to better enable this approach.
+
+If you enable certificate storage, you can configure PKI roles to associate Vault leases with issued certificates. This allows revocation through Vault’s idiomatic lease management system. However, turn off lease generation for certificates and rely instead on PKI-native revocation semantics. Leases present non-trivial resource utilization and management overhead that you should avoid for PKI use cases.
+
+The following example defines a comprehensive PKI role optimized for high-performance and large-scale certificate issuance.
+
+<Tabs>
+<Tab heading="CLI" group="cli">
+
+```sh
+vault write pki/roles/team-a \
+  allowed_domains="tenant-1.example.com" \
+  use_csr_common_name=true \
+  require_cn=true \
+  use_csr_sans=true \
+  allow_subdomains=true \
+  allow_bare_domains=false \
+  allow_glob_domains=false \
+  allow_localhost=false \
+  allow_wildcard_certificates=false \
+  allow_ip_sans=false \
+  enforce_hostnames=true \
+  server_flag=true \
+  client_flag=false \
+  code_signing_flag=false \
+  organization="HashiCorp" \
+  policy_identifiers="1.3.6.1.4.1.99999.999.1" \
+  key_usage="DigitalSignature,KeyAgreement,KeyEncipherment" \
+  key_type="ec" \
+  key_bits="256" \
+  max_ttl="720h" \
+  no_store=true \
+  generate_lease=false \
+  no_store_metadata=false
+```
+
+</Tab>
+<Tab heading="Terraform" group="terraform">
+
+```hcl
+resource "vault_pki_secret_backend_role" "team-a" {
+  backend                     = vault_mount.tenant_issuing_ca.path
+  name                        = "team-a"
+  allowed_domains             = ["tenant-1.example.com"]
+  allow_subdomains            = true
+  allow_bare_domains          = false
+  allow_glob_domains          = false
+  allow_localhost             = false
+  allow_wildcard_certificates = false
+  allow_ip_sans               = false
+  enforce_hostnames           = true
+  server_flag                 = true
+  client_flag                 = false
+  code_signing_flag           = false
+  use_csr_common_name         = true
+  require_cn                  = true
+  use_csr_sans                = true
+  organization                = ["HashiCorp"]
+  policy_identifiers          = ["1.3.6.1.4.1.99999.999.1"]
+  key_usage                   = ["DigitalSignature", "KeyAgreement", "KeyEncipherment"]
+  key_type                    = "ec"
+  key_bits                    = 256
+  max_ttl                     = 2592000 # 720h in seconds
+  no_store                    = true
+  generate_lease              = false
+  no_store_metadata           = false
+}
+```
+
+</Tab>
+</Tabs>
+
+Configuration options illustrated in this role include the following:
+
+* Domain and SAN restrictions: Limits certificate issuance to *subdomains* of tenant-1.example.com, and restricts the use of IP SANs and wildcard certificates.  
+  * Valid: app1.tenant-1.example.com, app2.tenant-1.example.com  
+  * Invalid: tenant-1xyz.example.com, \*.tenant-1.example.com  
+* Key type and size: Elliptic Curve (EC) P-256, balancing security and performance.  
+* TTL configuration: Certificates have a maximum lifetime of 30 days (720 hours) to reduce revocation needs. Requests for certificates with longer TTLs are overridden and issued with the maximum allowed value.  
+* Storage optimization:  
+  * `no_store=true` prevents Vault from storing issued certificates.  
+  * `generate_lease=false` disables lease tracking, reducing resource consumption.  
+  * `no_store_metadata=false` enables metadata storage for auditing and tracking purposes, even if not storing certificates. Note that if a certificate request contains metadata and you set this flag to false, the system forwards the request to the active leader node. This carries a performance penalty.
+
+This configuration ensures efficient, scalable certificate issuance while adhering to Vault’s best practices for performance and security.
+
+### ACL policies and entity metadata
+
+Define a Vault policy that grants access to the PKI role for authorized client applications. Like any other Vault policy, it should be appropriately scoped to grant the minimum necessary permissions to the client.
+
+For PKI engine workloads, Vault supports two methods of consumption at two separate API endpoints:
+
+* `sign` requires a CSR in the request payload
+* `issue` Vault-generated private key delivered to the client with the certificate, no CSR required in the request
+
+Exposing both endpoints to clients allows developers to choose the workflow that works best for their application.
+
+The example below shows a policy with the necessary permissions to generate PKI certificates using the `issue` endpoint of the role `team-a` within the PKI engine mounted at the path `pki`.
+
+```hcl
+path "pki/issue/team-a" {
+   capabilities = ["update"]
+}
+```
+
+While this is a suitable approach for small environments, Vault’s policy engine is capable of supporting dynamic templates to better facilitate large-scale application consumption use cases. Policy templates allow Vault administrators to define a single policy that may apply broadly across consuming clients for a particular access pattern, such as issuing certificates.
+
+The below policy example leverages templating that references entity metadata, ensuring that only applications associated with the intended team (`TeamName`) can request certificates from the role.
+
+<Tabs>
+<Tab heading="CLI" group="cli">
+
+```sh
+tee /tmp/pki-policy.hcl <<EOF
+path "pki/issue/{{identity.entity.metadata.TeamName}}" {
+  capabilities = ["update"]
+}
+EOF
+
+vault policy write pki /tmp/pki-policy.hcl
+```
+
+</Tab>
+<Tab heading="Terraform" group="terraform">
+
+```hcl
+resource "vault_policy" "pki" {
+  name      = "pki"
+  policy    = <<EOT
+path "pki/issue/{{identity.entity.metadata.TeamName}}" {
+  capabilities = ["create", "update"]
+}
+EOT
+}
+```
+
+</Tab>
+</Tabs>
+
+For general information about Vault ACL policies, see the [documentation](https://developer.hashicorp.com/vault/docs/concepts/policies).
+
+### Pre-creating entities for machine authentication
+
+To enable identity-based access control, Vault allows pre-defining entities with metadata that ACL policy templates can reference dynamically, such as in the previous example. This approach dynamically associates a machine identity (for example, AWS IAM role) with a policy via Vault’s entity construct, based on available metadata.
+
+The following example demonstrates how to complete these tasks:
+
+1. Create an entity for an application (`my-app`).  
+2. Attach metadata to define business-specific attributes.  
+3. Link the entity to an AWS authentication identity.
+
+The following command creates an entity with business-specific metadata that Vault ACL policies can reference dynamically.
+
+<Tabs>
+<Tab heading="CLI" group="cli">
+
+```sh
+vault write -format=json identity/entity \
+  name="my-app" \
+  metadata=AppName="my-app" \
+  metadata=BusinessUnitName="tenant-1" \
+  metadata=TeamName="team-a" \
+  metadata=EmailDistributionList="team-a@example.com" \
+  metadata=TLSDomain="app.tenant-1.example.com" \
+  | jq -r ".data.id" > /tmp/entity_id.txt
+```
+
+The command captures the entity ID and stores it in `/tmp/entity_id.txt` for later reference.
+
+</Tab>
+<Tab heading="Terraform" group="terraform">
+
+```hcl
+resource "vault_identity_entity" "my-app" {
+  name      = "my-app"
+  metadata = {
+    AppName               = "my-app"
+    BusinessUnitName      = "tenant-1"
+    TeamName   = "team-a"
+    EmailDistributionList = "team-a@example.com"
+    TLSDomain             = "foo.tenant-1.example.com"
+  }
+}
+```
+
+</Tab>
+</Tabs>
+
+
+To associate an AWS IAM role with the entity, retrieve the auth mount *accessor* for the desired auth method. This example mounts the AWS auth method at the path `aws`.
+
+<Tabs>
+<Tab heading="CLI" group="cli">
+
+```sh
+vault auth list -format=json \
+  | jq -r '.["aws/"].accessor' \
+  > /tmp/accessor_aws.txt
+```
+
+Use this accessor to bind an AWS IAM role to the Vault entity. The following command associates the AWS IAM role with the pre-created entity:
+
+```sh
+vault write identity/entity-alias \
+  name="arn:aws:iam::123456789012:role/this-iam-role" \
+  canonical_id=$(cat /tmp/entity_id.txt) \
+  mount_accessor=$(cat /tmp/accessor_aws.txt)
+```
+
+</Tab>
+<Tab heading="Terraform" group="terraform">
+
+```hcl
+resource "vault_auth_backend" "aws" {
+  type      = "aws"
+}
+```
+
+Use this AWS auth mount accessor to bind an AWS IAM role to the Vault entity. The following Terraform resource associates the AWS IAM role with the pre-created entity:
+
+```hcl
+resource "vault_identity_entity_alias" "aws_role" {
+  name           = var.aws-auth-unique-id
+  mount_accessor = vault_auth_backend.aws.accessor
+  canonical_id   = vault_identity_entity.my-app.id
+}
+```
+
+</Tab>
+</Tabs>
+
+### Enforcing certificate constraints with Sentinel
+
+To prevent unauthorized manipulation of certificate templates, you can use Sentinel endpoint governing policies (EGPs) to enforce additional security constraints beyond those that standard Vault ACL policies control. For example, you can use Sentinel to ensure the following:
+
+* Applications and developers can only request certificates for subdomains present in the requestor’s entity metadata.  
+* Only a trusted orchestrator (for example, Terraform) or an entity with predefined metadata can request certificates.
+
+```py
+## This policy is to restrict the common name while issuing a pki cert 
+import "strings"
+
+# Only care about write and update operations against pki/issue
+precond = rule {
+  request.operation in ["write", "update"] and
+  strings.has_prefix(request.path, "pki/issue")
+}
+
+# Check if the trusted orchestrator makes the request
+trusted_orchestrator_check = func() {
+
+  print ("trace:identity.entity.name", identity.entity.name)
+
+  # Check identity
+  if identity.entity.name matches "terraform" {
+    return true
+  }
+  return false
+}
+
+# Check common_name matches the entity metadata
+common_name_check = func() {
+  print ("trace:Request.data:", request.data)
+  print ("trace:TLSDomain", identity.entity.metadata.TLSDomain)
+
+  # Make sure there is request data
+  if length(request.data else 0) is 0 {
+    return false
+  }
+
+  # Make sure request data includes common_name
+  if length(request.data.common_name else 0) is 0 {
+    return false
+  }
+
+  # Check common_name matches app name
+  if request.data.common_name matches identity.entity.metadata.TLSDomain {
+    return true
+  }
+
+  return false
+}
+
+# Check the precondition before executing all above functions
+main = rule when precond {
+  trusted_orchestrator_check() or common_name_check()
+}
+```
+
+For additional information on Vault and Sentinel, see the Vault Enterprise [documentation](https://developer.hashicorp.com/vault/docs/enterprise/sentinel).
+
+## Vault Agent for VM-based workloads
+
+Using Vault Agent for certificate management of VM-based workloads.
+
+### Introduction to Vault Agent
+
+Applications must interact with the Vault API to automate certificate renewal. In some cases, teams might build and maintain custom automation for authentication, certificate retrieval, renewal timing, and persistence. However, this approach may not scale well in large enterprises with diverse platforms and runtimes, or may be wholly inappropriate for the target application.
+
+Vault Agent simplifies client-side integration with Vault by abstracting authentication, token management, and secrets consumption. For PKI workloads, it automates the certificate lifecycle and provides flexible templating features to render certificate files in formats tailored to application requirements. In addition, Vault Agent can trigger scripted actions after it issues a new certificate, such as reloading a service or calling a webhook.
+
+### PKI consumption workflow
+
+This consumption pattern demonstrates automating certificate management for applications with Vault Agent. The diagram below illustrates the architecture of an example application and how Vault Agent interacts with Vault to obtain certificates. In this example, an NGINX server running on an AWS EC2 instance requires a certificate for an HTTPS listener. NGINX, like many other software applications, references certificates and private keys from files on the local machine. Other examples of software solutions that implement this pattern include Apache HTTPD, HAProxy, PostgreSQL, MySQL, MongoDB, Kafka, RabbitMQ, Jetty, Tomcat, and Elasticsearch.
+
+![PKI consumption workflow](/img/vault/operating-guides/scaling/vault-og-scaling-pki-consumption-workflow.png)
+
+The workflow for obtaining a certificate consists of five main steps, explained in the diagram:
+
+1. Initial configuration: A Vault administrator must configure an auth method, role, policy, and PKI engine role to allow Vault to authenticate the client and issue a valid certificate. The administrator can use tools such as the Vault CLI, API, or Terraform to perform this configuration. Use Terraform as a best practice.
+2. Authentication: Upon startup, the agent automatically authenticates with the Vault cluster and obtains a token for subsequent requests. This example uses the AWS auth method.  
+3. Certificate retrieval: The agent retrieves a certificate by sending a request to the issuing PKI secrets engine. The secrets engine generates a certificate based on the request and the PKI role configuration and returns the certificate to the Agent.
+4. Template rendering: The agent converts the certificate data into the required format for the application and saves it to the filesystem. In this scenario, you have configured the agent to store the certificate and private key in separate files, as is common for most TLS-enabled application servers.  
+5. Application usage: NGINX can now utilize the rendered certificate and private key by referencing the paths to the agent-rendered files.
+
+Vault Agent continuously monitors and manages the lifecycle of the certificate and key, automating the renewal process and preventing downtime due to an expired certificate. As the expiration date approaches, the agent retrieves a new certificate from the PKI secrets engine, re-renders the certificate and private key to the file system, and performs any necessary steps to notify the application about the new certificate (steps 3-5).
+
+### Implementation guide
+
+The guide assumes that you have set up a Vault Enterprise cluster for PKI issuance by following the best practices defined in the [Vault HVD](https://developer.hashicorp.com/validated-designs/vault-solution-design-guides-vault-enterprise). It also presumes that you have implemented the guidance in Validated PKI Architecture, including engine configurations, tenant isolation, CA hierarchy, authentication methods, ACL policies, and application-specific PKI role configurations.
+
+#### Certificate generation APIs (sign versus issue)
+
+Vault supports two primary methods for obtaining certificates from the PKI secrets engine: `issue` and `sign`. Both endpoints are available to any PKI role, provided the client has appropriate access via ACL policy.
+
+The `issue` endpoint is for fully automated workflows. On request, Vault generates a private key and issues a certificate, returning both to the client. The private key is ephemeral, is not retained by Vault, and must be securely handled by the requesting application. Vault may store the certificate itself if you configure the role to do so.
+
+The `sign` endpoint supports a more traditional CA workflow, where the client generates its own key pair and submits a Certificate Signing Request (CSR) to Vault for evaluation. In this case, Vault signs the CSR and returns only the certificate. The private key remains under the exclusive control of the client and is never seen by Vault.
+
+While both methods are valid, Vault Agent templating requires the issue endpoint. This capability forms the foundation of the agent-based patterns and enables hands-free certificate lifecycle management for a variety of workloads.
+
+#### Authentication
+
+Vault Agent must authenticate with Vault like any other client. Therefore, the next step is to identify the auth method that the Vault Agent will use to log in and obtain a valid token. In many cases, the Vault Platform Team makes the decision of which auth method to use.
+
+Vault Agent supports the majority of application-oriented auth methods. As with any other use case, use a platform identity source (AWS IAM, Kubernetes service accounts, Azure MSI, and so on) instead of a static credential for Vault authentication. For workloads without a built-in source of identity, we recommend a trusted orchestrator pattern to provide credentials, such as an AppRole secret ID.
+
+#### Agent installation and configuration
+
+The first step is to install the Vault Agent binary on your application host. In our example, this corresponds to the EC2 instance running NGINX. Ideally, automation would install and configure the agent during workload provisioning. For a detailed tutorial covering agent installation and basic operation, see the [Vault Agent and Vault Proxy Quick Start](https://developer.hashicorp.com/vault/tutorials/vault-agent/agent-quick-start) guide.
+
+After installing the Vault Agent, the next step is to construct a valid configuration file that the agent will use when communicating with Vault. The configuration file specifies the Vault cluster address, auth method, and also defines templates for the secrets your application requires.
+
+##### Auto-authentication
+
+Vault Agent supports automatic authentication. The `auto_auth` block of the configuration file specifies the auth method and any relevant options. You should configure it to utilize the auth method and role defined for your application. While the [exact configuration options](https://developer.hashicorp.com/vault/docs/agent-and-proxy/autoauth) will differ depending on your chosen auth method, the example below illustrates how you would set it up for AWS IAM authentication.
+
+```hcl
+auto_auth {
+   method "aws" {
+       mount_path = "auth/aws"
+       config = {
+           type = "iam"
+           role = "my-app"
+       }
+   }
+}
+```
+
+Note: Auto-auth can also specify token *sinks* that store the Vault token in a local file. Sinks are optional and you should not include them unless your use case requires direct access to a Vault token. In our example, a sink is not required.
+
+#### PKI template
+
+Vault Agent has powerful [templating capabilities](https://developer.hashicorp.com/vault/docs/agent-and-proxy/agent/template), enabling you to render secret data as files or environment variables for applications to use. If a secret changes due to an update or scheduled rotation, the agent will ensure that any templates are re-rendered. This section will discuss best practices for using these templates to manage certificates.
+
+##### Template configuration
+
+Use `template` blocks to specify individual templates in the agent configuration. The [template documentation](https://developer.hashicorp.com/vault/docs/agent-and-proxy/agent/template#template-configurations) lists all available configuration options.
+
+```hcl
+template {
+    source = "/vault-agent/pkiCerts.tmpl"
+    destination = "/vault-agent/template-output/pki.data"
+}
+```
+
+You can specify the template contents either inline through the `contents` field or store them in a file and provide them via the `source` field. Our example assumes you store the source template in a file at `/vault-agent/pkiCerts.tmpl`. The template renders output to `/vault-agent/template-output/pki.data`. This `destination` file acts as a persistent cache for the `pkiCert` function output and consuming applications do not use it directly.
+
+The `template_config` block specifies global templating options. The most important configuration option for certificates is the `lease_renewal_threshold`. This threshold determines how long the template engine waits to attempt a renewal of the underlying certificate. It is defined as a fraction of the certificate’s total lifetime and defaults to 90 percent. Therefore, if your certificate has a TTL of 10 hours, the agent begins its renewal attempts approximately 1 hour before the expiration date. Depending on your configured certificate TTL and preferred practices, you may choose to adjust this buffer. The example below demonstrates changing this to 75 percent of the certificate's lifetime.
+
+```hcl
+template_config {
+   lease_renewal_threshold = 0.75
+}
+```
+
+##### Templating functions
+
+The templating language offers several helper *functions*. The two relevant functions for the PKI use case are `secret` and `pkiCert`. Both can retrieve certificates from Vault, but they differ in how they handle renewals.
+
+The `secret` function is suitable for generic consumption of a variety of Vault secret types. When rendering a certificate using `secret`, the Vault Agent will always fetch a new certificate at startup or during re-authentication, even if the current certificate is valid. This approach may or may not be appropriate for your use case.
+
+The `pkiCert` function manages rendering and renewals by checking the file system for an existing certificate on the target file system. If no certificate exists at the destination path, the agent retrieves and renders a new certificate. If a certificate is already present, the agent examines its expiration date. If the certificate has expired or is past the renewal threshold, a new one replaces it. However, if the certificate is still valid, the existing certificate remains in place and the agent continues to monitor it. Due to the enhanced behavior, we recommend the `pkiCert` function for all certificate management use cases.
+
+##### Rendering certificates
+
+In the case of our example NGINX application, the rendered certificate file should include the leaf certificate generated by Vault, concatenated with the chain of intermediate certificates used for signing. Note that our example does not include the root certificate, as we expect to distribute anchor certificates out-of-band and install them in device trust stores outside this workflow.
+
+To construct the content of the template source file, we first specify a function (`pkiCert`), an API path (`pki/issue/team-a`), and any necessary or desired parameters that you should include in the request payload, supplied as key-value pairs (for example, `ttl`):
+
+```txt
+{{- with pkiCert "pki/issue/team-a" "common_name=app.tenant-1.example.com" "ttl=14d" "remove_roots_from_chain=true" -}}
+```
+
+This line of the template, on its own, only defines the request to Vault. It does not generate any output that will be written to the destination file.
+
+Next, we define how the API response from Vault should be interpreted, transformed, and written to the local file system where the agent is running. The `pkiCert` function supports several helper *keys* that simplify this parsing:
+
+* `.Cert`: the certificate body  
+* `.Key`: the private key  
+* `.CAChain`: the CA chain defined in the PKI engine configuration
+
+<Note>
+
+The `.CAChain` field is only available in versions 1.18 or above of Vault Agent. If you are running an older version, see the consul-template [documentation](https://github.com/hashicorp/consul-template/blob/main/docs/templating-language.md#pkicert) for alternative options.
+
+</Note>
+
+Adding these keys to the template source file writes the corresponding API response values to the configured default template destination. This example template would produce a single file containing the PEM-formatted private key, certificate, and CA chain:
+
+```txt
+{{- with pkiCert "pki/issue/team-a" "common_name=app.tenant-1.example.com" "ttl=14d" "remove_roots_from_chain=true" -}}
+{{- .Key -}}
+{{- .Cert -}}
+{{- .CAChain -}}
+{{- end -}}
+```
+
+The output produced by this template has limited practical utility and likely cannot be used by an application such as NGINX. However, it is important to configure a default template output containing unique secret data so that the template engine (and `pkiCert` function in particular) establishes a source of comparison when deciding whether to request a new certificate or other secret. This output corresponds to the *cache* file mentioned in the template configuration section.
+
+To generate separate files containing the private key and certificate data as required by NGINX, additional outputs are defined using the `writeToFile` function. This function can write individual response values to specific files, concatenate secret data into existing files, and also set filesystem permissions on these outputs.
+
+Usage of the `writeToFile` function:
+
+```txt
+writeToFile "[output-path]" "owner" "group" "permission-bits"
+```
+
+In this example, the private key and certificate are written to distinct files at `/etc/nginx/certs/`, in addition to the default (cache) output of the template. Appropriate filesystem permissions are also enforced.
+
+```txt
+{{- with pkiCert "pki/issue/team-a" "common_name=app.tenant-1.example.com" "ttl=14d" "remove_roots_from_chain=true" -}}
+{{- .Key -}}
+{{- .Cert -}}
+{{- .CAChain -}}
+{{- .Key | writeToFile "/etc/nginx/certs/private.key" "" "" "0600" -}}
+{{- .Cert | writeToFile "/etc/nginx/certs/server.crt" "" "" "0644" -}}
+{{- end -}}
+```
+
+Since a standard TLS server handshake should include any intermediate certificates needed to construct a valid trust chain, we must also render the CA chain from the API response, concatenating it onto the leaf certificate file at `/etc/nginx/certs/server.crt`. Because the chain is represented as a list object in the API response, we must iterate through the chain using the `range` function and then append those certificates to the output.
+
+This example demonstrates a complete template, suitable for managing certificates for our NGINX application:
+
+```txt
+{{- with pkiCert "pki/issue/team-a" "common_name=app.tenant-1.example.com" "ttl=14d" "remove_roots_from_chain=true" -}}
+{{- .Key -}}
+{{- .Cert -}}
+{{- .CAChain -}}
+{{- .Key | writeToFile "/etc/nginx/certs/private.key" "" "" "0600" -}}
+{{- .Cert | writeToFile "/etc/nginx/certs/server.crt" "" "" "0644" -}}
+{{- range .CAChain -}}
+{{- . -}}
+{{- . | writeToFile "/etc/nginx/certs/server.crt" "" "" "0644" "append" -}}
+{{- end -}}
+{{- end -}}
+```
+
+##### Certificate metadata
+
+Vault 1.17 introduced the ability to add custom metadata to your certificates, allowing you to associate any valuable context or information with them. Examples of custom metadata include application, certificate owner, contact information, business unit, risk profile, host, and more. The system stores metadata separately from the certificates themselves, enabling you to utilize this feature even if you choose not to store issued certificates.
+
+To configure a PKI role to store metadata, regardless of whether you store certificates, set `no_store_metadata=false`. Note that including metadata in a certificate request forces the request to forward to the leader node since this action constitutes a storage write operation. This carries a performance penalty in the form of latency, similar to that of certificate storage.
+
+You can add certificate metadata at the time of certificate creation by setting the `cert_metadata` input field. The metadata can be in any format you choose, but it must be base64-encoded before sending it to the API. Typically, you will want the metadata in a standard format, such as JSON or YAML, for easier processing. Vault Agent offers several helper methods that you can use to add this formatted metadata.
+
+```txt
+{{- scratch.MapSet "certMetadata" "teamName" "team-a" -}}
+{{- scratch.MapSet "certMetadata" "application" "my-app" -}}
+{{- scratch.MapSet "certMetadata" "contact/email" "team-a@example.com" -}}
+{{- scratch.MapSet "certMetadata" "contact/slack" "#team-a" -}}
+{{- $certMetadata := scratch.Get "certMetadata" | explodeMap | toJSON | base64Encode -}}
+{{- $certMetadataArg := printf "cert_metadata=%s" $certMetadata -}}
+
+
+{{- with pkiCert "pki/issue/team-a" "common_name=app.tenant-1.example.com" "ttl=14d" "remove_roots_from_chain=true" $certMetadataArg -}}
+...
+```
+
+The preceding template uses the [`scratch`](https://github.com/hashicorp/consul-template/blob/main/docs/templating-language.md#scratch) helper to construct a map of the custom certificate metadata we want to assign to the certificate. The `/` separator can be used when defining the keys to create nested objects within the metadata. The map is then processed through [`explodeMap`](https://github.com/hashicorp/consul-template/blob/main/docs/templating-language.md#explodemap), [`toJson`](https://github.com/hashicorp/consul-template/blob/main/docs/templating-language.md#tojson), and [base64Encode](https://github.com/hashicorp/consul-template/blob/main/docs/templating-language.md#base64encode) to generate a base64-encoded JSON object.
+
+The template passes the encoded string in as an argument to the `pkiCert` call and the system stores it by certificate serial number. You can see the resulting certificate metadata for our sample template below:
+
+```sh
+$ vault read -field cert_metadata pki/cert-metadata/<serial> | base64 -d | jq
+{
+  {
+  "application": "my-app",
+  "contact": {
+    "email": "team-a@example.com",
+    "slack": "#team-a"
+  },
+  "teamName": "team-a"
+}
+```
+
+#### Integrating with applications
+
+Often, applications need to be notified when new certificate data is available. For example, NGINX does not automatically reload the TLS certificate when it changes on disk. Instead, it continues to use the previously loaded certificate and key until the configuration is reloaded. In this section, we will discuss controlling application behavior based on changes in certificate (or other secret) data.
+
+#### Post-render commands
+
+Vault Agent enables you to execute arbitrary commands after a template is rendered, including when secrets are modified. To specify a post-render command, use an `exec` block within the template configuration stanza. The `exec` block contains a `command` field where you specify the exact command and its arguments.
+
+The example below demonstrates how to trigger a reload of the Nginx TLS configuration with `nginx -s reload` whenever the certificate is updated. This ensures that the service is always running with a valid certificate, avoiding outages related to expired certificates.
+
+```hcl
+template {
+    source = "/vault-agent/pkiCerts.tmpl"
+    destination = "/vault-agent/template-output/pki.pem"
+    exec {
+       command = ["nginx", "-s", "reload"]
+    }
+}
+```
+
+#### Agent deployment and operations considerations
+
+Given that certificates are a crucial component of most web applications, it is essential that Vault Agent be deployed in a resilient manner. If your application is long-running, run the agent in daemon mode (with `exit_after_auth` set to `false`) and managing its execution with a service manager, such as `systemd` or Windows Service Control Manager, to ensure it starts automatically on boot and restarts in the event of any unexpected errors.
+
+If the application requiring a certificate runs on a host with other applications that also need secrets or certificates via Vault Agent, you should deploy a single instance of Vault Agent for each application. This enables each application to authenticate individually, helping you maintain least-privilege access principles. This separation further reduces the blast radius of any potential misconfiguration.
+
+Lastly, Vault Agent supports [telemetry](https://developer.hashicorp.com/vault/docs/agent-and-proxy/agent#telemetry-stanza) and logging, both of which should be used. The metrics allow you to monitor its performance, authentication status, and more. Consider ingesting your metrics and logs into your enterprise monitoring solutions to proactively identify issues with agents and prevent certificates from not being rotated due to problems like authentication failures.
+
+## Conclusion
+
+Automating certificate renewal with Vault’s PKI Secrets Engine offers a scalable and secure approach to managing certificates across diverse environments. By combining a structured PKI hierarchy with Vault Agent automation, organizations can reduce manual effort, improve operational efficiency, and strengthen their overall security posture.
+
+This validated pattern highlights the benefits of using short-lived certificates, enforcing strict access controls, and isolating workloads through Vault namespaces and sound PKI architecture.
+
+Successful implementation depends on understanding the limitations of this approach and addressing operational considerations. Compatibility with external systems and adherence to organizational compliance requirements must be evaluated. Close collaboration between platform operators, application developers, and security teams is essential to ensure reliable, automated certificate lifecycle management.

@@ -1,0 +1,493 @@
+---
+title: Authentication for applications
+description: Configure machine authentication using platform integration or trusted orchestrator approaches to solve the secret zero problem.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-06-09T20:55:54.000Z
+last_modified: 2026-06-09T20:55:54.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Authentication for applications
+
+In the previous section, we discussed the considerations for choosing an authentication method for human users. Since a human user will likely not authenticate with Vault in the same manner as a programmatic access request or application, there is a different set of considerations to take into account when choosing an authentication strategy for machine access.
+
+In order for a client to interact with Vault's API, it must pass an authentication token along with the request. An authentication token is granted after the client proves its identity to Vault via an authentication method. For a human user, providing a proof of identity is straightforward using a user ID and password. However, this is more challenging for applications because you need a secure way to provide that initial credential for the application to authenticate with Vault. This problem is often referred to as the _secret zero_ or secure introduction challenge. How does a secret consumer, an application or machine, prove that it is the legitimate recipient for a secret so that it can acquire a token? How can you avoid persisting raw token values during your secure introduction?
+
+## Secure introduction approach
+
+There are two approaches to securely authenticate a secret consumer.
+
+- Platform integration
+- Trusted orchestrator
+
+### Platform integration
+
+In the platform integration model, Vault trusts the underlying platform (e.g. AWS, Azure, GCP, Kubernetes etc.) which assigns a token or cryptographic identity (such as IAM token, signed JWT) to virtual machine, container, or serverless function.
+
+Vault uses the provided identifier to verify the identity of the client by interacting with the underlying platform. After the client identity is verified, Vault returns a token to the client that is bound to their identity and policies that grant access to secrets.
+
+![Platform integration](/img/vault/operating-guides/adoption/image7.png)
+
+For example, suppose we have an application running on a virtual machine in AWS EC2. When that instance is started, an IAM token is provided via the machine local metadata URL. That IAM token is provided to Vault, as part of the AWS auth method, to login and authenticate the client. Vault uses that token to query the AWS API and verify the token validity and fetch additional metadata about the instance (account ID, VPC ID, AMI, region, etc). These properties are used to determine the identity of the client and to distinguish between different roles (e.g. a web server versus an API server).
+
+Once validated and assigned to a role, Vault generates a token that is appropriately scoped and returns it to the client. All future requests from the client are made with the associated token, allowing Vault to efficiently authenticate the client and check for proper authorizations when consuming secrets.
+
+#### Use case
+
+When the client app is running on a compute construct (e.g. container, VM, or serverless function) hosted on a supported cloud provider, you can leverage the corresponding auth method to authenticate with Vault.
+
+#### Reference materials
+
+- <a href="https://developer.hashicorp.com/vault/docs/auth/aws" target="_blank" rel="noopener">AWS Auth Method</a>
+- <a href="https://developer.hashicorp.com/vault/docs/auth/azure" target="_blank" rel="noopener">Azure Auth Method</a>
+- <a href="https://developer.hashicorp.com/vault/docs/auth/gcp" target="_blank" rel="noopener">GCP Auth Method</a>
+- <a href="https://developer.hashicorp.com/vault/docs/auth/kubernetes" target="_blank" rel="noopener">Kubernetes Auth Method</a>
+
+### Trusted orchestrator
+
+In the trusted orchestrator model, you have an orchestrator which is already authenticated against Vault with privileged permissions. The orchestrator launches new applications and injects a mechanism they can use to authenticate (e.g. PKI cert, token, AppRole etc.) with Vault.
+
+![Trusted orchestrator model](/img/vault/operating-guides/adoption/image24.png)
+
+For example, suppose <a href="https://developer.hashicorp.com/terraform" target="_blank" rel="noopener">Terraform</a> is being used as a trusted orchestrator. This means Terraform already has a Vault token, with enough capabilities to generate new tokens or create new credentials. Terraform can interact with platforms such as VMware to provision new virtual machines. VMware does not provide a cryptographic identity, so a platform integration is not possible. Instead, Terraform can create and inject an AppRole credential into a new machine, acting as a trusted orchestrator that extends trust to the machine, allowing it or its application to authenticate against Vault using the injected credentials.
+
+![Terraform trusted orchestrator](/img/vault/operating-guides/adoption/image25.png)
+
+#### Use case
+
+When you are using an orchestrator tool such as Chef to launch applications, this model can be applied in an environment where [platform integration](#platform-integration) isn't possible (e.g. VMware host). See the section on [AppRole auth method](#approle-auth-method) for more details.
+
+#### Reference materials
+
+- <a href="https://developer.hashicorp.com/vault/docs/auth/approle" target="_blank" rel="noopener">AppRole Auth Method</a>
+- <a href="https://developer.hashicorp.com/vault/docs/auth/cert" target="_blank" rel="noopener">TLS Certificates Auth Method</a>
+- <a href="https://developer.hashicorp.com/vault/docs/auth/token" target="_blank" rel="noopener">Token Auth Method</a>
+
+### Vault agent
+
+Vault Agent is a client daemon which automates the workflow of client login and token refresh. It can be used with either [platform integration](#platform-integration) or [trusted orchestrator](#trusted-orchestrator) approaches. Vault Agent and its usage is covered in more detail in the [Consumption of Secrets](/validated-designs/vault-operating-guides-adoption/static-secrets#consumption-of-secrets) section later in this document.
+
+## Configure machine auth method
+
+We recommend that customers use the most specific auth method for their environment. In this section, we will cover two common machine auth methods that organizations utilize: cloud provider auth method and the AppRole auth method.
+
+### Cloud provider auth method
+
+The basic steps to configure a cloud provider auth method are as follows.
+
+1. Enable the auth method
+1. Configure credentials to allow Vault access to the cloud provider API
+1. Create a Vault policy specifying the resources that the application can access
+1. Create a Vault role to associate a cloud entity to a set of Vault policies
+
+In this section, you will learn how to configure the AWS auth method.
+
+#### AWS auth method overview
+
+The `aws` auth method provides two ways to authenticate to Vault using either `iam` principals or `ec2` instances.
+
+<Note>
+
+The `ec2` method was implemented before the primitives to implement the `iam` method were supported by AWS. The `iam` method is the recommended approach as it is more flexible and aligns with best practices to perform access control and authentication. Therefore, we will focus on the `iam` method in this document. See the <a href="https://developer.hashicorp.com/vault/docs/auth/aws#comparison-of-the-iam-and-ec2-methods">documentation</a> comparing the two auth methods for more information.
+
+</Note>
+
+With the `iam` method, an authenticating client creates a signed <a href="http://docs.aws.amazon.com/STS/latest/APIReference/API_GetCallerIdentity.html" target="_blank" rel="noopener">GetCallerIdentity</a> AWS request and uses it to authenticate with Vault. The GetCallerIdentity request is signed using the IAM credentials that are automatically supplied to AWS instances in IAM instance profiles, Lambda functions, and others. This signed AWS request is included in the login request sent to Vault. When Vault receives the login request, it can execute the STS query without needing to know its contents. Depending on the response from the STS service, Vault then authenticates the client by comparing the IAM principal's ARN mapped to the Vault role used for authentication. Clients authenticating to Vault must have an ARN that matches one of the ARNs bound to the role they are attempting to login to.
+
+![AWS auth method](/img/vault/operating-guides/adoption/image8.png)
+
+The steps below are examples of how to configure the AWS auth method using the `iam` method. For details on specific settings, please refer to the <a href="https://developer.hashicorp.com/vault/docs/auth/aws" target="_blank" rel="noopener">AWS Auth Method</a> documentation and the <a href="https://developer.hashicorp.com/vault/api-docs/auth/aws" target="_blank" rel="noopener">AWS Auth Method API</a>.
+
+#### Configuring AWS auth method
+##### Step 1: Enable the auth method
+
+Similar to configuring an auth method for human access, you must enable the AWS auth method before you can use it. You can enable and configure the auth method using the UI, CLI, or the API. We will focus on CLI commands in this document.
+
+Using the Vault CLI, log in to Vault as an admin user using the auth method you configured as part of the initial cluster configuration. Next, enable the AWS auth method under the tenant namespace using the commands below.
+
+```
+$ export VAULT_ADDR=https://vault:8200
+$ export VAULT_NAMESPACE=<tenant namespace>
+$ vault auth enable aws
+```
+
+##### Step 2: Configure auth method with AWS credentials
+
+Next, you need to configure the auth method with a credential that would allow Vault to make AWS API calls to validate the identity of a requesting client. If Vault is deployed on AWS EC2 instances, then Vault will attempt to use standard environment variables (`AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`) or IAM EC2 instance role credentials without having to embed credentials into the auth method configuration.
+
+The IAM account or role to which the credentials map must allow `iam:GetUser` and `iam:GetRole`. These permissions are used when using the `iam` auth method and binding to an IAM user or role principal to determine the <a href="https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_identifiers.html#identifiers-unique-ids" target="_blank" rel="noopener">AWS IAM Unique Identifiers</a> or when using a wildcard on the bound ARN to resolve the full ARN of the user or role. An example policy can be found in our <a href="https://developer.hashicorp.com/vault/docs/auth/aws#recommended-vault-iam-policy" target="_blank" rel="noopener">Recommended Vault IAM Policy</a> documentation.
+
+For Vault servers deployed outside of AWS, use the commands below to configure the client credential, substitute the `secret_key` and `acces_key` with your own values that have the permissions described previously.
+
+```
+$ vault write auth/aws/config/client \
+    secret_key=vCtSM8ZUEQ3mOFVlYPBQkf2sO6F/W7a5TVzrl3Oj \
+    access_key=VKIAJBRHKH6EVTTNXDHA
+```
+
+##### Step 3: Configure the X-Vault-AWS-IAM-Server-ID header
+
+We recommend requiring an additional header, `X-Vault-AWS-IAM-Server-ID`, for the AWS auth method to mitigate against different types of replay attacks. Clients must include this header in the headers of the login request, and further this header must be among the signed headers validated by AWS.  This is to protect against different types of replay attacks, for example a signed request sent to a dev server being resent to a production server. This header should be set to the Vault server's DNS name.
+
+```
+$ vault write auth/aws/config/client \
+    iam_server_id_header_value=vault.example.com
+```
+
+##### Step 4:  Configure the policies on the role
+
+Next, create a role to map the IAM principal to Vault policies.
+
+```
+$ vault write auth/aws/role/demo auth_type=iam \
+    bound_iam_principal_arn=arn:aws:iam::123456789012:role/MyRole \
+    policies=default \
+    token_ttl=8h \
+    max_ttl=8h
+```
+
+The command above creates a new role called _demo_ and associates it to the _default_ policy. The _default_ policy is used here as an example since you have not enabled any secrets engines at this point. You will create additional roles and map them to policies granting access to the KV secrets engine later in this document. The `bound_iam_principal_arn` defines the list of IAM principals that are permitted to login to the role using the `iam` auth method. Wildcards are supported at the end of the ARN, e.g. "arn:aws:iam::123456789012:*" will match any IAM principal in the AWS account 123456789012. The `token_ttl` specifies the incremental lifetime for generated tokens and the `max_ttl` specifies the maximum lifetime for generated tokens.
+
+##### Step 5: Test the login
+
+The easiest way to test the login is to create an EC2 instance and attach it to an instance profile with the `bound_iam_principal_arn` IAM roles specified in the previous step. Once you deploy the test EC2 instance, install the Vault binary.
+
+Test the login using the Vault CLI. The CLI will generate the signed STS request for you.
+
+```
+$ export VAULT_ADDR=https://vault:8200
+$ export VAULT_NAMESPACE=<tenant namespace>
+$ vault login -method=aws header_value=vault.example.com role=demo
+
+Success! You are now authenticated. The token information displayed below
+is already stored in the token helper. You do NOT need to run "vault login"
+again. Future Vault requests will automatically use this token.
+
+Key                      Value
+---                      -----
+token                    hvs.root.token
+token_accessor           FgsZpKvvD0NYbbGGETfn08Ig.Ojft7
+token_duration           8h
+token_renewable          true
+token_policies           ["default"]
+identity_policies        []
+policies                 ["default"]
+token_meta_account_id    258559098798
+token_meta_auth_type     iam
+token_meta_role_id       eec3784b-e51c-7c14-e263-8c3a64b6be07
+```
+
+Another way to test the login without an EC2 instance is to directly pass the IAM credentials on the command line (not recommended for production usage), omitting `aws_security_token` if not applicable.
+
+```
+$ vault login -method=aws header_value=vault.example.com role=demo \
+    aws_access_key_id=<access_key> \
+    aws_secret_access_key=<secret_key> \
+    aws_security_token=<security_token>
+```
+
+##### Reference material
+
+- <a href="https://developer.hashicorp.com/vault/docs/auth/aws" target="_blank" rel="noopener">AWS Auth Method</a>
+
+### AppRole auth method
+
+The AppRole auth method allows machines or applications to authenticate with Vault using custom roles defined in Vault. It is typically used in an environment where [platform integration](#platform-integration) is not possible (e.g. VMware host). The AppRole auth method is designed to enable automated workflows for a large number of applications, where a unique role is created for each application that wants to access Vault. Each role is attached to a set of Vault policies, which restricts the access needed for the application.
+
+Each role configured under the AppRole auth method is associated with a RoleID and SecretID, which in essence is a username and password for machines. During application authentication with Vault, both the RoleID and SecretID are included in the authentication request. Upon successful validation of the request, Vault returns a token. The application uses the token to make subsequent requests to Vault, such as reading secrets, generating dynamic credentials, or encrypting data.
+
+<Note>
+
+While AppRole is a valid use case, use this auth method as a last resort. Relying on alternative platform authentication methods is inherently more secure because AppRole can be misconfigured, leading to a less secure posture than is possible.
+
+</Note>
+
+<Note>
+
+Multiple SecretIDs can be created for the same RoleID. The value of each SecretID for the same RoleID is unique and they can all be used to authenticate to Vault. For this reason, it is important to set a TTL for each SecretID generated to prevent the risk of a leaked SecretID. See the <a href="#approle-auth-best-practice">AppRole Auth Best Practices</a> for more details.
+
+</Note>
+
+Below is a basic workflow for the AppRole auth method.
+
+![AppRole Auth Method](/img/vault/operating-guides/adoption/image6.png)
+
+#### Configuring AppRole auth method
+##### Step 1: Enable the auth method
+
+You must enable the AppRole auth method before you can use it.
+
+Using the Vault CLI, login to Vault as an administrator using the auth method you configured as part of the initial cluster configuration. Next, enable the AppRole auth method under the tenant namespace using the commands below.
+
+```
+$ export VAULT_ADDR=https://vault:8200
+$ export VAULT_NAMESPACE=<tenant namespace>
+$ vault auth enable approle
+```
+
+<Note>
+
+Use the `path` parameter to customize the path where you want to mount the auth method. For example, `vault auth enable -path=apps approle`.
+
+</Note>
+
+##### Step 2: Create a policy and a role
+
+Next, create a role and map it to Vault policies.
+
+```
+$ vault write auth/approle/role/demo \
+secret_id_num_uses=1 \
+secret_id_ttl=15m \
+token_policies="default" \
+token_ttl=1h \
+token_max_ttl=1h
+```
+
+The command above creates a new role called _demo _and associates it to the _default_ policy. The _default_ policy is used here as an example since we have not enabled any secrets engines yet. You will create additional roles and map them to policies granting access to the KV secrets engine later in this document.
+
+The `secret_id_num_uses` parameter determines how many times a particular SecretID generated for this role can be used to authenticate with Vault. Setting this value to 1 effectively makes any generated SecretID a one time password. This helps to prevent the SecretID from being reused elsewhere. The default value is 0, which will allow unlimited uses of the SecretID. The `secret_id_ttl` parameter sets the TTL of any SecretID generated for this role. Setting this value ensures that any generated SecretIDs that did not get used expire automatically. We recommend that you always set these two settings to reduce the attack surface in case the SecretID was accidentally leaked.
+
+<Note>
+
+Limiting the SecretID TTL and its number of uses means that a new SecretID will need to be delivered to the application once the application's Vault token reaches its maximum TTL and can no longer be renewed.
+
+</Note>
+
+<Tip>
+
+Also consider setting <a href="https://developer.hashicorp.com/vault/api-docs/auth/approle#secret_id_bound_cidrs">secret_id_bound_cidrs</a> to restrict the source IP range of the connecting devices.
+
+</Tip>
+
+You can use the command below to view the details of the role you just configured.
+
+```
+$ vault read auth/approle/role/demo
+
+Key                        Value
+---                        -----
+bind_secret_id             true
+local_secret_ids           false
+secret_id_bound_cidrs      <nil>
+secret_id_num_uses         1
+secret_id_ttl              15m
+token_bound_cidrs          []
+token_explicit_max_ttl     0s
+token_max_ttl              1h
+token_no_default_policy    false
+token_num_uses             0
+token_period               0s
+token_policies             [default]
+```
+
+##### Step 3: Get the RoleID
+
+The next step is to generate the RoleID. The RoleID is static and is not considered sensitive information, similar to a username.
+
+Read the RoleID using the command below.
+
+```
+$ vault read auth/approle/role/demo/role-id
+Key        Value
+---        -----
+role_id    04be0443-b30b-f5ab-8803-9afff043919b
+```
+
+##### Step 4: Get the SecretID
+
+Next, generate a SecretID for the role.
+
+```
+$ vault write -force -field=secret_id auth/approle/role/demo/secret-id
+```
+
+##### Step 5: Authenticate with Vault
+
+Login to Vault using your RoleID and SecretID.
+
+```
+$ vault write auth/approle/login \
+    role_id=04be0443-b30b-f5ab-8803-9afff043919b \
+    secret_id=a4173afc-6a04-0acc-7adc-6ab78445e752
+
+Key                     Value
+---                     -----
+token                   hvs.root.token
+token_accessor          ugevnwKij1v9xE4XRWO9w5Lx.Ojft7
+token_duration          1h
+token_renewable         true
+token_policies          ["default"]
+identity_policies       []
+policies                ["default"]
+token_meta_role_name    demo
+```
+
+Note that in step 2 we configured the TTL of the SecretID to be 15 minutes. If you see the error below, generate a new SecretID. Note that the namespace in the example below, `admin`, is specific to HCP Vault but the equivalent (`/`) is just as relevant in self-managed instances of Vault Enterprise.
+
+```
+Error writing data to auth/approle/login: Error making API request.
+
+Namespace: admin/
+URL: PUT https://dev.vault.org:8200/v1/auth/approle/login
+Code: 400. Errors:
+
+* invalid secret id
+```
+
+#### AppRole auth best practice
+
+As we alluded to earlier, the AppRole auth method is typically used with a [trusted orchestrator](#trusted-orchestrator) when a platform identity is not available. In that scenario, the trusted orchestrator is responsible for the delivery of the AppRole credential to the application.
+
+A potential risk with the trusted orchestrator pattern is that if the trusted orchestrator is responsible for delivering the AppRole credentials, it would also have access to the applications' secrets. If the trusted orchestrator is compromised, then application secrets would be at risk as well.
+
+In order to prevent any one system, other than the target client, from obtaining the complete set of credentials (RoleID and SecretID), we recommend implementing AppRole auth method to deliver those values separately through two different channels. This enables you to provide narrowly-scoped tokens to each trusted orchestrator to access either RoleID or SecretID, but never both.
+
+The diagram below illustrates the recommended workflow to securely deliver the RoleID and SecretID to the target application.
+
+![AppRole Auth Method Organization](/img/vault/operating-guides/adoption/image11.png)
+
+##### Step 1
+
+Take the time to consider role management before enabling the auth method. If you intend to delegate role management to others, assess whether they require full access to all roles. If not, it might be beneficial to enable AppRole at multiple paths, enabling targeted policies for managing specific sets of roles.
+
+##### Step 2
+
+Create roles and policies for your applications. Each role is associated with a set of Vault policies that define the secrets an application can access. Follow the principle of least privilege for each application and map each application to a role that grants access to the secrets deemed necessary - if two applications use the same role, they will have access to the same secrets.
+
+Remember, roles can have multiple attached policies. To handle shared and unique secrets among apps, craft one policy for common secrets and app-specific policies for unique needs.
+
+When creating roles, consider using these features when possible:
+
+1. <a href="https://www.vaultproject.io/api-docs/auth/approle?_gl=1*xinpkm*_ga*MzIwMDUzNjI0LjE2OTI4MDIyOTk.*_ga_P7S46ZYEKW*MTY5Njk2MjUxOC4zNy4xLjE2OTY5NjUxNzMuNDIuMC4w#secret_id_bound_cidrs" target="_blank" rel="noopener">TTL, usage limits, and source CIDR limits</a> for the SecretID to control authentication.
+
+2. <a href="https://www.vaultproject.io/api-docs/auth/approle?_gl=1*81buuk*_ga*MzIwMDUzNjI0LjE2OTI4MDIyOTk.*_ga_P7S46ZYEKW*MTY5Njk2MjUxOC4zNy4xLjE2OTY5NjUxNzMuNDIuMC4w#token_ttl" target="_blank" rel="noopener">The same limits</a> should be applied separately to the token generated upon authentication.
+
+For example, to limit the number of uses of the SecretID, set the <a href="https://developer.hashicorp.com/vault/api-docs/auth/approle#secret_id_num_uses" target="_blank" rel="noopener">secret_id_num_uses</a> on the role definition.
+
+```
+vault write auth/approle/role/jenkins token_policies="jenkins" \
+     token_ttl=1h token_max_ttl=4h \
+     secret_id_num_uses=10
+```
+
+##### Step 3 and 4
+
+Request and obtain the RoleID for the role. The RoleID is not a secret value. It’s a static UUID that identifies a specific role configuration. Because it is not a secret, it can be embedded into an application-related artifact, such as the VM image or container as a text file or environment variable.
+
+For example:
+
+- Build an image with <a href="https://developer.hashicorp.com/packer/tutorials" target="_blank" rel="noopener">Packer</a> with RoleID stored as an environment variable.
+- Use <a href="https://developer.hashicorp.com/terraform/tutorials" target="_blank" rel="noopener">Terraform</a> to provision a machine embedded with RoleID.
+
+There are a number of different patterns through which this value can be delivered.
+
+The application running on the machine or container will read the RoleID from the file or environment variable to authenticate with Vault.
+
+An appropriate policy is required to read RoleID from Vault. For example, to get the RoleID for a role named, "jenkins", the policy should look as below.
+
+```
+# Grant 'read' permission on the 'auth/approle/role/<role_name>/role-id' path
+path "auth/approle/role/jenkins/role-id" {
+capabilities = [ "read" ]
+}
+```
+
+##### Step 5
+
+At this point, the running application has half the necessary authentication information, with the remaining portion provided in the following step.
+
+<Note>
+Steps 6–8, which generates and delivers the SecretID, are sometimes done before step 5. However, the order of steps laid out here are the most secure way to deliver the SecretID to ensure that the application is fully started before the SecretID is delivered for immediate use. This minimizes the risk of exposure of an unconsumed SecretID. Ideally, application instances should wait for the SecretID and consume it immediately, or they should terminate and restart (e.g. by a supervising orchestrator) until the SecretID is available. In some cases, pre-delivery of the SecretID may be necessary if the application cannot gracefully handle startup before the SecretID is present.
+</Note>
+
+##### Step 6 and 7
+
+Your runtime platform now will need to request and obtain a SecretID to be provided to the application. Use a Vault identity for this that is associated with policies that allow only this operation. For example, to get the SecretID for a role named, “jenkins”, the policy should look as below.
+
+```
+# Grant 'update' permission on the 'auth/approle/role/<role_name>/secret-id' path
+path "auth/approle/role/jenkins/secret-id" {
+   capabilities = [ "update" ]
+}
+```
+
+The SecretID is equivalent to a password for its corresponding RoleID. Since it is a secret and should only be read by the intended recipient, additional considerations need to be accounted for when distributing the SecretID.
+
+1. Binding CIDRs
+2. AppRole response wrapping
+
+**Binding CIDRs**
+
+When defining an AppRole, you can use the <a href="https://developer.hashicorp.com/vault/api-docs/auth/approle#secret_id_bound_cidrs" target="_blank" rel="noopener">secretid_bound_cidrs</a> parameter to specify blocks of IP addresses which can perform the login operation for this role. You can further limit the IP range per token using <a href="https://developer.hashicorp.com/vault/api-docs/auth/approle#token_bound_cidrs" target="_blank" rel="noopener">token_bound_cidrs</a>.
+
+```
+vault write auth/approle/role/jenkins \
+      secret_id_bound_cidrs="0.0.0.0/0","127.0.0.1/32" \
+      secret_id_ttl=60m \
+      secret_id_num_uses=5 \
+      enable_local_secret_ids=false \
+      token_bound_cidrs="0.0.0.0/0","127.0.0.1/32" \
+      token_num_uses=10 \
+      token_ttl=1h \
+      token_max_ttl=3h \
+      token_type=default \
+      period="" \
+      policies="default","test"
+```
+
+**AppRole Response Wrapping**
+
+To guarantee confidentiality, integrity, and non-repudiation of SecretID, you can use the `-wrap-ttl` flag when generating the SecretID. Instead of providing the SecretID in plaintext, Vault <a href="https://www.vaultproject.io/docs/concepts/response-wrapping?_gl=1*phxbx8*_ga*MzIwMDUzNjI0LjE2OTI4MDIyOTk.*_ga_P7S46ZYEKW*MTY5NzAzMTU5Mi40MC4wLjE2OTcwMzE1OTIuNjAuMC4w" target="_blank" rel="noopener">response-wraps</a> the SecretID and returns a single-use token that can be used for an “unwrap” operation in the Vault API. When unwrapping, Vault returns the underlying secret - in this case an AppRole SecretID.
+
+Example: The following CLI command retrieves the SecretID for a role named, "jenkins". The generated SecretID is wrapped in a token which is valid for 60 seconds to unwrap.
+
+```
+vault write -wrap-ttl=60s -force auth/approle/role/jenkins/secret-id
+
+Key Value
+--- -----
+wrapping_token: s.yzbznr9NlZNzsgEtz3SI56pX
+wrapping_accessor: Smi4CO0Sdhn8FJvL8XvOT30y
+wrapping_token_ttl: 1m
+wrapping_token_creation_time: 2021-06-07 20:02:01.019838 -0700 PDT
+wrapping_token_creation_path: auth/approle/role/jenkins/secret-id
+```
+
+Finally, you can monitor your audit logs for attempted read access of your SecretID. If Vault throws a use-limit error when an application tries to read the SecretID, you know that someone else has read the SecretID and alert on that. For example, if you are <a href="https://learn.hashicorp.com/tutorials/vault/pattern-approle?in=vault/recommended-patterns" target="_blank" rel="noopener">using this pattern for CI/CD pipelines</a> and a SecretID is generated for a pipeline role but no pipelines are running. The audit logs will indicate where the SecretID read attempt originated.
+
+You can ensure response wrapping by applying a policy enforcing the application of TTLs on SecretID creation.
+
+```
+# This effectively makes response wrapping mandatory for this path by setting min_wrapping_ttl to 1 second.
+# This also sets this path's wrapped response maximum allowed TTL to 90 seconds.
+path "auth/approle/role/my-role/secret-id" {
+    capabilities = ["create", "update"]
+    min_wrapping_ttl = "1s"
+    max_wrapping_ttl = "90s"
+}
+```
+
+##### Step 8
+
+Deliver the SecretID wrapping token to the authorized application using your preferred delivery method. For example, you can push it via an API call to your application or have the application pull it by reading from a file. Whichever delivery method you use, ensure that it is not the same channel used for delivering the RoleID. It is also recommended to promptly remove the wrapping token once it is used for authentication (if you are using the [Vault agent](#vault-agent), it will attempt to delete the SecretID file by default after it has been read).
+
+<Note>
+
+We recommend configuring your CI/CD pipeline to raise a security alert to the Platform Team should this method result in a 500 error being received by an application attempting to use the wrapping token. Wrapping tokens are single use only, and a 500 API response code from Vault indicates that this token is now invalid suggesting it has already been used. We recommend testing this alerting mechanism to ensure it works as expected.
+
+</Note>
+
+##### Step 9-11
+
+The application unwraps the SecretID, authenticates with Vault using the RoleID and SecretID, and obtains a Vault token. If you are using the Vault Agent, it automatically unwraps the SecretID when a wrapping token is detected.
+
+Remember, it is crucial for the application to promptly unwrap and use the SecretID. Delaying its use increases the risk of an exposed credential, expiration of the wrapping token or SecretID, and the potential for a compromised token to go undetected until authentication is attempted.
+
+#### Reference material
+
+- <a href="https://developer.hashicorp.com/vault/docs/auth/approle" target="_blank" rel="noopener">AppRole auth method documentation</a>
+- <a href="https://developer.hashicorp.com/vault/api-docs/auth/approle" target="_blank" rel="noopener">AppRole auth method API</a>
+- <a href="https://www.hashicorp.com/blog/how-and-why-to-use-approle-correctly-in-hashicorp-vault" target="_blank" rel="noopener">How (and Why) to Use AppRole Correctly in HashiCorp Vault</a>
+- <a href="https://developer.hashicorp.com/vault/tutorials/recommended-patterns/pattern-approle" target="_blank" rel="noopener">Recommended Vault AppRole usage pattern (Jenkins example)</a>
+- <a href="https://developer.hashicorp.com/vault/tutorials/auth-methods/approle-best-practices" target="_blank" rel="noopener">AppRole usage best practices</a>

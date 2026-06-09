@@ -1,0 +1,279 @@
+---
+title:  Deployment (Managed Kubernetes)
+description: Deploy Terraform Enterprise on EKS, AKS, or GKE using HashiCorp Terraform modules.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-06-09T20:55:50.000Z
+last_modified: 2026-06-09T20:55:50.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Deployment (managed Kubernetes)
+
+This page provides guidance on how to deploy Terraform Enterprise on EKS, AKS and GKE using Terraform modules written and managed by HashiCorp (HVD Modules). The modules work in conjunction with the Terraform command-line tool, are available in the HashiCorp Terraform Registry and are the best practice method for deploying Terraform Enterprise on the respective managed Kubernetes services. See below for more on this.
+
+<Note>
+
+This topic requires a good understanding of Terraform Enterprise and managed Kubernetes services.
+Read the <a href="/validated-designs/terraform-solution-design-guides-terraform-enterprise/architecture" target="_blank">architecture</a> section before this one.
+
+</Note>
+
+## Architectural summary
+
+- Deployment of Terraform Enterprise using managed Kubernetes requires the `active-active` operational mode where a Redis instance operates separately, even if only one application container operates.
+- Deploy one or more Terraform Enterprise pod(s) onto a managed Kubernetes instance that autoscales across availability zones (AZs) and which reduces the overhead in managing those services including patching and upgrading.
+- Use managed versions of object storage, PostgreSQL database and clustered Redis cache (as offered by the public cloud of choice, but specifically not Redis Cluster which is not supported), to ensure replicas distribute in different AZs.
+- Use a layer 4 load balancer to ingress traffic to the Terraform Enterprise instances. This is because:
+  - Certificates need to be on the compute nodes for Terraform Enterprise to work.
+  - It is more secure to terminate the TLS connection on Terraform Enterprise rather than outside it and have to re-encrypt traffic from the inside of the load balancer requiring an additional certificate.
+  - It is more straight forward to manage than a layer 7 load balancer.
+- By using three AZs (one Terraform Enterprise pod in each AZ), the system has an n-2 failure profile, surviving failure of two AZs. However, if the entire region is unavailable, then Terraform Enterprise experiences an outage. The application architecture is single-region.
+- We do not recommend exposing Terraform Enterprise to the public Internet. Users must be on the company network to be able to access the Terraform Enterprise API/UI. However, we recommend allowing Terraform Enterprise to access <a href="https://developer.hashicorp.com/terraform/enterprise/deploy/configuration/network" target="_blank">certain addresses on the Internet</a>:
+  - The HashiCorp container registry - where HashiCorp provides the Terraform Enterprise container
+  - HashiCorp service APIs (all owned and operated by HashiCorp except Algolia):
+    - `registry.terraform.io` houses the public Terraform module registry which enterprise customers want to avoid letting users have unfettered access to (see below). However, this is where official providers index.
+    - `releases.hashicorp.com` is where HashiCorp host Terraform binary releases. We recommend users stay within two minor releases of current to access the latest security updates, and new features.
+    - `reporting.hashicorp.services` is where we aggregate license usage and as such we _strongly recommend_ including this in egress allow lists to ensure our partnership with your organization can be right-sized for your needs going forward.
+    - <a href="https://developer.hashicorp.com/terraform/enterprise/replicated/requirements/network#https-yy0ffni7mf-dsn-algolia-net" target="_blank">Algolia</a> - The Terraform Registry uses Algolia to index the current resources in the registry.
+  - Additional outbound targets for VCS and SAML depending on the use case.
+  - Public cloud cost estimation APIs as necessary.
+- Terraform Enterprise `v202309-1` or later works with Kubernetes deployments. Review <a href="https://developer.hashicorp.com/terraform/enterprise/deploy" target="_blank">the main public documentation</a> for this architecture if you have not already.
+- The HVD Modules all include example code which you can use to deploy Terraform Enterprise on an existing Kubernetes cluster, or to deploy a new cluster and then deploy the application onto it. To make the most efficient use of computing resources, we recommend deploying Terraform Enterprise onto an existing cluster.
+- Assess supported versions of Kubernetes from the latest <a href="https://developer.hashicorp.com/terraform/enterprise/releases" target="_blank">Terraform Enterprise Releases</a> document.
+- Remember that when selecting machine types in this guide, Terraform Enterprise supports x86-64 on all versions, but deployment on ARM architecture requires version v1.0.0 or later.
+- The Helm chart that deploys Terraform Enterprise has versions in <a href="https://github.com/hashicorp/terraform-enterprise-helm" target="_blank">this repository</a> and you must read and understand it as part of your preparation for deployment.
+
+In some regulated environments, outbound access to the Internet limits or totally restricts server environments. If you need to run Terraform Enterprise in a fully air-gapped mode, you must manually download and host provider and Terraform binary versions in the Terraform Enterprise registry when these release, to offer them to your users.
+
+To allow Terraform Enterprise access to the public registry, but prevent your user base from accessing community content, we recommend using Sentinel or OPA as part of platform development to limit which providers you sign off for use.
+
+If you are planning a scaled deployment, ensure your project management team allocates significant resources to engineer a suitable policy-as-code SDLC deployment. It must be ready for UAT at the latest such that users adapt to restrictions _well before_ the production deployment.
+
+## Terraform modules for installation
+
+The primary route to the installation of Terraform Enterprise on Kubernetes is through the use of HVD Modules which require the use of a <a href="https://developer.hashicorp.com/terraform/install" target="_blank">Terraform command-line tool binary</a>. These modules are available in the public HashiCorp Terraform Registry.
+
+The installation code we provide supports HashiCorp Professional Services and HashiCorp partners who set up best practice Terraform Enterprise instances. We highly recommend leveraging partners or HashiCorp Professional Services to accelerate the scaling out of your project.
+
+If you install Terraform Enterprise yourself, we recommend that you follow these high-level steps:
+
+1. Import the provided Terraform Enterprise modules into your VCS repository.
+1. Establish where to store the Terraform state for the deployment. HashiCorp recommends that you store state in HCP Terraform (free access is available or contact your HashiCorp account team for an entitlement for state storage just for Terraform Enterprise installs). If access to HCP Terraform is not possible, we recommend using a secure, cloud-based object store service (S3, Blob Storage, GCS and so on) instead.
+1. Select a machine where you execute the Terraform code. This machine needs the <a href="https://developer.hashicorp.com/terraform/downloads" target="_blank">Terraform command-line tool</a>
+ available. Use the latest binary version.
+1. Ensure that cloud credentials are available on the machine for Terraform execution.
+
+<Note>
+
+Terraform state contains sensitive information and needs protection. We do not recommend that you store the state file for a Terraform Enterprise deployment in VCS or any unprotected location. It is the only state you need to separately secure, as Terraform Enterprise protects all other state generated by your organization.
+
+</Note>
+
+## Process overview
+
+The layout of the HVD Module GitHub repositories follows a standard structure exhibiting these features:
+
+- The Terraform code separates into logical `.tf` files at the top level of the repository, without the need for submodules and without calls to external child modules. This keeps the codebase whole and straightforward to understand.
+- The main repository `README.md` file contains the primary instructions which you must read through _first_ and then follow to deploy Terraform Enterprise.
+- Subdirectories in the respective repository include:
+  - `docs` - Auxiliary documentation for the module.
+  - `examples` - This directory contains more than one example use case, each of which pertain to a root module which, when configured and run, uses the module to deploy Terraform Enterprise. Expect to run at least the initial development deployment from one of these subdirectories.
+  - `templates` - Contains HCL templates used by the module as needed.
+
+To deploy Terraform Enterprise using the provided modules, you need to:
+
+1. Select your managed Kubernetes service below, and then follow the link to the respective public Terraform Registry entry.
+1. In the Registry, review the contents, then click the `Source Code` link in the page header to point your browser to the GitHub repository.
+1. Read the GitHub repository for the respective Terraform module _in its entirety_. Not doing so may result in a failed deployment. Do not run code you do not understand.
+1. Follow the repository `README.md` file step by step, ensuring you have all prerequisites in place _before_ starting the deployment; these may take some time to arrange in your environment and you must account for them in project planning.
+1. Ensure you have the TLS certificate and private key for your Terraform Enterprise installation. The DNS SAN in the certificate must include the FQDN you use in DNS for the service (which resolves to the Kubernetes NLB). We also expect you have a standard organizational CA bundle and process for generating these which we recommend using. We do not recommend self-signed certificates, especially in production environments. Inspect your certificate with this command.
+
+  ```shell
+  openssl x509 -noout -text -in cert.pem
+  ```
+
+1. The `README.md` directs you to complete the configuration and deploy Terraform Enterprise using the `terraform init`, `terraform plan` and `terraform apply` commands. If using the example `terraform.tfvars.example` file, remember to remove angled brackets from the resulting `terraform.tfvars` file.
+1. Once the Terraform deployment completes, insert the relevant secrets into the cluster. Do this in a way which does not result in secrets storing anywhere else (for example `.bash_history`, VCS and so on). The HVD Modules have a document about Kubernetes secrets management detailing recommendations for different scenarios and lists the secrets you need to use. If your organization has a strategic Kubernetes secrets management approach which avoids writing plain text secrets, we recommend using it. Otherwise, use `read -sp` as per the following command example for each secret in scope to securely instantiate environment variables into your shell and then use these with `kubectl` to ingress them into Kubernetes as the HVD Module instructs.
+
+  ```shell
+  read -sp 'TFE_ENCRYPTION_PASSWORD> ' TFE_ENCRYPTION_PASSWORD && export TFE_ENCRYPTION_PASSWORD
+  ```
+
+1. The modules contain a `locals_helm_overrides.tf` convenience function which generates a file called `helm/module_generated_helm_overrides.yaml` - this overrides certain default values in the Helm chart for Terraform Enterprise.
+1. The instructions then guide you as to the use of <a href="https://helm.sh/" target="_blank">Helm</a> to deploy the Terraform Enterprise container to your Kubernetes cluster.
+1. Follow the last link in the README to the information on the HashiCorp public documentation for using the IACT (Initial Admin Console Token) to complete the setup of Terraform Enterprise _within 60 minutes of deployment_.
+
+## Kubernetes-specific guidance
+
+This section provides more detailed guidance on the deployment of Terraform Enterprise on Kubernetes.
+
+### General guidance
+
+- Separate Terraform Enterprise pods and HCP Terraform agent worker pods, because even under load, Terraform Enterprise pod resource consumption is more consistent than HCP Terraform agent workload requirements which are necessarily inconsistent and demanding on CPU and network I/O. Node separation for Terraform Enterprise pods and HCP Terraform agents is preferable when operating at scale as a result.
+- Use the HCP Terraform Operator instead of the internal Terraform Kubernetes driver run pipeline (see below). The internal run pipeline provisions all agents on demand, creating a much more inconsistent and spiky workload during peak demand.
+- Three pods for Terraform Enterprise are sufficient as this is more for availability than performance. HCP Terraform agent cluster node capacity has the greatest impact on run success at scale.
+- Ensure that project planning allows time and resource for scale testing as close to the degree of scale that is eventually expected in production. We recommend working with your adopter teams to understand the expected scale and to ensure appropriate cluster sizing during development and testing.
+- Ensure that observability tooling is also in place _before_ load testing so that you fully understand CPU, RAM and I/O constraints in your specific context and in terms of connectivity to external services.
+
+### Use of the internal run pipeline versus HCP Terraform Operator
+
+The <a href="https://developer.hashicorp.com/terraform/cloud-docs/integrations/kubernetes" target="_blank">HCP Terraform Operator</a> is more efficient at spreading agent demand by establishing minimum numbers of replicas and preventing thundering herd issues that can occur with the internal <a href="https://developer.hashicorp.com/terraform/enterprise/flexible-deployments/install/configuration#kubernetes-driver-settings" target="_blank">Terraform Kubernetes driver run pipeline</a> where all agents come online at once. However, smaller deployments may find the internal run pipeline sufficient.
+
+For customers going beyond the default concurrency per Terraform Enterprise pod, it is highly preferable to leverage the HCP Terraform Operator in all situations. The sizing guidelines remain the same.
+
+### CPU
+
+At high concurrency, HCP Terraform agent workload may pressure network throughput and is sensitive to the over-allocation of CPU. Memory-optimized instances are less performant and cannot provide sufficient CPU, resulting in possible HCP Terraform agent workspace run failures.
+
+Do not use burstable instances with low baseline throughput limitations on CPU and network. For example, avoid T type AWS instances. Use the latest generation Intel or AMD instances where possible. See below for cloud-specific guidance on machine sizing.
+
+More Terraform Enterprise pods does not equal improved performance and can reduce performance unless you give careful consideration to the impact of additional pods on the database I/O, and the concurrency multiplier (number of Terraform Enterprise pods * concurrency).
+
+### RAM
+
+Memory sizing is the most workload-dependent and the Terraform configuration executed drives RAM usage. To size conservatively, start with the system defaults and test thoroughly, preferably using representative workloads, and increase limits as necessary.
+
+The default HCP Terraform agent run pipeline configures a pod resource request for every agent at 2048MiB, so if the cluster is not appropriately sized for this reservation, physical memory over-allocation causes run failure. You can adjust this using the `agentWorkerPodTemplate` <a href="https://github.com/hashicorp/terraform-enterprise-helm/blob/main/values.yaml" target="_blank">directive</a> in the Helm `module_generated_helm_overrides.yaml` if you need to adjust the max concurrent workload memory usage. The conservative approach is to size on the limit so you can tune this down if cost efficiency is a priority.
+
+The Terraform Enterprise internal run pipeline configures the Kubernetes driver to use a default resource request and limit of 2048MiB per agent. If running the defaults, you need to factor this into your cluster sizing (number of Terraform Enterprise pods * `TFE_CAPACITY_CONCURRENCY`). You must size HCP Terraform agent nodes to handle the configured run concurrency, as over-allocation of physical node memory results in consistent run failure. The default configuration assumes every agent uses a max of 2 GB at the same time. As an example, this could be possible with a large Terraform configuration at high concurrency. Typical scenarios to be aware of include a repetitive platform team workflow such as the use of landing zones at scale.
+
+By default, the HCP Terraform operator configures no resource limits on the HCP Terraform agents. Ideally, set a limit on memory and configure a baseline resource request. This can help efficient node placement and becomes critical if using a cluster scaling technology such as Karpenter.
+
+#### Determine maximum HCP Terraform agent RAM requirement and production system overhead
+
+You set this resource capacity in your `module_generated_helm_overrides.yaml` file and it is thus configurable irrespective of whether you deploy agents using a pipeline or the HCP Terraform Operator for Kubernetes. The following configuration specifies the default allocated RAM resource request of 2 GB.
+
+```yaml
+resources:
+  limits:
+    memory: 2048M
+  requests:
+    memory: 2048M
+```
+
+From this, the maximum RAM requirement for the agents is thus calculated as `number of agents * 2GB`.
+In the nominal example, with 30 agents, the maximum RAM requirement would be 60 GB for workspace runs.
+
+For right-sizing of the cluster, at least ten percent overhead is prudent, making the total RAM requirement 66 GB.
+Note that this calculation does not include OS requirements or for agents that run in discrete network segments outside of the cluster, which you size separately based on specific graph calculation requirements.
+
+Select your managed Kubernetes service below for further specific guidance on CPU sizing and corresponding machine size choice.
+
+<Note>
+
+These numbers assume, in a scaled environment, HCP Terraform agents run in a dedicated node group/node pool or cluster, as we recommend isolation from the Terraform Enterprise pods.
+If running in a shared environment, provide at least 4 GB memory per Terraform Enterprise pod to ensure you apply appropriate resource requests to Terraform Enterprise pods for some protection under load.
+
+</Note>
+
+### Network
+
+Reduce egress network load by specifying a specific version tag for the HCP Terraform agent image - `tfc-agent:<tag>`. The use of `tfc-agent:latest` results in retrieving the image every time there is a workspace run and thus unnecessary network load. This becomes more significant when using the internal pipeline as you deploy all workers on demand.
+
+The HVD Modules all deploy layer 4 load balancers. This is the highest throughput load balancer available.
+Ensure that you load the HCP Terraform agent docker image from a performant region local source where possible like ECR, rather than a public Internet-based source.
+
+Do not use instances with burstable network characteristics.
+
+### Disk
+
+The Terraform Enterprise pods and HCP Terraform agent workloads are not storage I/O bound in Kubernetes (I/O moves to the external services). During testing, baseline root partitions did not see any latency spikes on nodes under load and node storage did not become a factor at scale.
+
+### Machine sizing
+
+Customers must understand the expected target scale for the project and ensure the instances which comprise the cluster are of sufficient capacity accordingly. While the architecture page in this HVD provides initial guidance on sizing, consider the calculations below.
+
+#### Determine pod count
+
+Use a nominal, initial expectation of three Terraform Enterprise pods for high availability, one deployed in each of three AZs in each of three replicas (total three pods across three AZs). Increase in sets of three so that a balance of pod availability maintains across the chosen region.
+
+#### Determine HCP Terraform agent count requirements
+
+Calculate how many HCP Terraform agents you need by using this formula:
+
+Number of HCP Terraform agents = `TFE_CAPACITY_CONCURRENCY` * number of Terraform Enterprise pods
+
+`TFE_CAPACITY_CONCURRENCY` defaults to 10, so with the initial pod count of three, the agent capacity expected is 30.
+
+## Platform-specific guidance
+
+Select your managed Kubernetes service below for further guidance and corresponding machine size choice.
+
+### Deployment modules
+
+Select your managed Kubernetes service for the official HVD module link.
+
+<Tabs>
+<Tab heading="EKS">
+
+The official Terraform Enterprise deployment module for Elastic Kubernetes Service is available at <a href="https://registry.terraform.io/modules/hashicorp/terraform-enterprise-eks-hvd/aws/latest" target="_blank">this entry in Terraform Registry</a>.
+
+</Tab>
+<Tab heading="AKS">
+
+The official Terraform Enterprise deployment module for Azure Kubernetes Service is available at <a href="https://registry.terraform.io/modules/hashicorp/terraform-enterprise-aks-hvd/azurerm/latest" target="_blank">this entry in Terraform Registry</a>
+
+Not every machine size is available in every region. You may find that machine sizes are available for compute in a region, but unavailable for AKS in the same region. We recommend checking the availability of the machine sizes in the region you intend to deploy to by using the Azure console. Start the deployment of an AKS instance just to see which machine sizes it offers, making a note of the correct machine size for your deployment and then cancel the deployment.
+
+Use the following command to identify the version of Kubernetes available for AKS in the region you intend to deploy to, replacing `<region>` with your region (for example `northeurope` or `eastus`). Cross reference this with <a href="https://developer.hashicorp.com/terraform/enterprise/releases" target="_blank">the version of Kubernetes supported by Terraform Enterprise</a> to ensure you deploy a version of Kubernetes which Terraform Enterprise supports.
+
+```shell
+az aks get-versions --location <region> --output table
+```
+
+</Tab>
+<Tab heading="GKE">
+
+The official Terraform Enterprise deployment module for Google Kubernetes Engine is available at <a href="https://registry.terraform.io/modules/hashicorp/terraform-enterprise-gke-hvd/google/latest" target="_blank">this entry in Terraform Registry</a>
+
+</Tab>
+</Tabs>
+
+### Resource sizing
+
+The following table summarizes recommended resource sizing for each managed Kubernetes service.
+
+| Component | EKS | AKS | GKE |
+|-----------|-----|-----|-----|
+| Disk | EBS gp3 | Premium SSD Managed Disks | Persistent SSD Disks |
+| Machine (3-node cluster) | `m7i.2xlarge` (8 vCPU, 32 GB) | `Standard_D8s_v5` (8 vCPU, 32 GB) | `n2-standard-8` (8 vCPU, 32 GB) |
+| Machine (5-node cluster) | `m7i.xlarge` (4 vCPU, 16 GB) | `Standard_D4s_v5` (4 vCPU, 16 GB) | `n2-standard-4` (4 vCPU, 16 GB) |
+
+Example approximate minimum Kubernetes cluster sizings for HCP Terraform agents only, with three Terraform Enterprise pods at system defaults are as follows.
+
+- 3-node cluster: 96 GB total memory, 64 GB (n-1)
+- 5-node cluster: 80 GB total memory, 64 GB (n-1)
+
+For ideal CPU sizing across all providers:
+
+- Choose the latest generation general purpose instance type x86-64 hosts.
+- Use CPU/RAM ratio of 1:4 or higher.
+- Do not use memory-optimized instances.
+
+## Troubleshooting
+
+The following are common issues that may arise during the deployment of Terraform Enterprise on Kubernetes.
+
+### ImagePullBackOff
+
+This error occurs when the Kubernetes cluster is unable to pull the Terraform Enterprise container image from the HashiCorp container registry. This can be due to a number of reasons, including:
+
+- The Kubernetes cluster does not have the necessary permissions to pull the image.
+- The image is not available in the HashiCorp container registry. Check the version of Terraform Enterprise you have specified in the `locals_helm_overrides.tf` file.
+- The image pull secret is not correctly configured in the Kubernetes cluster. Ensure that you have processed the license file HashiCorp have issued you. The license file must not have a new line in it if you intend to run the equivalent of `cat tfe.hclic | base64` to generate the base64 encoded license string while populating Kubernetes secrets.
+
+### Crash loop back off
+
+This error occurs when the Terraform Enterprise container is unable to start correctly. Again, this can be due to a number of reasons. To diagnose the problem, open two terminal windows, and in one, run:
+
+```shell
+while true
+do
+  sleep 1
+  kubectl exec -n tfe -ti $(kubectl get pods -n tfe \
+  | tail -1 \
+  | awk '{print $1}') -- tail -n 100 -f /var/log/terraform-enterprise/terraform-enterprise.log
+done
+```
+
+and in the other, run your `helm install` command. This means that the moment the container starts up, you start to see the initial output to the terminal running the `while` loop. This at least provides the error message from the start up of Terraform Enterprise that helps diagnose the problem, or that you can pass to HashiCorp Support when raising a support ticket.

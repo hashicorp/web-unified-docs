@@ -1,0 +1,851 @@
+---
+title: Deployment
+description: Installing and configuring Consul across multi-cloud, multi-runtime environments with mesh gateways and peering.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-06-09T20:55:37.000Z
+last_modified: 2026-06-09T20:55:37.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Deployment
+
+This section describes how Consul will be installed and configured in a multi-cloud, multi-runtime environment. The configuration process involves several stages, including setting up Consul servers in multiple run-times (Kubernetes, VMs, and Nomad).
+
+It also describes how to configure mesh gateways, enable cluster peering, and integrate with DNS and API gateways by following best practices for collaborative cloud connectivity and reliability.
+
+## Consul preparation
+
+### Deploy infrastructure
+- **Kubernetes Environments:** Provision AWS EKS and Azure AKS clusters. Follow our recommendations for sizing and architecture described in the [Consul Solution Design Guidelines](/validated-designs/consul-solution-design-guides-consul-enterprise-self-hosted/consul-on-kubernetes).
+- **EC2 Instances:** Provision EC2 instances that will host Consul and Nomad servers.
+
+### Prerequisites
+Walk through the following guides:
+- [Configure Consul as code](/validated-designs/consul-operating-guides-adoption/initial-configuration#configure-consul-as-code)
+- [Consul on Kubernetes Helm Chart](https://github.com/hashicorp/consul-k8s/tree/main/charts/consul)
+- [Nomad integration with Consul](https://developer.hashicorp.com/nomad/docs/configuration/consul)
+
+### Consul networking configuration
+- Enable and set up mesh gateways.
+- Enable and set up cluster peering.
+- Set up DNS.
+- Set up the API gateway.
+
+### Consul multi-tenancy configuration
+- Enable admin partitions.
+- Enable sameness groups.
+- Configure service failover.
+
+## Consul installation and deployment 
+
+### Install Consul on Kubernetes
+This document describes the deployment of Consul on both Amazon EKS and Azure AKS clusters. To learn more about the requirements for each cloud provider, please refer to the ["Deploy federated multi-cloud Kubernetes clusters" tutorial](https://developer.hashicorp.com/terraform/tutorials/networking/multicloud-kubernetes).
+
+We recommend using the official Consul Helm chart to install Consul on Kubernetes, especially for multi-cluster setups that require cross-partition or cross datacenter communication. It simplifies and automates the deployment of all necessary components and supports various use cases, providing consistency and scalability.
+
+```
+global:
+  name: consul
+  image: "hashicorp/consul-enterprise:1.18.3-ent"
+  adminPartitions:
+    enabled: true
+ 
+  acls:
+    manageSystemACLs: true
+  enableConsulNamespaces: true
+  enterpriseLicense:
+    secretName: "consul-ent-license"
+    secretKey: "key"
+    enableLicenseAutoload: true
+  peering:
+    enabled: true
+  tls:
+    enabled: true
+server:
+ replicas: 5
+ bootstrapExpect: 5
+ exposeService:
+    enabled: true
+    type: LoadBalancer
+
+syncCatalog:
+ enabled: true
+
+ui:
+  enabled: true
+  service:
+    enabled: true
+    type: LoadBalancer
+```
+
+The same Helm chart can be used to install Consul on both clusters, allowing you to specify the datacenter and global name per cluster during deployment. 
+For example, in an EKS or AKS setup, values can be directly specified through the command line:
+
+EKS
+```
+$ helm install consul hashicorp/consul --set global.name=consul-eks --set global.datacenter=aws-eks-dc1
+```
+
+AKS
+```
+$ helm install consul hashicorp/consul --set global.name=consul-aks --set global.datacenter=aks-dc-1
+```
+
+### Deploy Consul on EC2
+To deploy Consul on EC2 using Terraform, HashiCorp provides Terraform modules that simplify the process and ensure a deployment following best practices and recommended architecture. 
+
+<Note> 
+Please contact your HashiCorp account team for access to these modules:
+<ul>
+    <li><code>terraform-aws-consul-prerequisites</code>: Assists in provisioning prerequisite resources required for a Consul Enterprise deployment on AWS EC2. Infrastructure components include items such as network load balancers, KMS encryption keys, log groups, Route 53 entries, S3 buckets, etc.</li>
+    <li><code>terraform-aws-consul</code>: Deploys Consul Enterprise on AWS. It creates resources like AWS Auto Scaling groups, launch templates, security groups, and Route 53 configurations.</li>
+</ul>
+</Note>
+
+Here is an example of how you might configure these modules in your Terraform setup script:
+
+```
+module "consul_prerequisites" {
+  source  = "hashicorp/consul/aws//modules/prerequisites"
+  version = "x.y.z"
+
+  # Add your specific configurations here
+}
+
+module "consul" {
+  source  = "hashicorp/consul/aws"
+  version = "x.y.z"
+
+  # Add your specific configurations here
+}
+```
+
+### Setup Consul and Nomad
+
+A Nomad cluster is typically comprised of a number of servers and client agents. Nomad differs slightly from Consul in that it divides infrastructure into [regions](https://developer.hashicorp.com/nomad/docs/concepts/architecture#regions) which are served by one Nomad server cluster, but can manage multiple [datacenters](https://developer.hashicorp.com/nomad/docs/concepts/architecture#datacenters) or availability zones. For examples, a US region can include datacenters `us-east-1` and `us-west-2`.
+
+![Consul and Nomad](/img/consul/operating-guides/scaling/consul-and-nomad.png)
+
+A single Nomad cluster is recommended for applications deployed in the same region. Each cluster is expected to have three or five server, but no more than seven. This strikes a balance between availability in the case of failure and performance, as the Raft consensus protocol gets progressively slower as more servers are added.
+
+Nomad Server Configuration
+
+`/etc/nomad.d/server.hcl`
+```
+datacenter= "nomad-dc"
+region = "us-west-1"
+data_dir  = "/opt/nomad/data"
+bind_addr = "0.0.0.0"
+# Enable the server
+server {
+  enabled          = true
+  bootstrap_expect = 5
+}
+consul {
+  address = "127.0.0.1:8500"
+  token = "CONSUL_TOKEN"
+  client_auto_join = true
+}
+
+acl {
+  enabled = true
+}
+```
+
+It is recommended that you adjust certain Nomad settings (e.g. [`raft_multiplier`](https://developer.hashicorp.com/nomad/docs/configuration/server#raft_multiplier) and [`retry_interval`](https://developer.hashicorp.com/nomad/docs/configuration/server#retry_interval)) to optimize performance for cross-cloud communication latency. 
+
+Nomad Client Configuration
+
+`/etc/nomad.d/client.hcl`
+```
+data_dir  = "/opt/nomad/data"
+bind_addr = "0.0.0.0"
+datacenter = "nomad-dc"
+
+# Enable the client
+client {
+  enabled = true
+  }
+acl {
+  enabled = true
+}
+consul {
+  address = "127.0.0.1:8500"
+  token = "CONSUL_TOKEN"
+}
+vault {
+  enabled = true
+  address = "http://active.vault.service.consul:8200"
+}
+```
+
+## Application deployment
+
+Once the Kubernetes clusters (EKS, AKS) are provisioned, the following YAML files define the necessary resources for deploying two applications: Counting and Dashboard. These files include configurations for ServiceAccounts, ClusterIPServers, Consul service defaults, and deployments.
+
+### Prerequisites
+- It is recommended to create separate namespaces for each application.
+- Kubernetes clusters are provisioned as per the previous steps.
+
+### Deploy the Counting application on AKS
+
+```
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: counting
+  namespace: counting
+automountServiceAccountToken: true
+imagePullSecrets:
+  - name: registry-nonprod
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: counting
+  namespace: counting
+  labels:
+    app: counting
+spec:
+  type: ClusterIP
+  selector:
+    app: counting
+  ports:
+    - port: 9001
+      targetPort: 9001
+      protocol: TCP
+
+---
+apiVersion: consul.hashicorp.com/v1alpha1
+kind: ServiceDefaults
+metadata:
+  name: counting
+  namespace: counting
+spec:
+  protocol: "http"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: counting
+  namespace: counting
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      service: counting
+      app: counting
+  template:
+    metadata:
+      labels:
+        service: counting
+        app: counting
+      annotations:
+        consul.hashicorp.com/connect-inject: "true"
+        k8s.v1.cni.cncf.io/networks: '[{ "name": "consul-cni" }]'
+    spec:
+      serviceAccountName: counting
+      containers:
+        - name: counting
+          image: hashicorp/counting-service:0.0.2
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 9001
+```
+
+### Deploy the Dashboard application on EKS
+
+```
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dashboard
+  namespace: dashboard
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dashboard
+  namespace: dashboard
+  labels:
+    app: dashboard
+spec:
+  type: ClusterIP
+  selector:
+    app: dashboard
+  ports:
+    - port: 8080
+      targetPort: 9002
+      protocol: TCP
+
+---
+apiVersion: consul.hashicorp.com/v1alpha1
+kind: ServiceDefaults
+metadata:
+  name: dashboard
+  namespace: dashboard
+spec:
+  protocol: "http"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dashboard
+  namespace: dashboard
+  labels:
+    app: dashboard
+    service: dashboard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dashboard
+      service: dashboard
+  template:
+    metadata:
+      labels:
+        service: dashboard
+        app: dashboard
+      annotations:
+        consul.hashicorp.com/connect-inject: "true"
+        k8s.v1.cni.cncf.io/networks: '[{ "name": "consul-cni" }]'
+    spec:
+      serviceAccountName: dashboard
+      containers:
+        - name: dashboard
+          image: hashicorp/dashboard-service:0.0.4
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 9002
+          env:
+            - name: COUNTING_SERVICE_URL
+              value: http://counting.virtual.cp-7599887.ns.consul
+```
+
+### Dashboard service registration in AWS EC2
+
+The example file below defines the 'dashboard' service for registration with Consul on an EC2 instance.
+
+`dashboard.hcl`
+```
+service {
+  name = "dashboard"
+  port = 9002
+
+  connect {
+    sidecar_service {
+      proxy {
+        upstreams {
+          destination_name = "counting"
+          local_bind_port  = 9001
+        }
+      }
+    }
+  }
+
+  check {
+    name     = "HTTP Health Check"
+    http     = "http://localhost:9002/health"
+    interval = "10s"
+    timeout  = "2s"
+  }
+}
+```
+
+Then, update the service in the Consul catalog:
+
+```
+consul services register dashboard.hcl
+```
+
+## Nomad 
+This Nomad job file deploys the `counting` service in the `counting` partition, exposing port 9001 and integrating with Consul for service mesh and discovery.
+
+<Note>Admin partitions are a Consul Enterprise feature.</Note>
+
+```
+job "counting" {
+  datacenters = ["nomad-dc"]
+  type        = "service"
+  partition   = "counting"
+
+  group "counting-group" {
+    count = 1
+
+    network {
+      port "counting" {
+```
+
+## Consul networking
+
+### Mesh gateways deployed over VMs
+
+Deploying mesh gateways on VMs requires the Consul service mesh to be enabled. The flow of the control plane traffic through the gateway is implied by the presence of a mesh config entry with `PeerThroughMeshGateways = true`.
+
+```
+Kind = "mesh"
+Peering {
+  PeerThroughMeshGateways = true
+}
+```
+
+### Mesh gateways deployed on Kubernetes
+
+In Kubernetes, mesh gateways can be enables in the Helm chart under the `global` section:
+
+```
+meshGateway:
+  enabled: true 
+  replicas: 3
+  service:
+    type: NodePort
+    nodePort: 30443
+  resources:
+    requests:
+      memory: "256Mi" cpu: "100m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+  affinity: |
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector: 
+          matchLabels:
+            app: {{ template "consul.name" . }}
+            release: "{{ .Release.Name }}"
+            component: mesh-gateway
+          topologyKey: kubernetes.io/hostname
+```
+
+It is recommended that you:
+- Assign at least three replicas for fault tolerance, and
+- Add affinity so each mesh gateway pod is scheduled on a different node. [See an example](https://github.com/hashicorp/consul-k8s/blob/fad1df06458c71cef68c0380553755756ba607c3/charts/consul/values.yaml#L3158).
+
+For all other supported parameters, refer to the [Helm chart `meshGateway` documentation](https://developer.hashicorp.com/consul/docs/k8s/helm#h-meshgateway).
+
+### Mesh gateways in Nomad
+
+The `gateway` block allows for configuration of [Consul service mesh gateways](https://developer.hashicorp.com/consul/docs/connect/gateways). Nomad will automatically create the necessary gateway [configuration entry](https://developer.hashicorp.com/consul/docs/agent/config-entries), as well as inject an Envoy proxy task into the Nomad job to serve as the gateway.
+The gateway configuration is valid within the context of a `connect` block. Additional information about gateway configurations can be found in Consul's ["Gateways Overview" documentation](https://developer.hashicorp.com/consul/docs/connect/gateways).
+
+Example of a Nomad job definition including the mesh gateway:
+
+```
+job "countdash-mesh-one" {
+  datacenters = ["aws-ec2"]
+
+  group "mesh-gateway-aws-ec2" {
+    network {
+      mode = "bridge"
+
+      # A mesh gateway will require a host_network configured on at least one
+      # Nomad client that can establish cross-datacenter connections. Nomad will
+      # automatically schedule the mesh gateway task on compatible Nomad clients.
+      port "mesh_wan" {
+        host_network = "public"
+      }
+    }
+
+    service {
+      name = "mesh-gateway"
+
+      # The mesh gateway connect service should be configured to use a port from
+      # the host_network capable of cross-datacenter connections.
+      port = "mesh_wan"
+
+      connect {
+        gateway {
+          mesh {
+            # No configuration options in the mesh block.
+          }
+
+          # Consul gateway [envoy] proxy options.
+          proxy {
+            # The following options are automatically set by Nomad if not explicitly
+            # configured with using bridge networking.
+            #
+            # envoy_gateway_no_default_bind = true
+            # envoy_gateway_bind_addresses "lan" {
+            #   address = "0.0.0.0"
+            #   port    = <generated dynamic port>
+            # }
+            # envoy_gateway_bind_addresses "wan" {
+            #   address = "0.0.0.0"
+            #   port    = <configured service port>
+            # }
+            # Additional options are documented at
+            # https://developer.hashicorp.com/nomad/docs/job-specification/gateway#proxy-parameters
+          }
+        }
+      }
+    }
+  }
+
+  group "dashboard" {
+    network {
+      mode = "bridge"
+
+      port "http" {
+        static = 9002
+        to     = 9002
+      }
+    }
+
+    service {
+      name = "count-dashboard"
+      port = "9002"
+
+      connect {
+        sidecar_service {
+          proxy {
+            upstreams {
+              destination_name = "count-api"
+              local_bind_port  = 8080
+
+              # This dashboard service is running in datacenter "one", and will
+              # make requests to the "count-api" service running in datacenter
+              # "two", by going through the mesh gateway in each datacenter.
+              datacenter       = "two"
+
+              mesh_gateway {
+                # Using "local" mode indicates requests should exit this datacenter
+                # through the mesh gateway, and enter the destination datacenter
+                # through a mesh gateway in that datacenter.
+                # Using "remote" mode indicates requests should bypass the local
+                # mesh gateway, instead directly connecting to the mesh gateway
+                # in the destination datacenter.
+                mode = "local"
+              }
+            }
+          }
+        }
+      }
+    }
+
+    task "dashboard" {
+      driver = "docker"
+
+      env {
+        COUNTING_SERVICE_URL = "http://${NOMAD_UPSTREAM_ADDR_count_api}"
+      }
+
+      config {
+        image = "hashicorpdev/counter-dashboard:v3"
+      }
+    }
+  }
+}
+```
+
+### Setup DNS
+Detailed instructions on configuring DNS for Kubernetes and VMs can be found in the Consul Operating Guides, under ["Initial Configuration"](/validated-designs/consul-operating-guides-adoption/initial-configuration#configure-dns-forwarding).
+
+## API Gateway Configuration
+API gateways solve the following use cases:
+- **Control access at the point of entry:** Set the protocols of external connection requests and secure inbound connections with TLS certificates from trusted providers, such as Verisign and Let's Encrypt.
+- **Simplify traffic management:** Load balance requests across services and route traffic to the appropriate service by matching one or more criteria, such as hostname, path, header presence or value, and HTTP method.
+
+### API Gateway in Kubernetes
+The API gateway is enabled in the Helm chart under the `connectInject` section. Once deployed, it will create a load balancer on each cloud provider automatically.
+
+```
+global:
+  enabled: true
+connectInject:
+  apiGateway:
+    managedGatewayClass:
+      serviceType: LoadBalancer
+```
+
+To specify the gateway's behavior, entry point for north-south traffic and routing, it is necessary to define and deploy a gateway object as shown in the example:
+
+```
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: Gateway
+metadata:
+  name: api-gateway
+  namespace: consul
+spec:
+  gatewayClassName: consul
+  listeners:
+    - protocol: HTTP
+      port: 80
+      name: http
+      allowedRoutes:
+        namespaces:
+          from: All
+```
+
+This configuration sets up an HTTP listener on port 80, allowing routes from all namespaces.
+
+### API gateway in Nomad
+Provided is an example of Nomad's job definition, where an API gateway is deployed in its own Nomad namespace.
+
+Start by creating a Nomad namespace:
+
+```
+$ nomad namespace apply -description "namespace for Consul API Gateways" ingress
+```
+
+Create a Consul ACL binding rule for the API gateway that assigns the `builtin/api-gateway` templated policy to Nomad workloads deployed in the Nomad namespace `ingress` that you just created:
+
+```
+$  consul acl binding-rule create -method 'nomad-workloads' -description 'Nomad API gateway' -bind-type 'templated-policy'-bind-name 'builtin/api-gateway' -bind-vars Name=${value.nomad_job_id}' -selector '"nomad_service" not in value and value.nomad_namespace==ingress'
+```
+
+The API gateway job needs mTLS certificates to communicate with Consul. Add certificates to the ingress namespace:
+
+```
+$ nomad var put -namespace ingress nomad/jobs/my-api-gateway/gateway/setup consul_cacert=@$CONSUL_CACERT consul_client_cert=@$CONSUL_CLIENT_CERT  consul_client_key=@$CONSUL_CLIENT_KEY
+```
+
+### Deploy the API gateway
+Run the Nomad job. You can pass additional values to the command with the [`-var` option](https://developer.hashicorp.com/nomad/docs/commands/job/run#var).
+
+```
+$ nomad job run api-gateway.hcl
+```
+
+`api-gateway.hcl`
+```
+job "my-api-gateway" {
+
+  namespace = var.namespace
+
+  group "gateway" {
+
+    network {
+      mode = "bridge"
+      port "http" {
+        static = 8088
+        to     = 8088
+      }
+    }
+
+    consul {
+      # If the Consul token needs to be for a specific Consul namespace, you will
+      # need to set the namespace here
+
+      # namespace = "foo"
+    }
+
+    task "setup" {
+      driver = "docker"
+
+      config {
+        image = var.consul_image # image containing Consul
+        command = "/bin/sh"
+        args = [
+          "-c",
+         "consul connect envoy -gateway api -register -deregister-after-critical 10s -service ${NOMAD_JOB_NAME} -admin-bind 0.0.0.0:19000 -ignore-envoy-compatibility -bootstrap > ${NOMAD_ALLOC_DIR}/envoy_bootstrap.json"
+        ]
+      }
+
+      lifecycle {
+        hook = "prestart"
+        sidecar = false
+      }
+
+      env {
+        # these addresses need to match the specific Nomad node the allocation
+        # is placed on, so it uses interpolation of the node attributes. The
+        # CONSUL_HTTP_TOKEN variable will be set as a result of having template
+        # blocks with Consul enabled.
+        CONSUL_HTTP_ADDR = "https://${attr.unique.network.ip-address}:8501"
+        CONSUL_GRPC_ADDR = "${attr.unique.network.ip-address}:8502" # xDS port (non-TLS)
+
+        # these file paths are created by template blocks
+        CONSUL_CLIENT_KEY  = "secrets/certs/consul_client_key.pem"
+        CONSUL_CLIENT_CERT = "secrets/certs/consul_client.pem"
+        CONSUL_CACERT      = "secrets/certs/consul_ca.pem"
+      }
+
+      template {
+        destination = "secrets/certs/consul_ca.pem"
+        env         = false
+        change_mode = "restart"
+        data        = <<EOF
+{{- with nomadVar "nomad/jobs/my-api-gateway/gateway/setup" -}}
+{{ .consul_cacert }}
+{{- end -}}
+EOF
+      }
+
+      template {
+        destination = "secrets/certs/consul_client.pem"
+        env         = false
+        change_mode = "restart"
+        data        = <<EOF
+{{- with nomadVar "nomad/jobs/my-api-gateway/gateway/setup" -}}
+{{ .consul_client_cert }}
+{{- end -}}
+EOF
+      }
+
+      template {
+        destination = "secrets/certs/consul_client_key.pem"
+        env         = false
+        change_mode = "restart"
+        data        = <<EOF
+{{- with nomadVar "nomad/jobs/my-api-gateway/gateway/setup" -}}
+{{ .consul_client_key }}
+{{- end -}}
+EOF
+      }
+
+    }
+
+    task "api" {
+      driver = "docker"
+
+      config {
+        image = var.envoy_image # image containing Envoy
+        args = [
+          "--config-path",
+          "${NOMAD_ALLOC_DIR}/envoy_bootstrap.json",
+          "--log-level",
+          "${meta.connect.log_level}",
+          "--concurrency",
+          "${meta.connect.proxy_concurrency}",
+          "--disable-hot-restart"
+        ]
+      }
+    }
+  }
+}
+```
+
+## Setup cluster peering
+
+It is recommended that you refer to the cluster peering section in the [Operating Guide for Standardization](/validated-designs/consul-operating-guides-standardization/deployments#cluster-peering)documentation before proceeding with the next steps.
+
+### Establishing cluster peering connection diagram
+
+![Cluster peering connection establishment](/img/consul/operating-guides/scaling/cluster-peering-connection.png)
+
+### Enable cluster peering in Kubernetes
+
+```
+global:
+  peering:
+    enabled: true
+``` 
+
+### Enable cluster peering for VMs
+Cluster peering requires ACLs for authentication between clusters. Ensure that ACLs are enabled and properly configured:
+
+```
+acl {
+  enabled = true
+  default_policy = "deny"
+  enable_token_persistence = true
+}
+```
+
+### Sameness groups
+In Consul, sameness groups allow for service discovery and routing across multiple datacenters that are considered part of the same "group," which get treated equally for service routing purposes. When a failure occurs in one datacenter, Consul can seamlessly failover to another datacenter within the same sameness group.
+
+Assuming the Counting application is deployed across Consul VMs and Nomad, and that the Dashboard application runs on Kubernetes (EKS and AKS), the configuration below presents an example on how to configure sameness groups:
+
+`sameness.hcl` (VM)
+```
+service {
+  name = "counting"
+  id = "counting-vm"
+  tags = ["sameness-group:counting"]
+  port = 9001
+
+  connect {
+    sidecar_service {
+      proxy {
+        upstreams {
+          destination_name = "dashboard"
+          local_bind_port  = 8080
+        }
+      }
+    }
+  }
+
+  check {
+    name     = "HTTP health check"
+    http     = "http://localhost:9001/health"
+    interval = "10s"
+  }
+}
+```
+
+`counting-service.hcl` (Nomad)
+```
+job "counting" {
+  group "counting-group" {
+    task "counting-task" {
+      driver = "docker"
+      config {
+        image = "your-counting-image"
+      }
+
+      service {
+        name = "counting"
+        tags = ["sameness-group:counting"]
+        port = "9001"
+
+        connect {
+          sidecar_service {}
+        }
+      }
+
+      check {
+        type     = "http"
+        path     = "/health"
+        interval = "10s"
+        timeout  = "2s"
+      }
+    }
+  }
+}
+```
+
+`sameness.yaml (Kubernetes)`
+```
+apiVersion: consul.hashicorp.com/v1alpha1
+kind: SamenessGroup 
+metadata:
+ name: dashboard
+spec:
+ defaultForFailover: true
+ members:                                   
+   - peer: aws-ec2
+```
+
+### Service failover
+
+This configuration defines the default behavior for the `counting` service in Consul. It sets the service protocol to HTTP and assigns it the the "counting" sameness group for consistent behavior across environments. The `failover` section specifies that if the service in the primary datacenter fails, traffic will automatically failover to the "counting" sameness group.
+
+`servicefailovers.yaml` (Kubernetes)
+```
+aapiVersion: consul.hashicorp.com/v1alpha1
+kind: ServiceResolver
+metadata:
+  name: counting
+spec:
+  defaultSubset: v1
+  subsets:
+      failover:
+    v1:
+      samenessGroup: "counting"
+```
+
+## References
+
+- ["Helm Chart Reference"](https://developer.hashicorp.com/consul/docs/k8s/helm)
+- ["Nomad: Operating Guide"](/validated-designs/nomad-operating-guides-nomad-enterprise)
+- ["Nomad reference architecture"](https://developer.hashicorp.com/nomad/tutorials/enterprise/production-reference-architecture-vm-with-consul)
+- ["API gateway for Kubernetes technical specifications"](https://developer.hashicorp.com/consul/docs/connect/gateways/api-gateway/tech-specs)
+- ["Deploy a Consul API Gateway on Nomad"](https://developer.hashicorp.com/nomad/tutorials/integrate-consul/deploy-api-gateway-on-nomad)
+- ["Establish cluster peering connections on Kubernetes"](https://developer.hashicorp.com/consul/docs/k8s/connect/cluster-peering/usage/establish-peering)
+- ["Establish cluster peering connections"](https://developer.hashicorp.com/consul/docs/connect/cluster-peering/usage/establish-cluster-peering)
+- ["Create sameness groups on Kubernetes"](https://developer.hashicorp.com/consul/docs/k8s/connect/cluster-peering/usage/create-sameness-groups)
