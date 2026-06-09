@@ -24,7 +24,7 @@ const EVENTS = [
  * @property {string} name The name of the build event, e.g. 'next-build', 'prebuild', etc.
  * @property {number} duration The duration of the event in milliseconds
  * @property {number} [timestamp] A unix timestamp to represent the time of the event.
- * @property {string[]} tags
+ * @property {[string, string][]} tags A tuple of key/value pairs to be sent with the metric
  */
 
 async function readTraceFile(traceFilePath) {
@@ -67,16 +67,20 @@ const submitDatadogMetrics = async (metrics) => {
 								Math.round(event.duration / 1e3),
 							],
 						],
-						tags,
+						tags: tags.map(([key, value]) => {
+							return `${key}:${value}`
+						}),
 						type: 'gauge',
 					}
 				}),
 			},
 		})
 
-		const [{ tags }] = metrics
+		const tags = metrics[0].tags.map(([key, value]) => {
+			return `${key}:${value}`
+		})
 		console.log(
-			`\n〽️ Submitted build metrics to Datadog:\n${JSON.stringify(tags, null, 2)}\n`,
+			`〽️ Submitted build metrics to Datadog:\n${JSON.stringify(tags, null, 2)}`,
 		)
 	} catch {
 		// Swallow any errors, we don't want to impact the build or make it seem like there's been an error in the
@@ -114,9 +118,9 @@ async function main() {
 				return {
 					...event,
 					tags: [
-						`app:${appName}`,
-						`environment:${environment}`,
-						`buildType:${buildType}`,
+						['app', appName],
+						['environment', environment],
+						['buildType', buildType],
 					],
 					timestamp,
 				}
