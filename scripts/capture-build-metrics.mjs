@@ -88,8 +88,95 @@ const submitDatadogMetrics = async (metrics) => {
 	}
 }
 
+/**
+ * Submit build metrics to Instana OpenTelemetry endpoint
+ *
+ * @param {BuildEvent[]} metrics
+ */
+const submitInstanaMetrics = async (metrics) => {
+	const payload = {
+		resourceMetrics: [
+			{
+				resource: {
+					attributes: [
+						{
+							key: 'service.name',
+							value: {
+								stringValue: metrics[0].tags.find(([key]) => {
+									return key === 'app'
+								})?.[1],
+							},
+						},
+					],
+				},
+				scopeMetrics: [
+					{
+						scope: {
+							name: 'capture-build-metrics',
+						},
+						metrics: metrics.map(({ timestamp, tags, ...event }) => {
+							const unixTimeNs = (
+								BigInt(timestamp ?? Math.round(Date.now() / 1e3)) *
+								1_000_000_000n
+							).toString()
+
+							return {
+								name: `build.${event.name}`,
+								description: 'Build event duration',
+								unit: 's',
+								gauge: {
+									dataPoints: [
+										{
+											attributes: tags.map(([key, value]) => {
+												return {
+													key,
+													value: { stringValue: value },
+												}
+											}),
+											asDouble: Math.round(event.duration / 1e3),
+											timeUnixNano: unixTimeNs,
+										},
+									],
+								},
+							}
+						}),
+					},
+				],
+			},
+		],
+	}
+	const response = await fetch(
+		'https://otlp-http-red-saas.instana.io:443/v1/metrics',
+		{
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+				'x-instana-key': process.env.INSTANA_OTLP_API_TOKEN,
+			},
+			body: JSON.stringify(payload),
+		},
+	)
+	if ([200, 202].includes(response.status)) {
+		const [{ tags }] = metrics
+		console.log(
+			`〽️ Submitted build metrics to Instana:\n${JSON.stringify({ url: response.url, tags }, null, 2)}`,
+		)
+	} else {
+		console.error(
+			`Failed to submit metrics to Instana. Status: ${response.status}, Response: ${await response.json()}`,
+		)
+	}
+
+	const tags = metrics[0].tags.map(([key, value]) => {
+		return `${key}:${value}`
+	})
+	console.log(
+		`〽️ Submitted build metrics to Instana:\n${JSON.stringify(tags, null, 2)}`,
+	)
+}
+
 async function main() {
-	const [, , appName] = process.argv
+	const [, , appName = 'web-unified-docs'] = process.argv
 	const incBuild = process.env.INCREMENTAL_BUILD === 'true'
 
 	try {
@@ -127,7 +214,10 @@ async function main() {
 			})
 
 		// Submit metrics to monitoring platforms in parallel
-		await Promise.all([submitDatadogMetrics(filteredEvents)])
+		await Promise.all([
+			submitDatadogMetrics(filteredEvents),
+			submitInstanaMetrics(filteredEvents),
+		])
 	} catch {
 		// Swallow errors
 		// we don't want to impact the build or make it seem like there's been an error in the actual app if something goes wrong when sending metrics
