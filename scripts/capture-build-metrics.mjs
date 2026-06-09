@@ -139,17 +139,14 @@ const submitInstanaMetrics = async (metrics) => {
 			},
 		],
 	}
-	const response = await fetch(
-		'https://otlp-http-red-saas.instana.io:443/v1/metrics',
-		{
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json',
-				'x-instana-key': process.env.INSTANA_OTLP_API_TOKEN,
-			},
-			body: JSON.stringify(payload),
+	const response = await fetch(process.env.INSTANA_OTLP_ENDPOINT, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json',
+			'x-instana-key': process.env.INSTANA_OTLP_API_TOKEN,
 		},
-	)
+		body: JSON.stringify(payload),
+	})
 	if (![200, 202].includes(response.status)) {
 		const responseText = await response.text()
 		throw new Error(
