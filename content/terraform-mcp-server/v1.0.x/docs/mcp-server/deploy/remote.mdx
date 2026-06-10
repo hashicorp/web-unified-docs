@@ -1,0 +1,230 @@
+---
+page_title: Deploy Terraform MCP server to a remote environment 
+description: Learn how to deploy Terraform MCP server to a remote environment and integrate with your agent.
+
+---
+
+# Deploy Terraform MCP server to a remote environment 
+
+ 
+This topic describes how to deploy the Terraform Model Context Protocol (MCP) server into a remote environment so that you can centrally manage an instance of the server. This ensures that team members always have access to the same set of tools and that your organization can uniformly enforce security policies for accessing your registry and other platform resources.  
+ 
+For information about deploying the server locally, refer to [Deploy Terraform MCP server locally](/terraform/mcp-server/deploy/local). 
+
+## Overview 
+ 
+Choose the environment for your deployment. You can deploy the server into several types of environments, such as running the compiled binary in a cloud instance or running the containerized image in Docker, Fargate, or other container engine. 
+ 
+If you intend to connect the server to your HCP Terraform or Terraform Enterprise organization, create an API token for authentication.  
+ 
+Configure the server. The only requirement for deploying the server to a remote environment is setting the transport mode to `streamable-http`, but you can configure any additional settings, such as enabling metrics, that match your requirements. To connect to HCP Terraform or Terraform Enterprise, you must also configure the server to present your API token.  
+ 
+Configure your agent to connect to the remote server so that when a prompt triggers the Terraform MCP server, your local agent routes the request to the remote server. 
+
+## Requirements 
+
+The requirements depend on your installation environment. 
+ 
+### Docker container 
+
+To use the Terraform MCP server Docker image, you must have Docker Engine v20.10.21+ or Docker Desktop v4.14.0+ installed on the target machine. Refer to the [Docker documentation](https://docs.docker.com/desktop) for installation instructions. 
+
+### Pre-compiled binary 
+
+You can run the compiled binary in the following operating systems and architectures: 
+ 
+- MacOS: amd64, arm64 
+- FreeBSD:  386, amd64 
+- Linux: 386, amd64, arm, arm64 
+- Solaris: amd64 
+- Windows: 386, amd64  
+ 
+### HCP Terraform and Terraform Enterprise 
+
+If connecting to HCP Terraform or Terraform Enterprise, you must have network access to `https://app.terraform.io` or your Terraform Enterprise endpoint. 
+ 
+You must also provide the server with an API token for accessing HCP Terraform or Terraform Enterprise. Refer to [API Tokens](/terraform/cloud-docs/users-teams-organizations/api-tokens) in the HCP Terraform documentation or [API Tokens](/terraform/enterprise/users-teams-organizations/api-tokens) in the Terraform Enterprise documentation for instructions on creating API tokens. 
+
+## Configure the server 
+
+Set environment variables to define server behavior and pass them into your deployment environment. You must set the `TRANSPORT_MODE` variable to `streamable-http` so that the server receives and sends data using a single endpoint. Refer to the [environment variables reference documentation](/terraform/mcp-server/reference#environment-variables) for information about all available settings.  
+ 
+Refer to the documentation for your specific deployment environment for additional information on how to pass environment variables. 
+
+### Connect to HCP Terraform or Terraform Enterprise 
+
+You can configure the server with a baseline API token for authentication by setting the `TFE_TOKEN` variable to your API token. You can also omit the token when starting the server and pass a token from your client to the server in an HTTP header. If you provide a token in an HTTP header and the server is already configured with a token, the token you provide from your client overrides the baseline token configured for the server. Refer to [Configure local agents](#configure-local-agents) for more information.
+
+To connect the server to Terraform Enterprise, you must also set the `TFE_HOSTNAME` environment variable to the URL of your Terraform Enterprise deployment.
+
+### Enable telemetry
+
+It is optional, but you can configure the Terraform MCP server to collect telemetry metrics. Set the `OTEL_METRICS_ENABLED` environment variable to `true` to enable metrics. The server implements the following lifecycle:
+
+1. Creates an OTel meter provider 
+1. Exports metrics over `OTLP/HTTP` to `OTEL_METRICS_ENDPOINT` 
+1. Flushes the metrics according to the interval set by `OTEL_METRICS_EXPORT_INTERVAL` 
+1. Adds the service identity is `OTEL_METRICS_SERVICE_NAME` and `OTEL_METRICS_SERVICE_VERSION`
+
+The Terraform MCP server generates the metrics and exports them to the configured OTLP endpoint. Then, the server can receive and forward the telemetry to your monitoring software through its own collector or forwarding setup. This repository produces OTel metrics, but the remote repository is responsible for routing them to the monitoring service.
+
+Refer to [telemetry metrics reference](/terraform/mcp-server/reference#telemetry-metrics) for more information.
+
+### Configure multiple replicas
+
+Set `MCP_SESSION_MODE` to `stateless` when deploying multiple replicas.
+
+By default, the server keeps session state in each instance's memory. If multiple replicas are deployed behind a load balancer, your client can initially route to one replica but route to a different replica on the next tool call. The second replica won't have the session data from the inital call, resulting in potential issues. 
+
+
+### Example configuration
+ 
+The following example Terraform configuration pulls the server image into a Fargate container and deploys it to an ECS cluster. The highlighted lines configure the MCP server, which includes the API token so that the server can interact with HCP Terraform or Terraform Enterprise specified in the `var.tfe_address` variable. Note that the token is also passed to the cluster using a Terraform variable for security purposes:
+
+<CodeBlockConfig highlight="19-42">
+
+```hcl  
+resource "aws_ecs_cluster" "compute" {  
+  name = "terraform-mcp-${random_string.suffix.id}"  
+}  
+   
+resource "aws_ecs_task_definition" "mcp" {  
+  family                   = "terraform-mcp"  
+  requires_compatibilities = ["FARGATE"]  
+  network_mode             = "awsvpc"  
+  cpu                      = "256"  
+  memory                   = "512"  
+  execution_role_arn       = aws_iam_role.ecs_execution.arn  
+   
+  container_definitions = jsonencode([  
+    {  
+      name      = "terraform-mcp-${random_string.suffix.id}"  
+      image     = "hashicorp/terraform-mcp-server"  
+      essential = true  
+   
+      environment = [  
+        {  
+          name  = "TRANSPORT_MODE"  
+          value = "streamable-http"  
+        },  
+        {  
+          name  = "TRANSPORT_HOST"  
+          value = "0.0.0.0"  
+        },  
+        {  
+          name  = "TRANSPORT_PORT"  
+          value = tostring(var.port)  
+        },  
+        {  
+          name  = "LOG_LEVEL"  
+          value = var.log_level  
+        },  
+        {  
+          name  = "TFE_ADDRESS",  
+          value = var.tfe_address  
+        },  
+        {  
+          name  = "TFE_TOKEN",  
+          value = var.tfe_token  
+        }  
+      ]  
+   
+      portMappings = [{  
+        containerPort = var.port  
+        protocol      = "tcp"  
+      }]  
+   
+      logConfiguration = {  
+        logDriver = "awslogs"  
+        options = {  
+          "awslogs-group"         = aws_cloudwatch_log_group.mcp.name  
+          "awslogs-region"        = var.region  
+          "awslogs-stream-prefix" = "ecs"  
+        }  
+      }  
+    }  
+  ])  
+}  
+   
+resource "aws_ecs_service" "mcp" {  
+  name            = "terraform-mcp-${random_string.suffix.id}"  
+  cluster         = aws_ecs_cluster.compute.id  
+  task_definition = aws_ecs_task_definition.mcp.arn  
+  desired_count   = 1  
+  launch_type     = "FARGATE"  
+   
+  network_configuration {  
+    subnets          = module.vpc.private_subnets  
+    security_groups  = [aws_security_group.fargate_traffic.id]  
+    assign_public_ip = false  
+  }  
+   
+  load_balancer {  
+    target_group_arn = aws_lb_target_group.mcp.arn  
+    container_name   = "terraform-mcp-${random_string.suffix.id}"  
+    container_port   = var.port  
+  }  
+   
+  depends_on = [aws_lb.mcp]  
+}  
+   
+resource "aws_cloudwatch_log_group" "mcp" {  
+  name              = "/ecs/terraform-mcp"  
+  retention_in_days = 1  
+}  
+```
+  
+</CodeBlockConfig>
+
+## Deploy the server
+
+Apply your configuration to provision the infrastructure and deploy the server. If you configured the server to connect to HCP Terraform or the Terraform Enterprise instance, it uses the URL specified in the `TFE_ADDRESS` variable. For authentication, the server uses the API token specified in the `TFE_TOKEN` variable. You can also configure your client with your user API token to access different resources than what may be available in the baseline token. Refer to [Configure local agents](#configure-local-agents) for more information. 
+
+
+## Configure local agents 
+
+Add the URL of the remote server to your agent’s MCP configuration file. 
+
+The following example shows an entry in the `.vscode/mcp.json` file for Visual Studio Code. Refer to your agent documentation for instructions on how to specify a remote MCP server:   
+ 
+```json 
+{
+  "servers": {
+    "remote-terraform-mcp-server": {
+      "url": "http://remote-server-path:port/endpoint",
+      "type": "http"
+    }
+  }
+}
+```
+
+### Configure a user token
+
+You can configure your client to pass your API token to the remote server for authentication with HCP Terraform or Terraform Enterprise instead of the token that the server is configured to present. 
+
+Configure your client to pass the user API token in the HTTP header, for example:
+
+```json
+{
+  "servers": {
+    "remote-terraform-mcp-server": {
+      "url": "http://remote-server-path:port/endpoint",
+      "type": "http",
+      "headers": {
+        "TFE_TOKEN": "${input:tfe-token}"
+      }
+    }
+  }
+}
+```
+
+Tokens provided in request headers takes precedence over any token configured on the server using environment variables.
+
+You can also omit the token in the [server configuration](#configure-the-server), which would require all clients to present a token to interact with HCP Terraform or Terraform Enterprise through the server. This lets different clients access resources based on their RBAC permissions so that multiple users with different access levels can access data they need using a centrally managed MCP server.  
+
+## Next steps
+
+- Begin prompting your AI model to create Terraform configuration. Refer to [Prompt an AI model](/terraform/mcp-server/prompt) for guidance on effective prompting techniques.
+- The server provides access to up-to-date provider documentation in tne public registry, as well as information in your HCP Terraform or Terraform Enterprise organization.
+- Ask for help with specific Terraform resources and modules. 
+- Explore advanced configuration options for your specific deployment needs.
