@@ -76,6 +76,12 @@ export const loadRedirects = async (version = 'default', redirectsDir) => {
 
 					return destUrl.href
 				}
+			} else {
+				// Static external destination (no tokens to interpolate).
+				// Wrap in a function so it can be called uniformly.
+				destination = () => {
+					return redirect.destination
+				}
 			}
 		} else {
 			destination = pathToRegexp.compile(redirect.destination)
