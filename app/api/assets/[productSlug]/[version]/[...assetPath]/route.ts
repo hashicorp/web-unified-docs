@@ -54,7 +54,6 @@ export async function GET(
 	}
 
 	// TODO: should we add caching headers?
-	// @ts-expect-error:2345 - TS wants Uint8Array, but a Buffer is fine
 	return new Response(assetData.value.buffer, {
 		headers: {
 			'content-type': assetData.value.contentType,

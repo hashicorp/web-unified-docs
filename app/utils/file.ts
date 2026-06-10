@@ -208,7 +208,6 @@ export const fetchFile = async (
 
 			// Wrap the file content in a Response object to mimic the fetch API's Response which is expected downstream.
 
-			// @ts-expect-error:2345 - TS wants Uint8Array, but a Buffer is fine
 			const response = new Response(fileContent, {
 				headers: {
 					'content-type': contentTypeFromPath(localFilePath),
