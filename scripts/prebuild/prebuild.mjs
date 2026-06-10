@@ -126,7 +126,7 @@ async function main() {
 
 	// Determine which files to check for copying and transforms
 	let filesToCheck
-	if (changedFiles) {
+	if (changedFiles !== null && !Array.isArray(changedFiles)) {
 		filesToCheck = [...changedFiles.added, ...changedFiles.modified]
 	} else {
 		filesToCheck = await listFiles(CONTENT_DIR).filter((filePath) => {
