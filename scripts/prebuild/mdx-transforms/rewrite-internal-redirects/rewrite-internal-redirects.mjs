@@ -143,7 +143,7 @@ export const rewriteInternalRedirectsPlugin = ({ redirects }) => {
 }
 
 /**
- * Loads the redirects defined in redirects.js or redirects.next.js and attempts to apply them to any
+ * Loads the redirects defined in redirects.jsonc and attempts to apply them to any
  * matching links in the document.
  */
 export const transformRewriteInternalRedirects = async (
