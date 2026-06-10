@@ -18,8 +18,11 @@ export type GetParams = VersionedProduct & {
 	 */
 	section: string[]
 }
-export async function GET(request: Request, { params }: { params: GetParams }) {
-	const { productSlug, version, section } = params
+export async function GET(
+	request: Request,
+	{ params }: { params: Promise<GetParams> },
+) {
+	const { productSlug, version, section } = await params
 	const productVersionResult = getProductVersionMetadata(productSlug, version)
 	if (!productVersionResult.ok) {
 		console.error(errorResultToString('API', productVersionResult))
