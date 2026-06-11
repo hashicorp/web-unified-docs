@@ -24,9 +24,12 @@ export type GetParams = VersionedProduct & {
 	docsPath: string[]
 }
 
-export async function GET(request: Request, { params }: { params: GetParams }) {
+export async function GET(
+	request: Request,
+	{ params }: { params: Promise<GetParams> },
+) {
 	// Grab the parameters we need to fetch content
-	const { productSlug, version, docsPath } = params
+	const { productSlug, version, docsPath } = await params
 
 	if (!Object.keys(PRODUCT_CONFIG).includes(productSlug)) {
 		console.error(
