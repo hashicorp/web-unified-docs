@@ -14,6 +14,11 @@ export const getDocsPaths = async (
 ) => {
 	const paths = productSlugs
 		.map((productSlug: string) => {
+			// Internal products should not be included in the sitemap
+			if (PRODUCT_CONFIG[productSlug]?.internalProduct) {
+				return []
+			}
+
 			const latestProductMetadata = getProductVersionMetadata(
 				productSlug,
 				'latest',
