@@ -93,6 +93,24 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.CI_GITHUB_TOKEN }}
 
+      # The merge-commit checkout above populates scripts/ at the SOURCE PR's
+      # merge commit. For any PR merged before a forward-port tooling change,
+      # those scripts on disk are stale (e.g. an older get-changed-content-files
+      # that predates the --output/--merge-base flags), which fails silently.
+      # Restore only the forward-port tooling this job actually runs from the
+      # current default branch so it always uses the latest versions. The four
+      # files below are the entrypoints plus get-changed's relative-import dep
+      # (get-files-using-partial). content/ stays at the merge commit, so the
+      # diff-base logic below is unaffected.
+      - name: Restore current forward-port scripts from main
+        run: |
+          git fetch --no-tags --depth=1 origin main
+          git checkout FETCH_HEAD -- \
+            scripts/utils/get-changed-content-files.mjs \
+            scripts/utils/get-files-using-partial.mjs \
+            scripts/forward-port/resolve-target.mjs \
+            scripts/forward-port/apply-forward-port-changes.mjs
+
       # ******************************************************************************************
       # ************ If the PR was merged (forward-port gha not manually dispatched): ************
       # ******************************************************************************************
@@ -168,6 +186,23 @@ jobs:
           LABEL_SLUG: ${{ inputs.labelSlug }}
         run: |
           if [ -n "${OVERRIDE_JSON}" ]; then
+            # Validate it's parseable JSON first. The most common cause of
+            # failure is smart quotes from copy-paste, so the error message
+            # calls that out specifically.
+            if ! printf '%s' "${OVERRIDE_JSON}" | jq empty 2>/dev/null; then
+              echo "::error::overrideJson is not valid JSON. The usual cause is smart quotes (curly “ ” ‘ ’) from copy-paste — retype it using straight quotes in a plain-text editor (VS Code, Notepad, TextEdit in plain-text mode), not Word/Docs/Slack."
+              exit 1
+            fi
+            # Ensure all four required routing fields are present and non-empty.
+            MISSING_FIELDS=$(printf '%s' "${OVERRIDE_JSON}" | jq -r '
+              ["targetBranch","sourceVersionFolder","targetVersionFolder","targetProduct"]
+              - [to_entries[] | select(.value != null and .value != "") | .key]
+              | join(", ")
+            ')
+            if [ -n "${MISSING_FIELDS}" ]; then
+              echo "::error::overrideJson is missing required field(s): ${MISSING_FIELDS}. Provide all of: targetBranch, sourceVersionFolder, targetVersionFolder, targetProduct."
+              exit 1
+            fi
             # Parse the JSON object and write fields directly to GITHUB_ENV.
             echo "${OVERRIDE_JSON}" | jq -r '
               "TARGET_BRANCH=" + .targetBranch,
