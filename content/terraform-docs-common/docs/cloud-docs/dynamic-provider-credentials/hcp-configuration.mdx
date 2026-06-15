@@ -5,7 +5,7 @@ description: >-
   your HCP Terraform runs.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2025-06-26T16:53:09-07:00
-last_modified: 2025-09-05T12:41:13-07:00
+last_modified: 2026-03-16T23:04:09.000Z
 # END AUTO GENERATED METADATA
 ---
 
@@ -18,18 +18,16 @@ You can use HCP Terraform’s native OpenID Connect integration with HCP to auth
 1. **[Configure HCP](#configure-hcp):** Set up a trust configuration between HCP and HCP Terraform. Then, you must create a [service principal in HPC](/hcp/docs/hcp/iam/service-principal) for your HCP Terraform workspaces.
 2. **[Configure HCP Terraform](#configure-hcp-terraform):** Add environment variables to the HCP Terraform workspaces where you want to use Dynamic Credentials.
 
-<!-- BEGIN: TFC:only name:stacks-tfe -->
-
 If you are configuring a Stack, refer to [Authenticate a Stack](/terraform/language/stacks/deploy/authenticate) to learn about the workflow of authenticating your Stack deployments with dynamic credentials.
-
-<!-- END: TFC:only name:stacks-tfe -->
 
 Once you complete the setup, HCP Terraform automatically authenticates to HCP during each run.
 
 ## Configure HCP
+
 You must enable and configure a workload identity pool and provider on HCP. These instructions use the HCP CLI, but you can also use Terraform to configure HCP. Refer to our [example Terraform configuration](https://github.com/hashicorp/terraform-dynamic-credentials-setup-examples/tree/main/hcp).
 
 #### Create a Service Principal
+
 Create a service principal for HCP Terraform to assume during runs by running the following HCP command. Note the ID of the service principal you create because you will need it in the following steps. For all remaining steps, replace `HCP_PROJECT_ID` with the ID of the project that contains all the resources and workspaces that you want to manage with this service principal. If you wish to manage more than one project with dynamic credentials, it is recommended that you create multiple service principals, one for each project.
 
 ```shell
@@ -60,15 +58,12 @@ hcp iam workload-identity-providers create-oidc hcp-terraform-dynamic-credential
 
 ## Configure HCP Terraform
 
-<!-- BEGIN: TFC:only name:stacks-tfe -->
-
 If you are configuring a Stack, refer to [Authenticate a Stack](/terraform/language/stacks/deploy/authenticate) to learn how to use the `identity_token` block to authenticate your Stack deployments with dynamic credentials.
-
-<!-- END: TFC:only name:stacks-tfe -->
 
 Next, you need to set environment variables in your HCP Terraform workspace to configure HCP Terraform to authenticate with HCP using dynamic credentials. You can set these as workspace variables or use a variable set to share one HCP service principal across multiple workspaces. When you configure dynamic provider credentials with multiple provider configurations of the same type, use either a default variable or a tagged alias variable name for each provider configuration. Refer to [Specifying Multiple Configurations](#specifying-multiple-configurations) for more details.
 
 ### Required Environment Variables
+
 | Variable                                                                                                                               | Value                                                                                                 | Notes                                                                                                                                                                                                   |
 |----------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `TFC_HCP_PROVIDER_AUTH`<br />`TFC_HCP_PROVIDER_AUTH[_TAG]`<br />_(Default variable not supported)_                                     | `true`                                                                                                | Requires **v1.15.1** or later if you use self-managing agents. Must be present and set to `true`, or HCP Terraform will not attempt to use dynamic credentials to authenticate to HCP.                  |

@@ -4,7 +4,7 @@ description: >-
   Variables let you customize runs in HCP Terraform. Learn how to use Terraform variables and environment variables.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2025-06-26T16:53:09-07:00
-last_modified: 2025-09-19T14:16:47-07:00
+last_modified: 2026-03-16T23:04:16.000Z
 # END AUTO GENERATED METADATA
 ---
 
@@ -12,7 +12,7 @@ last_modified: 2025-09-19T14:16:47-07:00
 
 Variables let you customize configurations, modify Terraform's behavior, setup [dynamic provider credentials](/terraform/cloud-docs/dynamic-provider-credentials), and store information like static provider credentials.
 
-You can set variables specifically for each workspace or you can create variable sets to reuse the same variables across multiple workspaces<!-- BEGIN: TFC:only name:stacks-tfe --> and Stacks<!-- END: TFC:only name:stacks-tfe -->. For example, you could define a variable set of provider credentials and automatically apply it to all of the workspaces<!-- BEGIN: TFC:only name:stacks-tfe --> and Stacks<!-- END: TFC:only name:stacks-tfe --> using that provider.
+You can set variables specifically for each workspace or you can create variable sets to reuse the same variables across multiple workspaces and Stacks. For example, you could define a variable set of provider credentials and automatically apply it to all of the workspaces and Stacks using that provider.
 
 
 For workspaces, you can use the command line to specify workspace variable values for each plan or apply. Otherwise, HCP Terraform applies workspace variables to all runs within that workspace.
@@ -31,11 +31,7 @@ HCP Terraform performs Terraform runs on disposable Linux worker VMs using a POS
 
 Environment variables can store provider credentials and other data. Refer to your provider's Terraform Registry documentation for a full list of supported shell environment variables (e.g., authentication variables for [AWS](https://registry.terraform.io/providers/hashicorp/aws/latest/docs#environment-variables), [Google Cloud Platform](https://registry.terraform.io/providers/hashicorp/google/latest/docs/guides/getting_started#adding-credentials), and [Azure](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs#argument-reference)). Environment variables can also [modify Terraform's behavior](/terraform/cli/config/environment-variables). For example, `TF_LOG` enables detailed logs for debugging.
 
-<!-- BEGIN: TFC:only name:stacks-tfe -->
-
 To learn more about accessing environment variable values in Stacks, refer to [Variable sets and Stacks](/terraform/cloud-docs/variables/managing-variables#variable-sets-and-stacks).
-
-<!-- END: TFC:only name:stacks-tfe -->
 
 #### Parallelism
 
@@ -49,11 +45,7 @@ Dynamic credentials lets you use temporary per-run credentials and eliminates th
 
 You can configure [dynamic credentials](/terraform/cloud-docs/dynamic-provider-credentials) for certain providers using environment variables [at the workspace level](/terraform/cloud-docs/variables/managing-variables#workspace-specific-variables) or using [variable sets](/terraform/cloud-docs/variables/managing-variables#variable-sets).
 
-<!-- BEGIN: TFC:only name:stacks-tfe -->
-
 If you are configuring a Stack, refer to [Authenticate a Stack](/terraform/language/stacks/deploy/authenticate) to learn the workflow of authenticating your Stack deployments with dynamic credentials.
-
-<!-- END: TFC:only name:stacks-tfe -->
 
 ### Terraform variables
 
@@ -80,11 +72,7 @@ module "ec2_instances" {
 
 If a required input variable is missing, Terraform plans in the workspace will fail and print an explanation in the log.
 
-<!-- BEGIN: TFC:only name:stacks-tfe -->
-
 To learn more about accessing Terraform variable values in Stacks, refer to [Variable sets and Stacks](/terraform/cloud-docs/variables/managing-variables#variable-sets-and-stacks).
-
-<!-- END: TFC:only name:stacks-tfe -->
 
 ## Scope
 
@@ -95,8 +83,8 @@ Each environment and Terraform variable can have one of the following scopes:
 | Workspace run-specific                  | Apply to a specific run within a single workspace.                                 | [Specify Run-Specific Variables](/terraform/cloud-docs/variables/managing-variables#run-specific-variables)                                                                                                                                                                                                                                 |
 | Workspace-Specific            | Apply to a single workspace.                                                       | [Create Workspace-Specific Variables](/terraform/cloud-docs/variables/managing-variables#workspace-specific-variables), [Loading Variables from Files](/terraform/cloud-docs/variables/managing-variables#loading-variables-from-files), [Workspace-Specific Variables API](/terraform/cloud-docs/api-docs/workspace-variables). |
 | Workspace-Scoped Variable Set | Apply to multiple workspaces within the same organization.                         | [Create Variable Sets](/terraform/cloud-docs/variables/managing-variables#variable-sets) and [Variable Sets API](/terraform/cloud-docs/api-docs/variable-sets)                                                                                                                                                                              |
-| Project-Scoped Variable Set   | Automatically applied and available to all current and future workspaces<!-- BEGIN: TFC:only name:stacks-tfe --> and Stacks<!-- END: TFC:only name:stacks-tfe --> within a project.       | [Create Variable Sets](/terraform/cloud-docs/variables/managing-variables#variable-sets) and [Variable Sets API](/terraform/cloud-docs/api-docs/variable-sets)                                                                                                                                                                              |
-| Global Variable Set           | Automatically applied to all current and future workspaces<!-- BEGIN: TFC:only name:stacks-tfe --> and Stacks<!-- END: TFC:only name:stacks-tfe --> within an organization. | [Create Variable Sets](/terraform/cloud-docs/variables/managing-variables#variable-sets) and [Variable Sets API](/terraform/cloud-docs/api-docs/variable-sets)                                                                                                                                                                              |
+| Project-Scoped Variable Set   | Automatically applied and available to all current and future workspaces and Stacks within a project.       | [Create Variable Sets](/terraform/cloud-docs/variables/managing-variables#variable-sets) and [Variable Sets API](/terraform/cloud-docs/api-docs/variable-sets)                                                                                                                                                                              |
+| Global Variable Set           | Automatically applied to all current and future workspaces and Stacks within an organization. | [Create Variable Sets](/terraform/cloud-docs/variables/managing-variables#variable-sets) and [Variable Sets API](/terraform/cloud-docs/api-docs/variable-sets)                                                                                                                                                                              |
 
 ## Variable set ownership
 
@@ -112,7 +100,7 @@ Refer to [**Manage variable sets**](/terraform/cloud-docs/variables/managing-var
 
 > **Hands On:** The [Manage Multiple Variable Sets in HCP Terraform](/terraform/tutorials/cloud/cloud-multiple-variable-sets) tutorial shows how to manage multiple variable sets and demonstrates variable precedence.
 
-There may be cases when a workspace contains conflicting variables of the same type with the same key. HCP Terraform marks overwritten variables in the UI. <!-- BEGIN: TFC:only name:stacks-tfe -->Stacks directly reference individual variable sets using the `store` block, so they do not need to heed the following precedence rules.<!-- END: TFC:only name:stacks-tfe -->
+There may be cases when a workspace contains conflicting variables of the same type with the same key. The platform marks overwritten variables in the UI. Stacks directly reference individual variable sets using the `store` block, so they do not need to heed the following precedence rules.
 
 HCP Terraform prioritizes and overwrites conflicting variables in workspaces according to the following precedence:
 

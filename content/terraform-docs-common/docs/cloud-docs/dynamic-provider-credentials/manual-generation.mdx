@@ -4,7 +4,7 @@ description: >-
   Learn how to generate workload identity tokens to allow Terraform runs to safely authenticate with custom workflows and providers that do not natively support dynamic credentials.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2025-06-26T16:53:09-07:00
-last_modified: 2025-09-05T12:41:13-07:00
+last_modified: 2026-03-16T23:04:10.000Z
 # END AUTO GENERATED METADATA
 ---
 
@@ -15,13 +15,11 @@ last_modified: 2025-09-05T12:41:13-07:00
 If required for custom auth workflows or to perform auth with providers that are not natively supported by dynamic credentials, you can request that HCP Terraform inject a [workload identity token](/terraform/cloud-docs/workspaces/dynamic-provider-credentials/workload-identity-tokens) into the run environment for usage in agent hooks.
 
 ## Configure HCP Terraform
-<!-- BEGIN: TFC:only name:stacks-tfe -->
 
 If you are configuring a Stack, refer to [Authenticate a Stack](/terraform/language/stacks/deploy/authenticate) to learn about the workflow of authenticating your Stack deployments with dynamic credentials.
 
-<!-- END: TFC:only name:stacks-tfe -->
-
 ### Required Environment Variables
+
 You’ll need to set the following environment variable in your HCP Terraform workspace in order to have HCP Terraform inject a workload identity token into the run environment. You can set this as a workspace variable, or if you’d like to inject tokens with the same audience value across multiple workspaces, you can use a variable set.
 
 | Variable                         | Value                                       | Notes                                                                                                                                                                |

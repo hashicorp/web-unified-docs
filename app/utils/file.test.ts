@@ -12,7 +12,7 @@ vi.hoisted(() => {
 	process.env.VERCEL_URL = 'local-vercel-CDN'
 })
 
-import { fetchFile, FileType } from './file'
+import { fetchFile, findFileWithMetadata, FileType } from './file'
 
 vi.mock('fs/promises', () => {
 	return {
@@ -234,5 +234,29 @@ describe('fetchFile — INCREMENTAL_BUILD=true', () => {
 			'https://prod-vercel-CDN/asset/vault/v1.21.x/img/foo.png',
 			expect.objectContaining({ cache: 'no-cache' }),
 		)
+	})
+})
+
+describe('findFileWithMetadata', () => {
+	test('removes empty segments from URL path', async () => {
+		const filePath = [
+			'content',
+			'terraform-docs-common',
+			'',
+			'docs',
+			'cloud-docs/index.mdx',
+		]
+		const versionMetaData = {
+			releaseStage: 'stable',
+			version: '',
+			isLatest: true,
+		}
+
+		const mockResponse = new Response('body')
+		vi.mocked(fetch).mockResolvedValue(mockResponse)
+
+		await findFileWithMetadata(filePath, versionMetaData)
+
+		expect(fetch.mock.calls[0][0]).not.toContain('//docs')
 	})
 })
