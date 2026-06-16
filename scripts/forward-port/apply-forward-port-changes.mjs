@@ -6,40 +6,17 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { parseArgs } from 'node:util'
-
-const { values } = parseArgs({
-	options: {
-		'changes-file': { type: 'string' },
-		'target-product': { type: 'string' },
-		'source-version': { type: 'string' },
-		'target-version': { type: 'string' },
-		'source-dir': { type: 'string' },
-	},
-	strict: true,
-})
-
-if (!values['changes-file'] || !values['target-product'] || !values['source-version'] || !values['target-version']) {
-	console.error('Error: --changes-file, --target-product, --source-version, and --target-version are required')
-	process.exit(1)
-}
-
-const changesFile = values['changes-file']
-const targetProduct = values['target-product']
-const sourceVersion = values['source-version']
-const targetVersion = values['target-version']
-const sourceDir = values['source-dir']
-
-
+import { pathToFileURL } from 'node:url'
 
 /**
  * Rewrites the source-version segment of a file path to the target version.
  * e.g. content/terraform/v1.14.x/docs/file.mdx → content/terraform/v1.15.x/docs/file.mdx
  */
-function toTargetPath(srcPath) {
+function toTargetPath(srcPath, sourceVersion, targetVersion) {
 	return srcPath.replace(sourceVersion, targetVersion)
 }
 
-// filter out only the targetProduct files/directories from the changesFile
+// filter out only the targetProduct files/directories from the changes object
 function filterByTargetProduct(files, product) {
 	const prefix = `content/${product}/`
 	const filtered = {
@@ -67,65 +44,133 @@ function filterByTargetProduct(files, product) {
 	return filtered
 }
 
-let changedFiles
-try {
-	changedFiles = JSON.parse(fs.readFileSync(changesFile, 'utf-8'))
-} catch (error) {
-	console.error(`Error reading changes file at ${changesFile}:`, error)
-	process.exit(1)
+/**
+ * Applies forward-port changes: copies added/modified files from the source
+ * version directory into the target version directory, and deletes the
+ * target-version counterparts of removed files.
+ *
+ * @param {object} options
+ * @param {string} options.changesFile - Path to the {added, modified, removed} JSON.
+ * @param {string} options.targetProduct - Product directory name (e.g. terraform).
+ * @param {string} options.sourceVersion - Source version segment (e.g. v1.14.x).
+ * @param {string} options.targetVersion - Target version segment (e.g. v1.15.x).
+ * @param {string} [options.sourceDir] - Directory to read source files from.
+ * @returns {{ result?: { applied: number, deleted: number, skipped: number }, error?: string }}
+ */
+export function applyForwardPortChanges({
+	changesFile,
+	targetProduct,
+	sourceVersion,
+	targetVersion,
+	sourceDir,
+} = {}) {
+	if (!changesFile || !targetProduct || !sourceVersion || !targetVersion) {
+		return {
+			error:
+				'changesFile, targetProduct, sourceVersion, and targetVersion are required',
+		}
+	}
+
+	let changedFiles
+	try {
+		changedFiles = JSON.parse(fs.readFileSync(changesFile, 'utf-8'))
+	} catch (error) {
+		return { error: `Error reading changes file at ${changesFile}: ${error.message}` }
+	}
+
+	changedFiles = filterByTargetProduct(changedFiles, targetProduct)
+
+	const { added = [], modified = [], removed = [] } = changedFiles
+
+	let applied = 0
+	let skipped = 0
+	let deleted = 0
+
+	// Added and modified: copy from source path to target path.
+	for (const srcPath of [...added, ...modified]) {
+		const destPath = toTargetPath(srcPath, sourceVersion, targetVersion)
+
+		if (srcPath === destPath) {
+			console.warn(`Skipping ${srcPath}: source and target paths are identical (version segment not found)`)
+			skipped++
+			continue
+		}
+
+		const absoluteSrcPath = sourceDir ? path.join(sourceDir, srcPath) : srcPath
+		if (!fs.existsSync(absoluteSrcPath)) {
+			console.warn(`Skipping ${srcPath}: source file does not exist`)
+			skipped++
+			continue
+		}
+
+		fs.mkdirSync(path.dirname(destPath), { recursive: true })
+		fs.copyFileSync(absoluteSrcPath, destPath)
+		console.log(`  copied: ${srcPath} → ${destPath}`)
+		applied++
+	}
+
+	// Removed: delete the target-version counterpart if it exists.
+	for (const srcPath of removed) {
+		const destPath = toTargetPath(srcPath, sourceVersion, targetVersion)
+
+		if (srcPath === destPath) {
+			console.warn(`Skipping removal of ${srcPath}: source and target paths are identical (version segment not found)`)
+			skipped++
+			continue
+		}
+
+		if (!fs.existsSync(destPath)) {
+			console.log(`  already absent: ${destPath}`)
+			skipped++
+			continue
+		}
+
+		fs.rmSync(destPath)
+		console.log(`  deleted: ${destPath}`)
+		deleted++
+	}
+
+	console.log(
+		`\nForward-port complete: ${applied} copied, ${deleted} deleted, ${skipped} skipped`,
+	)
+
+	return { result: { applied, deleted, skipped } }
 }
-changedFiles = filterByTargetProduct(changedFiles, targetProduct)
 
-const { added = [], modified = [], removed = [] } = changedFiles
-
-let applied = 0
-let skipped = 0
-let deleted = 0
-
-// Added and modified: copy from source path to target path.
-for (const srcPath of [...added, ...modified]) {
-	const destPath = toTargetPath(srcPath)
-
-	if (srcPath === destPath) {
-		console.warn(`Skipping ${srcPath}: source and target paths are identical (version segment not found)`)
-		skipped++
-		continue
+/**
+ * Returns true when this module is executed directly by Node, e.g.
+ * `node scripts/forward-port/apply-forward-port-changes.mjs`.
+ */
+function isRunFromCommandLine() {
+	if (!process.argv[1]) {
+		return false
 	}
 
-	const absoluteSrcPath = sourceDir ? path.join(sourceDir, srcPath) : srcPath
-	if (!fs.existsSync(absoluteSrcPath)) {
-		console.warn(`Skipping ${srcPath}: source file does not exist`)
-		skipped++
-		continue
-	}
-
-	fs.mkdirSync(path.dirname(destPath), { recursive: true })
-	fs.copyFileSync(absoluteSrcPath, destPath)
-	console.log(`  copied: ${srcPath} → ${destPath}`)
-	applied++
+	return import.meta.url === pathToFileURL(process.argv[1]).href
 }
 
-// Removed: delete the target-version counterpart if it exists.
-for (const srcPath of removed) {
-	const destPath = toTargetPath(srcPath)
+if (isRunFromCommandLine()) {
+	const { values } = parseArgs({
+		options: {
+			'changes-file': { type: 'string' },
+			'target-product': { type: 'string' },
+			'source-version': { type: 'string' },
+			'target-version': { type: 'string' },
+			'source-dir': { type: 'string' },
+		},
+		strict: true,
+	})
 
-	if (srcPath === destPath) {
-		console.warn(`Skipping removal of ${srcPath}: source and target paths are identical (version segment not found)`)
-		skipped++
-		continue
+	const outcome = applyForwardPortChanges({
+		changesFile: values['changes-file'],
+		targetProduct: values['target-product'],
+		sourceVersion: values['source-version'],
+		targetVersion: values['target-version'],
+		sourceDir: values['source-dir'],
+	})
+
+	if (outcome.error) {
+		console.error(`Error: ${outcome.error}`)
+		process.exit(1)
 	}
-
-	if (!fs.existsSync(destPath)) {
-		console.log(`  already absent: ${destPath}`)
-		skipped++
-		continue
-	}
-
-	fs.rmSync(destPath)
-	console.log(`  deleted: ${destPath}`)
-	deleted++
 }
-
-console.log(
-	`\nForward-port complete: ${applied} copied, ${deleted} deleted, ${skipped} skipped`,
-)
