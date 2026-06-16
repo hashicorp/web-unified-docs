@@ -375,13 +375,25 @@ The typical workflow for controller-led registration is as follows. For more det
 
 1. Create the worker resource in Boundary or HCP Boundary.
 2. Obtain the controller-generated activation token.
-3. Add the token to `worker.config`.
+3. Supply the token using one of the methods below.
 4. Install the worker Helm chart.
 5. Confirm the worker registers and persists its credentials to auth storage.
 
 The worker uses the activation token during initial bootstrap. After successful registration, the worker uses persisted credentials from auth storage.
 
-Example HCL for controller-led registration:
+The chart supports three ways to supply the activation token.
+
+<Note>
+
+The plaintext and `extraEnv` methods store the token in the Helm release Secret, which means it is visible to anyone who can run `helm get values boundary-worker --namespace boundary`. Use the `secretRefs` method if you need the token to stay out of Helm release storage entirely.
+
+</Note>
+
+### Plaintext token
+
+Embed the token directly in `worker.config`. Suitable for development only — the token is visible to anyone who can read the ConfigMap.
+
+Example HCL:
 
 ```hcl
 disable_mlock = true
@@ -421,7 +433,7 @@ events {
 }
 ```
 
-Example values for controller-led registration with auth storage persistence:
+Example values:
 
 ```yaml
 worker:
@@ -429,6 +441,100 @@ worker:
     authStorage:
       enabled: true
       size: 1Gi
+```
+
+### Token from a Kubernetes Secret using secretRefs
+
+Store the activation token in a Kubernetes Secret and inject it as an environment variable. The chart maps the Secret key to `BOUNDARY_WORKER_CONTROLLER_GENERATED_ACTIVATION_TOKEN`, which Boundary reads at startup via the `env://` prefix.
+
+Create the Secret before installing the chart:
+
+```shell-session
+$ kubectl create secret generic boundary-worker-secrets \
+  --namespace boundary \
+  --from-literal=worker-controller-generated-activation-token='<activation-token>'
+```
+
+Set `controller_generated_activation_token` to the `env://` reference in `worker.config`:
+
+```hcl
+worker {
+  name = "boundary-worker"
+  public_addr = ""
+  initial_upstreams = ["boundary-controller-cluster:9201"]
+  auth_storage_path = "/var/lib/boundary"
+  controller_generated_activation_token = "env://BOUNDARY_WORKER_CONTROLLER_GENERATED_ACTIVATION_TOKEN"
+
+  tags {
+    type = ["worker", "controller-led"]
+  }
+}
+```
+
+Example values:
+
+```yaml
+secretRefs:
+  secretName: boundary-worker-secrets
+  keys:
+    controllerGeneratedActivationToken: worker-controller-generated-activation-token
+
+worker:
+  persistence:
+    authStorage:
+      enabled: true
+      size: 1Gi
+```
+
+Set `secretRefs.validateExisting=true` to make Helm fail early if the Secret is missing during installation.
+
+### Token via extraEnv in a values file
+
+Use `extraEnv` to inject the token directly as an environment variable without creating a Secret. This is useful when the token is managed by an external secrets operator or CI pipeline that injects values at install time.
+
+Set `controller_generated_activation_token` to the `env://` reference in `worker.config`:
+
+```hcl
+worker {
+  name = "boundary-worker"
+  public_addr = ""
+  initial_upstreams = ["boundary-controller-cluster:9201"]
+  auth_storage_path = "/var/lib/boundary"
+  controller_generated_activation_token = "env://BOUNDARY_WORKER_CONTROLLER_GENERATED_ACTIVATION_TOKEN"
+
+  tags {
+    type = ["worker", "controller-led"]
+  }
+}
+```
+
+Example values:
+
+```yaml
+extraEnv:
+  - name: BOUNDARY_WORKER_CONTROLLER_GENERATED_ACTIVATION_TOKEN
+    value: "<activation-token>"
+
+worker:
+  persistence:
+    authStorage:
+      enabled: true
+      size: 1Gi
+```
+
+### Token via extraEnv at install time
+
+Pass the token at install time using `--set` without adding it to a values file. This avoids storing the token on disk and is useful for one-time installs or scripted pipelines.
+
+Set `controller_generated_activation_token` to the `env://` reference in `worker.config` as shown above, then run:
+
+```shell-session
+$ helm install boundary-worker hashicorp/boundary-worker \
+  --version 0.1.0 \
+  --namespace boundary \
+  --values my-values.yaml \
+  --set 'extraEnv[0].name=BOUNDARY_WORKER_CONTROLLER_GENERATED_ACTIVATION_TOKEN' \
+  --set 'extraEnv[0].value=<activation-token>'
 ```
 
 ## KMS-backed worker authentication
