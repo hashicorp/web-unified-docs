@@ -265,6 +265,17 @@ export const PRODUCT_CONFIG = {
 		versionedDocs: true,
 		websiteDir: 'website',
 	},
+	tfctl: {
+		assetDir: '',
+		basePaths: ['tfctl'],
+		contentDir: 'docs',
+		dataDir: 'data',
+		navDataPath: 'tfctl',
+		productSlug: 'terraform',
+		semverCoerce: semver.coerce,
+		versionedDocs: true,
+		websiteDir: 'website',
+	},
 	'terraform-migrate': {
 		assetDir: '',
 		basePaths: ['migrate'],
