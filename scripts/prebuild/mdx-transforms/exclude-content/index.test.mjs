@@ -405,7 +405,7 @@ This content should throw an error.
 `
 		await expect(async () => {
 			return await runTransform(markdown, vaultOptions)
-		}).rejects.toThrow('Invalid Vault directive: "invalid"')
+		}).rejects.toThrow('Invalid "Vault:invalid" directive')
 	})
 
 	it('should throw an error for unexpected END block', async () => {

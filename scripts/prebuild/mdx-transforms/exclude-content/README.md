@@ -67,13 +67,19 @@ The `name:` parameter is optional and can be used to add semantic meaning to dir
 ### File Structure
 ```
 exclude-content/
-├── index.mjs              # Main transform with if-block routing
+├── index.mjs              # Main transform: tag registry + directive-shape routing
 ├── ast-utils.mjs          # Block parsing and node removal utilities
-├── vault-processor.mjs    # Vault version directive processing
-├── terraform-processor.mjs # TFC/TFEnterprise only directive processing
+├── only-processor.mjs     # Generic "only" directive processing (any product)
+├── version-processor.mjs  # Generic version directive processing (any product)
 ├── index.test.mjs         # Unit tests
 └── README.md             # This file
 ```
+
+Processors are **generic** and product-agnostic: a single `only-processor.mjs`
+handles every `Product:only` directive and a single `version-processor.mjs`
+handles every `Product:>=vX.Y.x` directive. The mapping from a directive's tag
+(for example, `Vault`, `TFC`, `TFEnterprise`) to a product slug lives in the
+`EXCLUSION_DIRECTIVE_TAGS` registry in `index.mjs`.
 
 ### Code Flow
 
@@ -81,29 +87,41 @@ exclude-content/
 2. **Single AST Pass**: Parse all directive blocks in one traversal (`parseDirectiveBlocks`)
    - Stores **node references** (not line numbers) for BEGIN/END comments
    - Returns blocks with `{ startNode, endNode, startLine, endLine, content }`
-3. **Explicit Routing**: For each block, route to appropriate processor:
+3. **Tag Resolution**: Split the block content into a tag and directive, then look
+   up the product slug from the `EXCLUSION_DIRECTIVE_TAGS` registry. Unknown tags
+   throw an error.
    ```javascript
-   const directiveProcessingFuncs = {
-		Vault: processVaultBlock,
-		TFC: processTFCBlock,
-		TFEnterprise: processTFEnterpriseBlock,
+   export const EXCLUSION_DIRECTIVE_TAGS = {
+		Vault: 'vault',
+		TFC: 'terraform-docs-common',
+		TFEnterprise: 'terraform-enterprise',
 	}
 
-	if (product in directiveProcessingFuncs) {
-		directiveProcessingFuncs[product](directive, block, tree, options)
-	} else {
-		throw new Error(`Unknown directive product: "${product}"...`)
+	const [tag, ...rest] = block.content.split(':')
+	const directive = rest.join(':')
+	const targetSlug = EXCLUSION_DIRECTIVE_TAGS[tag]
+	if (!targetSlug) {
+		throw new Error(`Unknown directive product: "${tag}"...`)
 	}
    ```
-4. **Product-Specific Processing**: Each processor handles its own business logic
+4. **Directive-Shape Routing**: Dispatch to a generic processor based on the
+   directive shape, passing the resolved `targetSlug`:
+   ```javascript
+   if (directive === 'only' || directive.startsWith('only')) {
+		processOnlyDirective(targetSlug, directive, block, tree, options)
+	} else {
+		processVersionDirective(targetSlug, directive, block, tree, options)
+	}
+   ```
 5. **Node Removal**: `removeNodesInRange()` removes content between BEGIN/END comments
 
 ### Key Design Principles
 
-- **Explicit over Implicit**: No configuration-driven pattern matching
+- **Generic over Per-Product**: Two shape-based processors serve every product;
+  no product-specific processor files
 - **Single Pass Performance**: Parse all blocks once, route individually
 - **Clear Error Messages**: Immediate feedback with file context and line numbers
-- **Extensible**: Add new products by creating a processor and adding to routing object
+- **Extensible**: Add new products with a single entry in `EXCLUSION_DIRECTIVE_TAGS`
 
 ## Integration
 
@@ -209,6 +227,9 @@ function isCommentNode(node) {
 
 ## Adding a New Product
 
+Adding a product no longer requires a new processor file. Register the product
+and add a single tag mapping.
+
 ### Step 1: Update Product Configuration
 
 In `productConfig.mjs`:
@@ -220,55 +241,25 @@ export const PRODUCT_CONFIG = {
 }
 ```
 
-### Step 2: Add Routing Logic
+### Step 2: Register the Directive Tag
 
-In `exclude-content/index.mjs`:
+In `exclude-content/index.mjs`, add the tag-to-slug mapping to the registry:
 ```javascript
-const directiveProcessingFuncs = {
-  Vault: processVaultBlock,
-  TFC: processTFCBlock,
-  TFEnterprise: processTFEnterpriseBlock,
-  Consul: processConsulBlock // ← Add this
+export const EXCLUSION_DIRECTIVE_TAGS = {
+  Vault: 'vault',
+  TFC: 'terraform-docs-common',
+  TFEnterprise: 'terraform-enterprise',
+  Consul: 'consul', // ← Add this
 }
 ```
 
-### Step 3: Create Product Processor
+That's it. The generic processors handle both directive shapes automatically:
 
-Create `exclude-content/consul-processor.mjs`:
-```javascript
-import { removeNodesInRange } from './ast-utils.mjs'
+- `Consul:only` is routed to `processOnlyDirective` and kept only in `consul`
+- `Consul:>=v1.21.x` is routed to `processVersionDirective` and version-compared
+  against the file's version when `repoSlug === 'consul'`
 
-export function processConsulBlock(directive, block, tree, options) {
-  const { repoSlug } = options
-
-  if (directive === 'only') {
-    // Consul:only kept ONLY in consul, removed elsewhere
-    if (repoSlug !== 'consul') {
-      removeNodesInRange(tree, block)
-    }
-    return
-  }
-
-  // Version directive example
-  const versionMatch = directive.match(/^(<=|>=|<|>|=)v(\d+\.\d+\.x)$/)
-  if (versionMatch) {
-    // Process version comparison...
-    // If content should be removed:
-    // removeNodesInRange(tree, block)
-  }
-
-  throw new Error(`Invalid Consul directive: "${directive}" at lines ${block.startLine}-${block.endLine}`)
-}
-```
-
-### Step 4: Import the Processor
-
-In `exclude-content/index.mjs`:
-```javascript
-import { processConsulBlock } from './consul-processor.mjs'
-```
-
-### Step 5: Add Tests
+### Step 3: Add Tests
 
 Add test cases in `exclude-content/index.test.mjs` for your new product's behavior.
 
@@ -297,11 +288,11 @@ Navigate to `/admin/settings` in your Terraform Enterprise instance.
 Example error messages:
 
 ```
-Unknown directive product: "InvalidProduct" in block "InvalidProduct:only" at lines 5-7. Expected: Vault, TFC, or TFEnterprise
+Unknown directive product: "InvalidProduct" in block "InvalidProduct:only" at lines 5-7. Expected one of: Vault, TFC, TFEnterprise
 
 Mismatched block names: BEGIN="Vault:>=v1.21.x" at line 3, END="Vault:>=v1.22.x" at line 5
 
-Invalid Vault directive: "invalidformat" at lines 8-10. Expected format: Vault:>=vX.Y.x
+Invalid "Vault:invalidformat" directive at lines 8-10. Expected format: <Product>:>=vX.Y.x
 ```
 
 ## Testing
@@ -313,8 +304,8 @@ npx vitest scripts/prebuild/mdx-transforms/exclude-content
 ```
 
 Coverage:
-- Version directive processing (Vault)
-- "Only" directive processing (Terraform products)
+- Version directive processing (generic `version-processor`, e.g. Vault)
+- "Only" directive processing (generic `only-processor`, e.g. Terraform products)
 - Cross-product behavior
 - Error handling for malformed directives
 - Edge cases (nested comments, indented comments, multiple partials with same directive name)
