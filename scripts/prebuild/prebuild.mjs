@@ -15,6 +15,9 @@ import { copyRedirectFiles } from '#scriptUtils/copy-redirect-files.mjs'
 import { copyAssetFiles } from '#scriptUtils/copy-asset-files.mjs'
 import { copyInternalOnlyProductDocs } from './copy-internal-only-product-docs.mjs'
 import { getChangedContentFiles } from '#scriptUtils/get-changed-content-files.mjs'
+import { listFiles } from '#scriptUtils/list-files.mjs'
+
+import { PRODUCT_CONFIG } from '#productConfig.mjs'
 
 const NUM_OF_MICROSEC_IN_NANOSEC = BigInt('1000')
 
@@ -76,7 +79,10 @@ async function main() {
 	let skipTraceFile = false
 	const startTime = process.hrtime.bigint()
 	const traceId = Math.random().toString(16).slice(2, 18)
+
 	const incBuild = process.env.INCREMENTAL_BUILD === 'true'
+	const incBuildPRPreview = incBuild && process.env.VERCEL_ENV === 'preview'
+	const incBuildLocalDev = incBuild && process.env.VERCEL_ENV === 'development'
 
 	const args = getCommandLineArgs()
 
@@ -87,12 +93,15 @@ async function main() {
 	console.log(`Incremental build: ${incBuild ? 'true' : 'false'}\n`)
 
 	let changedFiles = null
-	if (incBuild) {
-		changedFiles = await getChangedContentFiles()
+	if (incBuildPRPreview) {
+		changedFiles = getChangedContentFiles()
 
 		console.log(
 			`Changed content files: ${JSON.stringify(changedFiles, null, 2)}\n`,
 		)
+	} else if (incBuildLocalDev) {
+		// Files are served dynamically in local dev
+		changedFiles = []
 	}
 
 	// Gather and write out version metadata
@@ -115,12 +124,24 @@ async function main() {
 	const docsPathsAllVersionsJson = JSON.stringify(docsPathsAllVersions, null, 2)
 	fs.writeFileSync(DOCS_PATHS_ALL_VERSIONS_FILE, docsPathsAllVersionsJson)
 
+	// Determine which files to check for copying and transforms
+	let filesToCheck
+	if (changedFiles !== null && !Array.isArray(changedFiles)) {
+		filesToCheck = [...changedFiles.added, ...changedFiles.modified]
+	} else {
+		filesToCheck = await listFiles(CONTENT_DIR).filter((filePath) => {
+			const relativePath = path.relative(CONTENT_DIR, filePath)
+			const repoSlug = relativePath.split('/')[0]
+			return repoSlug in PRODUCT_CONFIG
+		})
+	}
+
 	// Apply MDX transforms, writing out transformed MDX files to `public`
 	await buildMdxTransforms(
 		CONTENT_DIR,
 		CONTENT_DIR_OUT,
 		versionMetadata,
-		incBuild ? changedFiles : null,
+		filesToCheck,
 	)
 
 	if (args.buildAlgoliaIndex) {
@@ -138,22 +159,14 @@ async function main() {
 		CONTENT_DIR,
 		CONTENT_DIR_OUT,
 		versionMetadata,
-		incBuild ? changedFiles : null,
+		filesToCheck,
 	)
 
 	// Copy `redirects.jsonc` files from `content` to `public/content
-	await copyRedirectFiles(
-		CONTENT_DIR,
-		CONTENT_DIR_OUT,
-		incBuild ? changedFiles : null,
-	)
+	await copyRedirectFiles(CONTENT_DIR, CONTENT_DIR_OUT, filesToCheck)
 
 	// Copy all asset files from `content` to `public/assets`
-	await copyAssetFiles(
-		CONTENT_DIR,
-		CONTENT_DIR_OUT_ASSETS,
-		incBuild ? changedFiles : null,
-	)
+	await copyAssetFiles(CONTENT_DIR, CONTENT_DIR_OUT_ASSETS, filesToCheck)
 
 	// Copy internal-only product docs and assets to `public/content` and `public/assets` for their
 	// corresponding products based on version-config.json imports
