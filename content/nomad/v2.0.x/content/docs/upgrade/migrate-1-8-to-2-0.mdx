@@ -1,0 +1,574 @@
+---
+layout: docs
+page_title: Migrate from Nomad 1.8 to Nomad 2.0
+description: |-
+  Migrate your Nomad cluster from version 1.8 to version 2.0 through a staged
+  upgrade path. Review breaking changes, required pre-upgrade actions, and
+  post-upgrade verification steps for each intermediate version.
+---
+
+# Migrate from Nomad 1.8 to Nomad 2.0
+
+This guide walks operators through a staged upgrade from Nomad 1.8 to Nomad
+2.0. Nomad supports a maximum of two minor-version jumps in a single upgrade.
+A direct 1.8 → 2.0 upgrade is not supported. You must stage the upgrade
+through each intermediate minor version.
+
+Required upgrade path:
+
+**1.8.x → 1.9.x → 1.10.x → 1.11.x → 2.0.x**
+
+For general rolling-upgrade mechanics that apply at every stage, refer to
+[Upgrade Nomad](/nomad/docs/upgrade).
+
+## Requirements
+
+Before beginning this migration, verify that your environment meets the
+following requirements:
+
+- All Nomad client nodes run Nomad 1.6.0 or later. Nomad 1.9 servers drop
+  support for clients older than 1.6.0 and mark their workloads as lost.
+- NTP or another time-synchronization service runs on all server nodes.
+  Nomad 1.9 changes garbage collection to a clock-based mechanism that
+  requires servers to be roughly time-synchronized.
+- Vault and Consul integrations use
+  [workload identity](/nomad/docs/concepts/workload-identity) for
+  authentication. Nomad 1.10 removes the deprecated token-based
+  authentication workflow for both integrations.
+- You have access to all Nomad server configurations, job specifications,
+  and ACL policies.
+
+## Pre-upgrade checklist
+
+Complete all of the following tasks before you upgrade any Nomad binary.
+The checklist is organized by concern area so that you can batch related
+changes together. Each item notes which version requires the change.
+
+### Job specification changes
+
+**1. Migrate HCLv1 job specifications to HCLv2** *(required before 1.9)*
+
+Nomad 1.9 removes HCLv1 support. The `-hcl1` flag for `job run`,
+`job plan`, and `job validate` no longer works.
+
+The most common HCLv1 pattern that is invalid in HCLv2 is using quoted
+keys in blocks, for example Docker labels with dots:
+
+```hcl
+# HCLv1 — no longer accepted
+labels {
+  "com.datadoghq.ad.check_names"  = "[\"openmetrics\"]"
+  "com.datadoghq.ad.init_configs" = "[{}]"
+}
+
+# HCLv2 — required from Nomad 1.9 onward
+labels = [
+  {
+    "com.datadoghq.ad.check_names"  = "[\"openmetrics\"]"
+    "com.datadoghq.ad.init_configs" = "[{}]"
+  }
+]
+```
+
+Also remove any `-hcl1` flags from CI/CD pipelines.
+
+---
+
+**2. Replace deprecated `disconnect` fields with the `disconnect` block** *(required before 1.10)*
+
+Nomad 1.8 deprecated the `max_client_disconnect`, `stop_after_client_disconnect`,
+and `prevent_reschedule_on_lost` group-level fields in favor of the
+[`disconnect` block](/nomad/docs/job-specification/disconnect).
+Nomad 1.10 removes these fields. Replace them before upgrading to 1.10.
+
+```hcl
+# Before — deprecated fields, removed in 1.10
+group "example" {
+  max_client_disconnect    = "6h"
+  stop_after_client_disconnect = "12h"
+  prevent_reschedule_on_lost = true
+}
+
+# After — use the disconnect block
+group "example" {
+  disconnect {
+    lost_after = "6h"
+    replace    = true
+    reconcile  = "keep_original"
+  }
+}
+```
+
+~> **Note:** You cannot use both `lost_after` and `stop_on_client_after`
+in the same `disconnect` block.
+
+---
+
+**3. Add a `consul` block or `identity` block to tasks that use Consul Template** *(required before 1.10)*
+
+Nomad 1.10 removes the implicit Consul identity that was previously
+created for workloads that do not register services with Consul. Tasks
+that require a Consul token for template rendering must now declare it
+explicitly.
+
+```hcl
+# Add one of the following to your task block:
+
+# Option A — consul block
+task "my-task" {
+  consul {}
+  template {
+    data        = "{{ key \"config/app\" }}"
+    destination = "local/config.txt"
+  }
+}
+
+# Option B — explicit identity block
+task "my-task" {
+  identity {
+    aud = ["consul.io"]
+  }
+}
+```
+
+Refer to the [`consul` job specification block](/nomad/docs/job-specification/consul)
+and the [`identity` block](/nomad/docs/job-specification/identity) for details.
+
+---
+
+**4. Remove `reschedule` blocks from `sysbatch` and `system` jobs** *(required before 1.11)*
+
+Nomad 1.11 rejects `sysbatch` and `system` job submissions that include a
+`reschedule` block, returning an error instead of silently ignoring it.
+Remove these blocks before upgrading.
+
+To identify affected jobs, inspect each job's specification:
+
+```shell-session
+$ nomad job inspect <job-name>
+```
+
+---
+
+**5. Update QEMU job specifications** *(required before 1.11.2)*
+
+Nomad 1.11.2 changes the QEMU driver to use host file paths for filesystem
+environment variables instead of container-relative paths. Update any
+QEMU job specifications that reference `/alloc` or `/local` to use the
+corresponding host path.
+
+Refer to the [QEMU task driver documentation](/nomad/docs/deploy/task-driver/qemu)
+for updated environment variable values.
+
+---
+
+### Agent configuration changes
+
+**6. Migrate Vault and Consul token authentication to workload identity** *(required before 1.10)*
+
+Nomad 1.10 removes the Vault and Consul token-based authentication workflow
+that was deprecated in Nomad 1.7. You must complete this migration before
+upgrading to Nomad 1.10.
+
+Remove the following fields from your Nomad agent configuration:
+
+| Field | Configuration scope | Replacement |
+| :---- | :------------------ | :---------- |
+| `vault.allow_unauthenticated` | Agent | Tasks use workload identity. Do not provide a Vault token. |
+| `vault.task_token_ttl` | Agent | Tasks receive TTL configuration from the Vault role. |
+| `vault.token` | Agent | Nomad uses workload identity for authenticated requests. |
+| `consul.allow_unauthenticated` | Agent | Tasks use workload identity. Do not provide a Consul token. |
+
+Also remove `vault.policies` from job specifications and configure a
+Vault role instead.
+
+For step-by-step migration instructions, refer to:
+
+- [Migrate to workload identity with Vault](/nomad/docs/v1.9.x/integrations/vault/acl#migrating-to-using-workload-identity-with-vault)
+- [Migrate to workload identity with Consul](/nomad/docs/v1.9.x/integrations/consul/acl#migrating-to-using-workload-identity-with-consul)
+
+---
+
+**7. Add explicit `plugin` blocks for all binaries in `plugin_dir`** *(required before 1.10)*
+
+Nomad 1.10 only loads plugin binaries from
+[`plugin_dir`](/nomad/docs/configuration#plugin_dir) when a matching
+[`plugin` block](/nomad/docs/configuration/plugin) exists in the agent
+configuration. Nomad silently skips any binary that lacks a configuration
+block.
+
+For each binary in your `plugin_dir`, add a corresponding `plugin` block:
+
+```hcl
+plugin "my-custom-driver" {
+  config {
+    # driver-specific configuration
+  }
+}
+```
+
+---
+
+**8. Update `telemetry.publish_allocation_metrics`** *(required before 1.10.2 if you collect allocation metrics)*
+
+Nomad 1.10.2 fixes a bug where allocation metrics were published even when
+[`telemetry.publish_allocation_metrics`](/nomad/docs/configuration/telemetry#publish_allocation_metrics)
+was unset or `false`. If you rely on allocation metrics, explicitly set
+the field to `true` before upgrading:
+
+```hcl
+telemetry {
+  publish_allocation_metrics = true
+}
+```
+
+---
+
+**9. Migrate `client.disk_free_mb` to `client.reserved.disk`** *(required before 1.11.1)*
+
+Nomad 1.11.1 deprecates the `disk_free_mb` client configuration parameter
+and removes the `unique.storage.bytesfree` node attribute. Nomad now
+calculates schedulable storage using only `client.reserved.disk`.
+
+Update your client agent configurations:
+
+```hcl
+# Before
+client {
+  disk_free_mb = 1024
+}
+
+# After
+client {
+  reserved {
+    disk = 1024
+  }
+}
+```
+
+Reserve at least the amount of disk used by the host OS.
+
+---
+
+**10. Update the `raft_boltdb` server configuration to `raft_logstore`** *(required before 2.0)*
+
+Nomad 2.0 deprecates the `raft_boltdb` server configuration parameter in
+favor of [`raft_logstore`](/nomad/docs/configuration/server#raft_logstore).
+Update your server agent configuration before upgrading to 2.0.
+
+```hcl
+# Before — deprecated
+server {
+  raft_boltdb {
+    no_sync = false
+  }
+}
+
+# After
+server {
+  raft_logstore {
+    backend = "wal"
+  }
+}
+```
+
+After upgrading all servers to 2.0, you can optionally migrate the Raft
+log store from the BoltDB backend to the WAL backend for improved
+write-heavy workload performance:
+
+```shell-session
+$ nomad operator raft migrate-backend
+```
+
+<Warning>
+
+Once you migrate to the WAL backend, reverting to BoltDB requires
+restoring from a snapshot taken before the migration.
+
+</Warning>
+
+---
+
+### ACL and security changes
+
+**11. Validate ACL policies for duplicate or invalid keys** *(required before 1.11)*
+
+Nomad 1.11 rejects ACL policy writes that contain duplicate or invalid keys.
+Existing policies with invalid keys continue to function until they are
+updated, at which point Nomad rejects the write.
+
+Proactively validate and fix all ACL policies before upgrading. List all
+policies and inspect each one:
+
+```shell-session
+$ nomad acl policy list
+$ nomad acl policy info <policy-name>
+```
+
+---
+
+**12. Update `sentinel apply` automation scripts to require `-scope`** *(Enterprise; required before 1.10)*
+
+Nomad 1.10 requires the `-scope` flag for the
+[`nomad sentinel apply` command](/nomad/commands/sentinel/apply) to
+prevent accidentally applying volume policies to the job scope. Update
+any automation or scripts that call this command:
+
+```shell-session
+# Before
+$ nomad sentinel apply my-policy policy.sentinel
+
+# After
+$ nomad sentinel apply -scope job my-policy policy.sentinel
+```
+
+---
+
+**13. Update the `job_max_count` server configuration if needed** *(required before 1.11)*
+
+Nomad 1.11 introduces the
+[`job_max_count`](/nomad/docs/configuration/server#job_max_count) server
+configuration parameter, which caps the maximum number of allocations per
+job at 50,000 by default. Jobs that exceed this count are rejected at
+submit time.
+
+Audit any jobs that may exceed this limit. If needed, increase the cap
+before upgrading:
+
+```hcl
+server {
+  job_max_count = 100000
+}
+```
+
+---
+
+### Task driver changes
+
+**14. Migrate remote-tasks workloads** *(required before 1.10)*
+
+Nomad 1.10 removes all remote task driver support. Nomad no longer detaches
+drivers with the `RemoteTasks` capability when an allocation is lost, and
+does not detach remote tasks when a node is drained.
+
+Identify and migrate all workloads that use a remote task driver before
+upgrading to 1.10.
+
+---
+
+**15. Audit task log directory write behavior** *(required before 2.0.1)*
+
+Nomad 2.0.1 binds allocation log directories as read-only for task drivers
+that support filesystem isolation, such as `docker`, `exec`, and `raw_exec`.
+Tasks that write directly to the allocation log directory will fail after
+this change.
+
+Audit your task configurations to confirm no tasks write to the log
+directory path. Redirect any such writes to the task's `local/` or
+`alloc/data/` directories instead.
+
+---
+
+### Go API consumers
+
+**16. Update Go SDK quota usage** *(required before 1.10)*
+
+Nomad 1.10 changes the Go API `QuotaSpec.RegionLimit` field type from
+`Resources` to `QuotaResources`. The `QuotaSpec.VariablesLimit` field is
+deprecated and will be removed in a future version.
+
+Update any code that accesses these fields:
+
+```go
+// Before
+spec.RegionLimit = &api.Resources{...}
+spec.VariablesLimit = 100
+
+// After
+spec.RegionLimit = &api.QuotaResources{...}
+spec.RegionLimit.Storage = &api.QuotaStorageResources{
+  Variables: 100,
+}
+```
+
+---
+
+## Stage 1: Upgrade to Nomad 1.9.x
+
+This stage introduces the largest number of irreversible changes: HCLv1 support
+is removed, the Workload Identity keyring moves into Raft, the clock-based
+garbage collection mechanism activates, and support for Nomad clients older
+than 1.6.0 is dropped.
+
+**Complete before upgrading:**
+
+- [ ] Checklist items 1 (HCLv1 migration)
+- [ ] Verify all client nodes run Nomad 1.6.0 or later
+- [ ] Confirm NTP is running and synchronized on all server nodes
+- [ ] Review `function_denylist` and `env_denylist` defaults (see below)
+
+**`function_denylist` and `env_denylist` changes (1.9.4)**
+
+Nomad 1.9.4 adds `executeTemplate` to the default `function_denylist` and
+expands the default client `env_denylist`. If your templates use
+`executeTemplate` or your tasks depend on environment variables now
+excluded by default, review and update the relevant
+[client configuration](/nomad/docs/configuration/client) before upgrading.
+
+**Upgrade and verify:**
+
+Follow the [standard upgrade process](/nomad/docs/upgrade), upgrading
+servers one at a time and verifying cluster health between each.
+
+After all servers are on 1.9.x, run these verification checks:
+
+```shell-session
+# Verify all servers are on 1.9.x
+$ nomad server members
+
+# Verify all clients are ready and on 1.6.0 or later
+$ nomad node status
+```
+
+After the first `root_key_gc_interval` passes on the upgraded cluster,
+Nomad automatically migrates keyring material from disk into Raft.
+Continue backing up the on-disk keystore until you no longer need
+snapshots taken before the 1.9 upgrade.
+
+---
+
+## Stage 2: Upgrade to Nomad 1.10.x
+
+This stage removes the deprecated Vault and Consul token-based authentication
+workflow, removes the deprecated `disconnect` group fields, removes remote
+task driver support, and enforces explicit `plugin` blocks. All pre-upgrade
+actions in this section must be completed before upgrading any server.
+
+**Complete before upgrading:**
+
+- [ ] Checklist item 2 (`disconnect` block migration)
+- [ ] Checklist item 3 (Consul Template `consul`/`identity` block)
+- [ ] Checklist item 6 (Vault/Consul workload identity migration)
+- [ ] Checklist item 7 (`plugin_dir` explicit blocks)
+- [ ] Checklist item 8 (`publish_allocation_metrics` if applicable)
+- [ ] Checklist item 12 (`sentinel apply -scope`, Enterprise)
+- [ ] Checklist item 14 (remote-tasks migration)
+- [ ] Checklist item 16 (Go SDK quota update)
+
+**Agent configuration reload behavior change (1.10.1)**
+
+Nomad 1.10.1 changes agent behavior so that configuration errors encountered
+during a reload cause the agent to exit instead of logging and continuing.
+Test your configuration reload process before upgrading to confirm your
+configuration files are valid.
+
+**Raft peer removal (1.10.1)**
+
+Nomad 1.10.1 removes the non-functional `-peer-address` flag from
+`nomad operator raft peer-remove` and the `address` parameter from
+`DELETE /v1/operator/raft/peer`. Update any tooling that uses these
+removed options.
+
+**Upgrade and verify:**
+
+```shell-session
+# Verify all servers are on 1.10.x
+$ nomad server members
+
+# Verify workload identity tokens are being issued
+$ nomad job status <job-name>
+$ nomad alloc status <alloc-id>
+
+# Enterprise: verify sentinel apply works with -scope
+$ nomad sentinel apply -scope job test-policy test.sentinel
+```
+
+---
+
+## Stage 3: Upgrade to Nomad 1.11.x
+
+This stage introduces strict validation for ACL policies and sysbatch jobs,
+caps maximum allocations per job, adds client node identity, removes the
+Docker `email` auth field, and changes QEMU driver path behavior.
+
+**Complete before upgrading:**
+
+- [ ] Checklist item 4 (remove `reschedule` from sysbatch/system jobs)
+- [ ] Checklist item 5 (QEMU jobspec path updates)
+- [ ] Checklist item 9 (`client.reserved.disk` migration)
+- [ ] Checklist item 11 (ACL policy validation)
+- [ ] Checklist item 13 (`job_max_count` review)
+
+**Docker `email` auth field removed (1.11.1)**
+
+The deprecated `email` field in the Docker driver's
+[auth configuration](/nomad/docs/job-declare/task-driver/docker) has
+been removed. Remove `email` from any Docker task `auth` blocks.
+
+**Upgrade and verify:**
+
+```shell-session
+# Verify all servers are on 1.11.x
+$ nomad server members
+
+# Verify all clients are ready
+$ nomad node status
+
+# Confirm sysbatch and system jobs submit without errors
+$ nomad job run sysbatch-example.nomad.hcl
+
+# Confirm ACL policies can be written
+$ nomad acl policy apply test-policy test.hcl
+```
+
+After upgrading, you can optionally configure client node introduction
+tokens to add a second authentication layer for new clients joining the
+cluster. Refer to
+[Connect nodes into a cluster](/nomad/docs/deploy/clusters/connect-nodes#use-client-node-introduction-tokens)
+for details.
+
+---
+
+## Stage 4: Upgrade to Nomad 2.0.x
+
+This stage introduces the `raft_logstore` configuration parameter, deprecates
+`raft_boltdb`, adds a read-only bind mount for log directories in supported
+task drivers, and adds IBM PAO license support for Enterprise users.
+
+**Complete before upgrading:**
+
+- [ ] Checklist item 10 (`raft_logstore` configuration)
+- [ ] Checklist item 15 (log directory write audit)
+
+**Upgrade and verify:**
+
+```shell-session
+# Verify all servers are on 2.0.x
+$ nomad server members
+
+# Verify all clients are ready
+$ nomad node status
+
+# Confirm the raft log store backend is active
+$ nomad operator api /v1/agent/self | jq '.stats.raft'
+```
+
+After all nodes are on 2.0.x, optionally migrate the Raft log store to
+the WAL backend:
+
+```shell-session
+$ nomad operator raft migrate-backend
+```
+
+Refer to the [`nomad operator raft migrate-backend` command
+reference](/nomad/commands/operator/raft/migrate-backend) for details.
+
+---
+
+## Next steps
+
+- [Upgrade Nomad](/nomad/docs/upgrade) — standard rolling upgrade mechanics
+- [Version-specific upgrade details](/nomad/docs/upgrade/upgrade-specific) — exhaustive per-version notes
+- [Nomad 2.0.x release notes](/nomad/docs/release-notes/v2-0-x)
+- [Workload identity concepts](/nomad/docs/concepts/workload-identity) — background on the workload identity model
+- [Migrate workloads during client upgrade](/nomad/docs/manage/migrate-workloads) — how to drain nodes and migrate running allocations
