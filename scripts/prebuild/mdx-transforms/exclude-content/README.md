@@ -50,17 +50,21 @@ The `name:` parameter is optional and can be used to add semantic meaning to dir
 
 | Product | TFC:only | TFEnterprise:only | Vault:* |
 |---------|----------|-------------------|---------|
-| `terraform-docs-common` | Keep | Remove | Ignore |
-| `terraform-enterprise` | Remove | Keep | Ignore |
-| `terraform`** | Remove | Remove | Ignore |
-| `vault` | Ignore | Ignore | Process |
+| `terraform-docs-common` | Keep | Remove | Remove |
+| `terraform-enterprise` | Remove | Keep | Remove |
+| `terraform`** | Remove | Remove | Remove |
+| `vault` | Remove | Remove | Process |
 ** An extra feature based on the current logic, can be explicity ignored if needed
 
 **Legend:**
 - **Keep**: Content remains in output (BEGIN/END comments are kept)
 - **Remove**: Content is removed from output (including BEGIN/END comments)
-- **Ignore**: Directive blocks are not processed
 - **Process**: Apply version comparison logic
+
+Directives are always scoped to their target product. A directive (whether
+`:only` or a version comparison) is only evaluated in its target product; in
+every other product the block is **removed**, including its BEGIN/END comments.
+This keeps shared content from leaking another product's conditional blocks.
 
 ## Architecture
 
