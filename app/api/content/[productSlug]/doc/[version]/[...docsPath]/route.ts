@@ -9,6 +9,7 @@ import {
 	parseMarkdownFrontMatter,
 } from '#utils/file'
 import { getProductVersionMetadata } from '#utils/contentVersions'
+import { createInstanaErrorResponse } from '#utils/instana'
 import { errorResultToString } from '#utils/result'
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
 import docsPathsAllVersions from '#api/docsPathsAllVersions.json'
@@ -35,7 +36,15 @@ export async function GET(
 		console.error(
 			`API Error: Product, ${productSlug}, not found in contentDirMap`,
 		)
-		return new Response('Not found', { status: 404 })
+		return createInstanaErrorResponse(request, {
+			status: 404,
+			message: `Product ${productSlug} not found in contentDirMap`,
+			attributes: {
+				'error.kind': 'product_not_found',
+				'product.slug': productSlug,
+			},
+			body: 'Not found',
+		})
 	}
 
 	// Determine the content directory based on the "product" (actually repo) slug
@@ -43,7 +52,16 @@ export async function GET(
 	const productVersionResult = getProductVersionMetadata(productSlug, version)
 	if (!productVersionResult.ok) {
 		console.error(errorResultToString('API', productVersionResult))
-		return new Response('Not found', { status: 404 })
+		return createInstanaErrorResponse(request, {
+			status: 404,
+			message: `Version metadata lookup failed for ${productSlug}@${version}`,
+			attributes: {
+				'error.kind': 'version_not_found',
+				'product.slug': productSlug,
+				'product.version': version,
+			},
+			body: 'Not found',
+		})
 	}
 
 	const { value: versionMetadata } = productVersionResult
@@ -123,14 +141,34 @@ export async function GET(
 		console.error(
 			`API Error: No content found for ${request.url}\n\nChecked for content at: \n${locationsString.join('\n')}`,
 		)
-		return new Response('Not found', { status: 404 })
+		return createInstanaErrorResponse(request, {
+			status: 404,
+			message: `Content not found for ${productSlug}@${versionMetadata.version}/${parsedDocsPath}`,
+			attributes: {
+				'error.kind': 'content_not_found',
+				'product.slug': productSlug,
+				'product.version': versionMetadata.version,
+				'docs.path': parsedDocsPath,
+			},
+			body: 'Not found',
+		})
 	}
 
 	const markdownFrontMatterResult = parseMarkdownFrontMatter(foundContent)
 
 	if (!markdownFrontMatterResult.ok) {
 		console.error(errorResultToString('API', markdownFrontMatterResult))
-		return new Response('Not found', { status: 404 })
+		return createInstanaErrorResponse(request, {
+			status: 404,
+			message: `Front matter parse failed for ${productSlug}@${versionMetadata.version}/${parsedDocsPath}`,
+			attributes: {
+				'error.kind': 'frontmatter_parse_error',
+				'product.slug': productSlug,
+				'product.version': versionMetadata.version,
+				'docs.path': parsedDocsPath,
+			},
+			body: 'Not found',
+		})
 	}
 
 	const { metadata, markdownSource } = markdownFrontMatterResult.value

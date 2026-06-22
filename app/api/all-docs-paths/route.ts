@@ -5,6 +5,7 @@
 
 import { errorResultToString } from '#utils/result'
 import { getDocsPaths } from '#utils/allDocsPaths'
+import { createInstanaErrorResponse } from '#utils/instana'
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
 
 export async function GET(req: Request) {
@@ -22,7 +23,14 @@ export async function GET(req: Request) {
 
 	if (!docsPaths.ok) {
 		console.error(errorResultToString('API', docsPaths))
-		return new Response('Not found', { status: 404 })
+		return createInstanaErrorResponse(req, {
+			status: 404,
+			message: 'Docs paths lookup failed',
+			attributes: {
+				'error.kind': 'docs_paths_not_found',
+			},
+			body: 'Not found',
+		})
 	}
 	return Response.json({
 		result: docsPaths.value,

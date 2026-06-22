@@ -4,6 +4,7 @@
  */
 
 import { getProductMetadata } from '#utils/contentVersions'
+import { createInstanaErrorResponse } from '#utils/instana'
 import { errorResultToString } from '#utils/result'
 import { ProductParam } from '#api/types'
 
@@ -22,7 +23,15 @@ export async function GET(
 
 	if (!productVersionMetadataResult.ok) {
 		console.error(errorResultToString('API', productVersionMetadataResult))
-		return new Response('Not found', { status: 404 })
+		return createInstanaErrorResponse(request, {
+			status: 404,
+			message: `Product metadata lookup failed for ${productSlug}`,
+			attributes: {
+				'error.kind': 'product_metadata_not_found',
+				'product.slug': productSlug,
+			},
+			body: 'Not found',
+		})
 	}
 
 	return Response.json({

@@ -4,6 +4,7 @@
  */
 
 import { findDocVersions } from '#utils/findDocVersions'
+import { createInstanaErrorResponse } from '#utils/instana'
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
 
 export async function GET(request: Request) {
@@ -17,22 +18,40 @@ export async function GET(request: Request) {
 
 	// If a `product` parameter has not been provided, return a 400
 	if (!product) {
-		return new Response(
-			'Missing `product` query parameter. Please provide the `product` under which the requested document is expected to be found, for example `vault`.',
-			{ status: 400 },
-		)
+		return createInstanaErrorResponse(request, {
+			status: 400,
+			message: 'Missing `product` query parameter',
+			attributes: {
+				'error.kind': 'missing_query_param',
+				'error.param': 'product',
+			},
+			body: 'Missing `product` query parameter. Please provide the `product` under which the requested document is expected to be found, for example `vault`.',
+		})
 	}
 	// If a `fullPath` parameter has not been provided, return a 400
 	if (!fullPath) {
-		return new Response(
-			'Missing `fullPath` query parameter. Please provide the full document path, in the format `doc#<path/to/document>`, for example `doc#docs/internals`.',
-			{ status: 400 },
-		)
+		return createInstanaErrorResponse(request, {
+			status: 400,
+			message: 'Missing `fullPath` query parameter',
+			attributes: {
+				'error.kind': 'missing_query_param',
+				'error.param': 'fullPath',
+			},
+			body: 'Missing `fullPath` query parameter. Please provide the full document path, in the format `doc#<path/to/document>`, for example `doc#docs/internals`.',
+		})
 	}
 
 	if (!Object.keys(PRODUCT_CONFIG).includes(product)) {
 		console.error(`API Error: Product, ${product}, not found in contentDirMap`)
-		return new Response('Not found', { status: 404 })
+		return createInstanaErrorResponse(request, {
+			status: 404,
+			message: `Product ${product} not found in contentDirMap`,
+			attributes: {
+				'error.kind': 'product_not_found',
+				'product.slug': product,
+			},
+			body: 'Not found',
+		})
 	}
 	/**
 	 * reformat fullPath to searchable file path

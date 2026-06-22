@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
+import '@instana/serverless-collector'
 import { NextResponse } from 'next/server'
 
 /**
