@@ -19,6 +19,14 @@ const EVENTS = [
 	'next-export',
 ]
 
+/**
+ * @typedef {Object} BuildEvent
+ * @property {string} name The name of the build event, e.g. 'next-build', 'prebuild', etc.
+ * @property {number} duration The duration of the event in milliseconds
+ * @property {number} [timestamp] A unix timestamp to represent the time of the event.
+ * @property {[string, string][]} tags A tuple of key/value pairs to be sent with the metric
+ */
+
 async function readTraceFile(traceFilePath) {
 	const filepath = path.join(process.cwd(), traceFilePath)
 
@@ -36,18 +44,126 @@ async function readTraceFile(traceFilePath) {
 		.flat()
 }
 
-function captureMetric({ name, duration, timestamp, tags }) {
-	return {
-		host: '',
-		metric: name,
-		points: [[timestamp ?? Math.round(Date.now() / 1e3), duration]],
-		tags,
-		type: 'gauge',
+/**
+ * Submit build metrics to datadog
+ * @param {BuildEvent[]} metrics
+ */
+const submitDatadogMetrics = async (metrics) => {
+	const configuration = client.createConfiguration()
+	const api = new v1.MetricsApi(configuration)
+
+	// Send metrics to datadog API
+	await api.submitMetrics({
+		body: {
+			// Convert the build events into a format datadog understands
+			series: metrics.map(({ timestamp, tags, ...event }) => {
+				return {
+					host: '',
+					metric: `build.${event.name}`,
+					points: [
+						[
+							timestamp ?? Math.round(Date.now() / 1e3),
+							Math.round(event.duration / 1e3),
+						],
+					],
+					tags: tags.map(([key, value]) => {
+						return `${key}:${value}`
+					}),
+					type: 'gauge',
+				}
+			}),
+		},
+	})
+	const tags = metrics[0].tags.map(([key, value]) => {
+		return `${key}:${value}`
+	})
+	console.log(
+		`〽️ Submitted build metrics to Datadog:\n${JSON.stringify(tags, null, 2)}`,
+	)
+}
+
+/**
+ * Submit build metrics to Instana OpenTelemetry endpoint
+ *
+ * @param {BuildEvent[]} metrics
+ */
+const submitInstanaMetrics = async (metrics) => {
+	const payload = {
+		resourceMetrics: [
+			{
+				resource: {
+					attributes: [
+						{
+							key: 'service.name',
+							value: {
+								stringValue: metrics[0].tags.find(([key]) => {
+									return key === 'app'
+								})?.[1],
+							},
+						},
+					],
+				},
+				scopeMetrics: [
+					{
+						scope: {
+							name: 'capture-build-metrics',
+						},
+						metrics: metrics.map(({ timestamp, tags, ...event }) => {
+							const unixTimeNs = (
+								BigInt(timestamp ?? Math.round(Date.now() / 1e3)) *
+								1_000_000_000n
+							).toString()
+
+							return {
+								name: `build.${event.name}`,
+								description: 'Build event duration',
+								unit: 's',
+								gauge: {
+									dataPoints: [
+										{
+											attributes: tags.map(([key, value]) => {
+												return {
+													key,
+													value: { stringValue: value },
+												}
+											}),
+											asDouble: Math.round(event.duration / 1e3),
+											timeUnixNano: unixTimeNs,
+										},
+									],
+								},
+							}
+						}),
+					},
+				],
+			},
+		],
 	}
+	const response = await fetch(process.env.INSTANA_OTLP_ENDPOINT, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json',
+			'x-instana-key': process.env.INSTANA_OTLP_API_TOKEN,
+		},
+		body: JSON.stringify(payload),
+	})
+	if (![200, 202].includes(response.status)) {
+		const responseText = await response.text()
+		throw new Error(
+			`Failed to submit metrics to Instana. Status: ${response.status}, Response: ${responseText}`,
+		)
+	}
+
+	const tags = metrics[0].tags.map(([key, value]) => {
+		return `${key}:${value}`
+	})
+	console.log(
+		`〽️ Submitted build metrics to Instana:\n${JSON.stringify(tags, null, 2)}`,
+	)
 }
 
 async function main() {
-	const [, , appName] = process.argv
+	const [, , appName = 'web-unified-docs'] = process.argv
 	const incBuild = process.env.INCREMENTAL_BUILD === 'true'
 
 	try {
@@ -56,50 +172,56 @@ async function main() {
 			path: fs.existsSync(envLocalPath) ? [envLocalPath, '.env'] : '.env',
 		})
 
-		const configuration = client.createConfiguration()
-		const api = new v1.MetricsApi(configuration)
-
+		// It's important that this remains a constant variable rather than
+		// being incorprated into the `.map()` call as we don't want it to be
+		// re-evaluated for each run through the loop. We want it to remain fixed
 		const timestamp = Math.round(Date.now() / 1e3)
 
 		// Read trace files
 		const nextjsTrace = await readTraceFile(NEXTJS_TRACE_FILE)
 		const prebuildTrace = await readTraceFile(PREBUILD_TRACE_FILE)
 
-		const filteredEvents = [...nextjsTrace, ...prebuildTrace].filter(
-			(event) => {
-				return EVENTS.includes(event.name)
-			},
-		)
-
 		const environment = process.env.CI ? 'ci' : 'local'
 		const buildType = incBuild ? 'incremental' : 'full'
-		const tags = [
-			`app:${appName}`,
-			`environment:${environment}`,
-			`buildType:${buildType}`,
-		]
 
-		const structuredMetrics = filteredEvents.map((event) => {
-			return captureMetric({
-				name: `build.${event.name}`,
-				duration: Math.round(event.duration / 1e3),
-				timestamp,
-				tags,
+		const filteredEvents = [...nextjsTrace, ...prebuildTrace]
+			.filter((event) => {
+				return EVENTS.includes(event.name)
 			})
-		})
+			.map((event) => {
+				return {
+					...event,
+					tags: [
+						['app', appName],
+						['environment', environment],
+						['buildType', buildType],
+					],
+					timestamp,
+				}
+			})
 
-		await api.submitMetrics({
-			body: {
-				series: structuredMetrics,
-			},
-		})
+		const results = await Promise.allSettled([
+			submitDatadogMetrics(filteredEvents),
+			submitInstanaMetrics(filteredEvents),
+		])
 
-		console.log(
-			`\n〽️ Submitted build metrics to Datadog:\n${JSON.stringify(tags, null, 2)}\n`,
-		)
-	} catch {
+		const failedSubmissions = results
+			.filter(({ status }) => {
+				return status === 'rejected'
+			})
+			.map(({ reason }) => {
+				return reason
+			})
+		if (failedSubmissions.length > 0) {
+			throw new AggregateError(failedSubmissions)
+		}
+	} catch (error) {
 		// Swallow errors
-		// we don't want to impact the build or make it seem like there's been an error in the actual app if something goes wrong when sending metrics
+		// we don't want to impact the build or make it seem like there's been
+		// an error in the actual app if something goes wrong when sending metrics
+		if (process.env.NODE_ENV === 'development' || process.env.CI) {
+			throw error
+		}
 	}
 }
 
