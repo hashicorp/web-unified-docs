@@ -3,15 +3,14 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-import { spawnSync } from 'node:child_process'
-import fs from 'node:fs'
-import os from 'node:os'
-import path from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { vol } from 'memfs'
+import { resolveTarget } from './resolve-target.mjs'
 
-const RESOLVE_TARGET_SCRIPT = path.resolve(
-	'scripts/forward-port/resolve-target.mjs',
-)
+vi.mock('node:fs')
+
+const CONFIG_PATH = '/repo/forward-port-config.yml'
+const COMMENT_PATH = '/repo/comment.txt'
 
 // Config uses slug-based keys — the part after "forward-port:" in the PR label.
 // Every entry requires: sourceVersionFolder, targetProduct, targetBranch, targetVersionFolder.
@@ -63,211 +62,203 @@ targetProduct: boundary
 targetBranch: boundary-test
 targetVersionFolder: v1.2.0`
 
-describe('resolve-target', () => {
-	let tmpDir: string
-	let configPath: string
-
+describe('resolveTarget', () => {
 	beforeEach(() => {
-		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'resolve-target-'))
-		configPath = path.join(tmpDir, 'forward-port-config.yml')
-		fs.writeFileSync(configPath, SAMPLE_CONFIG, 'utf-8')
+		vol.reset()
+		vol.fromJSON({ [CONFIG_PATH]: SAMPLE_CONFIG })
 	})
 
 	afterEach(() => {
-		fs.rmSync(tmpDir, { recursive: true, force: true })
+		vol.reset()
 	})
-
-	function runScript(
-		labels: string[],
-		{
-			allowFailure = false,
-			commentFile = null,
-		}: { allowFailure?: boolean; commentFile?: string | null } = {},
-	): string {
-		const args = [
-			RESOLVE_TARGET_SCRIPT,
-			'--config',
-			configPath,
-			'--labels',
-			JSON.stringify(labels),
-		]
-		if (commentFile) {
-			args.push('--comment-file', commentFile)
-		}
-		const result = spawnSync('node', args, { encoding: 'utf-8' })
-		if (result.status !== 0) {
-			if (allowFailure) {
-				return [result.stdout, result.stderr]
-					.filter(Boolean)
-					.join('\n')
-					.trim()
-			}
-			throw new Error(result.stderr || result.stdout)
-		}
-		return (result.stdout ?? '').trim()
-	}
 
 	// ── Scenario A: config-driven (slug found in config) ─────────────────────
 
-	it('writes TARGET_BRANCH, TARGET_VERSION_FOLDER, SOURCE_VERSION_FOLDER, and TARGET_PRODUCT when a forward-port:* label matches the config', () => {
-		const output = JSON.parse(runScript(['forward-port:tf-forward-porting-testing']))
+	it('returns TARGET_BRANCH, TARGET_VERSION_FOLDER, SOURCE_VERSION_FOLDER, and TARGET_PRODUCT when a forward-port:* label matches the config', () => {
+		const { result } = resolveTarget({
+			configPath: CONFIG_PATH,
+			labels: ['forward-port:tf-forward-porting-testing'],
+		})
 
-		expect(output.TARGET_BRANCH).toBe('rn-forward-porting-test-rc')
-		expect(output.TARGET_VERSION_FOLDER).toBe('v1.15.x')
-		expect(output.SOURCE_VERSION_FOLDER).toBe('v1.14.x')
-		expect(output.TARGET_PRODUCT).toBe('terraform')
+		expect(result.TARGET_BRANCH).toBe('rn-forward-porting-test-rc')
+		expect(result.TARGET_VERSION_FOLDER).toBe('v1.15.x')
+		expect(result.SOURCE_VERSION_FOLDER).toBe('v1.14.x')
+		expect(result.TARGET_PRODUCT).toBe('terraform')
 	})
 
 	it('matches on label regardless of its position in the labels array', () => {
-		const output = JSON.parse(runScript(['some-other-label', 'forward-port:vault-test']))
+		const { result } = resolveTarget({
+			configPath: CONFIG_PATH,
+			labels: ['some-other-label', 'forward-port:vault-test'],
+		})
 
-		expect(output.TARGET_BRANCH).toBe('rn-test-vault')
-		expect(output.TARGET_VERSION_FOLDER).toBe('v1.20.x')
-		expect(output.SOURCE_VERSION_FOLDER).toBe('v1.19.x')
-		expect(output.TARGET_PRODUCT).toBe('vault')
+		expect(result.TARGET_BRANCH).toBe('rn-test-vault')
+		expect(result.TARGET_VERSION_FOLDER).toBe('v1.20.x')
+		expect(result.SOURCE_VERSION_FOLDER).toBe('v1.19.x')
+		expect(result.TARGET_PRODUCT).toBe('vault')
 	})
 
 	it('uses config values even when a comment file is also provided', () => {
-		const commentPath = path.join(tmpDir, 'comment.txt')
-		fs.writeFileSync(commentPath, VALID_COMMENT, 'utf-8')
+		vol.fromJSON({ [CONFIG_PATH]: SAMPLE_CONFIG, [COMMENT_PATH]: VALID_COMMENT })
 
 		// Config wins — not the comment's boundary values
-		const output = JSON.parse(runScript(['forward-port:vault-test'], { commentFile: commentPath }))
-		expect(output.TARGET_BRANCH).toBe('rn-test-vault')
-		expect(output.TARGET_PRODUCT).toBe('vault')
+		const { result } = resolveTarget({
+			configPath: CONFIG_PATH,
+			labels: ['forward-port:vault-test'],
+			commentFile: COMMENT_PATH,
+		})
+		expect(result.TARGET_BRANCH).toBe('rn-test-vault')
+		expect(result.TARGET_PRODUCT).toBe('vault')
 	})
 
 	// ── Scenario B: comment-driven (slug not in config) ──────────────────────
 
 	it('falls back to the comment file when the slug is not found in the config', () => {
-		const commentPath = path.join(tmpDir, 'comment.txt')
-		fs.writeFileSync(commentPath, VALID_COMMENT, 'utf-8')
+		vol.fromJSON({ [CONFIG_PATH]: SAMPLE_CONFIG, [COMMENT_PATH]: VALID_COMMENT })
 
-		const output = JSON.parse(runScript(['forward-port:boundary-1.0'], { commentFile: commentPath }))
-		expect(output.TARGET_BRANCH).toBe('boundary-test')
-		expect(output.TARGET_VERSION_FOLDER).toBe('v1.2.0')
-		expect(output.SOURCE_VERSION_FOLDER).toBe('v1.1.0')
-		expect(output.TARGET_PRODUCT).toBe('boundary')
+		const { result } = resolveTarget({
+			configPath: CONFIG_PATH,
+			labels: ['forward-port:boundary-1.0'],
+			commentFile: COMMENT_PATH,
+		})
+		expect(result.TARGET_BRANCH).toBe('boundary-test')
+		expect(result.TARGET_VERSION_FOLDER).toBe('v1.2.0')
+		expect(result.SOURCE_VERSION_FOLDER).toBe('v1.1.0')
+		expect(result.TARGET_PRODUCT).toBe('boundary')
 	})
 
-	it('exits with code 1 when the slug is not in config and no comment file is provided', () => {
-		const output = runScript(['forward-port:unknown-slug'], {
-			allowFailure: true,
+	it('returns an error when the slug is not in config and no comment file is provided', () => {
+		const { error } = resolveTarget({
+			configPath: CONFIG_PATH,
+			labels: ['forward-port:unknown-slug'],
 		})
 
-		expect(output).toContain('not found in config')
-		expect(output).toContain('comment file')
+		expect(error).toContain('not found in config')
+		expect(error).toContain('comment file')
 	})
 
-	it('exits with code 1 when the comment first line has the wrong slug', () => {
-		const commentPath = path.join(tmpDir, 'comment.txt')
+	it('returns an error when the comment first line has the wrong slug', () => {
 		// VALID_COMMENT has "forward-port:boundary-1.0" but label is boundary-2.0
-		fs.writeFileSync(commentPath, VALID_COMMENT, 'utf-8')
+		vol.fromJSON({ [CONFIG_PATH]: SAMPLE_CONFIG, [COMMENT_PATH]: VALID_COMMENT })
 
-		const output = runScript(['forward-port:boundary-2.0'], {
-			allowFailure: true,
-			commentFile: commentPath,
+		const { error } = resolveTarget({
+			configPath: CONFIG_PATH,
+			labels: ['forward-port:boundary-2.0'],
+			commentFile: COMMENT_PATH,
 		})
 
-		expect(output).toContain('forward-port:boundary-2.0')
+		expect(error).toContain('forward-port:boundary-2.0')
 	})
 
-	it('exits with code 1 when the comment first line is bare /forward-port without a slug', () => {
-		const commentPath = path.join(tmpDir, 'comment.txt')
-		fs.writeFileSync(
-			commentPath,
-			`/forward-port\nsourceVersionFolder: v1.1.0\ntargetProduct: boundary\ntargetBranch: boundary-test\ntargetVersionFolder: v1.2.0`,
-			'utf-8',
-		)
-
-		const output = runScript(['forward-port:boundary-1.0'], {
-			allowFailure: true,
-			commentFile: commentPath,
+	it('returns an error when the comment first line is bare /forward-port without a slug', () => {
+		vol.fromJSON({
+			[CONFIG_PATH]: SAMPLE_CONFIG,
+			[COMMENT_PATH]: `/forward-port\nsourceVersionFolder: v1.1.0\ntargetProduct: boundary\ntargetBranch: boundary-test\ntargetVersionFolder: v1.2.0`,
 		})
 
-		expect(output).toContain('forward-port:boundary-1.0')
+		const { error } = resolveTarget({
+			configPath: CONFIG_PATH,
+			labels: ['forward-port:boundary-1.0'],
+			commentFile: COMMENT_PATH,
+		})
+
+		expect(error).toContain('forward-port:boundary-1.0')
 	})
 
-	it('exits with code 1 when the comment file is missing a required field', () => {
-		const commentPath = path.join(tmpDir, 'comment.txt')
+	it('returns an error when the comment file is missing a required field', () => {
 		// Missing targetBranch
-		fs.writeFileSync(
-			commentPath,
-			`/forward-port forward-port:boundary-1.0\nsourceVersionFolder: v1.1.0\ntargetProduct: boundary\ntargetVersionFolder: v1.2.0`,
-			'utf-8',
-		)
-
-		const output = runScript(['forward-port:boundary-1.0'], {
-			allowFailure: true,
-			commentFile: commentPath,
+		vol.fromJSON({
+			[CONFIG_PATH]: SAMPLE_CONFIG,
+			[COMMENT_PATH]: `/forward-port forward-port:boundary-1.0\nsourceVersionFolder: v1.1.0\ntargetProduct: boundary\ntargetVersionFolder: v1.2.0`,
 		})
 
-		expect(output).toContain('targetBranch')
+		const { error } = resolveTarget({
+			configPath: CONFIG_PATH,
+			labels: ['forward-port:boundary-1.0'],
+			commentFile: COMMENT_PATH,
+		})
+
+		expect(error).toContain('targetBranch')
 	})
 
 	// ── Error cases ───────────────────────────────────────────────────────────
 
-	it('exits with code 1 when no forward-port:* label is present', () => {
-		const output = runScript(['some-label', 'another-label'], {
-			allowFailure: true,
+	it('returns an error when no forward-port:* label is present', () => {
+		const { error } = resolveTarget({
+			configPath: CONFIG_PATH,
+			labels: ['some-label', 'another-label'],
 		})
 
-		expect(output).toContain('forward-port:')
+		expect(error).toContain('forward-port:')
 	})
 
 	// Intentional for now to avoid potential complex edge cases
-	it('exits with code 1 when multiple forward-port:* labels are present', () => {
-		const output = runScript(
-			['forward-port:vault-test', 'forward-port:tf-test'],
-			{ allowFailure: true },
-		)
-
-		expect(output).toContain('Multiple')
-	})
-
-	it('exits with code 1 when a matching config entry is missing sourceVersionFolder', () => {
-		fs.writeFileSync(
-			configPath,
-			`tf-missing-source:\n  targetBranch: rn-test-tf\n  targetVersionFolder: v1.15.x\n  targetProduct: terraform`,
-			'utf-8',
-		)
-
-		const output = runScript(['forward-port:tf-missing-source'], {
-			allowFailure: true,
+	it('returns an error when multiple forward-port:* labels are present', () => {
+		const { error } = resolveTarget({
+			configPath: CONFIG_PATH,
+			labels: ['forward-port:vault-test', 'forward-port:tf-test'],
 		})
-		expect(output).toContain('sourceVersionFolder')
+
+		expect(error).toContain('Multiple')
 	})
 
-	it('exits with code 1 when the config file does not exist', () => {
-		fs.rmSync(configPath)
-		const output = runScript(['forward-port:tf-test'], { allowFailure: true })
-		expect(output).toContain('Error')
+	it('returns an error when a matching config entry is missing sourceVersionFolder', () => {
+		vol.fromJSON({
+			[CONFIG_PATH]: `tf-missing-source:\n  targetBranch: rn-test-tf\n  targetVersionFolder: v1.15.x\n  targetProduct: terraform`,
+		})
+
+		const { error } = resolveTarget({
+			configPath: CONFIG_PATH,
+			labels: ['forward-port:tf-missing-source'],
+		})
+		expect(error).toContain('sourceVersionFolder')
+	})
+
+	it('returns an error when the config file does not exist', () => {
+		vol.reset()
+		const { error } = resolveTarget({
+			configPath: CONFIG_PATH,
+			labels: ['forward-port:tf-test'],
+		})
+		expect(error).toContain('Error')
 	})
 
 	// ── Version format tests ──────────────────────────────────────────────────
 
 	it('resolves a semver targetVersionFolder (v1.1.0) correctly', () => {
-		const output = JSON.parse(runScript(['forward-port:tf-test']))
-		expect(output.TARGET_BRANCH).toBe('TF-test')
-		expect(output.TARGET_VERSION_FOLDER).toBe('v1.1.0')
-		expect(output.SOURCE_VERSION_FOLDER).toBe('v1.0.0')
+		const { result } = resolveTarget({
+			configPath: CONFIG_PATH,
+			labels: ['forward-port:tf-test'],
+		})
+		expect(result.TARGET_BRANCH).toBe('TF-test')
+		expect(result.TARGET_VERSION_FOLDER).toBe('v1.1.0')
+		expect(result.SOURCE_VERSION_FOLDER).toBe('v1.0.0')
 	})
 
 	it('resolves a pre-release targetVersionFolder (v1.1.0-beta) correctly', () => {
-		const output = JSON.parse(runScript(['forward-port:tf-test-beta']))
-		expect(output.TARGET_VERSION_FOLDER).toBe('v1.1.0-beta')
-		expect(output.SOURCE_VERSION_FOLDER).toBe('v1.0.0')
+		const { result } = resolveTarget({
+			configPath: CONFIG_PATH,
+			labels: ['forward-port:tf-test-beta'],
+		})
+		expect(result.TARGET_VERSION_FOLDER).toBe('v1.1.0-beta')
+		expect(result.SOURCE_VERSION_FOLDER).toBe('v1.0.0')
 	})
 
 	it('resolves a release-candidate targetVersionFolder (v1.1.0-rc) correctly', () => {
-		const output = JSON.parse(runScript(['forward-port:tf-test-rc']))
-		expect(output.TARGET_VERSION_FOLDER).toBe('v1.1.0-rc')
-		expect(output.SOURCE_VERSION_FOLDER).toBe('v1.0.0')
+		const { result } = resolveTarget({
+			configPath: CONFIG_PATH,
+			labels: ['forward-port:tf-test-rc'],
+		})
+		expect(result.TARGET_VERSION_FOLDER).toBe('v1.1.0-rc')
+		expect(result.SOURCE_VERSION_FOLDER).toBe('v1.0.0')
 	})
 
 	it('resolves a double-wildcard targetVersionFolder (v10.x.x) correctly', () => {
-		const output = JSON.parse(runScript(['forward-port:tf-10']))
-		expect(output.TARGET_VERSION_FOLDER).toBe('v10.x.x')
-		expect(output.SOURCE_VERSION_FOLDER).toBe('v9.x.x')
+		const { result } = resolveTarget({
+			configPath: CONFIG_PATH,
+			labels: ['forward-port:tf-10'],
+		})
+		expect(result.TARGET_VERSION_FOLDER).toBe('v10.x.x')
+		expect(result.SOURCE_VERSION_FOLDER).toBe('v9.x.x')
 	})
 })
