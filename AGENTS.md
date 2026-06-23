@@ -57,14 +57,11 @@ npm run coverage
 npm run lint
 ```
 
-For local application behavior, the repo also uses:
-
-```sh
-make
-make clean
-npm run prebuild
-npm run dev
-```
+`npm run test` runs `vitest`, which enters watch mode in a local terminal (it
+only auto-runs once when it detects CI). When running tests non-interactively,
+use run mode to avoid hanging — for example `npx vitest run` or
+`npx vitest run path/to/file`. Note that `npm run lint` runs `eslint --fix`,
+which writes fixes to files rather than only reporting them.
 
 ### TDD expectations by change type
 
@@ -86,6 +83,26 @@ npm run dev
 - if the change is only under `content/`, code tests may not be the primary validation path
 - still validate links, frontmatter, rendered output, and preview behavior when relevant
 
+## Local development
+
+Local development splits by audience.
+
+- **Educators** primarily make `content/` changes and run the full local
+  preview through Docker with `make`:
+
+```sh
+make
+make clean
+```
+
+- **Developers** work on application or tooling code and run the project
+  locally with `npm`:
+
+```sh
+npm run prebuild
+npm run dev
+```
+
 ## First places to look
 
 Start with the following files before making architectural claims:
@@ -100,13 +117,27 @@ Start with the following files before making architectural claims:
 
 Then narrow your search by change type.
 
+### Feature-local documentation
+
+Some features document themselves directly next to their implementation rather
+than in `docs/` or the root `README.md`. A feature directory may include its own
+`README.md` (or similar notes) explaining how that piece works, how to extend it,
+and how to test it. This is most common under `scripts/` — for example, the
+content-exclusion MDX transform documents itself in
+`scripts/prebuild/mdx-transforms/exclude-content/README.md`, right alongside its
+implementation, and several other `scripts/` subdirectories follow the same
+pattern.
+
+Before changing a feature, look for a co-located `README.md` or notes file in the
+same directory (and parent directories) and read it first. When you change the
+feature's behavior, update that co-located documentation in the same PR.
+
 ## Repo map
 
 ### Primary source directories
 
 - `content/`: source-of-truth docs content for migrated products and shared content
 - `app/`: Next.js application and API routes
-- `components/`: shared UI and rendering components
 - `app/utils/`: core utility logic and existing Vitest coverage
 - `scripts/`: prebuild, migration, link-check, and maintenance scripts
 - `public/`: generated or served static output
@@ -114,11 +145,10 @@ Then narrow your search by change type.
 
 ### High-value architecture facts
 
-- The repo uses Next.js.
-- The repo requires Node `>=24`.
-- Local preview commonly runs through Docker using `make`.
-- The unified docs API processes `content/` and produces served content and metadata.
-- `dev-portal` depends on this repo as one of its content APIs.
+- The repo uses Next.js and requires Node `>=24`.
+- The unified docs API processes `content/` and produces the served content and
+  metadata that `dev-portal` consumes.
+- Local development splits by audience; see the "Local development" section.
 
 ## How to navigate common tasks
 
@@ -132,14 +162,17 @@ Inspect the following areas first:
 - `app/utils/`
 - `productConfig.mjs`
 
-### If you are changing frontend rendering in this repo
+### If you are changing the Next.js app shell or API delivery
+
+This repo does not render a user-facing frontend — `dev-portal` owns that. The
+`app/` surface here is intentionally minimal: `app/layout.tsx` is a bare HTML
+shell and `app/page.tsx` simply redirects to the GitHub repository. Content is
+delivered through the API routes, not rendered into pages here.
 
 Inspect the following areas first:
 
-- `app/layout.tsx`
-- `app/page.tsx`
-- `components/`
-- `next.config.js`
+- `app/api/` for the content and metadata endpoints `dev-portal` consumes
+- `app/utils/` for the resolution and transformation logic behind the routes
 
 ### If you are changing product-specific behavior
 
@@ -149,7 +182,13 @@ Inspect the following areas first:
 - product folders under `content/`
 - any matching workflow or migration script under `scripts/`
 
-Do not assume every product has a custom workflow. The repo appears to centralize most product behavior in configuration, with specific exceptions that must be verified in the codebase.
+Product behavior is centralized in the `PRODUCT_CONFIG` map in `productConfig.mjs`.
+Each product is a keyed entry with a fixed set of attributes (such as `contentDir`,
+`dataDir`, `versionedDocs`, `productSlug`, and `semverCoerce`, plus optional fields
+like `basePaths` and `internalProduct`). Per-product differences are expressed as
+field values and optional overrides within that map rather than as separate
+per-product workflows. Confirm a product's specific values there before assuming
+how it behaves.
 
 ### If you are changing preview or deployment behavior
 
@@ -168,6 +207,13 @@ Agents should work from this baseline mental model and then verify details in th
 
 - pull requests trigger test and lint validation
 - PR preview workflows build and deploy preview environments
+- a prebuild-binary check (`.github/workflows/check-prebuild-binaries.yml`)
+  runs on PRs that touch `scripts/prebuild/**`, `scripts/utils/**`,
+  `scripts/algolia/**`, or `productConfig.mjs`. If those change, the three
+  committed gzipped binaries (`prebuild-arm-mac-binary.gz`,
+  `prebuild-x64-linux-binary.gz`, `prebuild-arm-linux-binary.gz`) must be
+  regenerated and committed too, or the check fails. Rebuild them with
+  `npm run compile-prebuild` and commit the result.
 
 ### Preview flow
 
@@ -205,11 +251,17 @@ Use the following priority order when gathering context:
 1. Product-local agent or instruction files inside the specific product directory when the task is product-specific
 1. Root operational files such as `README.md`, `package.json`, `makefile`, and `.github/workflows/*.yml`
 1. Focused internal docs under `docs/`
-1. Research docs under `docs/.research/` as supporting context only
+1. Local research notes under `docs/.research/` as supporting context only, when present
 
-Research docs may be helpful, but they can be specialized or become stale. Treat them as secondary references and verify important claims against the live code and workflow files.
+Research notes may be helpful, but `docs/.research/` is git-ignored and local to
+an individual contributor — do not assume those files exist for everyone or in
+CI. They can also be specialized or stale. Treat them as secondary references
+and verify important claims against the live code and workflow files.
 
-For product-specific work, prefer the nearest local instructions in that product's directory over this root file when the guidance conflicts or is more detailed.
+When the task is content authoring inside a product folder under `content/`,
+prefer that product's own local instructions over this root file where they
+conflict or are more detailed. For process, architecture, and tooling work
+outside `content/`, this file is the governing guide.
 
 ## Safe change checklist
 
@@ -222,61 +274,19 @@ Before opening or updating a PR, make sure you did the following:
 1. Checked whether the change also affects preview or deployment workflows.
 1. Called out any required `dev-portal` follow-up explicitly.
 
-## Known starting references
+## Background and rationale
 
-Use the following documents as starting points:
+The entry points in "First places to look" cover how the repo runs today. For
+why it is built the way it is, read deeper context only when a task needs it:
 
-- `README.md`
-- `docs/BROKEN_LINK_MONITORING.md`
-- `docs/.research/BUILD_DEPLOY_WORKFLOWS.md`
-- `docs/.research/PRODUCT_SPECIFIC_WORKFLOWS_RESEARCH.md`
-- `docs/images/` for architecture diagrams — use the image-viewing tool to load and interpret them when understanding the system architecture or deployment flow
-
-Do not treat the research docs as authoritative without verifying them.
-
-## Fill-in sections
-
-The following sections are placeholders we should expand over time.
-
-### Branching and PR conventions
-
-Add the repo's preferred PR workflow, labeling expectations, and review norms.
-
-### Required test matrix by change type
-
-Add a sharper map of which commands to run for:
-
-- content-only changes
-- API changes
-- prebuild changes
-- config changes
-- preview or deployment changes
-
-### Dev-portal coordination guide
-
-Add concrete guidance for:
-
-- when to open a paired `dev-portal` PR
-- how to set preview environment variables
-- what to test in the frontend after an API change
-
-### GitHub Actions and Vercel operational notes
-
-Add verified guidance for:
-
-- which workflows are informational versus blocking
-- how preview URLs are reported back to PRs
-- what secrets and deploy hooks matter for production
-- common failure modes and where to inspect them
-
-### Architecture deep dive
-
-Add a more precise explanation of:
-
-- how `content/` becomes served API output
-- how metadata files are generated
-- which files are source versus derived artifacts
-- where product config overrides enter the pipeline
+- `docs/decisions/` — architecture decision records covering API parity,
+  applying some MDX transforms at build time, and authoring MDX content outside
+  the `public/` directory. Read the relevant ADR before changing behavior it
+  describes.
+- `docs/images/UDR_Architecture_diagram.png` and
+  `docs/images/UDR_Build_Architecture_diagram.png` — system and build
+  architecture diagrams. Use the image-viewing tool to load and interpret them
+  when you need the end-to-end picture.
 
 ## Maintenance rule for this file
 
@@ -307,3 +317,35 @@ Before updating this file:
 1. keep summaries short and point readers to source files for details
 
 If you changed any of the trigger areas above and did not update this file, explain why in your final summary. Do not add speculative guidance just to keep this file synchronized. If the new behavior is not yet verified, leave the existing text unchanged and call out the gap explicitly.
+
+### Drift detection for changes made without AI
+
+Not every change to this repo is made with an AI agent in the loop. A developer
+may edit a workflow, bump the Node version, rename a directory, or change a
+command directly. When that happens, the corresponding guidance in this file can
+silently go stale. The next agent to work in the repo is responsible for
+catching that drift.
+
+At the start of any task that relies on facts in this file, spot-check the
+specific facts you are about to depend on against their source of truth before
+acting on them. You do not need to re-verify the entire file — only the claims
+relevant to your current task. Use this mapping:
+
+- runtime version, scripts, or commands — verify against `package.json`,
+  `makefile`, and `README.md`
+- repository structure or source-of-truth directories — verify against the
+  actual directory tree
+- CI, preview, or deployment behavior — verify against `.github/workflows/*.yml`
+- product-specific behavior — verify against `productConfig.mjs` and the
+  relevant product folder under `content/`
+- the `web-unified-docs` ↔ `dev-portal` contract — verify against the API routes
+  under `app/api/` and the consuming behavior described for dev-portal
+
+When you find that this file disagrees with the source of truth:
+
+1. trust the source of truth, not this file, for the task at hand
+1. correct the stale statement in this file as part of your change
+1. if the correction is outside the scope of your current task, call out the
+   drift explicitly in your final summary so a human can follow up
+1. never "fix" this file to match an assumption — only update it to match a fact
+   you verified in the repository
