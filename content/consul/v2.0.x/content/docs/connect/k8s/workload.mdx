@@ -253,40 +253,61 @@ Ended test job
 
 ## Kubernetes Pods with multiple ports
 
-To configure a pod with multiple ports to be a part of the service mesh and receive and send service mesh traffic, you
-will need to add configuration so that a Consul service can be registered per port. This is because services in Consul
-currently support a single port per service instance.
+To add a Pod with multiple ports to the service mesh, create a single Kubernetes Service that exposes the named ports and register it with one service account. Consul registers the Pod as a single multi-port service that routes mesh traffic to each named port. Multi-port service registration requires Consul Enterprise. <EnterpriseAlert inline /> For more information, refer to [multi-port services](/consul/docs/connect/proxy/multiport).
 
-In the following example, suppose we have a pod which exposes 2 ports, `8080` and `9090`, both of which will need to
-receive service mesh traffic.
+The following example defines a `web` service that exposes three named ports: `api-port` on `9090`, `metrics` on `9091`, and `admin-port` on `9092`. A `static-client` service then connects to each port through the service mesh.
 
-First, decide on the names for the two Consul services that will correspond to those ports. In this example, the user
-chooses the names `web` for `8080` and `web-admin` for `9090`.
+### Register the multi-port service
 
-Create two service accounts for `web` and `web-admin`:
+To register a Pod as a multi-port service, complete the following steps:
 
-<CodeBlockConfig filename="multiport-web-sa.yaml">
+1. Create a single service account for the service.
+1. Create a Kubernetes Service that exposes each port with a unique name.
+1. Create a Deployment that exposes the matching named container ports and enables injection with the `consul.hashicorp.com/connect-inject` annotation.
+
+When you do not set the `consul.hashicorp.com/connect-service-port` annotation, Consul registers all exposed container ports as named ports on a single multi-port service and uses the first port as the default port.
+
+The following manifest defines the `web` service account, Kubernetes Service, and Deployment. The Deployment runs a single container that serves all three ports.
+
+<CodeBlockConfig filename="web.yaml">
 
 ```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: web-config
+data:
+  nginx.conf: |
+    events {}
+    http {
+      server {
+        listen 9090;
+        location / {
+          default_type text/plain;
+          return 200 'Response from api-port 9090: Hello there!\n';
+        }
+      }
+      server {
+        listen 9091;
+        location / {
+          default_type text/plain;
+          return 200 'Response from metrics port 9091: Hello again!\n';
+        }
+      }
+      server {
+        listen 9092;
+        location / {
+          default_type text/plain;
+          return 200 'Response from admin port 9092: Hello again!\n';
+        }
+      }
+    }
+---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: web
 ---
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: web-admin
-```
-
-</CodeBlockConfig>
-
-
-Create two Service objects for `web` and `web-admin`:
-
-<CodeBlockConfig filename="multiport-web-svc.yaml">
-
-```yaml
 apiVersion: v1
 kind: Service
 metadata:
@@ -295,77 +316,21 @@ spec:
   selector:
     app: web
   ports:
-    - protocol: TCP
-      port: 80
-      targetPort: 8080
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: web-admin
-spec:
-  selector:
-    app: web
-  ports:
-    - protocol: TCP
-      port: 80
+    - name: api-port
+      port: 9090
       targetPort: 9090
-```
-
-</CodeBlockConfig>
-
-`web` will target `containerPort` `8080` and select pods labeled `app: web`. `web-admin` will target `containerPort`
-`9090` and will also select the same pods.
-
-~> Kubernetes 1.24+ only
-In Kubernetes 1.24+ you need to [create a Kubernetes secret](https://kubernetes.io/docs/concepts/configuration/secret/#service-account-token-secrets) for each additional Consul service associated with the pod in order to expose the Kubernetes ServiceAccount token to the Consul dataplane container running under the pod serviceAccount.  The Kubernetes secret name must match the ServiceAccount name:
-
-<CodeBlockConfig filename="multiport-web-secret.yaml">
-
-```yaml
-apiVersion: v1
-kind: Secret
-metadata:
-  name: web
-  annotations:
-    kubernetes.io/service-account.name: web
-type: kubernetes.io/service-account-token
+    - name: metrics
+      port: 9091
+      targetPort: 9091
+    - name: admin-port
+      port: 9092
+      targetPort: 9092
 ---
-apiVersion: v1
-kind: Secret
-metadata:
-  name: web-admin
-  annotations:
-    kubernetes.io/service-account.name: web-admin
-type: kubernetes.io/service-account-token
-```
-
-</CodeBlockConfig>
-
-Create a Deployment with any chosen name, and use the following annotations:
-```yaml
-annotations:
-  'consul.hashicorp.com/connect-inject': 'true'
-  'consul.hashicorp.com/transparent-proxy': 'false'
-  'consul.hashicorp.com/connect-service': 'web,web-admin'
-  'consul.hashicorp.com/connect-service-port': '8080,9090'
-```
-Note that the order the ports are listed in the same order as the service names, i.e. the first service name `web`
-corresponds to the first port, `8080`, and the second service name `web-admin` corresponds to the second port, `9090`.
-
-The service account on the pod spec for the deployment should be set to the first service name `web`:
-```yaml
-serviceAccountName: web
-```
-
-The following deployment example demonstrates the required annotations for the manifest. In addition, the previous YAML manifests can also be combined into a single manifest for easier deployment.
-
-<CodeBlockConfig filename="multiport-web.yaml">
-
-```yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
+  labels:
+    app: web
   name: web
 spec:
   replicas: 1
@@ -374,42 +339,43 @@ spec:
       app: web
   template:
     metadata:
-      name: web
-      labels:
-        app: web
       annotations:
         'consul.hashicorp.com/connect-inject': 'true'
-        'consul.hashicorp.com/transparent-proxy': 'false'
-        'consul.hashicorp.com/connect-service': 'web,web-admin'
-        'consul.hashicorp.com/connect-service-port': '8080,9090'
+      labels:
+        app: web
     spec:
-      containers:
-        - name: web
-          image: hashicorp/http-echo:latest
-          args:
-            - -text="hello world"
-            - -listen=:8080
-          ports:
-            - containerPort: 8080
-              name: http
-        - name: web-admin
-          image: hashicorp/http-echo:latest
-          args:
-            - -text="hello world from 9090"
-            - -listen=:9090
-          ports:
-            - containerPort: 9090
-              name: http
       serviceAccountName: web
+      volumes:
+        - name: config-volume
+          configMap:
+            name: web-config
+      containers:
+        - name: nginx
+          image: nginx:alpine
+          volumeMounts:
+            - name: config-volume
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+          ports:
+            - name: api-port
+              containerPort: 9090
+            - name: metrics
+              containerPort: 9091
+            - name: admin-port
+              containerPort: 9092
 ```
 
 </CodeBlockConfig>
 
-After deploying the `web` application, you can test service mesh connections by deploying the `static-client`
-application with the configuration in the [previous section](#connecting-to-mesh-enabled-services) and add the
-`consul.hashicorp.com/connect-service-upstreams: 'web:1234,web-admin:2234'` annotation to the pod template on `static-client`:
+### Connect to the multi-port service
 
-<CodeBlockConfig filename="multiport-static-client.yaml" lineNumbers highlight="33">
+You can connect to a multi-port service when transparent proxy mode is enabled or disabled.
+
+#### Transparent proxy enabled
+
+When transparent proxy mode is enabled, you do not need to define upstreams. Applications address a specific port on the upstream service using the virtual DNS format `<port-name>.<service-name>.virtual.consul`. The following `static-client` manifest enables transparent proxy.
+
+<CodeBlockConfig filename="static-client.yaml">
 
 ```yaml
 apiVersion: v1
@@ -444,12 +410,12 @@ spec:
         app: static-client
       annotations:
         'consul.hashicorp.com/connect-inject': 'true'
-        'consul.hashicorp.com/connect-service-upstreams': 'web:1234,web-admin:2234'
+        'consul.hashicorp.com/transparent-proxy': 'true'
     spec:
       containers:
         - name: static-client
           image: curlimages/curl:latest
-          # Just spin & wait forever, we'll use `kubectl exec` to demo
+          # Spin and wait forever; connect with `kubectl exec` to demonstrate the upstreams.
           command: ['/bin/sh', '-c', '--']
           args: ['while true; do sleep 30; done;']
       # If ACLs are enabled, the serviceAccountName must match the Consul service name.
@@ -458,33 +424,93 @@ spec:
 
 </CodeBlockConfig>
 
-If you exec on to a static-client pod, using a command like:
-```shell-session
-$ kubectl exec -it static-client-5bd667fbd6-kk6xs -- /bin/sh
-```
-you can then run:
-```shell-session
-$ curl localhost:1234
-```
-to see the output `hello world` and run:
-```shell-session
-$ curl localhost:2234
-```
-to see the output `hello world from 9090`.
+After you deploy `static-client`, connect to each port on `web` through its virtual address:
 
-The way this works is that a Consul service instance is being registered per port on the Pod, so there are 2 Consul
-services in this case. An additional Envoy sidecar proxy and `connect-init` init container are also deployed per port in
-the Pod. So the upstream configuration can use the individual service names to reach each port as seen in the example.
+```shell-session
+$ kubectl exec deploy/static-client -- curl --silent http://api-port.web.virtual.consul:9090
+Response from api-port 9090: Hello there!
 
-### Caveats for Multi-port Pods
+$ kubectl exec deploy/static-client -- curl --silent http://metrics.web.virtual.consul:9091
+Response from metrics port 9091: Hello again!
 
-- Transparent proxy is not supported for multi-port Pods.
-- Metrics and metrics merging is not supported for multi-port Pods.
-- Upstreams will only be set on the first service's Envoy sidecar proxy for the pod.
-  - This means that ServiceIntentions from a multi-port pod to elsewhere, will need to use the first service's name,
-    `web` in the example above to accept connections from either `web` or `web-admin`. ServiceIntentions from elsewhere
-    to a multi-port pod can use the individual service names within the multi-port Pod.
-- Health checking is done on a per-Pod basis, so if any Kubernetes health checks (like readiness, liveness, etc) are
-  failing for any container on the Pod, the entire Pod is marked unhealthy, and any Consul service referencing that Pod
-  will also be marked as unhealthy. So, if `web` has a failing health check, `web-admin` would also be marked as
-  unhealthy for service mesh traffic.
+$ kubectl exec deploy/static-client -- curl --silent http://admin-port.web.virtual.consul:9092
+Response from admin port 9092: Hello again!
+```
+
+#### Transparent proxy disabled
+
+When transparent proxy mode is disabled, define each port as an upstream with the `consul.hashicorp.com/connect-service-upstreams` annotation and set the `destination_port` parameter to the name of the target port. Applications then connect to each upstream on `localhost`. The following `static-client` manifest disables transparent proxy and defines the three upstreams.
+
+<CodeBlockConfig filename="static-client.yaml">
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  # This name will be the service name in Consul.
+  name: static-client
+spec:
+  selector:
+    app: static-client
+  ports:
+    - port: 80
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: static-client
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: static-client
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: static-client
+  template:
+    metadata:
+      name: static-client
+      labels:
+        app: static-client
+      annotations:
+        'consul.hashicorp.com/connect-inject': 'true'
+        'consul.hashicorp.com/transparent-proxy': 'false'
+        'consul.hashicorp.com/connect-service-upstreams': 'web.svc.default.ns.default.ap:9090:destination_port=api-port,web.svc.default.ns.default.ap:9091:destination_port=metrics,web.svc.default.ns.default.ap:9092:destination_port=admin-port'
+    spec:
+      containers:
+        - name: static-client
+          image: curlimages/curl:latest
+          # Spin and wait forever; connect with `kubectl exec` to demonstrate the upstreams.
+          command: ['/bin/sh', '-c', '--']
+          args: ['while true; do sleep 30; done;']
+      # If ACLs are enabled, the serviceAccountName must match the Consul service name.
+      serviceAccountName: static-client
+```
+
+</CodeBlockConfig>
+
+After you deploy `static-client`, connect to each upstream on its local port:
+
+```shell-session
+$ kubectl exec deploy/static-client -- curl --silent http://localhost:9090
+Response from api-port 9090: Hello there!
+
+$ kubectl exec deploy/static-client -- curl --silent http://localhost:9091
+Response from metrics port 9091: Hello again!
+
+$ kubectl exec deploy/static-client -- curl --silent http://localhost:9092
+Response from admin port 9092: Hello again!
+```
+
+### Caveats for multi-port services
+
+Consider the following caveats when you register a multi-port service:
+
+- Multi-port service registration requires Consul Enterprise. On Consul community edition, Consul registers only the first port as a single-port service. <EnterpriseAlert inline />
+- All ports of a multi-port service must use the same protocol. Consul does not support a combination of protocols for a single multi-port service.
+- When transparent proxy mode is disabled, the Kubernetes annotation character limit constrains the number of upstreams you can define for a service.
+- Consul performs health checks for each Pod. When a health check fails for any container in the Pod, Consul marks the entire multi-port service as unhealthy.
+
+For more information about multi-port service limitations, refer to [multi-port services](/consul/docs/connect/proxy/multiport).
