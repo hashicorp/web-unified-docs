@@ -8,18 +8,28 @@ description: >-
 
 # Deploy controllers using a Helm chart
 
+- [Prerequisites](#prerequisites)
+- [Add the HashiCorp Helm repository](#add-the-hashicorp-helm-repository)
+- [Create the controller Secret](#create-the-controller-secret)
+- [Create the TLS Secret when TLS is enabled](#create-the-tls-secret-when-tls-is-enabled)
+- [Prepare the controller configuration](#prepare-the-controller-configuration)
+- [List available chart versions](#list-available-chart-versions)
+- [Install a Boundary controller](#install-a-boundary-controller)
+- [Verify the deployment](#verify-the-deployment)
+- [Upgrade the controller](#upgrade-the-controller)
+
 @include 'helm/controller-chart.mdx'
 
 ## Prerequisites
 
 Before installing the controller Helm chart, make sure the following are available:
 
-- A Kubernetes cluster running version 1.34.0 or later.
+- A Kubernetes cluster running version 1.34 or later.
 - Helm 3 or later configured with access to the target Kubernetes cluster.
 - A reachable PostgreSQL 15 or later database for Boundary controller state.
 - A valid Boundary controller HCL configuration.
 - KMS configuration for the `root`, `recovery`, and `worker-auth` purposes.
-- An existing Kubernetes Secret containing the database URL and Boundary Enterprise license.
+- A Boundary Enterprise license and database URL.
 - An existing Kubernetes Secret containing `admin-username` and `admin-password` when `bootstrapAdmin.enabled=true`.
 - A Kubernetes TLS Secret containing `tls.crt` and `tls.key` when `tls.disabled=false`.
 - A ServiceAccount that the controller deployment and hook Jobs can use.
@@ -44,36 +54,22 @@ Example output:
 
 ```
 NAME                          CHART VERSION   APP VERSION   DESCRIPTION
-hashicorp/boundary-controller 1.0.0       1.0.0-ent     Official HashiCorp Boundary Controller Helm chart
+hashicorp/boundary-controller 0.1.0       1.0.0         Official HashiCorp Boundary Controller Chart
 ```
 
 </CodeBlockConfig>
 
 ## Create the controller Secret
 
-The chart reads sensitive values from an existing Kubernetes Secret referenced by `secretRefs.secretName`. At a minimum, you must create a Secret with the database URL and Boundary Enterprise license. Include the bootstrap admin credentials when bootstrap admin creation is enabled.
+The chart reads sensitive values from an existing Kubernetes Secret referenced by `secretRefs.secretName`. At a minimum, create a Secret with the database URL and Boundary Enterprise license. Include the bootstrap admin credentials when `bootstrapAdmin.enabled=true`.
 
-```shell-session
-$ kubectl create secret generic boundary-controller-secrets \
-  --namespace boundary \
-  --from-literal=database-url='postgres://boundary:password@postgres:5432/boundary?sslmode=require' \
-  --from-literal=license='<boundary-enterprise-license>' \
-  --from-literal=admin-username='admin' \
-  --from-literal=admin-password='<strong-password>'
-```
+Refer to the [Kubernetes Secrets documentation](https://kubernetes.io/docs/concepts/configuration/secret/) for instructions on creating Secrets.
 
-If your `controller.config` uses `migration_url = "env://BOUNDARY_PG_MIGRATION_URL"`, also add the migration URL key expected by `secretRefs.keys.migrationUrl`.
+Set `secretRefs.keys.*` to match the key names you used in your Secret. If your `controller.config` uses `migration_url = "env://BOUNDARY_PG_MIGRATION_URL"`, also include the migration URL key referenced by `secretRefs.keys.migrationUrl`.
 
 ## Create the TLS Secret when TLS is enabled
 
-If `tls.disabled=false`, create the Kubernetes TLS Secret before installation:
-
-```shell-session
-$ kubectl create secret tls boundary-controller-tls \
-  --namespace boundary \
-  --cert=tls.crt \
-  --key=tls.key
-```
+If `tls.disabled=false`, create a Kubernetes TLS Secret before installation. Refer to the [Kubernetes Secrets documentation](https://kubernetes.io/docs/concepts/configuration/secret/) for instructions. The Secret must contain `tls.crt` and `tls.key` entries, and its name must match `tls.secretName` (default: `boundary-controller-tls`).
 
 When TLS is disabled, the chart does not mount this Secret.
 
@@ -98,9 +94,11 @@ Refer to the following example controller configuration using AWS KMS:
 disable_mlock = true
 
 listener "tcp" {
-  address = "0.0.0.0:9200"
-  purpose = "api"
-  tls_disable = true
+  address       = "0.0.0.0:9200"
+  purpose       = "api"
+  tls_disable   = true
+  tls_cert_file = "/etc/boundary/tls/tls.crt"
+  tls_key_file  = "/etc/boundary/tls/tls.key"
 }
 
 listener "tcp" {
@@ -109,19 +107,21 @@ listener "tcp" {
 }
 
 listener "tcp" {
-  address = "0.0.0.0:9203"
-  purpose = "ops"
-  tls_disable = true
+  address       = "0.0.0.0:9203"
+  purpose       = "ops"
+  tls_disable   = true
+  tls_cert_file = "/etc/boundary/tls/tls.crt"
+  tls_key_file  = "/etc/boundary/tls/tls.key"
 }
 
 controller {
-  name = "boundary-controller"
-  description = "Boundary controller running in Kubernetes"
+  name                = "boundary-controller"
+  description         = "Boundary controller running in Kubernetes"
   public_cluster_addr = "boundary-controller-cluster.boundary.svc.cluster.local:9201"
-  license = "env://BOUNDARY_LICENSE"
+  license             = "<your-license-here>"
 
   database {
-    url = "env://BOUNDARY_PG_URL"
+    url = "postgres://<user>:<password>@<host>:5432/<dbname>?sslmode=require"
   }
 }
 
@@ -145,11 +145,23 @@ kms "aead" {
   key       = "ATTK2pMjMTEJGlAkUJAePnFMlNLQaXBnhSqJHVlJeKQ="
   key_id    = "global_worker-auth"
 }
+
+events {
+  audit_enabled        = true
+  sysevents_enabled    = true
+  observations_enabled = true
+  sink "stderr" {
+    name        = "all-events"
+    description = "All events sent to stderr"
+    event_types = ["*"]
+    format      = "hclog-text"
+  }
+}
 ```
 
 <Note>
 
-These inline AEAD KMS examples are suitable for development or testing. The keys are visible to anyone who can read the configuration. For production deployments, use an external KMS provider as described in [Configure KMS](https://developer.hashicorp.com/boundary/docs/configuration/kms).
+These inline AEAD KMS examples are suitable for development or testing. The keys are stored in plaintext and are visible to anyone who can read the configuration. For production deployments, use an external KMS provider as described in [Configure KMS](https://developer.hashicorp.com/boundary/docs/configuration/kms).
 
 </Note>
 
@@ -158,14 +170,6 @@ These inline AEAD KMS examples are suitable for development or testing. The keys
   We do not recommend changing `disable_mlock = true` from the chart default. The containers run without the elevated privileges required for memory locking.
 
 </Note>
-
-## Create a namespace
-
-Use the following command to create a namespace:
-
-```shell-session
-$ kubectl create namespace boundary
-```
 
 ## List available chart versions
 
@@ -187,16 +191,18 @@ serviceAccount:
   name: default
 
 tls:
-  disabled: true
+  disabled: false
 
 controller:
   config: |
     disable_mlock = true
 
     listener "tcp" {
-      address = "0.0.0.0:9200"
-      purpose = "api"
-      tls_disable = true
+      address       = "0.0.0.0:9200"
+      purpose       = "api"
+      tls_disable   = true
+      tls_cert_file = "/etc/boundary/tls/tls.crt"
+      tls_key_file  = "/etc/boundary/tls/tls.key"
     }
 
     listener "tcp" {
@@ -205,18 +211,21 @@ controller:
     }
 
     listener "tcp" {
-      address = "0.0.0.0:9203"
-      purpose = "ops"
-      tls_disable = true
+      address       = "0.0.0.0:9203"
+      purpose       = "ops"
+      tls_disable   = true
+      tls_cert_file = "/etc/boundary/tls/tls.crt"
+      tls_key_file  = "/etc/boundary/tls/tls.key"
     }
 
     controller {
-      name = "boundary-controller"
+      name                = "boundary-controller"
+      description         = "Boundary controller running in Kubernetes"
       public_cluster_addr = "boundary-controller-cluster.boundary.svc.cluster.local:9201"
-      license = "env://BOUNDARY_LICENSE"
+      license             = "<your-license-here>"
 
       database {
-        url = "env://BOUNDARY_PG_URL"
+        url = "postgres://<user>:<password>@<host>:5432/<dbname>?sslmode=require"
       }
     }
 
@@ -241,6 +250,18 @@ controller:
       key_id    = "global_worker-auth"
     }
 
+    events {
+      audit_enabled        = true
+      sysevents_enabled    = true
+      observations_enabled = true
+      sink "stderr" {
+        name        = "all-events"
+        description = "All events sent to stderr"
+        event_types = ["*"]
+        format      = "hclog-text"
+      }
+    }
+
   service:
     api:
       type: LoadBalancer
@@ -256,6 +277,7 @@ Run the following command to install the release:
 $ helm install boundary-controller hashicorp/boundary-controller \
   --version 0.1.0 \
   --namespace boundary \
+  --create-namespace \
   --values my-values.yaml
 ```
 
