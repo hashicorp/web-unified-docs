@@ -7,6 +7,12 @@ description: >-
 
 # AI agent support
 
+@include 'alerts/enterprise-only.mdx'
+
+@include 'alerts/beta.mdx'
+
+Agent registry and OAuth resource server configuration require Vault Enterprise 2.0.3 or later.
+
 Vault Enterprise provides native support for AI agents through two related
 capabilities:
 
@@ -19,6 +25,15 @@ Together, these capabilities let an approved agent present an OAuth 2.0 token to
 Vault without a separate login step. Vault validates the token, resolves the
 client to a Vault Identity entity, checks the entity's Agent Registry
 record, and enforces authorization constraints for agentic workflows.
+
+The Agent Registry and OAuth resource server configuration each contribute their 
+own audit metadata. See [OAuth JWT metadata](/vault/docs/audit/schema#oauth-jwt-metadata) for a specification of the detailed audit metadata. 
+When a client authenticates with an OAuth JWT, Vault does not create a stored
+token with an operator-defined metadata map. Instead, Vault derives token
+metadata from claims from the JWT each time the client presents the credential.
+The resulting token exists only for the lifetime of the request and Vault does
+not persist it to storage, so every request re-evaluates the claims in the
+presented JWT.
 
 For API usage details, refer to:
 
@@ -84,6 +99,7 @@ An Agent Registry record contains the following fields:
 | `owner` | Optional identifier for the person or team responsible for the agent. |
 | `ceiling_policies` | List of policy names that define the agent's authorization ceiling, used to limit permissions only in on-behalf-of requests. |
 | `no_default_ceiling_policy` | When `true`, Vault does not automatically add default ceiling policies to the registration. |
+| `optional_authorization_details` | When `true`, makes the `authorization_details` claim optional for the registered agent. |
 | `creation_time` | Timestamp of when the registration was created. |
 | `last_updated_time` | Timestamp of the most recent update to the registration. |
 
@@ -144,6 +160,97 @@ The `ceiling_policies` field cannot contain the `root` policy.
 
 </Note>
 
+## RAR enforcement
+
+Rich Authorization Requests (RAR) allow OAuth tokens to include fine-grained authorization constraints in the
+`authorization_details` claim. Vault uses the provided constraints to enforce
+path-level and parameter-level access control beyond what standard ACL policies provide.
+
+### Default behavior
+
+Vault enables RAR by default, and OAuth 2.0 tokens with `authorization_details` always honor the RAR authentication details.
+
+If the JWT does not contain an `authorization_details` claim for a RAR, Vault rejects the request with an error indicating that the claim is required.
+
+We recommend using RAR for all agentic workflows to enable fine-grained authorization constraints.
+
+### Making RAR optional
+
+While not recommended, making RAR optional can be useful when your identity provider does not support RAR or during a migration period.
+
+You can make RAR optional in one of two ways:
+
+1. Set `optional_authorization_details` to `true` on the OAuth resource server.
+1. Set `optional_authorization_details` to `true` for the agent registration.
+
+When you make RAR optional, Vault permits authentication without the `authorization_details` claim.
+
+Vault provides two methods for making RAR optional so you can:
+
+- Configure RAR as optional globally for all agents using a specific issuer
+  (set on the OAuth resource server profile).
+- Configure RAR as optional for specific agents while keeping it required for
+  others from the same issuer (set on individual agent registrations).
+
+When you make RAR optional, Vault uses standard ACL policies associated with the requesting entity to evaluate requests that omit the `authorization_details` claim.
+
+### RAR type specification
+
+Vault supports the `vault:path_access` RAR type for fine-grained authorization. Each authorization detail object in the `authorization_details` claim must conform to the following structure:
+
+| Field | Type | Required | Description |
+| ----- | ---- | -------- | ----------- |
+| `type` | string | Yes | Must be `vault:path_access` to indicate a Vault path access constraint. |
+| `path` | string | Yes | The Vault path the constraint applies to. Supports exact path matching. |
+| `capabilities` | array of strings | Yes | List of capabilities permitted for the path. Valid values: `read`, `create`, `update`, `delete`, `list`, `sudo`, `patch`, `subscribe`, `recover`, `deny`. |
+| `allowed_parameters` | object | No | Optional map of parameter names to arrays of values that restricts which request parameters and values Vault permits. An empty array `[]` allows any value for that parameter. |
+
+#### Rich authorization request example
+
+The following constraint:
+- Applies to the path `database/creds/my-role`.
+- Permits only `read` operations.
+- Works with ACL policies to determine final access for the entity.
+```json
+{
+  "type": "vault:path_access",
+  "path": "database/creds/my-role",
+  "capabilities": ["read"]
+}
+```
+
+
+#### Rich authorization request example with multiple constraints
+
+A JWT can include multiple authorization detail objects in the `authorization_details` array. Vault evaluates each constraint independently. Requests that include multiple constraints succeed if it matches at least one constraint that permits the operation.
+
+```json
+{
+  "authorization_details": [
+    {
+      "type": "vault:path_access",
+      "path": "database/creds/readonly-role",
+      "capabilities": ["read"]
+    },
+    {
+      "type": "vault:path_access",
+      "path": "pki/issue/my-role",
+      "capabilities": ["create", "update"]
+    }
+  ]
+}
+```
+
+#### How RAR constraints work
+
+RAR constraints narrow the access granted by ACL policies. For a request to succeed all of the following must be true:
+
+1. The request path and operation must match at least one `path` and `capabilities` constraint in the RAR.
+1. The ACL policy associated with the entity must permit the operation.
+1. When a matching RAR constraint includes `allowed_parameters`, the request parameters must satisfy those constraints.
+
+RAR constraints only restrict access and cannot expand permissions beyond what ACL policies allow.
+
 ## OAuth credential requirement
 
 Vault requires an Agent Registry record for clients that authenticate using OAuth
@@ -164,6 +271,35 @@ configuring one or more validation profiles, you establish trust relationships
 between Vault and external identity providers, enabling Vault to accept their
 JWTs as authentication credentials on every request without a separate login
 step.
+
+### Activate the OAuth resource server
+
+Vault gates OAuth resource server functionality behind an activation flag.
+Vault returns errors for profile configuration and JWT authentication requests
+until you activate the `oauth-resource-server` feature.
+
+<Tabs>
+
+<Tab heading="CLI" group="cli">
+
+```shell-session
+$ vault write -f sys/activation-flags/oauth-resource-server/activate
+```
+
+</Tab>
+
+<Tab heading="API" group="api">
+
+```shell-session
+$ curl \
+    --request PUT \
+    --header "X-Vault-Token: ${VAULT_TOKEN}" \
+    ${VAULT_ADDR}/v1/sys/activation-flags/oauth-resource-server/activate
+```
+
+</Tab>
+
+</Tabs>
 
 This configuration positions Vault as an OAuth 2.0
 [resource server](https://datatracker.ietf.org/doc/html/rfc6749#section-1.1).
@@ -198,6 +334,7 @@ the token.
 | `jwt_type` | The expected token type: `access_token` or `transaction_token`. Defaults to `access_token`. |
 | `clock_skew_leeway` | Tolerance in seconds for clock differences when validating time-based claims. |
 | `no_default_policy` | If `true`, tokens authenticated through the profile do not automatically receive the `default` policy. |
+| `optional_authorization_details` | If `true`, makes the `authorization_details` claim optional for tokens validated by the configured profile. |
 | `enabled` | If `false`, the profile is ignored during JWT validation. Defaults to `true`. |
 
 ### Key validation modes
