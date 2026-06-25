@@ -1,0 +1,262 @@
+---
+layout: docs
+page_title: Deploy workers using a Helm chart
+description: >-
+ Step-by-step instructions for deploying Boundary workers on Kubernetes using 
+ the Boundary worker Helm chart.
+---
+
+# Deploy workers using a Helm chart
+
+- [Prerequisites](#prerequisites)
+- [Add the HashiCorp Helm repository](#add-the-hashicorp-helm-repository)
+- [Prepare the worker configuration](#prepare-the-worker-configuration)
+- [Create a namespace](#create-a-namespace)
+- [List available chart versions](#list-available-chart-versions)
+- [Install a Boundary worker](#install-a-boundary-worker)
+- [Verify the deployment](#verify-the-deployment)
+- [Update `public_addr` for workers](#update-public_addr-for-workers)
+- [Uninstall the worker](#uninstall-the-worker)
+
+@include 'helm/worker-chart.mdx'
+
+## Prerequisites
+
+Before installing the worker Helm chart, make sure the following are available:
+
+- A Kubernetes cluster running version 1.34 or later with a default StorageClass or pre-provisioned PersistentVolumes.
+- Helm 3 or later configured with access to the target Kubernetes cluster.
+- Network connectivity from the worker pod to the HCP Boundary cluster or self-managed Boundary upstream workers.
+- A valid Boundary worker HCL configuration.
+- A registration model selected before installation:
+  - Controller-led registration with a controller-generated activation token.
+  - Worker-led registration using the token emitted in pod logs during the first startup.
+  - KMS-backed worker authentication for self-managed Boundary deployments configured for KMS worker auth.
+
+Intermediate workers may also require a reachable endpoint for the proxy listener and cluster support for the selected Service type, such as `LoadBalancer`.
+
+## Add the HashiCorp Helm repository
+
+Add the Helm repository and confirm the chart is visible:
+
+```shell-session
+$ helm repo add hashicorp https://helm.releases.hashicorp.com; \
+  helm search repo hashicorp/boundary-worker
+```
+
+Example output:
+
+<CodeBlockConfig hideClipboard>
+
+```
+NAME                      CHART VERSION   APP VERSION   DESCRIPTION
+hashicorp/boundary-worker 0.1.0           1.0.0         Official HashiCorp Boundary Worker Helm Chart
+
+```
+
+</CodeBlockConfig>
+
+## Prepare the worker configuration
+
+The chart reads raw Boundary HCL from `worker.config`. Embed the HCL inline in a values file under the `worker.config` key and pass the file with `--values`.
+
+For a base worker configuration, refer to the worker configuration guidance in the [Create the worker configuration](https://developer.hashicorp.com/boundary/docs/workers/create) reference.
+
+A usable worker configuration includes:
+
+- A proxy listener for session traffic
+- An operations listener for health and metrics
+- A worker registration mechanism
+- An `hcp_boundary_cluster_id` for HCP Boundary or `initial_upstreams` for an upstream worker or controller
+- An `auth_storage_path` when auth storage persistence is enabled
+- A `recording_storage_path` when session recording persistence is enabled
+- A `public_addr` when other clients or workers must connect to this worker
+
+Refer to the following example HCP Boundary worker configuration:
+
+```hcl
+disable_mlock = true
+
+listener "tcp" {
+  address = "0.0.0.0:9202"
+  purpose = "proxy"
+}
+
+listener "tcp" {
+  address     = "0.0.0.0:9203"
+  purpose     = "ops"
+  tls_disable = true
+}
+
+worker {
+  name = "boundary-worker"
+  public_addr = ""
+  initial_upstreams = ["boundary-controller-cluster:9201"]
+
+  tags {
+    type = ["worker", "kled", "tests"]
+  }
+}
+
+kms "aead" {
+  purpose = "worker-auth"
+  aead_type = "aes-gcm"
+  key = "8fZBjCUfN0TzjEGLQldGY4+iE9AkOvCfjh7+p0GtRBQ="
+  key_id = "global_worker-auth"
+}
+
+events {
+  audit_enabled       = true
+  sysevents_enabled   = true
+  observations_enable = true
+  sink "stderr" {
+    name        = "all-events"
+    description = "All events sent to stderr"
+    event_types = ["*"]
+    format      = "cloudevents-json"
+  }
+}
+```
+
+<Note>
+
+  This inline AEAD KMS example is suitable for development or testing. The key is visible to anyone who can read the configuration file. For production use, use an external KMS as described in [Configure KMS](https://developer.hashicorp.com/boundary/docs/configuration/kms).
+
+  We do not recommend changing `disable_mlock = true` from the chart default. The containers run without the elevated privileges required for memory locking.
+
+</Note>
+
+## Create a namespace
+
+Use the following command to create a namespace:
+
+```shell-session
+$ kubectl create namespace boundary
+```
+
+## List available chart versions
+
+Use the following command to see any available published versions of the worker chart:
+
+```shell-session
+$ helm search repo hashicorp/boundary-worker --versions
+```
+
+## Install a Boundary worker
+
+Create a values file that contains `worker.config` and any Kubernetes overrides:
+
+```yaml
+worker:
+  config: |
+    disable_mlock = true
+
+    listener "tcp" {
+      address = "0.0.0.0:9202"
+      purpose = "proxy"
+    }
+
+    listener "tcp" {
+      address     = "0.0.0.0:9203"
+      purpose     = "ops"
+      tls_disable = true
+    }
+
+    worker {
+      name = "boundary-worker"
+      public_addr = ""
+      initial_upstreams = ["boundary-controller-cluster:9201"]
+
+      tags {
+        type = ["worker", "kled", "tests"]
+      }
+    }
+
+    kms "aead" {
+      purpose = "worker-auth"
+      aead_type = "aes-gcm"
+      key = "8fZBjCUfN0TzjEGLQldGY4+iE9AkOvCfjh7+p0GtRBQ="
+      key_id = "global_worker-auth"
+    }
+
+  persistence:
+    authStorage:
+      storageClass: ""
+    recording:
+      enabled: true
+      storageClass: ""
+```
+
+Run the following command to install the release:
+
+```shell-session
+$ helm install boundary-worker hashicorp/boundary-worker \
+  --version 0.1.0 \
+  --namespace boundary \
+  --values my-values.yaml \
+  --wait
+```
+
+## Verify the deployment
+
+Check the rendered resources after installation:
+
+```shell-session
+$ kubectl get deployment,pods,svc,pvc --namespace boundary; \
+  kubectl logs --namespace boundary deployment/boundary-worker-deployment
+```
+
+Confirm that:
+
+- The pod becomes Ready.
+- Enabled PVCs are Bound.
+- The proxy and ops Services match your intended exposure model.
+- Worker logs show successful registration or authentication.
+- The worker appears as active in Boundary and is eligible for session assignment.
+
+## Update `public_addr` for workers
+
+Kubernetes may assign the external hostname or IP after installation when `worker.service.proxy.type` is `LoadBalancer`. If `worker.service.proxy.type` is `ClusterIP`, use a cluster-reachable address when the worker is accessed internally.
+
+Use the following command to watch the proxy Service:
+
+```shell-session
+$ kubectl get svc boundary-worker-proxy --namespace boundary --watch
+```
+
+If the worker HCL needs the final address, update the `public_addr` field in `worker.config` or in the HCL file with the `LoadBalancer` address or internal `ClusterIP` address, then upgrade the release:
+
+```shell-session
+$ helm upgrade boundary-worker hashicorp/boundary-worker \
+  --version 0.1.0 \
+  --namespace boundary \
+  --values my-values.yaml \
+  --rollback-on-failure \
+  --wait
+```
+
+## Uninstall the worker
+
+To remove the worker Helm release and its associated Kubernetes resources, run:
+
+```shell-session
+$ helm uninstall boundary-worker --namespace boundary
+```
+
+The uninstall command removes all Kubernetes resources created by the chart. PersistentVolumeClaims are not deleted automatically. To remove them:
+
+```shell-session
+$ kubectl delete pvc --namespace boundary --selector app.kubernetes.io/instance=boundary-worker
+```
+
+<Note>
+
+Deleting PVCs removes all persisted worker identity material and session recordings. Ensure any recordings have been processed before deleting auth storage or recording PVCs.
+
+</Note>
+
+## More information
+
+- To view supported Helm values so that you can configure or update workers, refer to [Worker values](/boundary/docs/deploy/helm-chart/worker-values).
+- To view example configurations, refer to [Worker Helm chart examples](/boundary/docs/deploy/helm-chart/worker-examples).
+- For frequently asked questions, refer to the [Worker chart FAQ](https://github.com/hashicorp/boundary-worker-helm/blob/main/docs/FAQ.md).
