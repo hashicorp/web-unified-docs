@@ -1,0 +1,273 @@
+---
+layout: docs
+page_title: Controller Helm chart values
+description: >-
+ Reference for Boundary controller Helm chart values, including runtime 
+ configuration, Kubernetes infrastructure, security contexts, and        
+ database job settings.
+---
+
+# Controller values
+
+- [Boundary runtime configuration](#boundary-runtime-configuration)
+- [Kubernetes infrastructure configuration](#kubernetes-infrastructure-configuration)
+- [Naming and namespace values](#naming-and-namespace-values)
+- [Image values](#image-values)
+- [TLS values](#tls-values)
+- [Secret reference values](#secret-reference-values)
+- [Controller runtime values](#controller-runtime-values)
+- [Listener Service values](#listener-service-values)
+- [Probe values](#probe-values)
+- [Resource values](#resource-values)
+- [Database job values](#database-job-values)
+- [Bootstrap admin values](#bootstrap-admin-values)
+- [Extra environment variables](#extra-environment-variables)
+- [Security context values](#security-context-values)
+- [ServiceAccount values](#serviceaccount-values)
+- [Availability and shutdown values](#availability-and-shutdown-values)
+- [Scheduling values](#scheduling-values)
+- [Configuration alignment checklist](#configuration-alignment-checklist)
+
+The Boundary controller Helm chart is configured with Helm values and a user-provided Boundary HCL configuration. The chart is the source of truth for supported values.
+
+## Boundary runtime configuration
+
+The `controller.config` contains the Boundary controller HCL. The chart writes the HCL values into a ConfigMap and mounts it at `/etc/boundary/controller.hcl`.
+
+
+The chart does not validate Boundary controller semantics beyond a few chart-level alignment checks. You are responsible for configuring valid listeners, database settings, cluster addresses, KMS stanzas, rate limits, and event sinks.
+
+The chart validates the following:
+
+- The `tls_cert_file` and `tls_key_file` settings are aligned with `tls.mountPath` when `tls.disabled=false`.
+- AEAD KMS keys are not referenced through `env://BOUNDARY_KMS_*` inside `kms` blocks.
+- Required Secret keys exist when `secretRefs.validateExisting=true`.
+
+## Kubernetes infrastructure configuration
+
+Kubernetes-specific values control the Deployment, Services, ConfigMap, Job hooks, security contexts, ServiceAccount, and scheduling options. These values do not replace or generate the Boundary runtime HCL.
+
+For example, if you change `controller.service.api.targetPort` to `9220`, you must also update the API listener port in the `controller.config`.
+
+Refer to the [configuration alignment checklist](#configuration-alignment-checklist) before you finalize any changes.
+
+The following sections describe the available Helm values grouped by function. Each table lists the key, default value, and a description.
+
+## Naming and namespace values
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `nameOverride` | `""` | Overrides the chart-generated resource base name |
+| `fullnameOverride` | `""` | Fully overrides the chart-generated resource name |
+| `namespace` | `""` | Overrides the namespace the chart renders namespaced resources into. An empty value uses the Helm release namespace. |
+
+## Image values
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `image.repository` | `hashicorp/boundary-enterprise` | Controller image repository |
+| `image.tag` | `""` | Controller image tag. When empty, the chart uses `Chart.appVersion`, currently `1.0.0`. |
+| `image.pullPolicy` | `IfNotPresent` | Kubernetes image pull policy |
+| `imagePullSecrets` | `[]` | Optional image pull secrets for private registries |
+
+## TLS values
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `tls.disabled` | `false` | Disables TLS on the API and ops listeners when true. Default is `false`, meaning TLS is enabled. |
+| `tls.secretName` | `boundary-controller-tls` | Name of the Kubernetes TLS Secret mounted when TLS is enabled |
+| `tls.mountPath` | `/etc/boundary/tls` | Container path where the TLS Secret is mounted |
+
+When you enable TLS, keep the listener `tls_cert_file` and `tls_key_file` paths in `controller.config` aligned with `tls.mountPath`. Probe schemes are auto-derived from `tls.disabled` and do not need to be set manually.
+
+## Secret reference values
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `secretRefs.secretName` | `boundary-controller-secrets` | Name of an existing Kubernetes Secret that contains the values referenced by `secretRefs.keys` |
+| `secretRefs.validateExisting` | `false` | When true, validates the referenced Secret and required keys during rendering |
+| `secretRefs.keys.databaseUrl` | `database-url` | Key in the Secret used for `env://BOUNDARY_PG_URL` in `controller.config`. Set to the key name used in your Secret. |
+| `secretRefs.keys.migrationUrl` | `migration-url` | Key in the Secret used for `env://BOUNDARY_PG_MIGRATION_URL` in `controller.config`. Required only when referenced in `controller.config`. Set to the key name used in your Secret. |
+| `secretRefs.keys.license` | `license` | Key in the Secret used for `env://BOUNDARY_LICENSE` in `controller.config`. Set to the key name used in your Secret. |
+| `secretRefs.keys.adminUsername` | `admin-username` | Key in the Secret whose value is used by the bootstrap admin Job. Set to the key name used in your Secret. |
+| `secretRefs.keys.adminPassword` | `admin-password` | Key in the Secret whose value is used by the bootstrap admin Job. Set to the key name used in your Secret. |
+
+The `secretRefs.keys` values are the key names inside your Kubernetes Secret — they are not fixed by the chart. Set each to match the actual key name you used when creating the Secret. For example, if you created the Secret with `--from-literal=pg-url=...`, set `secretRefs.keys.databaseUrl: "pg-url"`.
+
+## Controller runtime values
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `controller.replicas` | `2` | Number of controller replicas in the Deployment |
+| `controller.rollingUpdate.maxUnavailable` | `1` | Maximum unavailable pods during a rolling update |
+| `controller.rollingUpdate.maxSurge` | `1` | Maximum extra pods during a rolling update |
+| `controller.config` | Embedded sample HCL | Boundary controller HCL stored in a ConfigMap and mounted into the controller container and hook Jobs |
+
+The default `controller.config` includes `disable_mlock = true`. The chart's default security model drops all Linux capabilities and disallows privilege escalation. We do not recommend changing this value.
+
+## Listener Service values
+
+The chart creates separate Services for the API, cluster, and ops listeners.
+
+### API Service values
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `controller.service.api.type` | `LoadBalancer` | Kubernetes Service type for Boundary API traffic |
+| `controller.service.api.port` | `9200` | Service port for API traffic |
+| `controller.service.api.targetPort` | `9200` | Container port targeted by the API Service. Must match the API listener in `controller.config`. |
+| `controller.service.api.annotations` | `{}` | Annotations added to the API Service |
+
+### Cluster Service values
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `controller.service.cluster.type` | `ClusterIP` | Kubernetes Service type for worker registration and controller cluster traffic |
+| `controller.service.cluster.port` | `9201` | Service port for cluster traffic |
+| `controller.service.cluster.targetPort` | `9201` | Container port targeted by the cluster Service. Must match the cluster listener in `controller.config`. |
+| `controller.service.cluster.annotations` | `{}` | Annotations added to the cluster Service |
+
+### Ops Service values
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `controller.service.ops.type` | `ClusterIP` | Kubernetes Service type for health and metrics traffic |
+| `controller.service.ops.port` | `9203` | Service port for the operations endpoint |
+| `controller.service.ops.targetPort` | `9203` | Container port targeted by the ops Service. Must match the ops listener in `controller.config` |
+| `controller.service.ops.annotations` | `{}` | Annotations added to the ops Service |
+
+Keep the ops Service internal unless a trusted monitoring path requires a different exposure model.
+
+## Probe values
+
+The chart automatically adds liveness and readiness probes when an ops TCP listener is defined in `controller.config`. You do not need to set these values unless you want to adjust probe timing. The probe scheme is auto-derived from `tls.disabled`: `HTTPS` when `tls.disabled=false`, `HTTP` when `tls.disabled=true`. Override per-probe with `controller.livenessProbe.scheme` or `controller.readinessProbe.scheme` if needed.
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `controller.livenessProbe.scheme` | `""` | Probe scheme for `/health` on the ops listener. Auto-derived from `tls.disabled`: `HTTPS` when `tls.disabled=false`, `HTTP` when `tls.disabled=true`. Override if needed. |
+| `controller.livenessProbe.initialDelaySeconds` | `60` | Initial liveness probe delay |
+| `controller.livenessProbe.periodSeconds` | `10` | Liveness probe period |
+| `controller.livenessProbe.failureThreshold` | `3` | Liveness probe failure threshold |
+| `controller.livenessProbe.timeoutSeconds` | `5` | Liveness probe timeout |
+| `controller.readinessProbe.scheme` | `""` | Readiness probe scheme for `/health` on the ops listener. Auto-derived from `tls.disabled`: `HTTPS` when `tls.disabled=false`, `HTTP` when `tls.disabled=true`. Override if needed. |
+| `controller.readinessProbe.initialDelaySeconds` | `15` | Initial readiness probe delay |
+| `controller.readinessProbe.periodSeconds` | `10` | Readiness probe period |
+| `controller.readinessProbe.failureThreshold` | `3` | Readiness probe failure threshold |
+| `controller.readinessProbe.timeoutSeconds` | `5` | Readiness probe timeout |
+
+## Resource values
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `controller.resources.requests.cpu` | `250m` | CPU request for the controller container |
+| `controller.resources.requests.memory` | `512Mi` | Memory request for the controller container |
+| `controller.resources.limits.cpu` | `500m` | CPU limit for the controller container |
+| `controller.resources.limits.memory` | `1Gi` | Memory limit for the controller container |
+
+Tune resource values for your expected API load, worker volume, session coordination, and audit event volume.
+
+## Database job values
+
+The chart uses hook Jobs for database initialization, migration, and optional repair.
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `database.init.enabled` | `false` | Runs the pre-install database initialization Job |
+| `database.migrate.enabled` | `false` | Runs the pre-upgrade database migration Job |
+| `database.repair.version` | `""` | When set with `database.migrate.enabled=true`, also runs a pre-upgrade repair migration Job for the specified version |
+| `database.resources.requests.cpu` | `100m` | CPU request for database Jobs |
+| `database.resources.requests.memory` | `128Mi` | Memory request for database Jobs |
+| `database.resources.limits.cpu` | `500m` | CPU limit for database Jobs |
+| `database.resources.limits.memory` | `512Mi` | Memory limit for database Jobs |
+
+The initialization Job is idempotent. If the database is already initialized, the Job exits successfully.
+
+## Bootstrap admin values
+
+The bootstrap admin Job creates or updates a global password auth method, user, account, and role using Boundary recovery privileges.
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `bootstrapAdmin.enabled` | `false` | Runs the bootstrap admin Job after install |
+| `bootstrapAdmin.runOnUpgrade` | `false` | Also runs the bootstrap admin Job after upgrades when true |
+| `bootstrapAdmin.waitTimeoutSeconds` | `120` | Maximum time the bootstrap Job waits for the controller API to become reachable |
+| `bootstrapAdmin.authMethodName` | `bootstrap-auth-method` | Name of the password auth method created or reused by the Job |
+| `bootstrapAdmin.userResourceName` | `bootstrap-admin` | Boundary user resource name created or reused by the Job |
+| `bootstrapAdmin.accountResourceName` | `bootstrap-admin` | Boundary account resource name created or reused by the Job |
+| `bootstrapAdmin.roleName` | `bootstrap-global-admin` | Boundary role name created or reused by the Job |
+| `bootstrapAdmin.resources.requests.cpu` | `100m` | CPU request for the bootstrap Job |
+| `bootstrapAdmin.resources.requests.memory` | `128Mi` | Memory request for the bootstrap Job |
+| `bootstrapAdmin.resources.limits.cpu` | `500m` | CPU limit for the bootstrap Job |
+| `bootstrapAdmin.resources.limits.memory` | `512Mi` | Memory limit for the bootstrap Job |
+
+Disable this Job if you already manage Boundary auth methods and admin principals outside the chart.
+
+## Extra environment variables
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `extraEnv` | `[]` | Additional environment variables injected into controller and hook Job containers. Supports any valid Kubernetes `env` entry. |
+
+## Security context values
+
+The default security settings run the controller without elevated privileges.
+
+| Key | Default |
+| --- | --- |
+| `podSecurityContext.runAsNonRoot` | `true` |
+| `podSecurityContext.runAsUser` | `100` |
+| `podSecurityContext.runAsGroup` | `1000` |
+| `podSecurityContext.fsGroup` | `1000` |
+| `podSecurityContext.fsGroupChangePolicy` | `OnRootMismatch` |
+| `podSecurityContext.seccompProfile.type` | `RuntimeDefault` |
+| `containerSecurityContext.runAsNonRoot` | `true` |
+| `containerSecurityContext.runAsUser` | `100` |
+| `containerSecurityContext.runAsGroup` | `1000` |
+| `containerSecurityContext.allowPrivilegeEscalation` | `false` |
+| `containerSecurityContext.readOnlyRootFilesystem` | `true` |
+| `containerSecurityContext.capabilities.drop` | `ALL` |
+| `containerSecurityContext.seccompProfile.type` | `RuntimeDefault` |
+
+The Deployment and Jobs also set `SKIP_SETCAP=1`, which prevents the container startup path from attempting Linux capability modification.
+
+## ServiceAccount values
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `serviceAccount.name` | `default` | Existing ServiceAccount used by the Deployment and hook Jobs. The chart does not create a ServiceAccount. |
+| `serviceAccount.automountServiceAccountToken` | `false` | Controls whether the pod service account token is mounted |
+
+## Availability and shutdown values
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `podDisruptionBudget.enabled` | `true` | Creates a PodDisruptionBudget for controller pods |
+| `podDisruptionBudget.minAvailable` | `1` | Minimum available controller pods during voluntary disruptions |
+| `podDisruptionBudget.maxUnavailable` | not set | Optional alternative to `minAvailable`. Use only one of the two. |
+| `terminationGracePeriodSeconds` | `15` | Kubernetes termination grace period before SIGKILL. Must exceed `graceful_shutdown_wait_duration` in `controller.config`. |
+
+## Scheduling values
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `podAnnotations` | `{}` | Additional pod annotations |
+| `nodeSelector` | `{}` | Node selector constraints |
+| `tolerations` | `[]` | Pod tolerations |
+| `affinity` | `{}` | Pod affinity rules |
+
+## Configuration alignment checklist
+
+Before installing or upgrading a controller, confirm that:
+
+- The API listener port in `controller.config` matches `controller.service.api.targetPort`.
+- The cluster listener port in `controller.config` matches `controller.service.cluster.targetPort`.
+- The ops listener port in `controller.config` matches `controller.service.ops.targetPort`.
+- The `public_cluster_addr` setting matches the endpoint workers can actually reach.
+- The `tls_cert_file` and `tls_key_file` settings match `tls.mountPath` when TLS is enabled.
+- Probe schemes are auto-derived from `tls.disabled`. Override only if the derived scheme does not match your listener configuration.
+- The referenced Secret contains every key required by the current `controller.config` and bootstrap settings.
+- The `terminationGracePeriodSeconds` setting exceeds `graceful_shutdown_wait_duration` in the controller HCL.
+
+## More information
+
+To view example controller configurations, refer to [Controller Helm chart examples](/boundary/docs/deploy/helm-chart/controller-examples).
