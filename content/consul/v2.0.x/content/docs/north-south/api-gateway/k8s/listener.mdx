@@ -31,12 +31,12 @@ Configure Consul intentions to allow or prevent traffic between gateway listener
 1. Verify that the Consul API Gateway CRDs were applied. Refer to [Installation](/consul/docs/north-south/api-gateway/k8s/enable) for details.
 1. If your Kubernetes-orchestrated network runs on OpenShift, verify that OpenShift is enabled for your Consul installation. Refer to [OpenShift requirements](/consul/docs/connect/gateways/api-gateway/tech-specs#openshift-requirements) for additional information. 
 
-## Define the gateway and listeners
+## Define the standard gateway and listeners.
 
-Create an API gateway values file that defines the gateway and listeners.
+Create an standard API gateway values file that defines the gateway and listeners.
 
 1. Specify the following fields:
-    - `apiVersion`: Specifies the Kubernetes gateway API version. Must be `gateway.networking.k8s.io/v1beta1`.
+    - `apiVersion`: Specifies the Kubernetes gateway API version. Must be `gateway.networking.k8s.io/v1`.
     - `kind`: Specifies the type of configuration entry to implement. This must be `Gateway`. 
     - `metadata.name`:  Specify a name for the gateway configuration. The name is metadata that you can use to reference the configuration when performing Consul operations.
     - `spec.gatewayClassName`:  Specify the name of a `gatewayClass` configuration. Gateway classes are template-like resources in Kubernetes for instantiating gateway services. Specify `consul` to use the default gateway class shipped with Consul. Refer to the [GatewayClass configuration reference](/consul/docs/reference/k8s/api-gateway/gatewayclass) for additional information.
@@ -51,11 +51,51 @@ Create an API gateway values file that defines the gateway and listeners.
 In the following example, the API gateway specifies an HTTP listener on port `80`:
 
 ```yaml
-apiVersion: gateway.networking.k8s.io/v1beta1
+apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
   name: my-gateway
   namespace: consul
+  labels:
+    component: api-gateway
+spec:
+  gatewayClassName: consul-custom-consul
+  listeners:
+  - protocol: HTTP
+    port: 80
+    name: http
+    allowedRoutes:
+      namespaces:
+        from: "All"
+```
+
+## Deploy the Consul API Gateway and listeners.
+
+Create a Consul API gateway values file that defines the gateway and listeners using Consul's native API.
+
+1. Specify the following fields:
+    - `apiVersion`: Specifies the Consul API version. Must be `consul.hashicorp.com/v1beta1`.
+    - `kind`: Specifies the type of configuration entry to implement. This must be `Gateway`. 
+    - `metadata.name`:  Specify a name for the gateway configuration. The name is metadata that you can use to reference the configuration when performing Consul operations.
+    - `spec.gatewayClassName`:  Specify the name of a `gatewayClass` configuration. Gateway classes are template-like resources in Kubernetes for instantiating gateway services. Specify `consul` to use the default gateway class shipped with Consul. Refer to the [GatewayClass configuration reference](/consul/docs/reference/k8s/api-gateway/gatewayclass) for additional information.
+    - `spec.listeners`: Specify a list of listener configurations. Each listener is map containing the following fields:
+      - `port`: Specifies the port that the listener receives traffic on.
+      - `name`: Specifies a unique name for the listener.
+      - `protocol`: You can set either `tcp` or `http` 
+      - `allowedRoutes.namespaces`: Contains configurations for determining which namespaces are allowed to attach a route to the listener. 
+1. Configure any additional fields necessary for your use case, such as the namespace or admin partition. Refer to the [API gateway configuration entry reference](/consul/docs/reference/k8s/api-gateway/gateway) for additional information.
+1. Save the configuration.
+
+In the following example, the Consul API gateway specifies an HTTP listener on port `80`:
+
+```yaml
+apiVersion: consul.hashicorp.com/v1beta1
+kind: Gateway
+metadata:
+  name: my-custom-gateway
+  namespace: consul
+  labels:
+    component: api-gateway-consul
 spec:
   gatewayClassName: consul
   listeners:
@@ -67,7 +107,11 @@ spec:
         from: "All"
 ```
 
-## Kubernetes SDS implementation in consul-k8s
+
+## Kubernetes SDS implementation
+
+<Tabs>
+<Tab heading="Standard Gateway (gateway.networking.k8s.io/v1)">
 
 This section reflects the current API Gateway SDS behavior in consul-k8s:
 
@@ -108,7 +152,7 @@ For each listener:
 ### Example: Gateway listener SDS via annotations and listener `tls.options`
 
 ```yaml
-apiVersion: gateway.networking.k8s.io/v1beta1
+apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
   name: sds-gateway
@@ -116,6 +160,8 @@ metadata:
   annotations:
     api-gateway.consul.hashicorp.com/tls_sds_cluster_name: sds-cluster
     api-gateway.consul.hashicorp.com/tls_sds_cert_resource: wildcard.ingress.consul
+    labels:
+    component: api-gateway
 spec:
   gatewayClassName: consul
   listeners:
@@ -168,7 +214,7 @@ Validation and translation:
 ### Example: HTTPRoute backendRef override using RouteTLSSDSFilter
 
 ```yaml
-apiVersion: gateway.networking.k8s.io/v1beta1
+apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
   name: api-route-override
@@ -211,6 +257,157 @@ spec:
 - For local probes on non-8443 ports (for example `18443`), preserve hostname routing with `Host` and `--resolve`.
 
 Refer to [Define API gateway routes in Kubernetes](/consul/docs/north-south/api-gateway/k8s/route), [RouteTLSSDSFilter reference (Kubernetes)](/consul/docs/north-south/api-gateway/k8s/routetlssdsfilter), and [Route Resource Configuration](/consul/docs/reference/k8s/api-gateway/routes) for route and filter configuration details.
+
+</Tab>
+<Tab heading="Consul Gateway (consul.hashicorp.com/v1beta1)">
+
+This section reflects the SDS behavior for Consul API gateways using `consul.hashicorp.com/v1beta1`:
+
+- Listener-level SDS from Gateway annotations and listener `tls.options`
+- Backend-level SDS override from `RouteTLSSDSFilter`
+
+### Consul API gateway listener SDS source of truth
+
+Listener TLS SDS is resolved from these sources:
+
+- Listener `tls.options` (per-listener override)
+- Gateway `metadata.annotations` (gateway-wide defaults)
+
+Supported keys:
+
+- `api-gateway.consul.hashicorp.com/tls_sds_cluster_name`
+- `api-gateway.consul.hashicorp.com/tls_sds_cert_resource`
+
+### Consul API gateway SDS resolution behavior
+
+For each listener:
+
+- If both SDS keys are set in listener `tls.options`, listener values are used.
+- Otherwise, Gateway annotations are used as defaults.
+- If neither source sets SDS, listener SDS is unset.
+
+### Consul API gateway listener validation behavior
+
+- If only one SDS field is provided, listener validation fails.
+- SDS and `tls.certificateRefs` are validated independently and can both be configured on the same listener.
+
+### Translation to Consul entries for Consul API gateway
+
+- Resolved listener SDS is mapped to `APIGatewayListener.TLS.SDS`.
+- Listener certificate refs are mapped to `APIGatewayListener.TLS.Certificates`.
+- When both are configured, translated listener TLS includes both SDS and Certificates.
+
+### Example: Consul API gateway listener SDS via annotations and listener `tls.options`
+
+```yaml
+apiVersion: consul.hashicorp.com/v1beta1
+kind: Gateway
+metadata:
+  name: custom-sds-gateway
+  namespace: default
+  annotations:
+    api-gateway.consul.hashicorp.com/tls_sds_cluster_name: sds-cluster
+    api-gateway.consul.hashicorp.com/tls_sds_cert_resource: wildcard.ingress.consul
+  labels:
+    component: api-gateway-consul
+spec:
+  gatewayClassName: consul-custom-consul
+  listeners:
+  - name: https
+    protocol: HTTPS
+    port: 8443
+    hostname: a.example.test
+    tls:
+      mode: Terminate
+      options:
+        api-gateway.consul.hashicorp.com/tls_sds_cluster_name: sds-cluster
+        api-gateway.consul.hashicorp.com/tls_sds_cert_resource: wil.ingr.consul
+```
+
+### Consul API gateway TLS SDS precedence
+
+Effective certificate selection precedence is:
+
+1. Route service override `TLS.SDS`
+1. Listener `TLS.SDS`
+1. Gateway-level `TLS.SDS`
+
+## Route service SDS overrides for Consul API gateway (Kubernetes)
+
+`RouteTLSSDSFilter` remains the backend-level SDS override mechanism for HTTP routes with Consul API gateways.
+
+- Kind: `RouteTLSSDSFilter`
+- Spec fields:
+  - `spec.sds.clusterName` (optional when inherited from listener/global SDS)
+  - `spec.sds.certResource` (required)
+
+Inheritance behavior:
+
+- If `spec.sds.clusterName` is omitted, it is accepted when the route resolves exactly one listener-level SDS cluster from parentRefs.
+- If inherited cluster resolution is missing or ambiguous, validation rejects the filter.
+
+Usage pattern:
+
+- Attach from `HTTPRoute.rules[].backendRefs[].filters[]` with `type: ExtensionRef`.
+- Use `extensionRef.group: consul.hashicorp.com`.
+- Use `extensionRef.kind: RouteTLSSDSFilter`.
+- Use `extensionRef.name: <filter-name>`.
+
+Validation and translation:
+
+- Translation maps this to `HTTPService.TLS.SDS`.
+- Missing filter object, wrong type, missing/empty `spec.sds.certResource`, or missing/ambiguous inherited `clusterName` are rejected.
+- Rule-level placement (`HTTPRoute.rules[].filters[]`) is invalid for this override; backendRef filter placement is required.
+
+### Example: HTTPRoute backendRef override using RouteTLSSDSFilter with Consul API gateway
+
+```yaml
+apiVersion: consul.hashicorp.com/v1beta1
+kind: HTTPRoute
+metadata:
+  name: custom-api-route-override
+  namespace: default
+spec:
+  parentRefs:
+  - name: custom-sds-gateway
+    sectionName: https
+  hostnames:
+  - b.example.test
+  rules:
+  - backendRefs:
+    - name: svc-b
+      port: 5678
+      filters:
+      - type: ExtensionRef
+        extensionRef:
+          group: consul.hashicorp.com
+          kind: RouteTLSSDSFilter
+          name: custom-route-sds-override-http
+---
+apiVersion: consul.hashicorp.com/v1alpha1
+kind: RouteTLSSDSFilter
+metadata:
+  name: custom-route-sds-override-http
+  namespace: default
+spec:
+  sds:
+    clusterName: sds-cluster-2
+    certResource: foo.example.com
+```
+
+### Custom gateway troubleshooting checklist
+
+- Confirm both SDS keys are set together (listener `tls.options` or Gateway annotation defaults).
+- If `tls.certificateRefs` are used, verify referenced Secrets exist and are referenceable.
+- For backend overrides, ensure `RouteTLSSDSFilter` is attached under `backendRefs[].filters[]`.
+- Ensure `RouteTLSSDSFilter.spec.sds.certResource` is non-empty and `clusterName` is set or inherited.
+- Verify rendered config contains `APIGatewayListener.TLS.SDS`, `APIGatewayListener.TLS.Certificates`, and/or `HTTPService.TLS.SDS` as applicable.
+- For local probes on non-8443 ports (for example `18443`), preserve hostname routing with `Host` and `--resolve`.
+
+Refer to [Define API gateway routes in Kubernetes](/consul/docs/north-south/api-gateway/k8s/route), [RouteTLSSDSFilter reference (Kubernetes)](/consul/docs/north-south/api-gateway/k8s/routetlssdsfilter), and [Route Resource Configuration](/consul/docs/reference/k8s/api-gateway/routes) for route and filter configuration details.
+
+</Tab>
+</Tabs>
 
 ## Deploy the API gateway and listeners
 
