@@ -1,0 +1,362 @@
+---
+title: Backup Terraform Enterprise
+description: Backup the data layer of the application appropriately.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-06-09T20:55:46.000Z
+last_modified: 2026-06-09T20:55:46.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Backup Terraform Enterprise
+## Introduction
+
+Many business verticals require business continuity management (BCM) for production services. A reliable backup of your Terraform Enterprise deployment is crucial to ensuring business continuity. Your backup must include data held and processed by Terraform Enterprise's components so that operators can restore it within the organization's Recovery Time Objective (RTO) and to their Recovery Point Objective (RPO).
+
+Below are the best practices, options, and considerations for backing up Terraform Enterprise. It also recommends standard operating procedures for redundant, self-healing configurations using public and private cloud infrastructure, which add resilience to your deployment and reduce the chances of requiring restoration.
+
+This guide makes reference to the official Terraform Enterprise <a href="/terraform/enterprise/deploy/configuration/storage/configure-mode" target="_blank" rel="noreferrer">operating modes</a> and is only relevant to Terraform Enterprise and not HCP Terraform. Also, most of this guide is only relevant to `external` mode and `active-active` deployments except where otherwise stated. Refer to [Backup a `Disk` Deployment](#backup-a-mounted-disk-deployment) section below for specific details if you are running a `disk` deployment. If you have a `disk` deployment in production, we <b>strongly recommend</b> you liaise with your HashiCorp account team regarding urgent migration to one of the other operational modes because, while supported, it is not recommended for production use.
+
+For region redundancy, read this guide in concert with the *Terraform: Solution Design Guide* [Multiple Regions](/validated-designs/terraform-solution-design-guides-terraform-enterprise/multiple-regions) page.
+
+For recovery and restoration of Terraform Enterprise, refer to the next page of this guide.
+
+## Definitions
+
+**Business continuity (BC)** is a corporate capability. This capability exists whenever organizations can continue to deliver their products and services at acceptable, predefined levels whenever disruptive incidents occur. When we refer to _environments_, these map to engineering/pre-development, development, various test (system integration testing, user acceptance testing and so on) and production. Reserve dedicated engineering instances for the platform team only, for replication, backup/restore and upgrade testing.
+
+<Note>
+
+The <a href="https://www.iso.org/standard/75106.html" target="_blank" rel="noreferrer">ISO 22301 document</a> uses business continuity rather than disaster recovery (DR). As a result, this tutorial refers to business continuity instead of disaster recovery.
+
+</Note>
+
+Two factors heavily determine your organization's ability to achieve BC:
+
+1. <a href="https://en.wikipedia.org/wiki/IT_disaster_recovery#Recovery_Time_Objective" target="_blank" rel="noreferrer">Recovery Time Objective (RTO)</a> is the target time set for the resumption of product, service, or activity delivery after an incident. For example, if an organization has an RTO of one hour, they aim to have their services running within one hour of the service disruption.
+1. <a href="https://en.wikipedia.org/wiki/IT_disaster_recovery#Recovery_Point_Objective" target="_blank" rel="noreferrer">Recovery Point Objective (RPO)</a> is the maximum tolerable period of data loss during an incident. For example, if an organization has an RPO of one hour, they can tolerate the loss of a maximum of one hour's data before the service disruption.
+
+Based on these definitions, we recommend establishing the valid RTO/RPO for your Terraform Enterprise instance and approach BC accordingly. These factors determine your backup frequency and other considerations discussed below.
+
+In this guide:
+
+- Reference to a public cloud _availability zone_ (AZ) is equivalent to a single VMware-based _data center_.
+- Reference to a public cloud _multi-availability zone_ is equivalent to a _multi-data center_ **VMware** deployment.
+- The main AZ is the _primary_. Any other AZs in the same region are the _secondary_. The secondary _region_ is a business continuity/failover region only and is not an active secondary location. Consider all availability zones equal for the purposes of illustration.
+
+## Best practices
+### Maintain the backup and restore process
+
+When you deploy Terraform Enterprise:
+
+- Test the backup and restoration process and measure the recovery time to ensure it satisfies your organization's RTO/RPO.
+- Document the backup and restoration process.
+- Arrange for staff who did _not_ write this document to run a test restore using it. This measure increases confidence in the backup and restore process.
+- Use a regular schedule to test the backup and restoration process to ensure the documentation is reliable. This increases familiarity with the backup and restoration process and covers situations where staff leave.
+
+### Manage sensitive values
+
+For automated deployments, you must manage several sensitive values. On Kubernetes, refer to <a href="https://support.hashicorp.com/hc/en-us/articles/29828658601363-Secure-Method-of-Providing-Sensitive-Configuration-Values-to-Terraform-Enterprise-Helm-Chart" target="_blank" rel="noreferrer">this support page for base information</a>. The HVD deployment modules also provide further information specific to the deployment method and target platform - see below for further details. The methods below do not back up these data. We recommend <a href="https://developer.hashicorp.com/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets" target="_blank" rel="noreferrer">HashiCorp Vault</a> for storage of all pipeline secrets. Do not store any of these sensitive values in version control or allow them to leak into shell histories. Do not store any of these sensitive values in version control or allow them to leak into shell histories.
+
+We recommend <a href="https://developer.hashicorp.com/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets" target="_blank" rel="noreferrer">HashiCorp Vault</a> for storage of all pipeline secrets.
+
+### Process audit logs
+
+Audit log processing helps you identify the root cause during a data recovery incident.
+
+Follow the guidance on <a href="https://developer.hashicorp.com/terraform/enterprise/deploy/manage/monitor/logs" target="_blank" rel="noreferrer">this Terraform Enterprise logs resource page</a> to aggregate and index logs from the Terraform Enterprise node(s) using a central logging platform such as Splunk, ELK, or a cloud-native solution. Use these as a diagnostic tool in the event of outage, scanning them case insensitively for `ERROR` and `FATAL` messages as part of root cause analysis.
+
+### Terraform Enterprise backup API
+
+Terraform Enterprise has a <a href="/terraform/enterprise/deploy/manage/backup-restore" target="_blank" rel="noreferrer">Backup API</a> but this primarily facilitates migrations from one operational mode to another.
+Only use the backup API for such migrations. Use cloud-native tooling instead for day-to-day backup and recovery on public cloud, and standard approaches for on-premise deployments as detailed below.
+
+## Initial considerations
+
+The following recommendations improve your security posture, reduce the effort required to maintain an optimal Terraform Enterprise instance, and speed up deployment time during a restoration. Apply all relevant points in the list below for your target platform (VM-based or Kubernetes-based deployments).
+
+- Harden server images using <a href="https://www.cisecurity.org/cis-benchmarks/" target="_blank" rel="noreferrer">CIS benchmarking</a>.
+- Secure Terraform Enterprise deployments on both single-tenant and shared Kubernetes clusters. If using Kubernetes clusters, lock down all APIs properly using automated configuration capabilities such as Ansible.
+- If using VM-based deployments of Terraform Enterprise, use single-tenant, immutable instances using automation by repaving instances with patched images rather than patching them in place. This process requires you to maintain the setup configuration in the code used to deploy the system and is out of the scope of this document.
+- Remove all unnecessary packages from the operating system.
+- Ensure to store deployment configuration in a version control system and use git best practices on the repositories used to version the code.
+
+## Application server
+
+We recommend you automatically replace application server nodes when a node or availability zone fails. Replacing the node provides redundancy at the server and availability zone level. Public clouds and VMware have specific services for this.
+
+Click on the tab(s) below relevant to your cloud deployment for additional cloud-specific recommendations.
+The recommendation for all Kubernetes-based deployments is to deploy a cluster in line with the *Terraform: Solution Design Guide* [recommendations](/validated-designs/terraform-solution-design-guides-terraform-enterprise/terraform-based-k8s-tfe-install).
+
+<Tabs>
+<Tab heading="AWS" group="AWS">
+
+Select your deployment method below for more details. If you are deploying to EKS, your operational mode is `active-active`. You can deploy VM Docker-based instances in `external` mode or `active-active` mode.
+
+<Tabs>
+<Tab heading="external" group="external">
+
+- For `external` deployments, set the `min_size` and `max_size` of the ASG to 1. When a node or availability zone fails, the ASG automatically <a href="https://docs.aws.amazon.com/autoscaling/ec2/userguide/as-add-availability-zone.html" target="_blank" rel="noreferrer">replaces the node</a>. The time it takes for the ASG to replace the node depends on the time it takes the node to be ready. For example, the system comes up only after the node downloads the installation media from the network.
+
+</Tab>
+
+<Tab heading="active-active" group="active-active">
+
+- For VM-based `active-active` deployments, set the `min_size` and `max_size` parameters to the desired number of nodes. These two values must be the same. If a node fails, the service remains up while the ASG replaces it.
+- For Kubernetes-based `active-active` deployments using the HVD Module, in the Helm overrides file, set the `replicaCount` parameter to the desired number of nodes to influence how many server pods run on cluster. This defaults to 3. The module's `eks_nodegroup_scaling_config` variable sets the number of Kubernetes nodes in the node group. This also defaults to 3.
+
+</Tab>
+</Tabs>
+
+- For both `external` and VM-based `active-active` deployments, populate the ASG `vpc_zone_identifier` list with at least two subnets. If the region supports additional subnets, we recommend a minimum of three subnets since it provides `n-2` AZ redundancy.
+
+</Tab>
+
+<Tab heading="Azure" group="Azure">
+
+Select your deployment method below for more details. If you are deploying to AKS, your operational mode is `active-active`. You can deploy VM Docker-based instances in `external` mode or `active-active` mode.
+Use a zone-balanced Linux <a href="https://docs.microsoft.com/en-us/azure/virtual-machine-scale-sets/" target="_blank" rel="noreferrer">virtual machine scale set</a> (VMSS) to automatically replace nodes on Azure. Select your operational mode below for more details.
+
+For AKS-based deployments, <a href="https://learn.microsoft.com/en-us/azure/reliability/regions-list" target="_blank" rel="noreferrer">ensure your region</a> supports availability zones prior to deployment and confirm the number in the target zone prior to continuing.
+
+<Tabs>
+<Tab heading="external" group="external">
+
+- For `external` deployments, set the zone-balanced Linux VMSS `instances` parameter to 1. When a node or availability zone fails, the VMSS automatically <a href="https://docs.microsoft.com/en-us/azure/virtual-machines/availability#virtual-machines-scale-sets" target="_blank" rel="noreferrer">replaces the node</a> in the same region. The time it takes for the ASG to replace the node depends on the time it takes the node to be ready. For example, the system comes up only after the node downloads the installation media from the network.
+
+</Tab>
+
+<Tab heading="active-active" group="active-active">
+
+- For VM-based `active-active` deployments, set the zone-balanced Linux VMSS `instances` parameter to the desired number of nodes. Two or more instances meet the <a href="https://azure.microsoft.com/en-gb/support/legal/sla/virtual-machines/v1_9/" target="_blank" rel="noreferrer">Azure 99.95% service-level agreement for VM availability</a>. If a node fails, the service remains up while the VMSS replaces it. `active-active` deployments require a fully automated deployment.
+- For Kubernetes-based `active-active` deployments using the HVD Module, in the Helm overrides file, set the `replicaCount` parameter to the desired number of nodes to influence how many server pods run on cluster. The module's `aks_tfe_node_pool_node_count` variable sets the number of Kubernetes nodes in the node group. This defaults to 2 because of the number of regions which have fewer than three zones. We recommend using a minimum of three AZs and recommend testing deployment to ensure the node group size fits with your requirements.
+
+</Tab>
+</Tabs>
+
+- For both `external` and VM-based `active-active` deployments, if using Terraform to deploy, use the <a href="https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/linux_virtual_machine_scale_set" target="_blank" rel="noreferrer">`azurerm_linux_virtual_machine_scale_set`</a> resource. The HVD Module does this. Set the `zones` to a minimum of two (preferably three) zones in the region, and set `zone_balance` to true, which provides zone redundancy.
+
+</Tab>
+
+<Tab heading="GCP" group="GCP">
+
+Use a <a href="https://cloud.google.com/compute/docs/instance-groups/regional-migs" target="_blank" rel="noreferrer">regional managed instance group</a> (MIG) to automatically replace nodes on GCP. Select your operational mode below for more details.
+
+<Tabs>
+<Tab heading="external" group="external">
+
+- For `external` deployments, set the `target_size` parameter of the MIG to 1. When a node or availability zone fails, the MIG automatically <a href="https://cloud.google.com/compute/docs/instance-groups#autohealing" target="_blank" rel="noreferrer">replaces the node</a> in the same region. Enable the Google compute health check and configure the auto-healing policy of the instance group manager. The time it takes for the MIG to replace the node depends on the time it takes the node to be ready. For example, the system comes up only after the node downloads the installation media from the network.
+
+</Tab>
+
+<Tab heading="active-active" group="active-active">
+
+- For `active-active` deployments, set the `target_size` parameter of the MIG to the desired number of nodes. If a node fails, the service remains up while the MIG replaces it. `active-active` deployments require a fully automated deployment.
+
+</Tab>
+</Tabs>
+
+- For both `external` and `active-active` deployments, if using Terraform to deploy, use the <a href="https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/compute_region_instance_group_manager" target="_blank" rel="noreferrer">`google_compute_region_instance_group_manager`</a> resource as this deploys a regional MIG, and thus ensures that the application server layer can automatically recover from a zone failure. The HVD Module does this.
+
+</Tab>
+
+<Tab heading="VMware" group="VMware">
+
+In an `external` mode scenario, the application server is running as a stateless node.
+- If you deployed the instance from code (where the preceding sensitive data listed is available to the repaving of the node), you do not need to back up the instance. Redeploying the application server is acceptable.
+- If you deployed the instance through a vRA/vRO experience and need to manually configure it after it comes up, we recommend backing up the instance. Available VMware operational practices are likely to already include a strategic backup solution, which we would recommend using in this case. There are many VMware backup solutions, and the relative merits are outside the scope of this guide. HashiCorp customers back up Terraform Enterprise virtual machines using Dell EMC <a href="https://www.delltechnologies.com/en-us/data-protection/data-protection-suite/recoverpoint-for-virtual-machines-data-protection-software.htm" target="_blank" rel="noreferrer">RP4VM</a> and Veritas <a href="https://www.veritas.com/support/en_US/doc/21902280-128927880-0/index" target="_blank" rel="noreferrer">NetBackup</a>, however, solutions vary widely.
+
+</Tab>
+</Tabs>
+
+## Object store
+
+We recommend the following to support the object store's business continuity:
+
+- Choose fast storage optimized for use that scales well and automatically replicates to another zone in the same region. Each public cloud has a well-known option in this space. For private cloud `external` mode deployments, you must use S3-compatible storage.
+- Configure accidental/MFA deletion protection to prevent accidental deletion.
+- Be aware that automated backup facilities provided by cloud service providers provide eventual consistency within a time window of around 10-15 minutes depending on network congestion. This means that in a failover situation, not all object changes may have succeeded - see below. It also means, however, that object corruption is also automatically replicated.
+
+Click on the tab(s) below relevant to your cloud deployment for additional cloud-specific recommendations.
+
+<Tabs>
+<Tab heading="AWS" group="AWS">
+
+The most likely problem with the object store is service inaccessibility or corruption through human error rather than loss of durability, due to AWS's claim of eleven nines of durability.
+
+As a result, S3 <a href="https://docs.aws.amazon.com/AmazonS3/latest/dev/replication.html" target="_blank" rel="noreferrer">Same-Region Replication</a> is not explicitly required for the Terraform Enterprise object store because it does not add sufficient value. Corruption on the primary S3 bucket replicates to the secondary automatically.
+
+We recommend the following to ensure you back up your application data appropriately.
+
+- Refer to <a href="https://aws.amazon.com/s3/faqs/#durability-data-protection--huazgs" target="_blank" rel="noreferrer">AWS's S3 FAQs</a> for information about S3's durability.
+- Implement the <a href="https://docs.aws.amazon.com/AmazonS3/latest/dev/security-best-practices.html" target="_blank" rel="noreferrer">security best practices</a> for Amazon S3.
+- Enable <a href="https://docs.aws.amazon.com/AmazonS3/latest/dev/Versioning.html" target="_blank" rel="noreferrer">versioning</a> on the bucket used as the object store.
+
+</Tab>
+<Tab heading="Azure" group="Azure">
+
+The most likely problem with the object store is service inaccessibility or corruption through human error rather than loss of durability, due to Azure's claim of eleven nines of durability.
+
+We recommend the following to ensure you back up your application data appropriately.
+
+- Use a <a href="https://docs.microsoft.com/en-us/azure/storage/common/storage-redundancy#zone-redundant-storage" target="_blank" rel="noreferrer">zone-redundant</a> storage account blob (ZRS) for a single region deployment. If you require a multi-region solution, then use Geo-zone-redundant storage (GZRS) and refer to the [Terraform: Solution Design Guide](/validated-designs/terraform-solution-design-guides-terraform-enterprise/multiple-regions#s3-compatible-storage) for more information.
+- Implement the <a href="https://docs.microsoft.com/en-us/azure/storage/blobs/security-recommendations" target="_blank" rel="noreferrer">security recommendations</a> for Azure blob storage.
+- Enable <a href="https://docs.microsoft.com/en-us/azure/storage/blobs/point-in-time-restore-overview" target="_blank" rel="noreferrer">point-in-time restores</a>.
+  - In order to do this, you need to also enable its prerequisites on the storage account:
+    - <a href="https://docs.microsoft.com/en-us/azure/storage/blobs/soft-delete-blob-enable" target="_blank" rel="noreferrer">Enable soft delete for blobs</a> and set retention to the maximum 365 days.
+    - <a href="https://docs.microsoft.com/en-us/azure/storage/blobs/storage-blob-change-feed#enable-and-disable-the-change-feed" target="_blank" rel="noreferrer">Enable the change feed</a>
+    - <a href="https://docs.microsoft.com/en-us/azure/storage/blobs/versioning-overview" target="_blank" rel="noreferrer">Enable blob versioning</a>
+  - While Microsoft recommends maintaining fewer than one thousand versions per blob, Terraform Enterprise does not overwrite existing objects, so additional blob versions only exist as a result of workspace or accidental deletion operations.
+  - Note the Azure limitations on <a href="https://docs.microsoft.com/en-us/azure/storage/blobs/point-in-time-restore-manage?tabs=portal" target="_blank" rel="noreferrer">storage container deletion</a>.
+- Use a hot access tier, <a href="https://docs.microsoft.com/en-us/azure/storage/common/storage-account-overview" target="_blank" rel="noreferrer">General-Purpose V2</a> Azure blob storage account.
+- The bucket must be in the same region as the worker node for maximum efficiency.
+- Use the <a href="https://docs.microsoft.com/en-us/azure/storage/common/storage-network-security?toc=/azure/virtual-network/toc.json#grant-access-from-a-virtual-network" target="_blank" rel="noreferrer">`Microsoft.Storage`</a> endpoint.
+
+</Tab>
+<Tab heading="GCP" group="GCP">
+
+The most likely problem with the object store is service inaccessibility or corruption through human error rather than loss of durability, due to GCP's claim of eleven nines of durability.
+We recommend the following to ensure you back up your application data appropriately.
+
+- Refer to <a href="https://cloud.google.com/storage/docs/storage-classes" target="_blank" rel="noreferrer">Google's Storage</a> documentation for information about Google Cloud Storage's (GCS) durability.
+- Implement the <a href="https://cloud.google.com/storage/docs/best-practices#security" target="_blank" rel="noreferrer">security recommendations</a> for GCS.
+- Enable <a href="https://cloud.google.com/storage/docs/object-versioning" target="_blank" rel="noreferrer">object versioning</a>.
+- Use a regional `Standard Storage` cloud storage bucket as an object store. If managing a multi-region platform, use a replicated bucket and refer to the *Terraform: Solution Design Guide* [Multiple Regions](/validated-designs/terraform-solution-design-guides-terraform-enterprise/multiple-regions) page for more information.
+- For maximum efficiency, the bucket must be in the same region as the managed instance group which uses it.
+
+</Tab>
+<Tab heading="VMware" group="VMware">
+
+For on-premise `external` deployments, as the architectural requirements include an S3-compatible storage facility, such as <a href="https://min.io/solutions/vmware" target="_blank" rel="noreferrer">minIO</a> or <a href="https://www.delltechnologies.com/en-us/storage/ecs/index.htm#accordion0" target="_blank" rel="noreferrer">Dell ECS</a>:
+
+- If using minIO, use an active/passive configuration to ensure that objects replicate efficiently. Enable object versioning on the buckets. Refer to <a href="https://developer.hashicorp.com/terraform/enterprise/deploy/replicated/requirements/data-storage/minio-setup-guide" target="_blank" rel="noreferrer">MinIO setup guide</a> for more information.
+- If using Dell ECS, we recommend using the default erasure coding scheme (12+4) and, therefore, a minimum of four discrete nodes in the storage cluster _intra-region_. Because Terraform providers comprise a significant percentage of stored slug objects (created for each workspace run), the slug size stored could be larger or smaller than 128Mb. Refer to the *Terraform: Solution Design Guide* [Multiple Regions](/validated-designs/terraform-solution-design-guides-terraform-enterprise/multiple-regions) page for more information.
+
+</Tab>
+</Tabs>
+
+## Database
+
+Configure the database to be in line with Terraform Enterprise's <a href="https://developer.hashicorp.com/terraform/enterprise/deploy/configuration/storage/connect-database/postgres" target="_blank" rel="noreferrer">PostgreSQL requirements</a>.
+
+For high availability in a single public cloud region, we recommend deploying the database in a multi-availability zone configuration to add resilience against _recoverable_ outages. For coverage against _non-recoverable_ issues (such as data corruption), take regular snapshots of the database.
+
+Click on the tab(s) below relevant to your cloud deployment for additional cloud-specific recommendations.
+
+<Tabs>
+<Tab heading="AWS" group="AWS">
+
+In addition to the preceding general recommendations, consider the following AWS-specific recommendations.
+
+- Implement the security best practices for Amazon <a href="https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/CHAP_BestPractices.Security.html" target="_blank" rel="noreferrer">RDS</a>.
+- Use a <a href="https://aws.amazon.com/rds/features/multi-az/" target="_blank" rel="noreferrer">multi-AZ deployment</a>. AWS creates the primary DB instance in the _primary_ AZ and synchronously replicates the contents to the standby instance in the _secondary_ AZ. Refer to <a href="https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Concepts.MultiAZ.html" target="_blank" rel="noreferrer">AWS's high availability for RDS documentation</a> for more information.
+- <a href="https://aws.amazon.com/blogs/storage/point-in-time-recovery-and-continuous-backup-for-amazon-rds-with-aws-backup/" target="_blank" rel="noreferrer">Configure AWS Backup for RDS</a>, using continuous backup and point-in-time-recovery (PITR).
+- If using Aurora as the Terraform Enterprise RDS database, you <a href="https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Aurora.Managing.Backups.html" target="_blank" rel="noreferrer">automatically benefit</a> from PITR, continuous backup to Amazon S3, and replication across three availability zones. How many days of retention you require is a business decision, but HashiCorp recommends the maximum 35-day retention for maximum flexibility (the HVD Module uses this as a default), but we recommend performing a cost calculation relating to data storage.
+- Configure database <a href="https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_CreateSnapshot.html" target="_blank" rel="noreferrer">snapshots</a>.
+  - AWS creates the default standby instance DB backup once a day. To achieve an RPO of less than a day, use snapshots taken at shorter time frames, and facilitate region-redundancy by using region-replicated buckets. They also persist beyond the 35-day PITR window.
+  - Trigger DB snapshots automatically at required points during the day. The organization's needs and RPO determines when to trigger DB snapshots.
+  - Continuously monitor the length of time it takes to do the backup and compare this to the RPO to avoid overlapping backups.
+- In both cases, ensure that backups and snapshots are secure and restrict access to only required staff.
+- Keep up-to-date with the AWS RDS <a href="https://aws.amazon.com/rds/details/backup/" target="_blank" rel="noreferrer">documentation</a>.
+- <a href="https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/MonitoringOverview.html" target="_blank" rel="noreferrer">Actively and continuously monitor</a> operational health, and configure automatic event notifications.
+- Store your snapshots in Amazon S3 in the same region as the platform to reduce recovery time.
+- The HVD Module used to deploy Terraform Enterprise to both VM- and EKS-based targets uses a variable `rds_preferred_backup_window` set to a default of `04:00-04:30` local time.
+  - Override this in the terraform.tfvars file as needed. Check the value of `rds_preferred_maintenance_window` to ensure no overlap with `rds_preferred_backup_window`.
+  - Set a minimum of 30 minutes.
+- The HVD Module also allows for the setting of `is_secondary_region` to deploy to two regions. Refer to the [Multiple regions section of the Terraform Enterprise solution design guide](/terraform/enterprise/operating-guides/solution-design/multiple-regions) for more information on multi-region Terraform Enterprise deployments.
+- If your Terraform Enterprise uses Aurora, in the <a href="https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/rds_cluster" target="_blank" rel="noreferrer">`aws_rds_cluster`</a> resource:
+  - Set `availability_zones` to a list of at least three EC2 availability zones. AWS requires a minimum of three availability zones, which is also what HashiCorp recommends to maximize the database layer's recovery capability. The HVD Modules allow for multiple AZs.
+- Test that the backups work by documenting the restore experience in your run book making edits as necessary to the backup procedure.
+
+</Tab>
+<Tab heading="Azure" group="Azure">
+
+In addition to the preceding general recommendations, consider the following Azure-specific recommendations.
+
+- Follow the performance best practices for <a href="https://azure.microsoft.com/en-us/blog/performance-best-practices-for-using-azure-database-for-postgresql/" target="_blank" rel="noreferrer">Azure Database for PostgreSQL</a>.
+- Enable <a href="https://docs.microsoft.com/en-us/azure/postgresql/concepts-high-availability" target="_blank" rel="noreferrer">high availability</a> on the Azure Database for PostgreSQL service (default configuration).
+  - This provides automatic single-region redundancy for recoverable errors in seconds.
+  - For unrecoverable errors such as data corruption or user error, configure a <a href="https://docs.microsoft.com/en-us/azure/postgresql/concepts-backup" target="_blank" rel="noreferrer">point-in-time recovery</a> which would require database snapshots.
+  - Consider the overview of <a href="https://docs.microsoft.com/en-us/azure/postgresql/concepts-business-continuity" target="_blank" rel="noreferrer">BC with Azure Database for PostgreSQL - Single Server.</a>
+- Configure the PostgreSQL database in line with the <a href="https://docs.microsoft.com/en-us/azure/postgresql/concepts-backup" target="_blank" rel="noreferrer">Azure backup and restore guide</a>.
+- Keep up-to-date with the Azure Database for PostgreSQL <a href="https://cloud.google.com/sql/docs/" target="_blank" rel="noreferrer">documentation</a>.
+- Always ensure that event notifications and operational health are being <a href="https://docs.microsoft.com/en-us/azure/postgresql/concepts-monitoring" target="_blank" rel="noreferrer">actively monitored</a>.
+- Ensure that backups and snapshots are secure and restrict access to only required staff. Azure encrypted automatic database snapshots by default.
+- Use servers that can support up to 16 TB storage - bear in mind the <a href="https://docs.microsoft.com/en-us/azure/postgresql/concepts-pricing-tiers#storage" target="_blank" rel="noreferrer">supported regions</a> for these. This option provides eight days of coverage.
+- If using Azure Database for PostgreSQL, set the `azurerm_postgresql_server` resource's `backup_retention_days` to a suitable period inline with company policy and regulations. The recommended retention is the current maximum of 35 days and to perform a cost calculation of the cost of data retention. Use snapshots to retain DB copies for longer than this when necessary.
+- Test that the backups work by documenting the restore experience in your run book making edits as necessary to the backup procedure.
+
+</Tab>
+<Tab heading="GCP" group="GCP">
+
+In addition to the preceding general recommendations, consider the following GCP-specific recommendations.
+
+- Adopt Google CloudSQL best practices <a href="https://cloud.google.com/sql/docs/postgres/best-practices" target="_blank" rel="noreferrer">detailed here</a>. In particular, note that exports take longer to create because GCP creates an external file in Cloud Storage used to recreate your data. Exports are not affected if you delete the instance.
+- Use a <a href="https://cloud.google.com/sql/docs/postgres/high-availability" target="_blank" rel="noreferrer">multi-AZ HA regional deployment instance</a> so GCP automatically creates the primary DB instance in the _primary_ AZ and synchronously replicates the contents to the standby instance in the _secondary_ AZ. Failover is automatic. Refer to <a href="https://cloud.google.com/sql/docs/postgres/best-practices" target="_blank" rel="noreferrer">GCP's Replication in Cloud SQL documentation</a> for more information.
+- Keep up-to-date with the GCP CloudSQL <a href="https://aws.amazon.com/rds/details/backup/" target="_blank" rel="noreferrer">documentation</a>.
+- Always ensure that the database is being <a href="https://cloud.google.com/sql/docs/mysql/monitor-instance" target="_blank" rel="noreferrer">actively monitored</a>.
+- Ensure that backups and snapshots are secure and restrict access to only required staff.
+- GCP encrypts data in a Cloud SQL database instances <a href="https://cloud.google.com/sql/docs/postgres/cmek" target="_blank" rel="noreferrer">automatically</a>. The configuration of Google-managed encryption versus customer-managed encryption is down to site-specific policy.
+- If you use Terraform to deploy CloudSQL, in the <a href="https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/sql_database_instance" target="_blank" rel="noreferrer">`google_sql_database_instance`</a> resource:
+  - In the settings stanza, set `availability_type` to `REGIONAL` to enable high availability.
+  - Under the settings stanza, in the `backup_configuration` sub block, set `enabled` and `point_in_time_recovery_enabled` to `true`, set an appropriate `start_time` for backups to run.
+- Test that the backups work by documenting the restore experience in your run book making edits as necessary to the backup procedure.
+
+</Tab>
+<Tab heading="VMware" group="VMware">
+
+In addition to the preceding general recommendations, consider the following VMware-specific recommendations.
+
+- We understand that customers with private clouds are likely to have an established backup policy for databases already, possibly including a software partnership with a recognized backup vendor. In this case, for `external` mode deployments, we recommend you use these existing practices and tooling.
+- Refer to the PostgreSQL <a href="https://www.postgresql.org/docs/12/continuous-archiving.html" target="_blank" rel="noreferrer">continuous archiving and PITR</a> document to be able to replay write-ahead logs (WALs).
+- Establish automated snapshots in line with the established RPO.
+- Test that the backups work by documenting the restore experience in your run book making edits as necessary to the backup procedure.
+
+</Tab>
+</Tabs>
+
+## Redis cache
+
+Because the Redis instance serves as an active cache for Terraform Enterprise, you do not need to maintain backups of the caching layer.
+The core recommendation is to maintain intra-region redundancy in line with other recommendations in the HVDs.
+Assuming you are running identical service resources in the secondary region, failing over the cache involves starting use of the cache cluster in the secondary region which commences unpopulated.
+
+## Backup a `disk` deployment
+
+The backup approach for a `disk` operational mode deployment is simpler than for `active-active` mode because it involves a single machine and possibly its business continuity instance. Also, a `disk` deployment backup ensures the integrity of the machine and its attached data disk.
+
+<Tip>
+
+Read the [Introduction](#introduction), [Definitions](#definitions) and [Best Practices](#best-practices) sections of this guide before continuing this section.
+
+</Tip>
+
+We only recommend using `disk` mode when provisioning on private cloud where the added complexity of managing an on-premise database, S3-compatible storage and a Redis instance are not already supported in your environment.
+
+We do **not** recommend using `disk` deployments on public cloud since `external` and `active-active` modes provides better scalability. For <a href="https://12factor.net/dev-prod-parity" target="_blank" rel="noreferrer">Twelve Factor compliance</a>, use the same operational mode for both production and non-production.
+
+- Follow the advice in the preceding VMware tabs for information which is applicable to `disk` mode deployments as well.
+- Ensure to quiesce the database on `disk` instances before taking a database snapshot. Your backup software may or may not do this automatically.
+- `disk` mode uses a separate mountable volume (data disk) that can come in many flavors. To ensure data integrity, ensure the mountable volume has the following capabilities (in this order):
+  - Continuous volume replication
+  - Use of the same volume mounted on the original instance
+  - A backup restored to another volume
+- Make copies available in multiple data centers to confer DC-redundancy.
+
+<Tabs>
+<Tab heading="Isolated data disk" group="Isolated Disk">
+
+- If your primary `disk` node and a backup machine have their isolated data disks and maintain a mirroring strategy such as <a href="https://axkibe.github.io/lsyncd/" target="_blank" rel="noreferrer">`lsyncd`</a>, corruption on the primary volume replicates to the disk attached to the passive node. Maintain regular additional snapshots/backups of the data disk.
+
+</Tab>
+<Tab heading="Shared data disk" group="Shared Disk">
+
+- If your primary `disk` node and a backup machine share a SAN-provided data disk (or equivalent network device), use on-premise replication technologies to ensure that the SAN volume has inherent cross-data center resilience. Use additional regular backups to address issues of replicated corruption. Enable versioning if the resource that serves the mounted data disk has versioning.
+
+</Tab>
+</Tabs>
+
+<Note>
+
+ Do not start more than one `disk` mode instance against the same database simultaneously. If you are using a load balancer and a warm server with the data disk visible in the other data center, ensure Terraform Enterprise is not running on it while the primary is.
+
+</Note>
