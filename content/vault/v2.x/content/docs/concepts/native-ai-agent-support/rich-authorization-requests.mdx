@@ -1,0 +1,171 @@
+---
+layout: docs
+page_title: Rich Authorization Requests (RAR)
+description: >-
+  Learn about Rich Authorization Requests (RAR) in Vault, including path access constraints, capabilities, and parameter-level controls using allowed_parameters, denied_parameters, and required_parameters.
+---
+
+# Rich authorization requests (RAR)
+
+@include 'alerts/private-preview.mdx'
+
+@include 'alerts/enterprise-only.mdx'
+
+Rich Authorization Requests (RAR) provide fine-grained authorization constraints
+for OAuth 2.0 tokens used with Vault's [AI agent support](/vault/docs/concepts/native-ai-agent-support/overview).
+RAR embeds detailed access control rules directly in JWT tokens,
+enabling path-level and parameter-level restrictions beyond what standard ACL
+policies provide.
+
+[RFC 9396](https://datatracker.ietf.org/doc/html/rfc9396) defines RAR and
+extends OAuth 2.0 to support complex authorization scenarios. In Vault, RAR
+constraints work alongside ACL policies to narrow permissions without ever expanding
+them.
+
+## How RAR works with Vault
+
+When a client presents an OAuth JWT containing RAR constraints in the
+`authorization_details` claim, Vault evaluates both the entity's ACL policies
+and the RAR constraints. For a request to succeed:
+
+1. The request path and operation must match at least one RAR constraint
+2. The entity's ACL policies must permit the operation
+3. Any parameter-level constraints in the RAR must be satisfied
+
+RAR constraints can only restrict access, never granting permissions beyond
+what ACL policies allow.
+
+## RAR type: `vault:path_access`
+
+Vault supports the `vault:path_access` RAR type for fine-grained path and
+parameter authorization. Each authorization detail object in the
+`authorization_details` claim must conform to the following structure.
+
+### Required fields
+
+| Field | Type | Description |
+| ----- | ---- | ----------- |
+| `type` | string | Must be `vault:path_access` to indicate a Vault path access constraint. |
+| `path` | string | The Vault path the constraint applies to. Supports exact path matching only. |
+| `capabilities` | array of strings | List of capabilities permitted for the path. |
+
+The `capabilities` field uses the same capability values as [Vault ACL policies](/vault/docs/concepts/policies#capabilities), including `create`, `read`, `update`, `delete`, `list`, `sudo`, and `deny`. RAR capabilities work in conjunction with policy-level capabilities to determine final access permissions.
+
+### Optional fields
+
+| Field | Type | Description |
+| ----- | ---- | ----------- |
+| `allowed_parameters` | object | Map of parameter names to arrays of allowed values. Restricts which request parameters and values Vault permits. When specified, Vault allows only the listed parameters. |
+| `denied_parameters` | object | Map of parameter names to arrays of denied values. Blocks specific parameter values. Takes precedence over `allowed_parameters`. |
+| `required_parameters` | array of strings | List of parameter names that must be present in the request. Vault rejects requests missing any required parameter. |
+
+These parameter control fields work similarly to the parameter controls available in [Vault ACL policies](/vault/docs/concepts/policies#fine-grained-control). RAR parameter controls provide an additional layer of restriction on top of policy-level controls, enabling fine-grained authorization directly within OAuth tokens.
+
+## Interaction with ACL policies
+
+RAR constraints work alongside Vault ACL policies, not as a replacement. Both
+ACL policies and RAR constraints must permit an operation for the operation to succeed.
+
+### Policy-level parameter controls
+
+Vault ACL policies also support `allowed_parameters`, `denied_parameters`, and
+`required_parameters`. When both policy-level and RAR-level controls are present:
+
+- **RAR constraints narrow policy permissions**: RAR can only further restrict what policies allow
+- **Denied parameters take precedence**: When either policy or RAR denies a parameter, Vault denies the parameter
+- **Allowed parameters are intersected**: A parameter must be allowed by both policy and RAR
+- **Required parameters are combined**: All required parameters from both sources must be present
+
+**Example:**
+
+Policy:
+```hcl
+path "secret/data/*" {
+  capabilities = ["create", "update"]
+  allowed_parameters = {
+    "data" = []
+    "metadata" = []
+  }
+}
+```
+
+RAR constraint:
+```json
+{
+  "type": "vault:path_access",
+  "path": "secret/data/app-config",
+  "capabilities": ["create", "update"],
+  "allowed_parameters": {
+    "data": []
+  }
+}
+```
+
+**Result**: Vault allows only the `data` parameter (intersection of policy and RAR).
+The RAR constraint blocks the `metadata` parameter even though the policy
+allows the parameter.
+
+## Multiple RAR constraints
+
+A JWT can include multiple authorization detail objects in the
+`authorization_details` array. Vault evaluates each constraint independently and
+allows the request when the request matches at least one constraint that permits the
+operation.
+
+**Example with multiple constraints:**
+
+```json
+{
+  "authorization_details": [
+    {
+      "type": "vault:path_access",
+      "path": "database/creds/readonly-role",
+      "capabilities": ["read"]
+    },
+    {
+      "type": "vault:path_access",
+      "path": "pki/issue/my-role",
+      "capabilities": ["create", "update"],
+      "required_parameters": ["common_name"]
+    },
+    {
+      "type": "vault:path_access",
+      "path": "secret/data/app-*",
+      "capabilities": ["read", "list"],
+      "denied_parameters": {
+        "version": ["1"]
+      }
+    }
+  ]
+}
+```
+
+The JWT above allows:
+- Reading from `database/creds/readonly-role`
+- Creating or updating at `pki/issue/my-role` (with `common_name` required)
+- Reading or listing from `secret/data/app-*` paths (except version 1)
+
+## Making RAR optional
+
+By default, Vault requires the `authorization_details` claim in OAuth JWTs used
+with the Agent Registry. Operators can make RAR optional in two ways:
+
+1. **Per OAuth resource server profile**: Set `optional_authorization_details` to `true` on the
+   [OAuth resource server configuration](/vault/api-docs/system/config-oauth-resource-server)
+2. **Per agent registration**: Set `optional_authorization_details` to `true` on the
+   [Agent Registry record](/vault/api-docs/secret/agent-registry)
+
+When RAR is optional, Vault permits authentication without the
+`authorization_details` claim and uses only the entity's ACL policies for
+authorization.
+
+For more information about RAR enforcement modes and configuration options, see
+[RAR enforcement](/vault/docs/concepts/native-ai-agent-support/overview#rar-enforcement)
+in the AI agent support overview.
+
+## Related resources
+
+- [AI agent support](/vault/docs/concepts/native-ai-agent-support/overview)
+- [Agent Registry API](/vault/api-docs/secret/agent-registry)
+- [OAuth Resource Server API](/vault/api-docs/system/config-oauth-resource-server)
+- [RFC 9396: OAuth 2.0 Rich Authorization Requests](https://datatracker.ietf.org/doc/html/rfc9396)
