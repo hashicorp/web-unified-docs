@@ -4,11 +4,19 @@
  */
 
 import { parseDirectiveBlocks } from './ast-utils.mjs'
-import { processVaultBlock } from './vault-processor.mjs'
-import {
-	processTFCBlock,
-	processTFEnterpriseBlock,
-} from './terraform-processor.mjs'
+import { processOnlyDirective } from './only-processor.mjs'
+import { processVersionDirective } from './version-processor.mjs'
+
+/**
+ * Maps a directive tag (the text before the colon in a BEGIN/END comment) to
+ * the product slug the directive is scoped to. To support a new product, add a
+ * tag here - no new processor file is required.
+ */
+export const EXCLUSION_DIRECTIVE_TAGS = {
+	Vault: 'vault',
+	TFC: 'terraform-docs-common',
+	TFEnterprise: 'terraform-enterprise',
+}
 
 /**
  * Content exclusion transform with explicit if-block routing
@@ -49,26 +57,26 @@ export function transformExcludeContent(options = {}) {
 }
 
 /**
- * Route directive blocks to appropriate processors with if-blocks
+ * Route directive blocks to the generic processors based on the directive shape
  */
 function routeAndProcessBlock(block, tree, options) {
-	// Parse the directive: "Vault:>=v1.21.x" -> product="Vault", directive=">=v1.21.x"
-	const [product, ...rest] = block.content.split(':')
+	// Parse the directive: "Vault:>=v1.21.x" -> tag="Vault", directive=">=v1.21.x"
+	const [tag, ...rest] = block.content.split(':')
 	const directive = rest.join(':') // Handle edge cases like "TFEnterprise:only name:something"
 
-	const directiveProcessingFuncs = {
-		Vault: processVaultBlock,
-		TFC: processTFCBlock,
-		TFEnterprise: processTFEnterpriseBlock,
+	// Resolve the tag to a product slug
+	const targetSlug = EXCLUSION_DIRECTIVE_TAGS[tag]
+	if (!targetSlug) {
+		throw new Error(
+			`Unknown directive product: "${tag}" in block "${block.content}" at lines ${block.startLine}-${block.endLine}. ` +
+				`Expected one of: ${Object.keys(EXCLUSION_DIRECTIVE_TAGS).join(', ')}`,
+		)
 	}
 
-	// Explicit routing
-	if (product in directiveProcessingFuncs) {
-		directiveProcessingFuncs[product](directive, block, tree, options)
+	// Dispatch by directive shape: "only" directives vs version directives
+	if (directive === 'only' || directive.startsWith('only')) {
+		processOnlyDirective(targetSlug, directive, block, tree, options)
 	} else {
-		// Error for unknown products
-		throw new Error(
-			`Unknown directive product: "${product}" in block "${block.content}" at lines ${block.start}-${block.end}. Expected: Vault, TFC, or TFEnterprise`,
-		)
+		processVersionDirective(targetSlug, directive, block, tree, options)
 	}
 }
