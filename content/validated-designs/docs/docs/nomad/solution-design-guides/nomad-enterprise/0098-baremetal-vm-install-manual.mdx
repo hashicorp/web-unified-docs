@@ -1,0 +1,431 @@
+---
+title: On-premises deployment
+description: Deploy Nomad Enterprise on bare metal or virtual machines with manual installation and configuration steps.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-06-09T20:55:44.000Z
+last_modified: 2026-06-09T20:55:44.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Manual installation of Nomad Enterprise
+
+This guide provides detailed instructions for deploying Nomad Enterprise in on-premises environments, covering both virtual machine and bare metal installations. Before proceeding, ensure you have reviewed the <a href="/validated-designs/nomad-solution-design-guides-nomad-enterprise/architecture" target="_blank">Nomad Architecture</a> and <a href="https://developer.hashicorp.com/nomad/docs/deploy/production/requirements" target="_blank">Deployment Requirements</a>.
+
+## Preparation
+
+### Server requirements
+
+For Nomad servers, hardware requirements depends on the size of the cluster and the rate of change. As a rule of thumb, we recommend the following specifications based on cluster size.
+
+| Cluster Size | CPU Cores | Memory | Storage |
+|--------------|-----------|---------|-------------|
+| Small (&lt; 100 clients) | 4-8 cores | 16-32GB | 50GB SSD |
+| Medium (100-500 clients) | 8-16 cores | 32-64GB | 100GB SSD |
+| Large (500+ clients) | 16-32 cores | 64-128GB | 200GB+ SSD |
+
+Nomad servers can be IOPS intensive as it writes chunks of data from memory to storage. Ensure that the storage subsystem can handle the write load (SSDs are a must), and be sure to monitor disk latency and throughput.
+
+For the continued availability of the Nomad cluster, use 5-6 servers in the cluster. Nomad uses the Raft consensus algorithm, so ensure that there is always a quorum. The best way to achieve this depends a bit on the available network and datacenter topology.
+
+- If there are more than 3 failure domains (datacenters close to one another (&lt; 10ms latency), independent datacenter rooms or racks, etc), deploy 6 servers and make use of the <a href="/validated-designs/nomad-solution-design-guides-nomad-enterprise/architecture#redundancy-zones" target="_blank">Redundancy Zones</a> feature, which ensures that there are the correct number of voting servers in each failure domain, and increases the fault tolerance and performance of the cluster.
+- If there only 2 failure domains (two datacenters), where the system cannot maintain quorum, consider either deploying the servers in only one of the failure domains, or deploying two clusters of 5 servers each, <a href="https://developer.hashicorp.com/nomad/docs/deploy/clusters/federate-regions" target="_blank">federated together</a>.
+- If there are not any clear failure domains (single datacenter), deploy 5 servers.
+
+### Client requirements
+
+Client hardware requirements vary based on workload types. Generally, unless you are running in an _edge_ scenario, avoid having small client sizes. As a rule of thumb, aim for at least 4 cores and 8GB of memory per client, adapting as needed based on workload requirements and distribution. Connect Nomad clients to the servers in any datacenter, even those connected over unreliable networks (in which case, tune the behavior of workloads using the <a href="https://developer.hashicorp.com/nomad/docs/job-specification/disconnect" target="_blank">disconnect</a> block).
+
+<tip>
+
+Nomad clients can run on virtual machines or bare metal servers, depending on your organization's requirements. Start by running clients in virtual machines, and as the number of workloads increases, consider moving to bare metal for better performance, resource utilization and to avoid having two orchestrators trying to optimize the use of the same underlying hardware.
+
+</tip>
+
+<tip>
+
+Consider reserving resources on the hypervisor level for VM-based Nomad clients to ensure available physical capacity for assigned workloads.
+
+</tip>
+
+
+### Network requirements
+
+Nomad requires a few ports for internal communication, bidirectionally. The defaults for those are:
+
+| Port | Name | Purpose | Protocol |
+| - | -- | --- | -- |
+| 4646 | HTTP API | Used by clients and servers to serve the HTTP API | TCP only |
+| 4647 | RPC | Used for internal RPC communication between client agents and servers, and for inter-server traffic | TCP only    |
+| 4648 | Serf WAN | Used by servers to gossip both over the LAN and WAN to other servers. Not required for Nomad clients to reach this address | TCP and UDP |
+
+For optimal performance, ensure the following.
+- Low-latency connectivity between servers (&lt; 10&nbsp;ms round-trip time)
+- Sufficient bandwidth for job artifacts and container images
+- Network segmentation between server and client traffic
+
+### Certificates
+
+Create a standard X.509 certificate for the Nomad servers. Follow your organization’s process for creating a new certificate that matches the DNS record you intend to use for accessing Nomad. This guide assumes the conventions and using self-signed certificates from the <a href="/validated-designs/nomad-solution-design-guides-nomad-enterprise/architecture" target="_blank">Nomad Architecture</a> and <a href="https://developer.hashicorp.com/nomad/docs/secure/traffic" target="_blank">Enable TLS tutorial</a>.
+
+You need three files.
+
+1. CA Public certificate (`nomad-agent-ca.pem`)
+2. Server node certificate's private key: (`global-server-nomad-key.pem`)
+3. Server node public certificate: (`global-server-nomad.pem`)
+
+Distribute these certificates to the server nodes (covered below). They are used to secure communications between Nomad clients, servers, and the API.
+
+Generate a fourth certificate and private key used later in this guide for clients: `global-cli-nomad.pem` and `global-cli-nomad-key.pem`. The `global-` prefix for the certificate and key assume these are for multi-region environments. You are able to generate certificates on a per-region basis, however, in this guide, we are using a single certificate and key for use across all clusters globally.
+
+<Note>
+
+Ensure the certificate's Common Name (CN) or Subject Alternative Names (SANs) include the DNS names you will use to access Nomad, such as `nomad.yourdomain.com`. If you are using separate DNS names for server-to-server communication, include these in the SANs as well.
+
+</Note>
+
+While the TLS configuration included in this guide provides a production ready configuration, key management and rotation is a complex subject not covered by this guide. <a href="https://developer.hashicorp.com/nomad/tutorials/integrate-vault/vault-pki-nomad" target="_blank">Vault PKI integration with Nomad</a> is the suggested solution for key generation and management.
+
+### Load balancing the API and UI
+
+Load balance the UI and API of the servers (either for human/machine access, CI/CD pipeline consumption, or for initial discovery to join the cluster), you can use any load balancer, in layer 4 or layer 7 mode (caveat: the web UI's `exec` into an allocation uses web sockets, so if you need it for debugging purposes, your load balancer must allow for that). Use the `/v1/agent/health` endpoint for health checking. Terminate TLS at the load balancer to enable full mTLS with client verification without impacting human users connecting to the web UI.
+
+### Auto-join
+
+Use the `server_join` configuration option to specify the initial set of Nomad servers to join (for both servers to form the cluster, and clients to join it). This can be a list of IP addresses or DNS names of the servers or a load balancer in front of them, or a <a href="https://developer.hashicorp.com/nomad/docs/configuration/server_join#cloud-auto-join" target="_blank">cloud auto-join configuration</a>. There are cloud auto-join providers for a number of on-premises orchestrators (such as VMware vSphere, OpenStack), as well as mDNS. At least one of the provided IPs/DNS names/cloud auto-join providers must be reached for the Nomad agent to join the cluster. Once this happens, all other servers are automatically discovered, so it is not an issue if some of the servers are unreachable.
+
+Servers:
+```hcl
+server {
+  enabled          = true
+  bootstrap_expect = 3
+  server_join {
+    retry_join     = [ "1.1.1.1", "2.2.2.2" ]
+  }
+}
+```
+
+Clients:
+```hcl
+client {
+    enabled = true
+    server_join {
+        retry_join     = [ "1.1.1.1", "2.2.2.2" ]
+    }
+}
+```
+### Obtain the Nomad Enterprise license file
+
+Obtain the Nomad Enterprise License File from your HashiCorp account team. This file contains a license key unique to your environment. Name the file `nomad.hclic`.
+Keep this file on hand, as it is needed later in the installation process.
+
+### Download and install the Nomad command-line tool
+
+To interact with your Nomad cluster, install the Nomad binary. Follow the steps for your OS on the <a href="https://developer.hashicorp.com/nomad/install" target="_blank">Install Nomad</a> documentation page.
+
+## Deployment process
+### Infrastructure bootstrapping
+
+Create the necessary infrastructure for your Nomad cluster. Use the most appropriate tooling such as bare metal machines via PXE boot, or an automated provisioning system such as Canonical MaaS or Tinkerbell. For virtual machines, use Terraform. Ensure that the servers have the necessary network connectivity and storage available, and set up any related infrastructure (such as load balancers, firewall, and switch configurations, DNS entries, etc.)
+
+Automate the following steps using your preferred configuration management and image management tools ensuring consistency and repeatability.
+
+### Download and install Nomad
+
+<Tabs>
+<Tab heading="Manual" group="manual">
+
+```shell
+PRODUCT='nomad'
+VERSION='1.9.1+ent'
+OS_ARCH="$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | tr '[:upper:]' '[:lower:]')" # e.g. linux_x86_64
+hashicorp_key_id='34365D9472D7468F'
+hashicorp_key_fingerprint='C874011F0AB405110D02105534365D9472D7468F'
+curl -#Ok --remote-name https://www.hashicorp.com/.well-known/pgp-key.txt
+gpg --import pgp-key.txt
+gpg --sign-key ${hashicorp_key_id}
+gpg --fingerprint --list-signatures "HashiCorp Security" | tr -d ' ' | grep -q "${hashicorp_key_fingerprint}"
+curl -#Ok --remote-name https://releases.hashicorp.com/"${PRODUCT}"/"${VERSION}"/"${PRODUCT}"_"${VERSION}"_"${OS_ARCH}".zip
+curl -#Ok --remote-name https://releases.hashicorp.com/"${PRODUCT}"/"${VERSION}"/"${PRODUCT}"_"${VERSION}"_SHA256SUMS
+curl -#Ok --remote-name https://releases.hashicorp.com/"${PRODUCT}"/"${VERSION}"/"${PRODUCT}"_"${VERSION}"_SHA256SUMS.sig
+gpg --verify "${PRODUCT}"_"${VERSION}"_SHA256SUMS.sig "${PRODUCT}"_"${VERSION}"_SHA256SUMS
+[[ "$(sha256sum ${PRODUCT}_${VERSION}_${OS_ARCH}.zip | awk '{print $1}')" != "$(grep ${PRODUCT}_${VERSION}_${OS_ARCH}.zip "${PRODUCT}"_"${VERSION}"_SHA256SUMS | awk '{print $1}')" ]] && echo "ALERT: VERIFICATION FAILED" || echo "DOWNLOAD VERIFICATION SUCCEEDED - PLEASE PROCEED TO UNZIP AND MOVE INTO PLACE"  # stop if verification fails
+unzip "${PRODUCT}"_"${VERSION}"_"${OS_ARCH}".zip
+sudo mv "${PRODUCT}" /usr/local/bin/
+sudo chmod -h 0755 /usr/local/bin/nomad
+```
+
+</Tab>
+
+<Tab heading="Package repository" group="package">
+
+Follow the instructions in the <a href="https://developer.hashicorp.com/nomad/install" target="_blank">documentation</a> page to install Nomad from the official HashiCorp package repository for your OS.
+
+</Tab>
+</Tabs>
+
+### Create necessary directories
+
+```
+sudo mkdir -p /opt/nomad/data
+sudo mkdir -p /etc/nomad.d
+sudo mkdir -p /etc/nomad.d/tls
+```
+
+###  Copy TLS certificates
+
+Copy your TLS certificates to `/etc/nomad.d/tls/`.
+
+```
+sudo scp nomad-agent-ca.pem global-server-nomad-key.pem global-server-nomad.pem ubuntu@server-machine:/etc/nomad.d/tls/
+```
+
+### Copy license file
+
+```
+echo "02MV4UU43BK5..." >> /etc/nomad.d/license.hclic
+```
+
+### Create gossip encryption key
+
+```
+nomad operator gossip keyring generate
+```
+
+Save the output of this key to use in the configuration file.
+
+<Note>
+
+The `nomad operator gossip keyring generate` command returns 16 bytes. However, Nomad supports gossip encryption keys of 32 bytes as well. Supplying your own 32 byte key enables AES-256 mode, where supplying a 16 byte key enables AES-128 mode.
+
+</Note>
+
+### Create Nomad configuration file
+
+Create `/etc/nomad.d/nomad.hcl` with the following content or supply your own. The example below includes:
+- <a href="/validated-designs/nomad-operating-guides-nomad-enterprise/automated-upgrades" target="_blank">Autopilot</a> which handles automated upgrades
+- <a href="/validated-designs/nomad-solution-design-guides-nomad-enterprise/architecture#redundancy-zones" target="_blank">Redundancy zones</a>: Nomad uses these values to partition the servers by redundancy zone/failure domain, and aims to keep one voting server per zone. Extra servers in each zone stay as non-voters on standby and Nomad promotes these the respective active voter leaves or dies.
+- <a href="https://developer.hashicorp.com/nomad/docs/configuration/tls" target="_blank">TLS:</a> enables TLS between nodes and for the API. At scale, we recommend using <a href="https://www.vaultproject.io/" target="_blank">HashiCorp Vault</a>, however for starting out, it is acceptable to use signed certificates copied to the machine.
+
+```hcl
+data_dir = "/opt/nomad/data"
+bind_addr = "0.0.0.0" #CHANGE ME to listen only on the required IPs
+
+server {
+  enabled = true
+  bootstrap_expect = 3
+  server_join {
+    retry_join     = [ "1.1.1.1", "2.2.2.2" ] # CHANGE ME
+  }
+  redundancy_zone = "dc1-rack-b51" # CHANGE ME
+  license_path = "/etc/nomad.d/license.hclic"
+  encrypt = "YOUR-GOSSIP-KEY" #Paste your key from the above "Create Gossip Encryption Key" step
+}
+
+acl {
+  enabled = true
+}
+
+tls {
+  http = true
+  rpc  = true
+  ca_file   = "/etc/nomad.d/tls/nomad-agent-ca.pem"
+  cert_file = "/etc/nomad.d/tls/global-server-nomad-key.pem"
+  key_file  = "/etc/nomad.d/tls/global-server-nomad.pem"
+}
+
+autopilot {
+  cleanup_dead_servers      = true
+  last_contact_threshold    = "200ms"
+  max_trailing_logs         = 250
+  server_stabilization_time = "10s"
+  enable_redundancy_zones   = true
+  disable_upgrade_migration = false
+  enable_custom_upgrades    = false
+}
+```
+
+<tip>
+
+If you are using a <a href="https://developer.hashicorp.com/nomad/docs/configuration/server#bootstrapping-with-a-custom-scheduler-config" target="_blank">non-default scheduler configuration</a>, configure these settings and then start Nomad for the first time. Not doing this requires subsequent configuration using <a href="https://developer.hashicorp.com/nomad/api-docs/operator/scheduler#update-scheduler-configuration" target="_blank">the API</a>.
+
+</tip>
+
+### Starting Nomad
+
+<Tabs>
+<Tab heading="Manual" group="manual">
+
+Create the Nomad service file:
+
+```
+sudo nano /etc/systemd/system/nomad.service
+```
+
+```
+[Unit]
+Description=Nomad
+Documentation=https://www.nomadproject.io/docs/
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+
+# Nomad servers should be run as the nomad user.
+# Nomad clients should be run as root
+User=root
+Group=root
+
+ExecReload=/bin/kill -HUP $MAINPID
+ExecStart=/usr/local/bin/nomad agent -config /etc/nomad.d
+KillMode=process
+KillSignal=SIGINT
+LimitNOFILE=65536
+LimitNPROC=infinity
+Restart=on-failure
+RestartSec=2
+
+TasksMax=infinity
+OOMScoreAdjust=-1000
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable and start the Nomad service:
+
+```
+sudo systemctl enable nomad
+sudo systemctl start nomad
+```
+</Tab>
+
+<Tab heading="Package" group="package">
+
+Enable and start the Nomad service:
+
+```
+sudo systemctl enable nomad
+sudo systemctl start nomad
+```
+
+</Tab>
+
+</Tabs>
+
+### Validate the cluster
+
+Verify you have the expected amount of servers with the following commands.
+```
+nomad server members
+nomad operator raft list-peers
+```
+
+If you are running into issues with your cluster bootstrapping or the Nomad agent starting, you can view journal logs to reveal any errors:
+
+```
+sudo systemctl status nomad
+sudo journalctl -xe
+```
+
+Typically issues are due to invalid configuration entries within `nomad.hcl`, certificate, or networking issues where the nodes cannot communicate with each other.
+
+### Initialize ACL system
+
+Log into one of your servers and run the following commands:
+
+Set environment variables
+```
+export NOMAD_ADDR=https://127.0.0.1:4646
+export NOMAD_CACERT=/etc/nomad.d/tls/nomad-agent-ca.pem
+export NOMAD_CLIENT_CERT=/etc/nomad.d/tls/global-server-nomad.pem
+export NOMAD_CLIENT_KEY=/etc/nomad.d/tls/global-server-nomad-key.pem
+```
+
+Bootstrap the ACL system. Do this on only one of the servers in the cluster. Nomad syncs ACLs across all cluster nodes.
+```
+nomad acl bootstrap
+```
+
+Save the accessor ID and Secret ID and follow the <a href="/validated-designs/nomad-operating-guides-nomad-enterprise/identity-access-management" target="_blank">Identity and Access Management</a> section of the Nomad Operating Guide for more information on ACLs and post installation tasks.
+
+### Interact with your Nomad cluster
+
+```
+export NOMAD_ADDR=https://nomad-lb
+export NOMAD_TOKEN=YourSecretID
+export NOMAD_CACERT=./nomad-agent-ca.pem
+export NOMAD_CLIENT_CERT=./global-cli-nomad.pem
+export NOMAD_CLIENT_KEY=./global-cli-nomad-key.pem
+nomad -autocomplete-install && complete -C /usr/bin/nomad nomad
+```
+
+### Client installation
+The client installation process is similar to the server installation, with a few key differences in the configuration. Nomad clients are responsible for running tasks and jobs scheduled by the Nomad servers. They register with the server cluster, receive work assignments, and execute tasks.
+
+#### Client TLS configuration
+Nomad clients must use a different certificate than the server nodes. From the same directory as the CA certificate you generated during the server installation steps:
+
+1. `nomad tls cert create -client`
+
+	This generates the following.
+
+	- `global-client-nomad.pem` (Client certificate)
+	- `global-client-nomad-key.pem` (Client private key)
+
+1. Copy certificates to the client machines using this command.
+
+`scp nomad-agent-ca.pem global-client-nomad.pem global-client-nomad-key.pem ubuntu@client-machine:/etc/nomad.d/tls/ `
+
+Remember to keep your private keys secure and implement proper certificate management practices, including regular rotation and secure distribution of certificates to your Nomad clients.
+
+In your `nomad.hcl` file:
+
+```hcl
+# Base configuration
+data_dir = "/opt/nomad/data"
+bind_addr = "0.0.0.0" #CHANGE ME to listen only on the required IPs
+
+# Client configuration
+client {
+  enabled = true
+
+  # Server join configuration
+    server_join {
+        retry_join     = [ "1.1.1.1", "2.2.2.2" ]
+    }
+
+  # Node pool configuration
+  # Optionally configure a node pool for this client to join
+  # node_pool = "general"
+}
+
+# Security configuration
+tls {
+  http = true
+  rpc  = true
+  verify_server_hostname = true
+  ca_file   = "/etc/nomad.d/tls/nomad-agent-ca.pem"
+  cert_file = "/etc/nomad.d/tls/client.pem"
+  key_file  = "/etc/nomad.d/tls/client-key.pem"
+}
+
+# Telemetry configuration
+telemetry {
+  publish_allocation_metrics = true
+  publish_node_metrics = true
+  prometheus_metrics = true
+}
+
+```
+
+## Post-installation tasks
+
+After installation, perform these tasks to ensure everything worked as expected:
+
+Verify cluster health:
+```bash
+nomad server members #lists all servers
+nomad node status #lists all clients
+```
+
+For day 2 activities, such as observability and backups, consult the <a href="/validated-designs/nomad-operating-guides-nomad-enterprise" target="_blank">Nomad Operating Guide</a>.

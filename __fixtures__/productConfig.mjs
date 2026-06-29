@@ -456,6 +456,15 @@ export const PRODUCT_CONFIG = {
 	//  versionedDocs: true,
 	// 	websiteDir: 'website',
 	// },
+	'validated-designs': {
+		assetDir: 'img',
+		contentDir: 'docs',
+		dataDir: 'data',
+		productSlug: 'validated-designs',
+		semverCoerce: semver.coerce,
+		versionedDocs: false,
+		websiteDir: 'website',
+	},
 	'well-architected-framework': {
 		/**
 		 * ✅ Initial migration attempt: SEEMS TO WORK
