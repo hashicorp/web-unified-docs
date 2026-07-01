@@ -116,6 +116,15 @@ export const PRODUCT_CONFIG = {
 		versionedDocs: false,
 		websiteDir: '.',
 	},
+	'hcp-vagrant': {
+		assetDir: 'img',
+		contentDir: 'docs',
+		dataDir: 'data',
+		productSlug: 'vagrant',
+		semverCoerce: semver.coerce,
+		versionedDocs: false,
+		websiteDir: 'website',
+	},
 	nomad: {
 		/**
 		 *  🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
