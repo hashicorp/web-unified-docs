@@ -1,0 +1,184 @@
+---
+page_title: SCIM user lifecycle
+description: >-
+  Learn about user lifecycle operations from your identity provider when SCIM
+  2.0 provisioning is configured in Terraform Enterprise.
+---
+
+# SCIM user lifecycle
+
+This topic describes how Terraform Enterprise manages user lifecycle through SCIM 2.0 provisioning. When you enable SCIM, your identity provider (IdP) becomes the source of truth for user management, automatically synchronizing user creation, updates, and deactivation with Terraform Enterprise.
+
+## Overview
+
+SCIM (System for Cross-domain Identity Management) 2.0 enables your identity provider to automatically manage the complete user lifecycle in Terraform Enterprise:
+
+- **Create**: When a new employee is assigned to the Terraform Enterprise application in your IdP, SCIM automatically creates their account. No manual account creation is required.
+- **Update**: When user attributes change in your IdP (such as email or username), SCIM synchronizes those changes to Terraform Enterprise in real-time.
+- **Deactivate**: When an employee leaves or is removed from the application in your IdP, SCIM immediately revokes their access by suspending their account.
+
+This automation eliminates manual user management overhead and ensures that terminated employees cannot retain access to Terraform Enterprise.
+
+## User lifecycle operations
+
+Terraform Enterprise supports the following SCIM user operations. All operations use the `/scim/v2/Users` endpoint.
+
+### Create user
+
+When your IdP provisions a new user, Terraform Enterprise performs the following actions:
+
+1. Creates a user record or links an existing user with the same email address.
+1. Creates a SCIM identity record that links the user to your IdP.
+1. Returns a unique SCIM `id` that your IdP uses for all subsequent operations on this user.
+
+The new user has no team memberships or organization access by default. Team membership is managed separately through [SCIM group provisioning](/terraform/enterprise/scim/groups).
+
+### Update user
+
+When user attributes change in your IdP, Terraform Enterprise updates the corresponding user record. Supported updates include:
+
+- Email address changes
+- SCIM `userName` changes
+- External ID changes
+- Active status changes
+
+Updates are applied synchronously and take effect immediately.
+
+Terraform Enterprise supports the following PATCH behaviors for users:
+
+- `Replace` on supported user attributes, either as a targeted operation with a `path` or without a `path` when `value` is an object
+- `Add` on single-valued supported user attributes, which Terraform Enterprise treats the same as `Replace`
+- `Remove` for `externalId`
+
+Terraform Enterprise ignores attempts to clear required user attributes such as `userName`, `emails`, or `active`. A `Remove` operation without a `path` is ignored.
+
+### Deactivate user
+
+When your IdP sets `active=false` for a user or removes them from the application, Terraform Enterprise suspends the user by setting a `suspended_at` timestamp. Suspended users:
+
+- Cannot log in to Terraform Enterprise
+- Retain their user record and historical data
+- Can be reactivated if the IdP provisions them again with `active=true`
+
+If the suspended user was a site administrator through SCIM, Terraform Enterprise revokes that administrative access when the user is suspended.
+
+### Delete user
+
+When your IdP sends a delete request, Terraform Enterprise deprovisions the user. This action:
+
+- Deletes the SCIM identity record that links the user to the IdP.
+- Suspends the Terraform Enterprise user record.
+- Revokes site administrator access if the user had it through SCIM.
+
+Terraform Enterprise does not delete the underlying Terraform Enterprise user record through SCIM delete.
+
+## SCIM attribute mapping
+
+Terraform Enterprise maps SCIM attributes to internal user fields as follows:
+
+| SCIM attribute | Terraform Enterprise field | Description |
+|----------------|---------------------------|-------------|
+| `userName` | `scim_username` | The IdP-managed username stored with the SCIM identity. Must be unique across the instance. |
+| `emails[primary=true].value` | `email` | The user's primary email address. Must be unique across the instance. |
+| `active` | `suspended_at` | When `active=false`, sets `suspended_at` to the current timestamp. When `active=true`, clears `suspended_at`. |
+| `externalId` | `scim_external_id` | The IdP-assigned identifier for the user. Used by some IdPs (such as Microsoft Entra ID) to look up users. |
+
+Terraform Enterprise generates the internal Terraform Enterprise `username` value when the user record is created. SCIM `userName` does not become the Terraform Enterprise username.
+
+Terraform Enterprise does not store SCIM name fields (`givenName`, `familyName`, `middleName`). These attributes are accepted in requests but not persisted.
+
+## Linking existing users
+
+If an incoming SCIM user has the same email address as an existing Terraform Enterprise user, Terraform Enterprise links that existing user to SCIM management, as long as the incoming `userName` is not already owned by a different SCIM identity.
+
+After Terraform Enterprise creates the SCIM identity link, later updates to that user come from the IdP. Terraform Enterprise keeps a single underlying user record.
+
+If Terraform Enterprise does not find a matching email address, it creates a new user record and generates the local Terraform Enterprise `username` separately from the SCIM `userName`.
+
+Terraform Enterprise stores the original `userName` sent by the IdP in the `scim_username` field. This enables the IdP to query by its original username even when the Terraform Enterprise username differs.
+
+## SCIM-managed versus manually-managed users
+
+Users in Terraform Enterprise can be either SCIM-managed or manually-managed. The management type affects what operations are allowed.
+
+### Identifying SCIM-managed users
+
+A note on surfaces: the indicators below appear on Terraform Enterprise JSON:API user responses, not on the public SCIM `/scim/v2/Users` response shape.
+
+A user is SCIM-managed if they have an associated SCIM identity record. You can identify SCIM-managed users through the following indicators:
+
+- Terraform Enterprise JSON:API user responses include `scim-username` and `scim-updated-at` attributes
+- The user was created or linked through SCIM provisioning
+
+### Behavior when SCIM is enabled
+
+When SCIM is enabled:
+
+- Users provisioned through SCIM become SCIM-managed
+- Existing manually-created users remain manually-managed until provisioned through SCIM
+- If an IdP provisions a user whose email matches an existing manual user, that user becomes SCIM-managed
+- Manually-managed users can still be created directly in Terraform Enterprise for emergency access
+
+### Transitioning from manual to SCIM management
+
+When you enable SCIM, existing users are not automatically converted. A user becomes SCIM-managed only when:
+
+- The IdP creates the user through SCIM
+- The IdP provisions a user whose email matches an existing user
+
+## Site administrator provisioning
+
+You can provision site administrators through SCIM using a designated SCIM group.
+
+Configure the `site-admin-group-scim-id` setting in your SCIM configuration to specify which SCIM group Terraform Enterprise uses for site administrator provisioning. For the full site admin group behavior, refer to [Manage SCIM provisioning](/terraform/enterprise/scim/manage#site-admin-group-behavior).
+
+-> **Note:** When SCIM is enabled, site administrator provisioning through SAML attributes is disabled. All site administrator management must go through the configured site admin group.
+
+For more information about site administrators, refer to [Site Administration Permissions](/terraform/enterprise/users-teams-organizations/users#site-admin-permissions).
+
+## Blocked operations for SCIM-managed users
+
+To maintain the IdP as the single source of truth, certain operations are blocked for SCIM-managed users. Administrators must make changes through the IdP rather than directly in Terraform Enterprise.
+
+### Account API
+
+A note on surfaces: these are Terraform Enterprise JSON:API endpoints, not the public SCIM `/scim/v2/*` provisioning endpoints.
+
+| Endpoint | Method | Blocked | Reason |
+|----------|--------|---------|--------|
+| `/api/v2/account/details` | GET | No | Read operations are always allowed. |
+| `/api/v2/account/update` | PATCH | Yes (403) | Identity attributes are managed by SCIM. |
+| `/api/v2/account/password` | PATCH | Yes (403) | Identity and access state are managed through SCIM and SSO configuration. |
+
+### Users API
+
+| Endpoint | Method | Blocked | Reason |
+|----------|--------|---------|--------|
+| `/api/v2/users/:user_id` | GET | No | Read operations are always allowed. |
+
+### Admin UI actions
+
+| Action | Blocked | Reason |
+|--------|---------|--------|
+| Suspend user | Yes | User lifecycle is managed by SCIM. |
+| Anonymize user | Yes | User lifecycle is managed by SCIM. |
+| Delete user | Yes | User lifecycle is managed by SCIM. |
+
+### Operations that remain available
+
+The following operations remain available for SCIM-managed users because they control Terraform Enterprise-specific functionality rather than identity:
+
+- **User tokens API** (`/api/v2/users/:user_id/authentication-tokens`): Users can create, list, and revoke their own API tokens for programmatic access to Terraform Enterprise.
+
+SCIM controls _who_ the user is (identity attributes like email and username) and whether the user is active. It does not control _how_ the user authenticates to Terraform Enterprise APIs.
+
+## SAML and SCIM username handling
+
+When SCIM is enabled, Terraform Enterprise stops synchronizing SCIM-managed user identity from SAML assertions. Updates to SCIM `userName` must come through SCIM. This ensures SCIM remains the single source of truth for SCIM-managed user identity attributes.
+
+## API reference
+
+Use the following public API references for SCIM user provisioning:
+
+- Refer to the [Public SCIM API](/terraform/enterprise/api-docs/scim) for authentication, discovery endpoints, pagination, supported filters, and shared rate limits.
+- Refer to the [SCIM Users API](/terraform/enterprise/api-docs/scim/users) for `/scim/v2/Users` request and response details.

@@ -1,155 +1,297 @@
-# Well-Architected Framework Templates Guide
+# Well-Architected Framework Documentation Guide
 
-This folder contains templates, documentation standards, and AI assistant configurations for creating and maintaining HashiCorp Well-Architected Framework (WAF) documentation.
+This folder contains templates, standards, reference files, and automated skills for creating and maintaining HashiCorp Well-Architected Framework (WAF) documentation.
 
-## Overview
+**Last updated:** January 30, 2026
+**Recent changes:** Consolidated quick-reference files and streamlined documentation structure
 
-The templates folder provides a complete system for creating consistent, high-quality WAF content that serves both decision-makers and implementers. These files work together to establish writing standards, content structure, and review processes.
+---
 
-## File Descriptions
+## Table of Contents
 
-### Content Templates
+- [Quick Start](#quick-start)
+- [File Structure](#file-structure)
+- [Common Workflows](#common-workflows)
+- [Skills Reference](#skills-reference)
+- [Reference Files](#reference-files)
+- [Getting Help](#getting-help)
 
-**DOCUMENT_TEMPLATE.md**
-- Comprehensive template for individual WAF articles (500-1,200 words, typically 700-1,000)
-- Includes MDX template, section-by-section guidance, and writing standards checklist
-- Structure: Introduction, "Why [topic]" section, implementation examples, resources, Next steps
-- Serves both decision-makers (strategic value) and implementers (actionable guidance)
-- Balances prose (explanations, context) with lists (challenges, steps, resources)
-- Target audience: Standard WAF articles for practices, concepts, and implementations
-- When to use: Creating new topic-specific WAF articles (most common use case)
+---
 
-**pillar-overview.mdx**
-- MDX template for pillar overview pages
-- Includes structure for pillar introduction, topics, rationale, audience, timing, and framework relationships
-- More strategic and comprehensive than individual articles
-- Target audience: High-level pillar landing pages
-- When to use: Creating new pillar overview documents (rare - only for new pillars)
+## Quick Start
 
-### AI Assistant Configurations
+### For New Users
 
-**AGENTS.md**
-- Comprehensive documentation requirements and standards for AI assistants (GitHub Copilot)
-- Defines WAF goals, personas (decision-makers and implementers), and working relationship
-- Contains content strategy, frontmatter requirements, and complete writing standards
-- References the HashiCorp style guide in styleguide.md
-- When to use: Primary reference for AI-assisted content creation and editing
+1. **Read this README** to understand the system
+2. **Review [../CLAUDE.md](../CLAUDE.md)** for available skills
+3. **Use skills for validation:** `/check-structure`, `/check-resources`, etc.
+4. **Reference [../AGENTS.md](../AGENTS.md)** for core writing standards
 
-**CLAUDE.md**
-- Points to the AGENTS.md file
+### For Document Reviews
 
-### Style and Standards
+```bash
+# Quick pre-commit check
+/check-structure docs/file.mdx --fix
+/check-hashicorp-style docs/file.mdx --fix
 
-**styleguide.md**
-- Complete HashiCorp writing style guide
-- Contains the "Top 12 guidelines" covering voice, tense, word choice, and formatting
-- Includes examples of correct and incorrect usage for each guideline
-- Critical rules: active voice, present tense, simple language, avoiding jargon
-- When to use: Reference during writing and editing to ensure consistency with HashiCorp standards
+# Full review
+/review-doc docs/file.mdx --phases 1-7
+```
 
-### Review and Quality Control
+### For Creating New Documents
 
-**REVIEW_PHASES.md**
-- Seven-phase documentation review process
-- Phases: User Success Evaluation, Technical Accuracy, Cross-Document Relationships, Style Guide Compliance, SEO & AI/LLM Optimization, Link Quality & Balance, Final User Success Check
-- Includes quick commands for requesting specific types of reviews
-- Works in conjunction with AGENTS.md (provides process, AGENTS.md provides rules and standards)
-- Phase 5 references AGENTS.md SEO and AI/LLM Optimization sections for detailed standards
-- When to use: Conducting comprehensive document reviews before publication
+```bash
+# Use the template
+cat templates/doc-templates/DOCUMENT_TEMPLATE.md
 
-**TASK_AGENT_GUIDE.md**
-- Guide for using task agents effectively
-- Contains strategies for delegating work to AI agents
-- When to use: Learning how to work with specialized AI agents for documentation tasks
+# Check structure as you write
+/check-structure docs/new-file.mdx
 
-### Utility Files
+# Validate when done
+/review-doc docs/new-file.mdx
+```
 
-**prompts.md**
-- Collection of useful prompts for content creation and review
-- Includes setup instructions, content prompts, review prompts, CLI prompts, and SEO prompts
-- Examples: checking spelling/grammar, finding supporting documents, testing links
-- When to use: Quick reference for common documentation tasks
+---
 
-**CONTENT_PATHS.md**
-- Likely contains information about content organization and file paths
-- When to use: Understanding repository structure and where to place new content
+## File Structure
 
-## Quick Start Workflow
+### Core Guidelines (in parent docs/ directory)
 
-### Creating a New WAF Article
+| File | Purpose | When to Use |
+|------|---------|-------------|
+| **../CLAUDE.md** | Skills directory and usage guide (auto-loaded) | Quick skill reference |
+| **../AGENTS.md** | Main documentation standards and writing guidelines | Primary reference - load as needed |
+| **../.claude/** | Skills and agents directory | Contains all skills |
 
-1. Choose the appropriate template:
-   - Use **DOCUMENT_TEMPLATE.md** for standard WAF articles (most common)
-   - Use **pillar-overview.mdx** for pillar landing pages (rare)
+### Essential Files (in templates/ directory)
 
-2. Reference **AGENTS.md** for:
-   - Understanding target personas (decision-makers and implementers)
-   - Content strategy and writing standards
-   - Frontmatter requirements
+| File | Purpose |
+|------|---------|
+| **QUICK_REFERENCE.md** | Combined quick reference: patterns, checklist, skills, troubleshooting |
+| **REVIEW_PHASES.md** | 7-phase review process with detailed checklists |
+| **styleguide.md** | Official HashiCorp style guide (Top 12 + full guide) |
+| **doc-templates/DOCUMENT_TEMPLATE.md** | Template for creating new WAF articles |
 
-3. Check **styleguide.md** for:
-   - Voice and tone guidelines
-   - Grammar and formatting rules
-   - Examples of correct usage
+### Reference Files (reference/ directory)
 
-4. Before publishing, use **REVIEW_PHASES.md** to:
-   - Verify user success (Phase 1)
-   - Check technical accuracy (Phase 2)
-   - Validate writing standards (Phase 4)
+Load these on-demand for deep dives into specific topics:
 
-### Reviewing Existing Content
+| File | Purpose |
+|------|---------|
+| **PATTERNS.md** | All documentation patterns (structure, code, resources, tools, pitfalls) |
+| **CONTENT_PATHS.md** | Content organization and file paths |
+| **TASK_AGENT_GUIDE.md** | Guide for using task agents |
 
-**Quick review commands:**
-- Full review with fixes: "Full review on [document]. Implement fixes."
-- Style check only: "Phase 4 review on [document]."
-- Final polish: "Phases 4-6 review on [document]. Fix issues."
+**Note:** You don't need to load reference files manually - ask questions and Claude will read them, or use skills that have patterns built-in.
 
-**Review order:**
-1. Read **REVIEW_PHASES.md** to understand the review process
-2. Reference **AGENTS.md** for detailed standards to check against
-3. Use **prompts.md** for specific review commands
-4. Validate against **styleguide.md** for HashiCorp-specific guidelines
+---
 
-## Key Principles
+## Common Workflows
 
-### Content Philosophy
-- WAF docs explain the **why and what**, show representative examples, then direct to tutorials for the **how**
-- Documents are directories, not tutorials
-- Target word count: 500-1,200 words for articles (typically 700-1,000 for comprehensive coverage)
-- Serve two personas: decision-makers (strategic understanding) and implementers (actionable guidance)
-- Balance prose and lists: Use prose for explanations and context, lists for challenges, steps, and resources
+### Pre-Commit Quick Check (2-3 minutes)
 
-### Writing Standards Hierarchy
-1. **HashiCorp writing standards** (styleguide.md) supersede all other standards
-2. Second-person voice ("you"), active voice, present tense
-3. Avoid jargon, Latin phrases, and unnecessary complexity
-4. All code examples must have language tags and be tested
+```bash
+/check-structure docs/file.mdx --fix
+/check-hashicorp-style docs/file.mdx --fix
+git diff docs/file.mdx
+```
 
-### Content Strategy
-- Link to existing documents instead of duplicating content
-- Showcase full HashiCorp toolset when it provides value (but don't force it)
-- Make content evergreen when possible
-- Check existing patterns for consistency
-- Start with minimal, focused changes
+### Fast Style Review (5 minutes)
 
-## File Dependencies
+```bash
+/check-structure docs/file.mdx --fix
+/check-hashicorp-style docs/file.mdx --fix
+/check-resources docs/file.mdx --fix
+```
 
-- **REVIEW_PHASES.md** references → **AGENTS.md** (for detailed rules)
-- **AGENTS.md** references → **styleguide.md** (for complete style guide)
-- **DOCUMENT_TEMPLATE.md** references → **AGENTS.md** (for persona descriptions)
-- All templates follow standards defined in **AGENTS.md** and **styleguide.md**
+### New Document Creation (60 minutes)
 
-## Additional Resources
+```bash
+# 1. Create from template
+/create-doc docs/section/new-topic.mdx --interactive
 
-- Example documents referenced in templates:
-  - `/docs/optimize-systems/manage-cost/create-cloud-budgets.mdx`
-  - `/docs/optimize-systems/manage-cost/detect-cloud-spending-anomalies.mdx`
-  - `/docs/define-and-automate-processes/automate/packaging.mdx`
+# 2. Check structure while writing
+/check-structure docs/section/new-topic.mdx
 
-## Contributing
+# 3. Enhance content
+/check-code-examples docs/section/new-topic.mdx
+/add-resources docs/section/new-topic.mdx
 
-When adding new templates or updating existing ones:
-1. Ensure consistency with existing standards in AGENTS.md and styleguide.md
-2. Update this README to reflect changes
-3. Provide clear "When to use" guidance for new templates
-4. Include examples where applicable
+# 4. Auto-fix before review
+/check-structure docs/section/new-topic.mdx --fix
+/check-hashicorp-style docs/section/new-topic.mdx --fix
+
+# 5. Final review
+/review-doc docs/section/new-topic.mdx --phases 1-7
+```
+
+### Complete Document Review (30+ minutes)
+
+**See [REVIEW_PHASES.md](./REVIEW_PHASES.md) for the detailed 7-phase review process**, or use:
+
+```bash
+/review-doc docs/file.mdx --phases 1-7
+```
+
+**For step-by-step checklists and troubleshooting**, see [QUICK_REFERENCE.md](./QUICK_REFERENCE.md)
+
+---
+
+## Skills Reference
+
+### Essential Skills
+
+| Skill | Purpose | Auto-fix |
+|-------|---------|----------|
+| `/check-structure` | Validate WAF document structure | ✅ Yes |
+| `/check-hashicorp-style` | HashiCorp style guide compliance | ✅ Yes |
+| `/check-resources` | Resources section formatting | ✅ Yes |
+| `/check-code-examples` | Code example completeness | ❌ Manual |
+| `/review-doc` | Comprehensive 7-phase review | ❌ Manual |
+| `/full-styleguide-check` | Complete style guide validation | ✅ Yes |
+
+### Quick Skill Selection
+
+- **Before commit:** `/check-structure --fix` + `/check-hashicorp-style --fix`
+- **For code-heavy docs:** `/check-code-examples`
+- **For final review:** `/review-doc --phases 1-7`
+- **When stuck:** `/skill-advisor docs/file.mdx`
+
+**For complete skills list and usage examples**, see [../CLAUDE.md](../CLAUDE.md) and [QUICK_REFERENCE.md](./QUICK_REFERENCE.md)
+
+---
+
+## Reference Files
+
+### PATTERNS.md (Consolidated)
+
+Contains all documentation patterns in one file:
+- Document structure patterns (Why sections, workflow connections)
+- Code example patterns (completeness, realism, summaries)
+- Resources section patterns (link formatting, organization)
+- Tool-specific patterns (Packer, Terraform, Sentinel)
+- Common pitfalls and how to avoid them
+
+**When to use:** Creating new documents, understanding WAF patterns, troubleshooting quality issues
+
+### styleguide.md
+
+Official HashiCorp style guide with Top 12 guidelines and comprehensive rules.
+
+**When to use:** Reference for style questions, used automatically by `/check-hashicorp-style` and `/full-styleguide-check`
+
+### DOCUMENT_TEMPLATE.md
+
+Complete template for creating new WAF articles with:
+- MDX template structure
+- Section-by-section guidance
+- Writing standards checklist
+- Pre-publish checklist
+
+**When to use:** Creating new documents from scratch
+
+### REVIEW_PHASES.md
+
+Detailed 7-phase review process:
+1. User Success Evaluation
+2. Technical Accuracy & Fact-Checking
+3. Cross-Document Relationships
+4. AGENTS.md style guide compliance
+5. SEO & AI/LLM Optimization
+6. Link Quality & Balance
+7. Final User Success Check
+
+**When to use:** Conducting comprehensive reviews, understanding review criteria
+
+---
+
+## Getting Help
+
+### Common Questions
+
+**Q: Which files do I need to read?**
+A: Start with this README and CLAUDE.md. Reference files are loaded on-demand as needed.
+
+**Q: Which skill should I use?**
+A: Run `/skill-advisor docs/file.mdx` or see the quick selection guide above.
+
+**Q: How do I fix [specific issue]?**
+A: See QUICK_REFERENCE.md → Troubleshooting section for "If X, do Y" guidance.
+
+**Q: What's the fastest way to review a document?**
+A: Pre-commit quick check (2-3 minutes): `/check-structure --fix` + `/check-hashicorp-style --fix`
+
+### Ask Claude
+
+Claude can help with specific questions:
+- "How do I format Why sections?"
+- "What should Packer examples show?"
+- "How do I organize resources sections?"
+
+Claude will read the relevant reference file and explain with examples.
+
+---
+
+## File Organization
+
+```
+templates/
+├── README.md (this file)              ← Start here
+├── QUICK_REFERENCE.md                 ← Patterns, checklist, skills, troubleshooting
+├── REVIEW_PHASES.md                   ← 7-phase review process
+├── styleguide.md                      ← HashiCorp style guide
+├── CLAUDE.md (in parent)              ← Skills directory
+├── AGENTS.md (in parent)              ← Core writing standards
+│
+├── doc-templates/
+│   ├── DOCUMENT_TEMPLATE.md           ← New document template
+│   └── pillar-overview.mdx            ← Pillar landing page template
+│
+├── reference/                         ← On-demand reference files
+│   ├── PATTERNS.md                    ← All documentation patterns
+│   ├── CONTENT_PATHS.md               ← File organization
+│   └── TASK_AGENT_GUIDE.md            ← Agent usage
+│
+├── jira_tickets/                      ← Jira integration tools
+│   └── scripts/
+│
+└── gsc/                               ← Google Search Console tools
+```
+
+---
+
+## Quick Command Reference
+
+```bash
+# Daily workflow
+/check-structure docs/file.mdx --fix
+/check-hashicorp-style docs/file.mdx --fix
+
+# Full review
+/review-doc docs/file.mdx --phases 1-7
+
+# Specific checks
+/check-code-examples docs/file.mdx
+/check-resources docs/file.mdx --fix
+/full-styleguide-check docs/file.mdx --fix
+
+# Get help
+/skill-advisor docs/file.mdx
+/doc-intelligence --view tactical
+```
+
+---
+
+## What's Changed Recently
+
+**January 2026 Consolidation:**
+- ✅ Consolidated 4 quick-reference files → `QUICK_REFERENCE.md`
+- ✅ Consolidated 5 pattern files → `reference/PATTERNS.md`
+- ✅ Removed legacy `prompts.md`
+- ✅ Removed duplicate `styleguide-quick-reference.md`
+- ✅ Streamlined README (812 → 400 lines)
+- ✅ Simplified `/full-styleguide-check` skill documentation
+
+**Result:** 40% fewer files, easier navigation, less duplication
+
+**For detailed history**, see [reference/REORGANIZATION_SUMMARY.md](./reference/REORGANIZATION_SUMMARY.md)

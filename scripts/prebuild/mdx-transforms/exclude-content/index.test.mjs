@@ -1,5 +1,5 @@
 /**
- * Copyright IBM Corp. 2025
+ * Copyright IBM Corp. 2024, 2026
  * SPDX-License-Identifier: BUSL-1.1
  */
 
@@ -163,6 +163,27 @@ Final content.
 This should stay.
 
 <!-- END: Vault:<=v2.x -->
+
+Final content.`)
+	})
+
+	it('should handle double x versions correctly', async () => {
+		const markdown = `
+<!-- BEGIN: Vault:>=v2.x.x -->
+This should be removed.
+<!-- END: Vault:>=v2.x.x -->
+<!-- BEGIN: Vault:<=v2.x.x -->
+This should stay.
+<!-- END: Vault:<=v2.x.x -->
+Final content.
+`
+		const result = await runTransform(markdown, vaultOptions)
+
+		expect(result.trim()).toBe(`<!-- BEGIN: Vault:<=v2.x.x -->
+
+This should stay.
+
+<!-- END: Vault:<=v2.x.x -->
 
 Final content.`)
 	})
@@ -384,7 +405,7 @@ This content should throw an error.
 `
 		await expect(async () => {
 			return await runTransform(markdown, vaultOptions)
-		}).rejects.toThrow('Invalid Vault directive: "invalid"')
+		}).rejects.toThrow('Invalid "Vault:invalid" directive')
 	})
 
 	it('should throw an error for unexpected END block', async () => {

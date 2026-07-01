@@ -1,5 +1,5 @@
 /**
- * Copyright IBM Corp. 2025
+ * Copyright IBM Corp. 2024, 2026
  * SPDX-License-Identifier: BUSL-1.1
  */
 
@@ -14,6 +14,11 @@ export const getDocsPaths = async (
 ) => {
 	const paths = productSlugs
 		.map((productSlug: string) => {
+			// Internal products should not be included in the sitemap
+			if (PRODUCT_CONFIG[productSlug]?.internalProduct) {
+				return []
+			}
+
 			const latestProductMetadata = getProductVersionMetadata(
 				productSlug,
 				'latest',
