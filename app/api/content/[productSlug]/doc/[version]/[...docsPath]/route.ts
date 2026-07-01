@@ -27,6 +27,8 @@ export type GetParams = VersionedProduct & {
 export async function GET(request: Request, { params }: { params: GetParams }) {
 	// Grab the parameters we need to fetch content
 	const { productSlug, version, docsPath } = params
+	const url = new URL(request.url)
+	const mdOnly = url.searchParams.get('mdOnly') === 'true'
 
 	if (!Object.keys(PRODUCT_CONFIG).includes(productSlug)) {
 		console.error(
@@ -132,6 +134,15 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 
 	const { metadata, markdownSource } = markdownFrontMatterResult.value
 
+	if (mdOnly) {
+		return new Response(markdownSource, {
+			headers: {
+				'content-type': 'text/markdown',
+				'served-from': servedFrom,
+				'X-Robots-Tag': 'noindex',
+			},
+		})
+	}
 	return new Response(
 		JSON.stringify({
 			meta: {
