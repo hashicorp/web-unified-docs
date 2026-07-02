@@ -263,7 +263,7 @@ export const PRODUCT_CONFIG = {
 	},
 	'terraform-policy': {
 		assetDir: '',
-		basePaths: ['terraform-policy'],
+		basePaths: ['policy'],
 		contentDir: 'docs',
 		dataDir: 'data',
 		navDataPath: 'terraform-policy',
