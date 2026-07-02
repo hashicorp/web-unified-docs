@@ -4,7 +4,7 @@ description: |-
   Learn how to clean up resources by destroying a workspace's infrastructure and deleting a workspace in HCP Terraform.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2025-05-27T14:28:51-04:00
-last_modified: 2025-09-22T14:37:52-07:00
+last_modified: 2026-03-12T03:10:36.000Z
 # END AUTO GENERATED METADATA
 ---
 
@@ -98,7 +98,7 @@ Terraform does not automatically destroy managed infrastructure when you delete 
 
 After you delete the workspace and its state file, Terraform can _no longer track or manage_ that infrastructure. You must manually delete or [import](/terraform/cli/commands/import) any remaining resources into another Terraform workspace.
 
-By default, [workspace administrators](/terraform/cloud-docs/users-teams-organizations/permissions/workspace#workspace-admin) can only delete unlocked workspaces that are not managing any infrastructure. Organization owners can force delete a workspace to override these protections. Organization owners can also configure the [organization's settings](/terraform/cloud-docs/users-teams-organizations/organizations#general) to let workspace administrators force delete their own workspaces.
+By default, [workspace administrators](/terraform/cloud-docs/users-teams-organizations/permissions/workspace#workspace-admin) can only delete unlocked workspaces that are not managing any infrastructure. Organization owners can force delete a workspace to override these protections. Organization owners can also configure the [organization's settings](/terraform/cloud-docs/users-teams-organizations/organizations/settings#general) to let workspace administrators force delete their own workspaces.
 
 ## Data Retention Policies
 

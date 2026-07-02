@@ -1,0 +1,347 @@
+---
+page_title: Implement state stores
+description: >-
+  Learn how to implement state stores with the Terraform plugin framework.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-03-06T21:06:45.000Z
+last_modified: 2026-03-06T21:06:45.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Implement state stores
+
+<Highlight>
+
+State store support in framework is currently experimental and offered without compatibility promises
+until Terraform core support for state stores is generally available.
+
+State store support can be enabled in Terraform v1.15+ alpha releases by running Terraform commands with
+the `-enable-pluggable-state-storage-experiment` flag or setting the environment variable `TF_ENABLE_PLUGGABLE_STATE_STORAGE`
+to any value.
+
+</Highlight>
+
+The main code components of a [state store](/terraform/plugin/framework/state-stores) implementation are:
+
+* Implement the [`statestore.StateStore` interface](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/statestore#StateStore) as a Go type.
+* Define the [schema](#schema-method) and [metadata](#metadata-method) of the state store.
+* [Add the state store to the provider](#add-state-store-to-provider) so it is accessible by Terraform and practitioners.
+* [Implement configure and initialize for the state store](#configure-state-store) to include any API clients or provider-level data needed.
+* [Implement workspace support for the state store](#workspace-support).
+* [Implement lock support for the state store](#lock-support).
+* Implement the main logic of the state store, with [reading state](#read-state), [writing state](#write-state), and [validation](#validation).
+
+
+
+## Metadata method
+
+The [`statestore.StateStore` interface `Metadata` method](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/statestore#StateStore.Metadata) defines the state store type name as it would appear in Terraform configurations. This name should include the provider type prefix, an underscore, then the state store specific name. For example, a provider named `examplecloud` and a state store, "bucket", would be named `examplecloud_bucket`.
+
+The state store type name can be hardcoded, for example:
+
+```go
+func (a *BucketStateStore) Metadata(ctx context.Context, req statestore.MetadataRequest, resp *statestore.MetadataResponse) {
+    resp.TypeName = "examplecloud_bucket"
+}
+```
+
+Or the [`statestore.MetadataRequest.ProviderTypeName` field](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/statestore#MetadataRequest.ProviderTypeName) can be used to set the prefix:
+
+```go
+// The provider implementation
+func (p *ExampleCloudProvider) Metadata(ctx context.Context, req provider.MetadataRequest, resp *provider.MetadataResponse) {
+    resp.TypeName = "examplecloud"
+}
+
+// The state store implementation
+func (a *BucketStateStore) Metadata(ctx context.Context, req statestore.MetadataRequest, resp *statestore.MetadataResponse) {
+    resp.TypeName = req.ProviderTypeName + "_bucket"
+}
+```
+
+## Schema method
+
+The [`statestore.StateStore` interface `Schema` method](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/statestore#StateStore.Schema) defines a [schema](/terraform/plugin/framework/handling-data/schemas) describing what data is available in the state store configuration.
+
+### State store
+
+A state store can be defined by using the [`schema.Schema`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/statestore/schema#Schema) type in the `Schema` field:
+
+```go
+func (a *BucketStateStore) Schema(ctx context.Context, req statestore.SchemaRequest, resp *statestore.SchemaResponse) {
+    resp.Schema = schema.Schema{
+        Attributes: map[string]schema.Attribute{
+            "required_string": schema.StringAttribute{
+                Required: true,
+            },
+            "optional_bool": schema.BoolAttribute{
+                Optional: true,
+            },
+        },
+    }
+}
+```
+
+## Add state store to provider
+
+State stores become available to practitioners when they are included in the [provider](/terraform/plugin/framework/providers) implementation via the optional [`provider.ProviderWithStateStores` interface `StateStores` method](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/provider#ProviderWithStateStores.StateStores).
+
+In this example, the `BucketStateStore` type, which implements the `statestore.StateStore` interface, is added to the provider implementation:
+
+```go
+var _ provider.ProviderWithStateStores = (*ExampleCloudProvider)(nil)
+
+func (p *ExampleCloudProvider) StateStores(_ context.Context) []func() statestore.StateStore {
+    return []func() statestore.StateStore{
+        NewBucketStateStore,
+    }
+}
+
+func NewBucketStateStore() statestore.StateStore {
+    return &BucketStateStore{}
+}
+```
+
+## Configure state store
+
+State stores may require provider-level data or remote system clients to operate correctly. In addition to this provider-level data, there is also
+state store specific configuration that may be necessary to fully configure a state store to read/write state.
+
+```terraform
+terraform {
+  required_providers {
+    examplecloud = {
+      source = "registry.terraform.io/hashicorp/examplecloud"
+    }
+  }
+
+  state_store "examplecloud_bucket" {
+	provider "examplecloud" {
+      region = "us-east-1" # provider-level data
+    }
+
+    bucket = "example-bucket-123" # state store specific data
+  }
+}
+```
+
+### Initialize method
+
+Similar to other provider-defined types (managed resources, data sources, etc.), you can set provider-level data to be used in state stores via the
+[`provider.ConfigureResponse.StateStoreData` field](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/provider#ConfigureResponse.StateStoreData)
+in the [`Provider` interface `Configure` method](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/provider#Provider.Configure).
+
+In this example, the Go standard library [`net/http.Client`](https://pkg.go.dev/net/http#Client) is configured in the provider, and made available for state stores:
+
+```go
+func (p *ExampleCloudProvider) Configure(ctx context.Context, req provider.ConfigureRequest, resp *provider.ConfigureResponse) {
+  resp.StateStoreData = &http.Client{/* ... */}
+}
+```
+
+Unlike the other provider-defined types, there is a dedicated RPC (`ConfigureStateStore`) for configuring a state store which is invoked once, immediately following the
+provider configure RPC, which contains the state store's configuration. The `statestore.StateStore` interface `Initialize` method is called when this RPC is
+invoked and is used to combine the [provider-level data](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/statestore#InitializeRequest.ProviderData) with
+the [state store specific configuration](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/statestore#InitializeRequest.Config) data.
+
+After this data has been combined, it can then be set on the [`statestore.InitializeResponse.StateStoreData`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/statestore#InitializeResponse.StateStoreData)
+field, which will be the data passed to the `Configure` method for the `statestore.StateStore` implementation each time an operation occurs. (`Read`, `Write`, `Lock`, etc.)
+
+In this example, the provider configured the Go standard library [`net/http.Client`](https://pkg.go.dev/net/http#Client) which the state store modifies during `Initialize`:
+
+```go
+func (d *BucketStateStore) Initialize(ctx context.Context, req statestore.InitializeRequest, resp *statestore.InitializeResponse) {
+  // Read data from provider configure
+  providerClient, ok := req.ProviderData.(*http.Client)
+  if !ok {
+    resp.Diagnostics.AddError(
+      "Unexpected StateStore Initialize Type",
+      fmt.Sprintf("Expected *http.Client, got: %T. Please report this issue to the provider developers.", req.ProviderData),
+    )
+
+    return
+  }
+
+  var stateStoreCfg BucketStateStoreModel
+
+  // Read state store config data into the model
+  resp.Diagnostics.Append(req.Config.Get(ctx, &stateStoreCfg)...)
+  if resp.Diagnostics.HasError() {
+    return
+  }
+
+  // Modify the providerClient based on data in stateStoreCfg
+
+  // This is the data that will be sent to the statestore.StateStore implementation `Configure` method
+  resp.StateStoreData = providerClient
+}
+```
+
+### Configure method
+
+Implement the [`statestore.StateStoreWithConfigure` interface](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/statestore#StateStoreWithConfigure) which receives the
+state store configured data from the [`statestore.StateStore` interface `Initialize` method](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/statestore#StateStore.Initialize)
+and saves it into the [`statestore.StateStore` interface](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/statestore#StateStore) implementation.
+
+In this example, the state store initialized the Go standard library [`net/http.Client`](https://pkg.go.dev/net/http#Client) which the state store uses during `Read`:
+
+```go
+type BucketStateStore struct {
+  client *http.Client
+}
+
+func (d *BucketStateStore) Configure(ctx context.Context, req statestore.ConfigureRequest, resp *statestore.ConfigureResponse) {
+  // Always perform a nil check when handling StateStoreData because Terraform
+  // sets that data after it calls the ConfigureProvider and ConfigureStateStore RPCs.
+  if req.StateStoreData == nil {
+    return
+  }
+
+  client, ok := req.StateStoreData.(*http.Client)
+
+  if !ok {
+    resp.Diagnostics.AddError(
+      "Unexpected StateStore Configure Type",
+      fmt.Sprintf("Expected *http.Client, got: %T. Please report this issue to the provider developers.", req.StateStoreData),
+    )
+
+    return
+  }
+
+  d.client = client
+}
+
+func (d *BucketStateStore) Read(ctx context.Context, req statestore.ReadRequest, resp *statestore.ReadResponse) {
+  httpReq, _ := http.NewRequest(
+    http.MethodGet,
+    "http://example.com/api/states",
+    bytes.NewBuffer([]byte(`{"fake": "data"}`)),
+  )
+
+  httpResp, err := d.client.Do(httpReq)
+  /* ... */
+}
+```
+
+## Workspace support
+
+State stores support [workspaces](/terraform/cli/workspaces), which allow practitioners to manage multiple instances of state
+in the same Terraform working directory.
+
+In state store implementations, a workspace name is also referred to as a "state ID",
+and are returned by the [`GetStates`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/statestore#StateStore.GetStates) method,
+which returns all state IDs for states persisted in the configured state store. All other methods receive a `StateID` in the request to indicate
+which state to perform the given operation against (`Lock`, `Read`, `Write`, etc.)
+
+In the scenario that a workspace is not explicitly chosen by the practitioner, Terraform will send `default` as the workspace name / state ID.
+
+## Lock support
+
+State stores support [state locking](/terraform/language/state/locking) which Terraform will attempt to do before calling any operations
+that could write to state.
+
+State stores that support locking are expected to handle concurrent clients by ensuring multiple locks cannot be acquired on the same state
+simultaneously. The backing data store must be [strongly consistent](https://en.wikipedia.org/wiki/Strong_consistency) (i.e. a newly created
+lock is immediately visible to all clients) and some form of concurrency control must be implemented when attempting to acquire a lock. An
+example of this would be creating a lock file with a conditional write that would fail if the requested file already exists.
+
+The state store's [`Lock`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/statestore#StateStore.Lock) method returns a lock ID, which
+is an opaque string that the state store is expected to persist to indicate that the given state is locked. Terraform will then pass this lock ID
+back to the [`Unlock`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/statestore#StateStore.Unlock) method. If the state store
+does not support locking, return an empty string as the lock ID.
+
+If Terraform requests to acquire a lock on a state that has already been locked, the state store should return an error diagnostic with
+information about the current lock. Additionally, the state store should return an error if Terraform requests to unlock a state that is 
+not locked or has a lock ID that doesn't match the one received from Terraform. These scenarios likely indicate either a bug in the `Lock` method
+or the underlying storage mechanism where multiple concurrent clients were able to acquire a lock on the same state.
+
+## Read state
+
+State stores implement the [`Read`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/statestore#StateStore.Read) method to return
+the state data (as bytes) for a given state ID.
+
+Terraform will always attempt to read the state prior to writing, even in the initial case of writing the first state
+for a new workspace. If the given state ID does not exist in the configured state store, [`statestore.ReadResponse.StateBytes`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/statestore#ReadResponse.StateBytes)
+should be kept empty and returned with no diagnostics.
+
+## Write state
+
+State stores implement the [`Write`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/statestore#StateStore.Write) method to write
+the state data (as bytes) for a given state ID to a configured state store.
+
+## Validation
+
+State stores support validating an entire practitioner configuration in either declarative or imperative logic. Feedback, such as
+required syntax or acceptable combinations of values, is returned via [diagnostics](/terraform/plugin/framework/diagnostics).
+
+This section describes implementation details for validating entire state store configurations, typically referencing multiple attributes. Further documentation is available for other configuration validation concepts:
+
+- [Single attribute validation](/terraform/plugin/framework/validation#attribute-validation) is a schema-based mechanism for implementing attribute-specific validation logic.
+- [Type validation](/terraform/plugin/framework/validation#type-validation) is a schema-based mechanism for implementing reusable validation logic for any attribute using the type.
+
+-> Configuration validation in Terraform occurs without provider configuration ("offline"), therefore the state store `Configure` method will not have been called. To implement validation with a configured API client, use logic within the `Initialize` method.
+
+### ConfigValidators Method
+
+The [`statestore.StateStoreWithConfigValidators` interface](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/statestore#StateStoreWithConfigValidators) follows a similar pattern to attribute validation and allows for a more declarative approach. This enables consistent validation logic across multiple state stores. Each validator intended for this interface must implement the [`statestore.ConfigValidator` interface](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/statestore#ConfigValidator).
+
+The [`terraform-plugin-framework-validators` Go module](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework-validators) has a collection of common use case state store configuration validators in the [`statestorevalidator` package](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework-validators/statestorevalidator). These use [path expressions](/terraform/plugin/framework/path-expressions) for matching attributes.
+
+This example will raise an error if a practitioner attempts to configure both `attribute_one` and `attribute_two`:
+
+```go
+// Other methods to implement the statestore.StateStore interface are omitted for brevity
+type BucketStateStore struct {}
+
+func (d BucketStateStore) ConfigValidators(ctx context.Context) []statestore.ConfigValidator {
+    return []statestore.ConfigValidator{
+        statestorevalidator.Conflicting(
+            path.MatchRoot("attribute_one"),
+            path.MatchRoot("attribute_two"),
+        ),
+    }
+}
+```
+
+### ValidateConfig Method
+
+The [`statestore.StateStoreWithValidateConfig` interface](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/statestore#StateStoreWithValidateConfig) is more imperative in design and is useful for validating unique functionality across multiple attributes that typically applies to a single state store.
+
+This example will raise a warning if a practitioner attempts to configure `attribute_one`, but not `attribute_two`:
+
+```go
+// Other methods to implement the statestore.StateStore interface are omitted for brevity
+type BucketStateStore struct {}
+
+type BucketStateStoreModel struct {
+    AttributeOne types.String `tfsdk:"attribute_one"`
+    AttributeTwo types.String `tfsdk:"attribute_two"`
+}
+
+func (d BucketStateStore) ValidateConfig(ctx context.Context, req statestore.ValidateConfigRequest, resp *statestore.ValidateConfigResponse) {
+    var data BucketStateStoreModel
+
+    resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
+
+    if resp.Diagnostics.HasError() {
+        return
+    }
+
+    // If attribute_one is not configured, return without warning.
+    if data.AttributeOne.IsNull() || data.AttributeOne.IsUnknown() {
+        return
+    }
+
+    // If attribute_two is not null, return without warning.
+    if !data.AttributeTwo.IsNull() {
+        return
+    }
+
+    resp.Diagnostics.AddAttributeWarning(
+        path.Root("attribute_two"),
+        "Missing Attribute Configuration",
+        "Expected attribute_two to be configured with attribute_one. "+
+            "The state store may return unexpected results.",
+    )
+}
+```

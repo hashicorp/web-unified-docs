@@ -48,6 +48,7 @@ function captureMetric({ name, duration, timestamp, tags }) {
 
 async function main() {
 	const [, , appName] = process.argv
+	const incBuild = process.env.INCREMENTAL_BUILD === 'true'
 
 	try {
 		const envLocalPath = '.env.local'
@@ -71,7 +72,7 @@ async function main() {
 		)
 
 		const environment = process.env.CI ? 'ci' : 'local'
-		const buildType = process.env.INCREMENTAL_BUILD ? 'incremental' : 'full'
+		const buildType = incBuild ? 'incremental' : 'full'
 		const tags = [
 			`app:${appName}`,
 			`environment:${environment}`,

@@ -45,12 +45,17 @@ export async function buildMdxTransforms(
 	targetDir,
 	outputDir,
 	versionMetadata,
+	changedFiles = null,
 ) {
-	// Walk the directory to get a list of all files
-	const allFiles = await listFiles(targetDir)
+	const filesToCheck = changedFiles
+		? [...changedFiles.added, ...changedFiles.modified]
+		: await listFiles(targetDir)
+
 	// Filter for `.mdx` files
-	const mdxFiles = allFiles.filter((filePath) => {
-		return path.extname(filePath) === '.mdx'
+	const mdxFiles = filesToCheck.filter((filePath) => {
+		const relativePath = path.relative(targetDir, filePath)
+		const repoSlug = relativePath.split('/')[0]
+		return path.extname(filePath) === '.mdx' && repoSlug in PRODUCT_CONFIG
 	})
 	/**
 	 * Map over each `.mdx` file, and prepare the file for transformation
@@ -87,7 +92,7 @@ export async function buildMdxTransforms(
 		'MDX transforms',
 		mdxFileEntries,
 		(entry) => {
-			return applyMdxTransforms(entry, versionMetadata)
+			return applyMdxTransforms(entry, versionMetadata, targetDir)
 		},
 	)
 	// Log out any errors encountered
@@ -123,7 +128,7 @@ export async function buildMdxTransforms(
  * @param {string} entry.outPath
  * @return {object} { error: string | null }
  */
-async function applyMdxTransforms(entry, versionMetadata = {}) {
+async function applyMdxTransforms(entry, versionMetadata = {}, targetDir) {
 	try {
 		const { filePath, partialsDir, outPath, version, redirectsDir } = entry
 		const redirects = await loadRedirects(version, redirectsDir)
@@ -140,7 +145,7 @@ async function applyMdxTransforms(entry, versionMetadata = {}) {
 			.use(remarkMdx)
 			// Process partials first, then content exclusion
 			// This ensures exclusion directives in global partials are properly evaluated
-			.use(remarkIncludePartialsPlugin, { partialsDir, filePath })
+			.use(remarkIncludePartialsPlugin, { partialsDir, targetDir, filePath })
 
 		// Make sure the content exclusion process skips looking through
 		// the global partial filepath (it should only be processed once the global

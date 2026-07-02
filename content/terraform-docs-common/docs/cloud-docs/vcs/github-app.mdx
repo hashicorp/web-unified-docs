@@ -5,7 +5,7 @@ description: >-
   Learn how to use GitHub.com repositories with workspaces and private registry modules in HCP Terraform.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2025-05-27T14:28:51-04:00
-last_modified: 2025-09-08T19:31:08-07:00
+last_modified: 2026-03-17T22:19:31.000Z
 # END AUTO GENERATED METADATA
 ---
 
@@ -21,7 +21,7 @@ last_modified: 2025-09-08T19:31:08-07:00
 
 # Set up the GitHub.com (GitHub App) VCS provider
 
-These instructions are for using repositories from GitHub.com with HCP Terraform workspaces<!-- BEGIN: TFC:only name:stacks-tfe --> or Stacks<!-- END: TFC:only name:stacks-tfe --> and private registry modules, without requiring an organization owner to configure an OAuth connection.
+These instructions describe how to use repositories on GitHub.com with workspaces or Stacks and private registry modules without requiring an organization owner to configure an OAuth connection.
 
 This method uses a preconfigured GitHub App, and only works with GitHub.com. There are separate instructions for connecting to [GitHub.com via OAuth](/terraform/cloud-docs/vcs/github), connecting to [GitHub Enterprise](/terraform/cloud-docs/vcs/github-enterprise), and connecting to [other supported VCS providers.](/terraform/cloud-docs/vcs)
 
@@ -29,14 +29,12 @@ This method uses a preconfigured GitHub App, and only works with GitHub.com. The
 
 ## Using GitHub Repositories
 
-Choose "GitHub.com" on the "Connect to a version control provider" screen, which is shown when [creating a new workspace][create], [changing a workspace's VCS connection][vcs settings], or<!-- BEGIN: TFC:only name:stacks-tfe --> [creating](/terraform/cloud-docs/stacks/create) or [configuring](/terraform/cloud-docs/stacks/configure) Stacks<!-- END: TFC:only name:stacks-tfe -->. Authorize access to GitHub if necessary. On the next screen, select a GitHub account or organization from the drop-down menu (or add a new organization) and choose a repository from the list.
+Choose "GitHub.com" on the "Connect to a version control provider" screen, which is shown when [creating a new workspace][create], [changing a workspace's VCS connection][vcs settings], or [creating](/terraform/cloud-docs/stacks/create) or [configuring](/terraform/cloud-docs/stacks/configure) Stacks. Authorize access to GitHub if necessary. On the next screen, select a GitHub account or organization from the drop-down menu (or add a new organization) and choose a repository from the list.
 
 The controls on the "Connect to a version control provider" screen can vary, depending on your permissions and your organization's settings:
 
-- In organizations with no VCS connections configured:
-  - Users with permission to manage VCS settings ([more about permissions](/terraform/cloud-docs/users-teams-organizations/permissions)) will see several drop-down menus, sorted by product family. Choose "GitHub.com" (_not_ "GitHub.com (Custom)") from the GitHub menu.
-  - Other users will see a "GitHub" button.
-- In organizations with an existing VCS connection, only the connected providers are shown. Click the "Connect to a different VCS" link to reveal the provider menus (if you [can manage VCS settings) or the GitHub button (others).
+- In organizations with no VCS connections configured, users with [permission](/terraform/cloud-docs/users-teams-organizations/permissions) to manage VCS settings have access to several drop-down menus sorted by product family. Choose **GitHub.com** from the GitHub menu.
+- In organizations with an existing VCS connection, only the connected providers are shown. If you can manage VCS settings, click **Connect to a different VCS** to reveal the provider menus. Otherwise, click **GitHub**.
 
 [permissions-citation]: #intentionally-unused---keep-for-maintainers
 
@@ -56,7 +54,7 @@ Individual HCP Terraform users can access GitHub repositories where both of the 
 - The user has at least read access to that repository on GitHub.
 - The repository's owner has installed the Terraform Cloud app and allowed it to access that repository.
 
-This means that different HCP Terraform users within the same organization can see different sets of repositories available for their workspaces<!-- BEGIN: TFC:only name:stacks-tfe --> or Stacks<!-- END: TFC:only name:stacks-tfe -->.
+This means that different users within the same organization can see different sets of repositories available for their workspaces or Stacks.
 
 ### Authorizing
 
@@ -74,9 +72,9 @@ If you are a repository owner, you can adjust an existing Github App configurati
 1. Next to **Terraform Cloud**, click **Configure**.
 1. Underneath **Repository access**, adjust the repositories your GitHub app can access.
 
-Now that your Github app has access to your desired repository, you can [create a new workspace](/terraform/cloud-docs/workspaces/create#create-a-workspace)<!-- BEGIN: TFC:only name:stacks-tfe --> or [Stack](/terraform/cloud-docs/stacks/create)<!-- END: TFC:only name:stacks-tfe --> with your existing, newly updated GitHub App connection.
+Now that your Github app has access to your desired repository, you can [create a new workspace](/terraform/cloud-docs/workspaces/create#create-a-workspace) or [Stack](/terraform/cloud-docs/stacks/create) with your existing, newly updated GitHub App connection.
 
-You can also adjust your GitHub App's access within HCP Terraform itself.  Whenever you create a new workspace<!-- BEGIN: TFC:only name:stacks-tfe --> or Stack<!-- END: TFC:only name:stacks-tfe -->, you can choose which organizations or repositories to install the GitHub App into. To adjust your GitHub App's configuration, create a new workspace:
+You can also adjust your GitHub App's access within HCP Terraform itself.  Whenever you create a new workspace or Stack, you can choose which organizations or repositories to install the GitHub App into. To adjust your GitHub App's configuration, create a new workspace:
 
 1. Sign in to [HCP Terraform](https://app.terraform.io/) and navigate to the organization where you want to adjust your VCS settings.
 1. Choose **Workspaces** from the sidebar.
@@ -92,7 +90,7 @@ You can use GitHub's web interface to deauthorize HCP Terraform for your GitHub 
 
 Open your GitHub personal settings, then go to the "Applications" section and the "Authorized GitHub Apps" tab. (Or, browse directly to `https://github.com/settings/apps/authorizations`.) Click the **Revoke** button for HCP Terraform to deauthorize it.
 
-After deauthorizing, you won't be able to connect GitHub repositories to HCP Terraform workspaces<!-- BEGIN: TFC:only name:stacks-tfe --> or Stacks<!-- END: TFC:only name:stacks-tfe --> until you authorize again. Existing connections will still work.
+After deauthorizing, you won't be able to connect GitHub repositories to HCP Terraform workspaces or Stacks until you authorize again. Existing connections will still work.
 
 ### Installing
 
@@ -116,7 +114,7 @@ Open your GitHub personal settings or organization settings, then go to the **Ap
 
 In the app's settings you can change which repositories HCP Terraform has access to, or uninstall it entirely.
 
-If you disallow access to a repository that is currently connected to any HCP Terraform workspaces<!-- BEGIN: TFC:only name:stacks-tfe --> or Stacks<!-- END: TFC:only name:stacks-tfe -->, those workspaces <!-- BEGIN: TFC:only name:stacks-tfe --> or Stacks<!-- END: TFC:only name:stacks-tfe --> will be unable to retrieve configuration versions until you change their VCS settings and connect them to an allowed repository.
+If you disallow access to a repository that is currently connected to any workspaces or Stacks, those workspaces or Stacks are unable to retrieve configuration versions until you change their VCS settings and connect them to an allowed repository.
 
 ## Feature Limitations
 

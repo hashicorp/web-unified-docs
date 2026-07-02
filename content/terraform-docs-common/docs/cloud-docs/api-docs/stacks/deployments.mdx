@@ -1,10 +1,9 @@
 ---
 page_title: /stack-deployments API reference for HCP Terraform
 description: Use the HCP Terraform API's `/stack-deployments` to consume and propagate actions for Stack deployment groups, runs, and steps.
-tfc_only: true
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2025-09-19T13:41:08-07:00
-last_modified: 2025-09-23T08:57:51-07:00
+last_modified: 2026-03-16T23:10:21.000Z
 # END AUTO GENERATED METADATA
 ---
 

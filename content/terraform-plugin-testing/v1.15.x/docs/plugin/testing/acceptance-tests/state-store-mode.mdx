@@ -1,0 +1,144 @@
+---
+page_title: 'Plugin Development - Acceptance Testing: State store mode'
+description: |-
+  _StateStore_ mode is used for testing state store functionality with a set
+  of smoke tests using real Terraform commands.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-03-06T22:46:12.000Z
+last_modified: 2026-03-06T22:46:12.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Acceptance Tests: State store mode
+
+<Highlight>
+
+State store support in `terraform-plugin-testing` is currently experimental and offered without compatibility promises
+until Terraform core support for state stores is generally available.
+
+State store support can be enabled in Terraform v1.15+ alpha releases by running tests with the environment variable
+`TF_ENABLE_PLUGGABLE_STATE_STORAGE` set to any value.
+
+</Highlight>
+
+In provider acceptance tests, _StateStore_ mode is used for testing state stores which read/write [state](/terraform/language/state)
+and manage [workspaces](/terraform/language/state/workspaces) using a series of real Terraform commands. (plan, apply, workspace, etc.)
+
+For state store configurations that support [locking](/terraform/language/state/locking), the `VerifyStateStoreLock` field can be set to `true`
+to run an additional set of Terraform commands to ensure that the state store can successfully lock and unlock the state.
+
+## StateStore test
+
+The simplest usage of the state store testing mode can be used by setting `StateStore` to `true` and including a
+configuration via `Config`, `ConfigDirectory` or `ConfigFile`.
+
+```go
+func TestStateStore(t *testing.T) {
+  // Setting this environment variable ensures Terraform core uses pluggable state storage during init.
+  // This is only temporary while PSS is experimental.
+  t.Setenv("TF_ENABLE_PLUGGABLE_STATE_STORAGE", "1")
+
+  r.UnitTest(t, r.TestCase{
+    // State stores currently are only available in alpha releases or built from source
+    // with experiments enabled: `go install -ldflags="-X main.experimentsAllowed=yes" .`
+    TerraformVersionChecks: []tfversion.TerraformVersionCheck{
+      tfversion.SkipBelow(tfversion.Version1_15_0),
+      tfversion.SkipIfNotPrerelease(),
+    },
+    ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+      "examplecloud": providerserver.NewProviderServer(testprovider.Provider{
+        StateStores: map[string]*testprovider.StateStore{
+          "examplecloud_bucket": exampleCloudValidStateStore(),
+        },
+      }),
+    },
+    Steps: []r.TestStep{
+      {
+        StateStore: true,
+        Config: `
+          terraform {
+            required_providers {
+              examplecloud = {
+                source = "registry.terraform.io/hashicorp/examplecloud"
+              }
+            }
+            state_store "examplecloud_bucket" {
+              provider "examplecloud" {
+                region = "us-east-1"
+              }
+
+              bucket = "test-bucket-123"
+              enable_locking = false
+            }
+          }
+        `,
+      },
+    },
+  })
+}
+```
+
+This single test step will run a series of Terraform commands and assertions to validate that the underlying state store:
+- Can be successfully initialized (testing validation and configuring)
+- Can read and write state
+- Supports managing multiple workspaces
+
+While Terraform always attempts to lock the state while running commands, the `StateStore` testing mode will not explicitly assert
+that the state store supports locking, so it's okay to use this mode with configurations that don't support locking.
+
+## StateStore lock test
+
+To explicitly assert that the state store supports locking, set the `VerifyStateStoreLock` field to `true`:
+
+```go
+func TestStateStore_enable_locking(t *testing.T) {
+  // Setting this environment variable ensures Terraform core uses pluggable state storage during init.
+  // This is only temporary while PSS is experimental.
+  t.Setenv("TF_ENABLE_PLUGGABLE_STATE_STORAGE", "1")
+
+  r.UnitTest(t, r.TestCase{
+    // State stores currently are only available in alpha releases or built from source
+    // with experiments enabled: `go install -ldflags="-X main.experimentsAllowed=yes" .`
+    TerraformVersionChecks: []tfversion.TerraformVersionCheck{
+      tfversion.SkipBelow(tfversion.Version1_15_0),
+      tfversion.SkipIfNotPrerelease(),
+    },
+    ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+      "examplecloud": providerserver.NewProviderServer(testprovider.Provider{
+        StateStores: map[string]*testprovider.StateStore{
+          "examplecloud_bucket": exampleCloudValidStateStore(),
+        },
+      }),
+    },
+    Steps: []r.TestStep{
+      {
+        StateStore: true,
+        VerifyStateStoreLock: true,
+        Config: `
+          terraform {
+            required_providers {
+              examplecloud = {
+                source = "registry.terraform.io/hashicorp/examplecloud"
+              }
+            }
+            state_store "examplecloud_bucket" {
+              provider "examplecloud" {
+                region = "us-east-1"
+              }
+
+              bucket = "test-bucket-123"
+              enable_locking = true
+            }
+          }
+        `,
+      },
+    },
+  })
+}
+```
+
+This single test step, after passing all of the assertions made during the [basic test](#statestore-test), will run a series of Terraform commands and assertions
+to validate that the underlying state store:
+- Supports locking, acquired during `terraform apply`
+- Prevents clients from acquiring a lock for an already locked state by returning an error message.
+- Supports unlocking, by releasing a previously locked state after an operation is complete.

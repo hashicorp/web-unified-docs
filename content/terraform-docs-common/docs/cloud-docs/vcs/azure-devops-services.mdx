@@ -6,7 +6,7 @@ description: >-
 source: terraform-docs-common
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2025-05-27T14:28:51-04:00
-last_modified: 2025-09-22T14:37:52-07:00
+last_modified: 2026-03-17T22:39:25.000Z
 # END AUTO GENERATED METADATA
 ---
 
@@ -101,7 +101,7 @@ If you receive a 404 error from Azure DevOps Services, verify that your callback
 
 The following HCP Terraform and Terraform Enterprise settings are optional.
 
--   **Scope of VCS Provider**. You can configure which workspaces<!-- BEGIN: TFC:only name:stacks-tfe --> or Stacks<!-- END: TFC:only name:stacks-tfe --> can use repositories from this VCS provider. By default the **All Projects** option is selected, meaning this VCS provider is available to be used by all workspaces<!-- BEGIN: TFC:only name:stacks-tfe --> and Stacks<!-- END: TFC:only name:stacks-tfe --> in the organization.
+-   **Scope of VCS Provider**. You can configure which workspaces or Stacks can use repositories from this VCS provider. By default the **All Projects** option is selected, meaning this VCS provider is available to be used by all workspaces and Stacks in the organization.
 -   **Set up SSH Keypair**. Most organizations do not need to add an SSH key. However, if the organization repositories include Git submodules that can only be accessed over SSH, an SSH key can be added along with the OAuth credentials. You can add or update the SSH key at a later time.
 
 If you don't need to configure the advanced settings, click **Skip and Finish**. HCP Terraform or Terraform Enterprise directs you to the VCS provider page, which now includes your new Azure DevOps Services client.
@@ -110,7 +110,7 @@ If you don't need to configure the advanced settings, click **Skip and Finish**.
 
 Complete the following steps if you need to Limit the scope of this VCS provider:
 
-1. Select the **Selected Projects** option and use the text field that appears to search for and select projects to enable. All current and future workspaces<!-- BEGIN: TFC:only name:stacks-tfe --> and Stacks<!-- END: TFC:only name:stacks-tfe --> for any selected projects can use repositories from this VCS Provider.
+1. Select the **Selected Projects** option and use the text field that appears to search for and select projects to enable. All current and future workspaces and Stacks for any selected projects can use repositories from this VCS Provider.
 
 2.  Click the **Update VCS Provider** button to save your selections.
 
@@ -142,7 +142,7 @@ Ensure that the Azure DevOps organization you intend to link with HCP Terraform 
 
 ## Next steps
 
-After configuring Azure DevOps Services access for HCP Terraform, you can create Terraform workspaces<!-- BEGIN: TFC:only name:stacks-tfe --> or Stacks<!-- END: TFC:only name:stacks-tfe -->based on your organization's repositories.
+After configuring Azure DevOps Services access for HCP Terraform<!-- BEGIN: TFEnterprise:only name:product-name --> or Terraform Enterprise<!-- END: TFEnterprise:only name:product-name -->, you can create workspaces or Stacks based on your organization's repositories.
 
 ### Migrate existing workspaces to connect to ADO Organization with the new MS Entra App
 

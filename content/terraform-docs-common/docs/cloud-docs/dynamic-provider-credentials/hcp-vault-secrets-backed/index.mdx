@@ -8,7 +8,7 @@ description: >-
   providers.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2025-06-26T16:53:09-07:00
-last_modified: 2025-09-05T12:41:13-07:00
+last_modified: 2026-03-16T23:04:09.000Z
 # END AUTO GENERATED METADATA
 ---
 
@@ -36,11 +36,7 @@ Using HCP Vault Secrets-backed dynamic credentials in a workspace requires the f
 1. Configure your HCP Terraform workspace: You must add specific environment variables to your workspace to tell HCP Terraform how to authenticate to other cloud providers during runs. Each cloud platform has its own set of environment variables that are necessary to configure dynamic credentials.
 1. Complete the instructions for setting up HCP Vault Secrets-backed dynamic for [Amazon Web Services](/terraform/cloud-docs/dynamic-provider-credentials/hcp-vault-secrets-backed/aws-configuration) or [Google Cloud Platform](/terraform/cloud-docs/dynamic-provider-credentials/hcp-vault-secrets-backed/gcp-configuration).
 
-<!-- BEGIN: TFC:only name:stacks-tfe -->
-
 If you are configuring a Stack, refer to [Authenticate a Stack](/terraform/language/stacks/deploy/authenticate) to learn about the workflow of authenticating your Stack deployments with dynamic credentials.
-
-<!-- END: TFC:only name:stacks-tfe -->
 
 ### Access to metadata endpoints
 

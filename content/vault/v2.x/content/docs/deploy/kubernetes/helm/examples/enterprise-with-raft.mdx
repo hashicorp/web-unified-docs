@@ -1,0 +1,231 @@
+---
+layout: 'docs'
+page_title: 'Highly available Vault Enterprise cluster with integrated storage (Raft)'
+sidebar_current: 'docs-platform-k8s-examples-enterprise-with-raft'
+description: >-
+  Learn how to set up a highly available Vault Enterprise cluster with integrated storage (Raft) as the storage backend.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-04-14T17:13:42-07:00
+last_modified: 2026-06-16T18:48:36.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Highly available Vault Enterprise cluster with integrated storage (Raft)
+
+@include 'helm/version.mdx'
+
+
+## Deploy with integrated storage 
+
+<Tip>
+
+For full license configuration options, refer to
+[Running Vault Enterprise](/vault/docs/platform/k8s/helm/enterprise).
+
+</Tip>
+
+### Step 1: Deploy the cluster 
+
+1. Enable integrated storage using the `server.ha.raft.enabled` value. You need
+   to configure the pods to use the internal service provided by the Helm chart
+   so they can communicate directly:
+
+  ```shell-session
+  $ helm install vault hashicorp/vault                          \
+    --set='server.image.repository=hashicorp/vault-enterprise'  \
+    --set='server.image.tag=2.0.2-ent'                          \
+    --set='server.ha.enabled=true'                              \
+    --set='server.ha.raft.enabled=true'
+  ```
+
+1. Initialize the `vault-0` pod:
+
+  ```shell-session-session
+  $ kubectl exec -ti vault-0 -- vault operator init
+  ```
+
+1. Unseal the `vault-0` pod:
+
+  ```shell-session-session
+  $ kubectl exec -ti vault-0 -- vault operator unseal
+  ```
+
+1. Join the remaining pods to the Raft cluster. For example, to join `vault-1`
+   to the cluster:
+
+  ```shell-session-session
+  $ kubectl exec -ti vault-1 -- vault operator raft join http://vault-0.vault-internal:8200
+  ```
+
+1. Unseal the remaining pods to the Raft cluster. For example, to unseal
+   `vault-1` to the cluster:
+   
+  ```shell-session-session
+  $ kubectl exec -ti vault-1 -- vault operator unseal
+  ```
+
+### Step 2: Verify deployment 
+
+You can verify that the Raft cluster was initialized successfully by connecting
+to the pod and listing active peers.
+
+1. Login using the `root` token on the `vault-0` pod:
+
+  ```shell-session
+  $ kubectl exec -ti vault-0 -- vault login
+  ```
+
+1. List all the raft peers:
+
+  ```shell-session
+  $ kubectl exec -ti vault-0 -- vault operator raft list-peers
+
+  Node                                    Address                        State       Voter
+  ----                                    -------                        -----       -----
+  a1799962-8711-7f28-23f0-cea05c8a527d    vault-0.vault-internal:8201    leader      true
+  e6876c97-aaaa-a92e-b99a-0aafab105745    vault-1.vault-internal:8201    follower    true
+  4b5d7383-ff31-44df-e008-6a606828823b    vault-2.vault-internal:8201    follower    true
+  ```
+
+## Set up redundancy zones
+
+@include 'alerts/enterprise-only.mdx'
+
+For Vault Enterprise deployments on Kubernetes 1.35+, you can enable
+[redundancy zones](/vault/docs/enterprise/redundancy-zones) for improved
+availability and fault tolerance across availability zones.
+
+### Requirements
+
+- Kubernetes 1.35 or later
+- Nodes labeled with `topology.kubernetes.io/zone`
+- Vault Enterprise license
+
+### Option 1: Configure Vault with server flags
+
+You can provide explicit server flags during the Helm install:
+
+```shell-session
+$ helm install vault hashicorp/vault \
+  --set='server.image.repository=hashicorp/vault-enterprise' \
+  --set='server.image.tag=2.0.2-ent' \
+  --set='server.ha.enabled=true' \
+  --set='server.ha.replicas=6' \
+  --set='server.ha.raft.enabled=true' \
+  --set='server.ha.raft.redundancyZones.enabled=true' \
+  --set-string='server.ha.raft.config=
+    ui = true
+    
+    listener "tcp" {
+      tls_disable = 1
+      address = "[::]:8200"
+      cluster_address = "[::]:8201"
+    }
+    
+    storage "raft" {
+      path = "/vault/data"
+      autopilot_redundancy_zone = "VAULT_REDUNDANCY_ZONE"
+    }
+    
+    service_registration "kubernetes" {}' \
+  --set='server.topologySpreadConstraints[0].maxSkew=1' \
+  --set='server.topologySpreadConstraints[0].topologyKey=topology.kubernetes.io/zone' \
+  --set='server.topologySpreadConstraints[0].whenUnsatisfiable=DoNotSchedule'
+```
+
+
+### Option 2: Configure Vault with a values file
+
+1. Create a YAML values file:
+
+  ```yaml
+  # values.yaml
+  server:
+    image:
+      repository: hashicorp/vault-enterprise
+      tag: 2.0.2-ent
+    
+    ha:
+      enabled: true
+      replicas: 6  # 2 voting nodes per zone across 3 zones
+      raft:
+        enabled: true
+        redundancyZones:
+          enabled: true
+        config: |
+          ui = true
+          
+          listener "tcp" {
+            tls_disable = 1
+            address = "[::]:8200"
+            cluster_address = "[::]:8201"
+          }
+          
+          storage "raft" {
+            path = "/vault/data"
+            autopilot_redundancy_zone = "VAULT_REDUNDANCY_ZONE"
+          }
+          
+          service_registration "kubernetes" {}
+    
+    topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: topology.kubernetes.io/zone
+        whenUnsatisfiable: DoNotSchedule
+  ```
+  
+
+1. Reference the values file during Helm install:
+
+  ```shell-session
+  $ helm install vault hashicorp/vault -f values.yaml
+  ```
+  
+
+### Initialize and verify redundancy configuration
+
+To verify the install and redundancy zones configuration, you must initialize
+and unseal Vault.
+
+1. Initialize Vault to generate the unseal keys:
+
+  ```shell-session
+  $ kubectl exec -ti vault-0 -- vault operator init
+  ```  
+
+1. Unseal the first pod:
+
+  ```shell-session
+  $ kubectl exec -ti vault-0 -- vault operator unseal
+  ```
+
+1. Join and unseal the remaining pods to the cluster:
+
+  ```shell-session
+  $ for i in {1..5}; do
+      kubectl exec -ti vault-$i -- vault operator raft join http://vault-0.vault-internal:8200
+      kubectl exec -ti vault-$i -- vault operator unseal
+    done
+  ```
+
+1. Check the pod zone distribution:
+
+  ```shell-session
+  $ kubectl get pods -l app.kubernetes.io/name=vault \
+    -o custom-columns=NAME:.metadata.name,ZONE:.metadata.labels.'topology\.kubernetes\.io/zone'
+  ```
+
+1. Verify the raft peers:
+
+  ```shell-session
+  $ kubectl exec -ti vault-0 -- vault operator raft list-peers
+  ```
+
+1. Check Autopilot state (shows voting/non-voting status per zone)
+
+  ```shell-session
+  $ kubectl exec -ti vault-0 -- vault operator raft autopilot state
+  ```
+
+For more details, refer to the full
+[redundancy zones documentation](/vault/docs/platform/k8s/helm/enterprise#redundancy-zones).

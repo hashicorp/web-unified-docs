@@ -1,0 +1,156 @@
+---
+layout: docs
+page_title: Monitor certificate expiration
+description: >-
+  Learn how to monitor certificate expiration in Consul by using emitted metrics, CA root APIs, agent logs, and Prometheus alerts.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-04-01T15:15:12-07:00
+last_modified: 2026-04-02T20:49:25.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Monitor certificate expiration
+
+This topic describes how to monitor certificate expiration in Consul to prevent service disruptions caused by expired certificates.
+
+## Overview
+
+Consul manages several types of certificates in a service mesh deployment:
+
+- **CA Root Certificates**: The primary root certificate authority
+- **Intermediate Certificates**: Signing certificates used to issue leaf certificates
+- **Leaf Certificates**: Service identity certificates for workloads
+- **Agent TLS Certificates**: Certificates for secure agent communication
+
+Service disruptions may occur if you do not renew certificates in time. Consul
+provides built-in certificate telemetry to help you track certificate
+expiration and renewal health before these issues cause outages.
+
+## Configuration
+
+Certificate telemetry is enabled by default. You can [customize thresholds and behavior in your agent configuration](/consul/docs/reference/agent/configuration-file/telemetry#certificate-expiration).
+
+@include 'examples/agent/telemetry/certificate.mdx'
+
+## Monitoring workflows
+
+There are four methods for monitoring certificate expiration telemetry:
+
+1. Query the [agent metrics endpoint](/consul/api-docs/agent/metrics)
+1. Query the CA roots APIs for `NotAfter` timestamps
+1. Monitor agent logs
+1. Configure Prometheus alerts
+
+### Agent metrics endpoint
+
+Consul emits certificate-related metrics through the existing
+[`/agent/metrics` endpoint](/consul/api-docs/agent/metrics). Use the
+Prometheus format to retrieve the certificate metrics in a scrape-friendly form.
+
+Use the following command to request certificate-related metrics from the
+Consul agent:
+
+```shell-session
+$ curl http://127.0.0.1:8500/v1/agent/metrics?format=prometheus
+```
+
+Example response:
+
+```text
+consul_mesh_active_root_ca_expiry{datacenter="dc1"} 864000
+consul_mesh_active_signing_ca_expiry{datacenter="dc1"} 259200
+consul_agent_tls_cert_expiry{datacenter="dc1",partition="default",node="server-1"} 950400
+consul_leaf_certs_cert_expiry{datacenter="dc1",partition="default",namespace="default",service="web",kind=""} 86340
+consul_leaf_certs_cert_renewal_failure{datacenter="dc1",partition="default",namespace="default",service="web",kind="",reason="rate_limited"} 1
+```
+
+The root and signing CA expiry metrics are emitted by the leader-side monitor.
+On non-leaders or during startup you may temporarily see `NaN` for these values
+until the leader updates them.
+
+### CA roots APIs
+
+For exact CA root expiry timestamps, query one of the CA roots APIs:
+
+- [`/connect/ca/roots`](/consul/api-docs/connect/ca#list-ca-root-certificates)
+- [`/agent/connect/ca/roots`](/consul/api-docs/agent/connect#certificate-authority-ca-roots)
+
+These responses include the `NotAfter` field for the returned CA roots.
+
+### Agent logs
+
+Consul logs certificate expiration warnings at different severity levels:
+
+- `CRITICAL`
+- `WARNING`
+
+Use the [`consul monitor` CLI command](/consul/commands/monitor) to return an agent's logs. You can configure log behavior in [the Consul agent's configuration file](/consul/docs/reference/agent/configuration-file/log).
+
+### Prometheus Metrics
+
+Consul emits the following Prometheus metrics for certificate expiration:
+
+- `consul_mesh_active_root_ca_expiry`: Root CA expiration, in seconds
+- `consul_mesh_active_signing_ca_expiry`: Signing CA expiry, in seconds
+- `consul_agent_tls_cert_expiry{node="server-1"}`: Agent TLS certificate expiry in seconds, labeled by node
+- `consul_leaf_certs_cert_expiry{service="web",kind=""}`: Leaf certificate expiry in seconds, labeled by service and kind
+- `consul_leaf_certs_cert_renewal_failure{service="web",kind="service",reason="rate_limited"}`: Certificate renewal failures
+- `consul_leaf_certs_renewal_success`: Counter for successful leaf certificate renewals
+- `consul_leaf_certs_renewal_failed`: Counter for leaf renewal failures that are not rate limited
+- `consul_leaf_certs_renewal_failed_rate_limited`: Counter for rate-limited leaf renewal failures
+- `consul_leaf_certs_consecutive_rate_limit_errors`: Gauge tracking consecutive rate-limit failures
+
+You can configure certificate expiration alerts in Prometheus using these metrics. The following configuration example alerts you in the following scenarios:
+
+- Root CA expires in less than 7 days
+- Leaf certificate renewal failed for a service
+
+```yaml
+groups:
+  - name: consul_certificates
+    rules:
+      - alert: ConsulCertificateExpiringSoon
+        expr: consul_mesh_active_root_ca_expiry < (7 * 24 * 60 * 60)
+        labels:
+          severity: critical
+        annotations:
+          summary: "Consul root CA expires in less than 7 days"
+          description: "Root CA expires in {{ $value | humanizeDuration }}"
+
+      - alert: ConsulLeafCertRenewalFailure
+        expr: consul_leaf_certs_cert_renewal_failure > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "Leaf certificate renewal failing for {{ $labels.service }}"
+          description: "Service {{ $labels.service }} has renewal failures: {{ $labels.reason }}"
+```
+
+## Troubleshooting
+
+If you experience one of these issues when using Consul's certificate expiration telemetry features, follow our troubleshooting suggestions.
+
+### Certificate not listed
+
+If a certificate does not appear in the metrics, take the following actions:
+
+- Verify that certificate telemetry is enabled.
+- Confirm that Consul uses the certificate.
+- Ensure Prometheus is collecting Consul metrics.
+- Wait for the next metrics emission cycle. For CA certificates, this occurs every hour.
+
+### Certificate renewal failures
+
+If leaf certificates show renewal failures:
+
+- Check the `reason` label on the renewal failure metric
+- Verify CA availability and health
+- Check for rate limiting and [increase `CSRMaxPerSecond` if needed](/consul/docs/secure-mesh/certificate/built-in#csrmaxpersecond)
+- Verify ACL permissions for certificate signing
+- Review agent logs for detailed error messages
+
+### Root and signing CA metrics show `NaN`
+
+If the root or signing CA expiry metrics show `NaN`, verify that you are
+scraping the current leader and allow time for the leader-side monitor to emit
+the first value after startup.
