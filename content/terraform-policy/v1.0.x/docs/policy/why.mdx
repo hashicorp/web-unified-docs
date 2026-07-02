@@ -1,0 +1,138 @@
+---
+page_title: Why Terraform policy?
+description: >-
+  Learn about the benefits of Terraform policy and how it differs from other policy frameworks.
+---
+
+# Why Terraform policy?
+
+Terraform policy is a declarative, HCL-based policy-as-code solution deeply integrated with Terraform. It provides native support for evaluating policies at multiple stages of the Terraform lifecycle, from initialization through post-apply validation.
+
+## Key benefits
+
+### Native HCL syntax
+
+Terraform policy uses the same HCL configuration language as Terraform itself. Policy blocks, locals, and enforce blocks follow familiar Terraform patterns, eliminating the need to learn a new language. This reduces the learning curve and enables faster policy development for teams already using Terraform.
+
+### Deep Terraform integration
+
+Terraform policy is tightly integrated with Terraform's execution model, enabling capabilities that external policy frameworks cannot provide:
+
+- **Early validation**: Provider and module policies are evaluated during `terraform init`, before any downloads occur
+- **Post-apply evaluation**: Policies can validate provider-computed values (ARNs, IDs, ports) that are only known after resources are provisioned
+- **Resource relationship queries**: Built-in functions like `core::getresources()` make it easy to validate relationships between resources
+- **Data source lookups**: Policies can query data source results directly using `core::getdatasource()` to enforce dynamic requirements
+
+### Flexible enforcement levels
+
+Terraform policy supports three enforcement levels that mirror the Sentinel model:
+
+- **Hard-mandatory**: Blocks the run if the policy fails
+- **Soft-mandatory**: Can be overridden with appropriate permissions
+- **Advisory**: Warns but does not block
+
+### Support for modern Terraform workflows
+
+Terraform policy works with both traditional workspaces and HCP Terraform Stacks, covering multi-component and multi-environment deployments. It will eventually support policy evaluations alongside drift detection to ensure that drifted resources are assessed for compliance.
+
+## Comparison with Sentinel
+
+Terraform policy is our policy-as-code tool of choice for Terraform going forward, and new innovations will land there. Sentinel will continue to be supported for other HashiCorp products and for Terraform customers who would like to continue using Sentinel.
+
+| Feature | Sentinel | Terraform policy |
+|---------|----------|------------------|
+| **Policy language** | Sentinel DSL - a purpose-built policy language with its own syntax and type system | HCL - the same configuration language used to write Terraform |
+| **Post-plan evaluation** | Evaluates after `terraform plan` completes via tfplan/v2 import | Evaluates after `terraform plan` completes using resource_policy blocks |
+| **Enforcement levels** | Advisory, soft-mandatory, hard-mandatory | Advisory, soft-mandatory, hard-mandatory |
+| **Resource relationships** | Possible but complex - requires manually iterating resource_changes and correlating by attribute | `core::getresources(type, filter)` provides a structured API for querying related resources |
+| **Data source lookups** | Cannot trigger or query data sources at evaluation time | `core::getdatasource(type, name)` queries data source results directly |
+| **Block provider/module downloads** | Runs after `terraform init` completes - providers and modules are already downloaded | `provider_policy` and `module_policy` blocks evaluate during `terraform init` before downloads |
+| **Post-apply evaluation** | Only invoked during plan/policy check stage | Evaluates after apply completes to validate provider-computed values |
+
+
+
+## Comparison with OPA
+
+Open Policy Agent (OPA) is a general-purpose policy engine that can be integrated with HCP Terraform. While OPA is powerful for cross-platform policy enforcement, Terraform policy provides deeper integration with Terraform-specific workflows.
+
+| Feature | OPA (HCP Terraform) | Terraform policy |
+|---------|---------------------|------------------|
+| **Policy language** | Rego - a general-purpose declarative query language native to the OPA ecosystem | HCL - the same configuration language used to write Terraform |
+| **Post-plan evaluation** | Evaluates the Terraform plan JSON after `terraform plan` completes | Evaluates the Terraform plan after `terraform plan` completes |
+| **Enforcement levels** | Pass/fail only - no built-in concept of advisory or soft-mandatory levels | Three levels: hard-mandatory, soft-mandatory, and advisory |
+| **Resource relationships** | Possible but complex - the full plan JSON is available but there is no structured helper API | `core::getresources(type, filter)` provides a structured API for querying related resources |
+| **Data source lookups** | Can read data source values already in the plan but cannot trigger new lookups | `core::getdatasource(type, name)` queries data source results directly |
+| **Block provider/module downloads** | Runs after `terraform init` and `terraform plan` - providers and modules are already downloaded | `provider_policy` and `module_policy` blocks evaluate during `terraform init` before downloads |
+| **Post-apply evaluation** | Only invoked at the plan/policy check stage | Evaluates after apply completes to validate provider-computed values |
+| **Policy on Stacks** | No current support for Terraform Stacks deployments | Policies apply to HCP Terraform Stacks |
+
+## Feature deep dives
+
+The following sections provide detailed comparisons of key Terraform policy capabilities against both Sentinel and OPA.
+
+### Evaluating resource relationships
+
+**Use cases:**
+- Require every S3 bucket to have a corresponding versioning resource with `status = "Enabled"`
+- Require every IAM role to have at least one policy attached
+- Require every security group to have an explicit egress rule
+
+**Terraform policy** provides `core::getresources(type, filter)` which fetches related resources by type and attribute. The filter is applied at evaluation time, returning only matching candidates. This makes relationship checks concise and readable.
+
+**Sentinel** can technically achieve this by iterating over tfplan/v2 resource changes and filtering by type, but there is no structured helper API. Correlating two resource types by a shared attribute requires manually iterating both collections and matching by value. For deeply nested relationships across multiple resource types, this becomes difficult to write and maintain. Results can also be unpredictable when the linking attribute is unknown at plan time.
+
+**OPA** can technically achieve this since the full plan JSON is available, allowing you to cross-reference resource types in Rego. However, there is no structured helper API - you must write raw array comprehensions over `input.plan.resource_changes`. For simple cases this is manageable; for deeply nested relationships across multiple resource types it becomes difficult to read and maintain.
+
+### Evaluating using data source lookups
+
+**Use cases:**
+- Enforce that EC2 instances use only AMIs from an approved `aws_ami` data source lookup
+- Validate that an RDS instance uses a KMS key that exists in an `aws_kms_key` lookup
+- Check that an S3 bucket region matches a known approved region list retrieved via a data source
+
+**Terraform policy** provides `core::getdatasource(type, name)` which lets policies query data source results directly at evaluation time. For example, you can look up approved AMI IDs from an `aws_ami` data source and enforce that EC2 instances use only those AMIs.
+
+**Sentinel** has no equivalent mechanism. It evaluates a static snapshot of the plan and configuration and cannot call out to a data source or trigger a Terraform data lookup at policy evaluation time. Approved value lists must be hard-coded into the policy itself or maintained as Sentinel parameters, which adds operational overhead to keep them in sync.
+
+**OPA** has no equivalent mechanism. It evaluates a static JSON snapshot of the plan and cannot call out to a data source or trigger a Terraform data lookup at policy evaluation time. Data source values that were already refreshed during the plan may appear in `input.plan` but are not queryable by name or type.
+
+### Blocking provider and module downloads
+
+**Use cases:**
+- Prevent engineers from pulling Terraform modules from the public registry or GitHub - only allow modules sourced from the organization's private registry
+- Require all providers to come from the official HashiCorp registry (block third-party or forked providers)
+- Enforce provider version pinning to prevent unexpected major-version upgrades
+
+**Terraform policy** evaluates `provider_policy` and `module_policy` blocks during `terraform init`, before providers and modules are downloaded. A non-compliant provider or module is blocked at the earliest possible point - nothing is fetched if the policy fails.
+
+**Sentinel** runs after `terraform init` and `terraform plan` have already completed, meaning providers and modules have been resolved and downloaded before any policy evaluation occurs. There is no hook in the Sentinel integration to intercept or block the download step.
+
+**OPA** runs after `terraform init` and `terraform plan` have already completed, meaning providers and modules have been resolved and downloaded before any policy evaluation occurs. There is no hook in the OPA integration to intercept or block the download step.
+
+### Post-apply evaluations
+
+**Use cases:**
+- Verify that provider-computed values (ARNs, IDs, assigned ports) meet policy requirements - values that are only known once apply has completed
+- Surface policy violations immediately after apply so teams can remediate quickly
+
+**Terraform policy** evaluates policies after apply completes, against values that are only known once the provider has provisioned the resource - such as assigned ARNs, IDs, or computed attributes. The apply is not blocked, but any violations are surfaced immediately as errors so teams can act on them right away.
+
+**Sentinel** is only invoked during the plan/policy check stage of a run. There is no built-in mechanism to evaluate policy against post-apply values. Catching violations on provider-computed attributes would require a custom external pipeline.
+
+**OPA** on HCP Terraform is invoked only at the plan/policy check stage. There is no built-in mechanism to re-evaluate policy against the live infrastructure state after `terraform apply`. Catching violations on provider-computed attributes would require a custom external pipeline.
+
+### Policy on Stacks
+
+**Terraform policy** applies to HCP Terraform Stacks, covering multi-component and multi-environment deployments managed through the Stacks workflow.
+
+**Sentinel** has no current support for evaluating policies against Terraform Stacks deployments.
+
+**OPA** has no current support for evaluating policies against Terraform Stacks deployments.
+
+## Migration from existing policies
+
+Terraform policy represents a significant shift in how the policy engine interacts with Terraform. Existing Sentinel and OPA policies will require migration to the new HCL-based syntax. We will provide migration guides and tools to assist in the transition.
+
+## Integration with other tools
+
+Any software orchestrated with a Terraform provider can be made compliant with the help of Terraform policy. While there is no first-class integration for other products at this time, we will continue to assess customer demand for this new policy experience on products outside of Terraform over the coming months.

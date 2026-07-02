@@ -1,0 +1,267 @@
+---
+page_title: Policy plugins
+description: >-
+  Learn how to write and use policy plugins to extend Terraform policy with custom functions.
+---
+
+# Policy plugins
+
+Plugins provide a way to extend Terraform policy with additional functions that you can use to simplify your policy authoring experience. You will write Terraform policy plugins in Golang using the [`terraform-policy-plugin-framework`](https://github.com/hashicorp/terraform-policy-plugin-framework.git) open source library.
+
+You must be compile Terraform policy plugins and include them in your policy VCS repository before you can use them in your policies. In your policy files, you will use the syntax `core::<functionname>` to refer to functions built into Terraform or Terraform policy, and `plugin::<pluginname>::<functionname>` to refer to functions from plugins that you write.
+
+## Author a plugin
+
+To author your own plugins, you will create a new Go package, import the Terraform policy plugin framework library, and then author a `main()` function to register your plugin's functions and Go functions to implement each of them.
+
+The following is an example of a plugin that defines two functions, `echo`, and `trim`:
+
+<CodeBlockConfig filename="plugins/src/example/main.go">
+
+```go
+package main
+
+import (
+  "strings"
+  "github.com/hashicorp/terraform-policy-plugin-framework/policy-plugin/plugins"
+)
+
+func main() {
+  plugins.RegisterFunction("echo", echo)
+  plugins.RegisterFunction("trim", trim)
+  plugins.Serve()
+}
+
+func echo(value string) (string, error) {
+  return value, nil
+}
+
+func trim(value, prefix string) (string, error) {
+  return strings.TrimPrefix(value, prefix), nil
+}
+```
+
+</CodeBlockConfig>
+
+After you implement your plugin in Go, build it into a binary with the `go build` command, and store both the source and binary in the same VCS repository as your policy files.
+
+## Plugin Directory Structure
+
+Set up the following directory structure for your plugin to ensure Terraform policy can read it:
+
+```text
+./
+├── policies/
+├── tests/
+├── plugins/
+│   ├── src/
+│   │   └── example/
+│   │       ├── main.go
+│   │       ├── go.mod
+│   │       └── go.sum
+│   └── bin/
+│       └── example
+└── README.md
+```
+
+## Compile a plugin
+
+After you have set up the directory structure and authored your plugin, run `go build` to compile it to the `bin` directory. For example:
+
+```shell-session
+cd plugins/src/example
+go build -o ../../bin/example main.go
+```
+
+## Use plugins in policy files
+
+Specify plugins by using the `plugins {}` block within the `policy {}` block of your `.policy.hcl` files. Then, reference your functions with the `plugin::` prefix.
+
+<CodeBlockConfig filename="policies/example.policy.hcl">
+
+```hcl
+policy {
+  enforcement_level = "mandatory"
+  
+  plugins {
+    example = {
+      source = "plugins/bin/example"
+    }
+    second_example = {
+      source = "path/to/second-bin"
+    }
+  }
+}
+
+locals {
+  instance_type = plugin::example::trim("foo.t3.micro", "foo.")
+}
+```
+
+</CodeBlockConfig>
+
+The value of the `source` attribute must be a string literal that is the relative path to a binary in the same VCS repository as your policies. The binary must be a valid Terraform policy Go plugin server. Use the [`terraform-policy-plugin-framework`](https://github.com/hashicorp/terraform-policy-plugin-framework.git) open source library to ensure your plugin provides the correct interface.
+
+## Current Limitations
+
+### Function plugins must be precompiled
+
+In order to execute policies with function plugins on HCP Terraform successfully, Terraform policy assumes the presence of a precompiled binary present with the appropriate directory structure when you configure the policies into a policy set.
+
+## Examples
+
+### Detect overlapping CIDR ranges
+
+This example uses a plugin called `cidr_utils` to ensure that a new VPC CIDR block does not overlap with a restricted corporate range.
+
+<CodeBlockConfig filename="policies/cidr-overlap.policy.hcl">
+
+```hcl
+policy {
+  plugins {
+    network = {
+      source = "plugins/bin/cidr_utils"
+    }
+  }
+}
+
+resource_policy "aws_vpc" "no_corporate_overlap" {
+  enforce {
+    condition = all v in core::getresources("aws_vpc") : (
+      !plugin::network::cidr_overlap(v.attrs.cidr_block, ["10.0.0.0/8", "172.16.0.0/12"])
+    )
+    error_message = "The VPC CIDR ${v.attrs.cidr_block} overlaps with a protected corporate range."
+  }
+}
+```
+
+</CodeBlockConfig>
+
+The above policy uses the following plugin, authored in Go. It implements the logic to compare a CIDR against a restricted list and serves the function via the plugin server.
+
+<CodeBlockConfig filename="plugins/src/cidr_utils/main.go">
+
+```go
+# main.go
+package main
+
+import (
+  "context"
+  "net/netip"
+  
+  "github.com/hashicorp/terraform-policy-plugin-framework/function"
+  "github.com/hashicorp/terraform-policy-plugin-framework/plugin"
+)
+
+func main() {
+  plugin.Serve(&plugin.ServeOpts{
+    Functions: []function.Function{
+      &CIDROverlapFunction{},
+    },
+  })
+}
+
+type CIDROverlapFunction struct{}
+
+func (f *CIDROverlapFunction) Metadata(_ context.Context, req function.MetadataRequest, resp *function.MetadataResponse) {
+  resp.Name = "cidr_overlap"
+}
+
+func (f *CIDROverlapFunction) Definition(_ context.Context, req function.DefinitionRequest, resp *function.DefinitionResponse) {
+  resp.Definition = function.Definition{
+    Summary: "Returns true if a given CIDR overlaps with any in a provided list.",
+    Parameters: []function.Parameter{
+      function.StringParameter{Name: "check_cidr"},
+      function.ListParameter{
+        Name:        "restricted_ranges",
+        ElementType: function.StringType{},
+      },
+    },
+    Return: function.BoolReturn{},
+  }
+}
+
+func (f *CIDROverlapFunction) Run(ctx context.Context, req function.RunRequest, resp *function.RunResponse) {
+  var checkStr string
+  var restrictedStrs []string
+  
+  // Extract arguments from HCL
+  req.Arguments.Get(ctx, &checkStr, &restrictedStrs)
+  
+  checkPrefix, err := netip.ParsePrefix(checkStr)
+  if err != nil {
+    resp.Error = function.NewArgumentError(0, "Invalid CIDR format")
+    return
+  }
+  
+  for _, s := range restrictedStrs {
+    restrictedPrefix, err := netip.ParsePrefix(s)
+    if err != nil {
+      continue
+    }
+    
+    if checkPrefix.Overlaps(restrictedPrefix) {
+      resp.Result.Set(ctx, true)
+      return
+    }
+  }
+  
+  resp.Result.Set(ctx, false)
+}
+```
+
+</CodeBlockConfig>
+
+Before you can use your plugin in your policies, you must compile it. For example:
+
+```shell-session
+cd plugins/src/cidr_utils
+go build -o ../../bin/cidr_utils main.go
+```
+
+Write test for your policies, including those that use plugins. For example:
+
+<CodeBlockConfig filename="tests/example.policytest.hcl">
+
+```hcl
+policytest {
+  targets = ["example.policy.hcl"]
+}
+
+# --- Passing Test Case ---
+resource "aws_vpc" "compliant_vpc" {
+  attrs = {
+    cidr_block = "192.168.1.0/24"
+  }
+}
+
+# --- Failing Test Case ---
+resource "aws_vpc" "overlapping_vpc" {
+  expect_failure = true
+  
+  attrs = {
+    cidr_block = "10.50.0.0/16"  # Overlaps with 10.0.0.0/8
+  }
+}
+```
+
+<CodeBlockConfig filename="example.tf">
+
+The following Terraform configuration defines two `aws_vpc` resource that violate this example policy:
+
+```hcl
+resource "aws_vpc" "innovation_lab" {
+  cidr_block = "10.50.0.0/16"
+  
+  tags = {
+    Name = "Innovation-Lab-VPC"
+    Env  = "Sandbox"
+  }
+}
+
+resource "aws_vpc" "legacy_app" {
+  cidr_block = "172.18.0.0/24"
+}
+```
+
+</CodeBlockConfig>
