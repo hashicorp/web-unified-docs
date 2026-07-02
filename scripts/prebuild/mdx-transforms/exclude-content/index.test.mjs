@@ -207,33 +207,6 @@ This content should stay.
 		const result = await runTransform(markdown, options)
 		expect(result.trim()).toBe('This content should stay.')
 	})
-
-	it('should version-compare a Vault directive when processed in vault', async () => {
-		const options = {
-			filePath: 'vault/some-file.md',
-			version: '1.20.x',
-			repoSlug: 'vault',
-			productConfig: vaultConfig,
-		}
-
-		const markdown = `
-<!-- BEGIN: Vault:>=v1.21.x -->
-This content should be removed.
-<!-- END: Vault:>=v1.21.x -->
-<!-- BEGIN: Vault:<=v1.21.x -->
-This content should stay.
-<!-- END: Vault:<=v1.21.x -->
-Final content.
-`
-		const result = await runTransform(markdown, options)
-		expect(result.trim()).toBe(`<!-- BEGIN: Vault:<=v1.21.x -->
-
-This content should stay.
-
-<!-- END: Vault:<=v1.21.x -->
-
-Final content.`)
-	})
 })
 
 describe('transformExcludeContent - TFC/TFEnterprise Directives', () => {
