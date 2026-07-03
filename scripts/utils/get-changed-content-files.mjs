@@ -34,21 +34,39 @@ const GIT_STATUS = {
  *   directly-changed files should be ported.
  */
 function buildChangedContentFiles({ mergeBase, includePartials = true } = {}) {
-	// If an explicit mergeBase is provided (e.g. github.event.pull_request.base.sha
-	// passed from the forward-port workflow), use it directly. Otherwise find
-	// where the current branch chain diverged from origin/main — this handles the
-	// stacked-branch case correctly for incremental builds.
-	const resolvedMergeBase =
-		mergeBase ??
-		execSync('git merge-base HEAD origin/main', {
-			encoding: 'utf-8',
-		}).trim()
+	// In CI, GIT_MERGE_BASE is pre-computed by the workflow's "Fetch connection to main for merge-base"
+	// step and exported via $GITHUB_ENV. We do this in the workflow (not here) because actions/checkout
+	// creates a partial (blobless) clone where git merge-base can fail due to lazy-fetch issues with
+	// "promised" commit objects. Shell git in the workflow step has full credentials and works reliably.
+	//
+	// Locally, GIT_MERGE_BASE is not set, so we fetch and compute it here.
+	let resolvedMergeBase = mergeBase || process.env.GIT_MERGE_BASE
+	if (!resolvedMergeBase) {
+		try {
+			resolvedMergeBase = execSync('git merge-base HEAD origin/main', {
+				encoding: 'utf-8',
+			}).trim()
+		} catch (error) {
+			throw new Error(
+				`Failed to find merge-base with origin/main. Ensure origin main is fetched before running this script.\n` +
+					`stderr: ${error.stderr?.trim() || '(none)'}`,
+			)
+		}
+	}
 
 	// Get the diff between the merge base and HEAD.
-	const diffOutput = execSync(
-		`git diff --name-status ${resolvedMergeBase} HEAD -- content/`,
-		{ encoding: 'utf-8' },
-	).trim()
+	let diffOutput
+	try {
+		diffOutput = execSync(
+			`git diff --name-status ${resolvedMergeBase} HEAD -- content/`,
+			{ encoding: 'utf-8' },
+		).trim()
+	} catch (error) {
+		throw new Error(
+			`Failed to diff merge-base (${resolvedMergeBase}) against HEAD.\n` +
+				`stderr: ${error.stderr?.trim() || '(none)'}`,
+		)
+	}
 
 	const added = []
 	const modified = []
@@ -121,7 +139,10 @@ function isRunFromCommandLine() {
 export async function getChangedContentFiles(options = {}) {
 	const { mergeBase, includePartials = true, outputFile } = options
 	try {
-		const changedFiles = buildChangedContentFiles({ mergeBase, includePartials })
+		const changedFiles = buildChangedContentFiles({
+			mergeBase,
+			includePartials,
+		})
 
 		const outputPath = outputFile ?? path.join(process.cwd(), OUTPUT_FILE)
 		await fs.promises.writeFile(
@@ -159,5 +180,3 @@ if (isRunFromCommandLine()) {
 		outputFile: values.output,
 	})
 }
-
-
