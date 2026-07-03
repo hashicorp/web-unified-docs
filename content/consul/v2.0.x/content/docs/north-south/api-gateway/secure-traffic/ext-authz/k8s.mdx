@@ -1,0 +1,186 @@
+---
+layout: docs
+page_title: Delegate authorization for API gateways to an external service on Kubernetes
+description: Learn how to delegate authorization for requests to Consul API gateways to an external service with the ext-authz Envoy extension on Kubernetes.
+---
+
+# Delegate API gateway authorization to an external service on Kubernetes
+
+<EnterpriseAlert> This feature is available in Consul Enterprise. </EnterpriseAlert>
+
+This topic describes how to delegate authorization for requests to Consul API gateways to an external service on Kubernetes-orchestrated networks. If your services are deployed to virtual machines, refer to [Delegate API gateway authorization to an external service on virtual machines](/consul/docs/north-south/api-gateway/secure-traffic/ext-authz/vm).
+
+## Overview
+
+The [external authorization Envoy extension](/consul/docs/reference/proxy/extensions/ext-authz) (`builtin/ext-authz`) directs Envoy to call an external authorization service before it forwards a request to an upstream. When you set the extension's `ProxyType` to `api-gateway`, Consul applies external authorization to north-south traffic that the API gateway routes to services in the mesh.
+
+You can control external authorization at three levels:
+
+- Gateway-wide: The `consul.hashicorp.com/ext-authz` annotation on the `Gateway` resource sets the default posture for all routes attached to the gateway.
+- Per-route: A [`RouteAuthFilter`](/consul/docs/reference/k8s/api-gateway/routeauthfilter) referenced by an `HTTPRoute`, or the `consul.hashicorp.com/ext-authz` annotation on an `HTTPRoute`, overrides the gateway-wide posture.
+- Extension: The extension itself must be applied to the gateway through the gateway's `ServiceDefaults` for any of these toggles to take effect.
+
+Complete the following steps to delegate API gateway authorization to an external service:
+
+1. Apply the external authorization extension to the API gateway's `ServiceDefaults` resource.
+1. Set the gateway-wide authorization posture with an annotation on the `Gateway`.
+1. Optionally override the posture for specific routes with a `RouteAuthFilter` or annotation.
+1. Apply the resources to your cluster.
+
+## Requirements
+
+- Consul Enterprise 2.0.2 or later
+- An API gateway deployed and configured to route to one or more mesh services
+- An external authorization service that implements the Envoy external authorization gRPC or HTTP API
+
+## Apply the extension to the API gateway
+
+Add the external authorization extension to the `ServiceDefaults` resource for your API gateway and set `ProxyType` to `api-gateway`.
+
+When `ProxyType` is `api-gateway`, you can also point [`Target.URI`](/consul/docs/reference/proxy/extensions/ext-authz#arguments-config-grpcservice-target-uri) at an authorization service on a remote host. This is not allowed for `connect-proxy` proxies, which require the authorization service to run on localhost.
+
+For the full list of configurable fields, including request and response header controls, refer to the [external authorization extension configuration reference](/consul/docs/reference/proxy/extensions/ext-authz).
+
+<CodeBlockConfig filename="gateway-service-defaults.yaml">
+
+```yaml
+apiVersion: consul.hashicorp.com/v1alpha1
+kind: ServiceDefaults
+metadata:
+  name: api-gateway
+spec:
+  protocol: http
+  envoyExtensions:
+  - name: builtin/ext-authz
+    arguments:
+      ProxyType: api-gateway
+      Config:
+        GrpcService:
+          Target:
+            URI: authz.example.com:9191
+        AllowedHeaders:
+        - Prefix: x-
+        DisallowedHeaders:
+        - Exact: authorization
+          IgnoreCase: true
+```
+
+</CodeBlockConfig>
+
+## Set the gateway-wide authorization posture
+
+Add the `consul.hashicorp.com/ext-authz` annotation to the `Gateway` resource to set the default posture for all routes attached to the gateway.
+
+- When you omit the annotation, external authorization is enabled by default for every route.
+- Set the annotation to `disabled` to make external authorization opt-in so that routes must enable it individually.
+
+<CodeBlockConfig filename="gateway.yaml">
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: Gateway
+metadata:
+  name: api-gateway
+  annotations:
+    consul.hashicorp.com/ext-authz: disabled
+spec:
+  gatewayClassName: consul
+  listeners:
+  - name: http-listener
+    port: 8443
+    protocol: HTTP
+```
+
+</CodeBlockConfig>
+
+## Override the posture for specific routes
+
+You can override the gateway-wide posture for individual routes in one of two ways.
+
+### Use a RouteAuthFilter
+
+Define a [`RouteAuthFilter`](/consul/docs/reference/k8s/api-gateway/routeauthfilter) and reference it from an `HTTPRoute` with an `extensionRef` filter. The filter's `spec.extAuthz.enabled` value takes precedence over the gateway-wide posture.
+
+<CodeBlockConfig filename="route-auth-filter.yaml">
+
+```yaml
+apiVersion: consul.hashicorp.com/v1alpha1
+kind: RouteAuthFilter
+metadata:
+  name: admin-ext-authz
+  namespace: default
+spec:
+  extAuthz:
+    enabled: true
+```
+
+</CodeBlockConfig>
+
+<CodeBlockConfig filename="http-route.yaml">
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: HTTPRoute
+metadata:
+  name: admin-route
+spec:
+  parentRefs:
+  - name: api-gateway
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /admin
+    filters:
+    - type: ExtensionRef
+      extensionRef:
+        group: consul.hashicorp.com
+        kind: RouteAuthFilter
+        name: admin-ext-authz
+    backendRefs:
+    - name: admin
+      port: 8080
+```
+
+</CodeBlockConfig>
+
+### Use an annotation
+
+Alternatively, add the `consul.hashicorp.com/ext-authz` annotation directly to an `HTTPRoute` to override the posture for the routes it defines. Set the value to `enabled` or `disabled`.
+
+<CodeBlockConfig filename="http-route-annotation.yaml">
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: HTTPRoute
+metadata:
+  name: admin-route
+  annotations:
+    consul.hashicorp.com/ext-authz: enabled
+spec:
+  parentRefs:
+  - name: api-gateway
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /admin
+    backendRefs:
+    - name: admin
+      port: 8080
+```
+
+</CodeBlockConfig>
+
+## Apply the resources
+
+Use the `kubectl apply` command to apply each resource:
+
+```shell-session
+$ kubectl apply -f gateway-service-defaults.yaml
+$ kubectl apply -f gateway.yaml
+$ kubectl apply -f route-auth-filter.yaml
+$ kubectl apply -f http-route.yaml
+```
+
+After Consul reconciles the resources, the API gateway calls the external authorization service according to the posture you configured before it forwards matching requests to upstream services.

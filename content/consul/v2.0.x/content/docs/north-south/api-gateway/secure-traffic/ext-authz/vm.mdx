@@ -1,0 +1,163 @@
+---
+layout: docs
+page_title: Delegate authorization for API gateways to an external service on virtual machines
+description: Learn how to delegate authorization for requests to Consul API gateways to an external service with the ext-authz Envoy extension on virtual machines.
+---
+
+# Delegate API gateway authorization to an external service on virtual machines
+
+<EnterpriseAlert> This feature is available in Consul Enterprise. </EnterpriseAlert>
+
+This topic describes how to delegate authorization for requests to Consul API gateways to an external service on virtual machines (VM). If your services are deployed to Kubernetes-orchestrated containers, refer to [Delegate API gateway authorization to an external service on Kubernetes](/consul/docs/north-south/api-gateway/secure-traffic/ext-authz/k8s).
+
+## Overview
+
+The [external authorization Envoy extension](/consul/docs/reference/proxy/extensions/ext-authz) (`builtin/ext-authz`) directs Envoy to call an external authorization service before it forwards a request to an upstream. When you set the extension's `ProxyType` to `api-gateway`, Consul applies external authorization to north-south traffic that the API gateway routes to services in the mesh.
+
+You can control external authorization at three levels:
+
+- Gateway-wide: The [`ExtAuthz` block in the API gateway configuration entry](/consul/docs/reference/config-entry/api-gateway#extauthz) sets the default posture for all routes attached to the gateway.
+- Per-route: The [`ExtAuthz` filter in an HTTP route configuration entry](/consul/docs/reference/config-entry/http-route#rules-filters-extauthz) overrides the gateway-wide posture for the routes it matches.
+- Extension: The extension itself must be applied to the gateway for any of these toggles to take effect.
+
+Complete the following steps to delegate API gateway authorization to an external service:
+
+1. Apply the external authorization extension to the API gateway's service defaults configuration entry.
+1. Set the gateway-wide authorization posture in the API gateway configuration entry.
+1. Optionally override the posture for specific routes in the HTTP route configuration entries.
+1. Write the configuration entries to Consul.
+
+## Requirements
+
+- Consul Enterprise 2.0.2 or later
+- An API gateway deployed and configured to route to one or more mesh services
+- An external authorization service that implements the Envoy external authorization gRPC or HTTP API
+
+## Apply the extension to the API gateway
+
+Add the external authorization extension to the service defaults configuration entry for your API gateway and set `ProxyType` to `api-gateway`.
+
+When `ProxyType` is `api-gateway`, you can also point [`Target.URI`](/consul/docs/reference/proxy/extensions/ext-authz#arguments-config-grpcservice-target-uri) at an authorization service on a remote host. This is not allowed for `connect-proxy` proxies, which require the authorization service to run on localhost.
+
+For the full list of configurable fields, including request and response header controls, refer to the [external authorization extension configuration reference](/consul/docs/reference/proxy/extensions/ext-authz).
+
+<CodeBlockConfig filename="gateway-service-defaults.hcl">
+
+```hcl
+Kind = "service-defaults"
+Name = "api-gateway"
+Protocol = "http"
+EnvoyExtensions = [
+  {
+    Name = "builtin/ext-authz"
+    Arguments = {
+      ProxyType = "api-gateway"
+      Config = {
+        GrpcService = {
+          Target = {
+            URI = "authz.example.com:9191"
+          }
+        }
+        AllowedHeaders = [
+          {
+            Prefix = "x-"
+          }
+        ]
+        DisallowedHeaders = [
+          {
+            Exact      = "authorization"
+            IgnoreCase = true
+          }
+        ]
+      }
+    }
+  }
+]
+```
+
+</CodeBlockConfig>
+
+## Set the gateway-wide authorization posture
+
+Use the [`ExtAuthz` block in the API gateway configuration entry](/consul/docs/reference/config-entry/api-gateway#extauthz) to set the default posture for all routes attached to the gateway.
+
+- When you omit the `ExtAuthz` block, external authorization is enabled by default for every route.
+- Set `ExtAuthz.Enabled` to `false` to make external authorization opt-in so that routes must enable it individually.
+
+<CodeBlockConfig filename="api-gateway.hcl">
+
+```hcl
+Kind = "api-gateway"
+Name = "api-gateway"
+
+ExtAuthz = {
+  Enabled = false
+}
+
+Listeners = [
+  {
+    Name     = "http-listener"
+    Port     = 8443
+    Protocol = "http"
+  }
+]
+```
+
+</CodeBlockConfig>
+
+## Override the posture for specific routes
+
+Use the [`ExtAuthz` filter in an HTTP route configuration entry](/consul/docs/reference/config-entry/http-route#rules-filters-extauthz) to force external authorization on or off for the routes that the rule matches. The route-level setting takes precedence over the gateway-wide posture.
+
+In the following example, external authorization is enabled for requests to `/admin` even when the gateway-wide posture is opt-in:
+
+<CodeBlockConfig filename="http-route.hcl">
+
+```hcl
+Kind = "http-route"
+Name = "admin-route"
+
+Parents = [
+  {
+    Kind = "api-gateway"
+    Name = "api-gateway"
+  }
+]
+
+Rules = [
+  {
+    Matches = [
+      {
+        Path = {
+          Match = "prefix"
+          Value = "/admin"
+        }
+      }
+    ]
+    Filters = {
+      ExtAuthz = {
+        Enabled = true
+      }
+    }
+    Services = [
+      {
+        Name = "admin"
+      }
+    ]
+  }
+]
+```
+
+</CodeBlockConfig>
+
+## Apply the configuration entries
+
+Use the `consul config write` command to apply each configuration entry:
+
+```shell-session
+$ consul config write gateway-service-defaults.hcl
+$ consul config write api-gateway.hcl
+$ consul config write http-route.hcl
+```
+
+After Consul applies the configuration, the API gateway calls the external authorization service according to the posture you configured before it forwards matching requests to upstream services.

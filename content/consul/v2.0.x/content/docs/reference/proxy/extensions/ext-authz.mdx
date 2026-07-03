@@ -32,6 +32,20 @@ Click on a property name to view additional details, including default values.
    - [`Config`](#arguments-config): map | required
       - [`BootstrapMetadataLabelsKey`](#arguments-config-bootstrapmetadatalabelskey): string
       - [`ClearRouteCache`](#arguments-config-grpcservice): boolean | `false` | HTTP only
+      - [`AllowedHeaders`](#arguments-config-allowedheaders): list
+         - [`Contains`](#arguments-config-allowedheaders): string
+         - [`Exact`](#arguments-config-allowedheaders): string
+         - [`IgnoreCase`](#arguments-config-allowedheaders): boolean
+         - [`Prefix`](#arguments-config-allowedheaders): string
+         - [`SafeRegex`](#arguments-config-allowedheaders): string
+         - [`Suffix`](#arguments-config-allowedheaders): string
+      - [`DisallowedHeaders`](#arguments-config-disallowedheaders): list
+         - [`Contains`](#arguments-config-disallowedheaders): string
+         - [`Exact`](#arguments-config-disallowedheaders): string
+         - [`IgnoreCase`](#arguments-config-disallowedheaders): boolean
+         - [`Prefix`](#arguments-config-disallowedheaders): string
+         - [`SafeRegex`](#arguments-config-disallowedheaders): string
+         - [`Suffix`](#arguments-config-disallowedheaders): string
       - [`GrpcService`](#arguments-config-grpcservice): map
         - [`Target`](#arguments-config-grpcservice-target): map | required
            - [`Service`](#arguments-config-grpcservice-target-service): map
@@ -115,7 +129,7 @@ When each field is defined, an `ext-authz` configuration has the following form:
 ```hcl
 Name = "builtin/ext-authz" 
 Arguments = {
-   ProxyType = "connect-proxy"
+   ProxyType = "connect-proxy" // or "api-gateway" (Enterprise-only)
    InsertOptions = {
       Location = "<location in the filter chain>" 
       FilterName = "<filter relative to the location>"
@@ -123,6 +137,12 @@ Arguments = {
    Config = {
       BootstrapMetadataLabelsKey = "<key from bootstrap metadata>"
       ClearRouteCache = false // HTTP only
+      AllowedHeaders = [
+         Exact = "<only forward client request headers with this exact name to the authorization service>"
+      ]
+      DisallowedHeaders = [
+         Exact = "<never forward client request headers with this exact name to the authorization service>"
+      ]
       GrpcService = {
          Target = {
             Service = {
@@ -234,13 +254,17 @@ Contains the global configuration for the extension.
 
 ### `Arguments.ProxyType`
 
-Specifies the type of Envoy proxy that this extension applies to. The extension only applies to proxies that match this type and is ignored for all other proxy types. The only supported value is `connect-proxy`.
+Specifies the type of Envoy proxy that this extension applies to. The extension only applies to proxies that match this type and is ignored for all other proxy types. Supported values are `connect-proxy` and, on Consul Enterprise, `api-gateway`.
+
+When set to `api-gateway`, Consul applies external authorization to requests that the API gateway routes to upstream services. <EnterpriseAlert inline /> Support for the `api-gateway` proxy type was introduced in Consul Enterprise 2.0.2. The `api-gateway` proxy type also relaxes the [`Target.URI`](#arguments-config-grpcservice-target-uri) localhost restriction so that the authorization service can run on a remote host. Refer to [Delegate authorization for API gateways to an external service](/consul/docs/north-south/api-gateway/secure-traffic/ext-authz/vm) for usage information.
 
 #### Values
 
 - Default: `connect-proxy`
 - This field is required.
-- Data type: String
+- Data type is one of the following string values:
+  - `connect-proxy`
+  - `api-gateway` <EnterpriseAlert inline />
 
 ### `Arguments.ListenerType`
 
@@ -319,6 +343,39 @@ Envoy also clears cached routes if the status returned from the authorization se
 - Data type: Boolean
 
 
+### `Arguments.Config.AllowedHeaders`
+
+Restricts which client request headers Envoy forwards to the external authorization service in the check request. When set, only client request headers whose names match one of the configured [string matchers](#string-matcher-configuration) are sent to the authorization service. This field applies to both the gRPC and HTTP transports.
+
+When unset, Envoy keeps its default behavior: all client request headers are sent to a gRPC authorization service, whereas only a small default set (plus any [`HttpService.AuthorizationRequest.AllowedHeaders`](#arguments-config-httpservice-authorizationrequest)) are sent to an HTTP authorization service. This field is the only way to restrict the request headers sent to a gRPC authorization service.
+
+#### Values
+
+- Default: None
+- Data type: List of [string matchers](#string-matcher-configuration)
+
+### `Arguments.Config.DisallowedHeaders`
+
+Prevents Envoy from forwarding the listed client request headers to the external authorization service. Client request headers whose names match one of the configured [string matchers](#string-matcher-configuration) are never sent to the authorization service, even when they also match [`AllowedHeaders`](#arguments-config-allowedheaders). This field applies to both the gRPC and HTTP transports and takes precedence over `AllowedHeaders` when a header matches both.
+
+#### Values
+
+- Default: None
+- Data type: List of [string matchers](#string-matcher-configuration)
+
+#### String matcher configuration
+
+Each entry in `AllowedHeaders` and `DisallowedHeaders` matches a client request header name using exactly one of the following fields:
+
+| Parameter | Description | Data type | Default |
+| ---       | ---         | ---       | ---     |
+| `Contains` | Matches when the header name contains this substring. | String | None |
+| `Exact` | Matches when the header name equals this value exactly. | String | None |
+| `Prefix` | Matches when the header name begins with this value. | String | None |
+| `SafeRegex` | Matches when the header name matches this RE2 regular expression. | String | None |
+| `Suffix` | Matches when the header name ends with this value. | String | None |
+| `IgnoreCase` | When `true`, performs the match case-insensitively. | Boolean | `false` |
+
 ### `Arguments.Config.GrpcService`
 
 Specifies the external authorization configuration for gRPC requests. Configure the `GrpcService` or the [`HttpService`](#arguments-config-httpservice) settings, but not both.
@@ -365,7 +422,7 @@ The following table describes how to configure parameters for the `Service` fiel
 
 ### `Arguments.Config.GrpcService.Target.Uri`
 
-Specifies the URI of the external authorization service. Configure this field when you must provide an explicit URI to the external authorization service, such as cases in which the authorization service is running on the same host or pod. If set, the value of this field must be one of `localhost:<port>`, `127.0.0.1:<port>`, or `::1:<port>`.
+Specifies the URI of the external authorization service. Configure this field when you must provide an explicit URI to the external authorization service, such as cases in which the authorization service is running on the same host or pod. When [`ProxyType`](#arguments-proxytype) is `connect-proxy`, the value of this field must be one of `localhost:<port>`, `127.0.0.1:<port>`, or `::1:<port>`. When `ProxyType` is `api-gateway`, this restriction is relaxed and the URI may point to a remote host. <EnterpriseAlert inline />
 
 Configure either the `Uri` field or the [`Service`](#arguments-config-grpcservice-target-service) field, but not both. 
  
@@ -451,7 +508,7 @@ The following table describes how to configure parameters for the `Service` fiel
 
 ### `Arguments{}.Config{}.HttpService{}.Target{}.Uri`
 
-Specifies the URI of the external authorization service. Configure this field when you must provide an explicit URI to the external authorization service, such as cases in which the authorization service is running on the same host or pod. If set, the value of this field must be one of `localhost:<port>`, `127.0.0.1:<port>`, or `::1:<port>`.
+Specifies the URI of the external authorization service. Configure this field when you must provide an explicit URI to the external authorization service, such as cases in which the authorization service is running on the same host or pod. When [`ProxyType`](#arguments-proxytype) is `connect-proxy`, the value of this field must be one of `localhost:<port>`, `127.0.0.1:<port>`, or `::1:<port>`. When `ProxyType` is `api-gateway`, this restriction is relaxed and the URI may point to a remote host. <EnterpriseAlert inline />
 
 Configure either the `Uri` field or the [`Service`](#arguments-config-httpservice-target-service) field, but not both. 
  
@@ -741,3 +798,43 @@ EnvoyExtensions = [
   }
 ]
 ```
+
+### Authorize API gateway requests to a remote authorization service <EnterpriseAlert inline />
+
+<EnterpriseAlert>Applying the external authorization extension to API gateways requires Consul Enterprise 2.0.2 or later.</EnterpriseAlert>
+
+In the following example for Consul Enterprise, a service defaults configuration entry applies the extension to an API gateway named `api-gateway`. Because [`ProxyType`](#arguments-proxytype) is `api-gateway`, the [`Target.URI`](#arguments-config-grpcservice-target-uri) can point to a remote authorization service. The configuration also restricts which client request headers Envoy forwards to the authorization service:
+
+```hcl
+Kind = "service-defaults"
+Name = "api-gateway"
+Protocol = "http"
+EnvoyExtensions = [
+  {
+    Name = "builtin/ext-authz"
+    Arguments = {
+      ProxyType = "api-gateway"
+      Config = {
+        GrpcService = {
+          Target = {
+            URI = "authz.example.com:9191"
+          }
+        }
+        AllowedHeaders = [
+          {
+            Prefix = "x-"
+          }
+        ]
+        DisallowedHeaders = [
+          {
+            Exact      = "authorization"
+            IgnoreCase = true
+          }
+        ]
+      }
+    }
+  }
+]
+```
+
+Refer to [Delegate API gateway authorization to an external service on virtual machines](/consul/docs/north-south/api-gateway/secure-traffic/ext-authz/vm) and [on Kubernetes](/consul/docs/north-south/api-gateway/secure-traffic/ext-authz/k8s) for complete workflows, including how to set the gateway-wide and per-route authorization posture.
