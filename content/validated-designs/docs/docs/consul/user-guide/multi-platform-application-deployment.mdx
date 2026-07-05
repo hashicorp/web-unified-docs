@@ -1,0 +1,211 @@
+---
+title: Multi-platform application deployment
+description: Deploy example applications across Kubernetes, EC2, and Nomad using Consul.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-07-03T10:00:00.000Z
+last_modified: 2026-07-03T10:00:00.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Multi-platform application deployment
+
+## Application deployment
+
+Once the Kubernetes clusters (EKS, AKS) are provisioned, the following YAML files define the necessary resources for deploying two applications: Counting and Dashboard. These files include configurations for ServiceAccounts, ClusterIPServers, Consul service defaults, and deployments.
+
+### Prerequisites
+- It is recommended to create separate namespaces for each application.
+- Kubernetes clusters are provisioned as per the previous steps.
+
+### Deploy the Counting application on AKS
+
+```
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: counting
+  namespace: counting
+automountServiceAccountToken: true
+imagePullSecrets:
+  - name: registry-nonprod
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: counting
+  namespace: counting
+  labels:
+    app: counting
+spec:
+  type: ClusterIP
+  selector:
+    app: counting
+  ports:
+    - port: 9001
+      targetPort: 9001
+      protocol: TCP
+
+---
+apiVersion: consul.hashicorp.com/v1alpha1
+kind: ServiceDefaults
+metadata:
+  name: counting
+  namespace: counting
+spec:
+  protocol: "http"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: counting
+  namespace: counting
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      service: counting
+      app: counting
+  template:
+    metadata:
+      labels:
+        service: counting
+        app: counting
+      annotations:
+        consul.hashicorp.com/connect-inject: "true"
+        k8s.v1.cni.cncf.io/networks: '[{ "name": "consul-cni" }]'
+    spec:
+      serviceAccountName: counting
+      containers:
+        - name: counting
+          image: hashicorp/counting-service:0.0.2
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 9001
+```
+
+### Deploy the Dashboard application on EKS
+
+```
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dashboard
+  namespace: dashboard
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dashboard
+  namespace: dashboard
+  labels:
+    app: dashboard
+spec:
+  type: ClusterIP
+  selector:
+    app: dashboard
+  ports:
+    - port: 8080
+      targetPort: 9002
+      protocol: TCP
+
+---
+apiVersion: consul.hashicorp.com/v1alpha1
+kind: ServiceDefaults
+metadata:
+  name: dashboard
+  namespace: dashboard
+spec:
+  protocol: "http"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dashboard
+  namespace: dashboard
+  labels:
+    app: dashboard
+    service: dashboard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dashboard
+      service: dashboard
+  template:
+    metadata:
+      labels:
+        service: dashboard
+        app: dashboard
+      annotations:
+        consul.hashicorp.com/connect-inject: "true"
+        k8s.v1.cni.cncf.io/networks: '[{ "name": "consul-cni" }]'
+    spec:
+      serviceAccountName: dashboard
+      containers:
+        - name: dashboard
+          image: hashicorp/dashboard-service:0.0.4
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 9002
+          env:
+            - name: COUNTING_SERVICE_URL
+              value: http://counting.virtual.cp-7599887.ns.consul
+```
+
+### Dashboard service registration in AWS EC2
+
+The example file below defines the 'dashboard' service for registration with Consul on an EC2 instance.
+
+`dashboard.hcl`
+```
+service {
+  name = "dashboard"
+  port = 9002
+
+  connect {
+    sidecar_service {
+      proxy {
+        upstreams {
+          destination_name = "counting"
+          local_bind_port  = 9001
+        }
+      }
+    }
+  }
+
+  check {
+    name     = "HTTP Health Check"
+    http     = "http://localhost:9002/health"
+    interval = "10s"
+    timeout  = "2s"
+  }
+}
+```
+
+Then, update the service in the Consul catalog:
+
+```
+consul services register dashboard.hcl
+```
+
+## Nomad 
+This Nomad job file deploys the `counting` service in the `counting` partition, exposing port 9001 and integrating with Consul for service mesh and discovery.
+
+<Note>Admin partitions are a Consul Enterprise feature.</Note>
+
+```
+job "counting" {
+  datacenters = ["nomad-dc"]
+  type        = "service"
+  partition   = "counting"
+
+  group "counting-group" {
+    count = 1
+
+    network {
+      port "counting" {
+```

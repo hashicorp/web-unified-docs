@@ -1,0 +1,223 @@
+---
+title: Scale services on multiple infrastructures
+description: Use Consul service mesh, mesh gateways, DNS, and catalog sync across multiple infrastructures.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-06-09T20:55:37.000Z
+last_modified: 2026-06-09T20:55:37.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Scale services on multiple infrastructures
+
+<Note>
+
+Namespaces, admin partitions, cluster peering, and mesh gateway governance are configured and managed by platform operators — see the Administration Guide: [Multi-cluster and multi-tenant deployments](/validated-designs/consul/administration-guide/multi-cluster-and-multi-tenant-deployments).
+
+</Note>
+
+Consul provides a way for organizations to secure service-to-service communications across numerous clouds and run-times based on service identity, instead of difficult-to-manage IP addresses. You are able to integrate with your preferred identity access management (IAM) system and OpenID Connect (OIDC) providers. This gives platform teams the ability to limit machine, database, application, and service account access based on policies and role assignments. 
+
+Implementing Consul's security and service communication features requires planning and incorporation of HashiCorp's Cloud Operating Model. It is especially important for developers to consider the following constructs:
+
+1. **Provision:** Leverage multi-cloud infrastructure provisioning with Terraform. Using Terraform is especially beneficial in large organizations that utilize on-premises and multi-cloud deployments. Taking an infrastructure-as-code (IaC) approach provides a reliable and consistent way to self-service infrastructure that is compliant and easily managed.
+2. **Secure:** Adopt zero-trust practices by securing east-west communication with Consul across distributed network boundaries. Secure workload communications running on multiple run-times with encryption, authorization, and Vault secret storage.
+3. **Connect:** The networking layer transitions from being heavily dependent on the physical location and IP addresses of services to using a dynamic registry of services for discovery, segmentation, and composition.
+4. **Execute:** Run applications on infrastructure which is provisioned on-demand using a scheduler. Use Consul to connect the applications securely.
+
+While scaling, there will be scenarios where organizations will want to apply multi-tenancy across several clusters, all while sharing a Consul cluster between various clouds. In this document, you will walk through the following scenario:
+ 
+- An organization has on-premises infrastructure, and has made heavy investments in VM-based virtualization. They have a single Consul cluster running on the virtual machines. Two partitions have been created: `frontend-team` and `backend-team`. 
+
+- The frontend team manages a dashboard application and relies on the backend team to provide data for the dashboard. The backend team chose to containerize their counting application by standing up Nomad infrastructure with Consul clients installed on each node, which register back with the Consul server cluster.
+
+- Business has been increasing for the organization. They now have to support other geographical areas, and therefore need to scale to public cloud providers. The frontend team is choosing to deploy their dashboard in AWS, while the backend team has chosen to deploy their counting application in Azure. 
+ 
+- A third platform team is using Consul's cluster peering feature to join the two cloud-hosted clusters and existing on-premises environment, providing a failover path for the backend team's application.
+
+
+<Note> Admin partitions are only supported in Consul Enterprise. </Note>
+
+The diagram shows how the business-supporting applications will be installed:
+
+![Business application installation](/img/consul/operating-guides/scaling/business-application-install.png)
+
+Notes on the diagram:
+- On-premises dashboard application is install on VMs.
+- On-premises counting application is installed on VMs with a Nomad runtime.
+- Dashboard application is installed on EKS in AWS-US East DC1.
+- Counting application is installed on AKS in an HA configuration in Azure-US East DC2.
+
+## Architectural elements
+
+Before diving into the installation details, it is important to get introduced to the architectural elements that will enable you to achieve the targeted state architecture needed by your organization.
+
+### Mesh gateways
+Consul clusters may run on different cloud providers or in multiple regions within the same provider's system. [Consul's mesh gateways](https://developer.hashicorp.com/consul/docs/connect/gateways/mesh-gateway) facilitate cross-cluster communication by encrypting outgoing traffic, decrypting incoming traffic, and routing traffic to healthy services. Mesh gateways are required to route service-to-service traffic between datacenters and handle control plane traffic from Consul servers. They are also used to route service-to-service traffic between admin partitions. These gateways sit at the edge of a cluster or on the public internet, and accept Layer 4 (L4) traffic with mutual TLS (mTLS) encryption.
+
+Mesh gateways, when crossing network boundaries like the internet or regional boundaries with the same cloud service provider (CSP), should leverage the cloud provider's automatic load balancer configuration. For example, when services on Kubernetes are exposed via the type `LoadBalancer`, the cloud provider will automatically create a corresponding load balancer within the environment. Consul advertises the load balancer's address as the WAN interface for the mesh gateway. 
+
+In the context of this document, mesh gateways will be used for cluster peering and will not utilize Consul's traditional WAN federation model. 
+
+### Cluster peering
+Cluster peering uses various components of Consul's architecture to ensure secure service-to-service communication:
+- A _peering token_ contains a secret that facilitates secure communication when symmetrically shared between datacenters. By exchanging this token, server agents in a datacenter can authenticate requests from the corresponding peer, similar to how the gossip encryption key protects LAN and WAN gossip between Consul agents.
+- A _mesh gateway_ is responsible for routing encrypted traffic and requests to healthy services. For mesh gateways to function, Consul's service mesh capabilities must be activated. These gateways are specific to the admin partitions they are deploy in.
+- An _exported service_ makes a given upstream service discoverable by downstream services in the service catalogs of the consuming admin partitions or peers. These services must be explicitly defined within the `exported-services` configuration entry or through a Kubernetes custom resource.
+- _Service intentions_ authorize communication between services in the mesh. They provide identity-based access by authorizing connections based on the downstream service identity that is encoded in the TLS certificate used by the sidecar proxy when connecting to upstream services.
+
+![Cluster peering](/img/consul/operating-guides/scaling/cluster-peering.png)
+
+### Consul dataplane - Kubernetes
+When deploying Consul service mesh, organizations will benefit from adding the Consul dataplane sidecar with built-in [Envoy](https://www.envoyproxy.io) proxy capabilities. Consul dataplane was introduced in Consul v1.14 and replaces the Consul client agent with a lightweight agent. Consul dataplane does not use gossip, and relies on Kubernetes health checks to validate the health of a pod.
+
+![Consul dataplane](/img/consul/operating-guides/scaling/consul-dataplane.png)
+
+Consul dataplane has the following benefits:
+- **Fewer network requirements:** Bidirectional network connectivity between nodes is not required for gossip communication. This has been replaced by a single gRPC connection to the Consul servers.
+- **Simplified setup:** Because gossip communication is not require, there is no need for generating or rotating encryption keys, resulting in fewer tokens to track.
+- Support for AWS Fargate and GKE Autopilot.
+
+Organizations adopting Consul service mesh can find a compatibility matrix, list of supported features, and technical constraints in the [Consul Solution Design Guide](/validated-designs/consul/installation-guide/consul-on-kubernetes#kubernetes-deployment-architecture). The Helm values file given below shows the options that are recommended to turn on the Consul dataplane:
+
+```
+global:
+connectInject:
+    replicas: 2
+    consulNamespaces:
+        mirroringK8S: true
+    transparentProxy:
+        defaultEnabled: true
+    cni:
+        enabled: true
+        namespace: "consul"
+        cniBinDir: "/var/lib/cni/bin"
+        cniNetDir: "/etc/kubernetes/cni/net.d"
+        multus: true 
+    metrics:
+        defaultEnabled: true
+        defaultEnableMerging: true
+    resources:
+        requests:
+            memory: "200Mi"
+            cpu: "100m"
+        limits:
+            memory: "500Mi"
+            cpu: "500m"
+    failurePolicy: "Ignore"
+    k8sDenyNamespaces:
+        - default
+    sidecarProxy:
+        resources:
+        requests:
+            memory: 100Mi
+            cpu: 100m
+        limits:
+            memory: null
+            cpu: null
+    initContainer:
+        resources:
+            requests:
+                memory: "25Mi"
+                cpu: "50m"
+            limits:
+                memory: "150Mi"
+                cpu: "50m"
+    apiGateway:
+        manageExternalCRDs: true
+        managedGatewayClass:
+            serviceType: LoadBalancer
+```
+
+### Transparent proxy
+The [Consul service mesh transparent proxy](https://developer.hashicorp.com/consul/docs/k8s/connect/transparent-proxy) simplifies service mesh adoption by allowing services to connect securely without modifying application code. It leverages Envoy as a sidecar proxy, automatically intercepting and managing service-to-service communication using mTLS, authorization policies, and traffic routing rules.
+
+In a traditional Consul service mesh setup, services must be explicitly configured to communicate to upstream services via local ports that are bound by the Envoy proxy sidecar. With the transparent proxy, however, this requirement is removed. Consul automatically configures the network to intercept traffic from the application without requiring any changes to service configurations or code and forwards it to Envoy. This allows legacy applications or services that cannot be easily modified to participate in the service mesh with minimal effort.
+
+### Consul CNI
+The Consul Container Network Interface (CNI) plugin is deployed to enable transparent proxy functionality for service mesh workloads, and to avoid the need for privileged permissions within application initialization containers.
+
+```
+connectInject:
+  replicas: 2
+  consulNamespaces:
+    mirroringk8s: true 
+  transparentProxy:
+    defaultEnabled: true
+  cni:
+    enabled: true
+    namespace: "consul"
+    cniBinDir: "/var/lib/cni/bin"
+    cniNetDir: "/etc/kubernetes/cni/net.d"
+    multus: true
+```
+
+## Networking
+Managing multiple cloud environments often introduces significant overhead for customers. Establishing connectivity between disparate cloud providers typically involves setting up VPN tunnels. These include examples such as IPsec VPNs that traverse the public internet, or dedicated circuits like AWS Direct Connect, Microsoft ExpressRoute, and GCP Cloud Interconnect. 
+
+Each of these methods presents its own set of complexities, including issues with scalability, fragmented visibility, and inconsistencies in security policies. Moreover, the requirement to avoid overlapping IP addresses further complicates configuration and management. Consul service mesh addresses these networking challenges by offering a cohesive networking model that unifies services across these varied and disconnected environments.
+
+### Load balancers for gateways
+Consul provides load balancing capabilities by randomizing the DNS responses when queried by one service trying to reach another within the service mesh; this can be further extended to high availability, resilience and failover. Consul’s DNS and load balancing capabilities help organizations reduce network costs and complexity by reducing the amount of load balancers and firewalls in a service communication path. 
+
+In a large-scale deployment - especially when connecting different network boundaries - there will be situations where there are services that have not yet been migrated to Consul, or fall under a different administrative control where Consul cannot be installed. These are two scenarios where load balancers will be required.
+
+Organizations with regionally diverse datacenters or multiple CSPs will need load balancers for network translation between public and private subnets. A Network Load Balancer ( NLB ) operates at Layer 3 and Layer 4, offering IP/Port translation and managed traffic between cloud and on-premises environments.
+
+### Load balancers for VMs and Kubernetes
+An on-premises or public cloud virtual machine- or container-based deployment will have load balancers deployed in the following scenarios:
+
+- **Front-ending the service mesh at the north-south ingress point:** These load balancers are typically L4 and can be set up to load balance L4 traffic between multiple API gateways. These API gateways typically handle L7 traffic providing SSL termination, authentication, session persistence, and other balancing techniques like service splitting based on HTTP headers.
+- **Exposing Consul's DNS endpoint for query by upstream DNS servers:** Consul exposes both TCP and UDP port 8600 for DNS queries against its service catalog. An L4 load balancer can be set up to proxy DNS queries on port 53 to port 8600 serviced by multiple Consul servers, preferably to non-voting Consul servers. This will reduce the risk of overloading the voting servers.
+- **Connecting mesh gateways between two regions or datacenters with different admin controls:** Mesh gateways operate at the edge of the mesh. They receive incoming or outgoing HTTP/TCP connections to services running in the mesh and for inter-cluster calls. To connect mesh gateways across different administrative boundaries, load balancers will be required to provide a static virtual IP, which can be used to route incoming traffic. You will see this, for example, in mesh gateways deployed across VPCs, where public-facing load balancers frontend multiple mesh gateways in a region.
+
+The above scenarios are discussed further in subsequent sections, and will be covered in the installation modules provided. 
+
+## Consul DNS 
+Consul offers a DNS interface for querying services registered in the Consul catalog, and is the main mode of service resolution for communication between Consul registered services. For a deployment at scale, companies will need to establish a DNS strategy for connecting services in the following states:
+1. Services that are not yet discovered by Consul and are not part of the mesh (off-mesh), or
+2. Services that are discovered by Consul and/or are part of the mesh (on-mesh).
+
+This becomes important when workloads are running monolith or microservices-based applications on Kubernetes. It is also applicable when you have VM-based deployments leveraging on-premises infrastructure or public clouds. HashiCorp can provide guidance around how to manage DNS behavior for services running on-mesh, or how to configure Consul DNS. 
+
+### Consul DNS on VM-based Consul clients
+
+Consul DNS can be used by applications for upstream service lookups and nodes registered with Consul. Applications do not need to be modified to retrieve the service's connection information; i.e., a fully qualified domain name (FQDN) that aligns with Consul's lookup format to retrieve the relevant information.
+
+Because you are turning on service mesh capabilities, you have the option of [using service upstream](https://developer.hashicorp.com/consul/docs/connect/proxies/proxy-config-reference#upstream-configuration-reference) or DNS. If an app is registered with Consul, it will use its local agent to query the Consul catalog to resolve an upstream application. VM-based clients query `localhost` for services in the `.consul` domain or an `alt_domain` configured by the Consul admins.
+
+### DNS recursion
+While clients operating locally will use Consul DNS for resolution, there will be cases where clients need to talk to off-mesh services. For this case, [recursors](https://developer.hashicorp.com/consul/docs/agent/config/config-files#recursors) will need to be set up to point to the upstream DNS resolvers.
+
+### Consul DNS on Kubernetes
+Most Kubernetes distributions now use CoreDNS as a general-purpose authoritative DNS server that can provide in-cluster DNS resolution. Consul can extend its DNS capabilities to Kubernetes by integrating with CoreDNS. The ["Resolve Consul DNS requests in Kubernetes" guide](https://developer.hashicorp.com/consul/docs/k8s/dns/enable) goes into more detail on how to configure CoreDNS in various Kubernetes distributions including OpenShift.
+
+Organizations can use the built in `.consul` domain or choose to create a sub-domain for services catered by the Consul DNS. This sub-domain or alt-domain can be configured as a Helm value, as shown below:
+
+```
+server:
+  enabled: true
+  logLevel: trace
+  replicas: 3
+  extraConfig: |
+    {
+      "alt_domain": "consul.useast18.myorg.com"
+    }
+```
+
+## Service catalog sync
+Kubernetes provides basic service discovery within a single cluster. When Consul is used solely for service discovery, there is an option to synchronize Kubernetes’s service catalog with Consul’s service catalog, or vice versa. Consul catalog service sync can be turned on in the Helm chart, as explained in ["Service Sync for Consul on Kubernetes"](https://developer.hashicorp.com/consul/docs/k8s/service-sync).
+
+Service Mesh and Service Sync are not supported together. This is because services are automatically synced with Kubernetes when the service mesh is enabled. Additional service syncing does not need to be enabled in the Helm chart.
+
+## High-level design
+As illustrated in the architecture below, a Consul deployment is designed to operate across several clouds (in this case AWS and Azure) and diverse runtime environments, including Kubernetes, Nomad, and traditional VMs. This multi-cloud, multi-runtime architecture ensures that service discovery, service mesh, and network automation capabilities are consistently delivered across diverse infrastructure environments.
+
+![High level design](/img/consul/operating-guides/scaling/high-level-design.png)
+
+## References
+
+- ["Consul 1.13 Introduces Cluster Peering"](https://www.hashicorp.com/blog/consul-1-13-introduces-cluster-peering)
+- ["Consul: Solution Design Guide - Detailed Design"](/validated-designs/consul/installation-guide/detailed-design#firewalls)
+- ["Consul: Operating Guide for Adoption - DNS discovery"](/validated-designs/consul/user-guide/service-discovery-catalog#dns-discovery)
+- ["DNS forwarding"](https://developer.hashicorp.com/consul/docs/services/discovery/dns-forwarding)
+- ["Recursors"](https://developer.hashicorp.com/consul/docs/agent/config/config-files#recursors)

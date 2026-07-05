@@ -74,6 +74,10 @@ function normalizeLine(line) {
 	let l = line
 	// keep visible link text, drop the URL target: [text](url) -> text
 	l = l.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+	// keep visible text of HTML anchors, drop the tag+href: <a href="url">text</a> -> text
+	// (source HVDs frequently use HTML links whose URLs change during migration;
+	//  comparing on the URL would produce false "missing content" positives)
+	l = l.replace(/<a\s+[^>]*>(.*?)<\/a>/gi, '$1')
 	l = l.replace(/`/g, '')
 	// unescape common markdown escapes so \- \. \# compare equal
 	l = l.replace(/\\([-.#*_])/g, '$1')
