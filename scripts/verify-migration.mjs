@@ -81,8 +81,77 @@ function normalizeLine(line) {
 	l = l.replace(/`/g, '')
 	// unescape common markdown escapes so \- \. \# compare equal
 	l = l.replace(/\\([-.#*_])/g, '$1')
+	// canonicalise guide-type NAMES so the content diff is not swamped by the
+	// intentional terminology migration (Solution Design Guide -> Installation Guide,
+	// Operating Guide -> Administration/User Guide). A line that changed only by a
+	// guide-name swap should match; genuine prose loss still surfaces. The separate
+	// legacy-terminology gate (below) is what enforces the swap actually happened.
+	l = l.replace(/\b(solution design|installation|administration|operating|user)\s+guides?\b/gi, 'GUIDE')
 	l = l.replace(/\s+/g, ' ').trim()
 	return l
+}
+
+// Prose scan for legacy guide-type names and retired maturity-model framing.
+// Excludes URLs, image paths, and HTML/JSX comments (which carry the editorial markers).
+const LEGACY_PATTERNS = [
+	/\bsolution design guide\b/i,
+	/\boperating guide\b/i,
+	/\b(adoption|adopt|standardization|standardizing|scaling)\s+phase\b/i,
+	/\bmaturity (model|scale)\b/i,
+	/\bphase of operating\b/i,
+]
+function scanLegacyTerms(tree) {
+	const hits = []
+	let inComment = false
+	for (const file of walkMdx(tree)) {
+		const body = stripFrontmatter(fs.readFileSync(file, 'utf8'))
+		body.split('\n').forEach((raw, i) => {
+			let line = raw
+			// skip HTML/JSX comment lines (editorial review markers live here)
+			if (/<!--|\{\/\*/.test(line)) inComment = true
+			const commented = inComment
+			if (/-->|\*\/\}/.test(line)) inComment = false
+			if (commented) return
+			// strip links/images so URL slugs and asset paths don't count
+			line = line.replace(/\]\([^)]*\)/g, ']').replace(/<a\s+[^>]*>/gi, '').replace(/\/img\/[^\s)"']*/g, '')
+			// keep only prose that isn't a bare URL
+			line = line.replace(/https?:\/\/\S+/g, '').replace(/\/validated-designs\/\S+/g, '')
+			for (const re of LEGACY_PATTERNS) {
+				if (re.test(line)) {
+					hits.push(`${file.split('/docs/docs/')[1] || file}:${i + 1}: ${raw.trim().slice(0, 120)}`)
+					break
+				}
+			}
+		})
+	}
+	return hits
+}
+
+// Duplicate H2 headings within an introduction page. Intros are where content
+// concatenated from multiple source guides shows up (e.g. repeated "Use cases"
+// sections). Restricted to introduction.mdx + H2 to avoid flagging legitimately
+// repeated sub-headings in long reference pages.
+function duplicateHeadings(tree) {
+	const dupes = []
+	for (const file of walkMdx(tree)) {
+		if (path.basename(file) !== 'introduction.mdx') continue
+		const body = stripFrontmatter(fs.readFileSync(file, 'utf8'))
+		let inFence = false
+		const seen = new Map()
+		for (const raw of body.split('\n')) {
+			if (/^\s*(```|~~~)/.test(raw)) inFence = !inFence
+			if (inFence) continue
+			const m = /^(##)\s+(.*)$/.exec(raw.trim())
+			if (m) {
+				const key = normalizeLine(m[2])
+				seen.set(key, (seen.get(key) || 0) + 1)
+			}
+		}
+		for (const [key, n] of seen) {
+			if (n > 1) dupes.push(`${file.split('/docs/docs/')[1] || file} :: "${key}" (\u00d7${n})`)
+		}
+	}
+	return dupes
 }
 
 function collectCorpus(tree) {
@@ -175,6 +244,19 @@ function main() {
 	console.log(`  numbered filenames:   ${numberedFiles.length}`)
 	console.log(`  numbered nav paths:   ${numberedPaths.length}`)
 
+	// ---- Terminology gate: no legacy guide names / maturity-phase framing in prose ----
+	const legacy = scanLegacyTerms(path.join(target, product))
+	console.log(`\nTerminology gate (legacy guide names / maturity-phase framing in prose): ${legacy.length}`)
+	for (const h of legacy.slice(0, 40)) console.log(`  ✗ ${h}`)
+	if (legacy.length > 40) console.log(`  … and ${legacy.length - 40} more`)
+	if (legacy.length) failures.push(`Legacy terminology remains in prose (${legacy.length} lines) — see terminology gate above`)
+
+	// ---- Duplicate-heading check (catches concatenated intros) ----
+	const dupes = duplicateHeadings(path.join(target, product))
+	console.log(`\nDuplicate headings within a guide: ${dupes.length}`)
+	for (const d of dupes) console.log(`  ✗ ${d}`)
+	if (dupes.length) failures.push(`Duplicate headings within a guide (${dupes.length}) — likely concatenated content`)
+
 	// ---- Content-preservation diff (source vs target) ----
 	const srcTree = path.join(source, product)
 	const tgtTree = path.join(target, product)
@@ -211,7 +293,7 @@ function main() {
 	console.log(`\nNotes:`)
 	for (const n of notes) console.log(`  - ${n}`)
 
-	console.log(`\nResult: ${failures.length === 0 ? 'STRUCTURAL PASS' : 'STRUCTURAL FAIL'}`)
+	console.log(`\nResult: ${failures.length === 0 ? 'PASS' : 'FAIL'}`)
 	if (failures.length) {
 		for (const f of failures) console.log(`  ✗ ${f}`)
 		process.exit(1)
