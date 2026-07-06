@@ -178,11 +178,15 @@ function collectCorpus(tree) {
 
 function navPathsForProduct(navFile, product) {
 	const nav = JSON.parse(fs.readFileSync(navFile, 'utf8'))
-	const node = nav.find(
-		(p) =>
-			(p.title || '').toLowerCase().replace(/[\s-]+/g, '-') ===
-			product.toLowerCase().replace(/[\s-]+/g, '-'),
-	)
+	// Normalize titles/args so hyphens and spaces are equivalent, and an
+	// " Enterprise" product suffix is optional (e.g. arg "vault" matches the
+	// nav title "Vault Enterprise", while "vault-radar" still matches "Vault Radar").
+	const norm = (s) =>
+		(s || '')
+			.toLowerCase()
+			.replace(/[\s-]+/g, '-')
+			.replace(/-enterprise$/, '')
+	const node = nav.find((p) => norm(p.title) === norm(product))
 	if (!node) return { node: null, paths: [], allTitles: nav.map((p) => p.title) }
 	const paths = []
 	const walk = (routes) => {
