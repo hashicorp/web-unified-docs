@@ -6,8 +6,6 @@ description: >-
 
 # Policy examples
 
-FIXME: Need to test and update all of these
-
 This page provides examples of Terraform policy policies. Refer to these examples to learn how to implement your own policies.
 
 ## Example 1: Encrypt EBS volumes
@@ -39,7 +37,7 @@ This test includes two mock resources: one that passes the policy and one that f
 
 ```hcl
 policytest {
-  targets = ["policies/encrypted_ebs.policy.hcl"]
+  targets = ["../policies/encrypted_ebs.policy.hcl"]
 }
 
 resource "aws_ebs_volume" "pass" {
@@ -148,7 +146,7 @@ This test includes both passing and failing test cases.
 
 ```hcl
 policytest {
-  targets = ["policies/azure_disk_encryption.policy.hcl"]
+  targets = ["../policies/azure_disk_encryption.policy.hcl"]
 }
 
 resource "azurerm_managed_disk" "pass" {
@@ -269,7 +267,7 @@ The policy ensures that VPC modules are sourced from an internal private registr
 <CodeBlockConfig filename="policies/module_validation.policy.hcl">
 
 ```hcl
-module_policy "app.terraform.io/my-org/vpc/aws" "registry_check" {
+module_policy "aws_vpc" "registry_check" {
   enforce {
     condition     = core::startswith(meta.source, "app.terraform.io/my-org/")
     error_message = "The VPC module (${meta.address}) must be sourced from the internal private registry (app.terraform.io/my-org/)."
@@ -292,7 +290,7 @@ This test includes multiple failure scenarios to ensure the policy works correct
 
 ```hcl
 policytest {
-  targets = ["policies/module_validation.policy.hcl"]
+  targets = ["../policies/module_validation.policy.hcl"]
 }
 
 module "aws_vpc" "pass" {
@@ -422,7 +420,7 @@ This test includes multiple failure scenarios including untrusted sources.
 
 ```hcl
 policytest {
-  targets = ["policies/aws_provider.policy.hcl"]
+  targets = ["../policies/aws_provider.policy.hcl"]
 }
 
 provider "aws" "pass" {
@@ -540,7 +538,7 @@ This test demonstrates using the `skip` attribute to mock dependencies without e
 
 ```hcl
 policytest {
-  targets = ["policies/cloudtrail_s3_acl.policy.hcl"]
+  targets = ["../policies/cloudtrail_s3_acl.policy.hcl"]
 }
 
 resource "aws_s3_bucket_acl" "pass" {
@@ -655,11 +653,11 @@ The first policy ensures that all network interfaces are associated with a netwo
 ```hcl
 resource_policy "azurerm_network_interface" "require_nsg_association" {
   locals {
-    associations = core::getresources("azurerm_network_interface_security_group_association")
+    associations = core::getresources("azurerm_network_interface_security_group_association", {network_interface_id = attrs.id})
   }
   
   enforce {
-    condition     = any a in local.associations : (a.attrs.network_interface_id == attrs.id)
+    condition     = core::length(local.associations) > 0
     error_message = "The Network Interface ${attrs.name} must be associated with a Network Security Group."
   }
 }
@@ -675,7 +673,7 @@ The second policy uses a custom plugin function to validate that subnet CIDR ran
 policy {
   plugins {
     network = {
-      source = "plugins/bin/cidr_utils"
+      source = "../plugins/bin/cidr_utils"
     }
   }
 }
@@ -701,56 +699,30 @@ The above policy uses the following plugin, authored in Go. It implements the lo
 <CodeBlockConfig filename="plugins/src/cidr_utils/main.go">
 
 ```go
-# main.go
 package main
 
 import (
-  "context"
+  "fmt"
   "net/netip"
+  "strings"
 
-  "github.com/hashicorp/terraform-policy-plugin-framework/function"
-  "github.com/hashicorp/terraform-policy-plugin-framework/plugin"
+  "github.com/hashicorp/terraform-policy-plugin-framework/policy-plugin/plugins"
 )
 
 func main() {
-  plugin.Serve(&plugin.ServeOpts{
-    Functions: []function.Function{
-      &CIDROverlapFunction{},
-    },
-  })
+	plugins.RegisterFunction("cidr_overlaps", cidr_overlaps)
+  plugins.Serve()
 }
 
-type CIDROverlapFunction struct{}
-
-func (f *CIDROverlapFunction) Metadata(_ context.Context, req function.MetadataRequest, resp *function.MetadataResponse) {
-  resp.Name = "cidr_overlap"
+func trim(value, prefix string) (string, error) {
+  return strings.TrimPrefix(value, prefix), nil
 }
 
-func (f *CIDROverlapFunction) Definition(_ context.Context, req function.DefinitionRequest, resp *function.DefinitionResponse) {
-  resp.Definition = function.Definition{
-    Summary: "Returns true if a given CIDR overlaps with any in a provided list.",
-    Parameters: []function.Parameter{
-      function.StringParameter{Name: "check_cidr"},
-      function.ListParameter{
-        Name:        "restricted_ranges",
-        ElementType: function.StringType{},
-      },
-    },
-    Return: function.BoolReturn{},
-  }
-}
-
-func (f *CIDROverlapFunction) Run(ctx context.Context, req function.RunRequest, resp *function.RunResponse) {
-  var checkStr string
-  var restrictedStrs []string
-
-  // Extract arguments from HCL
-  req.Arguments.Get(ctx, &checkStr, &restrictedStrs)
+func cidr_overlaps(checkStr string, restrictedStrs []string) (bool, error) {
 
   checkPrefix, err := netip.ParsePrefix(checkStr)
   if err != nil {
-    resp.Error = function.NewArgumentError(0, "Invalid CIDR format")
-    return
+    return false, fmt.Errorf("Invalid CIDR format")
   }
 
   for _, s := range restrictedStrs {
@@ -760,22 +732,40 @@ func (f *CIDROverlapFunction) Run(ctx context.Context, req function.RunRequest, 
     }
 
     if checkPrefix.Overlaps(restrictedPrefix) {
-      resp.Result.Set(ctx, true)
-      return
+      return true, nil
     }
   }
 
-  resp.Result.Set(ctx, false)
+  return false, nil
 }
 ```
 
 </CodeBlockConfig>
 
-Before you can use your plugin in your policies, you must compile it. For example:
+Before you can use your plugin in your policies, you must compile it.
+
+Change into the plugin source directory.
 
 ```shell-session
-cd plugins/src/cidr_utils
-go build -o ../../bin/cidr_utils main.go
+$ cd plugins/src/cidr_utils
+```
+
+Initialize go modules.
+
+```shell-session
+$ go mod init cidr_utils
+```
+
+Download and verify go modules.
+
+```shell-session
+$ go mod tidy
+```
+
+Build the plugin.
+
+```shell-session
+$ go build -o ../../bin/cidr_utils main.go
 ```
 
 ### Tests
@@ -788,7 +778,7 @@ The first test validates the Azure network interface policy:
 
 ```hcl
 policytest {
-  targets = ["policies/azure_nic_nsg.policy.hcl"]
+  targets = ["../policies/azure_nic_nsg.policy.hcl"]
 }
 
 resource "azurerm_network_interface" "pass" {
@@ -823,7 +813,7 @@ The second test validates the CIDR overlap policy:
 
 ```hcl
 policytest {
-  targets = ["policies/azure_subnet_cidr.policy.hcl"]
+  targets = ["../policies/azure_subnet_cidr.policy.hcl"]
 }
 
 resource "azurerm_subnet" "pass" {
