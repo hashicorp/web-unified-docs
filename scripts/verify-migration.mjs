@@ -95,6 +95,7 @@ function normalizeLine(line) {
 // Excludes URLs, image paths, and HTML/JSX comments (which carry the editorial markers).
 const LEGACY_PATTERNS = [
 	/\bsolution design guide\b/i,
+	/\bsolutions? guide\b/i,
 	/\boperating guide\b/i,
 	/\b(adoption|adopt|standardization|standardizing|scaling)\s+phase\b/i,
 	/\bmaturity (model|scale)\b/i,
