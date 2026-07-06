@@ -642,7 +642,7 @@ resource "aws_cloudtrail" "my_cloudtrail" {
 
 ## Example 6: Multiple policies with core functions and plugins
 
-This example demonstrates working with multiple policies in a single project, including both core functions and custom plugins. The policies validate Azure network interface security group associations and AWS subnet CIDR ranges.
+This example demonstrates working with multiple policies in a single project, including both core functions and custom plugins. The policies validate Azure network interface security group associations and Azure subnet CIDR ranges.
 
 ### Policies
 
@@ -669,22 +669,114 @@ resource_policy "azurerm_network_interface" "require_nsg_association" {
 
 The second policy uses a custom plugin function to validate that subnet CIDR ranges don't overlap with reserved ranges:
 
-<CodeBlockConfig filename="policies/cidr_overlap.policy.hcl">
+<CodeBlockConfig filename="policies/azure_subnet_cidr.policy.hcl">
 
 ```hcl
-resource_policy "aws_subnet" "no_cidr_overlap" {
+policy {
+  plugins {
+    network = {
+      source = "plugins/bin/cidr_utils"
+    }
+  }
+}
+
+resource_policy "azurerm_subnet" "no_cidr_overlap" {
   locals {
     reserved_cidrs = ["10.0.0.0/24", "10.0.1.0/24"]
   }
 
   enforce {
-    condition     = !plugin::network::cidr_overlaps(attrs.cidr_block, local.reserved_cidrs)
-    error_message = "Subnet CIDR ${attrs.cidr_block} overlaps with reserved ranges."
+    condition     = !plugin::network::cidr_overlaps(attrs.address_prefixes[0], local.reserved_cidrs)
+    error_message = "Subnet CIDR ${attrs.address_prefixes[0]} overlaps with reserved ranges."
   }
 }
 ```
 
 </CodeBlockConfig>
+
+### Plugin
+
+The above policy uses the following plugin, authored in Go. It implements the logic to compare a CIDR against a restricted list and serves the function via the plugin server.
+
+<CodeBlockConfig filename="plugins/src/cidr_utils/main.go">
+
+```go
+# main.go
+package main
+
+import (
+  "context"
+  "net/netip"
+
+  "github.com/hashicorp/terraform-policy-plugin-framework/function"
+  "github.com/hashicorp/terraform-policy-plugin-framework/plugin"
+)
+
+func main() {
+  plugin.Serve(&plugin.ServeOpts{
+    Functions: []function.Function{
+      &CIDROverlapFunction{},
+    },
+  })
+}
+
+type CIDROverlapFunction struct{}
+
+func (f *CIDROverlapFunction) Metadata(_ context.Context, req function.MetadataRequest, resp *function.MetadataResponse) {
+  resp.Name = "cidr_overlap"
+}
+
+func (f *CIDROverlapFunction) Definition(_ context.Context, req function.DefinitionRequest, resp *function.DefinitionResponse) {
+  resp.Definition = function.Definition{
+    Summary: "Returns true if a given CIDR overlaps with any in a provided list.",
+    Parameters: []function.Parameter{
+      function.StringParameter{Name: "check_cidr"},
+      function.ListParameter{
+        Name:        "restricted_ranges",
+        ElementType: function.StringType{},
+      },
+    },
+    Return: function.BoolReturn{},
+  }
+}
+
+func (f *CIDROverlapFunction) Run(ctx context.Context, req function.RunRequest, resp *function.RunResponse) {
+  var checkStr string
+  var restrictedStrs []string
+
+  // Extract arguments from HCL
+  req.Arguments.Get(ctx, &checkStr, &restrictedStrs)
+
+  checkPrefix, err := netip.ParsePrefix(checkStr)
+  if err != nil {
+    resp.Error = function.NewArgumentError(0, "Invalid CIDR format")
+    return
+  }
+
+  for _, s := range restrictedStrs {
+    restrictedPrefix, err := netip.ParsePrefix(s)
+    if err != nil {
+      continue
+    }
+
+    if checkPrefix.Overlaps(restrictedPrefix) {
+      resp.Result.Set(ctx, true)
+      return
+    }
+  }
+
+  resp.Result.Set(ctx, false)
+}
+```
+
+</CodeBlockConfig>
+
+Before you can use your plugin in your policies, you must compile it. For example:
+
+```shell-session
+cd plugins/src/cidr_utils
+go build -o ../../bin/cidr_utils main.go
+```
 
 ### Tests
 
@@ -727,26 +819,30 @@ resource "azurerm_network_interface" "fail" {
 
 The second test validates the CIDR overlap policy:
 
-<CodeBlockConfig filename="tests/cidr_overlap.policytest.hcl">
+<CodeBlockConfig filename="tests/azure_subnet_cidr.policytest.hcl">
 
 ```hcl
 policytest {
-  targets = ["policies/cidr_overlap.policy.hcl"]
+  targets = ["policies/azure_subnet_cidr.policy.hcl"]
 }
 
-resource "aws_subnet" "pass" {
+resource "azurerm_subnet" "pass" {
   attrs = {
-    cidr_block = "10.0.2.0/24"
-    vpc_id     = "vpc-12345"
+    name                 = "example-subnet"
+    address_prefixes     = ["10.0.2.0/24"]
+    virtual_network_name = "example-vnet"
+    resource_group_name  = "example-rg"
   }
 }
 
-resource "aws_subnet" "fail" {
+resource "azurerm_subnet" "fail" {
   expect_failure = true
   
   attrs = {
-    cidr_block = "10.0.0.0/24"
-    vpc_id     = "vpc-12345"
+    name                 = "reserved-subnet"
+    address_prefixes     = ["10.0.0.0/24"]
+    virtual_network_name = "example-vnet"
+    resource_group_name  = "example-rg"
   }
 }
 ```
@@ -770,19 +866,17 @@ $ tfpolicy test --policies=policies/ --tests=tests/
 # resource.azurerm_network_interface.pass... pass
 # resource.azurerm_network_interface.fail... pass
 # azure_nic_nsg.policytest.hcl... pass
-# cidr_overlap.policytest.hcl... running
-# resource.aws_subnet.pass... pass
-# resource.aws_subnet.fail... pass
-# cidr_overlap.policytest.hcl... pass
+# azure_subnet_cidr.policytest.hcl... running
+# resource.azurerm_subnet.pass... pass
+# resource.azurerm_subnet.fail... pass
+# azure_subnet_cidr.policytest.hcl... pass
 ```
 
-### Sample Terraform configurations
+### Sample Terraform configuration
 
-The following Terraform configurations demonstrate resources that would be evaluated against both policies.
+The following Terraform configuration demonstrates Azure resources that would be evaluated against both policies:
 
-Azure network interface configuration:
-
-<CodeBlockConfig filename="azure-main.tf">
+<CodeBlockConfig filename="example-main.tf">
 
 ```hcl
 terraform {
@@ -811,20 +905,29 @@ resource "azurerm_virtual_network" "example" {
   resource_group_name = azurerm_resource_group.example.name
 }
 
-resource "azurerm_subnet" "example" {
-  name                 = "example-subnet"
-  resource_group_name  = azurerm_resource_group.example.name
-  virtual_network_name = azurerm_virtual_network.example.name
-  address_prefixes     = ["10.0.1.0/24"]
-}
-
 resource "azurerm_network_security_group" "example" {
   name                = "web-nsg"
   location            = azurerm_resource_group.example.location
   resource_group_name = azurerm_resource_group.example.name
 }
 
-# This network interface would pass the policy (has NSG association)
+# This subnet would pass the CIDR policy (no overlap with reserved ranges)
+resource "azurerm_subnet" "pass" {
+  name                 = "allowed-subnet"
+  resource_group_name  = azurerm_resource_group.example.name
+  virtual_network_name = azurerm_virtual_network.example.name
+  address_prefixes     = ["10.0.2.0/24"]
+}
+
+# This subnet would fail the CIDR policy (overlaps with reserved range)
+resource "azurerm_subnet" "fail" {
+  name                 = "reserved-subnet"
+  resource_group_name  = azurerm_resource_group.example.name
+  virtual_network_name = azurerm_virtual_network.example.name
+  address_prefixes     = ["10.0.0.0/24"]
+}
+
+# This network interface would pass the NSG policy (has NSG association)
 resource "azurerm_network_interface" "pass" {
   name                = "web-nic-01"
   location            = azurerm_resource_group.example.location
@@ -832,7 +935,7 @@ resource "azurerm_network_interface" "pass" {
 
   ip_configuration {
     name                          = "internal"
-    subnet_id                     = azurerm_subnet.example.id
+    subnet_id                     = azurerm_subnet.pass.id
     private_ip_address_allocation = "Dynamic"
   }
 }
@@ -842,7 +945,7 @@ resource "azurerm_network_interface_security_group_association" "pass" {
   network_security_group_id = azurerm_network_security_group.example.id
 }
 
-# This network interface would fail the policy (no NSG association)
+# This network interface would fail the NSG policy (no NSG association)
 resource "azurerm_network_interface" "fail" {
   name                = "rogue-nic-02"
   location            = azurerm_resource_group.example.location
@@ -850,7 +953,7 @@ resource "azurerm_network_interface" "fail" {
 
   ip_configuration {
     name                          = "internal"
-    subnet_id                     = azurerm_subnet.example.id
+    subnet_id                     = azurerm_subnet.pass.id
     private_ip_address_allocation = "Dynamic"
   }
 }
