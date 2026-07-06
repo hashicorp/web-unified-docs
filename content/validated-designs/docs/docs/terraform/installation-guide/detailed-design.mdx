@@ -1,6 +1,6 @@
 ---
 title: Detailed design
-description: Review Terraform Enterprise components, operational modes, and deployment-method decisions.
+description: Review the common software configuration, external component requirements, and baseline sizing that apply to every Terraform Enterprise deployment.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2026-07-06T12:00:00.000Z
 last_modified: 2026-07-06T12:00:00.000Z
@@ -9,100 +9,67 @@ last_modified: 2026-07-06T12:00:00.000Z
 
 # Detailed design
 
-This page expands the Terraform Enterprise architecture into the component and operational-mode decisions that inform deployment.
+The [architecture](/validated-designs/terraform/installation-guide/architecture) page describes the Terraform Enterprise software building blocks and the operational modes that arrange them. This page goes a level deeper into the software components and configuration that are **common to every deployment**, regardless of the platform you run on.
 
-## Terraform Enterprise components
+Use this page to understand the external components Terraform Enterprise depends on, the baseline resources those components require, and the cross-cutting concerns — such as load balancing and networking — that every deployment must satisfy. The platform-specific implementation of these concerns, including cloud instance types and managed-service SKUs, lives on the relevant [_Deployment_](/validated-designs/terraform/installation-guide/deployment-vm-container) page.
 
-Terraform Enterprise consists of several components, each with specific responsibilities in the overall architecture. This section explains the function of each component and the technologies they support.
+<!-- EDITORIAL: this page was rebuilt. It previously duplicated the architecture page (~85% identical). It now carries common software-component detail per the page-ownership split: Architecture = building blocks + operational modes; Detailed design = component requirements, baseline sizing, and common cross-cutting concerns; Deployment = platform-specific implementation. -->
 
-- **Terraform Enterprise application**: This is the Terraform Enterprise container that HashiCorp provides as the core application. See the Terraform HVD Module code for the latest default machine size or type for the respective cloud or Kubernetes environment. These link from the _Deployment_ pages later in this HVD.
-- **HCP Terraform agent (optional)**: A fleet of isolated execution environments that perform Terraform runs on behalf of Terraform Enterprise users. The HCP Terraform agent (which is also usable with Terraform Enterprise) can consume APIs in isolated network segments to provide quality of service to specific teams in your organization or distributes load away from the core Terraform Enterprise service. While use of HCP Terraform agents is highly recommended, it is not required. Terraform Enterprise comes with built-in agents for job execution.
-- **PostgreSQL database**: Serves as the primary store of Terraform Enterprise's application data such as workspace settings and user settings. You can review the supported versions and requirements on our <a href="https://developer.hashicorp.com/terraform/enterprise/deploy/configuration/storage/connect-database/postgres" target="_blank" rel="noreferrer">Terraform Enterprise PostgreSQL</a> page.
-- **Redis cache**: Used for caching and coordination between Terraform Enterprise core's web and background workers. In order to have multiple, simultaneously active application nodes, you require an external cache. We have validated Terraform Enterprise with the native Redis services from AWS, Azure, and GCP. Terraform Enterprise uses Redis internally on single-node VMware-based deployments. You can review the supported versions and requirements on our <a href="https://developer.hashicorp.com/terraform/enterprise/deploy/configuration/storage/connect-redis" target="_blank" rel="noreferrer">Terraform Enterprise Redis</a> page.
-- **Object Storage**: Used for storage of Terraform state files, plan files, configuration, output logs and other such objects. All objects persisted to blob storage are symmetrically encrypted then written. A unique encryption key encrypts each object using 128 bit AES in CTR mode. The internal HashiCorp Vault transit secret engine processes the key material, which stores the default transit encryption cipher (AES-GCM with a 256-bit AES key and a 96-bit nonce), alongside the object. This pattern is envelope encryption. Any S3-compatible object storage service, GCP Cloud Storage or Azure blob storage meets Terraform Enterprise's object storage requirements. You must create an object store instance for Terraform Enterprise to use, and specify its connection string details during installation. We recommend you ensure the object store is in the same region as the Terraform Enterprise instance.
+## Terraform Enterprise application configuration
 
-## Operational modes
+The following software configuration decisions apply to every Terraform Enterprise deployment. The mechanism you use to set them varies by platform (environment variables in a Docker `compose.yml`, Helm overrides on Kubernetes, and so on), but the decisions themselves are common.
 
-In this section, we review the supported operational modes for Terraform Enterprise.
+- **Encryption and the embedded Vault**: Terraform Enterprise uses an embedded instance of HashiCorp Vault for data-security operations. The `TFE_ENCRYPTION_PASSWORD` decrypts the Vault token stored in the database, and Terraform Enterprise then uses that token for all subsequent encryption and decryption. Treat this value as a sensitive company secret and generate it in line with your corporate password policy.
+- **Run concurrency**: `TFE_CAPACITY_CONCURRENCY` controls the number of concurrent workspace runs per Terraform Enterprise instance (default `10`), and each concurrent run reserves memory (default `2 GB`, set by `TFE_CAPACITY_MEMORY`). These values drive the compute sizing for both the application and the execution layer, so decide them before you size any platform. The per-platform sizing calculations that build on these defaults are on the _Deployment_ pages.
+- **TLS**: Terraform Enterprise terminates TLS on the application. Every deployment requires a server certificate and private key whose DNS SAN includes the FQDN that resolves to the load balancer. We do not recommend self-signed certificates in any environment. Terraform Enterprise cannot use passphrase-protected private keys.
 
-From <a href="https://developer.hashicorp.com/terraform/enterprise/releases/2023/v202309-1" target="_blank" rel="noreferrer">v202309-1</a>, Terraform Enterprise is compatible with a variety of platforms including Kubernetes. Our official installation documentation for this is <a href="https://developer.hashicorp.com/terraform/enterprise/deploy" target="_blank" rel="noreferrer">here</a>. We recommend using this for all private cloud deployments.
+## External components
 
-| Operational mode | Characteristics | Description |
-| ---------------- | --------------- | ----------- |
-| `disk` | All Terraform Enterprise services deploy onto a single node. | Most suitable for functional testing, training, and gaining familiarity. Do not use for production. |
-| `external` | External database, external object storage, stateless application installed on a single node with internal cache with optional, remote Terraform agents. | Most suitable for organizations who focus on system performance, but less so with system resilience. |
-| `active-active` | Replicated database and object storage, external caching layer and multiple, stateless application nodes in redundant availability zones. Optionally, multiple remote Terraform agents. | Most suitable for a business-wide service that requires the highest levels of resilience and performance. |
+In any production operational mode (`external` or `active-active`), Terraform Enterprise depends on three external components. These are software requirements common to all platforms; how you provision them — self-managed or through a Platform-as-a-Service (PaaS) offering — is a platform decision covered on the _Deployment_ pages.
 
-### `disk` mode
+### PostgreSQL
 
-In a `disk` mode deployment, an organization deploys Terraform Enterprise in a singular compute environment without failover or active/active capabilities. In this deployment model, all services (including PostgreSQL DB and other storage requirements) are self-contained within the Docker environment, eliminating external dependencies. The application data is self-managed and uses localized Docker disk volumes for caching and data operations.
+PostgreSQL is the primary store of Terraform Enterprise application data, such as workspace and user settings. Terraform Enterprise requires PostgreSQL version 13.x or later; we recommend a version later than 15.x for new installations because <a href="https://developer.hashicorp.com/terraform/enterprise/deploy/configuration/storage/connect-database/postgres" target="_blank" rel="noreferrer">some 14.x versions are not supported</a>. There are also specific schema requirements documented at that link, so involve your DBA team early so that all parties understand the requirements at the outset.
 
-A `disk` deployment is well-suited for development, functional testing, and acceptance testing scenarios, however we do not recommend that you use this for any production environments. For production deployments, use only the `external` or `active-active` operational modes.
+### Redis
 
-The following diagram illustrates the logical architecture of a _`disk`_ Terraform Enterprise deployment:
+Redis provides caching and coordination between the web and background workers. An external Redis instance is a hard requirement whenever more than one Terraform Enterprise application node is active — that is, for `active-active` mode. Terraform Enterprise uses Redis internally on single-node deployments, so `disk` and single-node `external` deployments do not require a separate Redis instance. Supported versions are 6.2 and later, and version 7, which we recommend. Redis Sentinel is not supported.
 
-![Terraform `disk` operational mode](/img/terraform/solution-design-guides/tfe/architecture-logical-mounted-disk.png)
+### Object storage
 
-The benefits of this deployment model include minimal resource requirements, reduced reliance on specialized expertise, and rapid deployment. However, it lacks enterprise-grade resiliency for unexpected downtime and cannot scale performance without interrupting services.
+Object storage holds Terraform state files, plan files, configuration, and output logs. Any S3-compatible object store, Google Cloud Storage, or Azure Blob Storage meets the requirement. All objects are encrypted before they are written: each object is encrypted with a unique key using 128-bit AES in CTR mode, and the embedded Vault transit secrets engine wraps that key material (AES-GCM with a 256-bit key and a 96-bit nonce) alongside the object — a pattern known as envelope encryption. Object store consumption grows with both the number of workspace runs and the size of the configuration directories submitted to the API, so keep configuration repositories limited to the files a run genuinely needs.
 
-### `external` mode
+## Baseline component sizing
 
-To move to a stateless application front-end, the `external` operational mode takes the application database and object storage and moves them to dedicated infrastructure. The cache remains internal but represents transient caching only.
+The following baseline is a **vendor-agnostic minimum specification** for the Terraform Enterprise application and its external components. It is appropriate for most initial production deployments and for development or testing environments. Treat it as the target that every deployment must meet or exceed, whichever platform you choose:
 
-Each of the public clouds provides native services for a PostgreSQL database and object storage that supports this deployment pattern. The configuration of these external services decouples the application infrastructure, eliminating single points of vulnerability and improving availability. While this deployment model may not offer performance scalability (although AWS Aurora storage scales and minimizing downtime is possible when scaling the DB instance through instance failover), it enhances the deployment resilience by distributing the core components.
+- A **self-managed** deployment (for example a manual private-cloud install) provisions PostgreSQL and Redis to these specifications directly.
+- A **PaaS** deployment (for example AWS Aurora and ElastiCache, or the Azure and GCP equivalents) selects a managed-service tier that meets or exceeds these specifications.
 
-![`external` mode operational mode](/img/terraform/solution-design-guides/tfe/architecture-logical-external-services.png)
+| Component | vCPU / cores | Memory | Disk |
+| --------- | ------------ | ------ | ---- |
+| Terraform Enterprise application (per node) | 4 vCPU | 32 GB | 1 TB |
+| PostgreSQL | 4 core | 32 GB | 2 TB |
+| Redis | 4 core | 16 GB | 500 GB |
 
-The model is an initial step towards a fully resilient and scalable deployment. It relies on one compute environment for a Docker engine. This means that this single instance of the Terraform Enterprise application becomes a vulnerable single point of failure for an enterprise-grade operation. If your target architecture requires zero downtime from expected failures such as instance or availability zone failure, we recommend `active-active` below.
+Configure CPU and memory identically across Terraform Enterprise application nodes. Many scaled customers begin with 8 vCPU and 32 GB RAM for the application as an initial production specification, and expect to scale past the baseline as adoption grows. Disk backing the application must sustain at least 3000 IOPS, and the Terraform Enterprise application requires at least 40 GB of available space (for Docker deployments this must be available to `/var/lib/docker`; the limit does not apply to Kubernetes).
 
-### `active-active` mode (multiple compute instances)
+The mapping of this baseline to concrete cloud instance types and managed-service SKUs is platform-specific and is documented in the resource-sizing table on each _Deployment_ page.
 
-When your organization requires increased availability or performance from Terraform Enterprise that your current single application instance cannot provide, it is time to scale to the `active-active` operational mode.
+## Load balancing
 
-Before scaling to this mode, weigh its benefits against the increased operational complexity. Specifically, consider the following aspects.
+Every production deployment places a **layer 4 (TCP) load balancer** in front of the Terraform Enterprise application nodes. A layer 4 load balancer is required because certificates must be present on the compute nodes for Terraform Enterprise to operate, and terminating TLS on the application — rather than at the load balancer — is more secure and avoids re-encrypting traffic behind the load balancer. This design decision is common to all platforms; the specific load balancer resource and its configuration are covered on each _Deployment_ page.
 
-- An automated Terraform Enterprise deployment process is a hard requirement
-- When monitoring multiple Terraform Enterprise instances, it is important to consider the impact on your monitoring dashboards and alerts.
-- To effectively manage the lifecycle of application nodes, custom automation is necessary.
+## Networking
 
-Terraform Enterprise supports `active-active` mode, which involves combining multiple instances of Terraform Enterprise with external services. In this model, separate Docker engines (on VMs, or by an orchestrator such as Kubernetes) host the primary application services, spread across at least three availability zones within the same cloud region. These instances connect to centralized services that provide the application database, shared object storage and durable cache, all managed by the cloud service provider.
+Terraform Enterprise has a defined set of ingress and egress requirements that apply to every deployment. Refer to the <a href="https://developer.hashicorp.com/terraform/enterprise/deploy/configuration/network" target="_blank" rel="noreferrer">network requirements page</a> for the authoritative list. In summary:
 
-Using an active/active model has a key advantage: It eliminates potential service failure points. By distributing multiple application instances, the service becomes more resilient and available. The deployment includes redundant elements that improve reliability, increase resilience, and enhance performance.
+- We do not recommend exposing Terraform Enterprise to the public internet; users should reach the API and UI from the company network.
+- Terraform Enterprise typically requires egress to the HashiCorp container registry and to HashiCorp service APIs (for example `registry.terraform.io`, `releases.hashicorp.com`, and `reporting.hashicorp.services`), plus any VCS, SAML, and cost-estimation endpoints your use case needs.
+- Where outbound access is restricted, Terraform Enterprise can run fully air-gapped by hosting provider and Terraform binaries in its own registry.
 
-The following diagram illustrates the recommended architecture for an `active-active` mode deployment. It provides a visual representation of data flow, user access, key connections, and infrastructure components.
+The application architecture is single-region. How you implement these requirements — subnets, security groups, egress controls, and air-gapping — is platform-specific and is covered on each _Deployment_ page.
 
-![`active-active` mode operational mode](/img/terraform/solution-design-guides/tfe/architecture-logical-active-active.png "image_tooltip")
+## Observability
 
-In addition to improved availability, `active-active` mode offers scalability and supportability benefits. The presence of multiple application instances allows for better workload distribution, alleviating bottlenecks and enhancing overall performance, with redundant application instances and external services.
-
-<Note>
-
-Please note that Redis does not have to be external when there is a single node of Terraform Enterprise. When using our Terraform-based deployment modules, they provision a separate Redis instance automatically when the active/active parameter is `true`. For HVD Module deployments onto any managed Kubernetes service, the module also deploys a required Redis instance as an external service.
-
-</Note>
-
-## Operational mode decision
-
-The `active-active` mode topology offers crucial benefits to your organization and is our recommendation because it:
-
-- Ensures service availability and scalability while mitigating potential failure scenarios caused by service interruption or resource starvation.
-- Safeguards against revenue loss due to unscheduled service interruptions.
-- Ensures data integrity while adhering to your data residency security guidelines.
-
-## Automated versus manual installation
-
-As mentioned, customers deploying Terraform Enterprise using `active-active` mode must use automated means, and this requirement must guide your thoughts as to how this needs to occur with your installation approach.
-
-For public cloud customers, we recommend our Terraform-based HVD Modules and `external` or `active-active` modes on VM-based deployments, and for EKS, AKS and GKE use only `active-active` mode. If you are a public cloud customer intending to deploy `disk` mode for development and testing, develop an automated deployment which works for you, to be able to destroy and recreate instances iteratively for which we recommend <a href="https://developer.hashicorp.com/packer/docs" target="_blank" rel="noreferrer">Packer</a>.
-
-For private cloud customers who have Chef, Puppet, Ansible, Salt or other automated configuration management technologies as their organisational standard, we agree that use of such is the best practice because it provides
-
-- A well-known approach to installation and software management for your organization and thus
-- Lower barrier to success in deployment.
-- Adherence to organizational standard likely also means increased chance of regulatory compliance where applicable.
-
-We advise private cloud customers to automate deployment of Terraform Enterprise irrespective of the operational mode used because
-
-- If you decide to manually install Terraform Enterprise, this increases the length of time and the amount of human involvement required to upgrade each instance each month. Automation reduces this burden.
-- Automated installation means being able to version and collaborate on code used.
-- Automated installation also means being able to rely on the same deployment pattern every time, which increases maintenance confidence for both architecture teams and services teams responsible for managing the product in production.
+Terraform Enterprise exposes metrics and logs that every deployment should collect. The setup of this software and general-component observability — enabling metrics, forwarding logs and audit trails, and collecting agent telemetry — is covered in [Observability setup](/validated-designs/terraform/installation-guide/observability-setup). Platform-specific observability, such as the log and metric destinations native to each cloud, is covered in an observability section on the relevant _Deployment_ page. Ongoing, day-2 observability and alerting belongs in the [Administration Guide](/validated-designs/terraform/administration-guide/observability-and-alert-management).
