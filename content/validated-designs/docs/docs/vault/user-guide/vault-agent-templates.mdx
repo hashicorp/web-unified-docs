@@ -1,0 +1,277 @@
+---
+title: Vault Agent templates
+description: Use Vault Agent templates to render secrets for applications.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-07-06T12:00:00.000Z
+last_modified: 2026-07-06T12:00:00.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Vault Agent templates
+
+Vault Agent templates offer a seamless way to integrate secrets management into your applications both new and old/legacy. For legacy (existing) applications, Vault agent brings the benefit of modern secrets management  bypassing the need for application upgrades or modifications. These agents authenticate with Vault, retrieve secrets, and inject them where your application expects, either as an environment variable or file, facilitating secret consumption and refreshment in sync with the application's lifecycle.
+
+
+## Understanding Vault Agent templates
+
+Vault Agent templates bridge the gap between the secret's format in Vault and the application's expectations. For instance, consider an application that uses a credentials file like this:
+```
+Password=passwordxyz,
+Username=userxyz
+```
+Vault’s API responses look like this:
+```
+"Password": "passwordxyz",
+"Username": "userxyz"
+```
+
+Agent templates allow you to reformat this data, ensuring it aligns with the application's required input format.
+
+
+## Getting Started with Vault Agent Templates
+
+<Note>
+
+Vault Agent leverages the same templating engine used by Hashicorp Consul and other HashiCorp products. For more details on the templating engine, see the <a href="https://github.com/hashicorp/consul-template/blob/main/docs/templating-language.md" target="_blank" rel="noreferrer">consul-template</a> public GitHub repository.
+
+</Note>
+
+To demonstrate the components of templates, we will create a template that renders a file in a format that another application expects, populated with secret information from Vault. Given an existing secret in Vault like this:
+
+```
+$ vault read database-app1/creds/pg-ro 
+
+Key                Value
+---                -----
+lease_id           database-app1/creds/pg-ro/2f6a614c-4aa2-7b19-24b9-ad944a8d4d
+lease_duration     1h
+lease_renewable    true
+password           FSREZ1S0kFsZtLat-y94
+username           v-vaultuser-e2978cd0-ugp7iqI2hdlff5hfjylJ-1602537260
+```
+
+
+We would expect the final rendering of the secret within the destination to be:
+```
+DBUser:v-vaultuser-e2978cd0-ugp7iqI2hdlff5hfjylJ-1602537260
+DBPassword:FSREZ1S0kFsZtLat-y94
+```
+
+### Template language overview
+
+Templates are defined using Go's templating format. First, we define a `template_config` block in our agent configuration to control template interactions. This block, set globally, specifies error handling and render intervals for static secrets:
+
+```
+template_config {
+  exit_on_retry_failure = false
+  static_secret_render_interval = "5m"
+}
+```
+
+
+The above serves as an example of how the configuration can be changed and is based on the original default value.
+
+<Note>
+
+The rendering frequency for both static and dynamic secrets is specified based on whether it is a leased and/or renewable secret. Each combination has its own default configuration for when the rendering will happen. In most cases, the default setting should be sufficient. Otherwise, those configurations can be re-configured as indicated <a href="https://developer.hashicorp.com/vault/docs/agent-and-proxy/agent/template#renewals-and-updating-secrets" target="_blank" rel="noreferrer">here</a>.
+
+</Note>
+
+Next, we define how to format the rendered secret within a `template` stanza. This stanza is specifically for manipulating a secret pulled from the Vault server and formatting in a way the consuming application expects:
+
+```
+template {
+  source      = "/tmp/agent/template.ctmpl"
+  destination = "/tmp/agent/render.txt"
+}
+```
+
+This configuration specifies the source template file and the destination file for the rendered output.
+
+<Tip>
+
+It is possible to render multiple secrets to a specific destination file within the same template. This is applicable in scenarios where you have a single application config file containing multiple secrets. Likewise, it is also possible to define multiple template stanzas within the same agent configuration file secrets for the creation of multiple destination files.
+
+</Tip>
+
+The source value in the template stanza references a templating file (.ctmpl) that specifies the Vault secret to retrieve and its formatting. The type of secret dictates the function used to declare it in the template. 
+
+The `.ctmpl` file should resemble the following:
+
+```
+{{ with secret "database-app1/creds/pg-ro" }}
+DBUser:{{ .Data.username }}
+DBPassword:{{ .Data.password }}
+{{ end }}
+```
+
+The template's first line declares the secret function, essential for processing most Vault secrets, excluding PKI certificates (we'll cover this exception later). The rest is written normally in the format of the destination file, using curly braces to break out into rendering the secret as needed. Any characters that fall outside of the curly braces will be taken literally. When a secret is pulled from Vault, it is returned as a JSON-based payload. 
+
+<Tip>
+
+If there are errors in the templating engine, directly make an API call to Vault and examine the JSON payload to ensure that the template's configuration aligns with the response received from Vault. 
+
+</Tip>
+
+A full list of parameters for the template block can be referenced <a href="https://developer.hashicorp.com/vault/docs/agent-and-proxy/agent/template#template-configurations" target="_blank" rel="noreferrer">here</a>.
+
+For simpler scenarios where maintaining a separate template file is excessive, embed the template directly using the `contents` parameter in place of `source`:
+
+```
+template {
+    contents    ="{{ with secret \"database-app1/creds/pg-ro\" }}DBUser:{{ .Data.username }}\nDBPassword:{{ .Data.password }}{{ end }}"
+    destination ="/tmp/agent/render.txt"
+}
+```
+
+### Environment variables
+
+For environment variable injection, use `env_template` stanzas. In this case, the name of the block (the string following `env_template`) will become the rendered environment variable. Because of this, no `destination` parameter is needed within `env_template` stanzas:
+
+```
+env_template "DB_USER" {
+  contents = "{{ with secret \"database-app1/creds/pg-ro\" }}{{ .Data.username }}{{ end }}"
+}
+
+env_template "DB_PASSWORD" {
+  contents = "{{ with secret \"database-app1/creds/pg-ro\" }}{{ .Data.password }}{{ end }}"
+}
+```
+
+The full list of parameters for `env_template` can be found <a href="https://developer.hashicorp.com/vault/docs/agent-and-proxy/agent/process-supervisor#env_template" target="_blank" rel="noreferrer">here</a>.
+
+
+### Application memory
+
+Some applications retrieve secrets directly from memory, not from files or environment variables. In these cases, it is recommended to use Vault Agent's Process Supervisor Mode. In this mode, Vault Agent will inject secrets referenced in the `env_template` configuration blocks as environment variables into the child process specified in the exec block.
+
+<Note>
+It is necessary for the target application to be run as a subprocess of Vault Agent (via exec) in order for Vault Agent to inject secrets into the target application’s environment variable. In many ways, Vault Agent will mirror the child process. Standard input and output streams (stdin / stdout / stderr) are all forwarded to the child process. Additionally, Vault Agent will exit when the child process exits on its own with the same exit code.
+</Note>
+
+Vault Agent’s Process Supervisor mode is used when you define `env_template` and a separate `exec` block to perform the additional necessary command. This block is executed after all `env_template` have been rendered and will be executed again during any re-rendering of the `env_template` (e.g., secret rotation and update) :
+
+```
+env_template "DB_USER" {
+  contents 		   = "{{ with secret \"database-app1/creds/pg-ro\" }}{{ .Data.username }}{{ end }}"
+  error_on_missing_key = true
+}
+
+env_template "DB_PASSWORD" {
+  contents 		   = "{{ with secret \"database-app1/creds/pg-ro\" }}{{ .Data.password }}{{ end }}"
+  error_on_missing_key = true
+}
+
+exec {
+  command                   = ["./my-app", "arg1", "arg2"]
+  restart_on_secret_changes = "always"
+  restart_stop_signal       = "SIGTERM"
+}
+```
+
+<Tip>
+It is recommended to set `error_on_missing_key = true `so that the Vault Agent will log an error when accessing a secret that does not exist. The error message will help during the debugging of the Vault Agent configuration. When `error_on_missing_key` is not specified or set to false (the default) and the key to render is not in the secret's response, the templating engine will ignore it (or render "value") and continue with its rendering.
+</Tip>
+
+
+### PKI certificates
+
+In the examples so far, we've used the `secret` function within the `template` stanza for retrieving secrets, However, PKI certificates require additional considerations, due to their inherent lifecycles and expiration details. Vault Agent provides a specific `pkiCert` template function to aid in the management of both the token/lease lifecycle and the certificate's expiration. This changes the behavior of when the agent refreshes the certificate, and how the agent will behave when it is restarted (e.g., whether to fetch an updated certificate or not based on the expiration of the certificate itself).
+
+Here are some behavior differences to be aware of when working with PKI certificates: 
+
+* If a certificate is configured to be rendered using the `pkiCert` template function, Vault Agent will perform a check during agent startup to detect if there is an existing certificate. If none has been previously rendered or the current rendered certificate has expired, Vault Agent will fetch a new certificate. This same check is performed during the agent auto-auth re-authentication. 
+* If a certificate is rendered using the `secret` template function, Vault Agent will fetch a new certificate on agent startup, **even if previously rendered certificates are still valid**. This is also true during agent auto-auth re-authentication.
+* In addition, if `generate_lease` is unset or set to `false`, the agent will use the certificate's `validTo` field to decide when to rotate the certificate. If `generate_lease` is set to `true`, the agent will follow the non-renewable, leased secret rules.
+
+As a result of the above behavior with `secret, `it is therefore recommended to use `pkiCert` to render the PKI certificates so as to avoid creating unnecessary certificates even when the existing has not expired.
+
+#### Common use cases for the `pkiCert` function to render TLS certificates
+
+To generate a new certificate and create a bundle with the key, certificate, and CA, use:
+
+```
+{{ with pkiCert "pki/issue/my-domain-dot-com" "common_name=foo.example.com" }}
+{{ .Data.Key }}
+{{ .Data.Cert }}
+{{ .Data.CA }}
+{{ end }}
+```
+
+To fetch only the issuing CA for this mount, use:
+
+```
+{{- with secret "pki/cert/ca" -}}
+{{ .Data.certificate }}
+{{- end -}}
+```
+
+<Tip>
+In the above example, `pki/cert/ca_chain` can be used instead to fetch the full CA chain.
+</Tip>
+
+
+## Integration Strategies for Applications
+
+#### Minimizing Disruption
+As with any change in an environment, configuration changes on Vault Agent such as templates should be tested in a development environment and rolled up to QA/Prod in stages to minimize the chance of an outage. Error handling while reviewing in a dev environment is key to shield against possible issues such as (but not limited to):
+
+* Agent process suddenly being stopped
+* Application being stopped
+* Reboots / Power outages
+* Vault server unavailability
+* File system permissions
+
+## Best practices for using HashiCorp Vault Agent templates in applications
+
+### Always use least-privilege access
+Ensuring least privilege access is always best practice. As Vault Agent is a client of Vault server, consider the authentication method used by auto-auth and the ACL policy that is assigned upon successful authentication.
+
+
+### Error Handling
+The base `template_config` stanza will be the first location to add some error handling, the only parameters available within this block are:
+
+* `exit_on_retry_failure` (bool: `false`) - This option configures Vault Agent to exit after it has exhausted its number of template retry attempts due to failures.
+* `static_secret_render_interval` (string or integer: `5m`) - If specified, configures how often Vault Agent Template should render non-leased secrets such as `kvv2`. This setting will not change how often Vault Agent templating renders leased secrets. Uses duration format strings.
+* `exit_on_retry_failure` as a global parameter is a general catch-all which will go on a retry loop. Error handling can also be added within the template stanza while the secret is being processed to exit. An example of this is using `error_on_missing_key` within the `template` stanza.
+* `error_on_missing_key` (bool: `false`) - Exit with an error when accessing a struct or map field/key that does not exist. The default behavior will print `&lt;no value>` when accessing a field that does not exist. It is highly recommended you set this to `true`.
+
+<Note>
+If `error_on_missing_key` is set to `false` or missing from the stanza, the templating will still attempt to render. If the expected payload is missing, the resulting destination will be blank.
+</Note>
+
+## Operational Best Practices
+
+### Monitoring and Logging
+
+If the Vault Agent process is stopped or dies, applications will continue functioning with previously rendered secrets. However, it can still lead to issues, particularly if dynamic secrets with shorter life cycles are being used. Because of this, monitoring the health of Vault Agent and alerting on failures is crucial, especially as the number of applications using Vault Agent grows over time. 
+
+To address the above, Vault Agent has a <code><a href="https://developer.hashicorp.com/vault/docs/agent-and-proxy/agent#telemetry-stanza" target="_blank" rel="noreferrer">telemetry feature</a></code> that can be configured using the <a href="https://developer.hashicorp.com/vault/docs/configuration/telemetry" target="_blank" rel="noreferrer">telemetry stanza </a> to offer operational insights. As the telemetry stanza is exactly the same as those used to configure Vault Server telemetry, it is possible to leverage the same telemetry sinks used in your Vault Server deployment such as Prometheus, StatsD, or InfluxDB.
+
+Vault Agent Telemetry provides the following runtime metrics about its performance, the auto-auth and the cache status:
+
+
+
+
+For active monitoring of the operation logs, logging can be configured during the <a href="https://developer.hashicorp.com/vault/docs/agent-and-proxy/agent#command-options" target="_blank" rel="noreferrer">starting of the agent</a> or specified in the <a href="https://developer.hashicorp.com/vault/docs/agent-and-proxy/agent#configuration-file-options" target="_blank" rel="noreferrer">configuration file</a>. Vault Agent supports various verbosity levels such as trace, debug, info, warn, and error (in order of descending detail). It is recommended to keep the default verbosity level (“info”) unless there are specific needs, such as during debugging, where you might need the debug or trace verbosity level for more detailed logs.
+
+Just as with telemetry, it is recommended to integrate Vault Agent logging with your enterprise logging solution (if applicable) so the Vault logs can be consolidated and made visible through a centralized logging platform. Depending on your enterprise logging solution, it is also recommended to set up alerts for any logs indicating warnings or errors.
+
+### Common Issues and Solutions
+
+* Customers sometimes encounter challenges when generating a Vault Agent's configuration file. A practical starting point is to use the agent binary's `generate-config` flag, which can help you create a basic configuration file. However, this initial setup typically needs fine-tuning before it is suitable for use in production, especially regarding things like authentication configuration or integrating different secret engines.
+* If you find you need help debugging your template, you can monitor the agent log by setting the `log-level` to `trace`. This log level can provide useful data if you are experiencing issues initiating agent process, or if your secret is not being rendered correctly.
+
+
+## Additional Resources
+
+* Links to relevant existing support articles or other HashiCorp documentation (optional section: integrate links throughout content wherever possible)
+    * <a href="https://developer.hashicorp.com/vault/docs/agent-and-proxy/agent/template" target="_blank" rel="noreferrer">https://developer.hashicorp.com/vault/docs/agent-and-proxy/agent/template</a> 
+
+    * <a href="https://developer.hashicorp.com/vault/docs/agent-and-proxy/agent/process-supervisor#env_template" target="_blank" rel="noreferrer">https://developer.hashicorp.com/vault/docs/agent-and-proxy/agent/process-supervisor#env_template</a> 
+
+    * <a href="https://github.com/hashicorp/consul-template/blob/main/docs/templating-language.md" target="_blank" rel="noreferrer">https://github.com/hashicorp/consul-template/blob/main/docs/templating-language.md</a> 
+
+    * <a href="https://developer.hashicorp.com/vault/docs/agent-and-proxy/agent" target="_blank" rel="noreferrer">https://developer.hashicorp.com/vault/docs/agent-and-proxy/agent</a> 
+
+    * <a href="https://developer.hashicorp.com/vault/api-docs/secret/pki" target="_blank" rel="noreferrer">https://developer.hashicorp.com/vault/api-docs/secret/pki</a>

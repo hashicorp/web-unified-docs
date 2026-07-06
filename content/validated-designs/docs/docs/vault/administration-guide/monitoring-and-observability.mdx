@@ -1,0 +1,497 @@
+---
+title: Monitoring and observability
+description: Monitor Vault Enterprise, review audit and operational logs, and respond to incidents during day-2 operations.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-07-06T12:00:00.000Z
+last_modified: 2026-07-06T12:00:00.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Monitoring and observability
+
+<Note>
+
+This page covers recurring monitoring, alert response, audit-log review, operational-log review, and incident response. For install-time telemetry and health endpoint setup, see the Installation Guide: [Observability setup](/validated-designs/vault/installation-guide/vms/observability-setup).
+
+</Note>
+
+In this section, we focus on Vault monitoring and observability. Vault provides metrics, operational logs, audit logs, and a health API. Combined with host monitoring, use all of these elements to gather an accurate picture of the security, compliance, and performance of your Vault environment.
+
+![Vault monitoring and observability focus areas](/img/vault/operating-guides/adoption/hvd-vault-oga-monitoring-and-observability.png "Vault monitoring and observability focus areas")
+
+## General recommendations
+
+To get a full picture and observe any anomalies in resource usage or metrics it is important to profile operational monitoring of Vault over time. Monitor all metrics continuously and implement tested alerting thresholds. We recommend establishing baselines and trends, with any deviation from them an indication of a potential problem.
+
+HashiCorp cannot provide definitive metric values in every case, so detecting deviations from a moving average is the most reliable indicator. In order to define a mean value, isolate the initial sample value for each metric and then monitor this over a day and a normal business week to establish a reasonable starting point. Keep in mind that those mean values can change over time as your usage changes. Sampling and reporting are not only useful for immediate alerting but also aggregation weekly, monthly, and annually for observability reporting purposes.
+
+Vault does not offer a solution for aggregating, visualizing, or alerting on telemetry or audit data. We recommend monitoring the following metrics with solutions such as [Prometheus and Grafana](https://learn.hashicorp.com/tutorials/vault/monitor-telemetry-grafana-prometheus) or [Splunk](https://learn.hashicorp.com/tutorials/vault/monitor-telemetry-audit-splunk). 
+
+<!-- TODO: resolve this link to pattern once published
+For guidance on integrating Vault metrics with Splunk you can also refer to this [Vault Integration Guide: Monitoring with Splunk](https://pattern-url).
+-->
+
+## Telemetry
+
+Vault provides many metrics you can export via [telemetry](https://developer.hashicorp.com/vault/docs/internals/telemetry). The Vault [reference documentation](https://developer.hashicorp.com/vault/docs/internals/telemetry/metrics/all) provides a full list of all metrics.
+
+The Vault [Installation Guide](/validated-designs/vault/installation-guide/vms/detailed-design#telemetry-stanza) explains how to configure the telemetry stanza in your Vault configuration.
+
+In this section we focus on the key monitoring metrics to maintain system health and performance.
+
+### Key metrics
+
+Vault's key metrics can be divided into host metrics, seal status and leadership metrics, core metrics, request handling metrics, usage metrics, replication and availability metrics, and storage metrics. The following tables show the respective metric, its unit, type, and a description of what the metric monitors. We include guidance on alert thresholds for each metric.
+
+#### Host metrics
+
+These metrics cover system level monitoring of the Vault hosts. Individual metrics for infrastructure components (CPU, memory, disk, I/O) are always good indicators of issues if they are outside of expected norms.
+
+| Metric/Unit/Type | What | Alert |
+| :---- | :---- | :---- |
+| `swap.used_percent` / `percent` / `gauge` | The percentage of swap space currently in use. When using Integrated Storage, swap generally should be disabled to avoid Vault's encryption keys being written to disk. | > 0 |
+| `diskio.read_bytes` / `byte` / `gauge` | Integrated Storage: IO is crucial for cluster stability. | Average bytes rises by 50% or more than 3 standard deviations from the mean. |
+| `diskio.write_bytes` / `byte` / `gauge` | Integrated Storage: IO is crucial for cluster stability. When using storage backends other than Integrated Storage, Vault generally does not require too much disk I/O, so a sudden change in disk activity could mean that debug or trace logging has accidentally been enabled in production, which can impact performance. | Average bytes rises by 50% or more than 3 standard deviations from the mean. |
+| `disk.used_percent` / `byte` / `gauge` | Percentage of total disk space used by user processes. | Average bytes rises by 50% or more than 3 standard deviations from the mean. |
+| `cpu.user_cpu` / `percent` / `gauge` | Percentage of CPU used by user processes (such as Vault) | Standard host threshold |
+| `cpu.iowait_cpu` / `percent` / `gauge` | Percentage of CPU time spent waiting for I/O tasks to complete | > 10% |
+| `net.bytes_recv` | Bytes received on each network interface | >50% deviation from baseline |
+| `net.bytes_sent` | Bytes transmitted on each network interface | >50% deviation from baseline |
+| `linux_sysctl_fs.file-nr` | Number of file handles used across all processes on the host | >80% |
+| `linux_sysctl_fs.file-max` | Total number of available file handles | N/A see following information |
+
+##### Memory utilization
+
+Memory usage is constant when your system is in a steady state, as there is a balance of lease issue and revocation. If you see memory usage starting to grow, then begin investigating.
+
+Memory usage does not spike. It grows in line with an increase in the workload. If it grows more quickly, then this is an indication that something is wrong.
+
+##### CPU utilization
+
+Encryption can place a heavy demand on the CPU. If the CPU is too busy, Vault may have trouble keeping up with the incoming request load. You may also want to monitor each CPU individually to make sure requests are evenly balanced across all CPUs.
+Monitor and warn on `cpu.iowait_cpu` greater than 10%.
+
+CPU monitoring is particularly important if the [Transit](https://developer.hashicorp.com/vault/docs/secrets/transit) or the [Transform](https://developer.hashicorp.com/vault/docs/secrets/transform) secrets engines are in use.
+
+##### Network utilization
+
+A sudden spike in network traffic to Vault might be the result of a misconfigured client causing too many requests or an additional load you did not plan for. Look for sudden large changes (greater than 50% deviation from baseline) to the net metrics.
+
+##### File descriptor usage
+
+Heavy utilization of the network due to lots of connections can often cause high utilization of file descriptors. Monitor `file-nr` and `file-max`. If `file-nr` reaches 80% of `file-max`, alert and investigate.
+
+##### Disk usage
+
+Implement disk space monitoring and alerting on audit endpoints. Alert when `/var/log` reaches 65% full so that there is plenty of time to review and arrange for additional disk space for the `File` audit endpoint.
+
+#### Seal status and leadership metrics
+
+These metrics cover Vault's seal and leadership election.
+
+| Metric/Unit/Type | What | Alert |
+| :---- | :---- | :---- |
+| `vault.core.unsealed` / `bool` / `gauge` | Vault-level detection of Vault being sealed. | Any host reports `0` |
+| `vault.core.post_unseal` / `ms` / `gauge` | Time taken by post-unseal operations handled by Vault core. | INFO every time |
+| `vault.core.leadership_setup_failed` / `ms` / `summary` | Time taken by cluster leadership setup failures which have occurred in a highly available Vault cluster. Monitor and alert on this for overall cluster leadership status. | > 0 |
+| `vault.core.leadership_lost` / `ms` / `summary` | Time taken by cluster leadership losses which have occurred in a highly available Vault cluster. Monitor and alert on this for overall cluster leadership status. | > 0 |
+| `vault.core.step_down` / `ms` / `summary` | Duration of time taken by cluster leadership step downs. Monitor this, and set alerts for overall cluster leadership status. | If count rises by 50% or more than 3 standard deviations from the mean. |
+| `vault.core.license.expiration_time_epoch` / `seconds` / `gauge` | Time as epoch at which license will expire. | < 30 days left  |
+
+##### Seal status
+
+- Any Vault node that is sealed during normal operation needs to be attended to immediately as it could impact cluster availability. Set up alerting systems so that staff are notified of changes immediately.
+
+##### Post-unseal
+
+- The `vault.core.post_unseal` metric is good for support or debugging problems with Vault startup after unsealing.  
+- Unexpected spikes in the `vault.core.post_unseal` metric can alert you to problems during the post-unseal process that affect the availability of your server. Check your Vault server logs to gather more details about potential causes, such as issues mounting a custom plugin backend or setting up auditing.
+
+##### Leadership metrics
+
+- Cluster leadership changes, particularly those in unhealthy clusters, are identified via these metrics. The main target is to understand how long leaders were leaders for, when a leader loses leadership, and how long it takes to get the system fully operational following a leadership election. You want to know every time a new leader is elected as frequent leadership changes can indicate cluster instability.  
+- Generally, leadership transitions in a Vault cluster are infrequent. Vault provides two metrics that are helpful for tracking leadership changes in your cluster. `vault.core.leadership_lost`, which measures the amount of time a server was the leader before it lost its leadership, and `vault.core.leadership_setup_failed`, which measures the time taken by cluster leadership setup failures.  
+- A consistently low `vault.core.leadership_lost` value is indicative of high leadership turnover and overall cluster instability. Spikes in `vault.core.leadership_setup_failed` indicate that your standby servers are failing to take over as the leader, which is something you will want to look into right away (e.g., was there an issue acquiring the leader election lock?). Monitor and alert on both of these metrics, as they can indicate a security risk. For instance, there might be a communication issue between Vault and its storage backend or a larger outage that is causing all of your Vault servers to fail.
+
+##### License metric
+
+- The metric `vault.core.license.expiration_time_epoch` is given as [Unix time](https://en.wikipedia.org/wiki/Unix_time). This means the time at which the Vault license expires is given as the number of seconds since January 1, 1970 (Unix epoch).
+
+```sh
+$ date -r 1641049200
+Sat Jan  1 16:00:00 CET 2022
+```
+
+#### Core metrics
+
+These metrics cover the Vault binary.
+
+| Metric/Unit/Type | What | Alert |
+| :---- | :---- | :---- |
+| `vault.runtime.alloc_bytes` / `byte` / `summary` | Number of bytes allocated by the Vault process. | 3 x 20% deviations from the mean |
+| `vault.runtime.sys_bytes` / `byte` / `summary` | Number of bytes allocated to the Vault process. | 3 x 20% deviations from the mean |
+| `vault.runtime.num_goroutines` / `goroutines` / `summary` | Number of goroutines associated with the vault process. This metric can serve as a general system load indicator and is worth establishing a baseline and thresholds for alerting. Blocked goroutines can increase memory usage and slow garbage collection. | 3 x 20% deviations from the mean |
+| `vault.runtime.gc_pause_ns` / `nanosecond` / `sample` | GC pause is a stop-the-world event, meaning that all runtime threads are blocked until GC completes. Normally these pauses last only a few nanoseconds. But if memory usage is high, the Go runtime may GC so frequently that it starts to slow down Vault. Sample every second | >33,330,000 nanoseconds per second = WARN (2 s/min); >83,330,000 nanoseconds per second = CRITICAL (5 s/min) |
+| `vault.barrier.get` / `ms` / `summary` | Duration of time taken by GET operations at the barrier. | If count rises by 50% or more than 3 standard deviations from the mean. |
+| `vault.barrier.put` / `ms` / `summary` | Duration of time taken by PUT operations at the barrier. | If count rises by 50% or more than 3 standard deviations from the mean. |
+| `vault.core.mount_table.size` / `bytes` / `gauge` | Size of a particular mount table. This metric is labeled by table type (auth or logical) and whether or not the table is replicated (local or not). | If count rises by 50% or more than 3 standard deviations from the mean. All tables. |
+| `vault.metrics.collection` / `summary` | Time taken to collect usage gauges, labeled by gauge type. | If count rises by 50% or more than 3 standard deviations from the mean. |
+| `vault.metrics.collection.error` / `counter` | Errors while collection usage gauges, labeled by gauge type. | > 0, though a period of detection and evaluation to provide protection of temporal issues/false positives is recommended. |
+
+#### Request handling metrics
+
+These metrics represent counts and measurements that are provided by Vault core request handlers.
+
+| Metric/Unit/Type | What | Alert |
+| :---- | :---- | :---- |
+| `vault.core.handle_request` / `ms` / `summary` | Duration of requests handled by Vault core and is a key measure of Vault's response time or number of requests. | >50% or >3 standard deviations from the mean. |
+| `vault.core.handle_login_request` / `ms` / `summary` | Duration of login requests handled by Vault core and is a key measure of Vault's user login response time or number of login requests. | >50% or >3 standard deviations from the mean. |
+
+- The `vault.core.handle_login_request` metric (using the mean aggregation) gives you a measure of how quickly Vault is responding to incoming client login requests. If you observe a spike in this metric but little to no increase in the number of tokens issued (`vault.token.creation`), you will want to immediately examine the cause of this issue. If clients cannot authenticate to Vault quickly, they may be slow in responding to the requests they receive, increasing the latency in your application.  
+- `vault.core.handle_request` is another good metric to track, as it can give you a sense of how much work your server is performing and whether you need to scale up your cluster to accommodate increases in traffic levels. Or, if you observe a sudden dip in throughput, it might indicate connectivity issues between Vault and its clients, which warrants further investigation.  
+- Look for changes to `vault.core.handle_request` that exceed 50% of baseline values, or more than 3 standard deviations above baseline. Changes for `vault.core.handle_login_request` to the count or mean fields that exceed 50% of baseline values, or more than 3 standard deviations above baseline.  
+- Route-Specific Metrics - Vault provides metrics about operations against [specific routes](https://developer.hashicorp.com/vault/docs/internals/telemetry/metrics/all#vault-route-create-mountpoint), including those in use by enabled secrets engines. When using a time-series database to gather metrics for this reason over time, performance recording per API endpoint can be understood. Route-specific metrics are use case specific and further discussion might be warranted depending on the use case.
+
+#### Usage metrics
+
+Token creation rate correlates to established normal behavior. A spike may indicate application misconfiguration.
+
+| Metric/Unit/Type | What | Alert |
+| :---- | :---- | :---- |
+| `vault.token.create_root` / `tokens` / `counter` | Number of created root tokens. Does not decrease on revocation. | On change |
+| `vault.token.creation` / `token` / `counter` | Number of service or batch tokens created. | If count rises by 50% or more than 3 standard deviations from the mean. |
+| `vault.token.create` / `ms` / `summary` | The time taken to create a token. | >50% or >3 standard deviations from the mean. |
+| `vault.token.store` / `ms` / `summary` | Time taken to store an updated token entry without writing to the secondary index. | Establish at baseline over a week's monitoring, and alert on more than 3 standard deviations from the mean. |
+| `vault.expire.num_leases` / `leases` / `gauge` | Number of all leases which are eligible for eventual expiry | If count rises by 50% or more than 3 standard deviations from the mean. |
+| `vault.expire.renew` / `ms` / `summary` | Time taken to renew a lease. | Establish at baseline over a week's monitoring, and alert on more than 3 standard deviations from the mean. |
+| `vault.expire.revoke` / `ms` / `summary` | Duration of time to revoke a token. | If count rises by 50% or more than 3 standard deviations from the mean. |
+| `vault.identity.num_entities` / `entities` / `gauge` | Number of identity entities | If count rises by 50% or more than 3 standard deviations from the mean. |
+| `vault.identity.entity.count` / `entities` / `gauge` | The number of identity entities stored in Vault, grouped by namespace. | Use this integer for trend analysis. Monitor per namespace counters as well as overall count per cluster as in the next item. |
+| `vault.identity.num_entities` / `entities` / `gauge` | The number of identity entities stored in Vault | The increase in this number over time may or may not correspond to the number of additional namespaces added to the system, but will allude to the total number of entities the system has to handle and is useful for trend analysis. Use with `vault.identity.entity.count` per namespace to identify team changes over time. |
+
+##### Root token creation
+
+- The metric `vault.token.create_root` is a counter that increments any time a root token gets created, but actual usage of the root token can be identified in the [audit logs](#audit-logs).  
+- Root tokens have the root policy attached to them and can do anything in Vault. Only generate root tokens when absolutely necessary and avoid persisting them. We recommend using the initial root token for just enough initial setup (e.g. setting up auth methods and policies necessary to allow administrators to acquire more limited tokens).
+
+##### Number of tokens
+
+- Monitoring the volume of token creation (`vault.token.creation`) together with the login request traffic (`vault.core.handle_login_request` aggregated as a count) can help you understand how busy your system is overall. If your use case involves running many short-lived processes (e.g., serverless workloads), you might have hundreds or thousands of functions spinning up and requesting secrets at once. In this case, you will see correlated spikes in both metrics.
+
+##### Number of leases
+
+- These metrics represent lease measurements that are provided by Vault. Large and unexpected delta in count can indicate a bulk operation, load testing, or runaway client application is generating excessive leases and requires immediate investigation.  
+- The metric `vault.expire.num_leases` stands for the number of leases that are eligible for eventual expiry. Leases associated with tokens and dynamic secrets have a short TTL. The default setting is 32 days, and expiring leases en-masse can be problematic. What to look for: A large and unexpected delta in count can indicate a bulk operation, load testing, or runaway client application is generating excessive leases and requires immediate investigation.  
+- Monitoring the current number of Vault leases (`vault.expire.num_leases`) can help you spot trends in the overall level of activity of your Vault server. A rise in this metric could signal a spike in traffic to your application, whereas an unexpected drop could mean that Vault is unable to access dynamic secrets quickly enough to serve the incoming traffic.
+
+##### Expiration
+
+- The metrics `vault.expire.revoke` and `vault.expire.renew` provide the lease revoke/renewal time when a TTL is reached. Long times here indicate slow revocation/renewal.  
+- Vault automatically revokes the lease on a token or dynamic secret when its TTL is up. Security operators can also manually revoke a lease in the event of a suspected intrusion. When a lease is revoked, the data in the associated object is invalidated and its secret can no longer be used. A lease can also be renewed before its TTL is up if you want to continue retaining the secret or token.  
+- Since revocation and renewal are important to the validity and accessibility of secrets, you will want to track that these operations are completed in a timely manner. Additionally, if secrets are not properly revoked, and attackers gain access to them, they can infiltrate your system and cause damage. If you are seeing long revocation times, review your server logs to see if there was a backend issue that prevented revocation.
+
+##### Identity metrics
+
+- These metrics represent identity entity measurements that are provided by Vault. This rises in line with onboarding teams although some existing teams may generate disproportionate numbers of additional identities depending on use case.
+
+##### Replication and availability metrics
+
+Monitoring this metric can provide insights into replication usage and saturation, while also revealing issues with storage performance. Increased time spent in [Merkle](https://support.hashicorp.com/hc/en-us/articles/20457140183443-Replication-Overview-and-Merkle-Sync-Loop-Analyses) diff operations can be indicative of a larger problem in determining differences between data in the two clusters. Closely monitoring this metric helps to identify potential replication breaking issues.
+
+| Metric/Unit/Type | What | Alert |
+| :---- | :---- | :---- |
+| `vault.merkle.flushDirty` / `ms` / `summary` | Time taken to flush dirty pages to storage. Provides insight into replication usage/saturation, and storage performance issues. | If count rises by 50% or more than 3 standard deviations from the mean. Note that it depends on system and network resources as to how long it will take to establish a mean. |
+| `vault.merkle.diff` / `ms` / `summary` | Time taken to perform a Merkle diff between the two clusters. Increased time spent in Merkle diff operations can be indicative of a larger problem in determining differences between data in the two clusters. Closely monitoring this metric helps to identify potential replication breaking issues. | If count rises by 50% or more than 3 standard deviations from the mean. Note that it depends on system and network resources as to how long it will take to establish a mean. |
+| `vault.merkle.flushDirty.num_pages` / `pages` / `gauge` | Number of pages flushed. | If count rises by 50% or more than 3 standard deviations from the mean. Used with the metrics mentioned previously to determine extent of merkle sync. |
+| `vault.merkle.saveCheckpoint` / `ms` / `summary` | Time taken to save the checkpoint. | If count rises by 50% or more than 3 standard deviations from the mean. |
+| `vault.merkle.saveCheckpoint.num_dirty` / `pages` / `gauge` | Number of dirty pages at checkpoint. | If count rises by 50% or more than 3 standard deviations from the mean. |
+| `vault.wal.deleteWALs` / `ms` / `summary` | Time taken to delete a [Write Ahead Log (WAL)](https://support.hashicorp.com/hc/en-us/articles/20457140183443-Replication-Overview-and-Merkle-Sync-Loop-Analyses). | If count rises by 50% or more than 3 standard deviations from the mean. |
+| `vault.merkle.remote_state_snapshot` / `ms` / `summary` | This metric represents the duration of time taken to perform a remote state snapshot on the other cluster before checking for differences. | If count rises by 50% or more than 3 standard deviations from the mean. |
+| `vault.merkle.reindex` / `ms` / `summary` | Reindex duration. A reindex is typically IOPS intensive, affects all relevant keys, and requires updating of all sub trees. Monitoring reindex usage and saturation is key to ensuring healthy replication and detecting performance bottlenecks. | If count rises by 50% or more than 3 standard deviations from the mean. |
+| `vault.replication.wal.last_wal` / `sequence_number` / `gauge` | Index of the last WAL. | INFO |
+| `vault.replication.wal.last_dr_wal` / `sequence_number` / `gauge` | Index of the last DR replication WAL. | INFO |
+| `vault.replication.wal.last_performance_wal` / `sequence_number` / `gauge` | Index of the last PR WAL. | INFO |
+| `vault.replication.fsm.last_remote_wal` / `sequence_number` / `gauge` | Index of the last remote WAL. | INFO |
+| `replication.rpc.client.stream_wals` / `ms` / `summary` | Duration of time taken by the client to stream WALs. | INFO |
+| `vault.replication.rpc.client.fetch_keys` / `ms` / `summary` | Duration of time taken by a client to perform a fetch keys request. | INFO |
+| `vault.replication.rpc.client.conflicting_pages` / `ms` / `summary` | Duration of time taken by a client conflicting page request. | INFO |
+| `vault.replication.merkleSync` / `ms` / `summary` | Duration of time to perform a Merkle Tree-based sync using the last delta generated between the clusters participating in replication. | INFO |
+| `vault.replication.merkleDiff` / `ms` / `summary` | Duration of time to perform a Merkle Tree based delta generation between the clusters participating in replication. | INFO |
+| `vault.wal_gc_total` / `WAL` / `counter` | Number of Write Ahead Logs (WAL) on disk. | INFO |
+| `vault.wal.persistWALs` / `ms` / `summary` | Time required to persist the Vault WAL to the storage backend. | >1000 ms |
+| `vault.wal.flushReady` / `ms` / `summary` | Time required to flush the WAL to the persist queue. | >500 ms |
+| `vault.wal.write_controller.reject_fraction` / `number` / `gauge`  | The estimated fraction of write requests that must be rejected to maintain cluster stability. | INFO |
+| `vault.ha.rpc.client.forward` / `ms` / `summary` | Time taken to forward a request from a standby to the active node | If count rises by 50% or more than 3 standard deviations from the mean. |
+| `vault.ha.rpc.client.forward.errors` / `errors` / `counter` | Number of standby requests forwarding failures. | > 0. Assess the suitability of this metric in case temporal network issues cause false positives. |
+
+##### WAL processing
+
+- The Vault write-ahead logs (WALs) are used to replicate Vault between clusters. WALs are kept even if replication is not currently enabled. The WAL is purged every few seconds by a garbage collector. But if Vault is under heavy load, the WAL may start to grow, putting pressure on the backend.  
+- `vault.wal.write_controller.reject_fraction` is connected to Vault's write overload protection. Consistently high fractions could indicate that there is a hardware failure or that the initial sizing has been outgrown by the actual workloads.
+
+#### Integrated storage metrics
+
+Monitor and trend the following metrics if you are using the Integrated Storage backend for Vault Enterprise.
+
+| Metric/Unit/Type | What | Alert |
+| :---- | :---- | :---- |
+| `vault.raft.leader.lastContact` / `ms` / `summary` | Measures the time since the leader was last able to contact the follower nodes when checking its leader lease. | > 0 |
+| `vault.raft.state.candidate` / `elections` / `counter` | Increments whenever raft server starts an election. | On change |
+| `vault.raft.state.leader` / `leaders` / `counter` | Increments whenever raft server becomes a leader. | On change |
+| `vault.raft.get` / `ms` / `summary` | Time to retrieve a key from underlying storage. | If count rises by 50% or more than 3 standard deviations from the mean. |
+| `vault.raft.put` / `ms` / `summary` | Time to persist a key in underlying storage. | If count rises by 50% or more than 3 standard deviations from the mean. |
+| `vault.raft.list` / `ms` / `summary` | Time to retrieve a list of keys from underlying storage. | If count rises by 50% or more than 3 standard deviations from the mean. |
+
+### Performance monitoring
+
+Several factors impact the performance of Vault, ranging from the underlying hardware to resource limits. For more information on the different factors you can review the [performance tuning guide](https://developer.hashicorp.com/vault/docs/concepts/tune-server-performance#tune-server-performance). We recommend monitoring system metrics like memory, CPU, and network utilization. Some metrics in Vault can help you narrow down the underlying reason for performance issues. Configuring alerting accordingly can prevent performance issues in the first place.
+
+Pay particular attention to the number of active leases with `vault.expire.num_leases` as described in the [Usage Metrics](#usage-metrics) section. An expiring lease is a write operation to Vault storage. By selecting the shortest possible TTL for your use case you can prevent a large number of leases expiring at the same time and space out those writes to ease the load on Vault storage.
+
+Monitor the `vault.runtime.num_goroutines` metric. Blocked goroutines can slow down memory and garbage collection. More details and specific recommendations are described in the [Core Metrics](#core-metrics) section.
+
+Replication within a cluster and cross-cluster is a key factor for improving Vault's availability and performance. As such, if there is an issue with replication it can have negative effects on overall performance. Monitor those metrics as described in the [replication and availability section](#replication-and-availability-metrics) of this guide. Hitting Vault's [limits and maximums](https://developer.hashicorp.com/vault/docs/internals/limits) can also have a negative effect on overall performance.
+
+| Metric/Unit/Type | What | Alert |
+| :---- | :---- | :---- |
+| `vault.identity.upsert_entity_txn` / `ms` /`summary` | Time required to upsert an entity to the in-memory database and persist the data to storage | If count rises by 50% or more than 3 standard deviations from the mean. |
+| `vault.identity.upsert_group_txn` / `ms` /`summary` | Time required to upsert group membership to the in-memory database and persist the data to storage | If count rises by 50% or more than 3 standard deviations from the mean. |
+| `vault.core.fetch_acl_and_token` / `ms` /`summary` | Time required to fetch ACL and token entries | If count rises by 50% or more than 3 standard deviations from the mean. |
+
+#### Entities and groups
+
+Of particular note here are usage metrics tied to Entities and Groups. As the number of entities rises (`vault.identity.num_entities`) the more taxing additions and updates to entities and groups on the overall system become. To remediate long times required for those updates, you can consider using smaller internal groups or using external groups.
+
+#### Policies
+
+Another metric that can indicate a reason for increased response times is linked to the number of policies. The higher the number of policies, the higher the time it takes to assemble the access control list for a token ([`vault.core.fetch_acl_and_token`](https://developer.hashicorp.com/vault/docs/internals/telemetry#core-metrics)).
+
+## Audit logs
+
+Audit devices record a detailed audit log of requests and responses from Vault, helping organizations meet their compliance requirements. Our help center documentation provides [an example audit log request and response including a description of the objects](https://support.hashicorp.com/hc/en-us/articles/360000995548-Audit-and-Operational-Log-Details). Enable at least one audit device or Vault does not respond to requests as it cannot log them.
+
+The general purpose of the audit log is for troubleshooting events that have adversely affected operations, rather than as an ongoing monitoring tool. This is because the audit log is an audit trail primarily designed to log requests and responses to the Vault API. In this section, we explore how to leverage the audit logs for troubleshooting.
+
+### General
+
+Expect a continuous addition to the audit log endpoints. Configure an alert to notify if this stops for any reason, especially during normal business hours and maintenance windows. We cover this more in the [Audit device metrics](#audit-device-metrics) section. We also recommend monitoring the highest delta of audit log aggregation per day as a percentage of the whole stored in the `File` audit endpoint. This identifies any significant jump in activity.
+
+### Usage patterns
+
+Use Vault's audit logs for auditing purposes (who did what when), to detect errors (like failed authentication or access denied), and to create metrics and visualize user patterns. Similar to operational monitoring, you can use audit logs to define baseline usage, alert on high deviations, and therefore be able to detect potential misconfigurations in applications consuming Vault. For example, if on a typical day there are 500 authentications with a token and 100 reads of a KVv2 secrets engine within a namespace, and suddenly there are 100,000 reads, there is probably an application misconfigured somewhere or a new usage pattern. If there is a high deviation in the number of operations per time period, for example, a sudden influx in key-value reads, it might be a misconfigured app or attack, or you might need to implement rate limits.
+
+The following examples are some observable usage patterns in the Vault audit log:
+
+- Use of the root token
+- Creation of a new root token
+- Increased attempts to access varying invalid paths with the same credentials
+- Increased attempts to access varying paths with insufficient permissions with the same credentials
+- Special tokens with extended permissions (Terraform, CI/CD, etc.) used from an unexpected IP address
+- Permission denied (403) responses
+- Invalid username or password
+- Vault policy modifications
+- Enabling a new authentication method
+- Modification of an authentication method role
+- Creation of a new authentication method role
+- Use of Vault by people-related accounts outside regular business hours
+- Vault requests originating from unrecognized subnets
+- Authentication attempts with varying credentials from the same subnets
+- A lot of authentication attempts in a short time
+- Sealing of Vault
+- Changes to the audit devices
+- K/V secret actions like create, update, and delete
+- PKI certificate generation and revocation
+- Changes to the Transit Minimum Decryption Version Config
+- Transit key deletion
+
+We strongly recommend profiling Vault to find out what normal usage looks like in your environment and to be able to act on observed deviations.
+
+### Privileged endpoints
+
+There are endpoints that are only accessed in an emergency or during maintenance windows. Configure alerts for any access to the following endpoints:
+
+- `/sys/policy`  
+- `/sys/policies`  
+- `/sys/rekey`  
+- `/sys/rekey-recovery-keys`  
+- `/sys/replication`  
+- `/sys/audit`  
+- `/sys/audit-hash`  
+- `/sys/generate-root`  
+- `/sys/rotate`
+
+As requests for these API endpoints go to the audit log, use a SIEM log aggregation service to detect endpoint requests and raise alerts to operational and security staff.
+
+See also: [https://developer.hashicorp.com/vault/docs/concepts/policies#root-protected-api-endpoints](https://developer.hashicorp.com/vault/docs/concepts/policies#root-protected-api-endpoints)
+
+### Audit device metrics
+
+| Metric/Unit/Type | What | Alert |
+| :---- | :---- | :---- |
+| `vault.audit.log_request_failure` / `failures` / `counter` | Count of failed attempts to log requests to an enabled audit device. | > 0 |
+| `vault.audit.log_response_failure` / `failures` / `counter` | Count of failed attempts to log responses to an enabled audit device. | > 0 |
+| `vault.audit.file.log_request` / `ms` / `summary` | Count of requests to an enabled `file` audit device. | >50% or >3 standard deviations from the mean. |
+| `vault.audit.file.log_response` / `ms` / `summary` | Count of responses to log requests specifically to an enabled `file` audit device. | >50% or >3 standard deviations from the mean. |
+| `vault.audit.syslog.log_request` / `ms` / `summary` | Count of requests to an enabled `syslog` audit device. | >50% or >3 standard deviations from the mean. |
+| `vault.audit.syslog.log_response` / `ms` / `summary` | Count of responses to log requests specifically to an enabled `syslog` audit device. | >50% or >3 standard deviations from the mean. |
+| `vault.audit.socket.log_request` / `ms` / `summary` | Count of requests to an enabled `socket` audit device. | >50% or >3 standard deviations from the mean. |
+| `vault.audit.socket.log_response` / `ms` / `summary` | Count of responses to log requests specifically to an enabled `socket` audit device. | >50% or >3 standard deviations from the mean. |
+| `vault.audit.log_request` / `ms` / `summary` | Duration of time taken by all audit log requests across all audit log devices. | >50% or >3 standard deviations from the mean. |
+| `vault.audit.log_response` / `ms` / `summary` | Duration of time taken by audit log responses across all audit log devices. | >50% or >3 standard deviations from the mean. |
+
+#### Request and response failures
+
+This is a particularly important metric. Any non-zero value here indicates that there was a failure to make an audit log request to any of the configured audit log devices.
+
+When Vault cannot log to any of the configured audit log devices it ceases all user operations. Begin troubleshooting the audit log devices immediately if this metric continually increases.
+
+Look for any anomalous spikes or incremental increase in `vault.audit.log_request_failure` and `vault.audit.log_response_failure` as they can indicate blocking on a device. If this occurs, inspecting your audit logs in more detail can help you identify the path to the problematic device and provide other clues as to where the issue lies. For instance, when Vault fails to write audit logs to syslog, the server publishes error logs like these:
+
+```txt
+2020-10-20T12:34:56.290Z [ERROR] audit: backend failed to log response: backend=syslog/ error="write unixgram @->/test/log: write: message too long"
+2020-10-20T12:34:56.291Z [ERROR] core: failed to audit response: request_path=sys/mounts
+ error="1 error occurred:
+        * no audit backend succeeded in logging the response
+```
+
+### Comparing sensitive values
+
+In Vault audit logs, [sensitive information](https://developer.hashicorp.com/vault/docs/audit#sensitive-information) written as JSON strings is HMAC'd by default. This includes error messages. When [querying the audit logs](https://developer.hashicorp.com/vault/tutorials/monitoring/query-audit-device-logs#query-audit-device-logs) for a specific error message you can use the [audit-hash API](https://developer.hashicorp.com/vault/api-docs/system/audit-hash) to find the corresponding hash.
+
+```sh
+$ vault write /sys/audit-hash/file input="invalid username or password"
+Key     Value
+---     -----
+hash    hmac-sha256:5c9b40bfb148f1247409b7c780a5c2352cd67afd40bf6ac17a48a1911dc48d75
+```
+
+## API-based monitoring
+
+### Health API
+
+Monitor the status of the Vault cluster and its nodes with the `sys/health` endpoint. The Vault API docs include [the default status codes](https://developer.hashicorp.com/vault/api-docs/system/health#read-health-information).
+
+- Configure an alert when a standby node cannot connect to the active node for a prolonged time (status code 474) as this means the node is not part of the cluster. This leads to a negative impact on cluster availability.
+- Configure an alert if Vault is sealed (status code 503) as it cannot serve any requests in the sealed state.
+
+### Transactional monitoring
+
+Transactional monitoring is a way to mimic and test user behavior. While monitoring all other aspects of the Vault service are useful in understanding the health and performance of the service, measuring an actual user transaction is particularly of use observability-wise.
+
+An example of transactional monitoring would be a script that does the following:
+
+- Authenticate with Vault and retrieve a service token.  
+- Use the service token to write a secret.  
+- Use the service token to retrieve a secret.  
+- Compare the secret to expected values.
+
+The following example is a basic script with the ldap and the kv secrets engine mounted to compare a secret value against an expected control value.
+
+```sh
+#!/bin/bash
+
+# Variables
+CONTROL_VALUE="<value you expect the secret to have>"
+USERNAME="<username>"
+PASSWORD="<password>"
+SECRET_KEY="<key>"
+SECRET_MOUNT="kv"
+SECRET_PATH="test-secret"
+
+# Authenticate to Vault
+vault login -method=ldap username="$USERNAME" password="$PASSWORD"
+
+# Write secret to Vault
+vault kv put -mount="$SECRET_MOUNT" "$SECRET_PATH" "$SECRET_KEY"="$CONTROL_VALUE"
+
+# Retrieve secret and test
+TEST_VALUE=$(vault kv get -format=json -mount="$SECRET_MOUNT" "$SECRET_PATH" | jq -r ".data.data.$SECRET_KEY")
+
+# Compare retrieved value with expected value
+if [[ "$TEST_VALUE" == "$CONTROL_VALUE" ]]; then
+    echo "SUCCESS: Retrieved value matches the expected secret value"
+    exit 0
+else
+    echo "FAILURE: Retrieved value does not match the expected secret value"
+    echo "Expected: $CONTROL_VALUE"
+    echo "Got: $TEST_VALUE"
+    exit 1
+fi
+```
+
+At each step of the script the success or failure of that step can be measured, and the amount of time it took to execute each step can also be recorded. This allows the operator to not only understand whether the service is functioning, but also how it is performing, especially when associated with CPU, RAM, and disk utilization statistics. This helps the operator build a true understanding of service health and performance as experienced by the people consuming it. As the script matures, it can be expanded to monitor aspects such as performance replication or dynamic credentials.
+
+We recommend executing the script at a defined interval using some form of job scheduler, such as cron. Additionally, the script is built in a way that allows long-term storage of critical data points, such as success/failure or execution time. Leveraging log aggregation tools will allow for the long-term evaluation of the data from this script.
+
+This script would have to be maintained by a privilege/access management team in the longer term, but the Vault API generally does not make breaking changes, and those which are introduced are surfaced as deprecation warnings at least quarters ahead of schedule - and Vault version changes would pick these up as part of prep for upgrade.
+
+## Operational logs
+
+Vault operational logs focus on the internal processes, activities, and performance of the Vault server itself. They provide insights into how Vault operates and handles requests, errors, and system health, primarily for administrative and troubleshooting purposes within the Vault environment.
+
+The operational logs are gathered from standard output and standard error. Configure the [logging level](https://support.hashicorp.com/hc/en-us/articles/360000995548-Audit-and-Operational-Log-Details) in the Vault [server configuration](https://developer.hashicorp.com/vault/docs/commands/server#log-level) to either `trace`, `debug`, `info`, `warn` or `error`. Trace gives the most detailed information and error only shows error messages in the log. Configure your monitoring solution to alert on `error` log events.
+
+HashiCorp Technical Support Engineers will often ask for Vault operational logs as a troubleshooting step, so it is extremely helpful if you provide these logs whenever relevant and especially when opening a new support issue. Please obtain the [compressed log file(s) for each Vault server](https://support.hashicorp.com/hc/en-us/articles/360002046068-Where-are-My-Vault-Logs-and-How-do-I-Share-Them-with-HashiCorp-Support) or as directed by HashiCorp support and share them in the ticket.
+
+## Incident response
+
+In this section, we cover the handling of unauthorized token usage and the identification of accessed secrets. This is an essential aspect of Vault's role in enhancing organizational security. If you observe unwanted behavior, the following steps help you remediate the issue. We have added [specific examples for incident responses](https://developer.hashicorp.com/vault/tutorials/monitoring/audit-elastic-incident-response) in our tutorials.
+
+### General steps
+
+1. Revoke the compromised token: Use the Vault CLI or API to revoke the compromised token
+
+    `vault token revoke <token_id>` or `vault token revoke -accessor <token-accessor>`
+
+1. Determine the time frame: Try to determine the time frame when the unauthorized activity occurred or when you suspect the token was compromised.
+1. Search by Token ID: generate the [hash](https://developer.hashicorp.com/vault/api-docs/system/audit-hash) of the compromised token and use tools like `grep` to search for entries in the audit logs containing the hash of the compromised token
+
+    ```sh
+    $ vault write /sys/audit-hash/file input="$VAULT_TOKEN"
+    Key     Value
+    ---     -----
+    hash    hmac-sha256:72d000ab78fa0036a5977e65a81841ca36a56c9c1233d550fe4e9007c5df96a5
+    ```
+
+1. Review the audit log entries: Review audit log entries associated with the compromised token to identify any secrets or data that were accessed or manipulated. Look for commands or actions like `read`, `write`, or `delete` that involve secret paths or keys and list the secrets or data paths that were accessed or manipulated by the compromised token.
+
+1. Rotate affected secrets: If the compromised token accessed secrets, revoke or rotate those secrets using the Vault CLI or API.  
+  
+    - Revoke the secrets via the lease ID
+
+      `vault lease revoke database/creds/readonly/<lease-id>`
+
+    - In case of several secrets being compromised, using the prefix for revocation can be helpful  
+
+      `vault lease revoke -prefix database/creds`
+
+    - Generate a new secret and have application/services read the new secret in Vault
+
+      `vault read database/creds/role-name`
+
+### Restrict access
+
+Depending on the severity of the incident, you might wish to [restrict access](https://developer.hashicorp.com/vault/tutorials/operations/emergency-break-glass-features) to Vault. A Vault operator can use one of two methods to restrict access:
+
+1. Seal Vault. Sealing wipes the root key from memory, effectively shutting down all operations in Vault. In multi-tenant environments this is a highly disruptive operation.
+
+    ```sh
+    vault operator seal
+    ```
+
+1. Lock the API of a specific namespace. This stops all operations on a specific namespace and any child namespaces.
+
+    Lock the namespace and note the `unlock_key`:
+
+    ```sh
+    $ vault namespace lock hvd
+    Key           Value
+    ---           -----
+    unlock_key    uzkzIgUvtyj3fP1bKlclk9ox
+    ```
+
+    Unlock the namespace after remediating the incident:
+
+    ```sh
+    vault namespace unlock -unlock-key uzkzIgUvtyj3fP1bKlclk9ox hvd
+    ```

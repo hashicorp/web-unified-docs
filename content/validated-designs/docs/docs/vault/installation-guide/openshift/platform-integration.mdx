@@ -1,0 +1,258 @@
+---
+title: Platform integration
+description: Vault seal and unseal strategies, authentication to external systems, cluster initialization, and GitOps fundamentals for Vault Enterprise on OpenShift.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-07-06T12:00:00.000Z
+last_modified: 2026-07-06T12:00:00.000Z
+# END AUTO GENERATED METADATA
+---
+
+## Vault seal/unseal and external key management
+
+We recommend enabling Vault auto-unseal for deployments on OpenShift. Auto-unseal allows Vault Pods to automatically enter service after restart or rescheduling without requiring manual intervention, simplifying operational workflow and improving cluster recovery characteristics.
+
+You can implement auto-unseal using either a cloud Key Management Service (KMS) or a supported Hardware Security Module (HSM) that exposes a Public Key Cryptography Standards (PKCS)#11 interface.
+
+The choice between KMS and HSM is typically driven by organizational security and compliance requirements. In OpenShift environments running on public cloud infrastructure, a cloud KMS is often the most straightforward option due to native integration and simplified operational management.
+
+When using either KMS or HSM, Vault must authenticate to the device to perform seal and unseal operations. Multiple credential delivery mechanisms are possible, but we recommend avoiding static credentials and instead using Pod or workload identity wherever the platform supports it. The Authentication to external systems section covers this design consideration.
+
+For each seal strategy wired into a complete server configuration, refer to the [reference Helm values for this HVD](https://github.com/hashicorp-validated-designs/vault-enterprise/tree/main/vault-on-openshift-hvd): `values-awskms-rz.yaml` for cloud KMS auto-unseal through workload identity, and `values-hsm-rz.yaml` for PKCS#11 HSM auto-unseal using the init-container library delivery pattern.
+
+### HSM client library delivery to Vault Pods
+
+HSM-backed auto-unseal on OpenShift requires the vendor's PKCS#11 shared library inside the Vault container before Vault starts. The delivery pattern you choose affects update cadence, image ownership boundaries, and storage dependencies across environments. This section compares three common patterns.
+
+For seal stanza configuration, refer to the [Vault Enterprise detailed design](/validated-designs/vault/installation-guide/vms/detailed-design#seal-stanza). For PKCS#11 seal reference documentation, refer to [PKCS#11 seal](https://developer.hashicorp.com/vault/docs/configuration/seal/pkcs11).
+
+Each pattern places the library in the container through a different mechanism, which determines who owns updates and how a changed library reaches running Pods. The three patterns differ mainly in how tightly the library couples to the Vault image:
+
+- **Custom Vault image**: Embeds the PKCS#11 library directly in the Vault image you run.
+- **Init container plus `emptyDir`**: Copies the library from a separate artifact image into a shared `emptyDir` that the Vault container mounts.
+- **Pre-provisioned shared volume**: Stores the library on ReadWriteMany (RWX) or ReadOnlyMany (ROX) shared storage that every Vault Pod mounts read-only.
+
+The following table compares these patterns across update cadence, reproducibility, rollback, failure mode, supply-chain integrity, and runtime dependencies so you can select the one that fits your environment.
+
+| Dimension | Custom Vault image | Init container plus `emptyDir` | Pre-provisioned shared volume |
+| :---- | :---- | :---- | :---- |
+| Library update cadence and coupling to the Vault image | Coupled: a library change requires a new image build and tag. | Decoupled: the library ships as a separate digest-pinned artifact image on its own cadence. | Decoupled: volume updates change the library without a Vault image change. |
+| Reproducibility and GitOps | The image digest fully describes the running library. | Reproducible when the artifact image is digest-pinned; the Vault digest plus the artifact digest describe the runtime. | The image digest does not describe the library; identical digests can run different library versions depending on volume contents. |
+| Rollback model | Revert the Vault image reference in your Helm values, then replace Pods. | Revert the artifact image reference in your Helm values, then replace Pods. | Restore the previous library version on the volume, then replace Pods. In-place overwrites live outside the manifest and GitOps does not track them; pinning an immutable version path keeps the rollback in Git. |
+| Failure mode and affected scope | A faulty library reaches Pods only when you replace Pods in a controlled order. | A faulty library reaches a Pod only when you recreate it, the same as the custom image; a bad artifact surfaces as an init-container failure that blocks that single Pod's startup, so you catch it during a controlled rollout. | An in-place overwrite or backend outage affects every Pod at once. Publishing immutable, versioned libraries and pinning the version path in the manifest narrows the scope to recreated Pods, but never matches the pull-time integrity of a signed image. |
+| External runtime dependency | None at runtime; the registry is only a pull-time dependency, as with any image. | None at steady-state runtime, only at Pod startup. The init container pulls the artifact image and copies the library into a local `emptyDir` at the same point the Vault image is pulled, so it adds a second pull-time registry dependency but no ongoing one; once the Pod is running the library sits on node-local storage and the registry can be unreachable without affecting it. The pull recurs on each Pod recreation, exactly as for the Vault image. | Startup and runtime dependency; the ReadWriteMany or ReadOnlyMany backend must stay reachable from every zone, or Pods cannot start. If the backend fails while Pods are running, those Pods can hang waiting on the volume, and some vendor clients read from it throughout operation, not just at startup. |
+| Supply-chain integrity and verification | Packaged as an Open Container Initiative (OCI) image, the library falls under whatever supply-chain controls you already apply to Vault images, such as signing, scanning, and admission-time verification. | A second OCI image under the same controls; apply the signing, scanning, and verification you use for the Vault image. | The volume sits outside the image supply-chain path, so those controls do not apply. Any principal with write access to the share can replace the library, which calls for compensating controls: restricted write role-based access control (RBAC) on the publishing path, a read-only mount, and checksum verification. |
+| Best fit when | Your team already owns the Vault image build pipeline and accepts an image rebuild on every library change and every Vault upgrade. | A separate team owns and releases the HSM client library on its own cadence and you want it decoupled from the Vault image: you run the stock `vault-enterprise:<version>-ent.hsm-ubi` image, so a Vault upgrade needs no library rebuild; you pin the artifact image by digest for GitOps reproducibility; the artifact inherits the same OCI supply-chain controls (signing, scanning, admission-time verification) as the Vault image; you can roll the library forward or back by changing one digest without touching the Vault image; and you avoid owning a custom Vault image build pipeline. | You must keep custom image builds out of the Vault upgrade path, or a ReadWriteMany or ReadOnlyMany delivery standard already exists in your environment. |
+
+We recommend the init container with a digest-pinned artifact image as the default delivery pattern. Choose the custom image or the shared volume only where your environment matches the conditions in the table above. For the shared volume, give each library version its own immutable path instead of overwriting the library in place.
+
+The Vault Helm chart supports the init container and shared-volume patterns through `server.extraInitContainers`, `server.volumes`, and `server.volumeMounts` without a chart fork. Mount the delivered library read-only into the Vault container. For the shared-volume pattern, use a backend that supports multi-node access across every zone where Vault schedules Pods: ReadWriteMany for in-place updates, or ReadOnlyMany for an immutable, pre-published volume. ReadWriteOnce cannot span nodes. Seed and update the volume with a separate publishing step, most commonly a Kubernetes Job that mounts the volume, writing each library version to its own immutable path and verifying its checksum.
+
+The chart defaults to the OnDelete update strategy, so StatefulSet template changes, such as image references, take effect only when you replace Pods in a controlled order. The update strategy does not control in-place shared-volume changes, so the changed library reaches any Pod that restarts.
+
+The following guidance applies to all three patterns:
+
+- Use the glibc-based Red Hat Universal Base Image (UBI) `hashicorp/vault-enterprise:<version>-ent.hsm-ubi` image, which matches the runtime that most vendor PKCS#11 libraries target. Confirm with your HSM vendor that their library supports this image.
+- Store client certificates, private keys, partition credentials, HSM personal identification numbers (PINs), and other authentication material in Kubernetes Secret objects or an approved external secret workflow. Inject `VAULT_HSM_PIN` through `server.extraSecretEnvironmentVars`, sourced from a Kubernetes Secret, so credentials never render into Helm values, the StatefulSet manifest, a ConfigMap, an artifact image, or a shared volume. Use ConfigMaps only for non-sensitive client configuration such as `Chrystoki.conf` for Thales Luna.
+- HSM reachability is a Vault startup dependency regardless of delivery pattern: an unreachable HSM prevents Pods from unsealing. Provide a reachable HSM, typically as a high-availability group, for each primary and disaster recovery cluster.
+
+## Authentication to external systems
+
+Depending on the features enabled, Vault may frequently need to authenticate to external systems to deliver core functionality. Examples include cloud APIs used by various secrets engines, external identity providers used by authentication methods, telemetry or storage integrations, and key management systems used for auto-unseal.
+
+In OpenShift environments, external integrations introduce an important design consideration: how Vault obtains and manages the credentials required to access those dependencies. Use the platform's native workload or Pod identity mechanism instead of distributing static credentials to Vault Pods or Vault plugin configurations. Major cloud platforms support various forms of Pod identity, such as GCP cluster workload identity federation and AWS IAM Roles for Service Accounts, all of which are compatible with Vault.
+
+## Cluster initialization and bootstrap
+
+Vault initialization on OpenShift uses the standard `vault operator init` (or `sys/init`) workflow. Operators commonly run the command from within a Vault Pod with `oc exec` when the service is not yet externally reachable, but the procedure itself is identical to other Vault deployments.
+
+```shell-session
+$ oc exec -n vault -it vault-0 -- /bin/sh
+$ vault operator init
+```
+
+After initialization, Vault returns a root token and recovery (or unseal) keys to the operator. Handle this data as you would in any other Vault initialization scenario. See the [official documentation](https://developer.hashicorp.com/vault/docs/commands/operator/init) for further details.
+
+## GitOps fundamentals
+
+This section covers design considerations for deploying and managing Vault Enterprise on OpenShift through GitOps and Helm-based workflows. The first part describes platform-agnostic patterns that apply regardless of tool choice. The second addresses Argo CD design decisions specific to Vault on OpenShift.
+
+For an introduction to Helm and Argo CD as deployment tooling, refer to the Deployment options section in this guide.
+
+### Vault GitOps design patterns
+
+These patterns apply to any declarative delivery tool, such as Argo CD, Flux, or a CI/CD pipeline that renders and applies Helm templates.
+
+Vault is not a typical GitOps workload. As a stateful, security-critical service, it introduces constraints that standard application deployments do not face:
+
+- **Ordering dependencies**: TLS certificates, CA bundles, and PKI resources must exist before the Vault Helm release deploys. A standard sync submits all resources at once. Vault Pods crash-loop if the certificate secret does not yet exist.  
+- **Sensitive values**: Helm values may reference TLS private keys, license keys, and seal credentials. These must never appear in Git in plaintext.  
+- **StatefulSet behavior**: Sync and pruning operations interact with StatefulSet ordering guarantees. A misconfigured prune policy can delete a PersistentVolumeClaim (PVC) mid-upgrade, breaking the Raft quorum.  
+- **Operator-managed resources**: cert-manager and the service-ca operator populate secrets and ConfigMaps after the GitOps tool creates the initial empty resources. If the tool treats this as drift, it either blocks sync or reverts the operator's work.
+
+These constraints lead to one core design principle: **split the deployment into two phases**: prerequisites first (Issuers, Certificates, CA ConfigMaps, NetworkPolicies), then the Vault Helm release. Keep sensitive values out of Git using tooling such as [Sealed Secrets](https://github.com/bitnami-labs/sealed-secrets), [External Secrets Operator](https://external-secrets.io/), [Argo CD Vault Plugin](https://argocd-vault-plugin.readthedocs.io/), or Kustomize post-rendering.
+
+Organize the Git repository with per-environment overlay directories. This structure works identically whether consumed by a GitOps controller, a CI/CD pipeline, or a manual Helm upgrade invocation:
+
+```text
+vault-config/
+├── overlays/
+│   ├── vault-nonprd/
+│   │   ├── kustomization.yaml
+│   │   ├── values.yaml
+│   │   └── assets/            # Issuer, Certificate, NetworkPolicy
+│   ├── vault-prd/
+│   │   ├── kustomization.yaml
+│   │   ├── values.yaml
+│   │   └── assets/
+│   └── vault-dr/
+│       ├── kustomization.yaml
+│       ├── values.yaml
+│       └── assets/
+```
+
+Teams that do not use a GitOps tool can apply the same two-phase model directly with Helm: either sequential `helm upgrade --install` calls or an umbrella chart with subchart dependencies. Refer to the [Vault Helm chart reference](https://developer.hashicorp.com/vault/docs/platform/k8s/helm).
+
+### OpenShift GitOps design decisions
+
+Red Hat OpenShift GitOps provides an enterprise-supported Argo CD distribution and serves as Red Hat's recommended GitOps solution for OpenShift. The following decisions target Argo CD but translate to other tools. For official documentation, refer to [the "Introduction to GitOps with OpenShift"](https://docs.openshift.com/gitops/latest/understanding_openshift_gitops/about-redhat-openshift-gitops.html) and ["Argo CD Declarative Setup" guides](https://argo-cd.readthedocs.io/en/stable/operator-manual/declarative-setup/).
+
+#### Application structure
+
+Use the [multi-source Application](https://argo-cd.readthedocs.io/en/stable/user-guide/multiple_sources/) pattern: one source references the Vault Helm chart from an OCI registry, the other references your Git repository for environment-specific values and supplementary Kustomize manifests. This cleanly separates the upstream chart lifecycle from organizational configuration and lets Argo CD deploy cert-manager Issuers, Certificates, and networking resources alongside the Helm release as a single unit.
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: vault
+  namespace: openshift-gitops
+spec:
+  project: vault-project
+  sources:
+    - repoURL: https://github.com/org/vault-config.git
+      targetRevision: main
+      ref: values
+      path: overlays/vault-prd  # Kustomize overlay: Issuer, Certificate, NP
+
+    - repoURL: oci://registry.example.com/helm/hashicorp/vault
+      targetRevision: 0.33.0
+      chart: vault
+      helm:
+        valueFiles:
+          - '$values/overlays/vault-prd/values.yaml'
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: vault
+
+  ignoreDifferences:
+    - group: ""
+      kind: Secret
+      name: vault-tls
+      jsonPointers:
+        - /data
+
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=false
+```
+
+The first source clones the Git repository and deploys the Kustomize overlay (cert-manager resources, networking manifests). The second pulls the Vault Helm chart and renders it with the environment-specific values. The `ignoreDifferences` block prevents drift detection on the cert-manager-managed vault-tls Secret.
+
+#### Dependency ordering
+
+The two-phase prerequisite model maps to Argo CD in two ways. Choose based on operational preference:
+
+- **Single Application with [sync waves](https://argo-cd.readthedocs.io/en/stable/user-guide/sync-waves/)**: annotate the Issuer at wave -6, the Certificate at wave -5, and the Vault Helm release at the default wave 0. All resources share a single sync status, which is simpler to manage but offers less granular control.
+- **Separate Applications under [App-of-Apps](https://argo-cd.readthedocs.io/en/stable/operator-manual/cluster-bootstrapping/#app-of-apps-pattern)**: a vault-prereqs Application and a vault-app Application, ordered by sync-wave annotations on the Application resources themselves, or gated by a PreSync [resource hook](https://argo-cd.readthedocs.io/en/stable/user-guide/resource_hooks/). This gives each phase an independent sync lifecycle at the cost of an extra Application to manage.
+
+Explicit ordering through mechanisms like sync-waves is often essential to ensure that prerequisite resources deploy before the Vault Pods start.
+
+#### Handling operator-managed drift
+
+The cert-manager and service-ca operator write into Secrets and ConfigMaps after Argo CD creates them. Argo CD may interpret this as drift. Therefore, it may be necessary to configure [ignoreDifferences](https://argo-cd.readthedocs.io/en/stable/user-guide/diffing/) on the /data field of Secret/vault-tls (cert-manager or service-ca) and ConfigMap/service-ca (if using service-ca). Without this, self-heal may revert operator-managed content, break certificate rotation, or leave the Argo CD Application permanently out of sync.
+
+#### Sync policy
+
+Enable `automated.selfHeal` with caution, as it reverts manual changes during Vault maintenance operations such as seal migration, manual unseal, or Raft peer removal. Disable `automated.prune` or use `PrunePropagationPolicy` to prevent accidental deletion of PersistentVolumeClaims (PVCs) or secrets during manifest reorganization. Set `CreateNamespace=false` so the platform team provisions the Vault namespace with proper RBAC, quotas, and SecurityContextConstraints (SCCs) before the application deploys. Use `RespectIgnoreDifferences=true` to prevent automated sync from overwriting operator-managed fields. See [Argo CD: Automated Sync Policy](https://argo-cd.readthedocs.io/en/stable/user-guide/auto_sync/) for additional information.
+
+#### Project scoping
+
+Contain Vault Applications within a dedicated [Argo CD Project](https://argo-cd.readthedocs.io/en/stable/user-guide/projects/) to limit which repositories, namespaces, and clusters they can target. Without this boundary, a misconfigured ApplicationSet can sync resources into the wrong namespace or deploy to an unintended cluster, both of which are scenarios that can cause outages.
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: vault-project
+  namespace: openshift-gitops
+spec:
+  sourceRepos:
+    - 'https://github.com/org/vault-config.git'
+    - 'oci://registry.example.com/helm/hashicorp/*'
+  destinations:
+    - namespace: vault-*
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+    - group: ''
+      kind: Namespace
+```
+
+#### Helm values precedence
+
+Argo CD applies Helm values in a fixed precedence order. When using subcharts, verify that subchart defaults do not silently override your top-level values. This is a common source of debugging time, especially for teams without access to the underlying templates. For the full precedence order, refer to the Helm values precedence subsection in the Deployment options section. For a deeper exploration, see the [Argo CD Helm documentation](https://argo-cd.readthedocs.io/en/stable/user-guide/helm/).
+
+#### Multi-cluster deployments
+
+For a multi-region Vault with DR or performance replication, use Argo CD [ApplicationSets](https://argo-cd.readthedocs.io/en/stable/user-guide/application-set/) with a list generator to produce one Application per target cluster. Each cluster references its own overlay directory for environment-specific values (replication role, hostnames, certificates) while sharing the same Helm chart version and base configuration.
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: vault-clusters
+  namespace: openshift-gitops
+spec:
+  generators:
+    - list:
+        elements:
+          - cluster: cluster-primary
+            url: https://api.primary.example.com:6443
+            overlay: vault-prd-primary
+          - cluster: cluster-dr
+            url: https://api.dr.example.com:6443
+            overlay: vault-prd-dr
+  template:
+    metadata:
+      name: 'vault-{{cluster}}'
+    spec:
+      project: vault-project
+      sources:
+        - repoURL: https://github.com/org/vault-config.git
+          targetRevision: main
+          ref: values
+          path: 'overlays/{{overlay}}'
+        - repoURL: oci://registry.example.com/helm/hashicorp/vault
+          targetRevision: 0.33.0
+          chart: vault
+          helm:
+            valueFiles:
+              - '$values/overlays/{{overlay}}/values.yaml'
+      destination:
+        server: '{{url}}'
+        namespace: vault
+```
+
+The primary and DR secondary clusters use different Vault configurations (listener addresses and replication stanza) through their respective overlay directories, but share the same chart version and project scoping. See [Multi-cluster Management with GitOps](https://docs.openshift.com/gitops/latest/multicluster/index.html), [ApplicationSet documentation](https://argo-cd.readthedocs.io/en/stable/operator-manual/applicationset/), and [Cluster sharding across Argo CD Application Controller replicas](https://docs.openshift.com/gitops/latest/declarative_clusterconfig/sharding-clusters-across-argo-cd-application-controller-replicas.html) for more information. For network connectivity between clusters, refer to the cross-cluster networking for replication subsection in the Networking, routes, and TLS section.
+
+#### Common anti-patterns
+
+Review your Argo CD configuration against the following failure patterns before promoting to production.
+
+- **Committing TLS private keys to Git**: anyone with repository read access can impersonate the Vault endpoint.  
+- **`selfHeal` without `ignoreDifferences`:** Argo CD reverts operator-managed secrets, breaking certificate rotation.  
+- **prune without safeguards**: can delete PVCs or Secrets during manifest changes.  
+- **Unscoped Argo CD Project**: a misconfigured ApplicationSet can target production clusters unintentionally.  
+- **Missing sync-wave annotations**: Vault deploys before certificates exist; TLS fails on first sync.  
+- **`VAULT_SKIP_VERIFY` as a workaround**: masks TLS misconfigurations instead of diagnosing the certificate chain.
+- **Unseal or recovery keys in Git**: full cluster compromise. Use KMS auto-unseal.

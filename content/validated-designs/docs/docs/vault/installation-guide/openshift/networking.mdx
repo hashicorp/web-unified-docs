@@ -1,0 +1,560 @@
+---
+title: Networking, routes, and TLS
+description: Internal cluster networking, external access patterns, network policies, cross-cluster replication, certificate trust, and TLS configuration for Vault on OpenShift.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-07-06T12:00:00.000Z
+last_modified: 2026-07-06T12:00:00.000Z
+# END AUTO GENERATED METADATA
+---
+
+## Networking, routes, and TLS
+
+This section covers OpenShift-specific networking considerations for Vault Enterprise, including external access patterns, TLS termination strategies, route configuration, network policy design, and cross-cluster replication connectivity.
+
+Vault requires network connectivity for two traffic types: client API traffic on port 8200 and Raft cluster traffic on port 8201. Clients outside the cluster reach the API through an external access path, such as an OpenShift Route, a LoadBalancer Service, or an NGINX Ingress Controller. Each path has different requirements for TLS, load balancing, and access control.
+
+## Internal cluster networking
+
+### Raft peer communication
+
+Vault Pods use port 8201/tcp for Raft consensus traffic (log replication, heartbeats, leader election). Within a cluster, port 8200/tcp (API) handles the one-time `retry_join` bootstrap handshake when a node first joins the cluster, but steady-state Raft communication occurs exclusively on port 8201 beyond this point. The headless Service `<release>-internal` provides a DNS record for each Pod, such as vault-0.vault-internal.vault.svc. Each Vault node advertises its cluster address using this name, and Raft peers communicate over these addresses on port 8201.
+
+The `retry_join` stanza in the Raft storage configuration enables Vault Pods to discover peers and form the cluster automatically. Use `auto_join` with the Kubernetes provider ([go-discover](https://github.com/hashicorp/go-discover)) for dynamic peer discovery instead of hardcoding individual Pod addresses. The following configuration uses the Kubernetes provider:
+
+```hcl
+storage "raft" {
+  path = "/vault/data"
+
+  retry_join {
+    auto_join             = "provider=k8s namespace=<namespace> label_selector=\"app.kubernetes.io/name=<chart-name>, component=server\""
+    auto_join_scheme      = "https"
+    leader_tls_servername = "vault.apps.example.com"
+    leader_ca_cert_file   = "/vault/userconfig/vault-tls/ca.crt"
+  }
+}
+```
+
+Replace `<namespace>` with the target namespace and `<chart-name>` with the value of the app.kubernetes.io/name label on the Vault Pods. This label defaults to vault (the chart name) unless overridden through `nameOverride` in the Helm values.
+
+Always set `leader_tls_servername` when using `auto_join`, and set it to a Subject Alternative Name (SAN) on the listener certificate, such as the external hostname. Auto-join discovers Pods by IP, and Pod IPs never appear as certificate SANs, so without this parameter TLS validation during Raft bootstrap fails. `leader_tls_servername` overrides the hostname used for that validation so the joining node checks against a SAN that actually exists on the certificate.
+
+When embedding this in the Helm `server.ha.raft.config` value, use Helm template expressions so Helm resolves the values at render time:
+
+```hcl
+auto_join = "provider=k8s namespace={{.Release.Namespace}} label_selector=\"app.kubernetes.io/name={{ template "vault.name" . }}, component=server\""
+```
+
+The quotes inside {{ }} above are Go template syntax processed by Helm before Helm parses the result as HashiCorp Configuration Language (HCL). After rendering, verify that the `label_selector` value remains valid HCL with escaped inner quotes, for example `auto_join = "provider=k8s namespace=vault label_selector=\"app.kubernetes.io/name=vault, component=server\""`. Keep a space after the comma in the rendered `label_selector` so the value parses correctly.
+
+The `auto_join` approach uses the Kubernetes API to discover Vault Pods by label selector, eliminating the need to maintain one `retry_join` block per Pod. This works regardless of the replica count and adapts automatically when scaling the StatefulSet. When using the Vault Helm chart in HA mode, the Helm chart creates the required RBAC automatically: the chart's `server-discovery-role.yaml` and `server-discovery-rolebinding.yaml` templates grant the Vault ServiceAccount the `get`, `watch`, `list`, `update`, and `patch` verbs on Pods in the namespace. `server.serviceAccount.serviceDiscovery.enabled` controls this behavior, and it defaults to `true`. If you pre-provision the service account externally or disable `server.serviceAccount.serviceDiscovery.enabled`, create this Role and RoleBinding manually.
+
+### DNS requirements
+
+Even though `auto_join` discovers peers by Pod IP through the Kubernetes API, each node advertises its cluster address as its stable DNS name in the `<release>-internal` headless Service, and steady-state Raft communication on port 8201 targets those names. Broken DNS therefore prevents cluster formation, so verify resolution for all Vault Pods before initializing the cluster:
+
+```shell-session
+oc exec vault-0 -n vault -- nslookup vault-0.vault-internal.vault.svc
+oc exec vault-0 -n vault -- nslookup vault-1.vault-internal.vault.svc
+oc exec vault-0 -n vault -- nslookup vault-2.vault-internal.vault.svc
+```
+
+If DNS resolution fails, verify that the headless Service exists and its selector matches the Vault Pods. DNS resolution depends on the `openshift-dns` namespace being accessible from the Vault namespace through network policies.
+
+## External access patterns
+
+OpenShift provides multiple mechanisms for exposing Vault to clients outside the cluster. The appropriate pattern depends on your platform variant, security requirements, and existing infrastructure.
+
+### OpenShift routes
+
+OpenShift Routes are the platform-native mechanism for exposing HTTP and HTTPS services to external clients. The OpenShift router, based on HAProxy, runs as a set of Pods in the `openshift-ingress` namespace and watches for Route objects across all namespaces.
+
+The Vault Helm chart creates a Route when you set `server.route.enabled` to `true`. Configure the Route hostname through `server.route.host`.
+
+For Vault deployments, use **passthrough** TLS termination as the default. Passthrough preserves end-to-end, unbroken TLS between the client and the Vault listener, consistent with HashiCorp's standard guidance for Vault deployments. The router forwards raw TLS traffic to Vault without termination or inspection, and the client validates Vault's listener certificate directly.
+
+Because the client sees the Vault listener certificate, that certificate **must include a SAN matching the external hostname** used in the Route. If the SAN does not match the hostname the client connects to, TLS validation fails. The certificate must also include the internal service DNS name so that in-cluster clients (Vault CLI, Vault Agent, or local application workloads) can validate the certificate when connecting through the Kubernetes service.
+
+Example certificate SANs for a Vault deployment in namespace vault with hostname vault.apps.example.com:
+
+```text
+Subject:    CN=vault.apps.example.com
+
+X509v3 Subject Alternative Name:
+    DNS:vault.apps.example.com          ← external clients via Route / LB
+    DNS:vault.vault.svc                 ← in-cluster clients via ClusterIP Service
+    DNS:vault.vault.svc.cluster.local   ← full internal DNS
+    IP Address:127.0.0.1                ← in-pod Vault CLI (VAULT_ADDR=https://127.0.0.1:8200)
+```
+
+The external SAN (vault.apps.example.com) enables passthrough route matching. The internal SANs (vault.vault.svc) enable in-cluster access without `VAULT_SKIP_VERIFY`. The 127.0.0.1 IP SAN is optional. Include it if the Helm chart sets `VAULT_ADDR` to `https://127.0.0.1:8200` (the default when you enable TLS).
+
+```yaml
+server:
+  route:
+    enabled: true
+    activeService: false
+    host: vault.apps.example.com
+    tls:
+      termination: passthrough
+```
+
+Setting `server.route.activeService` to `false` routes traffic to the `<release>` Service, which targets all Vault Pods. With Vault Enterprise, performance standbys serve most read operations locally, so distributing traffic across all Pods improves read operation throughput.
+
+Setting `server.route.activeService` to `true` sends Route traffic for port 8200 to the active Vault Pod through `<release>-active`. It does not expose port 8201 for replication traffic. For cluster replication communication on port 8201, provision a separate exposure mechanism, either a LoadBalancer Service (recommended) or a raw TCP passthrough Route as described in the cross-cluster networking for replication section.
+
+**Re-encrypt** termination is a valid alternative when organizational policy requires the router to terminate TLS for all services, or when the router needs L7 HTTP visibility (for example, header-based routing or rate limiting). Re-encrypt terminates the client TLS session at the router and establishes a new TLS connection to the Vault backend. However, re-encrypt breaks the end-to-end TLS chain, which has two implications:
+
+- **TLS certificates auth method**: Vault's [cert auth method](https://developer.hashicorp.com/vault/docs/auth/cert) requires the client to present its certificate during the TLS handshake. With re-encrypt, the router terminates the client TLS session, so Vault never sees the client certificate. Use passthrough if your deployment relies on TLS certificate authentication. Starting with Vault 1.17, the listener supports [`x_forwarded_for_client_cert_header`](https://developer.hashicorp.com/vault/docs/configuration/listener/tcp) to read the client certificate from an HTTP header forwarded by the proxy, which enables cert auth behind L7 proxies, provided the proxy forwards the certificate (for example, X-Forwarded-Client-Cert).  
+- **Router as trust boundary**: With re-encrypt, the router briefly holds the decrypted request in memory before re-encrypting it to the backend. The router becomes a trust boundary that you must secure accordingly.
+
+The following table compares TLS termination strategies for Vault on OpenShift.
+
+| Strategy | How it works | Vault compatibility | When to use |
+| :---- | :---- | :---- | :---- |
+| Passthrough | Router forwards raw TLS traffic to Vault without termination. Client validates Vault's listener certificate directly. Passthrough preserves end-to-end TLS. | **Recommended (default)**. Consistent with HashiCorp's standard TLS guidance. Supports all Vault authentication methods, including TLS certificate authentication natively. | Default for production deployments. Required when end-to-end, unbroken TLS is a compliance requirement. |
+| Re-encrypt | Router terminates client TLS, re-encrypts to backend using Vault's listener certificate. Router validates backend certificate against `destinationCACertificate`. | Supported. Breaks end-to-end TLS. TLS cert auth requires Vault 1.17+ with `x_forwarded_for_client_cert_header` and a proxy that forwards the client certificate. | Deployments where the external certificate authority differs from the internal certificate authority and a single certificate cannot satisfy both trust domains. |
+| Edge | Router terminates TLS and forwards plaintext HTTP to the backend. | Not recommended. The Vault listener must always serve TLS. Disabling TLS on the listener (`tls_disable = true`) removes encryption between the router and Vault Pod. | Not applicable for production Vault deployments. |
+
+When using passthrough termination, external clients must trust Vault's listener certificate. Use a certificate issued by a corporate PKI or public CA with a SAN that matches the external hostname. The `leader_tls_servername` setting allows you to also use this certificate for Raft peer validation. Refer to the Certificate trust and TLS section for additional details.
+
+#### Route certificate configuration (re-encrypt only)
+
+On OpenShift versions before 4.19, or when you do not use `.spec.tls.externalCertificate`, re-encrypt Routes require TLS certificates and private keys **inline** in the Route specification. On these versions, unlike Kubernetes Ingress resources that reference kubernetes.io/tls Secrets natively, Route resources cannot source certificates from Kubernetes Secrets. Passthrough routes do not use these fields, and in this case the Vault listener certificate handles client trust directly.
+
+This API design creates a significant security concern for Vault deployments: when you embed certificates in Helm values, the private key appears in **clear text** in the `values.yaml` file. If you commit this file to a Git repository, the private key becomes visible to anyone with read access.
+
+```yaml
+server:
+  route:
+    tls:
+      termination: reencrypt
+      # WARNING: These values contain sensitive key material in clear text.
+      # Do NOT commit this file to Git with actual certificate content.
+      certificate: |
+        -----BEGIN CERTIFICATE-----
+        <external certificate>
+        -----END CERTIFICATE-----
+      key: |
+        -----BEGIN RSA PRIVATE KEY-----
+        <private key - SENSITIVE>
+        -----END RSA PRIVATE KEY-----
+      caCertificate: |
+        -----BEGIN CERTIFICATE-----
+        <external CA certificate>
+        -----END CERTIFICATE-----
+      destinationCACertificate: |
+        -----BEGIN CERTIFICATE-----
+        <internal CA certificate for backend validation>
+        -----END CERTIFICATE-----
+```
+
+Avoid storing private keys in version control. For OpenShift versions before 4.19, inject certificate content at deploy time with `--set-file`, for example `--set-file server.route.tls.key=./certs/tls.key`. This approach requires manual CLI execution and does not integrate directly with GitOps workflows. On OpenShift 4.19 and later, the `externalCertificate` field removes this limitation, as the following paragraph describes. For GitOps secret-handling patterns on earlier versions, refer to the GitOps fundamentals section.
+
+OpenShift 4.16 introduced the RouteExternalCertificate feature gate to allow routes to reference a kubernetes.io/tls secret instead of embedding certificate content inline. As of OpenShift 4.19, this feature is [generally available](https://docs.redhat.com/en/documentation/openshift_container_platform/4.19/html/ingress_and_load_balancing/routes#nw-ingress-route-secret-load-external-cert_creating-advanced-routes). The Vault Helm chart passes the entire `server.route.tls` object through to `spec.tls`, so you can supply `externalCertificate` through `server.route.tls.externalCertificate` in the Helm values. This eliminates the need for `--set-file` injection or GitOps workarounds when using re-encrypt routes on OpenShift 4.19+.
+
+#### Route backend validation
+
+When using re-encrypt termination, the `destinationCACertificate` field contains the CA certificate that the router uses to validate the Vault Pod's listener certificate. This field must contain the CA certificate that signed the certificate Vault presents on port 8200.
+
+Provide the CA certificate that signed the Vault listener certificate as the `destinationCACertificate`. For details on certificate strategies, refer to the Certificate trust and TLS section.
+
+### Gateway API (OpenShift 4.19+)
+
+[Gateway API](https://gateway-api.sigs.k8s.io/) is the Kubernetes-standard successor to Ingress. OpenShift 4.19 introduced [Gateway API as generally available](https://docs.redhat.com/en/documentation/openshift_container_platform/4.19/html-single/ingress_and_load_balancing/index#ingress-gateway-api), supporting Gateway, HTTPRoute, and GRPCRoute resources through the Ingress Operator. Gateway API resources reference TLS certificates from secrets natively and offer stronger traffic management controls than Ingress.
+
+The Vault Helm chart does not generate Gateway API resources. If your organization adopts Gateway API, create HTTPRoute and Gateway resources as supplementary manifests managed alongside the Helm release (for example through Kustomize overlays) and do not configure Ingress or Route resources as part of the Vault deployment.
+
+### External load balancers
+
+Not all OpenShift deployments include cloud load balancer integration. On-premises and self-managed OpenShift clusters typically use F5 BIG-IP, MetalLB, HAProxy, or other external load balancers in front of the OpenShift router infrastructure.
+
+When an external load balancer sits in front of the OpenShift router, configure it for **SSL passthrough** to the router Pods. The external load balancer forwards encrypted traffic to the OpenShift router without terminating TLS. The router then handles traffic according to the route's TLS termination strategy (passthrough or re-encrypt).
+
+With **passthrough** (recommended), TLS flows end-to-end from the client to the Vault listener. The load balancer and router both forward the encrypted stream without termination while the client validates the Vault listener certificate directly.
+
+With **re-encrypt**, TLS terminates in stages:
+
+1. **Client to external load balancer**: SSL passthrough forwards encrypted traffic to the router.  
+2. **Router terminates and re-encrypts**: Router terminates the client TLS session and opens a new one to the Vault backend, validating the listener certificate against `destinationCACertificate`.
+
+Configure the external load balancer backend pool to target the OpenShift router Pod IPs or node ports. The load balancer distributes traffic across available router Pods, which then route requests based on the Server Name Indication (SNI) hostname to the appropriate route.
+
+### F5 NGINX Ingress Controller
+
+<Note>
+
+This section covers the [F5 NGINX Ingress Controller](https://github.com/nginxinc/kubernetes-ingress) (VirtualServer CustomResourceDefinitions (CRDs), apiGroup k8s.nginx.org), not the Kubernetes community [Ingress NGINX](https://github.com/kubernetes/ingress-nginx) project, which [retired in March 2026](https://kubernetes.io/blog/2025/11/11/ingress-nginx-retirement/). The F5 controller is open source (Apache 2.0) and actively supported.
+
+</Note>
+
+Some OpenShift deployments use the F5 NGINX Ingress Controller alongside, or instead of, the default HAProxy-based router. NGINX Ingress Controller uses VirtualServer custom resources instead of OpenShift Routes.
+
+| Criteria | OpenShift Route (HAProxy) | NGINX VirtualServer |
+| :---- | :---- | :---- |
+| **Default on OpenShift** | Yes. OpenShift deploys the HAProxy-based router out of the box. | No. Requires separate NGINX Ingress Controller installation. |
+| **Frontend TLS certificate** | Inline in Route spec, or through `externalCertificate` referencing a kubernetes.io/tls Secret (OpenShift 4.19+). On older versions, requires `--set-file` injection or GitOps workarounds. | References kubernetes.io/tls Secrets natively. Private keys never appear in manifests or Helm values. |
+| **Secret management** | With `externalCertificate` (4.19+), certificates stay in Secrets protected by RBAC. On older versions, private keys appear in clear text in the Route object or values.yaml. | Certificates stored in Kubernetes Secrets, protected by RBAC. Compatible with cert-manager, Sealed Secrets, and External Secrets Operator without additional workarounds. |
+| **Backend TLS validation** | `destinationCACertificate` field in Route spec (inline CA). | EgressMTLS Policy resource referencing a CA Secret. |
+| **Advanced L7 features** | Basic path-based routing, host-based routing, rate limiting annotations. | WAF, advanced rate limiting, JSON Web Token (JWT) validation, header manipulation, circuit breaking. |
+| **When to use** | Standard OpenShift deployments where the built-in router satisfies requirements. Most common for Vault deployments. | Deployments that require advanced traffic management, or where the organization standardizes on NGINX across Kubernetes platforms. |
+
+Use OpenShift routes when the default HAProxy-based router meets your requirements. Use NGINX VirtualServer when the cluster runs NGINX Ingress Controller and your organization requires advanced traffic management capabilities.
+
+#### VirtualServer configuration
+
+With re-encrypt termination, the ingress layer (OpenShift Route or NGINX VirtualServer) must trust the CA that signed Vault's listener certificate so it can validate the backend Pod. The ingress layer terminates the client TLS session and opens a new connection to the Vault backend, so it needs the listener CA to verify the backend Pod's identity. Passthrough termination forwards the raw TLS stream without inspection, so no backend trust configuration applies. Configure backend trust for re-encrypt as follows:
+
+- **OpenShift Route (re-encrypt)**: The `destinationCACertificate` field contains the listener CA certificate inline in the Route spec.  
+- **NGINX VirtualServer (re-encrypt)**: An EgressMTLS Policy references the listener CA certificate from a Kubernetes Secret.
+
+Without backend CA validation configured, the ingress layer connects to Vault over TLS but does not verify the identity of the backend Pod.
+
+```yaml
+apiVersion: k8s.nginx.org/v1
+kind: VirtualServer
+metadata:
+  name: vault
+  namespace: vault
+spec:
+  host: vault.example.com
+  tls:
+    secret: vault-external-tls
+  policies:
+  - name: vault-egress-mtls
+  upstreams:
+  - name: vault
+    service: vault
+    port: 8200
+    tls:
+      enable: true
+  routes:
+  - path: /
+    action:
+      pass: vault
+---
+apiVersion: k8s.nginx.org/v1
+kind: Policy
+metadata:
+  name: vault-egress-mtls
+  namespace: vault
+spec:
+  egressMTLS:
+    trustedCertSecret: service-ca-nginx
+    verifyServer: true
+    verifyDepth: 2
+    serverName: vault.vault.svc
+
+```
+
+Configure `tls.secret` to reference the external TLS certificate, `upstreams[].tls.enable: true` to enable backend TLS, `trustedCertSecret` to validate the backend certificate against the listener CA, and `verifyServer: true` to enforce validation. The `serverName` field overrides the hostname for backend TLS validation, matching the SANs on the listener certificate. For all available options, see the [VirtualServer and VirtualServerRoute resource specification](https://docs.nginx.com/nginx-ingress-controller/configuration/virtualserver-and-virtualserverroute-resources/).
+
+The trustedCertSecret references an OpenShift Container Platform (OCP) secret containing the CA that signed the listener certificate. If the CA is only available in a ConfigMap (for example, when using service-ca), synchronize the CA data into a secret using Kustomize secretGenerator, an init container, or a CronJob. For detailed GitOps automation patterns, refer to the GitOps fundamentals section.
+
+VirtualServer's native secret references provide a significant advantage for GitOps workflows: cert-manager creates and renews the external certificate secret automatically, and the VirtualServer references it by name. No certificate content appears in Git, and you need no additional secrets management tooling for the external certificate.
+
+### Client IP preservation
+
+Client IP preservation and TLS termination are independent concerns. TLS termination determines where the encrypted session ends, as covered in the preceding sections. Client IP preservation determines whether Vault sees the real client address or the proxy's address. However, the TLS termination choice constrains which client IP mechanism is available.
+
+Without client IP preservation, Vault audit logs record the router or load balancer Pod IP as `remote_address`, and IP-based policy constraints (`token_bound_cidrs`, `bound_cidrs`) cannot function correctly.
+
+| Proxy layer | Mechanism | Vault listener parameters |
+| :---- | :---- | :---- |
+| **L7** (proxy terminates TLS) | X-Forwarded-For HTTP header, the proxy injects the client IP into the request header before forwarding to Vault. | `x_forwarded_for_authorized_addrs` set to the proxy Pod Classless Inter-Domain Routing (CIDR). |
+| **L4** (direct LB to Vault, bypassing router) | [PROXY protocol](https://www.haproxy.org/download/1.8/doc/proxy-protocol.txt), the LB prepends a protocol header containing the client IP to the TCP stream. Does **not** work with passthrough routes (the OpenShift router does not send PROXY protocol to backends). | `proxy_protocol_behavior` and `proxy_protocol_authorized_addrs` set to the proxy Pod CIDR. |
+
+#### L7: X-Forwarded-For
+
+When the proxy terminates TLS (re-encrypt route, NGINX VirtualServer), it has HTTP visibility and injects the X-Forwarded-For header. Configure Vault to trust this header from the specific proxy IPs:
+
+```hcl
+listener "tcp" {
+  address       = "[::]:8200"
+  tls_cert_file = "/vault/userconfig/vault-tls/tls.crt"
+  tls_key_file  = "/vault/userconfig/vault-tls/tls.key"
+
+  x_forwarded_for_authorized_addrs     = ["<proxy-ip-1>/32", "<proxy-ip-2>/32"]
+  x_forwarded_for_hop_skips            = 0
+  x_forwarded_for_reject_not_present   = true
+  x_forwarded_for_reject_not_authorized = true
+}
+```
+
+Set `x_forwarded_for_authorized_addrs` to the IPs of the router or ingress controller Pods that send the X-Forwarded-For header. Scope this as narrowly as possible — trusting a broad CIDR (for example, the entire pod network) allows any Pod in that range to spoof client IPs. When Vault receives a request from an authorized address, it reads the client IP from the header and records it as `remote_address` in the audit log.
+
+**Impact on internal Pod traffic:** Internal clients (application workloads, Vault Agent, Vault Secrets Operator (VSO)) typically connect directly to the Vault service without passing through the ingress layer. These direct connections do not carry an X-Forwarded-For header and do not originate from an authorized proxy address, so the X-Forwarded-For (XFF) configuration does not affect them. In this case, Vault uses the connection source IP as `remote_address`. However, if a service mesh or HTTP client library in the cluster automatically injects X-Forwarded-For headers on direct connections, `x_forwarded_for_reject_not_authorized = true` rejects those requests because the source is not in the authorized list. If this occurs, either suppress the header on the client side, add the relevant source CIDR ranges to the authorized list, or set `x_forwarded_for_reject_not_authorized` to `false` (which allows the request but ignores the untrusted header).
+
+#### L4: PROXY protocol
+
+When using a direct L4 path to Vault (for example, a LoadBalancer service that bypasses the OpenShift router), you cannot inject HTTP headers. To preserve the client IP at L4, use the PROXY protocol (v1 or v2), which Vault supports natively.
+
+<Warning>
+
+The OpenShift HAProxy router does not forward PROXY protocol headers to backend Pods for passthrough routes, so the backend cannot observe the original client IP. PROXY protocol support on the Ingress Controller applies only to the external load balancer-to-router connection, not router-to-backend. To use PROXY protocol with Vault, configure the L4 load balancer to connect directly to Vault, bypassing the router.
+
+</Warning>
+
+```hcl
+listener "tcp" {
+  address       = "[::]:8200"
+  tls_cert_file = "/vault/userconfig/vault-tls/tls.crt"
+  tls_key_file  = "/vault/userconfig/vault-tls/tls.key"
+
+  proxy_protocol_behavior        = "allow_authorized"
+  proxy_protocol_authorized_addrs = ["<proxy-ip-1>/32", "<proxy-ip-2>/32"]
+}
+```
+
+| `proxy_protocol_behavior` value | Behavior |
+| :---- | :---- |
+| `allow_authorized` | Use the client IP from PROXY protocol if the source is in the authorized list. Use the connection source IP otherwise. |
+| `deny_unauthorized` | Reject connections without a valid PROXY protocol header from an authorized source. |
+| `use_always` | Always use the client IP from PROXY protocol, regardless of source. |
+
+PROXY protocol requires end-to-end support across the entire proxy chain. Configure every component in the path (external LB, OpenShift router, Vault listener) consistently. Not all L4 products support PROXY protocol. Enabling PROXY protocol on Vault without a corresponding upstream configuration causes connection failures.
+
+For a complete reference, see the [Vault TCP listener documentation](https://developer.hashicorp.com/vault/docs/configuration/listener/tcp).
+
+## Network policies
+
+OpenShift supports Kubernetes NetworkPolicy resources for controlling traffic to and from Vault Pods. In environments where the default network policy is deny-all, you must explicitly allow the traffic categories that Vault requires.
+
+### Required network policies
+
+The following table describes the network policies required for a Vault deployment.
+
+| Policy | Direction | Purpose | Source/Destination |
+| :---- | :---- | :---- | :---- |
+| Intra-namespace | Ingress + Egress | Raft peer communication between Vault Pods on ports 8200/tcp and 8201/tcp | Same namespace |
+| DNS | Egress | DNS resolution for Service names and Raft peer cluster addresses | `openshift-dns` namespace, ports 5353/tcp and 5353/udp |
+| Ingress controller | Ingress | External API traffic from the router or ingress controller to Vault Pods on port 8200 | OpenShift router namespace (`openshift-ingress`) or NGINX namespace |
+| Kubernetes API | Egress | Service registration (vault-active label updates), `auto_join` Pod discovery, and Kubernetes auth method | Kubernetes API server, port 6443 |
+| Monitoring | Ingress | Prometheus metrics scraping | `openshift-monitoring` namespace |
+
+### Additional egress policies
+
+Configure additional egress policies for external services that Vault connects to. The following are common examples. Your deployment may require additional policies depending on the auth methods, secrets engines, and audit devices in use:
+
+- **LDAP/LDAPS**: Port 636 (LDAPS) or 389 (LDAP) to directory servers for authentication if used.  
+- **External KMS**: Ports required by your key management service for auto-unseal (for example, AWS KMS, Azure Key Vault, GCP Cloud KMS, or a Public Key Cryptography Standards (PKCS)#11 hardware security module (HSM)).
+- **Replication targets**: Ports 8200/tcp and 8201/tcp to secondary Vault clusters for DR or performance replication.  
+- **Audit log destinations**: Ports required by Syslog or socket audit devices, if used.
+
+When network policies are in place, timeouts and connection failures are the first symptoms of a missing policy. Verify network policies whenever you encounter connectivity issues between Vault and external services.
+
+For ingress from the OpenShift router, create a NetworkPolicy that allows traffic from the `openshift-ingress` namespace (label `policy-group.network.openshift.io/ingress: ""`) to Vault Pods. Adapt the same pattern for NGINX Ingress Controller by targeting its namespace instead.
+
+## Cross-cluster networking for replication
+
+Multi-cluster Vault deployments using disaster recovery or performance replication require network connectivity between clusters on ports 8200/tcp (API) and 8201/tcp (cluster). Replication traffic must reach the active Vault node in each cluster, so use the `<release>-active` Service for replication endpoints.
+
+### Connectivity requirements
+
+| Traffic | Port | Direction | Service target |
+| :---- | :---- | :---- | :---- |
+| Replication setup | 8200 | Secondary → Primary | `<release>-active` on the primary cluster. The secondary initiates the connection to the primary's API endpoint to establish the replication relationship. |
+| Replication stream | 8201 | Secondary → Primary | `<release>-active` on the primary cluster. The secondary maintains a persistent connection to the primary's cluster port for receiving replicated data. |
+
+Within the cluster, the `<release>` and `<release>-active` Services both expose port 8201/tcp, and intra-cluster Raft communication needs no additional configuration. For **cross-cluster replication**, port 8201 has no external exposure by default: the Route created by `server.route.enabled` maps only to port 8200/tcp, and those Services default to ClusterIP, so neither reaches port 8201 from outside the cluster. You must provision a separate external exposure mechanism for port 8201 as a supplementary manifest, for example a LoadBalancer Service or TCP passthrough route managed through Kustomize overlays.
+
+Vault's cluster port (8201) uses gRPC over HTTP/2. The mechanism used to expose the `<release>-active` service must support HTTP/2 passthrough without protocol downgrade or inspection.
+
+Use a LoadBalancer Service or raw TCP passthrough for multi-cluster replication connectivity. A LoadBalancer Service associated with the `<release>-active` Service passes traffic directly to the active Pod without protocol inspection or termination. Configure the load balancer in L4/TCP mode. Any provider that integrates with the Kubernetes LoadBalancer Service type is sufficient, such as a cloud native load balancer, F5 BIG-IP, or MetalLB.
+
+| Pattern | HTTP/2 support | Considerations |
+| :---- | :---- | :---- |
+| **LoadBalancer Service** (recommended) | Full. L4 passthrough, no protocol inspection. | Requires cloud load balancer integration or MetalLB. Exposes ports 8200/tcp and 8201/tcp directly. |
+| **OpenShift Route with passthrough** | Requires verification. Configure the HAProxy-based router to support HTTP/2 passthrough on the cluster port. | Route operates on port 443, requiring port mapping from 443 to 8201. Verify HTTP/2 passthrough behavior with your router configuration. |
+
+Vault uses its own internal CA for cluster replication traffic on port 8201. Vault establishes certificate trust between primary and secondary clusters automatically during the replication setup process.
+
+Ensure that network policies on both clusters allow egress to the remote cluster and ingress from the remote cluster on ports 8200/tcp and 8201/tcp.
+
+### Network latency requirements
+
+Network latency between availability zones must be less than 8 ms for Raft peers within a single cluster ([Raft reference architecture](https://developer.hashicorp.com/vault/tutorials/day-one-raft/raft-reference-architecture#network-latency-and-bandwidth)). For replication between clusters, latency requirements are less strict because replication operates asynchronously, but sustained or excessive latency increases replication lag, which can lead to unpredictable application failure modes.
+
+## Certificate trust and TLS
+
+Vault on OpenShift relies on TLS for both client API access and Raft peer communication, so certificate design determines how clients and cluster members establish trust. This section recommends a single-certificate architecture, then covers backend certificate options for re-encrypt, volume configuration, provisioning and rotation, and a usage matrix that maps each connection path to its certificate. The guidance applies whether you expose Vault through OpenShift Routes or an NGINX-based ingress.
+
+### Recommended: single certificate from a trusted CA
+
+The simplest and recommended TLS architecture for Vault on OpenShift uses a **single certificate** issued by a trusted CA (corporate PKI or public CA), with a SAN matching the external hostname. Configure the Vault listener with this certificate and use passthrough termination (or an L4 load balancer) for external access. You need no additional certificate infrastructure.
+
+With `leader_tls_servername` set to the same external hostname in the `retry_join` configuration (see Raft peer communication), this single certificate covers both external client access and the Raft bootstrap handshake.
+
+```hcl
+listener "tcp" {
+  address         = "[::]:8200"
+  cluster_address = "[::]:8201"
+  tls_cert_file   = "/vault/userconfig/vault-tls/tls.crt"
+  tls_key_file    = "/vault/userconfig/vault-tls/tls.key"
+  tls_min_version = "tls12"
+}
+```
+
+Each profile in the [reference Helm values for this HVD](https://github.com/hashicorp-validated-designs/vault-enterprise/tree/main/vault-on-openshift-hvd) implements this single-certificate pattern end to end, pairing a passthrough Route with the listener certificate paths above and a `leader_tls_servername` set to a hostname SAN on that certificate.
+
+### Related guidance
+
+The **OpenShift routes** and **External load balancers** sections in the Networking, routes, and TLS section cover passthrough and re-encrypt behavior, certificate requirements, and external load balancers in front of the OpenShift router. The **Raft peer communication** section in Internal cluster networking covers port 8200 vs 8201 (API and `retry_join` bootstrap versus steady-state Raft and internal cluster TLS).
+
+### Backend certificate options for re-encrypt
+
+When using re-encrypt, the Vault listener needs a backend certificate that the router can validate. The certificate source is independent of the recommendation above, use whatever fits your environment:
+
+- [**cert-manager Operator for Red Hat OpenShift**](https://docs.openshift.com/container-platform/latest/security/cert_manager_operator/index.html) — the preferred option. Supports configurable renewal windows, external and internal CAs, and integrates with the Kubernetes secret lifecycle.  
+- **OpenShift service-ca operator** — a built-in option for minimal or greenfield setups where cert-manager is not yet available. The Vault Helm chart automates service-ca integration through `server.serviceCA.enabled` [v0.32.0+](https://github.com/hashicorp/vault-helm/releases/tag/v0.32.0). Service-ca has operational limitations: Vault does not auto-reload certificates (renewal requires a Pod restart), and the renewal window is neither configurable nor documented.
+
+Regardless of the tool used, the certificate requirements are the same: SANs matching the Service DNS name (for example, `vault.<namespace>.svc`), and a CA certificate available for `destinationCACertificate` (Route) or `trustedCertSecret` (NGINX VirtualServer). Do not use service-ca for passthrough or L4 deployments. Its certificates use an internal CA that external clients do not trust.
+
+### Volume configuration
+
+Vault Pods require the TLS certificate, private key, and CA certificate for the listener. Store the certificate and key in a kubernetes.io/tls secret (tls.crt, tls.key). If cert-manager includes the CA certificate in the same Secret (cert-manager populates ca.crt automatically), a single volume is sufficient.
+
+```yaml
+server:
+  extraEnvironmentVars:
+    VAULT_CACERT: /vault/userconfig/vault-tls/ca.crt
+
+  volumes:
+    - name: vault-tls
+      secret:
+        secretName: vault-tls
+        defaultMode: 0400
+
+  volumeMounts:
+    - name: vault-tls
+      mountPath: /vault/userconfig/vault-tls
+      readOnly: true
+```
+
+`VAULT_CACERT` points to the CA certificate that signed the listener certificate, so the in-pod Vault CLI trusts the listener. `leader_ca_cert_file` in the Raft configuration also points to this CA. If the CA certificate comes from a separate source (for example, a ConfigMap), mount it as an additional volume and adjust the paths accordingly.
+
+### Certificate provisioning with cert-manager
+
+cert-manager automates the issuance and renewal of certificates from your PKI solution. With passthrough, this is the only certificate needed, as it serves both external clients and Raft peers. With re-encrypt, cert-manager can also manage the route's frontend certificate.
+
+The integration requires two resources: an **Issuer** (or ClusterIssuer) that defines how cert-manager connects to the PKI, and a **Certificate** that describes the certificate to request.
+
+**Issuer vs ClusterIssuer**: An Issuer is namespace-scoped and can only issue certificates within its own namespace. A ClusterIssuer is cluster-scoped and can issue certificates in any namespace. Use a namespace-scoped Issuer when you need to isolate PKI credentials to the Vault namespace.
+
+The following example shows an Automatic Certificate Management Environment (ACME)-based Issuer that connects to a corporate PKI server using External Account Binding (EAB) for authentication and a DNS01 webhook solver for domain validation:
+
+```yaml
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: corporate-pki-issuer
+  namespace: vault
+  annotations:
+    argocd.argoproj.io/sync-wave: "-6"
+spec:
+  acme:
+    server: https://pki.example.com/acme/v2/directory
+    caBundle: <base64-encoded-corporate-root-ca>
+    externalAccountBinding:
+      keyID: <eab-key-id>
+      keySecretRef:
+        key: hmac
+        name: pki-eab-secret
+    privateKeySecretRef:
+      name: cert-manager-solver-account
+    solvers:
+    - dns01:
+        webhook:
+          groupName: acme.example.com
+          solverName: cert-manager-dns-solver
+```
+
+The Certificate resource describes the certificate to request. cert-manager watches for Certificate resources, requests the certificate from the configured Issuer, and stores the result in a Kubernetes Secret.
+
+```yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: vault-tls
+  namespace: vault
+  annotations:
+    argocd.argoproj.io/sync-wave: "-5"
+spec:
+  commonName: vault.apps.example.com
+  dnsNames:
+  - vault.apps.example.com
+  isCA: false
+  issuerRef:
+    kind: Issuer
+    name: corporate-pki-issuer
+  secretName: vault-tls
+  duration: 2160h
+  renewBefore: 360h
+  subject:
+    countries:
+    - <country-code>
+    localities:
+    - <city>
+    organizationalUnits:
+    - <organizational-unit>
+    organizations:
+    - <organization>
+    provinces:
+    - <state-or-province>
+  usages:
+  - server auth
+  - digital signature
+  - key encipherment
+  privateKey:
+    algorithm: RSA
+    size: 4096
+```
+
+#### Using the certificate
+
+With **passthrough** (recommended), mount the cert-manager Secret (vault-tls) directly into the vault Pod as the listener certificate. You need no certificate extraction, as the Vault listener serves the certificate to both external clients and Raft peers.
+
+With **re-encrypt** and **OpenShift Routes**, on OpenShift 4.19+ use `server.route.tls.externalCertificate` in the Helm values to reference the cert-manager Secret by name, and you need no certificate extraction or `--set-file` injection. The Helm chart passes the entire `server.route.tls` object through to `spec.tls`, so the `externalCertificate` field is available directly. On older versions, extract the certificate from the secret and inject it into the Helm values at deploy time using `--set-file` flags (for example, `--set-file server.route.tls.certificate`, `--set-file server.route.tls.key`). For **NGINX VirtualServer**, reference the Secret by name in the VirtualServer tls.secret field. You need no extraction.
+
+For detailed cert-manager usage instructions covering a variety of supported issuer types, see the [official documentation](https://cert-manager.io/docs/).
+
+#### Manual certificate provisioning
+
+When cert-manager is not available, obtain certificates from your PKI team and inject them into the Helm values using the same `--set-file` pattern. Track certificate expiry dates and plan renewals manually.
+
+### Certificate rotation
+
+Regardless of certificate source (corporate PKI, cert-manager, service-ca, or manual provisioning), Vault does not automatically reload certificates from disk. Vault continues serving the old certificate from memory until you reload the application. Therefore, perform a **rolling restart** of the Vault Pods so each Pod loads the new certificate. Monitor the certificate notAfter date and schedule restarts before expiry as you would for any other application that relies on a valid certificate.
+
+If using passthrough, the Route resource needs no specific action after a rotation because the Pod presents the listener certificate directly. With re-encrypt on OpenShift 4.19 and later, the Route references the certificate Secret through `externalCertificate` and also needs no action after rotation. With inline re-encrypt certificates on earlier versions, re-run the Helm upgrade with `--set-file` flags or resync the Argo CD Application.
+
+#### Source-specific considerations
+
+| Certificate source | Renewal mechanism | Operational window |
+| :---- | :---- | :---- |
+| **cert-manager** | Automatic, based on renewBefore (for example, 15 days before expiry). cert-manager updates the Secret in place. | Predictable and configurable: days or weeks to schedule a Pod restart. |
+| **Manual (corporate PKI)** | Manual; coordinate with your PKI team. Replace the secret contents and reschedule the Vault Pods before expiry. | Depends on your PKI team's process. Track notAfter proactively. |
+| **Service-ca** | Automatic, but the renewal threshold is neither configurable nor documented. | Undocumented and not configurable. Plan a controlled Pod restart before expiry rather than automating around the renewal timing. |
+
+### Certificate usage matrix
+
+The following table summarizes which certificate each connection path uses.
+
+| Connection path | Certificate presented | Validated by | Validation method |
+| :---- | :---- | :---- | :---- |
+| External client → Route (passthrough) | Vault listener certificate | Client browser or API consumer | CA trust store |
+| External client → Route (re-encrypt) | Route frontend certificate | Client browser or API consumer | CA trust store |
+| Router → Vault Pod (re-encrypt) | Vault listener certificate | OpenShift router | `destinationCACertificate` in Route spec |
+| External client → VirtualServer | VirtualServer tls.secret certificate | Client browser or API consumer | CA trust store |
+| VirtualServer → Vault Pod | Vault listener certificate | NGINX | EgressMTLS Policy with trustedCertSecret |
+| Raft bootstrap → Vault Pod (port 8200) | Vault listener certificate | Raft client (joining Vault Pod) | `leader_ca_cert_file` + `leader_tls_servername` |
+| Steady-state Raft (port 8201) | Vault internally-generated cluster TLS | Vault | Automatic, managed by Vault internally |
+| Vault CLI (in-pod) → Vault | Vault listener certificate | Vault CLI | `VAULT_CACERT` environment variable |
+
+### Deployment sequence
+
+The following sequence orders certificate provisioning, deployment, and verification so that TLS material exists before Vault Pods start.
+
+1. **Provision the TLS certificate**: Request a certificate from your CA (through cert-manager or manually) with SANs matching the external hostname and internal service DNS name. Store the certificate, private key, and CA certificate in a kubernetes.io/tls secret in the Vault namespace.  
+2. **Deploy Vault with Helm**: Run `helm install` with the listener configured to use the certificate secret. Configure the route (passthrough or re-encrypt) with the appropriate hostname.  
+3. **Initialize and unseal**: Once Pods are running, initialize the Vault cluster and unseal each. Raft peers join automatically through `retry_join` with `leader_tls_servername` set to a SAN on the listener certificate.  
+4. **Verify**: Confirm Raft cluster formation, route accessibility, and certificate chain validation from external clients.
