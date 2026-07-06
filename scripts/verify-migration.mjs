@@ -178,7 +178,11 @@ function collectCorpus(tree) {
 
 function navPathsForProduct(navFile, product) {
 	const nav = JSON.parse(fs.readFileSync(navFile, 'utf8'))
-	const node = nav.find((p) => (p.title || '').toLowerCase() === product.toLowerCase())
+	const node = nav.find(
+		(p) =>
+			(p.title || '').toLowerCase().replace(/[\s-]+/g, '-') ===
+			product.toLowerCase().replace(/[\s-]+/g, '-'),
+	)
 	if (!node) return { node: null, paths: [], allTitles: nav.map((p) => p.title) }
 	const paths = []
 	const walk = (routes) => {
