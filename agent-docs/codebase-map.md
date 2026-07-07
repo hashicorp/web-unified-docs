@@ -122,7 +122,7 @@ way it is, read deeper context only when a task needs it:
   applying some MDX transforms at build time, and authoring MDX content outside
   the `public/` directory. Read the relevant ADR before changing behavior it
   describes.
-- `docs/images/UDR_Architecture_diagram.png` and
-  `docs/images/UDR_Build_Architecture_diagram.png` — system and build
+- `agent-docs/images/UDR_Architecture_diagram.png` and
+  `agent-docs/images/UDR_Build_Architecture_diagram.png` — system and build
   architecture diagrams. Use the image-viewing tool to load and interpret them
   when you need the end-to-end picture.
