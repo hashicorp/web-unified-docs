@@ -189,6 +189,26 @@ Final content.`)
 	})
 })
 
+describe('transformExcludeContent - Cross-Product Version Directives', () => {
+	it('should remove a Vault version directive when processed outside vault', async () => {
+		const options = {
+			filePath: 'terraform-enterprise/some-file.md',
+			version: 'v2.0.x',
+			repoSlug: 'terraform-enterprise',
+			productConfig: terraformEnterpriseConfig,
+		}
+
+		const markdown = `
+<!-- BEGIN: Vault:>=v1.21.x -->
+This content should be removed.
+<!-- END: Vault:>=v1.21.x -->
+This content should stay.
+`
+		const result = await runTransform(markdown, options)
+		expect(result.trim()).toBe('This content should stay.')
+	})
+})
+
 describe('transformExcludeContent - TFC/TFEnterprise Directives', () => {
 	it('should keep TFC:only content in terraform-docs-common', async () => {
 		const options = {

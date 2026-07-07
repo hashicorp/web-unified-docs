@@ -431,6 +431,16 @@ export const PRODUCT_CONFIG = {
 		versionedDocs: true,
 		websiteDir: 'website',
 	},
+	'test-product': {
+		assetDir: 'img',
+		contentDir: 'content',
+		dataDir: 'data',
+		internalProduct: true,
+		productSlug: 'test-product',
+		semverCoerce: semver.coerce,
+		versionedDocs: true,
+		websiteDir: 'website',
+	},
 	vagrant: {
 		/**
 		 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions

@@ -9,9 +9,9 @@ import { removeNodesInRange } from './ast-utils.mjs'
 /**
  * Process a generic version directive block (e.g. ">=v1.21.x").
  *
- * Only processes the directive when the file being processed belongs to the
- * directive's target product - directives for other products are ignored so
- * the same content can be shared without unintended pruning.
+ * The directive is only version-compared in its target product. In every other
+ * product the block is removed (including its BEGIN/END comments) so shared
+ * content never leaks another product's conditional blocks.
  *
  * Generalizes the previous Vault-specific processor.
  *
@@ -30,8 +30,10 @@ export function processVersionDirective(
 ) {
 	const { repoSlug } = options
 
-	// Only process version directives in their target product - ignore elsewhere
+	// Outside the target product, remove the block so it never leaks into
+	// another product's output
 	if (repoSlug !== targetSlug) {
+		removeNodesInRange(tree, block)
 		return
 	}
 
