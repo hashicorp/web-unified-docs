@@ -1,0 +1,91 @@
+---
+page_title: Deploy Terraform Enterprise to IBM Cloud
+description: >-
+  Learn how to deploy Terraform Enterprise on IBM Cloud Kubernetes Service and
+  Red Hat OpenShift on IBM Cloud using the Helm chart with IBM Cloud managed
+  services.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-07-07T00:00:00Z
+last_modified: 2026-07-07T00:00:00Z
+# END AUTO GENERATED METADATA
+---
+
+# Deploy Terraform Enterprise to IBM Cloud
+
+## Overview
+
+This topic describes how to deploy Terraform Enterprise on IBM Cloud using the Helm chart with IBM Cloud managed services. It covers IBM Cloud Kubernetes Service (IKS) and Red Hat OpenShift on IBM Cloud (ROKS), with IBM Cloud Databases for PostgreSQL, IBM Cloud Object Storage, IBM Cloud Databases for Redis, and IBM Cloud Container Registry.
+
+The core installation follows the standard [Kubernetes](/terraform/enterprise/deploy/kubernetes) and [OpenShift](/terraform/enterprise/deploy/openshift) deployment guides. This topic adds the IBM Cloud specifics: how to prepare the managed services, the container registry requirements, the restricted-network scenario, and the platform behaviors to plan for.
+
+## Prerequisites
+
+Before you deploy, make sure you have the following:
+
+- An IBM Cloud Kubernetes Service cluster, or a Red Hat OpenShift on IBM Cloud cluster, with amd64 worker nodes. The Terraform Enterprise image is amd64, so the worker architecture must match.
+- IBM Cloud Databases for PostgreSQL, IBM Cloud Object Storage, and IBM Cloud Databases for Redis provisioned and reachable from the cluster over private endpoints.
+- An IBM Cloud Container Registry namespace.
+- The `ibmcloud`, `kubectl`, and `helm` command line tools.
+- A Terraform Enterprise license, a TLS certificate for your hostname, and a DNS record you can point at the cluster load balancer.
+
+## Prepare the managed services
+
+### PostgreSQL
+
+Provision IBM Cloud Databases for PostgreSQL 16 and connect over the private endpoint with `sslmode=require`.
+
+Terraform Enterprise requires the `hstore`, `uuid-ossp`, and `citext` extensions. IBM Cloud Databases for PostgreSQL only allows extensions in a dedicated `ibm_extension` schema, and Terraform Enterprise cannot create them itself, so you must create them before you start Terraform Enterprise and set `TFE_DATABASE_EXTRA_SCHEMAS=ibm_extension`. For the exact commands, an init container example that automates the step, and the error you see if you skip it, refer to [IBM Cloud Databases for PostgreSQL](/terraform/enterprise/deploy/configuration/storage/connect-database/postgres#ibm-cloud-databases-for-postgresql).
+
+### Object storage
+
+Provision IBM Cloud Object Storage and a bucket, then create an HMAC service credential to get an access key and secret key. Terraform Enterprise uses the S3 compatible API. Use the S3 direct (private) endpoint so object traffic stays on the private network. Refer to [Connect to object storage](/terraform/enterprise/deploy/configuration/storage/connect-object).
+
+### Redis
+
+Provision IBM Cloud Databases for Redis 8 and connect over the private endpoint with TLS enabled. Terraform Enterprise uses Redis for caching and background job queuing. Refer to [Connect to Redis](/terraform/enterprise/deploy/configuration/storage/connect-redis).
+
+## Prepare the container registry
+
+The cluster must be able to pull the Terraform Enterprise images. On IBM Cloud, use IBM Cloud Container Registry.
+
+- **Plan.** Use the Standard plan. The Free plan caps storage at 512 MB, which is too small for the multi-gigabyte Terraform Enterprise image, so the image does not serve and the pod fails on pull.
+- **Region.** The registry is region scoped. Target the correct region, or the namespace appears empty.
+- **Mirror by digest.** Copy the Terraform Enterprise application image and the run-pipeline agent image into your namespace by digest, so the amd64 architecture is preserved. Mirroring on an arm64 workstation without copying by digest produces an arm64 image that fails on amd64 nodes with an `exec format error`.
+- **Private endpoint.** Pull over the private endpoint, for example `private.us.icr.io`, so there is no public origin.
+- **Pull secret.** Create a docker-registry pull secret with the user `iamapikey` and an IBM Cloud IAM key. Attach it to the Terraform Enterprise deployment, and also place it in the run-pipeline namespace and set `TFE_RUN_PIPELINE_KUBERNETES_IMAGE_PULL_SECRET_NAME`. The agent pods carry no registry credential by default and otherwise fall back to an anonymous pull and receive a 401.
+
+## Install Terraform Enterprise
+
+Install with the Helm chart following the [Kubernetes](/terraform/enterprise/deploy/kubernetes) guide, or the [OpenShift](/terraform/enterprise/deploy/openshift) guide for ROKS. Set the IBM Cloud specifics in your Helm values:
+
+- The PostgreSQL, Object Storage, and Redis connection settings for your managed services.
+- `TFE_DATABASE_EXTRA_SCHEMAS=ibm_extension`.
+- The image and pull secret for your IBM Cloud Container Registry namespace.
+
+For a complete IBM Cloud values example, including the extension init container, refer to [ibm-cloud-values.yaml](https://github.com/hashicorp/terraform-enterprise-helm/blob/main/docs/example/ibm-cloud-values.yaml) in the Terraform Enterprise Helm chart.
+
+The managed-service preparation above applies to both IKS and ROKS. For ROKS, enable the OpenShift branches of the chart as described in the OpenShift guide.
+
+## Air-gapped or restricted-network deployment
+
+Terraform Enterprise on IBM Cloud supports a restricted-network deployment where the cluster reaches every dependency over private endpoints and pulls all images from the private registry, with no public origin.
+
+To deploy in this scenario:
+
+- Mirror both the Terraform Enterprise application image and the run-pipeline agent image into your IBM Cloud Container Registry namespace, and pull them over the private endpoint.
+- Reach PostgreSQL, Redis, and Object Storage over their private endpoints.
+- Create a DNS record that points the Terraform Enterprise hostname at the cluster load balancer. Terraform Enterprise must resolve its own hostname before a run can initialize. Without the record, archivist upload callbacks and run agents fail with `no such host`.
+- Provide the TLS certificate and the license.
+
+Two requirements are easy to miss:
+
+- **The hostname DNS record must exist before runs.** If you provision with a module that creates it, a `helm --wait` timeout can abort the apply before that step, so confirm the record exists.
+- **The run-pipeline agent pods need the registry pull secret too**, not only the main Terraform Enterprise pod. Set `TFE_RUN_PIPELINE_KUBERNETES_IMAGE_PULL_SECRET_NAME` and make sure the secret exists in the run namespace.
+
+## Known limitations and platform behavior
+
+- **PostgreSQL extensions are a manual prerequisite.** Terraform Enterprise cannot create them on IBM Cloud Databases for PostgreSQL. Create them and set the search path as described above.
+- **The registry must be on the Standard plan**, and images must be mirrored as amd64 by digest.
+- **The hostname must resolve before runs.** The DNS record is a hard requirement, not just a convenience.
+- **Agent pods need the registry pull secret** in the run namespace.
+- **Worker nodes must be amd64** to match the Terraform Enterprise image.
