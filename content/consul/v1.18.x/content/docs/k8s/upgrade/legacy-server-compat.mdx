@@ -13,16 +13,16 @@ This topic describes how to upgrade to Consul v1.21.x when your Kubernetes deplo
 
 When you prepare to upgrade to Consul v1.21.x from Consul v1.18.x with consul-k8s v1.4.x and Consul dataplane v1.4.x, both standard upgrade paths can block your progress:
 
-- When you upgrade the dataplane first, Consul dataplane 1.8.x rejects the connection because older servers do not advertise the `DATAPLANE_FEATURES_ENVOY_BOOTSTRAP_CONFIGURATION` feature.
+- When you upgrade the dataplane first, Consul dataplane v1.8.x runs a startup feature check and refuses to accept servers that do not advertise full dataplane feature support, including the `DATAPLANE_FEATURES_ENVOY_BOOTSTRAP_CONFIGURATION` feature.
 - When you upgrade Consul first, the older dataplane lacks the Envoy version that the newer Consul servers require, so mesh traffic stops until you upgrade the dataplane.
 
 The `-legacy-server-compat` flag provides a temporary compatibility mode that bypasses the dataplane feature check so that you can connect Consul dataplane v1.8.x to Consul v1.18.x servers during the migration to Consul v1.21.x.
 
 ## Requirements
 
-- Consul dataplane v1.8.x.
-- consul-k8s v1.4.x, which is the only supported pairing with Consul 1.18.x. Do not upgrade consul-k8s until you upgrade your Consul servers.
-- Existing Consul v1.18.x servers that you intend to upgrade to Consul v1.21.x.
+- consul-dataplane v1.4.x
+- consul-k8s v1.4.x
+- Consul server agents v1.18.x
 
 ## Migration paths
 
@@ -30,23 +30,31 @@ Choose a migration path based on whether you need to maintain mesh traffic durin
 
 | Path | Mesh traffic | DNS | Pod restarts | Flag required |
 | --- | --- | --- | --- | --- |
-| Dataplane-first | Available throughout | Available throughout | 2 | Yes (`-legacy-server-compat`) |
+| Dataplane-first | Available throughout | Available throughout | 2 | Yes (`DP_LEGACY_SERVER_COMPAT`) |
 | Consul-first | Stops during the Consul upgrade | Available throughout | 1 | No |
 
 During either migration window, central telemetry and merged Prometheus metrics are unavailable.
 
-### Option 1: Dataplane-first migration
+<Tabs>
+<Tab heading="Dataplane-first migration">
 
 We recommend the dataplane-first path when you require zero mesh traffic disruption.
 
-1. Upgrade Consul dataplane from v1.4.x to v1.8.x with the `-legacy-server-compat=true` flag. This step requires a pod restart.
+1. Upgrade Consul dataplane from v1.4.x to v1.8.x and enable the compatibility mode. On Kubernetes, `consul-dataplane` is invoked automatically by the connect-injector webhook — do not run the binary manually or use `kubectl exec`. Deliver the flag as an environment variable on the sidecar container using one of the following methods:
+
+   - **Pod annotation (per-workload, recommended):** Add the `consul.hashicorp.com/consul-dataplane-env-vars` annotation to each pod that needs compat mode. The connect-injector reads this annotation and injects the listed env vars into the `consul-dataplane` sidecar it generates. Use this approach to roll out the flag incrementally and remove it per-pod once migration is complete.
+   - **Helm `connectInject.extraEnvironmentVars` (cluster-wide):** Set `DP_LEGACY_SERVER_COMPAT: "true"` under `connectInject.extraEnvironmentVars` in your `values.yaml` and apply with `helm upgrade`. This sets the flag on every injected pod across the cluster at once. Remove the key and re-apply the chart after migration is complete so the flag does not persist in production.
+
+   This step requires a pod restart so that the sidecar restarts with the environment variable set.
 1. Perform a rolling upgrade of Consul from v1.18.x to v1.21.x.
 1. Upgrade consul-k8s from v1.4.x to v1.8.x.
-1. Remove the `-legacy-server-compat=true` flag. This step requires a second pod restart.
+1. After the servers advertise full dataplane feature support, confirm that the dataplane connects without warnings. When the connected server supports the full dataplane feature set, Consul dataplane lifts the compatibility guards and logs a recommendation to remove the environment variable.
+1. Remove the `DP_LEGACY_SERVER_COMPAT` environment variable (delete the pod annotation or remove the `connectInject.extraEnvironmentVars` entry from `values.yaml`) and perform a rolling restart of your injected workloads. The dataplane reconnects in normal mode with full feature support. This step requires a pod restart.
 
-Mesh traffic remains available throughout this migration. Central telemetry remains disabled until you remove the flag.
+Mesh traffic remains available throughout this migration. Central telemetry and merged Prometheus metrics remain disabled until you remove the environment variable.
 
-### Option 2: Consul-first migration
+</Tab>
+<Tab heading="Consul-first migration">
 
 The Consul-first path minimizes dataplane restarts, but mesh traffic stops during the Consul rolling upgrade window.
 
@@ -56,22 +64,11 @@ The Consul-first path minimizes dataplane restarts, but mesh traffic stops durin
 
 DNS resolution remains available throughout this migration because the dataplane DNS proxy uses an independent gRPC stream. Mesh traffic stops during the Consul rolling upgrade because the newer servers reject the Envoy version that the older dataplane bundles. Mesh traffic resumes after you upgrade the dataplane to v1.8.x.
 
-## Enable legacy server compatibility
+</Tab>
+</Tabs>
 
-To enable the compatibility mode, set the `-legacy-server-compat` flag when you start Consul dataplane:
+## Related documentation
 
-```shell-session
-$ consul-dataplane -legacy-server-compat=true
-```
-
-Alternatively, set the `DP_LEGACY_SERVER_COMPAT` environment variable:
-
-```shell-session
-$ export DP_LEGACY_SERVER_COMPAT=true
-```
-
-When you enable the flag, Consul dataplane logs the features that the compatibility mode disables. If the connected server already supports the full dataplane feature set, Consul dataplane lifts the compatibility guards and recommends that you remove the flag.
-
-## Next steps
-
-After you upgrade your Consul servers to v1.21.x and confirm that the dataplane connects without warnings, remove the `-legacy-server-compat` flag and restart the affected pods.
+- [Consul dataplane Overview](/consul/docs/connect/dataplane)
+- [Consul dataplane CLI reference](/consul/docs/connect/dataplane/consul-dataplane)
+- [Consul dataplane Telemetry](/consul/docs/connect/dataplane/telemetry)
