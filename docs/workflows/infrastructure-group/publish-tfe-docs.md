@@ -1,14 +1,16 @@
-# Terraform Enterprise quarterly releases
+# Terraform Enterprise releases
 
-This page describes the process for publishing Terraform Enterprise documentation. Terraform Enterprise adheres to the following semantic versioning scheme:
+This page describes the process for publishing Terraform Enterprise documentation. Terraform Enterprise uses the following semantic versioning scheme:
 
 `MILESTONE.MAJOR.PATCH`
 
-The team releases a milestone or major version once a quarter and releases patches as they become available.
+We release one milestone version of Terraform Enterprise in the April and one major verison in October. We also release patches as the become available.
 
-## Artifacts for next major release
+We only increment the documentation on milestone and major versions. We represent patches as `x` and update the current docs to reflect any changes. Only milestone and major releases should contain new features or significant changes to functionality. 
 
-After the release of a major verson, the release engineer runs a GitHub [workflow]((https://github.com/hashicorp/web-unified-docs-internal/actions/workflows/copy-cloud-docs-for-tfe.yml)) in the `web-unified-docs-internal` repository that creates the following artifacts:
+## Artifacts for next releases
+
+After releasing a milestone or major verson, the release engineer runs a GitHub [workflow]((https://github.com/hashicorp/web-unified-docs-internal/actions/workflows/copy-cloud-docs-for-tfe.yml)) in the `web-unified-docs-internal` repository to create the following artifacts:
 
 - A branch named `tfe-release/<milestone>.<major>.x` for assembling the release notes and documentation updates. This is the branch that you merge into `main` to publish the docs.
 - A branch named `HCPTF-diff/<milestone>.<major>.x` that contains a diff of all of the new content from HCP TF slated for the next Terraform Enterprise release. This branch will be updated with latest changes before next release.
@@ -29,11 +31,11 @@ More details -
 -> GA Release Publish: week of November 9
 ```
 
-Ask for the dates in the channel if it has been more than six weeks since the last milestone or major version and the manager hasn't posted the dates yet. You should also verify that the dates haven't changed closer to the standing date.
+Release dates often change, so you should verify the release date closer to the standing date.
 
-**Application Code Deadline**: Also called **app deadline**, this is the Terraform Enterprise code freeze and occurs 1.5 to 2 weeks before the release date. App deadline is also when the release engineer runs a GitHub [workflow]((https://github.com/hashicorp/web-unified-docs-internal/actions/workflows/create-tfe-release-notes.yml)) in the `web-unified-docs-internal` repository. The workkflow creates the release notes and updates the `HCPTF-diff/<milestone>.<major>.x` branch with latest changes from terraform common docs.
+**Application Code Deadline**: Also called **app deadline**, this is the Terraform Enterprise code freeze and occurs 1.5 to 2 weeks before the release date. App deadline is also when the release engineer runs a GitHub [workflow]((https://github.com/hashicorp/web-unified-docs-internal/actions/workflows/create-tfe-release-notes.yml)) in the `web-unified-docs-internal` repository. The workflow creates the release notes and updates the `HCPTF-diff/<milestone>.<major>.x` branch with latest changes from terraform common docs.
 
-**Backport Deadline**: This is an engineering deadline and isn't actionable for IPG team members.
+**Backport Deadline**: This is an engineering deadline and isn't actionable for education team members.
 
 **GA Release Publish**: On this date, merge the assembly branch into `main` to publish the documentation.
 
@@ -41,7 +43,17 @@ Ask for the dates in the channel if it has been more than six weeks since the la
 
 Make sure to merge any PRs against the `terraform-docs-common` folder that should be included in the upcoming Terraform Enterprise release.
 
-Apply any exclusion tags to prevent HCP Terraform-specifc content from publishing to the enterprise docs. Refer to [Exclusion tag syntax](#exclusion-tag-syntax) for details.
+Apply any exclusion tags to prevent HCP Terraform-specifc content from publishing to the enterprise docs and vice versa. Refer to [Exclusion tag syntax](#exclusion-tag-syntax) for details.
+
+## Pre-app deadline content
+
+The GitHub action that creates the release artifacts creates the new version folder so that authors can implement new content in the correct place. It also populates the new folder with a copy of the HCP Terraform docs on `main` from the public repo. For this reason, we do not run the action too early in the cycle. Otherwise, content merged to `main` on the public repo after the action runs won't be copied to the upcoming enterprise folder. Running the action too late would create a bottleneck of content changes.
+
+There is currently no optimal workflow for authoring enterprise-only docs before app deadline, but the following options are available for content authors:
+
+1. Create an external docs plan: Draft changes in a Word doc to streamline the review and approval process. Copy the content to the appropriate files after app deadline.
+1. Manually create a folder and copy the nav file and any related files, including containing folders in their existing structure, and author changes.
+1. Author content under the current version folder. After app deadline, manually port changes to the folder for the upcoming version and rollback changes in the current folder. This approach works best when all or most content is confined to new .mdx files. 
 
 ## Before GA release
 
