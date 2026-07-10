@@ -63,6 +63,27 @@ To use these, you will need to intentionally run `npm install` and `npm run preb
 
 Use `npm run coverage` to run coverage tests.
 
+### Instana environment variables
+
+This repository uses two separate Instana integrations:
+
+- Runtime API error tracing via `@instana/serverless-collector` (agentless)
+- Build metric export in `scripts/capture-build-metrics.mjs` (OTLP metrics)
+
+Set the runtime (agentless) variables to enable request tracing:
+
+| Environment variable | Purpose |
+| -------------------- | ------- |
+| `INSTANA_ENDPOINT_URL` | Instana serverless monitoring endpoint |
+| `INSTANA_AGENT_KEY` | Instana serverless agent key |
+
+Set the OTLP variables only for build metric export:
+
+| Environment variable | Purpose |
+| -------------------- | ------- |
+| `INSTANA_OTLP_ENDPOINT` | OTLP metrics endpoint used by postbuild metrics script |
+| `INSTANA_OTLP_API_TOKEN` | API token for OTLP metrics endpoint |
+
 ### Preview environments for unified-docs and dev-portal
 
 Unified docs API serves as one of the content APIs for `dev-portal` (frontend application for DevDot). As a result, when implementing new features, you may need to modify both the backend (this repo) and the frontend (`dev-portal`).

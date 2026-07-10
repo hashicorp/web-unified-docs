@@ -10,6 +10,20 @@ import { findDocVersions } from '#utils/findDocVersions'
 
 import { vol } from 'memfs'
 
+// Mock the Instana agentless SDK so tests run without a live backend
+const { mockCreateInstanaErrorResponse } = vi.hoisted(() => {
+	return {
+		mockCreateInstanaErrorResponse: vi.fn((_, options) => {
+			return new Response(options.body, { status: options.status })
+		}),
+	}
+})
+vi.mock('#utils/instana', () => {
+	return {
+		createInstanaErrorResponse: mockCreateInstanaErrorResponse,
+	}
+})
+
 // Mock fs module
 vi.mock('node:fs')
 vi.mock('node:fs/promises')
@@ -40,6 +54,10 @@ vi.mock('#utils/findDocVersions', () => {
 beforeEach(() => {
 	// Reset the state of in-memory fs
 	vol.reset()
+	mockCreateInstanaErrorResponse.mockClear()
+	mockCreateInstanaErrorResponse.mockImplementation((_, options) => {
+		return new Response(options.body, { status: options.status })
+	})
 })
 
 afterEach(() => {
@@ -80,6 +98,13 @@ test('should return 404 if the product is invalid', async () => {
 	expect(response.status).toBe(404)
 	const text = await response.text()
 	expect(text).toBe('Not found')
+	expect(mockCreateInstanaErrorResponse).toHaveBeenCalledWith(
+		expect.any(Request),
+		expect.objectContaining({
+			status: 404,
+			message: 'Product nonexistent not found in contentDirMap',
+		}),
+	)
 })
 
 test('should return 200 and array of strings on valid params', async () => {

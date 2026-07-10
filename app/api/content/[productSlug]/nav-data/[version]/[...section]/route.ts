@@ -5,6 +5,7 @@
 
 import { findFileWithMetadata, parseJson } from '#utils/file'
 import { getProductVersionMetadata } from '#utils/contentVersions'
+import { createInstanaErrorResponse } from '#utils/instana'
 import { errorResultToString } from '#utils/result'
 import { VersionedProduct } from '#api/types'
 
@@ -26,7 +27,16 @@ export async function GET(
 	const productVersionResult = getProductVersionMetadata(productSlug, version)
 	if (!productVersionResult.ok) {
 		console.error(errorResultToString('API', productVersionResult))
-		return new Response('Not found', { status: 404 })
+		return createInstanaErrorResponse(request, {
+			status: 404,
+			message: `Version metadata lookup failed for ${productSlug}@${version}`,
+			attributes: {
+				'error.kind': 'version_not_found',
+				'product.slug': productSlug,
+				'product.version': version,
+			},
+			body: 'Not found',
+		})
 	}
 
 	const { value: versionMetadata } = productVersionResult
@@ -46,7 +56,17 @@ export async function GET(
 
 	if (!readFileResult.ok) {
 		console.error(errorResultToString('API', readFileResult))
-		return new Response('Not found', { status: 404 })
+		return createInstanaErrorResponse(request, {
+			status: 404,
+			message: `Nav data file not found for ${productSlug}@${versionMetadata.version}/${sectionPath}`,
+			attributes: {
+				'error.kind': 'nav_data_not_found',
+				'product.slug': productSlug,
+				'product.version': versionMetadata.version,
+				'nav.section': sectionPath,
+			},
+			body: 'Not found',
+		})
 	}
 
 	const fileData = readFileResult.value.text
@@ -54,7 +74,17 @@ export async function GET(
 
 	if (!navDataResult.ok) {
 		console.error(errorResultToString('API', navDataResult))
-		return new Response('Not found', { status: 404 })
+		return createInstanaErrorResponse(request, {
+			status: 404,
+			message: `Nav data could not be parsed for ${productSlug}@${versionMetadata.version}/${sectionPath}`,
+			attributes: {
+				'error.kind': 'nav_data_parse_error',
+				'product.slug': productSlug,
+				'product.version': versionMetadata.version,
+				'nav.section': sectionPath,
+			},
+			body: 'Not found',
+		})
 	}
 
 	return new Response(
