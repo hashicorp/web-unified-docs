@@ -1,11 +1,11 @@
 /**
- * Copyright IBM Corp. 2024, 2026
- * SPDX-License-Identifier: BUSL-1.1
+ * Copyright IBM Corp. 2021, 2025
+ * SPDX-License-Identifier: MPL-2.0
  */
 
 import path from 'path'
 import fs from 'fs'
-
+import { emitOtelSpan } from './emit-otel-span.mjs'
 import dotenv from 'dotenv'
 import { client, v1 } from '@datadog/datadog-api-client'
 
@@ -32,16 +32,9 @@ async function readTraceFile(traceFilePath) {
 
 	const content = await fs.promises.readFile(filepath, { encoding: 'utf-8' })
 
-	// The trace file consists of multiple JSON arrays separated by newlines
-	// This gives us an array of un-parsed JSON arrays
-	const parts = content.trim().split('\n')
-
-	// Parse the arrays from the trace and flatten the full array, giving us a flat list of events
-	return parts
-		.map((part) => {
-			return JSON.parse(part)
-		})
-		.flat()
+	// Parse the arrays from the trace and flatten the full array, giving us a
+	// flat list of events
+	return content.trim().split('\n').flatMap(JSON.parse)
 }
 
 /**
@@ -52,10 +45,10 @@ const submitDatadogMetrics = async (metrics) => {
 	const configuration = client.createConfiguration()
 	const api = new v1.MetricsApi(configuration)
 
-	// Send metrics to datadog API
+	// Send metrics to Datadog API
 	await api.submitMetrics({
 		body: {
-			// Convert the build events into a format datadog understands
+			// Convert the build events into a format Datadog understands
 			series: metrics.map(({ timestamp, tags, ...event }) => {
 				return {
 					host: '',
@@ -83,74 +76,49 @@ const submitDatadogMetrics = async (metrics) => {
 }
 
 /**
- * Submit build metrics to Instana OpenTelemetry endpoint
+ * Submit build metrics to Instana as OpenTelemetry spans.
  *
- * @param {BuildEvent[]} metrics
+ * Raw OTLP metrics don't reliably surface on our Instana tenant, so each build
+ * event is reported as a span (via `emitOtelSpan`) whose duration reflects the
+ * build event duration. These appear as calls (named `build.<event>`) on the
+ * app's service and can be charted in Analyze Calls.
  */
 const submitInstanaMetrics = async (metrics) => {
-	const payload = {
-		resourceMetrics: [
-			{
-				resource: {
-					attributes: [
-						{
-							key: 'service.name',
-							value: {
-								stringValue: metrics[0].tags.find(([key]) => {
-									return key === 'app'
-								})?.[1],
-							},
-						},
-					],
-				},
-				scopeMetrics: [
-					{
-						scope: {
-							name: 'capture-build-metrics',
-						},
-						metrics: metrics.map(({ timestamp, tags, ...event }) => {
-							const unixTimeNs = (
-								BigInt(timestamp ?? Math.round(Date.now() / 1e3)) *
-								1_000_000_000n
-							).toString()
-
-							return {
-								name: `build.${event.name}`,
-								description: 'Build event duration',
-								unit: 's',
-								gauge: {
-									dataPoints: [
-										{
-											attributes: tags.map(([key, value]) => {
-												return {
-													key,
-													value: { stringValue: value },
-												}
-											}),
-											asDouble: Math.round(event.duration / 1e3),
-											timeUnixNano: unixTimeNs,
-										},
-									],
-								},
-							}
-						}),
-					},
-				],
-			},
-		],
-	}
-	const response = await fetch(process.env.INSTANA_OTLP_ENDPOINT, {
-		method: 'POST',
-		headers: {
-			'Content-Type': 'application/json',
-			'x-instana-key': process.env.INSTANA_OTLP_API_TOKEN,
-		},
-		body: JSON.stringify(payload),
+	const spans = metrics.map(({ name, duration, tags }) => {
+		return {
+			name: `build.${name}`,
+			attributes: Object.fromEntries(tags),
+			// Next.js trace durations are in microseconds; convert to milliseconds
+			// so Instana renders the build duration as the call's latency.
+			durationMs: duration / 1e3,
+		}
 	})
-	if (![200, 202].includes(response.status)) {
+
+	// Also emit an aggregate `build.total` span whose duration is the sum of all
+	// build phase durations. Instana chart/number widgets can't sum datasets, so
+	// this lets dashboards chart total build time as a single series. Because
+	// avg(sum) == sum(avg), avg(build.total) equals the sum of the per-phase
+	// averages (avg(build.next_build) + avg(build.next_export) + ...).
+	if (metrics.length > 0) {
+		const totalDurationMicros = metrics.reduce((sum, { duration }) => {
+			return sum + duration
+		}, 0)
+		spans.push({
+			name: 'build.total',
+			attributes: Object.fromEntries(metrics[0].tags),
+			durationMs: totalDurationMicros / 1e3,
+		})
+	}
+
+	const response = await emitOtelSpan({
+		scopeName: 'capture-build-metrics',
+		span: spans,
+	})
+
+	if (!response.ok) {
 		const responseText = await response.text()
 		throw new Error(
-			`Failed to submit metrics to Instana. Status: ${response.status}, Response: ${responseText}`,
+			`Failed to submit build spans to Instana. Status: ${response.status}, Response: ${responseText}`,
 		)
 	}
 
@@ -158,7 +126,7 @@ const submitInstanaMetrics = async (metrics) => {
 		return `${key}:${value}`
 	})
 	console.log(
-		`〽️ Submitted build metrics to Instana:\n${JSON.stringify(tags, null, 2)}`,
+		`〽️ Submitted build spans to Instana:\n${JSON.stringify(tags, null, 2)}`,
 	)
 }
 
@@ -173,16 +141,15 @@ async function main() {
 		})
 
 		// It's important that this remains a constant variable rather than
-		// being incorprated into the `.map()` call as we don't want it to be
+		// being incorporated into the `.map()` call as we don't want it to be
 		// re-evaluated for each run through the loop. We want it to remain fixed
 		const timestamp = Math.round(Date.now() / 1e3)
 
 		// Read trace files
 		const nextjsTrace = await readTraceFile(NEXTJS_TRACE_FILE)
 		const prebuildTrace = await readTraceFile(PREBUILD_TRACE_FILE)
-
-		const environment = process.env.CI ? 'ci' : 'local'
 		const buildType = incBuild ? 'incremental' : 'full'
+		const environment = process.env.HASHI_ENV ?? 'local'
 
 		const filteredEvents = [...nextjsTrace, ...prebuildTrace]
 			.filter((event) => {
@@ -209,17 +176,14 @@ async function main() {
 			.filter(({ status }) => {
 				return status === 'rejected'
 			})
-			.map(({ reason }) => {
-				return reason
+			.map((result) => {
+				return result.reason
 			})
 		if (failedSubmissions.length > 0) {
 			throw new AggregateError(failedSubmissions)
 		}
 	} catch (error) {
-		// Swallow errors
-		// we don't want to impact the build or make it seem like there's been
-		// an error in the actual app if something goes wrong when sending metrics
-		if (process.env.NODE_ENV === 'development' || process.env.CI) {
+		if (process.env.VERCEL_ENV === 'production') {
 			throw error
 		}
 	}
