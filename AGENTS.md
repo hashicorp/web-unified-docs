@@ -30,6 +30,12 @@ user-facing experience.
    repo clearly requires direct edits.
 1. If behavior touches deployment or preview infrastructure, inspect the
    matching GitHub Actions workflow before changing code.
+1. After completing a change, do a quick self-check: did you touch commands or
+   scripts, runtime versions, repo structure, CI/deployment workflows, or the
+   `dev-portal` API contract? If yes, update the relevant `agent-docs/` file in
+   the same PR. Read
+   [maintaining-this-guide.md](agent-docs/maintaining-this-guide.md) if you need
+   help determining which file to update or what to change.
 
 ## Scope
 
