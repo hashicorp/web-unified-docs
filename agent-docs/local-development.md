@@ -22,6 +22,11 @@ npm run prebuild
 npm run dev
 ```
 
+`npm run prebuild` populates the `public/` folder and only needs to run once
+(or when prebuild sources change — see `scripts/prebuild/**` or
+`productConfig.mjs`). It is a long-running process; run it manually when
+needed rather than before every `npm run dev`.
+
 ## Runtime
 
 The repo uses Next.js and requires Node `>=24` (see `package.json` `engines`).
