@@ -5,7 +5,10 @@
 
 import crypto from 'node:crypto'
 
-/** Default `service.name` resource attribute spans are reported under. */
+/**
+ * Default `service.name` resource attribute spans are reported under.
+ * Must match `var.otel_service_name` in terraform/variables.tf.
+ */
 const DEFAULT_SERVICE_NAME = 'web-unified-docs-hashicorp.vercel.app'
 
 /**

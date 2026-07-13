@@ -1,13 +1,13 @@
 variable "app_name" {
-  description = "The name of the application. Used to name resources in Instana, such as dashboards and alerting rules."
+  description = "Short display label for the application. Used to name Instana resources such as dashboards and alerting rules."
   type        = string
   default     = "web-unified-docs"
 }
 
-variable "slack_app_id" {
-  description = "Slack App ID (starts with A) for the Instana notification bot."
+variable "otel_service_name" {
+  description = "The OpenTelemetry `service.name` attribute emitted by the application. Must match DEFAULT_SERVICE_NAME in scripts/emit-otel-span.mjs."
   type        = string
-  default     = "A08AEK9NX41"
+  default     = "web-unified-docs-hashicorp.vercel.app"
 }
 
 variable "slack_channel_name" {

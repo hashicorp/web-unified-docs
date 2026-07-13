@@ -18,7 +18,7 @@ resource "instana_application_config" "udr" {
   label          = var.app_name
   boundary_scope = "INBOUND"
   scope          = "INCLUDE_IMMEDIATE_DOWNSTREAM_DATABASE_AND_MESSAGING"
-  tag_filter     = "service.name@dest EQUALS '${var.app_name}'"
+  tag_filter     = "service.name@dest EQUALS '${var.otel_service_name}'"
 }
 
 locals {
