@@ -1,19 +1,3 @@
-# @todo Remove this after apply - don't actually need to, but this will be a no-op
-import {
-  id = "d921s4i0j8og0p7ogbeg"
-  to = instana_alerting_channel.slack
-}
-resource "instana_alerting_channel" "slack" {
-  name = var.slack_channel_name
-  slack_app = {
-    app_id       = var.slack_app_id
-    team_id      = var.slack_team_id
-    team_name    = var.slack_team_name
-    channel_id   = var.slack_channel_id
-    channel_name = var.slack_channel_name
-  }
-}
-
 resource "instana_application_config" "udr" {
   label          = var.app_name
   boundary_scope = "INBOUND"
@@ -30,7 +14,7 @@ locals {
   application_alert_channels = {
     CRITICAL = []
     WARNING = [
-      instana_alerting_channel.slack.id,
+      var.slack_alerting_channel_id,
     ]
   }
 }

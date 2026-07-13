@@ -10,26 +10,10 @@ variable "otel_service_name" {
   default     = "web-unified-docs-hashicorp.vercel.app"
 }
 
-variable "slack_channel_name" {
-  description = "The name of the slack channel to send alerts to"
+variable "slack_alerting_channel_id" {
+  description = "Instana alerting channel ID for Slack notifications. This resource is owned by an external Terraform workspace; do not manage it here."
   type        = string
-  default     = "devdot-instana-digital-alerts"
-}
-
-variable "slack_channel_id" {
-  description = "Slack channel ID"
-  default     = "C0B9Y3JSL58"
-  type        = string
-}
-
-variable "slack_team_name" {
-  description = "The name of the slack team that contains the channel to send alerts to"
-  type        = string
-}
-
-variable "slack_team_id" {
-  description = "Slack team ID. You can find this by inspecting the URL of your Slack workspace (e.g. https://app.slack.com/client/<team ID>)"
-  type        = string
+  default     = "d921s4i0j8og0p7ogbeg"
 }
 
 variable "granularity_minutes" {
