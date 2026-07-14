@@ -288,6 +288,18 @@ export const PRODUCT_CONFIG = {
 		websiteDir: 'website',
 	},
 	'terraform-docs-agents': {
+	'terraform-policy': {
+		assetDir: '',
+		basePaths: ['policy'],
+		contentDir: 'docs',
+		dataDir: 'data',
+		navDataPath: 'policy',
+		productSlug: 'terraform',
+		semverCoerce: semver.coerce,
+		versionedDocs: true,
+		websiteDir: 'website',
+	},
+
 		/**
 		 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
 		 *
