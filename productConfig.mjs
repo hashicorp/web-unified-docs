@@ -287,7 +287,6 @@ export const PRODUCT_CONFIG = {
 		versionedDocs: true,
 		websiteDir: 'website',
 	},
-	'terraform-docs-agents': {
 	'terraform-policy': {
 		assetDir: '',
 		basePaths: ['policy'],
@@ -299,7 +298,7 @@ export const PRODUCT_CONFIG = {
 		versionedDocs: true,
 		websiteDir: 'website',
 	},
-
+	'terraform-docs-agents': {
 		/**
 		 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
 		 *
