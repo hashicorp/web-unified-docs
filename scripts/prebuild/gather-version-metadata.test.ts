@@ -111,6 +111,23 @@ it('Support beta releases - support release candidate (rc)', async () => {
 	expect(result).toStrictEqual(expected)
 })
 
+it('Single version with non-stable release stage is always isLatest', async () => {
+	const expected = {
+		'terraform-enterprise': [
+			{ version: 'v202401-1', releaseStage: 'beta', isLatest: true },
+		],
+	}
+	vol.fromJSON(
+		{
+			'./terraform-enterprise/v202401-1 (beta)/': null,
+		},
+		'/content',
+	)
+
+	const result = await gatherVersionMetadata('/content')
+	expect(result).toStrictEqual(expected)
+})
+
 it('Support beta releases - throw error for invalid stage', async ({
 	expect,
 }: {
