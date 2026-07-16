@@ -142,7 +142,6 @@ provider "aws" {
   region = "us-west-2"
 }
 
-# KMS key for EBS encryption
 resource "aws_kms_key" "ebs" {
   description             = "KMS key for EBS volume encryption"
   deletion_window_in_days = 10
@@ -153,12 +152,10 @@ resource "aws_kms_alias" "ebs" {
   target_key_id = aws_kms_key.ebs.key_id
 }
 
-# Data source to retrieve the KMS key
 data "aws_kms_key" "approved" {
   key_id = aws_kms_alias.ebs.name
 }
 
-# This volume would pass the policy (encrypted with approved key)
 resource "aws_ebs_volume" "pass" {
   availability_zone = "us-west-2a"
   size              = 10
@@ -166,19 +163,16 @@ resource "aws_ebs_volume" "pass" {
   kms_key_id        = data.aws_kms_key.approved.id
 }
 
-# This volume would fail the policy (not encrypted)
 resource "aws_ebs_volume" "fail_not_encrypted" {
   availability_zone = "us-west-2b"
   size              = 10
   encrypted         = false
 }
 
-# This volume would fail the policy (encrypted but wrong key)
 resource "aws_ebs_volume" "fail_wrong_key" {
   availability_zone = "us-west-2c"
   size              = 10
   encrypted         = true
-  # Using default AWS managed key instead of approved key
 }
 ```
 
@@ -186,18 +180,24 @@ resource "aws_ebs_volume" "fail_wrong_key" {
 
 ## Ensure Azure managed disks have encryption settings
 
-This example demonstrates a resource policy that validates nested attributes in Azure managed disks.
+This example demonstrates a resource policy that validates nested attributes in Azure managed disks. It also shows how to use `input` blocks to parameterize policies and the `inputs` block in tests to set and override input values.
 
 ### Policy
 
-The policy ensures that every managed disk has encryption settings explicitly enabled.
+The policy uses an input variable to make the encryption requirement configurable. By default, encryption is required, but this can be overridden for specific environments or test cases.
 
 <CodeBlockConfig filename="policies/azure_disk_encryption.policy.hcl">
 
 ```hcl
+input "require_encryption" {
+  type        = bool
+  description = "Whether to require encryption on managed disks"
+  default     = true
+}
+
 resource_policy "azurerm_managed_disk" "require_encryption" {
   enforce {
-    condition     = attrs.encryption_settings_collection[0].enabled == true
+    condition     = !input.require_encryption || attrs.encryption_settings_collection[0].enabled == true
     error_message = "The managed disk must have encryption settings enabled."
   }
 }
@@ -207,7 +207,7 @@ resource_policy "azurerm_managed_disk" "require_encryption" {
 
 ### Tests
 
-This test includes both passing and failing test cases.
+This test demonstrates using the `inputs` block at both the file level and per test case. The top-level `inputs` block sets a default value that applies to all test cases, while individual test cases can override it.
 
 <CodeBlockConfig filename="tests/azure_disk_encryption.policytest.hcl">
 
@@ -216,11 +216,18 @@ policytest {
   targets = ["../policies/azure_disk_encryption.policy.hcl"]
 }
 
+inputs {
+  require_encryption = true
+}
+
 resource "azurerm_managed_disk" "pass" {
   attrs = {
-    name                 = "data-disk-01"
+    name                 = "test-disk"
+    location             = "East US"
+    resource_group_name  = "test-rg"
     storage_account_type = "Standard_LRS"
     create_option        = "Empty"
+    disk_size_gb         = 10
     encryption_settings_collection = [
       {
         enabled = true
@@ -231,11 +238,34 @@ resource "azurerm_managed_disk" "pass" {
 
 resource "azurerm_managed_disk" "fail" {
   expect_failure = true
-  
+
   attrs = {
-    name                 = "shadow-disk-02"
+    name                 = "test-disk-unencrypted"
+    location             = "East US"
+    resource_group_name  = "test-rg"
     storage_account_type = "Standard_LRS"
     create_option        = "Empty"
+    disk_size_gb         = 10
+    encryption_settings_collection = [
+      {
+        enabled = false
+      }
+    ]
+  }
+}
+
+resource "azurerm_managed_disk" "pass_no_requirement" {
+  inputs {
+    require_encryption = false
+  }
+
+  attrs = {
+    name                 = "test-disk-optional"
+    location             = "East US"
+    resource_group_name  = "test-rg"
+    storage_account_type = "Standard_LRS"
+    create_option        = "Empty"
+    disk_size_gb         = 10
     encryption_settings_collection = [
       {
         enabled = false
@@ -263,6 +293,7 @@ $ tfpolicy test --policies=policies/azure_disk_encryption.policy.hcl --tests=tes
 # azure_disk_encryption.policytest.hcl... running
 # resource.azurerm_managed_disk.pass... pass
 # resource.azurerm_managed_disk.fail... pass
+# resource.azurerm_managed_disk.pass_no_requirement... pass
 # azure_disk_encryption.policytest.hcl... pass
 ```
 
