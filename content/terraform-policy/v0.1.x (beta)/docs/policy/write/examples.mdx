@@ -180,11 +180,11 @@ resource "aws_ebs_volume" "fail_wrong_key" {
 
 ## Ensure Azure managed disks have encryption settings
 
-This example demonstrates a resource policy that validates nested attributes in Azure managed disks. It also shows how to use `input` blocks to parameterize policies and the `inputs` block in tests to set and override input values.
+This example demonstrates a resource policy that validates nested attributes in Azure managed disks. It also shows how to use `input` blocks to parameterize policies, the `inputs` block in tests to set and override input values, and the `mandatory_overridable` enforcement level to allow exceptions with approval.
 
 ### Policy
 
-The policy uses an input variable to make the encryption requirement configurable. By default, encryption is required, but this can be overridden for specific environments or test cases.
+The policy uses an input variable to make the encryption requirement configurable and sets `enforcement_level = "mandatory_overridable"` to allow users with appropriate permissions to override the policy when needed (e.g., for development environments).
 
 <CodeBlockConfig filename="policies/azure_disk_encryption.policy.hcl">
 
@@ -196,6 +196,8 @@ input "require_encryption" {
 }
 
 resource_policy "azurerm_managed_disk" "require_encryption" {
+  enforcement_level = "mandatory_overridable"
+
   enforce {
     condition     = !input.require_encryption || attrs.encryption_settings_collection[0].enabled == true
     error_message = "The managed disk must have encryption settings enabled."
@@ -356,24 +358,26 @@ resource "azurerm_managed_disk" "fail" {
 
 ## Verify module sources and versions
 
-This example demonstrates a module policy that validates module sources and versions using meta-attributes and the semverconstraint function.
+This example demonstrates a module policy that validates module sources and versions using meta-attributes and the semverconstraint function. It uses `enforcement_level = "advisory"` to provide recommendations rather than hard requirements, allowing teams flexibility when needed.
 
 ### Policy
 
-The policy ensures that VPC modules are sourced from an internal private registry and use version 2.0.0 or higher.
+The policy recommends that VPC modules are sourced from an internal private registry and use version 2.0.0 or higher. The advisory enforcement level means violations will generate warnings but won't block operations.
 
 <CodeBlockConfig filename="policies/module_validation.policy.hcl">
 
 ```hcl
 module_policy "aws_vpc" "registry_check" {
+  enforcement_level = "advisory"
+
   enforce {
     condition     = core::startswith(meta.source, "app.terraform.io/my-org/")
-    error_message = "The VPC module must be sourced from the internal private registry (app.terraform.io/my-org/)."
+    error_message = "The VPC module should be sourced from the internal private registry (app.terraform.io/my-org/)."
   }
   
   enforce {
     condition     = core::semverconstraint(meta.version, ">= 2.0.0")
-    error_message = "The VPC module must be version 2.0.0 or higher."
+    error_message = "The VPC module should be version 2.0.0 or higher for latest features and security fixes."
   }
 }
 ```
@@ -602,16 +606,18 @@ resource "aws_s3_bucket" "example" {
 
 ## Validate CloudTrail S3 bucket ACL
 
-This example demonstrates using `core::getresources()` to validate relationships between resources.
+This example demonstrates using `core::getresources()` to validate relationships between resources. It uses `enforcement_level = "mandatory_overridable"` to allow exceptions for special cases (e.g., public audit trails) with appropriate approval.
 
 ### Policy
 
-The policy ensures that CloudTrail resources are associated with S3 buckets that have private ACLs.
+The policy ensures that CloudTrail resources are associated with S3 buckets that have private ACLs. The mandatory_overridable enforcement level allows users with appropriate permissions to override this requirement when necessary.
 
 <CodeBlockConfig filename="policies/cloudtrail_s3_acl.policy.hcl">
 
 ```hcl
 resource_policy "aws_cloudtrail" "must_be_private" {
+  enforcement_level = "mandatory_overridable"
+
   locals {
     s3_bucket_acl = core::getresources("aws_s3_bucket_acl", {
       bucket = attrs.s3_bucket_name
@@ -619,8 +625,8 @@ resource_policy "aws_cloudtrail" "must_be_private" {
   }
   
   enforce {
-    condition     = local.s3_bucket_acl[0].acl == "private"
-    error_message = "S3 bucket associated with CloudTrail is not private"
+    condition     = core::length(local.s3_bucket_acl) > 0 && local.s3_bucket_acl[0].acl == "private"
+    error_message = "CloudTrail S3 bucket must have a private ACL."
   }
 }
 ```
@@ -1037,6 +1043,141 @@ resource "azurerm_network_interface" "fail" {
     name                          = "internal"
     subnet_id                     = azurerm_subnet.pass.id
     private_ip_address_allocation = "Dynamic"
+  }
+}
+```
+
+</CodeBlockConfig>
+
+## Prevent EBS volume downsizing
+
+This example demonstrates using the `operations` parameter to control when policies are enforced and the `prior_attrs` attribute to access previous resource state. This is useful for preventing dangerous operations like reducing volume sizes that could cause data loss.
+
+### Policy
+
+The policy uses `operations = ["update"]` to only enforce during update operations (not create or delete) and compares `prior_attrs.size` with `attrs.size` to prevent downsizing.
+
+<CodeBlockConfig filename="policies/prevent_downsize.policy.hcl">
+
+```hcl
+resource_policy "aws_ebs_volume" "prevent_downsize" {
+  operations = ["update"]
+
+  enforce {
+    condition     = attrs.size >= prior_attrs.size
+    error_message = "EBS volume size cannot be reduced from ${prior_attrs.size}GB to ${attrs.size}GB. Downsizing volumes can cause data loss."
+  }
+}
+```
+
+</CodeBlockConfig>
+
+### Tests
+
+This test demonstrates using `prior_attrs` in test resources to simulate update operations. It includes three scenarios: increasing size (pass), keeping same size (pass), and decreasing size (fail).
+
+<CodeBlockConfig filename="tests/prevent_downsize.policytest.hcl">
+
+```hcl
+policytest {
+  targets = ["../policies/prevent_downsize.policy.hcl"]
+}
+
+resource "aws_ebs_volume" "pass_increase" {
+  prior_attrs = {
+    availability_zone = "us-east-1a"
+    size              = 50
+    encrypted         = true
+  }
+
+  attrs = {
+    availability_zone = "us-east-1a"
+    size              = 100
+    encrypted         = true
+  }
+}
+
+resource "aws_ebs_volume" "pass_same_size" {
+  prior_attrs = {
+    availability_zone = "us-east-1a"
+    size              = 50
+    encrypted         = true
+  }
+
+  attrs = {
+    availability_zone = "us-east-1a"
+    size              = 50
+    encrypted         = true
+  }
+}
+
+resource "aws_ebs_volume" "fail_decrease" {
+  expect_failure = true
+
+  prior_attrs = {
+    availability_zone = "us-east-1a"
+    size              = 100
+    encrypted         = true
+  }
+
+  attrs = {
+    availability_zone = "us-east-1a"
+    size              = 50
+    encrypted         = true
+  }
+}
+```
+
+</CodeBlockConfig>
+
+### Validate and test
+
+Validate the policy syntax:
+
+```shell-session
+$ tfpolicy validate --policies=policies/prevent_downsize.policy.hcl
+Success! Policy is valid.
+```
+
+Run the tests:
+
+```shell-session
+$ tfpolicy test --policies=policies/prevent_downsize.policy.hcl --tests=tests/prevent_downsize.policytest.hcl
+# prevent_downsize.policytest.hcl... running
+# resource.aws_ebs_volume.pass_increase... pass
+# resource.aws_ebs_volume.pass_same_size... pass
+# resource.aws_ebs_volume.fail_decrease... pass
+# prevent_downsize.policytest.hcl... pass
+```
+
+### Sample Terraform configuration
+
+The following Terraform configuration demonstrates an EBS volume that would be evaluated against this policy during updates:
+
+<CodeBlockConfig filename="main.tf">
+
+```hcl
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+  required_version = ">= 1.2.0"
+}
+
+provider "aws" {
+  region = "us-west-2"
+}
+
+resource "aws_ebs_volume" "example" {
+  availability_zone = "us-west-2a"
+  size              = 50
+  encrypted         = true
+
+  tags = {
+    Name = "example-volume"
   }
 }
 ```
