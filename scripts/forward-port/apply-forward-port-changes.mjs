@@ -20,14 +20,23 @@ function toTargetPath(srcPath, sourceVersion, targetVersion) {
 function filterByTargetProduct(files, product) {
 	const prefix = `content/${product}/`
 	const filtered = {
-		added: (files.added || []).filter((f) => f.startsWith(prefix)),
-		modified: (files.modified || []).filter((f) => f.startsWith(prefix)),
-		removed: (files.removed || []).filter((f) => f.startsWith(prefix)),
+		added: (files.added || []).filter((f) => {
+			return f.startsWith(prefix)
+		}),
+		modified: (files.modified || []).filter((f) => {
+			return f.startsWith(prefix)
+		}),
+		removed: (files.removed || []).filter((f) => {
+			return f.startsWith(prefix)
+		}),
 	}
 
 	const totalBefore =
-		(files.added || []).length + (files.modified || []).length + (files.removed || []).length
-	const totalAfter = filtered.added.length + filtered.modified.length + filtered.removed.length
+		(files.added || []).length +
+		(files.modified || []).length +
+		(files.removed || []).length
+	const totalAfter =
+		filtered.added.length + filtered.modified.length + filtered.removed.length
 
 	if (totalBefore > 0 && totalAfter === 0) {
 		console.warn(
@@ -75,7 +84,9 @@ export function applyForwardPortChanges({
 	try {
 		changedFiles = JSON.parse(fs.readFileSync(changesFile, 'utf-8'))
 	} catch (error) {
-		return { error: `Error reading changes file at ${changesFile}: ${error.message}` }
+		return {
+			error: `Error reading changes file at ${changesFile}: ${error.message}`,
+		}
 	}
 
 	changedFiles = filterByTargetProduct(changedFiles, targetProduct)
@@ -91,7 +102,9 @@ export function applyForwardPortChanges({
 		const destPath = toTargetPath(srcPath, sourceVersion, targetVersion)
 
 		if (srcPath === destPath) {
-			console.warn(`Skipping ${srcPath}: source and target paths are identical (version segment not found)`)
+			console.warn(
+				`Skipping ${srcPath}: source and target paths are identical (version segment not found)`,
+			)
 			skipped++
 			continue
 		}
@@ -114,7 +127,9 @@ export function applyForwardPortChanges({
 		const destPath = toTargetPath(srcPath, sourceVersion, targetVersion)
 
 		if (srcPath === destPath) {
-			console.warn(`Skipping removal of ${srcPath}: source and target paths are identical (version segment not found)`)
+			console.warn(
+				`Skipping removal of ${srcPath}: source and target paths are identical (version segment not found)`,
+			)
 			skipped++
 			continue
 		}
