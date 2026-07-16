@@ -1,0 +1,172 @@
+---
+page_title: Update TLS certificates
+description: >-
+  Learn how to update the TLS/SSL certificates that Terraform Enterprise serves, including the CA trust bundle, agents, and external load balancers that must also trust a new certificate authority.
+---
+
+# Update TLS certificates
+
+This topic describes how to update the TLS/SSL certificates that Terraform Enterprise serves, and the additional locations you must update when the certificate authority (CA) that signed the certificate changes.
+
+## Introduction
+
+You update your Terraform Enterprise certificates when you renew an expiring certificate, rotate to a new certificate, or migrate to a new certificate authority (CA). Terraform Enterprise reads its certificates when the application starts, so applying a new certificate requires a restart.
+
+Updating only the certificate that Terraform Enterprise serves is often not enough. When the CA that signed your new certificate changes, you must also update the CA trust bundle, the agents that connect back to Terraform Enterprise, and any external load balancer in front of Terraform Enterprise. Missing any of these locations causes outages, such as `x509: certificate signed by unknown authority` errors or clients that continue to receive the old certificate.
+
+This topic applies to Terraform Enterprise deployed to Docker Compose, Kubernetes with the Helm chart, Podman, and Nomad. For Replicated deployments, refer to [Manage Terraform Enterprise on Replicated overview](/terraform/enterprise/deploy/replicated/).
+
+## Requirements
+
+Before you begin, gather the following:
+
+- Your new certificate and private key in PEM format.
+- If the signing CA changed, the new CA certificate or CA bundle in PEM format.
+- Access to your deployment configuration for your runtime, such as your Docker Compose file, Helm values file, Podman pod specification, or Nomad job specification.
+- A maintenance window. Terraform Enterprise reads certificates at startup, so applying a new certificate requires a restart that interrupts service.
+
+## Certificate locations checklist
+
+<Warning>
+
+Updating only the certificate that Terraform Enterprise serves is often not sufficient. When the CA that signed your new certificate changes, you must also update the CA trust bundle, the agents, and any external load balancer. Missing any of these locations causes outages.
+
+</Warning>
+
+Confirm which of the following locations your change affects, then complete the matching section:
+
+- [ ] **Served certificate**: The certificate and key that Terraform Enterprise presents to clients, set with `TFE_TLS_CERT_FILE` and `TFE_TLS_KEY_FILE`. Update this for every certificate change.
+- [ ] **CA trust bundle**: The CA certificates that Terraform Enterprise and its components trust, set with `TFE_TLS_CA_BUNDLE_FILE`. Update this when the signing CA changed.
+- [ ] **Agents**: The agents that connect back to Terraform Enterprise to run Terraform operations. Update these when the signing CA changed.
+- [ ] **External load balancers**: Any load balancer that terminates or re-presents TLS in front of Terraform Enterprise. Update this when the load balancer serves its own copy of the certificate.
+
+## Update the certificate Terraform Enterprise serves
+
+Terraform Enterprise serves the certificate and key referenced by [`TFE_TLS_CERT_FILE`](/terraform/enterprise/deploy/reference/configuration#tfe_tls_cert_file) and [`TFE_TLS_KEY_FILE`](/terraform/enterprise/deploy/reference/configuration#tfe_tls_key_file). If you configured a secondary hostname with `TFE_HOSTNAME_SECONDARY`, also update [`TFE_TLS_CERT_FILE_SECONDARY`](/terraform/enterprise/deploy/reference/configuration#tfe_tls_cert_file_secondary) and [`TFE_TLS_KEY_FILE_SECONDARY`](/terraform/enterprise/deploy/reference/configuration#tfe_tls_key_file_secondary).
+
+1. Replace the certificate and key files that `TFE_TLS_CERT_FILE` and `TFE_TLS_KEY_FILE` reference with your new files. Keep the same file paths so your deployment configuration does not change. By convention, deployments mount these files in `/etc/ssl/private/terraform-enterprise/`, but the paths are whatever you set in your configuration.
+
+1. Restart Terraform Enterprise so it loads the new certificate. Terraform Enterprise reads the certificate only at startup.
+
+  <Tabs>
+    <Tab heading="Docker Compose" group="first">
+
+    Recreate the container to load the new certificate:
+
+    ```shell-session
+    $ docker compose down
+    $ docker compose up --detach
+    ```
+
+    </Tab>
+    <Tab heading="Helm Chart" group="second">
+
+    Update the certificate data in your values file (`tls.certData` and `tls.keyData`), or the Secret referenced by `tls.certificateSecret`, then apply the change:
+
+    ```shell-session
+    $ helm upgrade TERRAFORM_ENTERPRISE hashicorp/terraform-enterprise --namespace TFE_NAMESPACE --values OVERRIDES_FILE
+    ```
+
+    Kubernetes does not restart running pods when a mounted Secret changes. Recreate the Terraform Enterprise pods so they read the new certificate, for example by setting `replicaCount` to `0`, running `helm upgrade`, then restoring your original replica count.
+
+    </Tab>
+    <Tab heading="Podman" group="third">
+
+    Recreate the pod to load the new certificate:
+
+    ```shell-session
+    # podman kube play <path_to_YAML_file>
+    ```
+
+    </Tab>
+    <Tab heading="Nomad" group="fourth">
+
+    Update the certificate values in your job specification, then submit the job. The certificate `template` stanzas use `change_mode = "restart"`, so the allocation restarts when the certificate value changes:
+
+    ```shell-session
+    $ nomad job run <path-to-job-spec>
+    ```
+
+    </Tab>
+  </Tabs>
+
+## Update the CA trust bundle
+
+Terraform Enterprise trusts the CA certificates in the file referenced by [`TFE_TLS_CA_BUNDLE_FILE`](/terraform/enterprise/deploy/reference/configuration#tfe_tls_ca_bundle_file). Terraform Enterprise appends this bundle to the operating system trust store when the application starts. When the CA that signed your new certificate changed, update this bundle so that Terraform Enterprise and its components continue to trust the certificate. A mismatch produces `x509: certificate signed by unknown authority` errors.
+
+1. Update the file referenced by `TFE_TLS_CA_BUNDLE_FILE` to include the new CA certificate. Include the full certificate chain, and keep any other CA certificates that Terraform Enterprise still needs to trust, such as the CA for your version control system (VCS) provider.
+
+1. Restart Terraform Enterprise using the same runtime steps as the [previous section](#update-the-certificate-terraform-enterprise-serves). Terraform Enterprise re-reads and re-injects the CA bundle only at startup.
+
+<Note>
+
+When Terraform Enterprise starts, the `tls` startup check validates that the CA bundle exists, is valid PEM, and contains no expired or not-yet-valid certificates. If you rotate an expired CA certificate in a shared bundle, this check can block startup. Set [`TFE_STARTUP_CHECKS_IGNORE_FAILURES`](/terraform/enterprise/deploy/reference/configuration#tfe_startup_checks_ignore_failures) to `tls` to allow startup to continue. Refer to [Startup checks reference](/terraform/enterprise/deploy/reference/startup-checks) for more information.
+
+</Note>
+
+## Update Terraform Enterprise agents
+
+Agents that run Terraform operations and connect back to Terraform Enterprise trust it through their operating system trust store. Agents have no separate setting for a CA certificate. When the signing CA changes, update the agents so they continue to trust Terraform Enterprise. Otherwise, agents fail to register and log `x509: certificate signed by unknown authority`.
+
+Update the agents that apply to your deployment:
+
+- **Built-in agents**: Terraform Enterprise builds its built-in agent run image at startup and injects the current CA bundle. When you restart Terraform Enterprise to apply the new CA bundle, Terraform Enterprise rebuilds this image with the new CA. Agents that Terraform Enterprise starts after the restart trust the new certificate, so no additional action is required.
+- **Custom agent images**: If you set [`TFE_RUN_PIPELINE_IMAGE`](/terraform/enterprise/deploy/reference/configuration#tfe_run_pipeline_image) to a custom image, Terraform Enterprise does not rebuild it. Rebuild your custom image with the new CA certificate and update `TFE_RUN_PIPELINE_IMAGE`. Refer to [Build and deploy a custom worker image](/terraform/enterprise/deploy/custom-image) for instructions.
+- **External agents**: For agents that run on separate hosts or containers, add the new CA certificate to the operating system trust store on the agent host or container, then restart the agent.
+
+For more information about agents, refer to [HCP Terraform agents for Terraform Enterprise](/terraform/enterprise/application-administration/agents-on-tfe).
+
+## Update external load balancers
+
+If an external load balancer terminates TLS or re-presents a certificate in front of Terraform Enterprise, update the certificate on the load balancer as well. A common failure is updating the certificate on Terraform Enterprise while clients continue to receive the old certificate because a load balancer managed by a Helm chart or your cloud provider still serves the previous one.
+
+Update the certificate wherever your load balancer stores it, then confirm the load balancer serves the new certificate.
+
+## Verify the update
+
+1. Confirm the served certificate. From a host that can reach Terraform Enterprise, inspect the certificate that Terraform Enterprise presents and confirm the issuer, subject, and validity dates match your new certificate:
+
+  ```shell-session
+  $ echo | openssl s_client -connect HOSTNAME:443 -servername HOSTNAME 2>/dev/null | openssl x509 -noout -issuer -subject -dates
+  ```
+
+1. Confirm the `tls` startup check passed. Review the Terraform Enterprise startup logs for the `tls` check:
+
+  ```shell-session
+  terraform-enterprise: check passed: name=tls
+  ```
+
+  Refer to [Startup checks reference](/terraform/enterprise/deploy/reference/startup-checks) for how to read startup check output.
+
+1. Confirm the agents register. Review your agent logs and confirm the agents register without `x509` errors. A healthy agent logs a registration message:
+
+  ```shell-session
+  Registering agent...
+  ```
+
+## Troubleshoot
+
+Use the following symptoms to identify which step you may have missed.
+
+### Certificate signed by unknown authority
+
+**Symptom**: Terraform Enterprise components or agents fail with `x509: certificate signed by unknown authority`.
+
+**Cause**: A component does not trust the CA that signed the new certificate. The CA trust bundle, an agent, or an external load balancer still uses the old CA.
+
+**Solution**: Confirm the new CA certificate is in the file referenced by `TFE_TLS_CA_BUNDLE_FILE` and that you restarted Terraform Enterprise. Rebuild any custom agent run images, and add the new CA certificate to the trust store on external agent hosts. Refer to [Troubleshooting common application errors](/terraform/enterprise/deploy/troubleshoot/error-messages) for related guidance.
+
+### Clients receive the old certificate
+
+**Symptom**: Clients still receive the previous certificate after you update Terraform Enterprise.
+
+**Cause**: A component still serves the old certificate. Either an external load balancer holds the previous certificate, or the Terraform Enterprise container or pods did not restart.
+
+**Solution**: Update the certificate on any external load balancer, and confirm you restarted or recreated the Terraform Enterprise container or pods so they load the new certificate.
+
+## Next steps
+
+- [TLS settings](/terraform/enterprise/deploy/reference/configuration#tls-settings) reference for all TLS configuration options.
+- [Startup checks reference](/terraform/enterprise/deploy/reference/startup-checks) for how Terraform Enterprise validates certificates at startup.
+- [HCP Terraform agents for Terraform Enterprise](/terraform/enterprise/application-administration/agents-on-tfe) for agent configuration.
+- [Build and deploy a custom worker image](/terraform/enterprise/deploy/custom-image) for rebuilding a custom agent image with a new CA.
