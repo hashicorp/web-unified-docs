@@ -16,28 +16,42 @@ This page provides example policies written for the Terraform policy framework. 
 
 ## Encrypt EBS volumes
 
-This example demonstrates a basic resource policy that ensures all AWS EBS volumes are encrypted.
+This example demonstrates a basic resource policy that ensures all AWS EBS volumes are encrypted and use an approved KMS key. It also shows how to use `core::getdatasource()` to retrieve data sources and the `data` test block to mock them.
 
 ### Policy
 
-The policy checks that each `aws_ebs_volume` resource has the `encrypted` attribute set to `true`.
+The policy checks that each `aws_ebs_volume` resource is encrypted and uses the approved KMS key. It uses two separate policy blocks: one to enforce encryption, and another (with a filter) to enforce the KMS key requirement only on encrypted volumes.
 
 <CodeBlockConfig filename="policies/encrypted_ebs.policy.hcl">
 
 ```hcl
+locals {
+  approved_kms_key = core::getdatasource("aws_kms_key", {
+    key_id = "alias/approved-ebs-key"
+  })
+}
+
 resource_policy "aws_ebs_volume" "ebs_encrypted" {
   enforce {
     condition     = attrs.encrypted == true
     error_message = "EBS volume is not encrypted"
   }
 }
+
+resource_policy "aws_ebs_volume" "approved_kms_key" {
+  filter = attrs.encrypted == true
+
+  enforce {
+    condition     = attrs.kms_key_id == local.approved_kms_key.id
+    error_message = "EBS volume must use the approved KMS key: ${local.approved_kms_key.id}"
+  }
 ```
 
 </CodeBlockConfig>
 
 ### Tests
 
-This test includes two mock resources: one that passes the policy and one that fails.
+This test demonstrates using the `data` block to mock a KMS key data source. It includes three test cases: one that passes both policies, one that fails because it's not encrypted, and one that fails because it uses the wrong KMS key.
 
 <CodeBlockConfig filename="tests/encrypted_ebs.policytest.hcl">
 
@@ -46,21 +60,41 @@ policytest {
   targets = ["../policies/encrypted_ebs.policy.hcl"]
 }
 
+data "aws_kms_key" "approved" {
+  attrs = {
+    key_id = "alias/approved-ebs-key"
+    id     = "arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012"
+    arn    = "arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012"
+  }
+}
+
 resource "aws_ebs_volume" "pass" {
   attrs = {
     availability_zone = "us-east-1a"
     size              = 10
     encrypted         = true
+    kms_key_id        = data.aws_kms_key.approved.id
   }
 }
 
-resource "aws_ebs_volume" "fail" {
+resource "aws_ebs_volume" "fail_not_encrypted" {
   expect_failure = true
-  
+
   attrs = {
     availability_zone = "us-east-1a"
     size              = 10
     encrypted         = false
+  }
+}
+
+resource "aws_ebs_volume" "fail_wrong_key" {
+  expect_failure = true
+
+  attrs = {
+    availability_zone = "us-east-1a"
+    size              = 10
+    encrypted         = true
+    kms_key_id        = "arn:aws:kms:us-east-1:123456789012:key/wrong-key-id"
   }
 }
 ```
@@ -82,13 +116,14 @@ Run the tests:
 $ tfpolicy test --policies=policies/encrypted_ebs.policy.hcl --tests=tests/encrypted_ebs.policytest.hcl
 # encrypted_ebs.policytest.hcl... running
 # resource.aws_ebs_volume.pass... pass
-# resource.aws_ebs_volume.fail... pass
+# resource.aws_ebs_volume.fail_not_encrypted... pass
+# resource.aws_ebs_volume.fail_wrong_key... pass
 # encrypted_ebs.policytest.hcl... pass
 ```
 
 ### Sample Terraform configuration
 
-The following Terraform configuration defines an EBS volume that would pass this policy, and one that would fail:
+The following Terraform configuration demonstrates EBS volumes that would pass and fail these policies:
 
 <CodeBlockConfig filename="main.tf">
 
@@ -107,18 +142,44 @@ provider "aws" {
   region = "us-west-2"
 }
 
+# KMS key for EBS encryption
+resource "aws_kms_key" "ebs" {
+  description             = "KMS key for EBS volume encryption"
+  deletion_window_in_days = 10
+}
+
+resource "aws_kms_alias" "ebs" {
+  name          = "alias/approved-ebs-key"
+  target_key_id = aws_kms_key.ebs.key_id
+}
+
+# Data source to retrieve the KMS key
+data "aws_kms_key" "approved" {
+  key_id = aws_kms_alias.ebs.name
+}
+
+# This volume would pass the policy (encrypted with approved key)
 resource "aws_ebs_volume" "pass" {
   availability_zone = "us-west-2a"
   size              = 10
   encrypted         = true
+  kms_key_id        = data.aws_kms_key.approved.id
 }
 
-resource "aws_ebs_volume" "fail" {
+# This volume would fail the policy (not encrypted)
+resource "aws_ebs_volume" "fail_not_encrypted" {
   availability_zone = "us-west-2b"
   size              = 10
   encrypted         = false
 }
 
+# This volume would fail the policy (encrypted but wrong key)
+resource "aws_ebs_volume" "fail_wrong_key" {
+  availability_zone = "us-west-2c"
+  size              = 10
+  encrypted         = true
+  # Using default AWS managed key instead of approved key
+}
 ```
 
 </CodeBlockConfig>
@@ -276,12 +337,12 @@ The policy ensures that VPC modules are sourced from an internal private registr
 module_policy "aws_vpc" "registry_check" {
   enforce {
     condition     = core::startswith(meta.source, "app.terraform.io/my-org/")
-    error_message = "The VPC module (${meta.address}) must be sourced from the internal private registry (app.terraform.io/my-org/)."
+    error_message = "The VPC module must be sourced from the internal private registry (app.terraform.io/my-org/)."
   }
   
   enforce {
     condition     = core::semverconstraint(meta.version, ">= 2.0.0")
-    error_message = "The VPC module (${meta.address}) must be version 2.0.0 or higher."
+    error_message = "The VPC module must be version 2.0.0 or higher."
   }
 }
 ```
@@ -709,7 +770,6 @@ package main
 import (
   "fmt"
   "net/netip"
-  "strings"
 
   "github.com/hashicorp/terraform-policy-plugin-framework/policy-plugin/plugins"
 )
