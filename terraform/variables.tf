@@ -1,3 +1,8 @@
+/**
+ * Copyright IBM Corp. 2024, 2026
+ * SPDX-License-Identifier: BUSL-1.1
+ */
+
 variable "app_name" {
   description = "Short display label for the application. Used to name Instana resources such as dashboards and alerting rules."
   type        = string
