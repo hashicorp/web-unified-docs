@@ -1,5 +1,5 @@
 /**
- * Copyright (c) HashiCorp, Inc.
+ * Copyright IBM Corp. 2024, 2026
  * SPDX-License-Identifier: BUSL-1.1
  */
 
@@ -14,6 +14,11 @@ export const getDocsPaths = async (
 ) => {
 	const paths = productSlugs
 		.map((productSlug: string) => {
+			// Internal products should not be included in the sitemap
+			if (PRODUCT_CONFIG[productSlug]?.internalProduct) {
+				return []
+			}
+
 			const latestProductMetadata = getProductVersionMetadata(
 				productSlug,
 				'latest',
@@ -24,13 +29,11 @@ export const getDocsPaths = async (
 				return []
 			}
 
-			const { version, releaseStage } = latestProductMetadata.value
+			const { version } = latestProductMetadata.value
 
 			let parsedVersion
 			if (!PRODUCT_CONFIG[productSlug].versionedDocs) {
 				parsedVersion = 'v0.0.x'
-			} else if (releaseStage !== 'stable') {
-				parsedVersion = `${version} (${releaseStage})`
 			} else {
 				parsedVersion = version
 			}

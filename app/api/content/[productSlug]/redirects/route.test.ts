@@ -1,11 +1,12 @@
 /**
- * Copyright (c) HashiCorp, Inc.
+ * Copyright IBM Corp. 2024, 2026
  * SPDX-License-Identifier: BUSL-1.1
  */
 
 import { expect, test, vi } from 'vitest'
 import { GET } from './route'
 
+import { ServedFrom } from '#api/types'
 import * as utilsFileModule from '#utils/file'
 import * as utilsContentVersionsModule from '#utils/contentVersions'
 import { mockRequest } from '#utils/mockRequest'
@@ -60,7 +61,10 @@ test("Return 404 if not redirect DOESN'T exists for `latest` on `productSlug`", 
 test('Return 200 and parse the jsonc into json if valid for UNVERSIONED product', async () => {
 	const readFileSpy = vi.spyOn(utilsFileModule, 'findFileWithMetadata')
 	readFileSpy.mockImplementation(() => {
-		return Promise.resolve({ ok: true, value: jsoncFixtureBefore })
+		return Promise.resolve({
+			ok: true,
+			value: { text: jsoncFixtureBefore, servedFrom: ServedFrom.CurrentBuild },
+		})
 	})
 
 	const productSlug = 'terraform-docs-common'
@@ -74,7 +78,10 @@ test('Return 200 and parse the jsonc into json if valid for UNVERSIONED product'
 test('Return 200 and parse the jsonc into json if valid for VERSIONED product', async () => {
 	const readFileSpy = vi.spyOn(utilsFileModule, 'findFileWithMetadata')
 	readFileSpy.mockImplementation(() => {
-		return Promise.resolve({ ok: true, value: jsoncFixtureBefore })
+		return Promise.resolve({
+			ok: true,
+			value: { text: jsoncFixtureBefore, servedFrom: ServedFrom.CurrentBuild },
+		})
 	})
 
 	const contentVersionsSpy = vi.spyOn(

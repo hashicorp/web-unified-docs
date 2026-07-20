@@ -1,8 +1,9 @@
 Please go to the `Preview` tab and select the appropriate template:
 
+* [Boundary](?expand=1&labels=Boundary&title=Boundary+Docs&template=boundary_pull_request_template.md)
 * [Consul](?expand=1&labels=Consul&title=Consul+Docs&template=consul_pull_request_template.md)
 * [HCP services](?expand=1&template=hcp_pull_request_template.md)
-* [Nomad](?expand=1&labels=Nomad&title=Nomad+Docs&template=nomad_pull_request_template.md)
+* [Nomad](?expand=1&labels=Nomad,Runtime&title=Nomad+Docs&template=nomad_pull_request_template.md)
 
 ### Terraform
 

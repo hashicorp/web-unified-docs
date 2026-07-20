@@ -17,6 +17,27 @@ Use redirects for fun and profit!
 
 ---
 
+## Background
+
+If you move an existing article in the documentation, you **must** add redirects. Otherwise, links break between versions and users cannot find the information they are looking for, even if it exists in the version they are viewing. Additionally, we also recommend replacing references to the previous URL with your new URL in your documentation text.
+
+If your product **is not** versioned (e.g., a cloud product), add **one** redirect:
+
+![Diagram showing a single path change and a single redirect](../images/single_redirect_diagram.png)
+
+The single redirect ensures any requests to the old URL properly re-route to the new URL. To learn more, refer to [Example redirects](#example-redirects).
+
+If your product **is** versioned, add **three** redirects to reroute requests to the appropriate path in each version:
+
+![Diagram showing three redirects for a versioned product move](../images/three_redirects_per_versioned_move.png)
+
+The three redirects cover the following use cases:
+1. Redirects the latest version URL, which has no version path (i.e., `/product/<path>`).
+1. Redirects any requests of the new path to the previous path in older versions (i.e., `/product/:old_version/<old_path>`).
+1. Redirects any requests from the old path to the new URL in versions where that new path exists (i.e., `/product/:new_version/<old_path>`).
+
+Refer to [Versioned redirects](#versioned-redirects) for a full example.
+
 ## Definitions
 
 - **Docset** - A collection of docs associated with a specific product and
@@ -38,7 +59,7 @@ Use redirects for fun and profit!
 
 - **Versioned redirects** - Redirect **unversioned URLs** that no longer exist
   under the containing docset to a different URL in another docset.
-  
+
   For example, updating the v1.20 redirect file to send requests for
   `path/upgrade-to-1.18` to a URL in the v1.18 docset
   (`vault/docs/v1.18.x/path/upgrade-to-1.18`).
@@ -49,12 +70,11 @@ Use redirects for fun and profit!
   use backfacing redirects to help the version picker find the right page across
   versions or keep URL formatting consistent in long-living pages that span
   docsets.
-  
+
   For example, versioned URLs for `updates/important-changes` in the current
   Vault docset (`/vault/docs/{version}/updates/important-changes`) redirect to
   appropriate URLs in older docsets based on the version slug in the requested
   URL.
-
 
 ## Redirect slugs
 
@@ -100,7 +120,7 @@ subpath.
 
 ## Path parameter definition
 
-> [!NOTE]  
+> [!NOTE]
 > If you are reading the raw Markdown, the table says `\|`, but the actual
 > character is `|`. GitHub requires an escape character when `|` appears in
 > a table for the page to render properly on github.com
@@ -263,6 +283,45 @@ Redirect any `/old/path/` path that starts with "hello" and ends with "goodbye":
   }
 ```
 
+### Versioned redirects
+
+In the following example, you want to update the URL `/terraform/state` to `/terraform/concepts/state` in Terraform v1.10.x and above. Meaning, you want to move `state.mdx` to a new `concepts` directory.
+
+![Diagram showing example of versioned redirects](../images/versioned_redirects_example.png)
+
+To properly cover the change to `terraform/concepts/state`, you need three redirects:
+1. A redirect for the latest version to map `/terraform/state` to the new
+   `/terraform/state/concepts` URL.
+1. A backward-facing redirect to map URLs for v1.9.x and below so users land on
+   the original URL: `/terraform/<v1.9.x_and_below>/state`.
+1. A forward-facing redirect to map URLs for v1.10.x and above so users land on
+   the new URL `/terraform/<v1.10.x_and_above>/concepts/state`.
+
+The following redirects handle all the situations as users change
+between content versions:
+
+```json
+// Latest version of the documentation with no version in the path
+{
+  "source": "/terraform/state",
+  "destination": "/terraform/concepts/state",
+  "permanent": true
+}
+
+// Back-facing redirect that reroutes to the old path in v1.9.x and below:
+{
+  "source": "/terraform/v:version(1\\.[0-9]\\.x)/concepts/state",
+  "destination": "/terraform/v:version/state",
+  "permanent": true
+}
+
+// Forward-facing redirect that redirects to the new path v1.10 and above:
+{
+  "source": "/terraform/v:version(v1\\.(?:1[0-9]|[2-9][0-9])\\.x)/state",
+  "destination": "/terraform/v:version/concepts/state",
+  "permanent": true
+}
+```
 
 ### Non-capture groups
 

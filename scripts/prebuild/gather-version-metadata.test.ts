@@ -1,5 +1,5 @@
 /**
- * Copyright (c) HashiCorp, Inc.
+ * Copyright IBM Corp. 2024, 2026
  * SPDX-License-Identifier: BUSL-1.1
  */
 
@@ -12,6 +12,7 @@ vi.mock('#productConfig.mjs', () => {
 		PRODUCT_CONFIG: {
 			'terraform-enterprise': { contentDir: 'docs', versionedDocs: true },
 			terraform: { contentDir: 'docs', versionedDocs: true },
+			vault: { contentDir: 'docs', versionedDocs: true },
 		},
 	}
 })
@@ -102,6 +103,23 @@ it('Support beta releases - support release candidate (rc)', async () => {
 		{
 			'./terraform-enterprise/v202401-2 (rc)/': null,
 			'./terraform-enterprise/v202401-1/': null,
+		},
+		'/content',
+	)
+
+	const result = await gatherVersionMetadata('/content')
+	expect(result).toStrictEqual(expected)
+})
+
+it('Single version with non-stable release stage is always isLatest', async () => {
+	const expected = {
+		'terraform-enterprise': [
+			{ version: 'v202401-1', releaseStage: 'beta', isLatest: true },
+		],
+	}
+	vol.fromJSON(
+		{
+			'./terraform-enterprise/v202401-1 (beta)/': null,
 		},
 		'/content',
 	)
@@ -227,6 +245,29 @@ it('handles mixed semver and non-semver versions', async () => {
 			'./terraform-enterprise/1.1.0/': null,
 			'./terraform-enterprise/v202507-01/': null,
 			'./terraform-enterprise/v202506-01/': null,
+		},
+		// default cwd
+		'/content',
+	)
+	const result = await gatherVersionMetadata('/content')
+	expect(result).toStrictEqual(expected)
+})
+
+it('handles short versions', async () => {
+	const expected = {
+		vault: [
+			{ version: 'v3.x', releaseStage: 'stable', isLatest: true },
+			{ version: 'v2.x', releaseStage: 'stable', isLatest: false },
+			{ version: 'v1.21.x', releaseStage: 'stable', isLatest: false },
+			{ version: 'v1.20.x', releaseStage: 'stable', isLatest: false },
+		],
+	}
+	vol.fromJSON(
+		{
+			'./vault/v3.x/': null,
+			'./vault/v2.x/': null,
+			'./vault/v1.21.x/': null,
+			'./vault/v1.20.x/': null,
 		},
 		// default cwd
 		'/content',

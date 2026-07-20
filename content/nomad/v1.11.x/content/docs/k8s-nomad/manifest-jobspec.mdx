@@ -1,0 +1,638 @@
+---
+layout: docs
+page_title: Turn a Kubernetes manifest into a Nomad job specification
+description: |-
+  Learn how to convert an existing Kubernetes application written in YAML
+  manifests to a Nomad jobspec written in HCL.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-02-17T15:31:03-08:00
+last_modified: 2026-02-23T21:48:47.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Turn a Kubernetes manifest into a Nomad job specification
+
+Workloads for Kubernetes and Nomad are both defined in declarative specification
+files. Kubernetes workload specification files are known as _manifests_, and
+you write them in YAML. Nomad workload specification files are known as job
+specifications or _jobspecs_, and you create them in HCL.
+
+This page uses an example application defined in Kubernetes manifests to guide
+you through the process of creating an equivalent Nomad jobspec.
+
+## Review an example Kubernetes application
+
+We adapted the following example application from the [Deploy a sample
+application on Linux guide in the AWS EKS
+documentation](https://docs.aws.amazon.com/eks/latest/userguide/sample-deployment.html).
+
+The application contains three NGINX containers, each listening on port 8080, as
+well as a service that listens on port 80 and forwards requests to the NGINX
+containers. The containers run on Linux nodes with `amd64` or `arm64`
+architectures. The application consists of a Deployment manifest and a Service
+manifest.
+
+<CodeBlockConfig filename="sample-app.yaml" hideClipboard>
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: eks-sample-linux-deployment
+  namespace: eks-sample-app
+  labels:
+    app: eks-sample-linux-app
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: eks-sample-linux-app
+  template:
+    metadata:
+      labels:
+        app: eks-sample-linux-app
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: kubernetes.io/arch
+                operator: In
+                values:
+                - amd64
+                - arm64
+      containers:
+      - name: nginx
+        image: public.ecr.aws/nginx/nginx:1.23
+        ports:
+        - name: http
+          containerPort: 8080
+        imagePullPolicy: IfNotPresent
+      nodeSelector:
+        kubernetes.io/os: linux
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: eks-sample-linux-service
+  namespace: eks-sample-app
+  labels:
+    app: eks-sample-linux-app
+spec:
+  selector:
+    app: eks-sample-linux-app
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8080
+```
+
+</CodeBlockConfig>
+
+## How to start a Nomad jobspec
+
+To start the conversion process, create a framework for the jobspec file that
+includes the job, group, and task blocks.
+
+<CodeBlockConfig filename="sample-app.nomad.acl">
+
+```hcl
+job "eks-sample-linux-deployment" {
+    
+  group "nginx-group" {
+
+    task "nginx" {
+      
+    }
+  }
+}
+```
+
+</CodeBlockConfig>
+
+The naming scheme in these examples use the same `eks-` prefixes as the original
+Kubernetes manifests to highlight equivalent configuration properties. In this
+instance, the name of the Nomad `job` resource is the same as the Kubernetes
+Deployment `name`.
+
+To deploy a set of NGINX containers, configure the `group` block. The `count`
+attribute instructs Nomad to create three identical containers, and the
+`network` block enables port `8080` and makes it dynamically available to the
+task configuration with the name `http`. Each container uses the image and
+configuration defined in the `config` block, and the `driver` attribute
+instructs Nomad to use the Docker runtime. The task configuration also uses the
+`http` port defined at the group level.
+
+<CodeBlockConfig filename="sample-app.nomad.acl" hideClipboard highlight="4,6-10,13-18">
+
+```hcl
+job "eks-sample-linux-deployment" {
+    
+  group "nginx-group" {
+    count = 3
+
+    network {
+      port "http" { 
+        to = 8080
+      }
+    }
+
+    task "nginx" {
+      driver = "docker"
+
+      config {
+        image = "public.ecr.aws/nginx/nginx:1.23"
+        ports = ["http"]
+      }
+    }
+  }
+}
+```
+
+</CodeBlockConfig>
+
+## Limit where the workloads run
+
+Nomad lets you set [constraints](/nomad/docs/job-specification/constraint)
+and [affinities](/nomad/docs/job-specification/affinity) at the task, group, or
+job level, depending on your workload requirements.
+
+The example Kubernetes application configures affinity to run during scheduling
+so that it runs on nodes with `amd64` or `arm64` architectures. The `linux`
+runtime is set in the container's `nodeSelector` configuration.
+
+In Nomad, add the affinity blocks to the `job` definition. Each affinity is set
+to a weight of 50 to give each architecture an equal chance of being selected.
+Then set the constraint in the `task` block.
+
+<CodeBlockConfig filename="sample-app.nomad.acl" hideClipboard highlight="2-12,26-29">
+
+```hcl
+job "eks-sample-linux-deployment" {
+  affinity {
+    attribute = "${attr.cpu.arch}"
+    value = "amd64"
+    weight = 50
+  }
+ 
+  affinity {
+    attribute = "${attr.cpu.arch}"
+    value = "arm64"
+    weight = 50
+  }
+    
+  group "nginx-group" {
+    count = 3
+
+    network {
+      port "http" { 
+        to = 8080
+      }
+    }
+
+    task "nginx" {
+      driver = "docker"
+
+      constraint {
+        attribute = "${attr.kernel.name}"
+        value = "linux"
+      }
+
+      config {
+        image = "public.ecr.aws/nginx/nginx:1.23"
+        ports = ["http"]
+      }
+    }
+  }
+}
+```
+
+</CodeBlockConfig>
+
+## Set job type
+
+Nomad supports service, system, batch, and system batch job types. This example
+application is a `service`. For more information on job types, refer to [Nomad
+job schedulers in the
+documentation](/nomad/docs/concepts/scheduling/schedulers).
+
+Set the job type and then add the job metadata, including namespaces and custom
+labels, to the `job` block. To use the namespace, you must [configure a
+namespace object](/nomad/docs/other-specifications/namespace) before you run the
+job.
+
+<CodeBlockConfig filename="sample-app.nomad.acl" hideClipboard highlight="2-8">
+
+```hcl
+job "eks-sample-linux-deployment" {
+  type = "service"
+  namespace = "eks-sample-app"
+  datacenters = ["*"]
+  meta {
+    app = "eks-sample-linux-app"
+  }
+  affinity {
+    attribute = "${attr.cpu.arch}"
+    value = "amd64"
+    weight = 50
+  }
+ 
+  affinity {
+    attribute = "${attr.cpu.arch}"
+    value = "arm64"
+    weight = 50
+  }
+    
+  group "nginx-group" {
+    count = 3
+
+    network {
+      port "http" { 
+        to = 8080
+      }
+    }
+
+    task "nginx" {
+      driver = "docker"
+
+      constraint {
+        attribute = "${attr.kernel.name}"
+        value = "linux"
+      }
+
+      config {
+        image = "public.ecr.aws/nginx/nginx:1.23"
+        ports = ["http"]
+      }
+    }
+  }
+}
+```
+
+</CodeBlockConfig>
+
+Finally, add the `service` block to the `group` configuration so that Nomad
+exposes all three containers.
+
+Nomad has built-in service discovery, so adding the service block at the group
+level means the service name can direct traffic to any of the three allocations
+defined in the group's task block. Adding the service block at the group level
+also allows you to use the [Consul service mesh
+integration](/nomad/docs/job-specification/connect).
+
+<CodeBlockConfig filename="sample-app.nomad.acl" highlight="30-34">
+
+```hcl
+job "eks-sample-linux-deployment" {
+  type = "service"
+  namespace = "eks-sample-app"
+  datacenters = ["*"]
+  meta {
+    app = "eks-sample-linux-app"
+  }
+  affinity {
+    attribute = "${attr.cpu.arch}"
+    value = "amd64"
+    weight = 50
+  }
+ 
+  affinity {
+    attribute = "${attr.cpu.arch}"
+    value = "arm64"
+    weight = 50
+  }
+    
+  group "nginx-group" {
+    count = 3
+
+    network {
+      port "http" { 
+        to = 8080
+      }
+    }
+
+    service {
+      name = "eks-sample-linux-service"
+      provider = "nomad"
+      port = "80"
+    }
+
+    task "nginx" {
+      driver = "docker"
+
+      constraint {
+        attribute = "${attr.kernel.name}"
+        value = "linux"
+      }
+
+      config {
+        image = "public.ecr.aws/nginx/nginx:1.23"
+        ports = ["http"]
+      }
+    }
+  }
+}
+```
+
+</CodeBlockConfig>
+
+The Nomad jobspec is now complete, and you can [run the job on
+Nomad](/nomad/docs/job-run) with the CLI or Web UI. If you need a test
+environment, launch a hosted session using HashiCorp's [Nomad
+sandbox](/nomad/sandbox).
+
+## Example code comparisons
+
+These configuration snippets represent portions of the manifest or jobspec. They
+are presented side-by-side in tabs for additional clarity.
+
+### Namespace
+
+<Tabs>
+<Tab heading="Kubernetes" group="k8s-components">
+
+<CodeBlockConfig hideClipboard>
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: eks-sample-app
+```
+
+</CodeBlockConfig>
+
+</Tab>
+<Tab heading="Nomad" group="nomad-components">
+
+<CodeBlockConfig hideClipboard>
+
+```hcl
+job "eks-sample-linux-deployment" {
+  namespace = "eks-sample-app"
+}
+```
+
+</CodeBlockConfig>
+
+</Tab>
+</Tabs>
+
+### Metadata
+
+Metadata includes the name of the deployment or job as well as user defined
+metadata.
+
+<Tabs>
+<Tab heading="Kubernetes" group="k8s-components">
+
+<CodeBlockConfig hideClipboard>
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: eks-sample-linux-deployment
+  namespace: eks-sample-app
+  labels:
+    app: eks-sample-linux-app
+```
+
+</CodeBlockConfig>
+
+</Tab>
+<Tab heading="Nomad" group="nomad-components">
+
+<CodeBlockConfig hideClipboard>
+
+```hcl
+job "eks-sample-linux-deployment" {
+  meta {
+    app = "eks-sample-linux-app"
+  }
+}
+```
+
+</CodeBlockConfig>
+
+</Tab>
+</Tabs>
+
+### Container specification and count
+
+<Tabs>
+<Tab heading="Kubernetes" group="k8s-components">
+
+<CodeBlockConfig hideClipboard>
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+
+spec:
+  replicas: 3
+  template:
+    spec:
+      containers:
+      - name: nginx
+        image: public.ecr.aws/nginx/nginx:1.23
+        ports:
+        - name: http
+          containerPort: 8080
+```
+
+</CodeBlockConfig>
+
+</Tab>
+<Tab heading="Nomad" group="nomad-components">
+
+<CodeBlockConfig hideClipboard>
+
+```hcl
+job "eks-sample-linux-deployment" {
+    
+  group "nginx-group" {
+    count = 3
+
+    task "nginx" {
+      driver = "docker"
+
+      config {
+        image = "public.ecr.aws/nginx/nginx:1.23"
+        ports = "80"
+      }
+    }
+  }
+}
+```
+
+</CodeBlockConfig>
+
+</Tab>
+</Tabs>
+
+### Affinity
+
+<Tabs>
+<Tab heading="Kubernetes" group="k8s-components">
+
+<CodeBlockConfig hideClipboard>
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+
+spec:
+  template:
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: kubernetes.io/arch
+                operator: In
+                values:
+                - amd64
+                - arm64
+```
+
+</CodeBlockConfig>
+
+</Tab>
+<Tab heading="Nomad" group="nomad-components">
+
+<CodeBlockConfig hideClipboard>
+
+```hcl
+job "eks-sample-linux-deployment" {
+  affinity {
+    attribute = "${attr.cpu.arch}"
+    value = "amd64"
+    weight = 50
+  }
+ 
+  affinity {
+    attribute = "${attr.cpu.arch}"
+    value = "arm64"
+    weight = 50
+  }
+}
+```
+
+</CodeBlockConfig>
+
+</Tab>
+</Tabs>
+
+### Node selector and constraint
+
+<Tabs>
+<Tab heading="Kubernetes" group="k8s-components">
+
+<CodeBlockConfig hideClipboard>
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+
+spec:
+  template:
+    spec:
+      nodeSelector:
+        kubernetes.io/os: linux
+```
+
+</CodeBlockConfig>
+
+</Tab>
+<Tab heading="Nomad" group="nomad-components">
+
+<CodeBlockConfig hideClipboard>
+
+```hcl
+job "eks-sample-linux-deployment" {
+    
+  group "nginx-group" {
+
+    task "nginx" {
+
+      constraint {
+        attribute = "${attr.kernel.name}"
+        value = "linux"
+      }
+    }
+  }
+}
+```
+
+</CodeBlockConfig>
+
+</Tab>
+</Tabs>
+
+### Service
+
+Note that Kubernetes defines a service in a separate configuration manifest that
+has the `kind` set to `Service`. The Nomad jobspec contains both the service and
+task definition.
+
+<Tabs>
+<Tab heading="Kubernetes" group="k8s-components">
+
+<CodeBlockConfig hideClipboard>
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: eks-sample-linux-service
+  namespace: eks-sample-app
+  labels:
+    app: eks-sample-linux-app
+spec:
+  selector:
+    app: eks-sample-linux-app
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8080
+```
+
+</CodeBlockConfig>
+
+</Tab>
+<Tab heading="Nomad" group="nomad-components">
+
+<CodeBlockConfig hideClipboard>
+
+```hcl
+job "eks-sample-linux-deployment" {
+    
+  group "nginx-group" {
+
+    service {
+      name = "eks-sample-linux-service"
+      provider = "nomad"
+      port = "80"
+    }
+  }
+}
+```
+
+</CodeBlockConfig>
+
+</Tab>
+</Tabs>
+
+## Next steps
+
+To continue learning about about Nomad jobs and integrations, check out the
+following resources:
+
+- [Use Nomad's Consul integration](/nomad/tutorials/integrate-consul) for more advanced service discovery
+- Learn about [Vault integration](/nomad/docs/secure/vault) and how to use dynamic secrets in your Nomad jobs
+- Learn how to use [Nomad Variables](/nomad/tutorials/variables) to store and retrieve configuration data in Nomad
+- Reference the [Nomad job specification](/nomad/docs/job-specification) to
+  learn about available blocks in the job specification

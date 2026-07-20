@@ -1,5 +1,5 @@
 /**
- * Copyright (c) HashiCorp, Inc.
+ * Copyright IBM Corp. 2024, 2026
  * SPDX-License-Identifier: BUSL-1.1
  */
 
@@ -25,6 +25,12 @@ describe('getVersionFromFilePath', () => {
 			'content/terraform-plugin-mux/v0.13.x/docs/plugin/mux/index.mdx'
 		const version = getVersionFromFilePath(filePath)
 		expect(version).toBe('v0.13.x')
+	})
+
+	test('should return the correct version for a two-part version in the file path', () => {
+		const filePath = 'content/vault/v2.x/docs/updates/change-tracker.mdx'
+		const version = getVersionFromFilePath(filePath)
+		expect(version).toBe('v2.x')
 	})
 
 	test('should return the correct version for a Terraform Enterprise version in the file path', () => {

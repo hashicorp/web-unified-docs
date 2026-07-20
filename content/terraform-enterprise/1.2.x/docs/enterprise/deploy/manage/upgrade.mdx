@@ -1,0 +1,287 @@
+---
+page_title: Upgrade Terraform Enterprise
+description: Learn how to upgrade Terraform Enterprise using Docker Compose and Helm to run new versions on Nomad, Kubernetes, OpenShift, Podman, or Docker.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-02-02T17:54:50Z
+last_modified: 2026-02-02T17:54:50Z
+# END AUTO GENERATED METADATA
+---
+
+# Upgrade Terraform Enterprise
+
+This topic describes how to upgrade Terraform Enterprise installations. 
+
+<Note>
+The upgrade sequence should first be executed in a test environment.
+</Note>
+
+## Introduction
+
+To upgrade Terraform Enterprise, follow the checklist for every environment, from test through production, and for each intermediate release that needs to be applied.
+
+### Planning checklist
+
+- [ ] Select a target version and confirm its compatibility with your environments
+- [ ] Identify pre-requisite intermediate releases
+- [ ] Schedule maintenance window
+- [ ] Capture configuration
+- [ ] Backup PostgreSQL, Redis, and object storage
+- [ ] Download the container images downloaded for each intermediate release
+- [ ] Define rollback criteria and rehearse the rollback procedure
+- [ ] Upgrade Terraform Enterprise
+- [ ] Notify stakeholders
+
+## Select a target version
+
+Complete the following tasks before you schedule downtime:
+
+1. **Confirm compatibility**: Identify the Terraform Enterprise version you plan to install. Compare the supported platforms and dependency versions in the [release tables](/terraform/enterprise/releases) with your current infrastructure. Review the release notes for the target version and every intermediate version for breaking changes, deprecations, and new requirements.
+
+ @include 'software-compatibility-report.mdx'
+
+ 1. **Map required releases**: Refer to the **Last required release** label on the target version page, for example, [Terraform Enterprise 1.2.x](/terraform/enterprise/releases/1.2.x), to determine which previous releases you must install first. Repeat this comparison for each required release until you reach your current running version. Document the sequence so you can stage artifacts for every intermediate release. See the [Example upgrade path](#example-upgrade-path) for a sample workflow.
+
+ 1. **Stage release artifacts**: Download the Terraform Enterprise container images for every release in your upgrade path. Import the images into internal registries or hosts that cannot reach the public registry so you can update configuration files without extending downtime. Prune unused local images or volumes to free capacity where needed.
+
+ 1. **Prepare the maintenance window**: Freeze automation that could start runs, notify stakeholders about the planned downtime, and document the rollback criteria you intend to follow if validation fails.
+
+### Example upgrade path
+
+The following scenario shows how to build an upgrade path from a monthly release to a milestone release:
+
+1. Your production environment runs Terraform Enterprise `v202401-1`.
+1. Your target version is Terraform Enterprise `1.1.0`.
+1. Visit the [Terraform Enterprise 1.1.x releases page](/terraform/enterprise/releases/1.1.x) and note that `1.1.0` lists `v202406-1` as the last required release.
+1. Visit the [Terraform Enterprise 2024 releases](/terraform/enterprise/releases/2024/v202406-1) page. `v202406-1` requires no earlier release, so your full upgrade sequence is `v202401-1` → `v202406-1` → `1.1.0`.
+1. Stage the images and release notes for each intermediate release. Use the planning checklist at the beginning of this topic to coordinate backups, notifications, and testing before you promote the upgrade to production.
+
+## Take Terraform Enterprise offline
+
+Perform the following tasks to pause workloads before you capture backups and apply the upgrade. Review the runtime-specific instructions in the tabs when you stop the application.
+
+1. Use the Terraform Enterprise CLI to stop any existing Terraform runs and prevent Terraform Enterprise from starting new operations. Draining nodes allows active runs to complete before blocking new work. Refer to [Gracefully stop work on a node](/terraform/enterprise/deploy/reference/cli#gracefully-stop-work-on-a-node) for instructions.
+
+1. If your deployment runs multiple `terraform-enterprise` nodes in active-active mode, scale down to a single node to ensure upgrade consistency. Refer to [Configure the operational mode](/terraform/enterprise/deploy/configuration/storage/configure-mode) for information about operational modes.
+
+   <Note>
+
+   The method for scaling down varies by runtime:
+   - **Kubernetes/Helm**: Set `replicaCount: 1` in your values file
+   - **Docker Compose**: Stop additional service instances or update the compose file
+   - **Nomad**: Update the job specification's `count` to 1
+   - **Podman**: Stop additional pods or containers
+
+   After the upgrade completes and you validate the application, scale back to your desired replica count.
+
+   </Note>
+
+1. If your deployment uses an autoscaling group to manage instances of Terraform Enterprise, disable any configured health checks that would trigger the autoscaling group to rotate Terraform Enterprise instances during an upgrade.
+
+   <Note>
+
+   This step applies to orchestrated environments (Kubernetes, Nomad, OpenShift) where the platform manages instance health and automatic replacement. Skip this step if you use Docker Compose or standalone Podman deployments.
+
+   </Note>
+
+1. Stop the Terraform Enterprise application.
+
+  <Tabs>
+    <Tab heading="Docker Compose" group="first">
+
+    Stop all running containers:
+
+    ```shell-session
+    $ docker compose down
+    ```
+
+    </Tab>
+    <Tab heading="Helm Chart" group="second">
+
+    Scale down the deployment by setting the replica count to zero in your `values.yaml` file:
+    
+    ```yaml
+    replicaCount: 0
+    ```
+
+    </Tab>
+    <Tab heading="Podman" group="third">
+
+    Stop the pod defined in your Kubernetes YAML:
+
+    ```shell-session
+    $ podman kube play --down <path_to_YAML_file>
+    ```
+
+    </Tab>
+    <Tab heading="Nomad" group="fourth">
+
+    Stop the Terraform Enterprise job:
+
+    ```shell-session
+    $ nomad job stop <tfe-job-name>
+    ```
+
+    </Tab>
+  </Tabs>
+
+  <Note>
+
+  OpenShift users should follow the instructions in the **Helm Chart** tab because OpenShift deployments use Helm for application management.
+
+  </Note>
+
+## Back up Terraform Enterprise
+
+Run backups while Terraform Enterprise remains offline so you capture a consistent state:
+
+- Snapshot external services, including PostgreSQL, object storage, and Redis.
+- Export application configuration files and environment variables that you may need during rollback.
+- Verify that the backups are valid and stored in a location that you can access quickly if you must revert the upgrade.
+
+Refer to [Backup and restore](/terraform/enterprise/deploy/manage/backup-restore) for detailed backup procedures.
+
+## Apply the upgrade
+
+After you capture backups, apply the target release. Use the artifacts you staged during planning so you can complete these steps within the maintenance window.
+
+1. Update your configuration to reference the staged Terraform Enterprise image for the target [release](/terraform/enterprise/releases): `images.releases.hashicorp.com/hashicorp/terraform-enterprise:x.y.z`.
+
+  <Tabs>
+    <Tab heading="Docker Compose" group="first">
+
+    Update the image tag in your `compose.yaml` file:
+
+    ```yaml
+      name: terraform-enterprise
+      services:
+        tfe:
+          image: images.releases.hashicorp.com/hashicorp/terraform-enterprise:<vYYYYMM-#>
+    ```
+
+    </Tab>
+    <Tab heading="Helm Chart" group="second">
+
+    Update your `values.yaml` file with the new image tag and restore the replica count:
+
+    ```yaml
+      replicaCount: 1
+      image:
+      repository: images.releases.hashicorp.com
+      name: hashicorp/terraform-enterprise
+      tag: <vYYYYMM-#>
+    ```
+
+    </Tab>
+    <Tab heading="Podman" group="third">
+
+    Update the image tag in your `kube.yaml` file:
+
+    ```yaml
+      spec:
+        image: "images.releases.hashicorp.com/hashicorp/terraform-enterprise:<vYYYYMM-#>"
+        name: "terraform-enterprise"
+    ```
+
+    </Tab>
+    <Tab heading="Nomad" group="fourth">
+
+    Update the image tag in your Nomad job specification file:
+
+    ```hcl
+      variable "tfe_image" {
+        description = "The TFE image to use"
+        type        = string
+        default     = "images.releases.hashicorp.com/hashicorp/terraform-enterprise:<vYYYYMM-#>"
+      }
+    ```
+
+    </Tab>
+  </Tabs>
+
+  <Tip>
+
+  If you did not preload the image during planning, run your runtime's pull command before you restart Terraform Enterprise to avoid delays. Examples include `docker compose pull`, `podman pull`, or `crictl pull` on Kubernetes nodes.
+
+  </Tip>
+
+1. Start the Terraform Enterprise application with the new image. Database migrations run automatically during startup and may take considerable time depending on your deployment size and the migrations required for the target release. The application remains unavailable until migrations finish.
+
+  <Tabs>
+    <Tab heading="Docker Compose" group="first">
+
+    Start the containers with the updated image:
+
+    ```shell-session
+    $ docker compose up --detach
+    ```
+
+    </Tab>
+    <Tab heading="Helm Chart" group="second">
+
+    Apply the updated configuration using Helm:
+
+    ```shell-session
+    $ helm -n <TFE_NAMESPACE> upgrade --values=<OVERRIDES_FILE> terraform-enterprise hashicorp/terraform-enterprise
+    ```
+
+    </Tab>
+    <Tab heading="Podman" group="third">
+
+    Start the pod with the updated configuration:
+
+    ```shell-session
+    $ podman kube play <path_to_YAML_file>
+    ```
+
+    </Tab>
+    <Tab heading="Nomad" group="fourth">
+
+    Deploy the updated job specification:
+
+    ```shell-session
+    $ nomad job run \
+      -var="tfe_image_username=$TFE_REGISTRY_USERNAME" \
+      -var="tfe_image_password=$TFE_REGISTRY_PASSWORD" \
+      <path-to-tfe-job-spec>
+    ```
+
+    </Tab>
+  </Tabs>
+
+1. If you performed the upgrade in a test environment, repeat this section for the production instance of Terraform Enterprise after you validate results.
+
+## Validate the upgrade
+
+After Terraform Enterprise starts on the new version, perform the following checks:
+
+1. **Verify startup checks passed**. Use the Terraform Enterprise CLI to trigger and review startup checks. Refer to [Trigger startup checks](/terraform/enterprise/deploy/reference/cli#trigger-startup-checks) for instructions on running the checks and [Startup checks reference](/terraform/enterprise/deploy/reference/startup-checks) for details about each check and common failure scenarios.
+
+1. **Check application health**. Query the health check endpoint to verify the application responds correctly. The endpoint returns `200 OK` when Terraform Enterprise operates normally. Refer to [Perform diagnostics](/terraform/enterprise/deploy/troubleshoot/perform-diagnostics#run-a-health-check) for additional information about the health check endpoint.
+
+   ```shell-session
+   $ curl https://<TFE_HOSTNAME>/_health_check
+   ```
+
+1. **Perform a test run**. Execute a test Terraform plan and apply in a non-production workspace to confirm core functionality.
+
+1. **Verify release-specific features**. Confirm that features or fixes from the target release appear as expected. Consult the release notes for validation steps.
+
+1. **Re-enable paused systems**. Restore automation, autoscaling configurations, and monitoring that you paused during the upgrade. For active-active deployments, scale back to your desired replica count.
+
+1. **Document the upgrade**. Record the upgrade path, any issues encountered, and resolution steps for future reference.
+
+### Troubleshoot validation failures
+
+If any validation step fails or the application does not stabilize:
+
+1. Pause automated traffic and notify stakeholders.
+1. Review application logs for migration errors or dependency mismatches. Refer to [Access the Terraform Enterprise CLI](/terraform/enterprise/deploy/manage/access-cli) for instructions on accessing logs in your environment. You can also download logs through the [Admin Console](/terraform/enterprise/deploy/manage/access-admin-console) or the [System API](/terraform/enterprise/api-docs/support-bundle).
+1. If the issue persists beyond your change window, initiate rollback:
+   1. Stop the Terraform Enterprise application.
+   1. Restore PostgreSQL from the pre-upgrade snapshot.
+   1. Restore object storage from the pre-upgrade snapshot.
+   1. Deploy the previous Terraform Enterprise image version.
+   1. Verify the application starts successfully.
+1. Contact [HashiCorp Support](https://support.hashicorp.com/hc/en-us) with collected logs, the upgrade path attempted, and error messages for assistance.
+
+If you encounter issues at any point, contact [HashiCorp Support](https://support.hashicorp.com/hc/en-us) with your upgrade plan, release sequence, and the relevant logs.

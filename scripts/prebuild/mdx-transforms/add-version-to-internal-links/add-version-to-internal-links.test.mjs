@@ -1,5 +1,5 @@
 /**
- * Copyright (c) HashiCorp, Inc.
+ * Copyright IBM Corp. 2024, 2026
  * SPDX-License-Identifier: BUSL-1.1
  */
 
@@ -329,6 +329,22 @@ describe('transformRewriteInternalLinks', () => {
 			entry,
 			versionMetadata,
 		)
+		expect(result).toBe(expectedOutput)
+	})
+
+	it('should not rewrite links if they already contain a two-part version', async () => {
+		const content = `[Link to versioned path](/terraform/language/v2.x/some-page)`
+		const entry = {
+			filePath: 'content/terraform/v1.8.x/docs/language/some-file.mdx',
+		}
+		const expectedOutput =
+			'[Link to versioned path](/terraform/language/v2.x/some-page)\n'
+		const result = await transformRewriteInternalLinks(
+			content,
+			entry,
+			versionMetadata,
+		)
+
 		expect(result).toBe(expectedOutput)
 	})
 

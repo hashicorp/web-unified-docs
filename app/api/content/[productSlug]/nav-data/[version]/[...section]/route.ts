@@ -1,5 +1,5 @@
 /**
- * Copyright (c) HashiCorp, Inc.
+ * Copyright IBM Corp. 2024, 2026
  * SPDX-License-Identifier: BUSL-1.1
  */
 
@@ -18,8 +18,11 @@ export type GetParams = VersionedProduct & {
 	 */
 	section: string[]
 }
-export async function GET(request: Request, { params }: { params: GetParams }) {
-	const { productSlug, version, section } = params
+export async function GET(
+	request: Request,
+	{ params }: { params: Promise<GetParams> },
+) {
+	const { productSlug, version, section } = await params
 	const productVersionResult = getProductVersionMetadata(productSlug, version)
 	if (!productVersionResult.ok) {
 		console.error(errorResultToString('API', productVersionResult))
@@ -46,7 +49,7 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 		return new Response('Not found', { status: 404 })
 	}
 
-	const fileData = readFileResult.value
+	const fileData = readFileResult.value.text
 	const navDataResult = parseJson(fileData)
 
 	if (!navDataResult.ok) {
@@ -54,5 +57,13 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 		return new Response('Not found', { status: 404 })
 	}
 
-	return Response.json({ result: { navData: navDataResult.value } })
+	return new Response(
+		JSON.stringify({ result: { navData: navDataResult.value } }),
+		{
+			headers: {
+				'content-type': 'application/json',
+				'served-from': readFileResult.value.servedFrom,
+			},
+		},
+	)
 }

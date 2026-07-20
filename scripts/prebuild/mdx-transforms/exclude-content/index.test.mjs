@@ -1,5 +1,5 @@
 /**
- * Copyright (c) HashiCorp, Inc.
+ * Copyright IBM Corp. 2024, 2026
  * SPDX-License-Identifier: BUSL-1.1
  */
 
@@ -144,6 +144,48 @@ This content should stay.
 <!-- END: Vault:=v1.21.x -->
 
 Other content.`)
+	})
+
+	it('should handle short versions correctly', async () => {
+		const markdown = `
+<!-- BEGIN: Vault:>=v2.x -->
+This should be removed.
+<!-- END: Vault:>=v2.x -->
+<!-- BEGIN: Vault:<=v2.x -->
+This should stay.
+<!-- END: Vault:<=v2.x -->
+Final content.
+`
+		const result = await runTransform(markdown, vaultOptions)
+
+		expect(result.trim()).toBe(`<!-- BEGIN: Vault:<=v2.x -->
+
+This should stay.
+
+<!-- END: Vault:<=v2.x -->
+
+Final content.`)
+	})
+
+	it('should handle double x versions correctly', async () => {
+		const markdown = `
+<!-- BEGIN: Vault:>=v2.x.x -->
+This should be removed.
+<!-- END: Vault:>=v2.x.x -->
+<!-- BEGIN: Vault:<=v2.x.x -->
+This should stay.
+<!-- END: Vault:<=v2.x.x -->
+Final content.
+`
+		const result = await runTransform(markdown, vaultOptions)
+
+		expect(result.trim()).toBe(`<!-- BEGIN: Vault:<=v2.x.x -->
+
+This should stay.
+
+<!-- END: Vault:<=v2.x.x -->
+
+Final content.`)
 	})
 })
 
@@ -363,7 +405,7 @@ This content should throw an error.
 `
 		await expect(async () => {
 			return await runTransform(markdown, vaultOptions)
-		}).rejects.toThrow('Invalid Vault directive: "invalid"')
+		}).rejects.toThrow('Invalid "Vault:invalid" directive')
 	})
 
 	it('should throw an error for unexpected END block', async () => {
