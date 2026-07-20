@@ -47,9 +47,9 @@ parameter authorization. Each authorization detail object in the
 | ----- | ---- | ----------- |
 | `type` | string | Must be `vault:path_access` to indicate a Vault path access constraint. |
 | `path` | string | The Vault path the constraint applies to. Supports exact path matching only. |
-| `capabilities` | array of strings | List of capabilities permitted for the path. |
+| `capabilities` | array of strings | List of capabilities permitted for the path. Valid values: `read`, `create`, `update`, `delete`, `list`, `sudo`, `patch`, `subscribe`, `recover`, `deny`. |
 
-The `capabilities` field uses the same capability values as [Vault ACL policies](/vault/docs/concepts/policies#capabilities), including `create`, `read`, `update`, `delete`, `list`, `sudo`, and `deny`. RAR capabilities work in conjunction with policy-level capabilities to determine final access permissions.
+The `capabilities` field uses the same capability values as [Vault ACL policies](/vault/docs/concepts/policies#capabilities). RAR capabilities work in conjunction with policy-level capabilities to determine final access permissions.
 
 ### Optional fields
 
@@ -105,6 +105,69 @@ RAR constraint:
 The RAR constraint blocks the `metadata` parameter even though the policy
 allows the parameter.
 
+## Templated paths
+
+RAR `path` fields support the same [identity template syntax](/vault/docs/concepts/policies#templated-policies)
+as ACL policy paths. When Vault evaluates an `authorization_details` claim, it resolves
+`{{...}}` placeholders in each `path` using the identity information for the authenticated entity identity.
+
+RAR paths support all template parameters available in ACL policies. Refer to the
+[templated policies parameter reference](/vault/docs/concepts/policies#parameters)
+for the full list.
+
+Be aware of the following considerations when using templates:
+- Vault returns a "permission denied" response when the rendered output of an
+  identity template includes wildcards (`+`) or globs (`*`).
+- Use IDs wherever possible. Each ID is unique and stable, whereas names can
+  be reused and change over time.
+
+The following `authorization_details` object uses the same
+`{{identity.entity.id}}` template you might use in an ACL policy to restrict
+the JWT to the KVv2 plugin path associated with the authenticated entity:
+
+```json
+{
+  "authorization_details": [
+    {
+      "type": "vault:path_access",
+      "path": "secret/data/users/{{identity.entity.id}}",
+      "capabilities": ["read"]
+    }
+  ]
+}
+```
+
+When Vault evaluates the authorization constraint, it replaces `{{identity.entity.id}}` with
+the actual entity ID (for example, `abc123`) and checks whether the request path
+`secret/data/users/abc123` is permitted. The ACL policy must independently allow
+the entity access to the target path for the request to succeed.
+
+
+### Unresolvable templates
+
+If Vault cannot resolve a template placeholder, it silently skips that `authorization_details`
+entry. If no other entries match the request, Vault denies the request with a
+`permission denied` error.
+
+The fact that Vault skips unmatched placeholders means you can include a templated constraint alongside a static fallback without causing an error when Vault cannot resolve the template. For example, in the following authorization constrain, Vault skips the first, unresolvable entry and evaluates the second entry normally:
+
+```json
+{
+  "authorization_details": [
+    {
+      "type": "vault:path_access",
+      "path": "secret/data/users/{{identity.entity.UNKNOWN}}",
+      "capabilities": ["read"]
+    },
+    {
+      "type": "vault:path_access",
+      "path": "secret/data/users/fallback",
+      "capabilities": ["read"]
+    }
+  ]
+}
+```
+
 ## Multiple RAR constraints
 
 A JWT can include multiple authorization detail objects in the
@@ -145,27 +208,45 @@ The JWT above allows:
 - Creating or updating at `pki/issue/my-role` (with `common_name` required)
 - Reading or listing from `secret/data/app-*` paths (except version 1)
 
+## Default behavior
+
+Vault enables RAR by default, and OAuth 2.0 tokens with `authorization_details` always honor the RAR authentication details.
+
+If the JWT does not contain an `authorization_details` claim, Vault rejects the request with an error indicating that the claim is required.
+
+We recommend using RAR for all agentic workflows to enable fine-grained authorization constraints.
+
 ## Making RAR optional
 
+While not recommended, making RAR optional can be useful during a migration period or when your identity provider does not support RAR.
+
 By default, Vault requires the `authorization_details` claim in OAuth JWTs used
-with the Agent Registry. Operators can make RAR optional in two ways:
+with the Agent Registry. You can make RAR optional in two ways, and can modify the
+settings at any time. The modified settings take effect on the next applicable
+request:
 
 1. **Per OAuth resource server profile**: Set `optional_authorization_details` to `true` on the
-   [OAuth resource server configuration](/vault/api-docs/system/config-oauth-resource-server)
+   [OAuth resource server configuration](/vault/api-docs/system/config-oauth-resource-server).
+   The OAuth server configuration applies to all AI agents authorized by that OAuth resource server.
 1. **Per agent registration**: Set `optional_authorization_details` to `true` on the
-   [Agent Registry record](/vault/api-docs/secret/agent-registry)
+   [Agent Registry record](/vault/api-docs/secret/agent-registry).
+   Configuring the agent registry record only affects the specific agent unless the corresponding OAuth resource server profile has `optional_authorization_details` set to `false`.
+
+Vault provides multiple configuration methods so you can:
+
+- Configure RAR as optional globally for all agents using a specific issuer
+  (set on the OAuth resource server profile).
+- Configure RAR as optional for specific agents while keeping it required for
+  others from the same issuer (set on individual agent registrations).
 
 When RAR is optional, Vault permits authentication without the
 `authorization_details` claim and uses only the entity's ACL policies for
 authorization.
 
-For more information about RAR enforcement modes and configuration options, see
-[RAR enforcement](/vault/docs/concepts/native-ai-agent-support/overview#rar-enforcement)
-in the AI agent support overview.
-
 ## Related resources
 
 - [AI agent support](/vault/docs/concepts/native-ai-agent-support/overview)
+- [Templated policies](/vault/docs/concepts/policies#templated-policies)
 - [Agent Registry API](/vault/api-docs/secret/agent-registry)
 - [OAuth Resource Server API](/vault/api-docs/system/config-oauth-resource-server)
 - [RFC 9396: OAuth 2.0 Rich Authorization Requests](https://datatracker.ietf.org/doc/html/rfc9396)
