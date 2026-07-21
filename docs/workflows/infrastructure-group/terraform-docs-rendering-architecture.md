@@ -11,7 +11,7 @@ The Terraform documentation at `developer.hashicorp.com/terraform` is produced b
 
 `web-unified-docs` is both a content repository and a running HTTP server. `dev-portal` treats it purely as a remote API (`UNIFIED_DOCS_API`) and never reads files directly.
 
----
+
 
 ## The 13 Terraform content directories
 
@@ -338,7 +338,11 @@ API slug: `terraform-policy` · Versioned: yes (semver, `v0.1.x` (beta))
 | `/terraform/mcp-server` | `content/terraform-mcp-server/<v>/` | `docs/mcp-server/` |
 | `/terraform/policy` | `content/terraform-policy/<v>/` | `docs/policy/` |
 
----
+## Add a new Terraform sub-product
+
+Refer to [Add a versioned docs set to
+developer.hashicorp.com](../add-versioned-docs.md) for complete workflow
+instructions.
 
 ## System architecture
 
@@ -789,8 +793,3 @@ graph TD
 
 ---
 
-## Adding a new Terraform sub-product
-
-Refer to [Add a versioned docs set to
-developer.hashicorp.com](../add-versioned-docs.md) for complete workflow
-instructions.
