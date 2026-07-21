@@ -1,6 +1,6 @@
 # Terraform docs rendering architecture
 
-> How `web-unified-docs` content directories become `developer.hashicorp.com/terraform` pages.
+> How `web-unified-docs` Terraform content directories become `developer.hashicorp.com/terraform` pages.
 
 ## Overview
 
@@ -15,7 +15,7 @@ The Terraform documentation at `developer.hashicorp.com/terraform` is produced b
 
 ## The 13 Terraform content directories
 
-The `content/` directory in `web-unified-docs` contains 13 subdirectories whose names begin with `terraform`. Each maps to a distinct entry in [`productConfig.mjs`](../productConfig.mjs). Together they compose all Terraform documentation on the developer portal.
+The `content/` directory in `web-unified-docs` contains 13 subdirectories whose names begin with `terraform`. Each maps to a distinct entry in [`productConfig.mjs`](web-unified-docs/productConfig.mjs). Together they compose all Terraform documentation on the developer portal.
 
 | Content directory | `productSlug` (API key) | URL base path(s) | Versioned? |
 |---|---|---|---|
@@ -35,7 +35,7 @@ The `content/` directory in `web-unified-docs` contains 13 subdirectories whose 
 
 All 13 content directories use `productSlug: 'terraform'` in
 `productConfig.mjs`, so they all end up under the `/terraform/` URL namespace in
-`dev-portal`. 
+`dev-portal`.
 
 The `productSlug` field in `productConfig.mjs` is the API routing key used by
 `web-unified-docs`. The `productSlug` in `src/data/terraform.json` inside
@@ -50,22 +50,21 @@ If you prefer to locate files manually or are creating a new page, use the
 following table to find the right directory. Each row describes what the
 directory contains, which URL paths it drives, and where to open a pull request.
 
-| Content directory | What it contains | Published at | PR reviewer |
-|---|---|---|---|
-| `content/terraform/` | Terraform language reference, CLI reference, internals, and intro | `/terraform/language`, `/terraform/cli`, `/terraform/internals`, `/terraform/intro` | `team-docs-packer-and-terraform` |
-| `content/terraform-docs-common/` | HCP Terraform docs, general Terraform docs, plugin overview pages, and public registry publishing docs | `/terraform/cloud-docs`, `/terraform/docs`, `/terraform/plugin` (overview), `/terraform/registry` | `team-docs-packer-and-terraform` |
-| `content/terraform-docs-agents/` | HCP Terraform Agents | `/terraform/cloud-docs/agents` | `team-docs-packer-and-terraform` |
-| `content/terraform-enterprise/` | Terraform Enterprise deployment, administration, upgrade instructions, and release notes | `/terraform/enterprise` | `team-docs-packer-and-terraform` |
-| `content/terraform-cdk/` | CDK for Terraform (CDKTF, deprecated) | `/terraform/cdktf` | `team-docs-packer-and-terraform` |
-| `content/terraform-plugin-framework/` | Plugin Framework reference docs | `/terraform/plugin/framework` | `team-docs-packer-and-terraform` |
-| `content/terraform-plugin-sdk/` | Plugin SDKv2 reference docs | `/terraform/plugin/sdkv2` | `team-docs-packer-and-terraform` |
-| `content/terraform-plugin-mux/` | Plugin muxing reference docs | `/terraform/plugin/mux` | `team-docs-packer-and-terraform` |
-| `content/terraform-plugin-log/` | Plugin logging reference docs | `/terraform/plugin/log` | `team-docs-packer-and-terraform` |
-| `content/terraform-plugin-testing/` | Plugin testing reference docs | `/terraform/plugin/testing` | `team-docs-packer-and-terraform` |
-| `content/terraform-migrate/` | `tf-migrate` CLI docs | `/terraform/migrate` | `team-docs-packer-and-terraform` |
-| `content/terraform-mcp-server/` | Terraform MCP Server docs | `/terraform/mcp-server` | `team-docs-packer-and-terraform` |
-| `content/terraform-policy/` | Terraform Policy docs | `/terraform/policy` | `team-docs-packer-and-terraform` |
-
+| Content directory | What it contains | Published at |
+|---|---|---|
+| `content/terraform/` | Terraform language reference, CLI reference, internals, and intro | `/terraform/language`, `/terraform/cli`, `/terraform/internals`, `/terraform/intro` | 
+| `content/terraform-docs-common/` | HCP Terraform docs, general Terraform docs, plugin overview pages, and public registry publishing docs | `/terraform/cloud-docs`, `/terraform/docs`, `/terraform/plugin` (overview), `/terraform/registry` |
+| `content/terraform-docs-agents/` | HCP Terraform Agents | `/terraform/cloud-docs/agents` |
+| `content/terraform-enterprise/` | Terraform Enterprise deployment, administration, upgrade instructions, and release notes | `/terraform/enterprise` |
+| `content/terraform-cdk/` | CDK for Terraform (CDKTF, deprecated) | `/terraform/cdktf` |
+| `content/terraform-plugin-framework/` | Plugin Framework reference docs | `/terraform/plugin/framework` |
+| `content/terraform-plugin-sdk/` | Plugin SDKv2 reference docs | `/terraform/plugin/sdkv2` |
+| `content/terraform-plugin-mux/` | Plugin muxing reference docs | `/terraform/plugin/mux` |
+| `content/terraform-plugin-log/` | Plugin logging reference docs | `/terraform/plugin/log` |
+| `content/terraform-plugin-testing/` | Plugin testing reference docs | `/terraform/plugin/testing` |
+| `content/terraform-migrate/` | `tf-migrate` CLI docs | `/terraform/migrate` |
+| `content/terraform-mcp-server/` | Terraform MCP Server docs | `/terraform/mcp-server` |
+| `content/terraform-policy/` | Terraform Policy docs | `/terraform/policy` |
 
 ### Directory layout convention
 
