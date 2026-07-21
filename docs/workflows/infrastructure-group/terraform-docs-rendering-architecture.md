@@ -400,7 +400,7 @@ graph TB
 
 ---
 
-## Phase 1: Prebuild pipeline (`web-unified-docs`)
+### Phase 1: Prebuild pipeline (`web-unified-docs`)
 
 Before the Next.js server starts, `npm run prebuild` runs [`scripts/prebuild/prebuild.mjs`](../../../scripts/prebuild/prebuild.mjs). This phase transforms raw MDX into the form the API serves.
 
@@ -415,7 +415,7 @@ flowchart TD
     G --> H["public/ directory ready\nfor Next.js static serving"]
 ```
 
-### MDX transforms in detail
+#### MDX transforms in detail
 
 Each `.mdx` file passes through a chain of remark plugins in [`scripts/prebuild/mdx-transforms/build-mdx-transforms.mjs`](../../../scripts/prebuild/mdx-transforms/build-mdx-transforms.mjs):
 
@@ -431,11 +431,11 @@ The two JSON prebuild artifacts (`versionMetadata.json`, `docsPathsAllVersions.j
 
 ---
 
-## Phase 2: Unified docs API (`web-unified-docs`)
+### Phase 2: Unified docs API (`web-unified-docs`)
 
 `web-unified-docs` is a Next.js App Router application. Its API routes under `app/api/` serve content to `dev-portal` over HTTP.
 
-### API surface
+#### API surface
 
 ```
 GET /api/supported-products
@@ -470,7 +470,7 @@ GET /api/content-versions?product=terraform&fullPath=doc%23language/index
     → Returns which versions contain a given document
 ```
 
-### File resolution logic (doc route)
+#### File resolution logic (doc route)
 
 For a request to `/api/content/terraform/doc/v1.14.x/language/index`, the route handler in [`app/api/content/[productSlug]/doc/[version]/[...docsPath]/route.ts`](../../../app/api/content/%5BproductSlug%5D/doc/%5Bversion%5D/%5B...docsPath%5D/route.ts) tries these two locations in order:
 
@@ -483,11 +483,11 @@ The `contentDir` value from `productConfig.mjs` (`docs` for `terraform`) provide
 
 ---
 
-## Phase 3: `dev-portal` static site generation
+### Phase 3: `dev-portal` static site generation
 
 `dev-portal` uses Next.js Pages Router with a thin-shell pattern: every `pages/**/*.tsx` file contains only a few lines that wire up `getStaticPaths`/`getStaticProps` and re-export the view component. All real logic lives in `src/views/`.
 
-### Terraform-specific wiring
+#### Terraform-specific wiring
 
 The entry point for `https://developer.hashicorp.com/terraform/docs/...` is
 `src/pages/terraform/docs/[...page].tsx` in the `dev-portal` project.
@@ -528,7 +528,7 @@ The `src/data/terraform.json` file in `dev-portal` defines all Terraform sub-sec
 
 When `productSlugForLoader` is absent, it defaults to the parent `slug` (`terraform`). The `navDataPrefix` override handles cases where the nav-data filename doesn't match the URL path (for example, `plugin-framework-nav-data.json` vs path `plugin/framework`).
 
-### `getStaticPaths` flow
+#### `getStaticPaths` flow
 
 ```mermaid
 sequenceDiagram
@@ -549,7 +549,7 @@ sequenceDiagram
     Server-->>Next: { paths, fallback: 'blocking' }
 ```
 
-### `getStaticProps` flow
+#### `getStaticProps` flow
 
 ```mermaid
 sequenceDiagram
@@ -586,9 +586,9 @@ sequenceDiagram
 
 ---
 
-## Key data structures
+### Key data structures
 
-### `versionMetadata.json` (prebuild artifact)
+#### `versionMetadata.json` (prebuild artifact)
 
 ```json
 {
@@ -605,7 +605,7 @@ sequenceDiagram
 }
 ```
 
-### `docsPathsAllVersions.json` (prebuild artifact)
+#### `docsPathsAllVersions.json` (prebuild artifact)
 
 ```json
 {
@@ -618,7 +618,7 @@ sequenceDiagram
 }
 ```
 
-### Nav data (for example, `language-nav-data.json`)
+#### Nav data (for example, `language-nav-data.json`)
 
 ```json
 [
@@ -630,7 +630,7 @@ sequenceDiagram
 ]
 ```
 
-### Doc API response
+#### Doc API response
 
 ```json
 {
@@ -648,7 +648,7 @@ sequenceDiagram
 
 ---
 
-## URL to file mapping
+### URL to file mapping
 
 For a request to `https://developer.hashicorp.com/terraform/language/resources/configure`:
 
@@ -686,7 +686,7 @@ public/content/terraform/v1.13.x/docs/language/resources/configure.mdx
 
 ---
 
-## Versioning model
+### Versioning model
 
 ```mermaid
 flowchart TD
@@ -711,7 +711,7 @@ the page exists.
 
 ---
 
-## Terraform Enterprise: special versioning
+### Terraform Enterprise: special versioning
 
 `terraform-enterprise` uses calendar-date version strings (`v202507-1`, `v202504-2`, and so on) rather than semver. `productConfig.mjs` provides a custom `semverCoerce` function that converts these to sortable semver for version ordering:
 
@@ -727,7 +727,7 @@ semverCoerce: (versionString) => {
 
 ---
 
-## Incremental builds
+### Incremental builds
 
 In production Vercel builds, the environment variable `INCREMENTAL_BUILD=true` activates a selective build mode:
 
@@ -739,7 +739,7 @@ A deployment that changes a single doc page skips re-transforming the remaining 
 
 ---
 
-## Component relationships summary
+### Component relationships summary
 
 ```mermaid
 graph TD
@@ -790,6 +790,3 @@ graph TD
     LDR --> RPM
     RPM --> DV
 ```
-
----
-
