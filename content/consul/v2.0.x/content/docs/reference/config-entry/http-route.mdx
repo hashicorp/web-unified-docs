@@ -38,6 +38,10 @@ The following list outlines field hierarchy, language-specific data types, and r
     - [`Namespace`](#rules-services-namespace): string <EnterpriseAlert inline />
     - [`Partition`](#rules-services-partition): string <EnterpriseAlert inline />
     - [`Weight`](#rules-services-weight): number | `1`
+    - [`Limits`](#rules-services-limits): map | none
+      - [`MaxConnections`](#rules-services-limits-maxconnections): number | none
+      - [`MaxPendingRequests`](#rules-services-limits-maxpendingrequests): number | none
+      - [`MaxConcurrentRequests`](#rules-services-limits-maxconcurrentrequests): number | none
     - [`Filters`](#rules-services-filters): map | no default
     - [`ResponseFilters`](#rules-services-responsefilters): map | no default
     - [`TLS`](#rules-services-tls): map | no default
@@ -171,6 +175,11 @@ Rules = [
         Namespace = "<enterprise: namespace of the service>"
         Partition = "<enterprise: partition of the service>"
         Weight = 1
+        Limits = {
+          MaxConnections = <number>
+          MaxPendingRequests = <number>
+          MaxConcurrentRequests = <number>
+        }
         Filters = {
           Headers = [
             {
@@ -375,6 +384,8 @@ Specifies the list of HTTP routing rules used to construct the route table.
 
 Specifies services the gateway routes matching requests to.
 
+When a rule has one service, Consul API Gateway evaluates the service's discovery chain. When the service uses a `service-router` to route requests to a `service-resolver` subset, Consul preserves the subset destination when it synthesizes the API gateway discovery chain. Consul combines the `http-route` match and service-router match, so requests must satisfy both sets of criteria to use the subset route.
+
 #### Values
 
 - Default: none
@@ -427,6 +438,51 @@ Specifies route-level JWT verification settings. These settings take precedence 
 
 - Default: none
 - Data type: map
+
+### `Rules[].Services[].Limits`
+
+Specifies upstream circuit-breaker limits for this routed destination service.
+
+These values override any gateway-level defaults configured in the parent [`api-gateway` configuration entry](/consul/docs/reference/config-entry/api-gateway#defaults). If the same upstream service is referenced by multiple routes or listeners attached to the same gateway, Consul applies the lowest non-zero value for each limit when generating the shared Envoy cluster.
+
+#### Values
+
+- Default: none. If unspecified, Consul uses the gateway-level default for the same field when available. Otherwise the proxy default applies.
+- Data type: Map that can contain the following fields:
+  - [`MaxConnections`](#rules-services-limits-maxconnections)
+  - [`MaxPendingRequests`](#rules-services-limits-maxpendingrequests)
+  - [`MaxConcurrentRequests`](#rules-services-limits-maxconcurrentrequests)
+
+### `Rules[].Services[].Limits.MaxConnections`
+
+Specifies the maximum number of upstream connections this routed service is allowed to establish.
+
+#### Values
+
+- Default: none. If unspecified, Consul uses [`Defaults.MaxConnections`](/consul/docs/reference/config-entry/api-gateway#defaults-maxconnections) when available.
+- Data type: Integer
+
+### `Rules[].Services[].Limits.MaxPendingRequests`
+
+Specifies the maximum number of requests that are allowed to queue while waiting to establish an upstream connection.
+
+The attached API gateway listener must use an L7 protocol such as `http`, `http2`, or `grpc` for this configuration to take effect.
+
+#### Values
+
+- Default: none. If unspecified, Consul uses [`Defaults.MaxPendingRequests`](/consul/docs/reference/config-entry/api-gateway#defaults-maxpendingrequests) when available.
+- Data type: Integer
+
+### `Rules[].Services[].Limits.MaxConcurrentRequests`
+
+Specifies the maximum number of concurrent upstream requests that are allowed at a single point in time.
+
+The attached API gateway listener must use an L7 protocol such as `http`, `http2`, or `grpc` for this configuration to take effect.
+
+#### Values
+
+- Default: none. If unspecified, Consul uses [`Defaults.MaxConcurrentRequests`](/consul/docs/reference/config-entry/api-gateway#defaults-maxconcurrentrequests) when available.
+- Data type: Integer
 
 ## Examples
 
@@ -521,3 +577,82 @@ rules = [
 
 </Tab>
 </Tabs>
+
+### Route to a service subset
+
+The following example creates `stable` and `canary` subsets for the `api` service. The `service-router` routes requests with the `x-version: canary` header to the `canary` subset. The `http-route` exposes the `api` service through `api-gateway`; Consul API Gateway applies the service-router rule when routing matching requests to the backend service.
+
+Create the service resolver:
+
+```hcl
+Kind          = "service-resolver"
+Name          = "api"
+DefaultSubset = "stable"
+Subsets = {
+  stable = {
+    Filter = "Service.Meta.version == stable"
+  }
+  canary = {
+    Filter = "Service.Meta.version == canary"
+  }
+}
+```
+
+Create the service router:
+
+```hcl
+Kind = "service-router"
+Name = "api"
+Routes = [
+  {
+    Match {
+      HTTP {
+        Header = [
+          {
+            Name  = "x-version"
+            Exact = "canary"
+          },
+        ]
+      }
+    }
+
+    Destination {
+      Service       = "api"
+      ServiceSubset = "canary"
+    }
+  },
+]
+```
+
+Create the HTTP route:
+
+```hcl
+Kind = "http-route"
+Name = "api-route"
+
+Rules = [
+  {
+    Matches = [
+      {
+        Path = {
+          Match = "prefix"
+          Value = "/api"
+        }
+      }
+    ]
+    Services = [
+      {
+        Name = "api"
+      }
+    ]
+  }
+]
+
+Parents = [
+  {
+    Kind        = "api-gateway"
+    Name        = "api-gateway"
+    SectionName = "http"
+  }
+]
+```
