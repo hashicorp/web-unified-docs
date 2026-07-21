@@ -15,7 +15,7 @@ The Terraform documentation at `developer.hashicorp.com/terraform` is produced b
 
 ## The 13 Terraform content directories
 
-The `content/` directory in `web-unified-docs` contains 13 subdirectories whose names begin with `terraform`. Each maps to a distinct entry in [`productConfig.mjs`](web-unified-docs/productConfig.mjs). Together they compose all Terraform documentation on the developer portal.
+The `content/` directory in `web-unified-docs` contains 13 subdirectories whose names begin with `terraform`. Each maps to a distinct entry in [`productConfig.mjs`](../../productConfig.mjs). Together they compose all Terraform documentation on the developer portal.
 
 | Content directory | `productSlug` (API key) | URL base path(s) | Versioned? |
 |---|---|---|---|
@@ -104,10 +104,11 @@ content/<repo>/<version>/docs/<file-path>.mdx
 ```
 
 > **How to read the table**
-> - **URL pattern**: the path segment after `developer.hashicorp.com/terraform/`, with optional version segment shown in `[brackets]`.
+> - **URL path**: the path segment after `developer.hashicorp.com/terraform/`, with optional version segment shown in `[brackets]`.
 > - **Source file path**: relative to the repo root; `<v>` is a placeholder for the current version directory (for example, `v1.14.x`).
 > - **Nav-data file**: the JSON file that drives the sidebar for this section.
-> - The **latest version** for each product is determined at prebuild by [`gather-version-metadata.mjs`](../scripts/prebuild/gather-version-metadata.mjs) and recorded in [`app/api/versionMetadata.json`](../app/api/versionMetadata.json).
+> - The **latest version** for each product is determined at prebuild by
+>   [`gather-version-metadata.mjs`](../../../scripts/prebuild/gather-version-metadata.mjs) and recorded in [`app/api/versionMetadata.json`](../../../app/api/versionMetadata.json).
 
 ### `content/terraform/`: CLI, language, internals, intro
 
@@ -185,7 +186,10 @@ API slug: `terraform-enterprise` · Versioned: yes (date-based, for example `v20
 **Example (versioned):** `https://developer.hashicorp.com/terraform/enterprise/v202504-1/deploy`
 → `content/terraform-enterprise/v202504-1/docs/enterprise/deploy/index.mdx`
 
-> Terraform Enterprise uses calendar-date versions (`v202507-1`) rather than semver. See [Terraform Enterprise: Special Versioning](#terraform-enterprise-special-versioning) for the custom sort logic.
+> Terraform Enterprise uses calendar-date versions (`v202507-1`) rather than
+> semver. Refer to [Terraform Enterprise: Special
+> Versioning](#terraform-enterprise-special-versioning) for the custom sort
+> logic.
 
 ---
 
@@ -394,7 +398,7 @@ graph TB
 
 ## Phase 1: Prebuild pipeline (`web-unified-docs`)
 
-Before the Next.js server starts, `npm run prebuild` runs [`scripts/prebuild/prebuild.mjs`](../scripts/prebuild/prebuild.mjs). This phase transforms raw MDX into the form the API serves.
+Before the Next.js server starts, `npm run prebuild` runs [`scripts/prebuild/prebuild.mjs`](../../../scripts/prebuild/prebuild.mjs). This phase transforms raw MDX into the form the API serves.
 
 ```mermaid
 flowchart TD
@@ -409,7 +413,7 @@ flowchart TD
 
 ### MDX transforms in detail
 
-Each `.mdx` file passes through a chain of remark plugins in [`scripts/prebuild/mdx-transforms/build-mdx-transforms.mjs`](../scripts/prebuild/mdx-transforms/build-mdx-transforms.mjs):
+Each `.mdx` file passes through a chain of remark plugins in [`scripts/prebuild/mdx-transforms/build-mdx-transforms.mjs`](../../../scripts/prebuild/mdx-transforms/build-mdx-transforms.mjs):
 
 | Plugin | Effect |
 |---|---|
@@ -464,7 +468,7 @@ GET /api/content-versions?product=terraform&fullPath=doc%23language/index
 
 ### File resolution logic (doc route)
 
-For a request to `/api/content/terraform/doc/v1.14.x/language/index`, the route handler in [`app/api/content/[productSlug]/doc/[version]/[...docsPath]/route.ts`](../app/api/content/%5BproductSlug%5D/doc/%5Bversion%5D/%5B...docsPath%5D/route.ts) tries these two locations in order:
+For a request to `/api/content/terraform/doc/v1.14.x/language/index`, the route handler in [`app/api/content/[productSlug]/doc/[version]/[...docsPath]/route.ts`](../../../app/api/content/%5BproductSlug%5D/doc/%5Bversion%5D/%5B...docsPath%5D/route.ts) tries these two locations in order:
 
 ```
 public/content/terraform/v1.14.x/docs/language/index.mdx   ← named file
@@ -481,7 +485,8 @@ The `contentDir` value from `productConfig.mjs` (`docs` for `terraform`) provide
 
 ### Terraform-specific wiring
 
-The entry point for `https://developer.hashicorp.com/terraform/docs/...` is [`src/pages/terraform/docs/[...page].tsx`](../dev-portal/src/pages/terraform/docs/%5B...page%5D.tsx):
+The entry point for `https://developer.hashicorp.com/terraform/docs/...` is
+`src/pages/terraform/docs/[...page].tsx` in the `dev-portal` project.
 
 ```typescript
 // src/pages/terraform/docs/[...page].tsx
@@ -786,33 +791,6 @@ graph TD
 
 ## Adding a new Terraform sub-product
 
-To add a new content area (for example, a hypothetical `terraform-stacks` section surfaced at `/terraform/stacks/`):
-
-1. **`web-unified-docs`**: add a directory `content/terraform-stacks/<version>/docs/` with MDX files and `content/terraform-stacks/<version>/data/stacks-nav-data.json`.
-2. **`web-unified-docs/productConfig.mjs`**: add an entry:
-   ```javascript
-   'terraform-stacks': {
-     assetDir: 'img',
-     basePaths: ['stacks'],
-     contentDir: 'docs',
-     dataDir: 'data',
-     navDataPath: 'stacks',
-     productSlug: 'terraform',
-     semverCoerce: semver.coerce,
-     versionedDocs: true,
-     websiteDir: 'website',
-   }
-   ```
-3. **`web-unified-docs`**: run `npm run compile-prebuild` to regenerate the compiled binaries.
-4. **`dev-portal/src/data/terraform.json`**: add to `rootDocsPaths`:
-   ```json
-   { "iconName": "docs", "name": "Stacks", "path": "stacks",
-     "productSlugForLoader": "terraform-stacks", "navDataPrefix": "stacks" }
-   ```
-5. **`dev-portal/src/pages/terraform/stacks/[...page].tsx`**: create the thin-shell page:
-   ```typescript
-   const { getStaticPaths, getStaticProps } =
-     getRootDocsPathGenerationFunctions('terraform', 'stacks')
-   export { getStaticProps, getStaticPaths }
-   export default DocsView
-   ```
+Refer to [Add a versioned docs set to
+developer.hashicorp.com](../add-versioned-docs.md) for complete workflow
+instructions.
