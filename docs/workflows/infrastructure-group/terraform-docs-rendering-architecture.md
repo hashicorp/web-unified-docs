@@ -1,4 +1,4 @@
-# Terraform Docs Rendering Architecture
+# Terraform docs rendering architecture
 
 > How `web-unified-docs` content directories become `developer.hashicorp.com/terraform` pages.
 
@@ -6,14 +6,14 @@
 
 The Terraform documentation at `developer.hashicorp.com/terraform` is produced by two cooperating Next.js applications:
 
-- **`web-unified-docs`** — the content store and unified docs API. It holds all versioned MDX content under `content/`, runs a prebuild pipeline to transform that content, and exposes a REST API that the frontend consumes.
-- **`dev-portal`** — the frontend. It calls `web-unified-docs` at build time (SSG) and at request time (ISR) to fetch content, nav trees, and version metadata, then renders them into HTML.
+- `web-unified-docs`: the content store and unified docs API. It holds all versioned MDX content under `content/`, runs a prebuild pipeline to transform that content, and exposes a REST API that the frontend consumes.
+- `dev-portal`: the frontend. It calls `web-unified-docs` at build time (SSG) and at request time (ISR) to fetch content, nav trees, and version metadata, then renders them into HTML.
 
-The key insight is that **`web-unified-docs` is both a content repository _and_ a running HTTP server**. `dev-portal` treats it purely as a remote API — `UNIFIED_DOCS_API` — and never reads files directly.
+`web-unified-docs` is both a content repository and a running HTTP server. `dev-portal` treats it purely as a remote API (`UNIFIED_DOCS_API`) and never reads files directly.
 
 ---
 
-## The 13 Terraform Content Directories
+## The 13 Terraform content directories
 
 The `content/` directory in `web-unified-docs` contains 13 subdirectories whose names begin with `terraform`. Each maps to a distinct entry in [`productConfig.mjs`](../productConfig.mjs). Together they compose all Terraform documentation on the developer portal.
 
@@ -22,7 +22,7 @@ The `content/` directory in `web-unified-docs` contains 13 subdirectories whose 
 | `content/terraform/` | `terraform` | `cli`, `internals`, `intro`, `language` | ✅ |
 | `content/terraform-docs-common/` | `terraform-docs-common` | `cloud-docs`, `docs`, `plugin`, `registry` | ❌ (always `v0.0.x`) |
 | `content/terraform-docs-agents/` | `terraform-docs-agents` | `cloud-docs/agents` | ✅ |
-| `content/terraform-enterprise/` | `terraform-enterprise` | `enterprise` | ✅ (date-versioned, e.g. `v202507-1`) |
+| `content/terraform-enterprise/` | `terraform-enterprise` | `enterprise` | ✅ (date-versioned, for example `v202507-1`) |
 | `content/terraform-cdk/` | `terraform-cdk` | `cdktf` | ✅ |
 | `content/terraform-plugin-framework/` | `terraform-plugin-framework` | `plugin/framework` | ✅ |
 | `content/terraform-plugin-sdk/` | `terraform-plugin-sdk` | `plugin/sdkv2` | ✅ |
@@ -33,7 +33,39 @@ The `content/` directory in `web-unified-docs` contains 13 subdirectories whose 
 | `content/terraform-mcp-server/` | `terraform-mcp-server` | `mcp-server` | ✅ |
 | `content/terraform-policy/` | `terraform-policy` | `policy` | ✅ |
 
-All 13 content directories use `productSlug: 'terraform'` in `productConfig.mjs`, so they all end up under the `/terraform/` URL namespace in `dev-portal`. The `productSlug` field in `productConfig.mjs` is the API routing key used by `web-unified-docs`; the `productSlug` in `src/data/terraform.json` inside `dev-portal` is the frontend product identifier. They are different concepts that happen to share the value `"terraform"` for the core Terraform repo.
+All 13 content directories use `productSlug: 'terraform'` in
+`productConfig.mjs`, so they all end up under the `/terraform/` URL namespace in
+`dev-portal`. 
+
+The `productSlug` field in `productConfig.mjs` is the API routing key used by
+`web-unified-docs`. The `productSlug` in `src/data/terraform.json` inside
+`dev-portal` is the frontend product identifier. They are different concepts
+that share the value `"terraform"` for the core Terraform repo.
+
+### Contribute to a content directory
+
+To find the source file for a page you want to update, click the **Edit this page on GitHub** button at the bottom of the published page. This navigates directly to the correct `.mdx` file in the repository.
+
+If you prefer to locate files manually or are creating a new page, use the
+following table to find the right directory. Each row describes what the
+directory contains, which URL paths it drives, and where to open a pull request.
+
+| Content directory | What it contains | Published at | PR reviewer |
+|---|---|---|---|
+| `content/terraform/` | Terraform language reference, CLI reference, internals, and intro | `/terraform/language`, `/terraform/cli`, `/terraform/internals`, `/terraform/intro` | `team-docs-packer-and-terraform` |
+| `content/terraform-docs-common/` | HCP Terraform docs, general Terraform docs, plugin overview pages, and public registry publishing docs | `/terraform/cloud-docs`, `/terraform/docs`, `/terraform/plugin` (overview), `/terraform/registry` | `team-docs-packer-and-terraform` |
+| `content/terraform-docs-agents/` | HCP Terraform Agents | `/terraform/cloud-docs/agents` | `team-docs-packer-and-terraform` |
+| `content/terraform-enterprise/` | Terraform Enterprise deployment, administration, upgrade instructions, and release notes | `/terraform/enterprise` | `team-docs-packer-and-terraform` |
+| `content/terraform-cdk/` | CDK for Terraform (CDKTF, deprecated) | `/terraform/cdktf` | `team-docs-packer-and-terraform` |
+| `content/terraform-plugin-framework/` | Plugin Framework reference docs | `/terraform/plugin/framework` | `team-docs-packer-and-terraform` |
+| `content/terraform-plugin-sdk/` | Plugin SDKv2 reference docs | `/terraform/plugin/sdkv2` | `team-docs-packer-and-terraform` |
+| `content/terraform-plugin-mux/` | Plugin muxing reference docs | `/terraform/plugin/mux` | `team-docs-packer-and-terraform` |
+| `content/terraform-plugin-log/` | Plugin logging reference docs | `/terraform/plugin/log` | `team-docs-packer-and-terraform` |
+| `content/terraform-plugin-testing/` | Plugin testing reference docs | `/terraform/plugin/testing` | `team-docs-packer-and-terraform` |
+| `content/terraform-migrate/` | `tf-migrate` CLI docs | `/terraform/migrate` | `team-docs-packer-and-terraform` |
+| `content/terraform-mcp-server/` | Terraform MCP Server docs | `/terraform/mcp-server` | `team-docs-packer-and-terraform` |
+| `content/terraform-policy/` | Terraform Policy docs | `/terraform/policy` | `team-docs-packer-and-terraform` |
+
 
 ### Directory layout convention
 
@@ -49,7 +81,7 @@ content/<repo-slug>/
     redirects.jsonc  # URL redirect rules
 ```
 
-Non-versioned products (e.g. `terraform-docs-common`) omit the version segment:
+Unversioned products, such as `terraform-docs-common`, omit the version segment.
 
 ```
 content/terraform-docs-common/
@@ -61,26 +93,26 @@ content/terraform-docs-common/
 
 ---
 
-## URL-to-File Reference
+## URL-to-file reference
 
 This section maps every published URL path under `developer.hashicorp.com/terraform/` to its source file location in `web-unified-docs/content/`. The formula for every mapping is:
 
 ```
 https://developer.hashicorp.com/terraform/<url-path>
-    ↓ resolved by dev-portal via productSlugForLoader
+    ↓ resolved by dev-portal through productSlugForLoader
 content/<repo>/<version>/docs/<file-path>.mdx
     (or <file-path>/index.mdx for directory index pages)
 ```
 
 > **How to read the table**
-> - **URL pattern** — the path segment after `developer.hashicorp.com/terraform/`, with optional version segment shown in `[brackets]`.
-> - **Source file path** — relative to the repo root; `<v>` is a placeholder for the current version directory (e.g. `v1.14.x`).
-> - **Nav-data file** — the JSON file that drives the sidebar for this section.
+> - **URL pattern**: the path segment after `developer.hashicorp.com/terraform/`, with optional version segment shown in `[brackets]`.
+> - **Source file path**: relative to the repo root; `<v>` is a placeholder for the current version directory (for example, `v1.14.x`).
+> - **Nav-data file**: the JSON file that drives the sidebar for this section.
 > - The **latest version** for each product is determined at prebuild by [`gather-version-metadata.mjs`](../scripts/prebuild/gather-version-metadata.mjs) and recorded in [`app/api/versionMetadata.json`](../app/api/versionMetadata.json).
 
-### `content/terraform/` — CLI, Language, Internals, Intro
+### `content/terraform/`: CLI, language, internals, intro
 
-API slug: `terraform` · Versioned: yes (semver, e.g. `v1.14.x`)
+API slug: `terraform` · Versioned: yes (semver, for example `v1.14.x`)
 
 | URL path | Source file | Nav-data file |
 |---|---|---|
@@ -97,7 +129,7 @@ API slug: `terraform` · Versioned: yes (semver, e.g. `v1.14.x`)
 
 ---
 
-### `content/terraform-docs-common/` — HCP Terraform docs, Plugin overview, Registry, General docs
+### `content/terraform-docs-common/`: HCP Terraform docs, plugin overview, registry, general docs
 
 API slug: `terraform-docs-common` · Versioned: **no** (always resolves to the single unversioned directory at `content/terraform-docs-common/`)
 
@@ -119,13 +151,17 @@ This directory holds content for four distinct URL sections. The file lives at t
 **Example:** `https://developer.hashicorp.com/terraform/plugin`
 → `content/terraform-docs-common/docs/plugin/index.mdx`
 
-> **Note on `/terraform/plugin` split:** The top-level `plugin/` overview pages (index, how-terraform-works, debugging, best-practices, etc.) live in `terraform-docs-common`. The versioned SDK-specific sub-sections (`plugin/framework`, `plugin/sdkv2`, `plugin/mux`, `plugin/log`, `plugin/testing`) each come from their own dedicated repository — see the sections below.
+> **Note:** The top-level `plugin/` overview pages (index, how-terraform-works,
+> debugging, best-practices, and similar pages) live in `terraform-docs-common`.
+> The versioned SDK-specific sub-sections (`plugin/framework`, `plugin/sdkv2`,
+> `plugin/mux`, `plugin/log`, `plugin/testing`) each come from their own
+> dedicated repository.
 
 ---
 
-### `content/terraform-docs-agents/` — HCP Terraform Agents
+### `content/terraform-docs-agents/`: HCP Terraform Agents
 
-API slug: `terraform-docs-agents` · Versioned: yes (semver, e.g. `v1.25.x`)
+API slug: `terraform-docs-agents` · Versioned: yes (semver, for example `v1.25.x`)
 
 | URL path | Source file | Nav-data file |
 |---|---|---|
@@ -136,9 +172,9 @@ API slug: `terraform-docs-agents` · Versioned: yes (semver, e.g. `v1.25.x`)
 
 ---
 
-### `content/terraform-enterprise/` — Terraform Enterprise
+### `content/terraform-enterprise/`: Terraform Enterprise
 
-API slug: `terraform-enterprise` · Versioned: yes (date-based, e.g. `v202507-1`)
+API slug: `terraform-enterprise` · Versioned: yes (date-based, for example `v202507-1`)
 
 | URL path | Source file | Nav-data file |
 |---|---|---|
@@ -154,9 +190,9 @@ API slug: `terraform-enterprise` · Versioned: yes (date-based, e.g. `v202507-1`
 
 ---
 
-### `content/terraform-cdk/` — CDK for Terraform
+### `content/terraform-cdk/`: CDK for Terraform
 
-API slug: `terraform-cdk` · Versioned: yes (semver, e.g. `v0.21.x`)
+API slug: `terraform-cdk` · Versioned: yes (semver, for example `v0.21.x`)
 
 | URL path | Source file | Nav-data file |
 |---|---|---|
@@ -167,9 +203,9 @@ API slug: `terraform-cdk` · Versioned: yes (semver, e.g. `v0.21.x`)
 
 ---
 
-### `content/terraform-plugin-framework/` — Plugin Framework
+### `content/terraform-plugin-framework/`: Plugin Framework
 
-API slug: `terraform-plugin-framework` · Versioned: yes (semver, e.g. `v1.16.x`)
+API slug: `terraform-plugin-framework` · Versioned: yes (semver, for example `v1.16.x`)
 
 | URL path | Source file | Nav-data file |
 |---|---|---|
@@ -180,9 +216,9 @@ API slug: `terraform-plugin-framework` · Versioned: yes (semver, e.g. `v1.16.x`
 
 ---
 
-### `content/terraform-plugin-sdk/` — Plugin SDKv2
+### `content/terraform-plugin-sdk/`: Plugin SDKv2
 
-API slug: `terraform-plugin-sdk` · Versioned: yes (semver, e.g. `v2.38.x`)
+API slug: `terraform-plugin-sdk` · Versioned: yes (semver, for example `v2.38.x`)
 
 | URL path | Source file | Nav-data file |
 |---|---|---|
@@ -193,9 +229,9 @@ API slug: `terraform-plugin-sdk` · Versioned: yes (semver, e.g. `v2.38.x`)
 
 ---
 
-### `content/terraform-plugin-mux/` — Plugin Mux (Combining and Translating)
+### `content/terraform-plugin-mux/`: Plugin Mux (combining and translating)
 
-API slug: `terraform-plugin-mux` · Versioned: yes (semver, e.g. `v0.21.x`)
+API slug: `terraform-plugin-mux` · Versioned: yes (semver, for example `v0.21.x`)
 
 | URL path | Source file | Nav-data file |
 |---|---|---|
@@ -206,9 +242,9 @@ API slug: `terraform-plugin-mux` · Versioned: yes (semver, e.g. `v0.21.x`)
 
 ---
 
-### `content/terraform-plugin-log/` — Plugin Logging
+### `content/terraform-plugin-log/`: Plugin Logging
 
-API slug: `terraform-plugin-log` · Versioned: yes (semver, e.g. `v0.9.x`)
+API slug: `terraform-plugin-log` · Versioned: yes (semver, for example `v0.9.x`)
 
 | URL path | Source file | Nav-data file |
 |---|---|---|
@@ -219,9 +255,9 @@ API slug: `terraform-plugin-log` · Versioned: yes (semver, e.g. `v0.9.x`)
 
 ---
 
-### `content/terraform-plugin-testing/` — Plugin Testing
+### `content/terraform-plugin-testing/`: Plugin Testing
 
-API slug: `terraform-plugin-testing` · Versioned: yes (semver, e.g. `v1.13.x`)
+API slug: `terraform-plugin-testing` · Versioned: yes (semver, for example `v1.13.x`)
 
 | URL path | Source file | Nav-data file |
 |---|---|---|
@@ -232,9 +268,9 @@ API slug: `terraform-plugin-testing` · Versioned: yes (semver, e.g. `v1.13.x`)
 
 ---
 
-### `content/terraform-migrate/` — Terraform Migrate
+### `content/terraform-migrate/`: Terraform Migrate
 
-API slug: `terraform-migrate` · Versioned: yes (semver, e.g. `v2.0.x`)
+API slug: `terraform-migrate` · Versioned: yes (semver, for example `v2.0.x`)
 
 | URL path | Source file | Nav-data file |
 |---|---|---|
@@ -245,9 +281,9 @@ API slug: `terraform-migrate` · Versioned: yes (semver, e.g. `v2.0.x`)
 
 ---
 
-### `content/terraform-mcp-server/` — Terraform MCP Server
+### `content/terraform-mcp-server/`: Terraform MCP Server
 
-API slug: `terraform-mcp-server` · Versioned: yes (semver, e.g. `v0.3.x`)
+API slug: `terraform-mcp-server` · Versioned: yes (semver, for example `v0.3.x`)
 
 | URL path | Source file | Nav-data file |
 |---|---|---|
@@ -258,9 +294,9 @@ API slug: `terraform-mcp-server` · Versioned: yes (semver, e.g. `v0.3.x`)
 
 ---
 
-### `content/terraform-policy/` — Terraform Policy
+### `content/terraform-policy/`: Terraform Policy
 
-API slug: `terraform-policy` · Versioned: yes (semver, currently `v0.1.x (beta)`)
+API slug: `terraform-policy` · Versioned: yes (semver, `v0.1.x` (beta))
 
 | URL path | Source file | Nav-data file |
 |---|---|---|
@@ -269,7 +305,9 @@ API slug: `terraform-policy` · Versioned: yes (semver, currently `v0.1.x (beta)
 **Example:** `https://developer.hashicorp.com/terraform/policy`
 → `content/terraform-policy/v0.1.x (beta)/docs/policy/index.mdx`
 
-> The version directory name `v0.1.x (beta)` includes the release stage in parentheses — the prebuild pipeline strips the ` (beta)` suffix when building the API version string, but the filesystem path retains it.
+> The version directory name `v0.1.x (beta)` includes the release stage in
+> parentheses. The prebuild pipeline strips the ` (beta)` suffix when building
+> the API version string, but the filesystem path retains it.
 
 ---
 
@@ -299,7 +337,7 @@ API slug: `terraform-policy` · Versioned: yes (semver, currently `v0.1.x (beta)
 
 ---
 
-## System Architecture
+## System architecture
 
 ```mermaid
 graph TB
@@ -355,9 +393,9 @@ graph TB
 
 ---
 
-## Phase 1 — Prebuild Pipeline (`web-unified-docs`)
+## Phase 1: Prebuild pipeline (`web-unified-docs`)
 
-Before the Next.js server starts, `npm run prebuild` runs [`scripts/prebuild/prebuild.mjs`](../scripts/prebuild/prebuild.mjs). This is the most important phase to understand — it transforms raw MDX into a form the API can serve.
+Before the Next.js server starts, `npm run prebuild` runs [`scripts/prebuild/prebuild.mjs`](../scripts/prebuild/prebuild.mjs). This phase transforms raw MDX into the form the API serves.
 
 ```mermaid
 flowchart TD
@@ -377,18 +415,18 @@ Each `.mdx` file passes through a chain of remark plugins in [`scripts/prebuild/
 | Plugin | Effect |
 |---|---|
 | `remarkIncludePartialsPlugin` | Inlines `@include 'path/to/partial.mdx'` statements. Supports `@global` alias pointing to `content/global/partials/`. |
-| `transformExcludeContent` | Strips blocks tagged with `<!-- BEGIN_TFC_ONLY -->` / `<!-- END_TFC_ONLY -->` etc. based on the product's `supportsExclusionDirectives` flag. |
+| `transformExcludeContent` | Strips blocks tagged with `<!-- BEGIN_TFC_ONLY -->` / `<!-- END_TFC_ONLY -->` based on the product's `supportsExclusionDirectives` flag. |
 | `paragraphCustomAlertsPlugin` | Converts `> [!NOTE]` / `> [!WARNING]` paragraph syntax into custom alert MDX components. |
 | `rewriteInternalRedirectsPlugin` | Rewrites internal links that have been redirected (according to the product's `redirects.jsonc`) so old URLs aren't dead in rendered content. |
 | `rewriteInternalLinksPlugin` | Prepends version prefix to intra-product links so versioned pages link to the correct version. |
 
-The two JSON prebuild artifacts (`versionMetadata.json`, `docsPathsAllVersions.json`) are imported directly by Next.js API route handlers at module load time — they are bundled into the server-side JavaScript, not fetched at request time.
+The two JSON prebuild artifacts (`versionMetadata.json`, `docsPathsAllVersions.json`) are imported directly by Next.js API route handlers at module load time. They are bundled into the server-side JavaScript, not fetched at request time.
 
 ---
 
-## Phase 2 — The Unified Docs API (`web-unified-docs`)
+## Phase 2: Unified docs API (`web-unified-docs`)
 
-`web-unified-docs` is a Next.js App Router application. Its API routes under `app/api/` serve content to `dev-portal` via HTTP.
+`web-unified-docs` is a Next.js App Router application. Its API routes under `app/api/` serve content to `dev-portal` over HTTP.
 
 ### API surface
 
@@ -405,7 +443,7 @@ GET /api/content/:productSlug/version-metadata
 GET /api/content/:productSlug/nav-data/:version/:section
     → { result: { navData: NavNode[] } }
     → Returns parsed JSON from public/content/<slug>/<version>/data/<section>-nav-data.json
-    → E.g. /api/content/terraform/nav-data/v1.14.x/language
+    → For example, /api/content/terraform/nav-data/v1.14.x/language
 
 GET /api/content/:productSlug/doc/:version/...docsPath
     → { result: { markdownSource, metadata, product, version, githubFile, created_at, ... } }
@@ -438,9 +476,9 @@ The `contentDir` value from `productConfig.mjs` (`docs` for `terraform`) provide
 
 ---
 
-## Phase 3 — `dev-portal` Static Site Generation
+## Phase 3: `dev-portal` static site generation
 
-`dev-portal` uses Next.js Pages Router with a "thin-shell" pattern: every `pages/**/*.tsx` file contains only a few lines that wire up `getStaticPaths`/`getStaticProps` and re-export the view component. All real logic lives in `src/views/`.
+`dev-portal` uses Next.js Pages Router with a thin-shell pattern: every `pages/**/*.tsx` file contains only a few lines that wire up `getStaticPaths`/`getStaticProps` and re-export the view component. All real logic lives in `src/views/`.
 
 ### Terraform-specific wiring
 
@@ -480,7 +518,7 @@ The `src/data/terraform.json` file in `dev-portal` defines all Terraform sub-sec
 }
 ```
 
-When `productSlugForLoader` is absent, it defaults to the parent `slug` (`terraform`). The `navDataPrefix` override handles cases where the nav-data filename doesn't match the URL path (e.g. `plugin-framework-nav-data.json` vs path `plugin/framework`).
+When `productSlugForLoader` is absent, it defaults to the parent `slug` (`terraform`). The `navDataPrefix` override handles cases where the nav-data filename doesn't match the URL path (for example, `plugin-framework-nav-data.json` vs path `plugin/framework`).
 
 ### `getStaticPaths` flow
 
@@ -540,7 +578,7 @@ sequenceDiagram
 
 ---
 
-## Key Data Structures
+## Key data structures
 
 ### `versionMetadata.json` (prebuild artifact)
 
@@ -572,7 +610,7 @@ sequenceDiagram
 }
 ```
 
-### Nav data (e.g. `language-nav-data.json`)
+### Nav data (for example, `language-nav-data.json`)
 
 ```json
 [
@@ -602,7 +640,7 @@ sequenceDiagram
 
 ---
 
-## URL to File Mapping
+## URL to file mapping
 
 For a request to `https://developer.hashicorp.com/terraform/language/resources/configure`:
 
@@ -640,7 +678,7 @@ public/content/terraform/v1.13.x/docs/language/resources/configure.mdx
 
 ---
 
-## Versioning Model
+## Versioning model
 
 ```mermaid
 flowchart TD
@@ -656,13 +694,18 @@ flowchart TD
     NOTE["'latest' is a virtual ref.\nWhen the URL contains no version,\nthe loader fetches 'latest',\nand the API resolves it to\nthe actual isLatest version."]
 ```
 
-Versions in URL paths are optional. When absent, `dev-portal` uses the virtual ref `latest` when calling the API. When present (e.g. `/terraform/v1.13.x/language/...`), that exact version is passed. The `content-versions` API endpoint is used by the version switcher to determine which versions contain a given page, so the switcher only shows versions where the page exists.
+Versions in URL paths are optional. When absent, `dev-portal` uses the virtual
+ref `latest` when calling the API. When present (for example,
+`/terraform/v1.13.x/language/...`), that exact version is passed. The version
+switcher uses the `content-versions` API endpoint to determine
+which versions contain a given page, so the switcher only shows versions where
+the page exists.
 
 ---
 
-## Terraform Enterprise: Special Versioning
+## Terraform Enterprise: special versioning
 
-`terraform-enterprise` uses calendar-date version strings (`v202507-1`, `v202504-2`, etc.) rather than semver. `productConfig.mjs` provides a custom `semverCoerce` function that converts these to sortable semver for version ordering:
+`terraform-enterprise` uses calendar-date version strings (`v202507-1`, `v202504-2`, and so on) rather than semver. `productConfig.mjs` provides a custom `semverCoerce` function that converts these to sortable semver for version ordering:
 
 ```javascript
 semverCoerce: (versionString) => {
@@ -676,7 +719,7 @@ semverCoerce: (versionString) => {
 
 ---
 
-## Incremental Builds
+## Incremental builds
 
 In production Vercel builds, the environment variable `INCREMENTAL_BUILD=true` activates a selective build mode:
 
@@ -684,11 +727,11 @@ In production Vercel builds, the environment variable `INCREMENTAL_BUILD=true` a
 2. MDX transforms and file copies only process files in `changedFiles.added | modified`.
 3. The API route's `fetchFile()` function reads `changedContentFiles.json` and routes each request to either the current build or `UNIFIED_DOCS_PROD_URL` (the live production instance), depending on whether the file was changed.
 
-This allows a deployment that changes a single doc page to avoid re-transforming all thousands of MDX files.
+A deployment that changes a single doc page skips re-transforming the remaining MDX files.
 
 ---
 
-## Component Relationships Summary
+## Component relationships summary
 
 ```mermaid
 graph TD
@@ -742,12 +785,12 @@ graph TD
 
 ---
 
-## Adding a New Terraform Sub-Product
+## Adding a new Terraform sub-product
 
-To add a new content area (e.g. a hypothetical `terraform-stacks` section surfaced at `/terraform/stacks/`):
+To add a new content area (for example, a hypothetical `terraform-stacks` section surfaced at `/terraform/stacks/`):
 
-1. **`web-unified-docs`** — add a directory `content/terraform-stacks/<version>/docs/` with MDX files and `content/terraform-stacks/<version>/data/stacks-nav-data.json`.
-2. **`web-unified-docs/productConfig.mjs`** — add an entry:
+1. **`web-unified-docs`**: add a directory `content/terraform-stacks/<version>/docs/` with MDX files and `content/terraform-stacks/<version>/data/stacks-nav-data.json`.
+2. **`web-unified-docs/productConfig.mjs`**: add an entry:
    ```javascript
    'terraform-stacks': {
      assetDir: 'img',
@@ -761,13 +804,13 @@ To add a new content area (e.g. a hypothetical `terraform-stacks` section surfac
      websiteDir: 'website',
    }
    ```
-3. **`web-unified-docs`** — run `npm run compile-prebuild` to regenerate the compiled binaries.
-4. **`dev-portal/src/data/terraform.json`** — add to `rootDocsPaths`:
+3. **`web-unified-docs`**: run `npm run compile-prebuild` to regenerate the compiled binaries.
+4. **`dev-portal/src/data/terraform.json`**: add to `rootDocsPaths`:
    ```json
    { "iconName": "docs", "name": "Stacks", "path": "stacks",
      "productSlugForLoader": "terraform-stacks", "navDataPrefix": "stacks" }
    ```
-5. **`dev-portal/src/pages/terraform/stacks/[...page].tsx`** — create the thin-shell page:
+5. **`dev-portal/src/pages/terraform/stacks/[...page].tsx`**: create the thin-shell page:
    ```typescript
    const { getStaticPaths, getStaticProps } =
      getRootDocsPathGenerationFunctions('terraform', 'stacks')
