@@ -183,8 +183,9 @@ async function main() {
 			throw new AggregateError(failedSubmissions)
 		}
 	} catch (error) {
-		if (process.env.VERCEL_ENV === 'production') {
-			throw error
+		const errors = error instanceof AggregateError ? error.errors : [error]
+		for (const err of errors) {
+			console.error(`Failed to submit build metrics: ${err.message}`)
 		}
 	}
 }
