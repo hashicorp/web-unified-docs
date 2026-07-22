@@ -78,6 +78,10 @@ describe.sequential('pre-commit hook metadata flow', () => {
 
 	function installHookStubs(): void {
 		writeRepoFile(
+			'.husky/pre-commit-base.sh',
+			fs.readFileSync(path.resolve('.husky/pre-commit-base.sh'), 'utf-8'),
+		)
+		writeRepoFile(
 			'scripts/add-date-metadata.mjs',
 			`import fs from 'node:fs'
 const filePath = process.argv[2]
