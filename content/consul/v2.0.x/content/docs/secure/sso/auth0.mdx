@@ -1,0 +1,319 @@
+---
+layout: docs
+page_title: Enable Auth0 single sign-on (SSO)
+description: >-
+    Use Auth0 as an OIDC auth method in Consul Enterprise for single sign-on (SSO).
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-03-31T20:46:25.000Z
+last_modified: 2026-03-31T20:46:25.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Enable Auth0 single sign-on (SSO)
+
+This page describes the process to configure Consul to use Auth0 for single sign-on (SSO) in the Consul UI and CLI using OpenID Connect (OIDC).
+
+OIDC authentication is useful when you want to deploy SSO widely in your organization and do not want to manage access with individual Consul ACL tokens. Once implemented, SSO will enable an interactive login procedure that can be initiated from either the Consul UI or the command line.
+
+## Introduction
+
+These instructions configure Auth0 as an identity provider so that Consul can use data in Auth0 to automatically grant permissions for Consul ACL. This approach unifies the user permissions grants without creating individual user tokens or manually defining individual permissions for different users.
+
+<Note title="Enterprise Only">
+
+ The single sign-on (SSO) functionality demonstrated here requires [Consul Enterprise](/consul/docs/enterprise#access-consul-enterprise).
+
+</Note>
+
+## Workflow
+
+1. [Configure an Auth0 application for Consul integration](#configure-auth0-application)
+1. [Create a rule to associate Auth0 users and Consul metadata](#create-auth0-users-and-metadata)
+1. [Enable the OIDC auth method for Consul](#enable-the-oidc-auth-method-for-consul)
+1. [Login with OIDC](#login-with-oidc)
+
+## Configure Auth0 application
+
+To configure an Auth0 application for Consul, you need your Consul agent address. This is the address that you use to access Consul, either in your web browser with the Consul UI or with your terminal through the CLI. To fetch the address, run the following command:
+
+```shell-session
+$ echo $CONSUL_HTTP_ADDR
+http://localhost:8500
+```
+
+In this case, the Consul agent address is `localhost`, running on the default
+port `8500`. Next, open the **Settings** tab in the Auth0 App dashboard
+(`https://manage.auth0.com/#/`).
+
+![Auth0 UI configure application to set callback URLs](/img/sso/auth0-configure-callback-urls.png)
+
+In the **Allowed Callback URLs** field, enter the following:
+
+```uri
+http://localhost:8550/oidc/callback,
+http://localhost:8500/ui/oidc/callback
+```
+
+The `http://localhost:8550/oidc/callback` address is for logins with the CLI `consul login -type=oidc -method=oidc` command.
+The `http://localhost:8500/ui/oidc/callback` is for logins with the Consul UI.
+
+<Note>
+
+ The callback URLs must be comma-separated.
+
+</Note>
+
+## Create Auth0 users and metadata
+
+In the Auth0 dashboard for your app, on the sidebar, select **Users & Roles > Users** and click on **Create User**.
+
+![Auth0 UI create user form](/img/sso/auth0-create-user.png)
+
+The data you associate with Auth0 may change depending on your existing configurations. This example uses `user_metadata` and `app_metadata` to configure Auth0.
+
+```json
+{
+  // user_metadata (end-user editable)
+  "first_name": "Kara",
+  "last_name": "Danvers"
+}
+```
+
+```json
+{
+  // app_metadata (end-user not editable)
+  "roles": ["engineering"]
+}
+```
+
+In Auth0, create a new rule with the following javascript function:
+
+```javascript
+function (user, context, callback) {
+   user.user_metadata = user.user_metadata || {};
+   user.app_metadata = user.app_metadata || {};
+
+   context.idToken['http://consul.internal/first_name'] = user.user_metadata.first_name || "";
+   context.idToken['http://consul.internal/last_name'] = user.user_metadata.last_name || "";
+   context.idToken['http://consul.internal/groups'] = user.app_metadata.roles || [];
+   callback(null, user, context);
+}
+```
+
+This functions associates your user and app metadata in Auth0 with Consul's data.
+
+This example uses `http://consul.internal` to namespace the claims that are not part of the [JWT RFC](https://tools.ietf.org/html/rfc7519). The namespace is arbitrary, but it must be unique. Auth0 enforces the presence of a unique namespace by discarding claims that are unnamespaced and not in the RFC.
+
+## Enable the OIDC auth method for Consul
+
+In order to enable the OIDC auth method for Consul, you need to create a new auth method configuration that points to your Auth0 application. The contents of this configuration file depend on which way you supply it to Consul. 
+
+You can either use the Consul CLI or the HTTP API. Note that the configuration file contents differ slightly depending on whether you use the CLI or the HTTP API.
+
+<Tabs>
+<Tab group="cli" heading="CLI command">
+
+<CodeBlockConfig filename="auth-method-config.json">
+
+```json
+{
+  "OIDCDiscoveryURL": "https://<AUTH0_DOMAIN>/",
+  "OIDCClientID": "<AUTH0_CLIENT_ID>",
+  "OIDCClientSecret": "<AUTH0_CLIENT_SECRET>",
+  "BoundAudiences": ["<AUTH0_CLIENT_ID>"],
+  "AllowedRedirectURIs": [
+    "http://localhost:8550/oidc/callback",
+    "http://localhost:8500/ui/oidc/callback"
+  ],
+  "ClaimMappings": {
+    "http://consul.internal/first_name": "first_name",
+    "http://consul.internal/last_name": "last_name"
+  },
+  "ListClaimMappings": {
+    "http://consul.internal/groups": "groups"
+  }
+}
+```
+
+</CodeBlockConfig>
+
+</Tab>
+<Tab group="api" heading="API call using cURL">
+
+<CodeBlockConfig filename="auth-method-config.json">
+
+```json
+{
+  "Name": "auth0",
+  "Type": "oidc",
+  "MaxTokenTTL": "5m",
+  "Config": {
+    "OIDCDiscoveryURL": "https://<AUTH0_DOMAIN>/",
+    "OIDCClientID": "<AUTH0_CLIENT_ID>",
+    "OIDCClientSecret": "<AUTH0_CLIENT_SECRET>",
+    "BoundAudiences": ["<AUTH0_CLIENT_ID>"],
+    "AllowedRedirectURIs": [
+      "http://localhost:8550/oidc/callback",
+      "http://localhost:8500/ui/oidc/callback"
+    ],
+    "ClaimMappings": {
+      "http://consul.internal/first_name": "first_name",
+      "http://consul.internal/last_name": "last_name"
+    },
+    "ListClaimMappings": {
+      "http://consul.internal/groups": "groups"
+    }
+  }
+}
+```
+
+</CodeBlockConfig>
+
+</Tab>
+</Tabs>
+
+The configuration file above contains variables that you need to replace with the values from your Auth0 application. Make sure you replace:
+
+- `<AUTH0_DOMAIN>`
+- `<AUTH0_CLIENT_ID>`
+- `<AUTH0_CLIENT_SECRET>`
+
+After you create the configuration file, apply it to Consul for the new auth method to take effect.
+
+<Tabs>
+<Tab group="cli" heading="CLI command">
+
+Apply the configuration using the `consul acl auth-method` CLI command.
+
+```shell-session
+$ consul acl auth-method create -type oidc \
+    -name auth0 -max-token-ttl=5m \
+    -config=@auth-method-config.json
+```
+
+</Tab>
+<Tab group="api" heading="API call using cURL">
+
+Apply the configuration using the `acl/auth-method` API endpoint. Note the use of the `CONSUL_HTTP_TOKEN` environment variable to authenticate the request.
+
+```shell-session
+$ curl -sL --header "x-consul-token: $CONSUL_HTTP_TOKEN" \
+   --request PUT http://localhost:8500/v1/acl/auth-method \
+   --data @auth-method-config.json
+```
+
+</Tab>
+</Tabs>
+
+After you configure the auth method, you can automate permissions grants to users. That way, Consul can bind attested identities to roles or services with no additional work beyond what is required to link the identity and the auth method. You can configure this behavior with Consul binding rules.
+
+### Grant role permissions with app metadata
+
+Next, create a Consul ACL role and token to associate with the Auth0 method. The following command creates an ACL role named `eng-ro` and assigns it to users in the Auth0 `engineering` group.
+
+```shell-session
+$ consul acl binding-rule create \
+       -method=auth0 \
+       -bind-type=role \
+       -bind-name=eng-ro \
+       -selector='engineering in list.groups'
+```
+
+```plaintext hideClipboard
+ID:           7c9d6445-75c0-7d93-bb5e-d56100590950
+Namespace:    default
+AuthMethod:   auth0
+Description:
+BindType:     role
+BindName:     eng-ro
+Selector:     engineering in list.groups
+```
+
+Every user with `engineering` in their `app_metadata` in Auth0 will be assigned the Consul `eng-ro` role. Check the following documentation for further information on [Consul ACL roles](consul/docs/secure/acl/role) and [Consul ACL policies](/consul/docs/secure/acl/policy).
+
+### Grant service permissions with user metadata
+
+If you want to grant users permissions to register services, use a service type binding. The following example grants users in the `engineering` group the ability to register a service using a token that is dynamically generated from their own name.
+
+```shell-session
+$ consul acl binding-rule create \
+       -method=auth0 \
+       -bind-type=service \
+       -bind-name='dev-${value.first_name}-${value.last_name}' \
+       -selector='engineering in list.groups'
+```
+
+```plaintext hideClipboard
+ID:           a5309527-f5e0-8034-0795-ed7a98b961d0
+Namespace:    default
+AuthMethod:   auth0
+Description:
+BindType:     service
+BindName:     dev-${value.first_name}-${value.last_name}
+Selector:     engineering in list.groups
+```
+
+## Login with OIDC
+
+After the configuration is complete, you can login to Consul using Auth0.
+
+<Tabs>
+<Tab heading="CLI">
+
+
+```shell-session
+$ consul login -method=auth0 -type=oidc -token-sink-file=dev.token
+```
+
+The command will redirect you to a browser page from which you can use the user credentials to login in Consul with SSO.
+
+When prompted, accept and authorize the Consul access to your Auth0 App.
+
+![Consul UI post login page showing Signed in via OIDC](/img/sso/consul-ui-oidc-signed-in.png)
+
+Your token secretID will be written to the `dev.token` sink file as a UUID.
+
+```plaintext hideClipboard
+f110aff6-4d5b-4563-80dd-4da6f74c1067
+```
+
+You can review the details of the token that was created with the Consul CLI.
+
+```shell-session
+$ consul acl token read -self -token-file=dev.token
+AccessorID:       cd887b52-263a-4ae2-8747-725b76d0a79f
+SecretID:         f110aff6-4d5b-4563-80dd-4da6f74c1067
+Namespace:        default
+Description:      token created via OIDC login
+Local:            true
+Auth Method:      auth0
+Create Time:      2020-04-28 15:00:49.790370772 -0500 CDT
+Roles:
+   7d3e3a66-8c0f-e528-944e-84df6b36a115 - eng-ro
+Service Identities:
+   dev-kara-danvers (Datacenters: all)
+```
+
+</Tab>
+
+
+<Tab heading="Consul UI">
+
+
+Navigate to your Consul UI and click on the _Log in_ button.
+
+![Consul UI login page sso Auth0](/img/sso/consul-ui-oidc-login-form.png)
+
+![Consul UI popup Auth0 login](/img/sso/consul-ui-popup-auth0-login.png)
+
+</Tab>
+</Tabs>
+
+
+Once login is successful, you can navigate to the Consul UI.
+
+![Consul UI post login services page](/img/sso/consul-ui-services-signed-in.png)
+
+## Next steps
+
+Complete [Secure Consul with Access Control Lists (ACLs)](/consul/tutorials/security/access-control-setup-production) to learn how to configure production ready ACLs for your Consul datacenter.

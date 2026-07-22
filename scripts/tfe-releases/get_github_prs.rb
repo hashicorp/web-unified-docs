@@ -2,7 +2,6 @@
 # Copyright IBM Corp. 2024, 2026
 # SPDX-License-Identifier: BUSL-1.1
 
-
 require 'octokit'
 
 #
@@ -64,9 +63,12 @@ class PullRequest
   end
 
   def get_prs_from_github(pr_numbers)
-    pr_numbers.reverse.map do |pr_number|
+    pr_numbers.reverse.filter_map do |pr_number|
       # puts "retrieving pr #{pr_number}"
       $github.pull_request(@repo.to_s, pr_number.to_i)
+    rescue Octokit::NotFound
+      STDERR.puts "WARNING: PR ##{pr_number} not found in #{@repo}, skipping"
+      nil
     end
   end
 end
