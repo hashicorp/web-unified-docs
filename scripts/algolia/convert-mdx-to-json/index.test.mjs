@@ -63,6 +63,27 @@ describe('getLatestProductVersionDirectories', () => {
 		])
 	})
 
+	test('should append the release stage suffix for products whose latest version is not stable', async () => {
+		readdir.mockResolvedValue([
+			{
+				name: 'terraform-policy',
+				isDirectory: () => {
+					return true
+				},
+			},
+		])
+
+		const result = await getLatestProductVersionDirectories('public/content', {
+			...versionMetadata,
+			'terraform-policy': [
+				{ version: 'v0.1.x', releaseStage: 'beta', isLatest: true },
+			],
+		})
+		expect(result).toEqual([
+			path.join('public/content', 'terraform-policy', 'v0.1.x (beta)'),
+		])
+	})
+
 	test('should return an empty array if readdir does not return an array', async () => {
 		readdir.mockResolvedValue(null)
 
