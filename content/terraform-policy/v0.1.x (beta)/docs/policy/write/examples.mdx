@@ -16,19 +16,34 @@ This page provides example policies written for the Terraform policy framework. 
 
 ## Encrypt EBS volumes
 
-This example demonstrates a basic resource policy that ensures all AWS EBS volumes are encrypted.
+This example demonstrates a resource policy that ensures all AWS EBS volumes are encrypted and use an approved KMS key. It also shows how to use `core::getdatasource()` to retrieve data sources and the `data` test block to mock them.
 
 ### Policy
 
-The policy checks that each `aws_ebs_volume` resource has the `encrypted` attribute set to `true`.
+The policy checks that each `aws_ebs_volume` resource is encrypted and uses the approved KMS key. It applies a policy block that enforces encryption. A second block uses a filter to enforce the KMS key requirement on encrypted volumes.
 
 <CodeBlockConfig filename="policies/encrypted_ebs.policy.hcl">
 
 ```hcl
+locals {
+  approved_kms_key = core::getdatasource("aws_kms_key", {
+    key_id = "alias/approved-ebs-key"
+  })
+}
+
 resource_policy "aws_ebs_volume" "ebs_encrypted" {
   enforce {
     condition     = attrs.encrypted == true
     error_message = "EBS volume is not encrypted"
+  }
+}
+
+resource_policy "aws_ebs_volume" "approved_kms_key" {
+  filter = attrs.encrypted == true
+
+  enforce {
+    condition     = attrs.kms_key_id == local.approved_kms_key.id
+    error_message = "EBS volume must use the approved KMS key: ${local.approved_kms_key.id}"
   }
 }
 ```
@@ -37,7 +52,7 @@ resource_policy "aws_ebs_volume" "ebs_encrypted" {
 
 ### Tests
 
-This test includes two mock resources: one that passes the policy and one that fails.
+This test demonstrates using the `data` block to mock a KMS key data source. It includes a test case that passes both policies, a case that fails when the data source isn't encrypted, and a case that fails when the data source uses the wrong KMS key.
 
 <CodeBlockConfig filename="tests/encrypted_ebs.policytest.hcl">
 
@@ -46,21 +61,41 @@ policytest {
   targets = ["../policies/encrypted_ebs.policy.hcl"]
 }
 
+data "aws_kms_key" "approved" {
+  attrs = {
+    key_id = "alias/approved-ebs-key"
+    id     = "arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012"
+    arn    = "arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012"
+  }
+}
+
 resource "aws_ebs_volume" "pass" {
   attrs = {
     availability_zone = "us-east-1a"
     size              = 10
     encrypted         = true
+    kms_key_id        = data.aws_kms_key.approved.id
   }
 }
 
-resource "aws_ebs_volume" "fail" {
+resource "aws_ebs_volume" "fail_not_encrypted" {
   expect_failure = true
-  
+
   attrs = {
     availability_zone = "us-east-1a"
     size              = 10
     encrypted         = false
+  }
+}
+
+resource "aws_ebs_volume" "fail_wrong_key" {
+  expect_failure = true
+
+  attrs = {
+    availability_zone = "us-east-1a"
+    size              = 10
+    encrypted         = true
+    kms_key_id        = "arn:aws:kms:us-east-1:123456789012:key/wrong-key-id"
   }
 }
 ```
@@ -82,13 +117,14 @@ Run the tests:
 $ tfpolicy test --policies=policies/encrypted_ebs.policy.hcl --tests=tests/encrypted_ebs.policytest.hcl
 # encrypted_ebs.policytest.hcl... running
 # resource.aws_ebs_volume.pass... pass
-# resource.aws_ebs_volume.fail... pass
+# resource.aws_ebs_volume.fail_not_encrypted... pass
+# resource.aws_ebs_volume.fail_wrong_key... pass
 # encrypted_ebs.policytest.hcl... pass
 ```
 
 ### Sample Terraform configuration
 
-The following Terraform configuration defines an EBS volume that would pass this policy, and one that would fail:
+The following Terraform configuration demonstrates EBS volumes that would pass and fail these policies:
 
 <CodeBlockConfig filename="main.tf">
 
@@ -107,36 +143,64 @@ provider "aws" {
   region = "us-west-2"
 }
 
+resource "aws_kms_key" "ebs" {
+  description             = "KMS key for EBS volume encryption"
+  deletion_window_in_days = 10
+}
+
+resource "aws_kms_alias" "ebs" {
+  name          = "alias/approved-ebs-key"
+  target_key_id = aws_kms_key.ebs.key_id
+}
+
+data "aws_kms_key" "approved" {
+  key_id = aws_kms_alias.ebs.name
+}
+
 resource "aws_ebs_volume" "pass" {
   availability_zone = "us-west-2a"
   size              = 10
   encrypted         = true
+  kms_key_id        = data.aws_kms_key.approved.id
 }
 
-resource "aws_ebs_volume" "fail" {
+resource "aws_ebs_volume" "fail_not_encrypted" {
   availability_zone = "us-west-2b"
   size              = 10
   encrypted         = false
 }
 
+resource "aws_ebs_volume" "fail_wrong_key" {
+  availability_zone = "us-west-2c"
+  size              = 10
+  encrypted         = true
+}
 ```
 
 </CodeBlockConfig>
 
 ## Ensure Azure managed disks have encryption settings
 
-This example demonstrates a resource policy that validates nested attributes in Azure managed disks.
+This example demonstrates a resource policy that validates nested attributes in Azure managed disks. It also shows how to use `input` blocks to parameterize policies, the `inputs` block in tests to set and override input values, and the `mandatory_overridable` enforcement level to allow exceptions with approval.
 
 ### Policy
 
-The policy ensures that every managed disk has encryption settings explicitly enabled.
+The policy uses an input variable to make the encryption requirement configurable. It sets `enforcement_level = "mandatory_overridable"` to allow users with appropriate permissions to override the policy when needed, such as for development environments.
 
 <CodeBlockConfig filename="policies/azure_disk_encryption.policy.hcl">
 
 ```hcl
+input "require_encryption" {
+  type        = bool
+  description = "Whether to require encryption on managed disks"
+  default     = true
+}
+
 resource_policy "azurerm_managed_disk" "require_encryption" {
+  enforcement_level = "mandatory_overridable"
+
   enforce {
-    condition     = attrs.encryption_settings_collection[0].enabled == true
+    condition     = !input.require_encryption || attrs.encryption_settings_collection[0].enabled == true
     error_message = "The managed disk must have encryption settings enabled."
   }
 }
@@ -146,7 +210,7 @@ resource_policy "azurerm_managed_disk" "require_encryption" {
 
 ### Tests
 
-This test includes both passing and failing test cases.
+This test demonstrates using the `inputs` block at both the file level and per test case. The top-level `inputs` block sets a default value that applies to all test cases, while individual test cases can override it.
 
 <CodeBlockConfig filename="tests/azure_disk_encryption.policytest.hcl">
 
@@ -155,11 +219,18 @@ policytest {
   targets = ["../policies/azure_disk_encryption.policy.hcl"]
 }
 
+inputs {
+  require_encryption = true
+}
+
 resource "azurerm_managed_disk" "pass" {
   attrs = {
-    name                 = "data-disk-01"
+    name                 = "test-disk"
+    location             = "East US"
+    resource_group_name  = "test-rg"
     storage_account_type = "Standard_LRS"
     create_option        = "Empty"
+    disk_size_gb         = 10
     encryption_settings_collection = [
       {
         enabled = true
@@ -170,11 +241,34 @@ resource "azurerm_managed_disk" "pass" {
 
 resource "azurerm_managed_disk" "fail" {
   expect_failure = true
-  
+
   attrs = {
-    name                 = "shadow-disk-02"
+    name                 = "test-disk-unencrypted"
+    location             = "East US"
+    resource_group_name  = "test-rg"
     storage_account_type = "Standard_LRS"
     create_option        = "Empty"
+    disk_size_gb         = 10
+    encryption_settings_collection = [
+      {
+        enabled = false
+      }
+    ]
+  }
+}
+
+resource "azurerm_managed_disk" "pass_no_requirement" {
+  inputs {
+    require_encryption = false
+  }
+
+  attrs = {
+    name                 = "test-disk-optional"
+    location             = "East US"
+    resource_group_name  = "test-rg"
+    storage_account_type = "Standard_LRS"
+    create_option        = "Empty"
+    disk_size_gb         = 10
     encryption_settings_collection = [
       {
         enabled = false
@@ -202,6 +296,7 @@ $ tfpolicy test --policies=policies/azure_disk_encryption.policy.hcl --tests=tes
 # azure_disk_encryption.policytest.hcl... running
 # resource.azurerm_managed_disk.pass... pass
 # resource.azurerm_managed_disk.fail... pass
+# resource.azurerm_managed_disk.pass_no_requirement... pass
 # azure_disk_encryption.policytest.hcl... pass
 ```
 
@@ -264,31 +359,33 @@ resource "azurerm_managed_disk" "fail" {
 
 ## Verify module sources and versions
 
-This example demonstrates a module policy that validates module sources and versions using meta-attributes and the semverconstraint function.
+This example demonstrates a module policy that validates module sources and versions using meta-attributes and the semverconstraint function. It uses `enforcement_level = "advisory"` to provide recommendations rather than hard requirements, allowing teams flexibility when needed.
 
 ### Policy
 
-The policy ensures that VPC modules are sourced from an internal private registry and use version 2.0.0 or higher.
+The policy recommends that VPC modules are sourced from an internal private registry and use version 2.0.0 or higher. Because the enforcement level is set to `advisory`, violations generate warnings but don't block operations.
 
 <CodeBlockConfig filename="policies/module_validation.policy.hcl">
 
 ```hcl
 module_policy "aws_vpc" "registry_check" {
+  enforcement_level = "advisory"
+
   enforce {
     condition     = core::startswith(meta.source, "app.terraform.io/my-org/")
-    error_message = "The VPC module (${meta.address}) must be sourced from the internal private registry (app.terraform.io/my-org/)."
+    error_message = "The VPC module should be sourced from the internal private registry (app.terraform.io/my-org/)."
   }
   
   enforce {
     condition     = core::semverconstraint(meta.version, ">= 2.0.0")
-    error_message = "The VPC module (${meta.address}) must be version 2.0.0 or higher."
+    error_message = "The VPC module should be version 2.0.0 or higher for latest features and security fixes."
   }
 }
 ```
 
 </CodeBlockConfig>
 
-### Test
+### Tests
 
 This test includes multiple failure scenarios to ensure the policy works correctly.
 
@@ -418,7 +515,7 @@ provider_policy "aws" "official_source" {
 
 </CodeBlockConfig>
 
-### Test
+### Tests
 
 This test includes multiple failure scenarios including untrusted sources.
 
@@ -498,7 +595,6 @@ provider "aws" {
 provider "aws" {
   alias  = "fail"
   region = "us-east-1"
-  source = "untrusted-registry.com/fake/aws"
 }
 
 resource "aws_s3_bucket" "example" {
@@ -511,16 +607,18 @@ resource "aws_s3_bucket" "example" {
 
 ## Validate CloudTrail S3 bucket ACL
 
-This example demonstrates using `core::getresources()` to validate relationships between resources.
+This example demonstrates using `core::getresources()` to validate relationships between resources. It uses `enforcement_level = "mandatory_overridable"` to allow exceptions for special cases, such as public audit trails, with appropriate approval.
 
 ### Policy
 
-The policy ensures that CloudTrail resources are associated with S3 buckets that have private ACLs.
+The policy ensures that CloudTrail resources are associated with S3 buckets that have private ACLs. Because the enforcement level is set to `mandatory_overridable`, users with appropriate permissions can override this requirement when necessary.
 
 <CodeBlockConfig filename="policies/cloudtrail_s3_acl.policy.hcl">
 
 ```hcl
 resource_policy "aws_cloudtrail" "must_be_private" {
+  enforcement_level = "mandatory_overridable"
+
   locals {
     s3_bucket_acl = core::getresources("aws_s3_bucket_acl", {
       bucket = attrs.s3_bucket_name
@@ -528,15 +626,15 @@ resource_policy "aws_cloudtrail" "must_be_private" {
   }
   
   enforce {
-    condition     = local.s3_bucket_acl[0].acl == "private"
-    error_message = "S3 bucket associated with CloudTrail is not private"
+    condition     = core::length(local.s3_bucket_acl) > 0 && local.s3_bucket_acl[0].acl == "private"
+    error_message = "CloudTrail S3 bucket must have a private ACL."
   }
 }
 ```
 
 </CodeBlockConfig>
 
-### Test
+### Tests
 
 This test demonstrates using the `skip` attribute to mock dependencies without evaluating policies against them.
 
@@ -578,7 +676,7 @@ resource "aws_cloudtrail" "fail" {
   
   attrs = {
     name           = "insecure-trail"
-    s3_bucket_name = aws_s3_bucket_acl.fail_bucket.bucket
+    s3_bucket_name = aws_s3_bucket_acl.fail.bucket
     enable_logging = true
   }
 }
@@ -710,7 +808,6 @@ package main
 import (
   "fmt"
   "net/netip"
-  "strings"
 
   "github.com/hashicorp/terraform-policy-plugin-framework/policy-plugin/plugins"
 )
@@ -718,10 +815,6 @@ import (
 func main() {
 	plugins.RegisterFunction("cidr_overlaps", cidr_overlaps)
   plugins.Serve()
-}
-
-func trim(value, prefix string) (string, error) {
-  return strings.TrimPrefix(value, prefix), nil
 }
 
 func cidr_overlaps(checkStr string, restrictedStrs []string) (bool, error) {
@@ -951,6 +1044,141 @@ resource "azurerm_network_interface" "fail" {
     name                          = "internal"
     subnet_id                     = azurerm_subnet.pass.id
     private_ip_address_allocation = "Dynamic"
+  }
+}
+```
+
+</CodeBlockConfig>
+
+## Prevent EBS volume downsizing
+
+This example demonstrates using the `operations` parameter to control when policies are enforced and the `prior_attrs` attribute to access previous resource state. This is useful for preventing dangerous operations such as reducing volume sizes that could cause data loss.
+
+### Policy
+
+The policy uses `operations = ["update"]` so that only enforce during update operations trigger evaluation. During evaluation, the policy compares `prior_attrs.size` with `attrs.size` to prevent downsizing.
+
+<CodeBlockConfig filename="policies/prevent_downsize.policy.hcl">
+
+```hcl
+resource_policy "aws_ebs_volume" "prevent_downsize" {
+  operations = ["update"]
+
+  enforce {
+    condition     = attrs.size >= prior_attrs.size
+    error_message = "EBS volume size cannot be reduced from ${prior_attrs.size}GB to ${attrs.size}GB. Downsizing volumes can cause data loss."
+  }
+}
+```
+
+</CodeBlockConfig>
+
+### Tests
+
+This test demonstrates using `prior_attrs` in test resources to simulate update operations. It includes a scenario that passes when the EBS volume increases in size, a scenario that passes when the volume remains the same size, and a scenario that fails when the volume size decreases.
+
+<CodeBlockConfig filename="tests/prevent_downsize.policytest.hcl">
+
+```hcl
+policytest {
+  targets = ["../policies/prevent_downsize.policy.hcl"]
+}
+
+resource "aws_ebs_volume" "pass_increase" {
+  prior_attrs = {
+    availability_zone = "us-east-1a"
+    size              = 50
+    encrypted         = true
+  }
+
+  attrs = {
+    availability_zone = "us-east-1a"
+    size              = 100
+    encrypted         = true
+  }
+}
+
+resource "aws_ebs_volume" "pass_same_size" {
+  prior_attrs = {
+    availability_zone = "us-east-1a"
+    size              = 50
+    encrypted         = true
+  }
+
+  attrs = {
+    availability_zone = "us-east-1a"
+    size              = 50
+    encrypted         = true
+  }
+}
+
+resource "aws_ebs_volume" "fail_decrease" {
+  expect_failure = true
+
+  prior_attrs = {
+    availability_zone = "us-east-1a"
+    size              = 100
+    encrypted         = true
+  }
+
+  attrs = {
+    availability_zone = "us-east-1a"
+    size              = 50
+    encrypted         = true
+  }
+}
+```
+
+</CodeBlockConfig>
+
+### Validate and test
+
+Validate the policy syntax:
+
+```shell-session
+$ tfpolicy validate --policies=policies/prevent_downsize.policy.hcl
+Success! Policy is valid.
+```
+
+Run the tests:
+
+```shell-session
+$ tfpolicy test --policies=policies/prevent_downsize.policy.hcl --tests=tests/prevent_downsize.policytest.hcl
+# prevent_downsize.policytest.hcl... running
+# resource.aws_ebs_volume.pass_increase... pass
+# resource.aws_ebs_volume.pass_same_size... pass
+# resource.aws_ebs_volume.fail_decrease... pass
+# prevent_downsize.policytest.hcl... pass
+```
+
+### Sample Terraform configuration
+
+The following Terraform configuration demonstrates an EBS volume that would be evaluated against this policy during updates:
+
+<CodeBlockConfig filename="main.tf">
+
+```hcl
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+  required_version = ">= 1.2.0"
+}
+
+provider "aws" {
+  region = "us-west-2"
+}
+
+resource "aws_ebs_volume" "example" {
+  availability_zone = "us-west-2a"
+  size              = 50
+  encrypted         = true
+
+  tags = {
+    Name = "example-volume"
   }
 }
 ```
