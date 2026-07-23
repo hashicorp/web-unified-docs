@@ -20,6 +20,9 @@ concurrency:
 
 jobs:
   repo-sync:
+    permissions:
+      contents: write
+      pull-requests: write
     if: github.repository == 'hashicorp/web-unified-docs-internal' || github.repository == 'hashicorp/web-unified-docs'
     name: Repo Sync
     runs-on: ubuntu-latest
@@ -43,6 +46,7 @@ jobs:
           github_token: ${{ secrets.CI_GITHUB_TOKEN }}
 
       - name: Ship pull request
+        id: ship_pr
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         with:
           github-token: ${{ secrets.CI_GITHUB_TOKEN }}
@@ -110,6 +114,8 @@ jobs:
               pull = response.data
               pull_number = pull.number
               console.log('Created pull request successfully', pull.html_url)
+              // Expose the PR URL so later steps (e.g. the failure span) can reference it
+              core.setOutput('pr_url', pull.html_url)
             } catch (err) {
               // Don't error/alert if there's no commits to sync
               // Don't throw if > 100 pulls with same head_sha issue
@@ -148,3 +154,24 @@ jobs:
             })
             // Error loud here, so no try/catch
             console.log('Merged the pull request successfully')
+      - name: Emit repo-sync failure span
+        if: failure()
+        run: |
+          npx hc-tools ./scripts/emit-otel-span-cli.mjs -- \
+            --span '{
+              "name": "repo-sync-failed",
+              "status": { "message": "repo-sync workflow failed" },
+              "attributes": {
+                "ci.workflow": "${{ github.workflow }}",
+                "ci.run_id": "${{ github.run_id }}",
+                "ci.run_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+                "git.ref": "${{ github.ref }}",
+                "pr.url": "${{ steps.ship_pr.outputs.pr_url }}"
+              }
+            }' \
+            --scope-name '.github/workflows/repo-sync.yml' \
+            --service-name 'web-unified-docs-hashicorp.vercel.app' \
+            --host-id 'github-actions'
+        env:
+          INSTANA_OTLP_ENDPOINT: ${{ secrets.INSTANA_OTLP_ENDPOINT }}
+          INSTANA_OTLP_AGENT_TOKEN: ${{ secrets.INSTANA_OTLP_AGENT_TOKEN }}
