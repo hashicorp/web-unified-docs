@@ -125,11 +125,30 @@ port "foo" {}
 
 When the task starts, it will be passed the following environment variables:
 
-- <tt>NOMAD_IP_foo</tt> - The IP to bind on for the given port label.
+- <tt>NOMAD_IP_foo</tt> - The host IP allocated for the given port label.
 - <tt>NOMAD_PORT_foo</tt> - The port value for the given port label.
 - <tt>NOMAD_ADDR_foo</tt> - A combined <tt>ip:port</tt> that can be used for convenience.
 
 The label of the port is just text - it has no special meaning to Nomad.
+
+#### Binding to `0.0.0.0`
+
+The `port` block allocates a host IP and port. It does **not** set the address
+your process listens on inside its network namespace. Configure that in the
+application:
+
+- Bind to `0.0.0.0` (all addresses in the namespace) with `NOMAD_PORT_<label>`
+  when the service should accept traffic forwarded on any interface.
+- Bind to `NOMAD_IP_<label>` when the service should listen only on the
+  scheduled host address.
+- Bind to `127.0.0.1` when the service should stay private to the allocation
+  (common with [`bridge`](#bridge) mode and a service mesh proxy).
+
+Host-side port publishing still uses the allocated host network address (see
+[`host_network`](#host_network)). For `bridge`/`cni/*` mode when the client has
+no custom [`host_network`](/nomad/docs/configuration/client#host_network)
+blocks, port-mapping rules match any destination address by default. Refer to
+[`bind_wildcard_default_host_network`](/nomad/docs/configuration/client#bind_wildcard_default_host_network).
 
 ## `dns` parameters
 
@@ -360,6 +379,11 @@ If `host_network` is set for a port, Nomad will schedule the allocations on a no
 If not set the "default" host network is used which is commonly the address with a default route associated with it.
 
 When Nomad does port mapping for ports with a defined `host_network`, the port mapping rule will use the host address as the destination address.
+Task drivers such as Docker publish the host port on that same address. There
+is no `port` attribute that publishes the host side as `0.0.0.0`; use a
+`host_network` that matches the interfaces you need, or rely on the default
+wildcard mapping behavior described in
+[Binding to `0.0.0.0`](#binding-to-0-0-0-0).
 
 ```hcl
 network {
@@ -375,6 +399,47 @@ network {
   port "admin" {
     to           = 9000
     host_network = "private"
+  }
+}
+```
+
+### Bind on all addresses
+
+This example maps a dynamic host port to container port `8080`. The process
+listens on `0.0.0.0:8080` inside the container so it accepts forwarded traffic:
+
+```hcl
+job "http" {
+  group "api" {
+    network {
+      port "http" {
+        to = 8080
+      }
+    }
+
+    task "server" {
+      driver = "docker"
+
+      config {
+        image = "hashicorp/http-echo:latest"
+        args  = ["-listen", ":8080", "-text", "hello"]
+        ports = ["http"]
+      }
+    }
+  }
+}
+```
+
+When the task uses the host network namespace and a dynamic port, pass
+`0.0.0.0` as the listen address and `NOMAD_PORT_<label>` as the port:
+
+```hcl
+task "server" {
+  driver = "raw_exec"
+
+  config {
+    command = "/usr/local/bin/my-service"
+    args    = ["--bind", "0.0.0.0", "--port", "${NOMAD_PORT_http}"]
   }
 }
 ```
