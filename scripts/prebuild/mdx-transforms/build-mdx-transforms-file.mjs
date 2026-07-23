@@ -21,6 +21,7 @@ import {
 } from './rewrite-internal-redirects/rewrite-internal-redirects.mjs'
 import { transformExcludeContent } from './exclude-content/index.mjs'
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
+import { copyInternalOnlyProductDocs } from '../copy-internal-only-product-docs.mjs'
 
 const CWD = process.cwd()
 const VERSION_METADATA_FILE = path.join(CWD, 'app/api/versionMetadata.json')
@@ -73,7 +74,22 @@ export async function buildFileMdxTransforms(filePath) {
 	const versionMetadata = fs.readFileSync(VERSION_METADATA_FILE, 'utf-8')
 	const serializedVersionMetadata = JSON.parse(versionMetadata)
 	console.log(`🪄 Running MDX transform on ${filePath}...`)
-	const result = await applyFileMdxTransforms(entry, serializedVersionMetadata)
+	const result = await applyFileMdxTransforms(
+		entry,
+		serializedVersionMetadata,
+		targetDir,
+	)
+
+	// After transforming the file, if the file's product is an internal product,
+	// copy internal-only product docs and assets to `public/content` and `public/assets`
+	// for their corresponding products based on version-config.json imports
+	if (PRODUCT_CONFIG[repoSlug]?.internalProduct) {
+		await copyInternalOnlyProductDocs(
+			targetDir,
+			outputDir,
+			path.join(CWD, 'public', 'assets'),
+		)
+	}
 	if (result.error) {
 		console.error(`❗ Encountered an error: ${result.error}`)
 	} else {
@@ -94,7 +110,11 @@ export async function buildFileMdxTransforms(filePath) {
  * @param {string} entry.outPath
  * @return {object} { error: string | null }
  */
-export async function applyFileMdxTransforms(entry, versionMetadata = {}) {
+export async function applyFileMdxTransforms(
+	entry,
+	versionMetadata = {},
+	targetDir,
+) {
 	try {
 		const { filePath, partialsDir, outPath, version, redirectsDir } = entry
 		const redirects = await loadRedirects(version, redirectsDir)
@@ -112,7 +132,7 @@ export async function applyFileMdxTransforms(entry, versionMetadata = {}) {
 			.use(remarkMdx)
 			// Process partials first, then content exclusion
 			// This ensures exclusion directives in global
-			.use(remarkIncludePartialsPlugin, { partialsDir, filePath })
+			.use(remarkIncludePartialsPlugin, { partialsDir, targetDir, filePath })
 
 		// Make sure the content exclusion process skips looking through
 		// the global partial filepath (it should only be processed once the global
