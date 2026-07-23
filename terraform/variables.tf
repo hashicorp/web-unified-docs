@@ -52,8 +52,8 @@ variable "github_repository" {
 # -------------------------
 # Vercel
 # -------------------------
-variable "vercel_team_slug" {
-  description = "Vercel team slug (the part after vercel.com/ in your team URL)."
+variable "vercel_team_id" {
+  description = "Team ID of the \"hashicorp\" team"
   type        = string
 }
 

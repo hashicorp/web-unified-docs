@@ -22,7 +22,7 @@ resource "vercel_project_environment_variable" "this" {
   for_each = local.environment
 
   project_id = var.vercel_project_id
-  team_id    = var.vercel_team_slug
+  team_id    = var.vercel_team_id
   key        = each.value.client_visible && !startswith(each.key, "NEXT_PUBLIC_") ? format("NEXT_PUBLIC_%s", each.key) : each.key
   value      = each.value.value
   target     = coalesce(try(each.value.targets, null), ["production"])
