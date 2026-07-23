@@ -48,3 +48,16 @@ variable "github_repository" {
   description = "Canonical name of the GitHub repository to manage."
   type        = string
 }
+
+# -------------------------
+# Vercel
+# -------------------------
+variable "vercel_team_id" {
+  description = "Team ID of the \"hashicorp\" team"
+  type        = string
+}
+
+variable "vercel_project_id" {
+  description = "Vercel project ID. Find it in Project Settings → General."
+  type        = string
+}
