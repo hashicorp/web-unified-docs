@@ -15,6 +15,10 @@ terraform {
       source  = "integrations/github"
       version = ">= 6.12.0"
     }
+    vercel = {
+      source  = "vercel/vercel"
+      version = ">= 2.0.0"
+    }
   }
 
   backend "remote" {
