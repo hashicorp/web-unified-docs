@@ -1,0 +1,911 @@
+---
+title: Initial Configuration
+description: Essential configuration steps including ACLs, DNS forwarding, partitions, monitoring, and backup procedures.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-06-09T20:55:35.000Z
+last_modified: 2026-06-09T20:55:35.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Initial configuration
+
+This section describes how the product will be configured after installation for self-managed Consul Enterprise deployments.  It may take several weeks to work through all of the recommendations from each section, but this should be the primary focus of the Consul Enterprise platform operators after the initial deployment of Consul Enterprise has been completed. Establishing these foundational configuration best practices is essential before you begin targeting consumer workflows to onboard. This will ensure solid footing for your current and future use cases.
+
+- Configure Consul as code
+- Configure initial ACL roles and policies
+- Configure DNS forwarding
+    - Local agent resolution
+    - External resolution via DNS forwarding
+    - Kubernetes DNS forwarding with CoreDNS
+    - Forwarding destination for external resolution and Kubernetes configurations
+    - DNS ACL permissions
+    - DNS performance considerations
+- Configure admin partition and namespaces
+    - Admin partition
+    - Namespaces
+- Configure platform monitoring
+    - Consul control plane monitoring
+    - Raft monitoring
+    - Consul data plane monitoring
+    - Consul platform monitoring and alerts
+- Setup backup, restore, and upgrades
+    - Backup Consul
+    - Restore Consul
+    - Upgrade Consul
+- Security operational procedures
+    - Gossip key rotation
+    - Certificate rotation
+
+## Configure Consul as code
+
+When managing Consul Enterprise configuration entries or other configuration resources, make automation a foundational component of your approach from the beginning. There are several correct ways to manage your Consul configuration, and different organizations adopt different GitOps and configuration management practices. However, you should avoid making manual changes to your production Consul Enterprise environment to minimize edge cases and control the promotion of changes across your environments. Also, try not to mix different configuration styles whenever possible.
+
+When managing Consul configuration as code, a Git repository serves as the sole mechanism for contributors and operators to modify Consul configuration through a pull request driven workflow. To establish a self service configuration workflow, you should block direct commits to the main branch linked to the production configuration and require approvals and code reviews prior to accepting pull requests. When using a code driven configuration workflow, it is important to restrict manual operator level configuration changes to reduce drift between the configuration defined as code and the state of the real world.
+
+There are two approaches to configure service discovery within Consul Enterprise. Both approaches support all server platforms.
+
+1. **Terraform** If you manage configuration with Terraform, it assumes control over the state of the configuration values and will overwrite any changes made when using a different configuration method. Standardizing on one approach simplifies tasks for your operators. Having a single central place to manage configuration makes it easier for operators to create new configurations or adjust existing ones. You can also leverage Sentinel policies to govern behaviors around any resources managed with the Consul Terraform provider. Terraform does not have coverage for every configuration option within Consul, but should be the primary choice when automating configuration resources.
+2. **API and cli** The API has coverage for every configuration type. However, It is more challenging to build configuration workflows using the API because you need to incorporate logic around any dependencies, creation ordering, and the existing state of your configuration resources.
+
+### Terraform
+
+We recommend standardizing on Terraform for maintaining your Consul Enterprise configuration resources. Some key advantages to leveraging Terraform are that it manages state across lifecycle changes, so it can track which resources have already been created and any dependencies between the resources between changes. Another advantage is that common patterns can be composed into repeatable modules so that you can collect commonly used configuration entries or security policy and easily replicate it when onboarding new teams into Consul Enterprise. Changing only the team specific inputs when referencing a common module allows you to create a consistent usage model across similar consumer varieties.
+
+**Governance**
+From a governance standpoint, leveraging HCP Terraform allows you to define policy around any of the Consul configuration resources using the <a href="https://www.hashicorp.com/sentinel" target="_blank" rel="noreferrer">Sentinel policy</a> language which allows you to provide autonomy to your consumers with a self-service workflow while incorporating guardrails around any policies you want to enforce. An example of this might be enforcing the ideal quantity of servers to prevent operators from inadvertently scaling up the cluster size without understanding the quorum implications. Another example could be enforcing the inclusion of a TTL greater than zero inside prepared query resources to ensure that prepared query service queries can be cached within your DNS infrastructure.
+
+**GitOps repo structure**
+In the earlier stages of adoption, it is common for the central team operating Consul to use one monolithic configuration repo where the policies and roles, and configuration values are defined for all consumers and Partitions while allowing for collaboration and pull requests. As you continue to mature in your usage and adoption of Consul Enterprise, you might choose to split some of the Partition specific configuration entries into their own repositories and delegate more control to the consumer teams to define configuration at their level. An example of this might be pushing service export configuration to the team responsible for managing a specific Partition where services are exported from.
+
+An example Git configuration monorepo hierarchy:
+- Consul Datacenter
+    - Git Repo 1
+        - Default Partition - VM Server Deployment
+            - Config Entries
+            - Prepared Queries
+            - Auth Binding Rules
+            - Cross Partition Policies and Roles
+                - Cluster Wide Operators
+                - Cross Partition Admins
+                - Cross Partition Read Only
+                - Cluster Wide GitOps/TFC Write/Management Token
+            - Partition Specific Policies and Roles - TF Sub-Module
+                - Partition Z Admins
+                - Partition Z Read Only
+        - Partition Z..A - Kubernetes Cluster/VM App Team
+            - Config Entries
+
+### API or CLI
+
+If your organization hasn't adopted Terraform for managing application configuration, you can use the API or command line interface to automate Consul Enterprise configuration through various configuration management tools or GitOps pipeline driven automation workflows. The API or CLI offers great flexibility regarding the supported tooling, but orchestrating it might be more challenging since you'll need to track the state of configuration changes and dependencies within your chosen workflow, which can require additional code. However, one key advantage to using the API is its full coverage for all configuration types.
+
+## Configure initial ACL roles and policies
+
+![ACL Policies](/img/consul/operating-guides/adoption/0030-acl-policies.png)
+
+You can use Consul ACL tokens to authenticate users, services, and Consul agents. When ACLs are enabled, entities requesting access to a resource must include a token that has been linked with a policy, service identity, or node identity that grants permission to the resource. The ACL system checks the token and grants or denies access to resources based on the associated permissions.
+
+Authentication engines within Consul operate at the partition level. When you need roles or policies that grant access across more than one partition, you must define the auth method and policy within the “default” partition. All tokens generated within Consul are scoped to a specific partition and namespace.
+
+### Token precedence
+The following hierarchy, applied in descending order, ensures structured access control in Consul, with each token type serving a distinct role in securing your environment.
+
+1. **Tokens included in requests:** Tokens included in requests have the highest precedence. Consul evaluates these tokens first to determine request permissions.
+
+
+2. **Default token:** In the absence of a request token, Consul considers the default token specified in the agent configuration. This provides a baseline level of access for requests made to the API that lack a specified token. This is commonly configured with read-only access to services to enable DNS service discovery on agents.
+
+3. **Anonymous token:** The anonymous token applies when no other token is available, representing the permissions for unidentified requests.
+
+Be mindful of token precedence when configuring your token so you can maintain a reliable and secure access control mechanism within your Consul setup.
+
+
+### Bootstrap the acl system
+The first step for <a href="https://developer.hashicorp.com/consul/tutorials/day-0/access-control-setup" target="_blank" rel="noreferrer">bootstrapping the ACL system</a> is to enable ACLs on the Consul servers inside the agent configuration. With the architecture covered in this guide where the control plane is running on VM instances, the platform operator must configure the default ACL policy of "deny", which means the Consul Datacenter is configured to block access to all resources and functions by default unless access is explicitly granted via the token included in an API request, or included as part of the anonymous token rules. The `down_policy` of "extend-cache", means that the agents will ignore token TTLs during a control plane outage and continue operating based on the last cached state. If you have deployed your infrastructure following the Solution Design Guide, these configuration settings are already included in the default Terraform deployment configuration.
+
+```
+acl {
+    enabled        = true
+    default_policy = "deny"
+    down_policy    = "extend-cache"
+}
+```
+
+You can leverage Vault Enterprise Consul secrets engine to directly bootstrap the ACL system within Consul and protect the bootstrap token from being directly exposed to operators. In future HVD iterations, we will provide more prescriptive guidance on leveraging Consul Enterprise with Vault.
+
+If you aren’t using Vault Enterprise and are manually bootstrapping Consul’s ACL system, after you enable ACLs in your server configuration you will manually bootstrap the ACL system using the Consul ACL bootstrap <a href="https://developer.hashicorp.com/consul/api-docs/acl#bootstrap-acls" target="_blank" rel="noreferrer">API</a>.
+
+The token returned, referenced in the `SecretID` field, is granted the highest level of access and shouldn’t be used for extended periods of time. It is recommended that you only use this initial token to configure the first ACL policies and roles required for your infrastructure components and human operators by following the Solution Design Guide as well as the User Authentication section below. Once you have finished configuring your initial User Authentication roles and have validated their functionality, we recommend you discard the bootstrap token. The bootstrap token will only be needed in the event that your human operators or GitOps pipelines lose access to Consul Enterprise due to issues with any of your authentication methods preventing them from functioning. In this scenario, where all human operators have lost access through Consul Authentication methods, you should generate a new management token by using the <a href="https://developer.hashicorp.com/consul/docs/agent/config/config-files#acl_tokens_initial_management" target="_blank" rel="noreferrer">initial_management</a> token configuration option on the Consul Server nodes.
+
+```
+$ curl --request PUT http://127.0.0.1:8500/v1/acl/bootstrap
+{
+    "AccessorID": "b5b1a918-50bc-fc46-dec2-d481359da4e3",
+    "SecretID": "527347d3-9653-07dc-adc0-598b8f2b0f4d",
+    "Description": "Bootstrap Token (Global Management)",
+    "Policies": [
+        {
+            "ID": "00000000-0000-0000-0000-000000000001",
+            "Name": "global-management"
+        }
+    ],
+    "Local": false,
+    "CreateTime": "2018-10-24T10:34:20.843397-04:00",
+    "Hash": "oyrov6+GFLjo/KZAfqgxF/X4J/3LX0435DOBy9V22I0=",
+    "CreateIndex": 12,
+    "ModifyIndex": 12
+}
+```
+
+### Configure user authentication
+One of the earliest pieces of configuration that will be established in your Consul Enterprise deployment is the User Authentication configuration. When establishing a new Consul Datacenter, the platform operators will leverage the Consul bootstrap token to carve out specific roles for different operational tasks. You will have elevated roles for tasks requiring a management token, as well as basic roles that will provide read-only visibility. We recommend leveraging the Consul Secrets Engine inside Vault as your identity broker for Consul Authentication where possible. Leveraging Vault allows you to login with any of Vault’s supported authentication engines and map Vault roles to specific policies and roles within Consul. It also provides a central point to audit the mapping of short lived tokens to specific identities. If you are a customer without an established Vault deployment, or if you want a more native login experience for human operators within the UI and CLI, we recommend that you configure the single sign-on OIDC authentication method directly in Consul Enterprise. Detailed information about configuring the OIDC authentication method can be found <a href="https://developer.hashicorp.com/consul/docs/security/acl/auth-methods/oidc" target="_blank" rel="noreferrer">here</a>. We recommend that for human authentication workflows, defining all user authentication methods within the “default” Partition, and then granting more granular access to specific Partitions using policy and role definitions targeting those Partitions is the best approach. This is because if you define policies and roles within a Partition directly, you cannot grant access across more than a single Partition which means you would need to logout and re-authenticate if you needed to administer across multiple Partitions. It is also important to include appropriate <a href="https://developer.hashicorp.com/consul/api-docs/acl/auth-methods#maxtokenttl" target="_blank" rel="noreferrer">TTLs</a> when configuring authentication methods that issue ACL tokens so that they will only be active for a short period of time if compromised.
+
+The primary user authentication roles to configure for your initial Consul Enterprise Deployment are:
+
+- **Cluster level operators:** For individuals who should be able to perform any function across the entire cluster in all Namespaces and Partitions we recommend issuing ACL tokens with the global management policy. Keep the number of global management ACL tokens limited to a small group of individuals.
+- **Cross partition administrators:** This defines common functions that are used for the Service Discovery use case with administrative access across all Partitions, but doesn’t cover every action that can be performed within Consul like the management token would. This role should be used for most Consul platform operators, and additional permissions could be extended here, if it is found that you are commonly needing to make changes using the global management ACL tokens.
+
+```
+partition_prefix "" {
+  peering = "write"
+  mesh = "write"
+  acl = "write"
+  namespace "default" {
+    node_prefix "" {
+      policy = "write"
+    }
+  }
+  namespace_prefix "" {
+    node_prefix "" {
+      policy = "read"
+    }
+    key_prefix "" {
+      policy = "write"
+    }
+    service_prefix "" {
+      policy = "write"
+    }
+    session_prefix "" {
+      policy = "write"
+    }
+  }
+  agent_prefix "" {
+    policy = "write"
+  }
+}
+
+partition "default" {
+  acl = "read"
+}
+
+query_prefix "" {
+  policy = "write"
+}
+
+keyring = "read"
+acl = "read"
+operator = "read"
+
+```
+
+- **Cross partition read-only**: The policy “builtin/global-read-only” exists out of the box and allows Read-Only access across all Partitions and namespaces. This policy is useful for platform team members that need visibility into everything but that shouldn’t be making changes directly.
+
+- **Partition administrator**: Allows administrative functions within a specific Partition across all Namespaces within that Partition. Also allows read access to prepared queries which are defined globally, and other global operator and ACL functions.
+
+```
+partition "<partition name>" {
+    peering = "write"
+    mesh = "write"
+    acl = "write"
+    namespace "default" {
+        agent_prefix "" {
+            policy = "write"
+        }
+        node_prefix "" {
+            policy = "write"
+        }
+    }
+    namespace_prefix "" {
+        node_prefix "" {
+            policy = "read"
+        }
+        key_prefix "" {
+            policy = "write"
+        }
+        service_prefix "" {
+            policy = "write"
+        }
+        session_prefix "" {
+            policy = "write"
+        }
+    }
+    agent_prefix "" {
+        policy = "write"
+    }
+}
+
+query_prefix "" {
+    policy = "read"
+}
+
+keyring = "read"
+acl = "read"
+operator = "read"
+
+```
+
+- **Partition read-only**: Allows Read-Only access within a specific Partition, as well as all of the Namespaces within that Partition. Also allows read access to prepared queries which are defined globally, and other global operator and ACL functions.
+
+```
+partition "<partition name>" {
+    peering = "read"
+    mesh = "read"
+    acl = "read"
+    namespace_prefix "" {
+        node_prefix "" {
+            policy = "read"
+        }
+        key_prefix "" {
+            policy = "read"
+        }
+        service_prefix "" {
+            policy = "read"
+        }
+        session_prefix "" {
+            policy = "read"
+        }
+    }
+    agent_prefix "" {
+        policy = "read"
+    }
+}
+
+query_prefix "" {
+    policy = "read"
+}
+
+keyring = "read"
+acl = "read"
+operator = "read"
+```
+
+### Configure machine authentication
+
+It is important to establish identity within your machine workloads early in your Consul Enterprise deployment. As you move towards a dynamic infrastructure deployment model, you can no longer depend on elements like the source IP address to represent specific workload security barriers. Instead, identity becomes the primary mechanism to secure and govern traffic patterns for your workloads across all Consul Enterprise use cases. Establishing identity is important because it ensures that services, upon startup and registration with the catalog, are actually who they claim to be. In service discovery, this means that only services with a validated identity should receive traffic based on consumer catalog queries. If you compare the Consul Service Catalog to a phone book, and Consul Enterprise to the telephone company, when you establish your telephone number with the telephone company, they require you to present identification to establish your account and register an entry for you in the public phone records. If anyone could claim that they were someone else, there would be no value in the data within the phone book and people would no longer use it as a source of truth when trying to contact other people or businesses.
+
+There are several machine authentication methods supported directly within Consul Enterprise based on your application deployment platform. When running workloads in Kubernetes, Amazon ECS, and Nomad, the secure introduction of Consul ACLs and tokens can be handled automatically for the consumer using the respective authentication methods or direct platform integration which greatly simplifies adoption. Alternatively, leveraging Vault Enterprise’s Consul secrets engine as the identity broker is a great way to standardize on a central source of identity for all of your machine workloads. Manually distributing tokens to clients can be used as a last resort if you aren’t able to leverage the native authentication methods, or Vault Enterprise.
+
+For the highest level of security, individual service instances should have unique Consul ACL tokens. This improves auditability, and ensures you can reduce the blast radius in the event that an individual Consul Token is ever compromised. In cases where you are able to automate the distribution of new ACL tokens to consumers, it is also a good practice to issue ACL tokens with a shorter lived TTL to reduce the risk in the event of compromise.
+
+A best practice is to never store Consul ACL Tokens directly in source code or configuration repositories. Retrieve ACL tokens dynamically at runtime where possible, or distribute static ACL tokens directly to machines using a secure configuration management approach.
+
+<a href="https://developer.hashicorp.com/vault/tutorials/app-integration/secure-introduction" target="_blank" rel="noreferrer">Secure introduction</a> of ACL tokens within organizations is a much larger topic which involves an organizational secrets management strategy. Refer to your Secrets Management platform for guidance on securely introducing sensitive values to your application workloads.
+
+Authentication Methods Natively Supported in Consul Enterprise:
+
+|Types|Consul Version|
+|-|-|
+|kubernetes|1.5.0+|
+|jwt|1.8.0+|
+|OIDC|1.8.0+Enterprise|
+|aws-iam|1.12.0+|
+
+### Service identities
+
+When distributing ACL tokens to individual applications, it is common to leverage service identities as a simple abstraction to tie a consumer to a common ACL policy. If your applications need permissions that aren’t included as part of the service identity policy, you should define application-specific roles instead of leveraging service identities.
+
+The following policy is generated for each service when a service identity is declared:
+
+```
+# Allow the service and its sidecar proxy to register into the catalog.
+service "<service name>" {
+    policy = "write"
+}
+# For service mesh use cases
+service "<service name>-sidecar-proxy" {
+    policy = "write"
+}
+# Allow for any potential upstreams to be resolved.
+service_prefix "" {
+    policy = "read"
+}
+node_prefix "" {
+    policy = "read"
+}
+```
+
+### Agent tokens and node identities
+
+The `acl.tokens.agent` is a special token that is used for an agent's internal operations. It isn't used directly for any user-initiated operations like the `acl.tokens.default`, though if the `acl.tokens.agent` isn't configured the `acl.tokens.default` will be used. The ACL agent token is used for the following operations by the agent:
+
+- Updating the agent's node entry using the Catalog API, including updating its node metadata, tagged addresses, and network coordinates
+- Performing anti-entropy syncing, in particular reading the node metadata and services registered with the catalog
+- Reading and writing the special _rexec section of the KV store when executing consul exec commands
+
+ACL agent tokens should be distributed to all of your server and client agent deployments. When distributing ACL agent tokens to your client and server agents, it is recommended to leverage <a href="https://developer.hashicorp.com/consul/docs/security/acl/acl-roles#node-identities" target="_blank" rel="noreferrer">Node Identities</a> scoped to the specific node name.
+
+This policy is included when creating a node identity and is suitable for use as an ACL agent token:
+```
+node "<node name>" {
+    policy = "write"
+}
+service_prefix "" {
+    policy = "read"
+}
+```
+
+### AWS EC2 authentication
+
+When deploying application workloads directly onto EC2 instances, we advise using the <a href="https://developer.hashicorp.com/consul/docs/security/acl/auth-methods/aws-iam" target="_blank" rel="noreferrer">aws-iam</a> authentication method. This method streamlines the secure introduction of Consul ACL Tokens by enabling you to build trust with your cloud platform and link your IAM instance profiles with policies and roles inside Consul Enterprise.
+
+### Configuration as code authentication
+
+For a GitOps-driven configuration of Consul Enterprise, we suggest using <a href="https://developer.hashicorp.com/terraform/cloud-docs/workspaces/dynamic-provider-credentials/workload-identity-tokens" target="_blank" rel="noreferrer">workload identities</a> in HCP Terraform and Terraform Enterprise, or a comparable JWT-based identity model linked to your specific CI/CD pipelines. Scope the workload identity with only the necessary permissions required to manage the configuration intended to be contained within that workspace or pipeline.
+
+## Configure DNS forwarding
+
+We recommend adopting a tiered approach to DNS forwarding with Consul Enterprise to get the best experience in each deployment variety. By prioritizing local agent resolution, the system can achieve faster DNS lookups and aggregate requests through the client agent RPC connection, reducing network latency and providing the option to cache some portion of local DNS requests where sensible. This localized resolution not only enhances performance but also minimizes the dependency on external, centralized DNS servers, thereby reducing potential points of failure. As we move to systems without local client agents installed, because they haven’t yet joined the cluster, or are still beginning to adopt Consul Enterprise, we can rely on external DNS resolution methods that are already in place within your environment and configure forwarding for the consul domain. For Kubernetes, leveraging CoreDNS further extends this flexibility, allowing for seamless service discovery across both containerized and traditional environments where you can expose routable NodePort, LoadBalancer service types or by registering your Kubernetes Ingress controller definitions using the catalog-sync daemon. This tiered approach ensures that DNS resolution is optimized for speed and locality when possible, while still maintaining the broad reach and compatibility required for diverse and distributed infrastructures.
+
+### Local agent resolution with DNS forwarding
+
+We recommend starting with local agent resolution where you have Consul clients installed to achieve the best resolution locality, and optimal performance when considering TTLs and caching. By leveraging tools like `dnsmasq` or `systemd-resolved`, virtual machines equipped with client agents can resolve the `.consul` domain locally. This reduces the dependency and overall load on centralized DNS servers. For `dnsmasq`, a sample configuration would look like:
+
+```
+server=/.consul/127.0.0.1#8600
+```
+
+For `systemd-resolved`, in systemd version 246 and newer, the configuration would appear as:
+
+```
+[Resolve]
+DNS=127.0.0.1:8600
+DNSSEC=false
+Domains=~consul
+```
+
+Many operating systems use a different hierarchy or toolchain for configuring local DNS forwarding or resolution, so it is important to understand the specifics of the Operating System version you are using. Many modern Linux distributions have standardized on systemd-resolved. More detailed configuration considerations can be found <a href="https://developer.hashicorp.com/consul/tutorials/networking/dns-forwarding#systemd-resolved-setup" target="_blank" rel="noreferrer">here</a>.
+
+A key advantage in this scenario is that your DNS queries will automatically have the context of your client agent deployment, like the Partition your client is operating in when using admin partitions.
+
+### External resolution via DNS forwarding
+
+For environments that require external DNS resolution because there are Consumers who haven’t yet adopted Consul or don’t have Consul agents deployed locally, using DNS Forwarding becomes essential. External forwarding can also be a useful way to find the Consul server addresses when initially joining the cluster because you can resolve the server IP addresses by referencing the `consul.service.consul` DNS query. Tools and platforms like Active Directory Conditional Forwarding, BIND, Route53, and Infoblox can be configured to forward requests for the `.consul` domain to the appropriate Consul servers. This approach ensures that even if a request originates outside the local environment, it's directed correctly to the Consul cluster for that Region. For instance, in BIND, a forward zone can be defined specifically for the `.consul` domain, ensuring that all such requests are forwarded to the Consul DNS interface. Each Region will have unique resolution targets for forwarding, so factoring that into your design is essential. The Solution Design Guide covers a method for forwarding within Amazon VPCs by leveraging Route53 outbound forwarding.
+
+
+### Kubernetes DNS forwarding with CoreDNS
+In Kubernetes environments, CoreDNS is often the default DNS server. To integrate Consul's service discovery with Kubernetes, you can configure CoreDNS to forward requests for the `.consul` domain either to a ClusterIP DNS service within Kubernetes or an external load balancer exposing TCP and UDP DNS from a Consul agent. This ensures seamless service discovery across both Kubernetes and non-Kubernetes environments.
+
+The following is a sample CoreDNS configuration to forward traffic for the consul domain to your Consul DNS endpoint. Add the following consul forwarding configuration to the Corefile section of your coredns ConfigMap located in the “kube-system” Kubernetes namespace.
+
+```
+. {
+    forward . /etc/resolv.conf
+    log
+}
+
+consul {
+    forward . <CONSUL_DNS_TARGET>:<CONSUL_DNS_PORT>
+    log
+}
+```
+
+### Forwarding destination for external resolution and kubernetes configurations
+
+If you’ve been following the Solution Design Guide for deploying your Consul Enterprise servers into Amazon EC2, you should have a load balancer in front of your Consul server plane exposing DNS from the default partition on port 53 for both TCP and UDP. When deploying network load balancers within Amazon, the IP address of the listeners should not change once they are initially assigned. The forwarding destination for your external forwarding tier, or within CoreDNS, would need to be updated any time these IP addresses change due to re-deployment or other factors.
+
+When forwarding DNS directly to the Consul server control plane, all DNS queries will be performed from the context of the default partition and namespace. You can include partition or namespace information inside your query when discovering services located outside of the default partition and namespace.
+
+### DNS ACL permissions
+
+If you want to allow centralized DNS discovery across Consul namespaces and partitions within VM deployments you should adjust the anonymous token policy, or the default token policy of the DNS client agents to include cross partition and namespace read access. Currently this also grants read access when querying via the API.
+
+```
+partition_prefix "" {
+    namespace_prefix "" {
+        node_prefix "" {
+            policy = "read"
+        }
+        service_prefix "" {
+            policy = "read"
+        }
+    }
+}
+```
+
+### DNS performance considerations
+To improve DNS scalability in larger environments, it is important to consider some key DNS configuration settings early on in your deployment.
+
+**Stale reads**
+
+By default, Consul enables stale reads and sets the `max_stale` value to 10 years. This allows Consul to continue serving DNS queries in the event of a long outage with no leader. The telemetry counter `consul.dns.stale_queries` can be used to track when agents serve DNS queries that are stale by more than 5 seconds.
+```
+dns_config {
+    allow_stale = true
+    max_stale = "87600h"
+}
+```
+
+**Negative response caching**
+
+Some DNS clients cache negative responses – for example, Consul returns a "not found" response because a service exists but there are no healthy endpoints. If you are using DNS for service discovery, cached negative responses may cause services to appear "down" for longer than they are actually unavailable.
+
+One common example is when Windows defaults to caching negative responses for 15 minutes; DNS forwarders may also cache negative responses. To avoid this problem, check the negative response cache defaults for your client operating system and any DNS forwarder on the path between the client and Consul, and set the cache values appropriately. In many cases, an appropriate cache value may mean disabling negative response caching to get the best recovery time when a service becomes available again.
+
+To reduce negative response caching, you can tune SOA responses and modify the negative TTL cache where you are servicing DNS requests.
+```
+dns_config {
+    soa {
+        min_ttl = 60
+    }
+}
+```
+
+**TTL values**
+
+You can specify TTL values to enable caching for Consul DNS results. Higher TTL values reduce the number of lookups on the Consul servers and speed lookups for clients, at the cost of increasingly stale results. By default, all TTLs are zero which disables caching.
+
+```
+dns_config {
+    service_ttl {
+        "*" = "0s"
+    }
+    node_ttl = "0s"
+}
+```
+
+You can specify a TTL that applies to all services or a more granular TTL for services that require more precision. The following example Consul server configuration enables external forwarding, or local agent configurations when local agent forwarding is configured. Consul will cache all node and service requests for 5 seconds, and cache results for the `web` service for 1 second.
+
+```
+dns_config {
+    service_ttl {
+        "*" = "5s"
+        "web" = "1s"
+    }
+    node_ttl = "5s"
+}
+```
+
+## Configure admin partition and namespaces
+
+Based on the architecture defined in the Solution Design Guide it’s important to understand the purpose of admin partitions and namespaces for segmenting consumer workloads and Consul gossip communications.  As part of establishing your initial consumer workloads within Kubernetes and virtual machine instances, admin partitions will be used to create a logical separation between each networking boundary.
+
+### Configure admin partitions
+
+<a href="https://developer.hashicorp.com/consul/docs/enterprise/admin-partitions#introduction" target="_blank" rel="noreferrer">Admin partitions</a> exist at a level above Namespaces in the Consul hierarchy. They contain one or more namespaces and allow multiple independent tenants to share a Consul datacenter.
+
+You can use ACL tokens and permissions to manage admin partitions.
+
+The following recommendations show you how to configure admin partitions for Kubernetes and VMs.
+
+**Kubernetes**
+
+The recommended architecture is to have each Kubernetes cluster operate as its own admin partition. As an example, if you have 10 Kubernetes clusters, you should have 10 distinct admin partitions, with each Kubernetes cluster as a unique admin partition.
+
+You can define the admin partition in the Helm chart. The following configuration creates an admin partition named `my-admin-partition`.
+
+```
+global:
+    adminPartitions:
+        enabled: true
+        name: "my-admin-partition"
+```
+
+Helm will create the admin partition in the non-default partition Kubernetes clusters during the installation process. Unlike with VM based environments, you do not need to manually create the admin partition first.
+
+**VM**
+
+Determining boundaries for admin partitions is more nuanced when working in non-Kubernetes environments. One of the key considerations, among others, is how gossip pools are used in Consul.
+
+Each admin partition operates within its own unique gossip pool. Consul servers must belong to the default partition and participate in the gossip pools of every partition in the Consul datacenter.
+
+A single gossip pool should not exceed 5000 Consul nodes. Every node within a single pool must be able to communicate over TCP and UDP with every other node in the same pool. If applications need to be network isolated from each other, you must place them within their own admin partition. This will place the services in a unique gossip pool.
+
+You must create the admin partition using <a href="https://registry.terraform.io/providers/hashicorp/consul/latest/docs/resources/admin_partition" target="_blank" rel="noreferrer">Terraform</a> or the <a href="https://developer.hashicorp.com/consul/api-docs/admin-partitions#create-a-partition" target="_blank" rel="noreferrer">API</a> before you can use them. You can define the admin partition in the Consul agent configuration:
+
+```
+partition = "my-admin-partition"
+```
+
+**Service discovery with admin partitions**
+
+After you have created and deployed services to admin partitions, you must specify the admin partition in your DNS query to resolve services within a non-default admin partition. The following is the structure of the DNS query for admin partitions. Substitute service_name, namespace, and partition as applicable.
+
+```
+<service_name>.service.<namespace>.ns.<partition>.ap.consul
+```
+
+### Configure namespaces
+
+Consul <a href="https://developer.hashicorp.com/consul/docs/enterprise/namespaces" target="_blank" rel="noreferrer">namespaces</a> provide a way to isolate and group resources within an admin partition within a Consul cluster. All resources are placed within a `default` namespace unless explicitly assigned to a non-default namespace.
+
+One of the primary benefits of grouping resources into namespaces is to reduce service name collisions. For example, multiple applications can have a service named “database” and each will be resolved correctly within their respective namespaces.
+
+ACL tokens and permissions are used to manage Namespaces.
+
+**Kubernetes**
+
+Consul <a href="https://developer.hashicorp.com/consul/docs/k8s/service-sync" target="_blank" rel="noreferrer">Catalog Sync</a> automatically syncs Kubernetes namespaces to Consul namespaces. Example, if you have a service in the xyz Kubernetes namespace, Consul catalog sync will automatically create a corresponding service in the xyz Consul namespace.
+
+**VMs**
+
+Before you can assign services to a namespace, you must first create the namespace with <a href="https://registry.terraform.io/providers/hashicorp/consul/latest/docs/resources/namespace" target="_blank" rel="noreferrer">Terraform</a> or the <a href="https://developer.hashicorp.com/consul/api-docs/namespaces#create-a-namespace" target="_blank" rel="noreferrer">API</a>.
+
+Once you have a namespace, specify the namespace in the service configuration file. The following example creates a service named `my-service` in the `my-namespace` namespace.
+
+```
+service {
+    name = "my-service"
+    partition = "my-partition"
+    namespace = "my-namespace"
+    ...}
+```
+
+**Service discovery with namespaces**
+
+To resolve services within a non-default Consul Namespace, the DNS query must explicitly include the namespace name:
+```
+<service_name>.service.<namespace>.ns.consul
+```
+
+**Namespace policy defaults**
+
+If you want to allow services to discover other services located within different namespaces inside a partition, each namespace should have a policy defaults attached to it. The following is an example policy default that enables this behavior.
+
+```
+partition "default" {
+    namespace_prefix "" {
+        service_prefix "" {
+            policy = "read"
+    }
+        node_prefix "" {
+            policy = "read"
+        }
+    }
+}
+```
+
+## Configure platform monitoring
+
+After setting up your first datacenter, it is an ideal time to make sure your deployment is healthy and establish a baseline. Here are recommendations for monitoring your Consul control and data plane. By keeping track of these components and setting up alerts, you can better maintain the overall health and resilience of your service mesh.
+
+### Consul control plane monitoring
+
+The Consul control plane consists of the following components:
+- RPC communication between Consul servers and clients.
+- Gossip Traffic: LAN
+- Consul cluster peering
+
+It is important to monitor and establish baseline and alert thresholds for Consul control plane components for detection of abnormal behavior. Note that these alerts can also be triggered by some planned events like Consul cluster upgrades, configuration changes, or leadership change.
+
+To help monitor your Consul control plane, we recommend to establish a baseline and standard deviation for the following:
+
+- <a href="https://developer.hashicorp.com/consul/docs/agent/telemetry#server-health" target="_blank" rel="noreferrer">Server health</a>
+- <a href="https://developer.hashicorp.com/consul/docs/agent/telemetry#leadership-changes" target="_blank" rel="noreferrer">Leadership changes</a>
+- <a href="https://developer.hashicorp.com/consul/docs/agent/telemetry#key-metrics" target="_blank" rel="noreferrer">Key metrics</a>
+- <a href="https://developer.hashicorp.com/consul/docs/agent/telemetry#autopilot" target="_blank" rel="noreferrer">Autopilot</a>
+- <a href="https://developer.hashicorp.com/consul/docs/agent/telemetry#network-activity-rpc-count" target="_blank" rel="noreferrer">Network activity</a>
+- <a href="https://developer.hashicorp.com/consul/docs/agent/telemetry#certificate-authority-expiration" target="_blank" rel="noreferrer">Certificate authority expiration</a>
+
+We recommend monitoring the following parameters for Consul agents’ health:
+- Disk space and file handles
+- <a href="https://developer.hashicorp.com/consul/docs/agent/telemetry#memory-usage" target="_blank" rel="noreferrer">RAM utilization</a>
+- CPU utilization
+- Network activity and utilization
+
+We recommend using an <a href="https://developer.hashicorp.com/well-architected-framework/reliability/reliability-consul-monitoring-alerts#monitoring-tools" target="_blank" rel="noreferrer">application performance monitoring (APM) system</a> to track these metrics. For a full list of key metrics, visit the <a href="https://developer.hashicorp.com/consul/docs/agent/telemetry#key-metrics" target="_blank" rel="noreferrer">Key metrics</a> section of Telemetry documentation.
+
+**Host-level alerts**
+
+When collecting metrics, it is important to establish a baseline. This baseline ensures your Consul deployment is healthy, and serves as a reference point when troubleshooting abnormal Cluster behavior. Once you have established a baseline for your metrics, use them and the following recommendations to configure reasonable alerts for your Consul agent.
+
+**Memory**
+
+Set up an alert if your RAM usage exceeds a reasonable threshold (for example, 90% of your allocated RAM). Refer to the <a href="https://developer.hashicorp.com/well-architected-framework/reliability/reliability-consul-monitoring-alerts#memory-alert-recommendations" target="_blank" rel="noreferrer">Memory Alert Recommendations</a> for further details.
+
+Metrics to monitor:
+
+|Metric Name|Description|
+|-|-|
+|`consul.runtime.alloc_bytes`|Measures the number of bytes allocated by the Consul process.|
+|`consul.runtime.sys_bytes`|The total number of bytes of memory obtained from the OS.|
+|`mem.total`|Total amount of physical memory (RAM) available on the server.|
+|`mem.used_percent`|Percentage of physical memory in use.|
+|`swap.used_percent`|Percentage of swap space in use.|
+
+Consul agents are running low on memory if `consul.runtime.sys_bytes` exceeds 90% of mem.total_bytes, mem.used_percent is over 90%, or `swap.used_percent` is greater than 0. You should increase the memory available to Consul if any of these three conditions are met.
+
+**CPU**
+
+Set up an alert to detect CPU spikes on your Consul server agents.
+Refer to the <a href="https://developer.hashicorp.com/well-architected-framework/reliability/reliability-consul-monitoring-alerts#cpu-alert-recommendations" target="_blank" rel="noreferrer">CPU Alert Recommendations</a> for further details.
+
+Metrics to monitor:
+
+|Metric Name|Description|
+|-|-|
+|`cpu.user_cpu`|Percentage of CPU being used by consul processes|
+|`cpu.iowait_cpu`|Percentage of CPU time spent waiting for I/O tasks to complete.|
+
+If `cpu.iowait_cpu` is greater than 10%, it should be considered critical as Consul is waiting for data to be written to disk. This could be a sign that Raft is writing snapshots to disk too often.
+
+**Network**
+
+The data sent between all Consul agents must follow latency requirements for total round trip time (RTT):
+
+- Average RTT for all traffic cannot exceed 50ms. RTT for 99 percent of traffic cannot exceed 100ms.
+- Set an alert to detect when the RTT exceeds these values. These values should be compared  to the host's network latency so the RTT does not exceed these values.
+- Refer to the <a href="https://developer.hashicorp.com/consul/tutorials/production-deploy/reference-architecture#network-latency-and-bandwidth" target="_blank" rel="noreferrer">Reference architecture</a> to learn more about network latency and bandwidth guidance.
+
+Metrics to monitor:
+
+|Metric Name|Description|
+|-|-|
+|`net.bytes_recv`|Bytes received on each network interface.|
+|`net.bytes_sent`|Bytes transmitted on each network interface.|
+
+Sudden increases to the net metrics, greater than 50% deviation from baseline, indicates too many requests that are not being handled.
+
+**File descriptors**
+
+Metrics to monitor:
+
+|Metric Name|Description|
+|-|-|
+|`linux_sysctl_fs.file-nr`|Number of file handles being used across all processes on the host.|
+|`linux_sysctl_fs.file-max`|Total number of available file handles.|
+
+By default, process and kernel limits are conservative, you may want to increase the limits beyond the defaults. If the `linux_sysctl_fs.file-nr` value exceeds 80% of `linux_sysctl_fs.file-max`, the file handles should be increased.
+
+**Disk activity**
+
+Metrics to monitor:
+
+|Metric Name|Description|
+|-|-|
+|`diskio.read_bytes`|Bytes read from each block device.|
+|`diskio.write_bytes`|Bytes written to each block device.|
+|`diskio.read_time`|Time spent reading from disk, in cumulative milliseconds.|
+|`diskio.write_time`|Time spent writing to disk, in cumulative milliseconds.|
+
+Sudden, large changes to the disk I/O metrics, greater than 50% deviation from baseline or more than 3 standard deviations from baseline indicates Consul has too much disk I/O. Too much disk I/O can cause the rest of the system to slow down or become unavailable, as the kernel spends all its time waiting for I/O to complete.
+
+### Raft monitoring
+
+Consul uses <a href="https://developer.hashicorp.com/consul/docs/architecture/consensus" target="_blank" rel="noreferrer">Raft for consensus protocol</a>. High saturation of the Raft goroutines can lead to elevated latency in the rest of the system and may cause the Consul cluster to be unstable. As a result, it is important to monitor Raft to track your control plane health. We recommend the following actions to keep control plane healthy:
+
+- Create an alert that notifies you when <a href="https://developer.hashicorp.com/consul/docs/agent/telemetry#raft-thread-saturation" target="_blank" rel="noreferrer">Raft thread saturation</a> exceeds 50%.
+- Monitor <a href="https://developer.hashicorp.com/consul/docs/agent/telemetry#raft-replication-capacity-issues" target="_blank" rel="noreferrer">Raft replication capacity</a> when Consul is handling large amounts of data and high write throughput.
+- Lower <a href="https://developer.hashicorp.com/consul/docs/install/performance#production" target="_blank" rel="noreferrer">raft_multiplier</a> to keep your Consul cluster stable. The value of raft_multiplier defines the scaling factor for Consul. Default value for raft_multiplier is 5.A short multiplier minimizes failure detection and election time but may trigger frequently in high latency situations. This can cause constant leadership churn and associated unavailability. A high multiplier reduces the chances that spurious failures will cause leadership churn but it does this at the expense of taking longer to detect real failures and thus takes longer to restore Consul cluster availability.Wide networks with higher latency will perform better with larger raft_multiplier values.
+
+**Raft protocol health**
+
+Metrics to monitor:
+
+|Metric Name|Description|
+|-|-|
+|`consul.raft.thread.main.saturation`|An approximate measurement of the proportion of time the main Raft goroutine is busy and unavailable to accept new work.|
+|`consul.raft.thread.fsm.saturation`|An approximate measurement of the proportion of time the Raft FSM goroutine is busy and unavailable to accept new work.|
+|`consul.raft.fsm.lastRestoreDuration`|Measures the time taken to restore the FSM from a snapshot on an agent restart or from the leader calling installSnapshot.|
+|`consul.raft.rpc.installSnapshot`|Measures the time taken to process the installSnapshot RPC call. This metric should only be seen on agents which are currently in the follower state.|
+|`consul.raft.leader.oldestLogAge`|The number of milliseconds since the oldest entry in the leader's Raft log store was written. In normal usage this gauge value will grow linearly over time until a snapshot completes on the leader and the Raft log is truncated.|
+
+Saturation of consul.raft.thread of more than 50% can lead to elevated latency in the rest of the system and cause cluster instability.
+
+Snapshot restore happens when a Consul agent is first started, or when specifically instructed to do so via RPC. For Consul servers, consul.raft.fsm.lastRestoreDuration tracks the duration of the operation. For Consul clients, from the leader's perspective when it installs a new snapshot on a follower, `consul.raft.rpc.installSnapshot` tracks the timing information. Both these metrics should be consistent, without sudden large changes.
+
+Plotting of `consul.raft.leader.oldestLogAge` should look like a saw-tooth wave increasing linearly with time until the leader takes a snapshot and then jumping down as the oldest Raft logs are truncated. The lowest point on that line should remain comfortably higher (for example, 2x or more) than the time it takes to restore a snapshot.
+
+**BoltDB monitoring**
+
+Metrics to monitor:
+
+|Metric Name|Description|
+|-|-|
+|`consul.raft.boltdb.storeLogs`|Measures the amount of time spent writing Raft logs to the db.|
+|`consul.raft.boltdb.freelistBytes`|Represents the number of bytes necessary to encode the freelist metadata.|
+|`consul.raft.boltdb.logsPerBatch`|Measures the number of Raft logs being written per batch to the db.|
+|`consul.raft.boltdb.writeCapacity`|Theoretical write capacity in terms of the number of Raft logs that can be written per second.|
+
+Sudden increases in the `consul.raft.boltdb.storeLogs` times will directly impact the upper limit to the throughput of write operations within Consul.
+
+If the free space within the database grows excessively large, such as after a large spike in writes beyond the normal steady state and a subsequent slow down in the write rate, then Bolt DB could end up writing a large amount of extra data to disk for each Raft log storage operation. This will lead to an increase in the `consul.raft.boltdb.freelistBytes` metric - a count of the extra bytes that are being written for each Raft log storage operation beyond the Raft log data itself. Sudden increases in this metric can be correlated to increases in the `consul.raft.boltdb.storeLogs` metric indicating an issue.
+
+The maximum number of Raft log storage operations that can be performed each second is represented with the `consul.raft.boltdb.writeCapacity` metric. When Raft log storage operations are becoming slower you may not see an immediate decrease in write capacity due to increased batch sizes of each operation. Sudden changes in this metric should be further investigated.
+
+The `consul.raft.boltdb.logsPerBatch` metric keeps track of the current batch size for Raft log storage operations. The maximum allowed is 64 Raft logs. Therefore if this metric is near 64 and the `consul.raft.boltdb.storeLogs` metric is seeing increased time to write each batch to disk, it is likely that increased write latencies and other errors may occur.
+
+### Consul dataplane monitoring
+
+Consul data plane collects metrics about its own status and performance. Consul data plane uses the same external metrics store that is configured for Envoy. To enable telemetry for Consul data plane, enable telemetry for Envoy by specifying an external metrics store in the proxy-defaults configuration entry or directly in the `proxy.config` field of the proxy service definition.
+
+**Service monitoring**
+
+You can extract the following service-related information:
+- Use the <a href="https://developer.hashicorp.com/consul/commands/catalog" target="_blank" rel="noreferrer">catalog</a> command or the Consul UI to query all registered services in a Consul datacenter.
+- Use the <a href="https://developer.hashicorp.com/consul/api-docs/agent/service#get-service-configuration" target="_blank" rel="noreferrer">/agent/service/:service_id</a> API endpoint to query individual services.
+
+
+## Upgrading Consul
+
+Consul is a long-running agent on any nodes participating in a Consul cluster. These nodes consistently communicate with each other. As such, protocol level compatibility and ease of upgrades are important to remember when using Consul. After successfully installing and running Consul Enterprise, it's important to understand the backup and restore procedures to ensure data durability and system availability during unforeseen events.
+
+### Backup Consul
+
+You should regularly test and validate the backup and restore processes in a non-production environment to ensure you are well prepared if you need to perform a restore against production systems and ensure your ability to meet your defined recovery time objectives and recovery point objectives. Encrypt your snapshot backups to comply with organizational and regulatory requirements. Amazon S3 encrypted objects using server-side encryption by default. Ensure you follow any Key management processes defined within your organization when leveraging S3 encrypted backups. Refer to Amazon’s <a href="https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucket-encryption.html" target="_blank" rel="noreferrer">documentation</a> for encryption within S3.
+
+**Backup cadence with the Consul Enterprise snapshot agent**
+
+To automate the backup process, utilize the Consul Enterprise <a href="https://developer.hashicorp.com/consul/commands/snapshot/agent" target="_blank" rel="noreferrer">Snapshot Agent</a>. Configure the snapshot agent to take regular snapshots of the Consul server’s state and save them to a secure location. Store backups in a different physical/virtual location to prevent data loss during infrastructure failures. You can use Amazon S3 <a href="https://docs.aws.amazon.com/AmazonS3/latest/userguide/replication.html" target="_blank" rel="noreferrer">replication</a> techniques to achieve this.
+
+Below is an example configuration that can be used within Amazon to backup snapshots to an S3 bucket.
+
+```
+{
+    "snapshot_agent": {
+        "http_addr": "https://127.0.0.1:8501",
+        "ca_file": "/consul/config/tls/consul-agent-ca.pem",
+        "token": "$${SNAPSHOT_TOKEN}",
+        "snapshot": {
+            "interval": "${snapshot_agent.interval}",
+            "retain": ${snapshot_agent.retention},
+            "deregister_after": "8h"
+        },
+        "aws_storage": {
+            "s3_region": "${aws_region.name}",
+            "s3_bucket": "${snapshot_agent.s3_bucket_id}"
+        }
+    }
+}
+```
+
+Follow the [Solution Design Guide](/validated-designs/consul-solution-design-guides-consul-enterprise-self-hosted/consul-on-aws-ec2) for your Consul Enterprise deployment into EC2. You can use the exposed variables to directly modify the interval and retention setting to align with your recovery point objectives. The S3 bucket and IAM security are automatically provisioned as part of the Terraform module covered within that guide.
+
+When <a href="https://developer.hashicorp.com/consul/docs/security/acl/tokens/create/create-a-snapshot-agent-token" target="_blank" rel="noreferrer">configuring the snapshot agent manually</a>, you must provide a similar ACL policy.
+```
+# Required to read and snapshot ACL data
+acl = "write"
+# Allow the snapshot agent to create the key consul-snapshot/lock, which will
+# serve as a leader election lock when multiple snapshot agents are running in
+# an environment
+key "consul-snapshot/lock" {
+    policy = "write"
+}
+# Allow the snapshot agent to create sessions on the specified node for lock
+session_prefix "" {
+    policy = "write"
+}
+# Allow the snapshot agent to register itself into the catalog
+service "consul-snapshot" {
+    policy = "write"
+}
+```
+
+### Restore Consul
+
+When restoring from a snapshot backup taken with the Consul Enterprise snapshot agent, the state of the entire cluster will be reverted to the time the snapshot was taken. There isn’t an easy way to directly pull individual items from this snapshot without restoring it to an isolated cluster and using the API to retrieve individual items.
+
+You can only restore snapshots to the same Consul version in which they were created. For service discovery use cases, the state contained within the clients is less critical. It will be synchronized back to the server catalog using the anti-entropy methods to keep the agent and server states aligned. This means any services registered after the snapshot will reappear in the catalog after the client agent synchronizes its state with the servers or when the client rejoins the server cluster after the restore operation.
+
+It may be helpful to restart client agents where possible to ensure they aren’t caching any data that is no longer relevant after the restore operation. Another consideration is that any tokens generated after the snapshot would no longer be valid and may need to be re-issued.
+
+When leveraging cluster peering, the keys exchanged between peers rotate every three days. If you restore a snapshot created before a peering key was rotated, you must re-create the peering relationship using the same name.
+
+Use the `consul snapshot restore` command to restore a snapshot retrieved from S3 using the Amazon CLI or other S3 API tooling that can retrieve objects.
+
+### Upgrades
+
+Upgrading Consul Enterprise is a critical operational task that requires careful planning and execution to ensure service availability. All software upgrades and major server configuration changes should be tested in a non-production environment before being promoted to your production environment. This section elaborates on the key considerations when upgrading Consul Enterprise server instances.
+
+**Autopilot automated upgrades**
+
+The architecture deployed when following the [Solution Design Guide](/validated-designs/consul-solution-design-guides-consul-enterprise-self-hosted/consul-on-aws-ec2) leverages Autopilot automated upgrades to streamline the upgrade process. This feature automatically transitions to a new set of Consul server agents once ready, allowing the existing server agents to serve traffic during the transition.
+
+When operating within an AWS environment, leverage lifecycle hooks to halt the promotion of new Auto Scaling Groups (ASGs) or the teardown of old ones until the lifecycle hook post-validation is completed. Leverage the `UpgradeVersionTag` to perform safe promotion without changing the Consul version. This allows you to adopt an immutable deployment style and use automated upgrade promotion when changing any server configurations to ensure any changes that could affect server availability are validated as part of the upgrade promotion process. The Terraform module recommended as part of the [Solution Design Guide](/validated-designs/consul-solution-design-guides-consul-enterprise-self-hosted/aws-implementation) incorporates these automated upgrade features when deploying to EC2 instances.
+
+**Rolling upgrades with configuration management tools**
+
+In scenarios without AutoPilot, conduct rolling upgrades using traditional configuration management tools. It is imperative to incorporate health checks within this automation to prevent breaking the server quorum and triggering a server outage. The health checks should be robust enough to identify potential issues that could jeopardize the upgrade or the overall system stability.
+
+Validate each server node's health before upgrading the next node in your server pool. This ensures that service remains operational during the upgrade as long as you do not exceed your deployment's failure tolerance. Even when not leveraging the automated upgrades feature, you can still query the Autopilot state to determine your current failure tolerance and health states of individual server nodes as you progress through an upgrade.
+
+
+```
+$ curl https://127.0.0.1:8501/v1/operator/autopilot/state
+{
+    "Healthy": true,
+    "FailureTolerance": 1,
+    "OptimisticFailureTolerance": 4,
+    "Servers": {
+        "5e26a3af-f4fc-4104-a8bb-4da9f19cb278": {},
+        "10b71f14-4b08-4ae5-840c-f86d39e7d330": {},
+        "1fd52e5e-2f72-47d3-8cfc-2af760a0c8c2": {},
+        "63783741-abd7-48a9-895a-33d01bf7cb30": {},
+        "6cf04fd0-7582-474f-b408-a830b5471285": {}
+    },
+    "Leader": "5e26a3af-f4fc-4104-a8bb-4da9f19cb278",
+    "Voters": [
+        "5e26a3af-f4fc-4104-a8bb-4da9f19cb278",
+        "10b71f14-4b08-4ae5-840c-f86d39e7d330",
+        "1fd52e5e-2f72-47d3-8cfc-2af760a0c8c2"
+    ],
+    "RedundancyZones": {
+        "az1": {},
+        "az2": {},
+        "az3": {}
+    },
+    "ReadReplicas": [
+        "63783741-abd7-48a9-895a-33d01bf7cb30",
+        "6cf04fd0-7582-474f-b408-a830b5471285"
+    ],
+    "Upgrade": {}
+}
+```
+
+**Regular upgrade practice**
+
+Familiarize yourself with the upgrade procedures and make it a practice to carry out upgrades regularly. This proactive approach helps capitalize on new features and improvements while avoiding the risks of falling significantly behind on versions. While it's important to avoid bleeding-edge versions until they've proven stable in non-production environments, ensure you don't lag to the extent that the version gap introduces substantial risk during upgrades. In production, promote new releases only after they have achieved stability in non-production deployments.
+
+**Downgrade considerations**
+
+Downgrades are not supported unless you revert the server state to the pre-upgrade version. This implies that a thorough backup and validation process is important before any upgrade activity to ensure you can roll back to the previous version with the active data before the upgrade.
+
+**Upgrade clients**
+
+When deploying client agents to the nodes running your services, it is important to keep the client version in sync with the server version. Once your server agents have been upgraded to a new version, begin rolling out updates to the client agents by leveraging configuration management or by layering the new Consul software version into your system image and following an immutable deployment process to refresh the base image of all of your nodes.
+
+**Upgrade references**
+
+For more information about upgrading Consul, refer to <a href="https://developer.hashicorp.com/consul/docs/upgrading/instructions/general-process" target="_blank" rel="noreferrer">General Upgrade Process</a> and <a href="https://developer.hashicorp.com/consul/docs/upgrading/upgrade-specific#upgrading-specific-versions" target="_blank" rel="noreferrer">Upgrading Specific Versions</a>.
+
+For more information about autopilot, refer to <a href="https://developer.hashicorp.com/consul/tutorials/datacenter-operations/autopilot-datacenter-operations" target="_blank" rel="noreferrer">Autopilot</a> and <a href="https://developer.hashicorp.com/consul/tutorials/datacenter-operations/upgrade-automation" target="_blank" rel="noreferrer">Automate upgrades with Consul Enterprise</a>.
+
+For information about Kubernetes-specific upgrade instructions, refer to <a href="https://developer.hashicorp.com/consul/docs/k8s/upgrade" target="_blank" rel="noreferrer">Upgrading Consul on Kubernetes components</a>.
+
+## Security operational procedures
+
+It is important to review the below security recommendations to ensure they align with your organization's security policies and standards.  We recommend performing certificate and encryption key rotation on a recurring schedule whereas the CA and leaf TTL configurations can be updated as part of the initial deployment.
+
+### Rotate gossip key
+
+Consul uses a 256 bit symmetric gossip encryption key to protect Serf traffic between Consul client agents. To prevent the risk of exposure, you should <a href="https://developer.hashicorp.com/consul/tutorials/datacenter-operations/gossip-encryption-rotate" target="_blank" rel="noreferrer">periodically rotate this key</a> based on your organization’s existing encryption key rotation standards.
+
+### Rotate ca certificate
+
+A certificate rotation process is important to protect the integrity of traffic flowing between your Consul Enterprise servers and any client agents. Sensitive information that may be exchanged can include things like ACL tokens or routing information. If a certificate is ever compromised, having a rotation schedule ensures that any attacker is only able to intercept or tamper with traffic for as long as the certificate is valid for. We recommend that you leverage the Vault Enterprise PKI secrets engine to automate the rotation and distribution of your Consul Enterprise server certificates. Future HVD guides will include more prescriptive information around leveraging Vault with Consul Enterprise.
+
+### Certificate TTLs
+
+When leveraging auto encrypt for client certificate distribution, you may want to consider adjusting the expiration times for the Root CA, as well as any leaf certificates to align with security practices defined within your organization. The shorter the lifetime of any leaf certificates or CA, the less risk that they can be used for any extended time period if compromised. The default values should work for most organizations, which is 10 years for the CA certificate, and 3 days for the leaf certificates.
+
+<a href="https://developer.hashicorp.com/consul/api-docs/connect/ca#get-ca-configuration" target="_blank" rel="noreferrer">Retrieve</a> the current CA configuration.
+
+```
+$ curl http://127.0.0.1:8500/v1/connect/ca/configuration
+{
+    "Provider": "consul",
+    "Config": {
+        "LeafCertTTL": "72h",
+        "IntermediateCertTTL": "8760h",
+        "RootCertTTL": "87600h"
+    },
+    "ForceWithoutCrossSigning": false
+}
+```
+
+Update the CA configuration.
+
+```
+# payload.json
+{
+    "Provider": "consul",
+    "Config": {
+        "LeafCertTTL": "72h",
+        "IntermediateCertTTL": "8760h",
+        "RootCertTTL": "87600h"
+    },
+    "ForceWithoutCrossSigning": false
+}
+```
+```
+$ curl --request PUT --data @payload.json http://127.0.0.1:8500/v1/connect/ca/configuration
+```
