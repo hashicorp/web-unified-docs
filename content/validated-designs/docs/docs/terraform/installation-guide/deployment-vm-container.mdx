@@ -1,0 +1,190 @@
+---
+title: Deployment (VM + container)
+description: Deploy Terraform Enterprise on virtual machines using container-based installation.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-07-06T12:00:00.000Z
+last_modified: 2026-07-06T12:00:00.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Deployment (VM + container)
+
+This page provides guidance on how to deploy Terraform Enterprise using Docker on a VM running on AWS, Azure, or GCP using Terraform modules written and managed by HashiCorp (HVD Modules). HashiCorp designs the modules for use in conjunction with the Terraform command-line tool. The modules are available in the HashiCorp Terraform Registry and provide the best practice method for deploying Terraform Enterprise on the respective cloud.
+
+We expect that the reader has already reviewed the architecture page of this HVD and has a good understanding of the Terraform Enterprise architecture. If you have not done so, we recommend you review the architecture page before proceeding with the deployment. We also expect that the reader has a good understanding of Docker or Podman, and of deploying and managing virtual machines on public clouds.
+
+## Architectural summary
+
+- Terraform Enterprise deploys on a VM running on AWS, Azure or GCP, irrespective of the deployment topology. If using Active/Active, you scale additional VMs, running them in different availability zones (AZs) in the same region.
+- Deploy one or more Terraform Enterprise container(s) onto respective VMs depending on your chosen deployment topology.
+- Use managed versions of object storage, PostgreSQL database. If using Active/Active, use a managed Redis cache (as offered by your public cloud, specifically not Redis Cluster), to ensure the system distributes replicas in different AZs.
+- Use a layer 4 load balancer to ingress traffic to the Terraform Enterprise instances. This is because:
+  - Certificates need to be on the compute nodes for Terraform Enterprise to work.
+  - It is more secure to terminate the TLS connection on Terraform Enterprise rather than outside it and have to re-encrypt traffic from the inside of the load balancer requiring an additional certificate.
+- By using three AZs (one Terraform Enterprise pod in each AZ), the system has an n-2 failure profile, surviving failure of two AZs. However, if the entire region is unavailable, then Terraform Enterprise is unavailable. The application architecture is single-region.
+- We do not recommend that you expose Terraform Enterprise for ingress to the public Internet. Users must be on the company network to be able to access the Terraform Enterprise API/UI. However, we recommend Terraform Enterprise is <a href="https://developer.hashicorp.com/terraform/enterprise/deploy/configuration/network" target="_blank">allowed to access certain addresses on the Internet</a> to access:
+  - The HashiCorp container registry - where HashiCorp vends the Terraform Enterprise container from
+  - HashiCorp service APIs (all owned and operated by HashiCorp except Algolia):
+    - `registry.terraform.io` houses the public Terraform module registry which enterprise customers want to avoid letting users have unfettered access to as it contains community-contributed modules and providers uncertified by HashiCorp. However, this is where official providers index.
+    - `releases.hashicorp.com` is where HashiCorp host Terraform binary releases. We recommend users stay within two minor releases of latest to access the latest security updates, and new features.
+    - `reporting.hashicorp.services` is where we aggregate license usage and as such we _strongly recommend_ including this in egress allow lists to ensure our partnership with your organization can be right-sized for your needs going forward.
+    - <a href="https://developer.hashicorp.com/terraform/enterprise/replicated/requirements/network#https-yy0ffni7mf-dsn-algolia-net" target="_blank">Algolia</a> - The Terraform Registry uses Algolia to index the current resources in the registry.
+  - Additional outbound targets for VCS/SAML and so on depending on the use case.
+  - Public cloud cost estimation APIs as necessary.
+- This recommended architecture requires Terraform Enterprise `v202309-1` or later. Review <a href="https://developer.hashicorp.com/terraform/enterprise/deploy" target="_blank">the main public documentation</a> if you have not already.
+- The HVD Modules all include example code which you can use to deploy Terraform Enterprise on RHEL (Podman) or Ubuntu (Docker) onto new VM instances, which the module configures with the container runtime appropriate for the operating system chosen.
+
+<!-- EDITORIAL: VM-specific operational-mode and Packer recommendation relocated here from the architecture page's former "Automated versus manual installation" section. -->
+For production VM deployments we recommend the `external` or `active-active` operational modes together with the HashiCorp-maintained modules below. If you need a `disk` mode instance for development or testing, build an automated deployment that lets you destroy and recreate instances iteratively — we recommend <a href="https://developer.hashicorp.com/packer/docs" target="_blank" rel="noreferrer">Packer</a> for this.
+
+In some regulated environments, outbound access has limits or is totally inaccessible from server environments. If you need to run Terraform Enterprise fully air-gapped from the Internet, download provider and Terraform binary versions manually and host them in the Terraform Enterprise registry when these release, to offer them to your users.
+
+To allow Terraform Enterprise access to the public registry, but prevent your user base from accessing community content, we recommend using Sentinel or OPA as part of platform development to limit which providers sign off for use.
+
+## Terraform modules for installation
+
+To install Terraform Enterprise on VMs using a container runtime, we recommend you use the Terraform Enterprise HVD Modules and the <a href="https://developer.hashicorp.com/terraform/install" target="_blank">Terraform command-line tool</a>. Modules for deployment on VMs with Docker/Podman are available in the Terraform Registry for the following cloud providers.
+
+| Cloud Provider | Registry Link |
+| --- | --- |
+| AWS | <a href="https://registry.terraform.io/modules/hashicorp/terraform-enterprise-hvd/aws/latest" target="_blank" rel="noreferrer">Terraform Registry</a> |
+| Azure | <a href="https://registry.terraform.io/modules/hashicorp/terraform-enterprise-hvd/azurerm/latest" target="_blank" rel="noreferrer">Terraform Registry</a> |
+| GCP | <a href="https://registry.terraform.io/modules/hashicorp/terraform-enterprise-hvd/google/latest" target="_blank" rel="noreferrer">Terraform Registry</a> |
+
+HashiCorp Professional Services and HashiCorp partners use the installation code we provide to set up best practice Terraform Enterprise instances. We strongly recommend engaging partners or HashiCorp Professional Services to accelerate the scaling out of your project.
+
+If you install Terraform Enterprise yourself, we recommend that you follow these high-level steps:
+
+1. Import the provided Terraform Enterprise modules into your VCS repository.
+1. Establish where to store the Terraform state for the deployment. HashiCorp recommends that, for simplicity, you store the state in cloud-based object store service (S3, Blob Storage, GCS, and so on) for which HVD Modules all contain a `backend.tf` file which you can use to configure the remote state storage location as this is more secure than using the local backend. Free access in HCP Terraform for this can also work.
+1. Select a machine where the Terraform code runs. This machine needs to have the <a href="https://developer.hashicorp.com/terraform/downloads" target="_blank">Terraform command-line tool</a> available.
+1. Ensure that you instantiate cloud credentials in the shell used on the machine for Terraform execution.
+
+<Note>
+
+Terraform state contains sensitive information and needs protection. We do not recommend that you store the state file for a Terraform Enterprise deployment in VCS or any unprotected location. It is the only state you need to separately secure, as all other state generated by your organization receives protection by Terraform Enterprise.
+
+</Note>
+
+## Terraform Enterprise license
+
+Before starting the Terraform Enterprise installation, make sure you have a valid Terraform Enterprise license. If you do not, first reach out to your HashiCorp account team to request the license file. When you receive it, save it as `terraform.hclic`, and protect it as a company asset.
+
+Ensure that the license file contains a single line with no new line character. Run the following command and ensure the output is `0`.
+
+```shell
+$ wc -l terraform.hclic
+       0 terraform.hclic
+```
+
+## Process overview
+
+The layout of the HVD Module GitHub repositories follows a standard structure exhibiting these features:
+
+- The Terraform code separates into logical `.tf` files at the top level of the repository, without the need for submodules and without calls to external child modules. This keeps the codebase whole and straightforward to understand.
+- The main repository `README.md` file contains the primary instructions which you must read through and then follow to deploy Terraform Enterprise.
+- Subdirectories in the respective repository include:
+  - `docs` - Auxiliary documentation for the module.
+  - `examples` - This directory contains example code to deploy Terraform Enterprise with several configurable options like operating system, container runtime, log forwarding, and so on.
+  - `templates` - Contains HCL templates used by the module as needed.
+  - `tests` - Contains deployment configuration used to test the module contents.
+
+To deploy Terraform Enterprise using the provided modules, you need to:
+
+1. Select your cloud provider below, and then follow the link to the respective public Terraform Registry entry.
+1. In the Registry, review the contents, then click in the `Source Code` link in the page header to point your browser to the GitHub repository.
+1. Read the GitHub repository for the respective Terraform module in its entirety. Not doing so may result in a failed deployment.
+1. Follow the repository `README.md` file step by step, ensuring you have all prerequisites in place _before_ starting the deployment; these may take some time to arrange in your environment and require accounting for in project planning.
+1. Ensure you have the TLS certificate and private key for your Terraform Enterprise installation. The DNS SAN in the certificate must include the FQDN you use in DNS for the service (which resolves to the NLB). We also expect you have a standard organizational CA bundle and process for generating these which we recommend using. We do not recommend self-signed certificates in any environment. Inspect your certificate with this command.
+
+  ```shell
+  openssl x509 -noout -text -in cert.pem
+  ```
+
+1. The `README.md` directs you to complete the configuration and deploy Terraform Enterprise using the `terraform init`, `terraform plan` and `terraform apply` commands. When using the example `terraform.tfvars.example` file, remember to remove angled brackets from the values of key-value pairs in the resulting `terraform.tfvars` file.
+1. Once the Terraform run completes, ensure to login to the VM and tail the automated application setup logs, watching for errors. Then return to the `README.md` to complete the task.
+1. As soon as the software installs, you have _sixty minutes_ to access the Initial Admin Console Token (IACT) which the system generates during the installation process. As part of your preparation, read the HashiCorp public documentation for <a href="https://developer.hashicorp.com/terraform/enterprise/deploy/initial-admin-user" target="_blank">using the IACT</a> (Initial Admin Console Token) to create the first administrator user. This is also linked at the end of the main HVD Module `README.md` as next steps.
+
+## Container-specific guidance
+
+More detailed guidance on the deployment of Terraform Enterprise on Docker appears in this section.
+
+### General guidance
+
+Ensure that project planning allows time and resource for scale testing as close to the degree of scale that is eventually expected in production. We recommend working with your earlier adopter teams to understand the expected scale and to ensure that you size the machines appropriately during development and testing.
+
+Ensure that observability tooling is also in place _before_ load testing so that you can fully understand CPU, RAM and I/O constraints in your specific context and in terms of connectivity to external services.
+
+### CPU
+
+At high concurrency, HCP Terraform agent workload may pressure network throughput and is sensitive to the over-allocation of CPU. Evaluation of memory-optimized instances shows they are unable to provide sufficient CPU, resulting in possible HCP Terraform agent workspace run failures.
+
+### RAM
+
+Memory sizing is the most workload-dependent and RAM usage depends on the Terraform configuration executed. To size conservatively, start with the system defaults and test thoroughly, preferably using representative workloads, and increase limits as necessary.
+
+The default HCP Terraform agent run pipeline configures a container resource request for every agent at 2 GB. If the instance is not appropriately sized for this reservation, physical memory over-allocation causes run failure. You can adjust this using the `TFE_CAPACITY_MEMORY` environment variable <a href="https://developer.hashicorp.com/terraform/enterprise/deploy/reference/configuration#tfe_capacity_memory" target="_blank">directive</a>. The conservative approach is to size on the limit so you can tune this down if cost efficiency is a priority. If it needs to be uniformly increased, test it exhaustively. If only some workspaces require increases on this limit, consider running a agent pool for those workspaces, where dedicated hardware can run agents with higher resource availability as needed.
+
+#### Determine maximum HCP Terraform agent RAM requirement and production system overhead
+
+The `TFE_CAPACITY_CONCURRENCY` variable manages the number of concurrent workspace runs, and at the default, RAM requirement equates to `TFE_CAPACITY_CONCURRENCY * 2GB`.
+In the nominal example preceding, with a requirement of 30 agents (an agent container runs a workspace run), the maximum RAM requirement would be thus 60 GB for workspace runs.
+
+For right-sizing of the instance, at least ten percent overhead is prudent, making the total RAM requirement 66 GB. Note that this calculation does not include OS requirements or for agents you need to run in discrete network segments outside of the instance, which you would size separately based on specific graph calculation requirements.
+
+## Platform-specific guidance
+
+Select your cloud provider below for further guidance and corresponding machine size choice.
+
+For cluster calculation below:
+
+- One node in each of three AZs.
+- Nominal Linux operating system RAM requirement of **2048MiB**.
+- Terraform Enterprise requiring **4096MiB**.
+- Cluster calculations in MiB based on the `TFE_CAPACITY_MEMORY` system default of **2048MiB**.
+- Part GB calculations round down.
+
+### Resource sizing
+
+The following table maps the [baseline component sizing](/validated-designs/terraform/installation-guide/detailed-design#baseline-component-sizing) to recommended instance types and managed-service SKUs for each cloud provider.
+
+| Component | AWS | Azure | GCP |
+| --- | --- | --- | --- |
+| Disk | EBS gp3 (3000 IOPS) | Premium SSD (5000 IOPS) | Balanced Persistent SSD (10000 IOPS) |
+| Machine (default) | `m7i.2xlarge` (8 vCPU, 30517MiB) | `Standard_D8s_v4` (8 vCPU, 30517MiB) | `n2-standard-8` (8 vCPU, 30517MiB) |
+| Machine (scaled) | `m7i.4xlarge` (16 vCPU, 61035MiB) | `Standard_D16s_v4` (16 vCPU, 61035MiB) | `n2-standard-16` (16 vCPU, 61035MiB) |
+| Database | `db.r6i.xlarge` | `GP_Standard_D4ds_v4` | `db-custom-4-16384` |
+| Cache | `cache.m5.large` | `Premium`, a family of `P` and a capacity of `1` | `STANDARD_HA` |
+
+For ideal CPU sizing across all providers:
+
+- Avoid instances with burstable CPU or network characteristics, for example:
+  - AWS: T type
+  - Azure: B type
+  - GCP: e2-, f1-, g1- types
+
+- Choose the latest generation general purpose instance type x86-64 hosts.
+- Use CPU/RAM ratio of 1:4 or higher.
+- Do not use memory-optimized instances.
+
+### Cluster calculations
+
+The default machine type (8 vCPU, 30517MiB) provides:
+
+- 30517MiB - 2048MiB - 4096MiB = 24373MiB RAM maximum spare for workspace runs (25 GB).
+- Maximum `TFE_CAPACITY_CONCURRENCY` of 24373MiB / 2048MiB = **11**.
+
+The scaled machine type (16 vCPU, 61035MiB) provides:
+
+- 61035MiB - 2048MiB - 4096MiB = 54891MiB RAM maximum spare for workspace runs (57 GB).
+- Maximum `TFE_CAPACITY_CONCURRENCY` of 54891MiB / 2048MiB = **26**.
+
+## Observability
+
+Enable the general Terraform Enterprise metrics, logs, and agent telemetry described in [Observability setup](/validated-designs/terraform/installation-guide/observability-setup); that setup is common to all platforms. On a VM deployment, forward Terraform Enterprise logs and metrics to the observability service native to your cloud:
+
+- **AWS**: Amazon CloudWatch, with Amazon S3 for log archival.
+- **Azure**: Azure Monitor and Azure Log Analytics, or Azure Blob Storage for log archival.
+- **GCP**: Google Cloud Logging.
+
+Put observability tooling in place _before_ you load-test, so that you can understand CPU, RAM, and I/O constraints — and connectivity to the external services — in your specific context. Ongoing, day-2 observability and alerting is covered in the [Administration Guide](/validated-designs/terraform/administration-guide/observability-and-alert-management).

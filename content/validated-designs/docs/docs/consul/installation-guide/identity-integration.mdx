@@ -1,0 +1,275 @@
+---
+title: Identity integration — initial setup
+description: Bootstrap ACLs and configure initial user and machine authentication for Consul Enterprise.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-07-03T10:00:00.000Z
+last_modified: 2026-07-03T10:00:00.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Identity integration — initial setup
+
+This page covers the initial ACL bootstrap and authentication setup required before day-2 operations. Ongoing role, policy, namespace, and partition management belongs in the [Administration Guide](/validated-designs/consul/administration-guide/identity-and-access-management).
+
+## Configure initial ACL roles and policies
+
+![ACL Policies](/img/consul/operating-guides/adoption/0030-acl-policies.png)
+
+You can use Consul ACL tokens to authenticate users, services, and Consul agents. When ACLs are enabled, entities requesting access to a resource must include a token that has been linked with a policy, service identity, or node identity that grants permission to the resource. The ACL system checks the token and grants or denies access to resources based on the associated permissions.
+
+Authentication engines within Consul operate at the partition level. When you need roles or policies that grant access across more than one partition, you must define the auth method and policy within the “default” partition. All tokens generated within Consul are scoped to a specific partition and namespace.
+
+### Token precedence
+The following hierarchy, applied in descending order, ensures structured access control in Consul, with each token type serving a distinct role in securing your environment.
+
+1. **Tokens included in requests:** Tokens included in requests have the highest precedence. Consul evaluates these tokens first to determine request permissions.
+
+
+2. **Default token:** In the absence of a request token, Consul considers the default token specified in the agent configuration. This provides a baseline level of access for requests made to the API that lack a specified token. This is commonly configured with read-only access to services to enable DNS service discovery on agents.
+
+3. **Anonymous token:** The anonymous token applies when no other token is available, representing the permissions for unidentified requests.
+
+Be mindful of token precedence when configuring your token so you can maintain a reliable and secure access control mechanism within your Consul setup.
+
+
+### Bootstrap the acl system
+The first step for <a href="https://developer.hashicorp.com/consul/tutorials/day-0/access-control-setup" target="_blank" rel="noreferrer">bootstrapping the ACL system</a> is to enable ACLs on the Consul servers inside the agent configuration. With the architecture covered in this guide where the control plane is running on VM instances, the platform operator must configure the default ACL policy of "deny", which means the Consul Datacenter is configured to block access to all resources and functions by default unless access is explicitly granted via the token included in an API request, or included as part of the anonymous token rules. The `down_policy` of "extend-cache", means that the agents will ignore token TTLs during a control plane outage and continue operating based on the last cached state. If you have deployed your infrastructure following the Installation Guide, these configuration settings are already included in the default Terraform deployment configuration.
+
+```
+acl {
+    enabled        = true
+    default_policy = "deny"
+    down_policy    = "extend-cache"
+}
+```
+
+You can leverage Vault Enterprise Consul secrets engine to directly bootstrap the ACL system within Consul and protect the bootstrap token from being directly exposed to operators. In future HVD iterations, we will provide more prescriptive guidance on leveraging Consul Enterprise with Vault.
+
+If you aren’t using Vault Enterprise and are manually bootstrapping Consul’s ACL system, after you enable ACLs in your server configuration you will manually bootstrap the ACL system using the Consul ACL bootstrap <a href="https://developer.hashicorp.com/consul/api-docs/acl#bootstrap-acls" target="_blank" rel="noreferrer">API</a>.
+
+The token returned, referenced in the `SecretID` field, is granted the highest level of access and shouldn’t be used for extended periods of time. It is recommended that you only use this initial token to configure the first ACL policies and roles required for your infrastructure components and human operators by following the Installation Guide as well as the User Authentication section below. Once you have finished configuring your initial User Authentication roles and have validated their functionality, we recommend you discard the bootstrap token. The bootstrap token will only be needed in the event that your human operators or GitOps pipelines lose access to Consul Enterprise due to issues with any of your authentication methods preventing them from functioning. In this scenario, where all human operators have lost access through Consul Authentication methods, you should generate a new management token by using the <a href="https://developer.hashicorp.com/consul/docs/agent/config/config-files#acl_tokens_initial_management" target="_blank" rel="noreferrer">initial_management</a> token configuration option on the Consul Server nodes.
+
+```
+$ curl --request PUT http://127.0.0.1:8500/v1/acl/bootstrap
+{
+    "AccessorID": "b5b1a918-50bc-fc46-dec2-d481359da4e3",
+    "SecretID": "527347d3-9653-07dc-adc0-598b8f2b0f4d",
+    "Description": "Bootstrap Token (Global Management)",
+    "Policies": [
+        {
+            "ID": "00000000-0000-0000-0000-000000000001",
+            "Name": "global-management"
+        }
+    ],
+    "Local": false,
+    "CreateTime": "2018-10-24T10:34:20.843397-04:00",
+    "Hash": "oyrov6+GFLjo/KZAfqgxF/X4J/3LX0435DOBy9V22I0=",
+    "CreateIndex": 12,
+    "ModifyIndex": 12
+}
+```
+
+### Configure user authentication
+One of the earliest pieces of configuration that will be established in your Consul Enterprise deployment is the User Authentication configuration. When establishing a new Consul Datacenter, the platform operators will leverage the Consul bootstrap token to carve out specific roles for different operational tasks. You will have elevated roles for tasks requiring a management token, as well as basic roles that will provide read-only visibility. We recommend leveraging the Consul Secrets Engine inside Vault as your identity broker for Consul Authentication where possible. Leveraging Vault allows you to login with any of Vault’s supported authentication engines and map Vault roles to specific policies and roles within Consul. It also provides a central point to audit the mapping of short lived tokens to specific identities. If you are a customer without an established Vault deployment, or if you want a more native login experience for human operators within the UI and CLI, we recommend that you configure the single sign-on OIDC authentication method directly in Consul Enterprise. Detailed information about configuring the OIDC authentication method can be found <a href="https://developer.hashicorp.com/consul/docs/security/acl/auth-methods/oidc" target="_blank" rel="noreferrer">here</a>. We recommend that for human authentication workflows, defining all user authentication methods within the “default” Partition, and then granting more granular access to specific Partitions using policy and role definitions targeting those Partitions is the best approach. This is because if you define policies and roles within a Partition directly, you cannot grant access across more than a single Partition which means you would need to logout and re-authenticate if you needed to administer across multiple Partitions. It is also important to include appropriate <a href="https://developer.hashicorp.com/consul/api-docs/acl/auth-methods#maxtokenttl" target="_blank" rel="noreferrer">TTLs</a> when configuring authentication methods that issue ACL tokens so that they will only be active for a short period of time if compromised.
+
+The primary user authentication roles to configure for your initial Consul Enterprise Deployment are:
+
+- **Cluster level operators:** For individuals who should be able to perform any function across the entire cluster in all Namespaces and Partitions we recommend issuing ACL tokens with the global management policy. Keep the number of global management ACL tokens limited to a small group of individuals.
+- **Cross partition administrators:** This defines common functions that are used for the Service Discovery use case with administrative access across all Partitions, but doesn’t cover every action that can be performed within Consul like the management token would. This role should be used for most Consul platform operators, and additional permissions could be extended here, if it is found that you are commonly needing to make changes using the global management ACL tokens.
+
+```
+partition_prefix "" {
+  peering = "write"
+  mesh = "write"
+  acl = "write"
+  namespace "default" {
+    node_prefix "" {
+      policy = "write"
+    }
+  }
+  namespace_prefix "" {
+    node_prefix "" {
+      policy = "read"
+    }
+    key_prefix "" {
+      policy = "write"
+    }
+    service_prefix "" {
+      policy = "write"
+    }
+    session_prefix "" {
+      policy = "write"
+    }
+  }
+  agent_prefix "" {
+    policy = "write"
+  }
+}
+
+partition "default" {
+  acl = "read"
+}
+
+query_prefix "" {
+  policy = "write"
+}
+
+keyring = "read"
+acl = "read"
+operator = "read"
+
+```
+
+- **Cross partition read-only**: The policy “builtin/global-read-only” exists out of the box and allows Read-Only access across all Partitions and namespaces. This policy is useful for platform team members that need visibility into everything but that shouldn’t be making changes directly.
+
+- **Partition administrator**: Allows administrative functions within a specific Partition across all Namespaces within that Partition. Also allows read access to prepared queries which are defined globally, and other global operator and ACL functions.
+
+```
+partition "<partition name>" {
+    peering = "write"
+    mesh = "write"
+    acl = "write"
+    namespace "default" {
+        agent_prefix "" {
+            policy = "write"
+        }
+        node_prefix "" {
+            policy = "write"
+        }
+    }
+    namespace_prefix "" {
+        node_prefix "" {
+            policy = "read"
+        }
+        key_prefix "" {
+            policy = "write"
+        }
+        service_prefix "" {
+            policy = "write"
+        }
+        session_prefix "" {
+            policy = "write"
+        }
+    }
+    agent_prefix "" {
+        policy = "write"
+    }
+}
+
+query_prefix "" {
+    policy = "read"
+}
+
+keyring = "read"
+acl = "read"
+operator = "read"
+
+```
+
+- **Partition read-only**: Allows Read-Only access within a specific Partition, as well as all of the Namespaces within that Partition. Also allows read access to prepared queries which are defined globally, and other global operator and ACL functions.
+
+```
+partition "<partition name>" {
+    peering = "read"
+    mesh = "read"
+    acl = "read"
+    namespace_prefix "" {
+        node_prefix "" {
+            policy = "read"
+        }
+        key_prefix "" {
+            policy = "read"
+        }
+        service_prefix "" {
+            policy = "read"
+        }
+        session_prefix "" {
+            policy = "read"
+        }
+    }
+    agent_prefix "" {
+        policy = "read"
+    }
+}
+
+query_prefix "" {
+    policy = "read"
+}
+
+keyring = "read"
+acl = "read"
+operator = "read"
+```
+
+### Configure machine authentication
+
+It is important to establish identity within your machine workloads early in your Consul Enterprise deployment. As you move towards a dynamic infrastructure deployment model, you can no longer depend on elements like the source IP address to represent specific workload security barriers. Instead, identity becomes the primary mechanism to secure and govern traffic patterns for your workloads across all Consul Enterprise use cases. Establishing identity is important because it ensures that services, upon startup and registration with the catalog, are actually who they claim to be. In service discovery, this means that only services with a validated identity should receive traffic based on consumer catalog queries. If you compare the Consul Service Catalog to a phone book, and Consul Enterprise to the telephone company, when you establish your telephone number with the telephone company, they require you to present identification to establish your account and register an entry for you in the public phone records. If anyone could claim that they were someone else, there would be no value in the data within the phone book and people would no longer use it as a source of truth when trying to contact other people or businesses.
+
+There are several machine authentication methods supported directly within Consul Enterprise based on your application deployment platform. When running workloads in Kubernetes, Amazon ECS, and Nomad, the secure introduction of Consul ACLs and tokens can be handled automatically for the consumer using the respective authentication methods or direct platform integration which greatly simplifies adoption. Alternatively, leveraging Vault Enterprise’s Consul secrets engine as the identity broker is a great way to standardize on a central source of identity for all of your machine workloads. Manually distributing tokens to clients can be used as a last resort if you aren’t able to leverage the native authentication methods, or Vault Enterprise.
+
+For the highest level of security, individual service instances should have unique Consul ACL tokens. This improves auditability, and ensures you can reduce the blast radius in the event that an individual Consul Token is ever compromised. In cases where you are able to automate the distribution of new ACL tokens to consumers, it is also a good practice to issue ACL tokens with a shorter lived TTL to reduce the risk in the event of compromise.
+
+A best practice is to never store Consul ACL Tokens directly in source code or configuration repositories. Retrieve ACL tokens dynamically at runtime where possible, or distribute static ACL tokens directly to machines using a secure configuration management approach.
+
+<a href="https://developer.hashicorp.com/vault/tutorials/app-integration/secure-introduction" target="_blank" rel="noreferrer">Secure introduction</a> of ACL tokens within organizations is a much larger topic which involves an organizational secrets management strategy. Refer to your Secrets Management platform for guidance on securely introducing sensitive values to your application workloads.
+
+Authentication Methods Natively Supported in Consul Enterprise:
+
+|Types|Consul Version|
+|-|-|
+|kubernetes|1.5.0+|
+|jwt|1.8.0+|
+|OIDC|1.8.0+Enterprise|
+|aws-iam|1.12.0+|
+
+### Service identities
+
+When distributing ACL tokens to individual applications, it is common to leverage service identities as a simple abstraction to tie a consumer to a common ACL policy. If your applications need permissions that aren’t included as part of the service identity policy, you should define application-specific roles instead of leveraging service identities.
+
+The following policy is generated for each service when a service identity is declared:
+
+```
+# Allow the service and its sidecar proxy to register into the catalog.
+service "<service name>" {
+    policy = "write"
+}
+# For service mesh use cases
+service "<service name>-sidecar-proxy" {
+    policy = "write"
+}
+# Allow for any potential upstreams to be resolved.
+service_prefix "" {
+    policy = "read"
+}
+node_prefix "" {
+    policy = "read"
+}
+```
+
+### Agent tokens and node identities
+
+The `acl.tokens.agent` is a special token that is used for an agent's internal operations. It isn't used directly for any user-initiated operations like the `acl.tokens.default`, though if the `acl.tokens.agent` isn't configured the `acl.tokens.default` will be used. The ACL agent token is used for the following operations by the agent:
+
+- Updating the agent's node entry using the Catalog API, including updating its node metadata, tagged addresses, and network coordinates
+- Performing anti-entropy syncing, in particular reading the node metadata and services registered with the catalog
+- Reading and writing the special _rexec section of the KV store when executing consul exec commands
+
+ACL agent tokens should be distributed to all of your server and client agent deployments. When distributing ACL agent tokens to your client and server agents, it is recommended to leverage <a href="https://developer.hashicorp.com/consul/docs/security/acl/acl-roles#node-identities" target="_blank" rel="noreferrer">Node Identities</a> scoped to the specific node name.
+
+This policy is included when creating a node identity and is suitable for use as an ACL agent token:
+```
+node "<node name>" {
+    policy = "write"
+}
+service_prefix "" {
+    policy = "read"
+}
+```
+
+### AWS EC2 authentication
+
+When deploying application workloads directly onto EC2 instances, we advise using the <a href="https://developer.hashicorp.com/consul/docs/security/acl/auth-methods/aws-iam" target="_blank" rel="noreferrer">aws-iam</a> authentication method. This method streamlines the secure introduction of Consul ACL Tokens by enabling you to build trust with your cloud platform and link your IAM instance profiles with policies and roles inside Consul Enterprise.
+
+### Configuration as code authentication
+
+For a GitOps-driven configuration of Consul Enterprise, we suggest using <a href="https://developer.hashicorp.com/terraform/cloud-docs/workspaces/dynamic-provider-credentials/workload-identity-tokens" target="_blank" rel="noreferrer">workload identities</a> in HCP Terraform and Terraform Enterprise, or a comparable JWT-based identity model linked to your specific CI/CD pipelines. Scope the workload identity with only the necessary permissions required to manage the configuration intended to be contained within that workspace or pipeline.

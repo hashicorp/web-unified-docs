@@ -1,0 +1,266 @@
+---
+title: Key lifecycle management administration
+description: Configure and administer Vault key management and KMIP secrets engine capabilities.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-07-06T12:00:00.000Z
+last_modified: 2026-07-06T12:00:00.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Key lifecycle management administration
+
+<Note>
+
+This page covers the operator setup and administration of key lifecycle management. For consumer usage workflows, see the User Guide: [Key lifecycle management](/validated-designs/vault/user-guide/key-lifecycle-management).
+
+</Note>
+
+## Overview
+
+Organizations generate and store vast quantities of sensitive data. Protecting this data from unauthorized access, corruption, or breaches is crucial. Encryption serves as a critical line of defense, safeguarding information by rendering it unreadable without a decryption key. However, the security of encrypted data hinges entirely on the proper management of those keys. This is where encryption key lifecycle management comes into play. 
+
+Key lifecycle management encompasses the entire lifecycle of cryptographic keys, from their secure generation and distribution to their controlled usage, storage, archiving, and eventual destruction. Its primary objective is to ensure the confidentiality and integrity of encrypted data by safeguarding keys from cybercriminals, unauthorized individuals, or accidental exposure.
+
+HashiCorp Vault as a KMS solution allows organizations to maintain centralized control of their keys while also providing robust key lifecycle management. We'll explore each Vault key management solution  as well as best practices for leveraging  Vault's capabilities to generate, store, access, rotate, and audit cryptographic keys. By adopting these best practices, organizations can ensure the security of their encryption keys, safeguarding sensitive data.
+
+### Bring Your Own Key (BYOK)
+
+Bring Your Own Key (BYOK) is a key management strategy that empowers organizations to retain control over their encryption keys across various platforms and services. By generating and managing their own keys, organizations can significantly enhance data security and compliance.
+
+The key benefits of a BYOK approach include:
+
+* **Independent Key Generation**: BYOK allows organizations to verify the integrity and security of their encryption keys by independently generating them using trusted entropy sources. This ensures compliance with stringent security and regulatory requirements.  
+* **Exclusive Key Ownership**: Organizations maintain exclusive ownership of their encryption keys, ensuring complete control over data access and usage. This eliminates reliance on a third party for key management, mitigating potential risks.  
+* **Disaster Recovery**: By retaining the original copy of the key material outside of the cloud environment, organizations can implement robust disaster recovery plans to protect against data loss due to cloud service disruptions or failures.  
+* **Seamless Integration**: BYOK facilitates smooth integration between on-premises and cloud environments, enabling organizations to use the same encryption keys across different platforms. This flexibility enhances operational efficiency and reduces management overhead.
+
+Vault offers several key lifecycle management solutions: 
+
+1. **Key Management Secrets Engine:** Enables centralized lifecycle management of cryptographic keys while allowing copies of the key material to be securely distributed to cloud key management service (KMS) providers for cryptographic operations.  
+2. **KMIP Secrets Engine:** Vault acts as a [KMIP](http://docs.oasis-open.org/kmip/spec/v1.4/os/kmip-spec-v1.4-os.html) server, allowing services and applications to delegate cryptographic key management to Vault using a standardized protocol.
+## Key Management Secrets Engine
+
+Organizations adopt a KMS to satisfy relevant compliance and privacy requirements, and to address specific security needs. Cloud providers typically offer a KMS solution with native integrations for their services. For example, Microsoft Azure provides encryption at rest for various storage services using keys managed by the Azure Key Vault KMS platform.  
+
+As organizations adopt a cloud operating model, key management becomes a significant security and operational challenge. In particular, it is challenging for organizations to maintain centralized control over the generation and lifecycle of key material while still being able to take advantage of native cloud integrations for securing data. Operating in multiple clouds can further amplify these challenges and HashiCorp Vault aims to solve these challenges by utilizing the Key management secrets engine.  
+
+The Key Management secrets engine supports lifecycle management of keys in the following KMS providers:
+
+* [Azure Key Vault](https://developer.hashicorp.com/vault/docs/secrets/key-management/azurekeyvault)  
+* [AWS KMS](https://developer.hashicorp.com/vault/docs/secrets/key-management/awskms)  
+* [GCP Cloud KMS](https://developer.hashicorp.com/vault/docs/secrets/key-management/gcpkms)
+
+Requirements:
+
+- Vault Enterprise license with the Advanced Data Protection (ADP) module  
+- Any of the cloud KMS providers ( Azure Key Vault, AWS KMS or GCP KMS)   
+- Review the compatible key types for each KMS Provider ([link](https://developer.hashicorp.com/vault/docs/secrets/key-management#compatibility))
+
+Generally, the cloud KMS providers support key lifecycle operations such as:
+
+* **Importing** of key material using secure key wrapping methods  
+* **Rotation** of keys/versions  
+* **Enabling and disabling** of keys/versions  
+* **Deletion and archival** of keys/versions
+
+The Cloud KMS providers allow you to create a KMS key without key material and then import your own key material into that KMS key. The ImportKey implementation will carry out the secure key import procedure for the Cloud KMS provider as specified in their BYOK specification. 
+
+Key material will always be securely transferred in accordance with the [key import specification](https://developer.hashicorp.com/vault/docs/secrets/key-management#kms-providers) of the supported KMS providers.  
+
+A typical implementation follows the below diagram
+
+![Implementation Diagram](/img/vault/operating-guides/scaling/image6.png)
+
+### Setup
+
+Configure the secret engines in advance as below. These steps are usually completed by an operator or configuration management tool.
+
+```
+vault secrets enable keymgmt
+```
+### Usage
+
+After the secrets engine is mounted and a user/machine has a Vault token with the proper permission, it can use this secrets engine to generate, distribute, and manage the lifecycle of cryptographic keys in supported KMS providers.
+
+#### Key Distribution
+
+The general process for distributing encryption keys from HashiCorp Vault to the cloud KMS Provider is as below,
+
+Create a named cryptographic key of a specific type (e.g., 2048 bit RSA key)
+
+```
+vault write -f keymgmt/key/example-key type="rsa-2048"
+```
+
+Configure the KMS provider in Vault with the required credentials
+
+```
+vault write keymgmt/kms/example-kms \
+	provider="azurekeyvault" \
+	key_collection="keyvault-name" \
+credentials=client_id="${CLIENT_ID}" \
+	credentials=client_secret="${CLIENT_SECRET}" \
+	credentials=tenant_id="${TENANT_ID}"
+```
+
+The values supplied to the generic set of parameters will differ depending on the specified provider. This example represents the configuration of Azure KMS as a KMS provider. 
+
+Distribute the key from steps above to the KMS provider key vault. 
+
+```
+vault write keymgmt/kms/example-kms/key/example-key \
+	purpose="encrypt,decrypt" \
+	protection="hsm"
+```
+
+This operation distributes a copy of the named key to the KMS provider with a specific `purpose` and `protection`. The `purpose` defines the set of cryptographic capabilities that the key will have in the KMS provider. The `protection` defines where cryptographic operations are performed with the key in the KMS provider. 
+
+#### Key Rotation
+
+Rotating a key creates a new key version that contains new key material. The key will be rotated in both Vault and the KMS provider that the key has been distributed to. The new key version will be enabled and set as the current version for cryptographic operations in the KMS provider.
+
+```
+vault write -f keymgmt/key/example-key/rotate
+```
+
+#### Enable or Disable Key versions
+
+The `min_enabled_version` of a key can be updated in order to enable or disable sequences of key versions. All versions of the key less than the `min_enabled_version` will be disabled for cryptographic operations in the KMS provider that the key has been distributed to. Setting a `min_enabled_version` of `0` means that all key versions will be enabled.
+
+```
+vault write keymgmt/key/example-key min_enabled_version=2
+```
+
+#### Remove a key from a KMS provider
+
+This operation results in the key being deleted from the KMS provider. The key will still exist in the secrets engine and can be redistributed to a KMS provider at a later time.
+
+To permanently delete the key from the secrets engine, the [delete key](https://developer.hashicorp.com/vault/api-docs/secret/key-management#delete-key) API may be invoked.
+
+```
+vault delete keymgmt/kms/example-kms/key/example-key
+```
+## General Best Practices
+
+HashiCorp recommends the following best practices for effective key lifecycle management.
+
+**Define a process:** Establish a key lifecycle management strategy encompassing key generation, distribution, utilization, rotation, and decommissioning to guarantee consistent and secure key handling throughout their existence
+
+**Key Generation:** Key has to be selected based on the purpose that defines a set of cryptographic capabilities that the key will have in the KMS provider. Supported values include "encrypt", "decrypt", "sign", "verify", "wrap", and "unwrap".
+
+**Key Rotation:**  Establish a defined key rotation schedule based on risk assessment and regulatory requirements. Keep at least two versions of encryption keys to facilitate smooth transitions during rotation, considering that the time required to distribute a key to a KMS provider is proportional to the number of key versions.. 
+
+<Note>
+If a timeout occurs when distributing a key to a KMS provider, you may need to increase the value of VAULT_CLIENT_TIMEOUT.  Note that rotating a key in the secrets engine will result in a new key version in Vault and in the related KMS provider.<br />
+</Note>
+
+**Key Revocation**: Define a revocation process to promptly deactivate and replace compromised keys. Effective key revocation is critical to preventing data exposure and limiting the damage caused by security incidents. 
+
+**Monitoring and Auditing:** Continuous monitoring and auditing capabilities to track key usage patterns and identify anomalous behavior will have to be established at the respective KMS provider. Regularly analyze logs and audit trails to maintain compliance and proactively detect potential security threats.
+## KMIP Secrets Engine
+
+The [OASIS Key Management Interoperability Protocol (KMIP)](http://docs.oasis-open.org/kmip/spec/v1.4/kmip-spec-v1.4.html) standard is a widely adopted protocol for handling cryptographic workloads and secrets management for enterprise infrastructure such as databases, network storage, and virtual/physical servers. 
+
+While Vault's Transit secrets engine  provides transparent data encryption through its native APIs, many organizations have existing systems and applications that require cryptographic operations which rely on external key management services. To address this, Vault provides a KMIP secrets engine, enabling it to function as a KMIP server.
+
+KMIP is a standardized protocol designed to abstract and offload the complexities of cryptographic operations. By delegating key storage, lifecycle management, and cryptographic operations to a KMIP server, applications can focus on their core concerns without the overhead of managing cryptographic material. Vault's KMIP secrets engine serves as a secure and efficient bridge that integrates organizations' legacy systems with modern key management practices, offering a standardized interface while leveraging Vault's inherent security and flexibility.
+
+### Supported Profiles
+
+Vault implements version 1.4 of the following Key Management Interoperability Protocol Profiles:
+
+* Baseline Server   
+* Symmetric Key Lifecycle Server  
+* Basic Cryptographic Server  
+* Asymmetric Key Lifecycle Server  
+* Advanced Cryptographic Server
+
+### Components
+   
+The KMIP secrets engine is composed of two components:
+
+* First is the KMIP server component, which exposes a listener to accept KMIP client requests. Client-server communication will occur over TCP with TLS using the KMIP protocol.   
+* Second, the secrets engine exposes regular Vault HTTP API paths for configuring the listener, managing roles, and generating client certificates.
+
+Vault's KMIP secrets engine listens on a separate port from the standard Vault listener. Each Vault server in a Vault cluster configured with a KMIP secrets engine uses the same listener configuration, defaulting to port 5696. The KMIP listener port is configurable, which is necessary if there are multiple KMIP secrets engine mounts configured on a cluster. KMIP clients connect and authenticate to this KMIP secrets engine listener port using Vault-generated TLS certificates. KMIP Vault clients may connect to any server in the cluster using the configured KMIP port. 
+
+![KMIP Client Diagram](/img/vault/operating-guides/scaling/image7.png)
+
+<Note>
+The KMIP listener will only be enabled for performance standby servers. This means that if performance standby is not used, the load balancer must ensure that the KMIP route is directed only to the leader of the cluster. This can be achieved through <a href="https://developer.hashicorp.com/vault/api-docs/system/health">health checks</a> via the cluster port (8200) to determine the current leader node.
+</Note>
+
+### KMIP Certificate Authority
+
+When the KMIP secrets engine is initially configured, Vault generates a KMIP Certificate Authority (CA) to authenticate KMIP client certificates.
+
+Vault uses the internal KMIP CA to generate unique certificates for each client authenticating to Vault over the KMIP protocol. You cannot import an externally generated KMIP certificate authority: all KMIP authentication must use the internal KMIP CA.
+
+### Scopes and Roles
+
+Vault policies do not come into play during these KMIP requests. The KMIP secrets engine determines the set of KMIP operations the clients are allowed to perform based on the roles that are applied to the TLS client certificate. 
+
+Scopes are created to partition KMIP managed object storage into multiple named buckets. Within a scope, roles can be created which dictate the set of allowed operations that a particular role can perform. TLS client certificates can be generated for a role, which services and applications can then use when sending KMIP requests to Vault's KMIP secret engine.
+
+### KMIP Supported Operations
+
+The below table outlines the KMIP operations supported by Vault.  When you grant KMIP operations, the argument convention is `operation_<KMIP_operation>` like *operation_activate or operation_revoke*
+
+| activate | discover_versions | mac | revoke |
+| :---- | :---- | :---- | :---- |
+| add_attribute | encrypt | mac_verify | sign |
+| create | get | modify_attribute | signature_verify |
+| create_keypair | get_attribute_list | query | rng_seed |
+| decrypt | get_attributes | register | rng_retrieve |
+| delete_attribute | import | rekey |  |
+| destroy | locate | rekey_keypair |  |
+
+#### Pseudo-operations:
+
+Additionally, there are two pseudo-operations that can be used to allow or deny all operation capabilities for a role. 
+
+| operation_all |
+| :---- |
+| operation_none |
+
+![KMIP Client Flow Chart](/img/vault/operating-guides/scaling/image8.png)
+
+### KMIP Debugging & Troubleshoot
+
+To facilitate debugging and troubleshooting for KMIP-specific operations, you must enable additional environment variables before starting Vault. This allows Vault to provide more detailed KMIP logs.
+
+```
+export KMIP_CONNECTION_DEBUGGING=1
+export KMIP_REQUEST_DEBUGGING=1
+export KMIP_RESPONSE_DEBUGGING=1
+export KMIP_DECODING_DEBUGGING=1
+export KMIP_INDEX_DEBUGGING=1
+```
+
+### Implementation of Vault KMIP
+
+Vault KMIP can be integrated with any platform that functions as a KMIP client to communicate with Vault. Since the integration heavily depends on how the KMIP client is constructed and designed, the implementation of Vault KMIP may vary across different platforms.
+
+Below are just some examples that illustrate the differences in configuration across platforms.
+
+#### Example of KMIP Implementation & Reference
+
+| Platform | Reference  |
+| :---- | :---- |
+| MongoDB | [MongoDB Field Level Encryption with HashiCorp Vault KMIP Secrets Engine](https://www.hashicorp.com/blog/mongodb-field-level-encryption-with-hashicorp-vault-kmip-secrets-engine) [MongoDB Encryption](https://developer.hashicorp.com/vault/tutorials/adp/kmip-engine#kmip-client-configuration)  |
+| IBM Storage Scale | [Setup Encryption using HashiCorp Vault KMIP Secrets Engine as the RKM key server](https://www.ibm.com/docs/en/storage-scale/5.1.8?topic=environment-setup-using-hashicorp-vault-kmip-secrets-engine) |
+| AWS KMS External Key Store (XKS) | [AWS XKS Integration through PKCS\#11 Provider](https://developer.hashicorp.com/vault/docs/enterprise/pkcs11-provider/aws-xks) |
+
+While the examples above illustrate some Vault KMIP implementations, they do not provide a comprehensive list of compatible platforms. HashiCorp maintains a list of compatible platforms [here](https://developer.hashicorp.com/vault/docs/interoperability-matrix#vault-as-an-external-key-management-system-ekms), which includes all the platforms that have been tested to work with Vault as an external key management system.
+
+### General Considerations
+
+- Vault does not require or recommend the use of a separate KMIP cluster, but a separate KMIP cluster for high-traffic environments or demanding KMIP operations should be considered.   
+    
+- To ensure successful KMIP client authentication, Vault clusters operating behind a load balancer require the load balancer to be configured in pass-through mode. This configuration is essential for proper client certificate validation by Vault, as the KMIP protocol mandates direct client-server communication for authentication. The load balancer should support long-lived connections and it may use a round robin routing algorithm since Vault servers will forward to the primary Vault server if necessary.
+
+- KMIP credentials are used for authentication to Vault. However, these keys are typically stored according to the implementation approach of various KMIP clients. It is important to ensure that appropriate security measures are in place to protect these KMIP credentials.
+
+- KMIP client requests to performance standbys and secondary clusters will be forwarded to the leader node on the primary cluster.   
+    
+- Vault audits all KMIP requests and responses. Establish monitoring and auditing to track key usage and identify suspicious behavior. Regularly analyze logs and audit trails to maintain compliance and proactively detect potential security threats.

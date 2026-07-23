@@ -1,0 +1,75 @@
+---
+title: Backup and restore operations
+description: Run, verify, and restore Consul Enterprise backups.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-07-03T10:00:00.000Z
+last_modified: 2026-07-03T10:00:00.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Backup and restore operations
+
+This page covers recurring backup validation and restore operations. Initial backup tooling configuration belongs in the [Installation Guide](/validated-designs/consul/installation-guide/backup-restore-initial-setup).
+
+### Backup Consul
+
+You should regularly test and validate the backup and restore processes in a non-production environment to ensure you are well prepared if you need to perform a restore against production systems and ensure your ability to meet your defined recovery time objectives and recovery point objectives. Encrypt your snapshot backups to comply with organizational and regulatory requirements. Amazon S3 encrypted objects using server-side encryption by default. Ensure you follow any Key management processes defined within your organization when leveraging S3 encrypted backups. Refer to Amazon’s <a href="https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucket-encryption.html" target="_blank" rel="noreferrer">documentation</a> for encryption within S3.
+
+**Backup cadence with the Consul Enterprise snapshot agent**
+
+To automate the backup process, utilize the Consul Enterprise <a href="https://developer.hashicorp.com/consul/commands/snapshot/agent" target="_blank" rel="noreferrer">Snapshot Agent</a>. Configure the snapshot agent to take regular snapshots of the Consul server’s state and save them to a secure location. Store backups in a different physical/virtual location to prevent data loss during infrastructure failures. You can use Amazon S3 <a href="https://docs.aws.amazon.com/AmazonS3/latest/userguide/replication.html" target="_blank" rel="noreferrer">replication</a> techniques to achieve this.
+
+Below is an example configuration that can be used within Amazon to backup snapshots to an S3 bucket.
+
+```
+{
+    "snapshot_agent": {
+        "http_addr": "https://127.0.0.1:8501",
+        "ca_file": "/consul/config/tls/consul-agent-ca.pem",
+        "token": "$${SNAPSHOT_TOKEN}",
+        "snapshot": {
+            "interval": "${snapshot_agent.interval}",
+            "retain": ${snapshot_agent.retention},
+            "deregister_after": "8h"
+        },
+        "aws_storage": {
+            "s3_region": "${aws_region.name}",
+            "s3_bucket": "${snapshot_agent.s3_bucket_id}"
+        }
+    }
+}
+```
+
+Follow the [Installation Guide](/validated-designs/consul/installation-guide/consul-on-vm) for your Consul Enterprise deployment into EC2. You can use the exposed variables to directly modify the interval and retention setting to align with your recovery point objectives. The S3 bucket and IAM security are automatically provisioned as part of the Terraform module covered within that guide.
+
+When <a href="https://developer.hashicorp.com/consul/docs/security/acl/tokens/create/create-a-snapshot-agent-token" target="_blank" rel="noreferrer">configuring the snapshot agent manually</a>, you must provide a similar ACL policy.
+```
+# Required to read and snapshot ACL data
+acl = "write"
+# Allow the snapshot agent to create the key consul-snapshot/lock, which will
+# serve as a leader election lock when multiple snapshot agents are running in
+# an environment
+key "consul-snapshot/lock" {
+    policy = "write"
+}
+# Allow the snapshot agent to create sessions on the specified node for lock
+session_prefix "" {
+    policy = "write"
+}
+# Allow the snapshot agent to register itself into the catalog
+service "consul-snapshot" {
+    policy = "write"
+}
+```
+
+### Restore Consul
+
+When restoring from a snapshot backup taken with the Consul Enterprise snapshot agent, the state of the entire cluster will be reverted to the time the snapshot was taken. There isn’t an easy way to directly pull individual items from this snapshot without restoring it to an isolated cluster and using the API to retrieve individual items.
+
+You can only restore snapshots to the same Consul version in which they were created. For service discovery use cases, the state contained within the clients is less critical. It will be synchronized back to the server catalog using the anti-entropy methods to keep the agent and server states aligned. This means any services registered after the snapshot will reappear in the catalog after the client agent synchronizes its state with the servers or when the client rejoins the server cluster after the restore operation.
+
+It may be helpful to restart client agents where possible to ensure they aren’t caching any data that is no longer relevant after the restore operation. Another consideration is that any tokens generated after the snapshot would no longer be valid and may need to be re-issued.
+
+When leveraging cluster peering, the keys exchanged between peers rotate every three days. If you restore a snapshot created before a peering key was rotated, you must re-create the peering relationship using the same name.
+
+Use the `consul snapshot restore` command to restore a snapshot retrieved from S3 using the Amazon CLI or other S3 API tooling that can retrieve objects.

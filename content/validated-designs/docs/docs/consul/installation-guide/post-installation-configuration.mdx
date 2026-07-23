@@ -1,0 +1,135 @@
+---
+title: Post-installation configuration
+description: Configure DNS forwarding and other one-time settings after Consul installation.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-07-03T10:00:00.000Z
+last_modified: 2026-07-03T10:00:00.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Post-installation configuration
+
+After Consul Enterprise is running, complete the one-time configuration needed before handoff to operators and consumers. Ongoing IAM, namespace, partition, backup, restore, and upgrade management belongs in the [Administration Guide](/validated-designs/consul/administration-guide/introduction).
+
+## Configure DNS forwarding
+
+We recommend adopting a tiered approach to DNS forwarding with Consul Enterprise to get the best experience in each deployment variety. By prioritizing local agent resolution, the system can achieve faster DNS lookups and aggregate requests through the client agent RPC connection, reducing network latency and providing the option to cache some portion of local DNS requests where sensible. This localized resolution not only enhances performance but also minimizes the dependency on external, centralized DNS servers, thereby reducing potential points of failure. As we move to systems without local client agents installed, because they haven’t yet joined the cluster, or are still beginning to adopt Consul Enterprise, we can rely on external DNS resolution methods that are already in place within your environment and configure forwarding for the consul domain. For Kubernetes, leveraging CoreDNS further extends this flexibility, allowing for seamless service discovery across both containerized and traditional environments where you can expose routable NodePort, LoadBalancer service types or by registering your Kubernetes Ingress controller definitions using the catalog-sync daemon. This tiered approach ensures that DNS resolution is optimized for speed and locality when possible, while still maintaining the broad reach and compatibility required for diverse and distributed infrastructures.
+
+### Local agent resolution with DNS forwarding
+
+We recommend starting with local agent resolution where you have Consul clients installed to achieve the best resolution locality, and optimal performance when considering TTLs and caching. By leveraging tools like `dnsmasq` or `systemd-resolved`, virtual machines equipped with client agents can resolve the `.consul` domain locally. This reduces the dependency and overall load on centralized DNS servers. For `dnsmasq`, a sample configuration would look like:
+
+```
+server=/.consul/127.0.0.1#8600
+```
+
+For `systemd-resolved`, in systemd version 246 and newer, the configuration would appear as:
+
+```
+[Resolve]
+DNS=127.0.0.1:8600
+DNSSEC=false
+Domains=~consul
+```
+
+Many operating systems use a different hierarchy or toolchain for configuring local DNS forwarding or resolution, so it is important to understand the specifics of the Operating System version you are using. Many modern Linux distributions have standardized on systemd-resolved. More detailed configuration considerations can be found <a href="https://developer.hashicorp.com/consul/tutorials/networking/dns-forwarding#systemd-resolved-setup" target="_blank" rel="noreferrer">here</a>.
+
+A key advantage in this scenario is that your DNS queries will automatically have the context of your client agent deployment, like the Partition your client is operating in when using admin partitions.
+
+### External resolution via DNS forwarding
+
+For environments that require external DNS resolution because there are Consumers who haven’t yet adopted Consul or don’t have Consul agents deployed locally, using DNS Forwarding becomes essential. External forwarding can also be a useful way to find the Consul server addresses when initially joining the cluster because you can resolve the server IP addresses by referencing the `consul.service.consul` DNS query. Tools and platforms like Active Directory Conditional Forwarding, BIND, Route53, and Infoblox can be configured to forward requests for the `.consul` domain to the appropriate Consul servers. This approach ensures that even if a request originates outside the local environment, it's directed correctly to the Consul cluster for that Region. For instance, in BIND, a forward zone can be defined specifically for the `.consul` domain, ensuring that all such requests are forwarded to the Consul DNS interface. Each Region will have unique resolution targets for forwarding, so factoring that into your design is essential. The Installation Guide covers a method for forwarding within Amazon VPCs by leveraging Route53 outbound forwarding.
+
+
+### Kubernetes DNS forwarding with CoreDNS
+In Kubernetes environments, CoreDNS is often the default DNS server. To integrate Consul's service discovery with Kubernetes, you can configure CoreDNS to forward requests for the `.consul` domain either to a ClusterIP DNS service within Kubernetes or an external load balancer exposing TCP and UDP DNS from a Consul agent. This ensures seamless service discovery across both Kubernetes and non-Kubernetes environments.
+
+The following is a sample CoreDNS configuration to forward traffic for the consul domain to your Consul DNS endpoint. Add the following consul forwarding configuration to the Corefile section of your coredns ConfigMap located in the “kube-system” Kubernetes namespace.
+
+```
+. {
+    forward . /etc/resolv.conf
+    log
+}
+
+consul {
+    forward . <CONSUL_DNS_TARGET>:<CONSUL_DNS_PORT>
+    log
+}
+```
+
+### Forwarding destination for external resolution and kubernetes configurations
+
+If you’ve been following the Installation Guide for deploying your Consul Enterprise servers into Amazon EC2, you should have a load balancer in front of your Consul server plane exposing DNS from the default partition on port 53 for both TCP and UDP. When deploying network load balancers within Amazon, the IP address of the listeners should not change once they are initially assigned. The forwarding destination for your external forwarding tier, or within CoreDNS, would need to be updated any time these IP addresses change due to re-deployment or other factors.
+
+When forwarding DNS directly to the Consul server control plane, all DNS queries will be performed from the context of the default partition and namespace. You can include partition or namespace information inside your query when discovering services located outside of the default partition and namespace.
+
+### DNS ACL permissions
+
+If you want to allow centralized DNS discovery across Consul namespaces and partitions within VM deployments you should adjust the anonymous token policy, or the default token policy of the DNS client agents to include cross partition and namespace read access. Currently this also grants read access when querying via the API.
+
+```
+partition_prefix "" {
+    namespace_prefix "" {
+        node_prefix "" {
+            policy = "read"
+        }
+        service_prefix "" {
+            policy = "read"
+        }
+    }
+}
+```
+
+### DNS performance considerations
+To improve DNS scalability in larger environments, it is important to consider some key DNS configuration settings early on in your deployment.
+
+**Stale reads**
+
+By default, Consul enables stale reads and sets the `max_stale` value to 10 years. This allows Consul to continue serving DNS queries in the event of a long outage with no leader. The telemetry counter `consul.dns.stale_queries` can be used to track when agents serve DNS queries that are stale by more than 5 seconds.
+```
+dns_config {
+    allow_stale = true
+    max_stale = "87600h"
+}
+```
+
+**Negative response caching**
+
+Some DNS clients cache negative responses – for example, Consul returns a "not found" response because a service exists but there are no healthy endpoints. If you are using DNS for service discovery, cached negative responses may cause services to appear "down" for longer than they are actually unavailable.
+
+One common example is when Windows defaults to caching negative responses for 15 minutes; DNS forwarders may also cache negative responses. To avoid this problem, check the negative response cache defaults for your client operating system and any DNS forwarder on the path between the client and Consul, and set the cache values appropriately. In many cases, an appropriate cache value may mean disabling negative response caching to get the best recovery time when a service becomes available again.
+
+To reduce negative response caching, you can tune SOA responses and modify the negative TTL cache where you are servicing DNS requests.
+```
+dns_config {
+    soa {
+        min_ttl = 60
+    }
+}
+```
+
+**TTL values**
+
+You can specify TTL values to enable caching for Consul DNS results. Higher TTL values reduce the number of lookups on the Consul servers and speed lookups for clients, at the cost of increasingly stale results. By default, all TTLs are zero which disables caching.
+
+```
+dns_config {
+    service_ttl {
+        "*" = "0s"
+    }
+    node_ttl = "0s"
+}
+```
+
+You can specify a TTL that applies to all services or a more granular TTL for services that require more precision. The following example Consul server configuration enables external forwarding, or local agent configurations when local agent forwarding is configured. Consul will cache all node and service requests for 5 seconds, and cache results for the `web` service for 1 second.
+
+```
+dns_config {
+    service_ttl {
+        "*" = "5s"
+        "web" = "1s"
+    }
+    node_ttl = "5s"
+}
+```

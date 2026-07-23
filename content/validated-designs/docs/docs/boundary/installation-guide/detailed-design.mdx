@@ -1,0 +1,272 @@
+---
+title: Detailed Design
+description: Review sizing, networking, storage, KMS, TLS, load balancing, and failure considerations for Boundary Enterprise deployment.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-07-03T10:00:00.000Z
+last_modified: 2026-07-03T10:00:00.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Detailed design
+
+This section provides more architectural detail on each Boundary Enterprise component. Review this section to identify all technical and personnel requirements before moving to implementation.
+
+## Sizing
+
+Every hosting environment is different, and every customer's Boundary Enterprise usage profile is different. Refer to the tables below for sizing recommendations for controller nodes and worker nodes, as well as small and large use cases, based on expected usage.
+
+**Small** deployments would be appropriate for most initial production deployments or for development and testing environments.
+**Large** deployments are production environments with a consistently high workload, such as a large number of sessions.
+
+### Controller nodes
+
+| Size | CPU | Memory | Disk capacity | Network throughput |
+|-|-|-|-|-|
+| Small | 2-4 core | 8-16 GB RAM | 50+ GB | Minimum 5 GB/s |
+| Large |4-8 core | 32-64 GB RAM | 200+ GB | Minimum 10 GB/s |
+
+### Worker nodes
+
+| Size | CPU | Memory | Disk capacity | Network throughput |
+|-|-|-|-|-|
+| Small | 2-4 core | 8-16 GB RAM | 50+ GB | Minimum 10 GB/s |
+| Large | 4-8 core | 32-64 GB RAM | 200+ GB | Minimum 10 GB/s |
+
+Refer to [Hardware sizing for Boundary servers](https://developer.hashicorp.com/boundary/tutorials/enterprise/ent-reference-architecture#hardware-sizing-for-boundary-servers) for more details. These recommendations serve as a starting point for operations staff to observe and adjust to meet the unique needs of each deployment. Match your requirements and maximize the stability of your Boundary Enterprise controller and worker instances, by performing load tests and continue monitoring resource usage and all reported metrics from Boundary's telemetry.
+
+### Hardware considerations
+
+CPU, memory, and storage performance requirements depend on your exact usage profile for example types of requests, average request rate, and peak request rate. Boundary Enterprise controllers and worker nodes have distinct resource needs as they handle different tasks. Refer to the [Hardware Considerations](https://developer.hashicorp.com/boundary/tutorials/enterprise/ent-reference-architecture#hardware-considerations) for more information.
+
+Enable audit logging in Boundary Enterprise. It is best to write audit logs to a separate disk for optimal performance. We recommend monitoring both the file descriptor usage and the memory consumption for each Boundary Enterprise worker node. These resources can become constrained depending on the number of clients connecting to Boundary Enterprise targets at any given time. If you have enabled session recording on a target, the worker stores the session recordings locally during the recording phase. Refer to [Storage Considerations](https://developer.hashicorp.com/boundary/docs/configuration/session-recording#storage-considerations) to determine how much storage to allocate for recordings on the worker nodes.
+
+## Networking
+
+Network bandwidth requirements for Boundary Enterprise controllers and workers depend on your specific usage patterns. Consider bandwidth requirements for other external systems, such as monitoring and logging collectors. Refer to [Network Considerations](https://developer.hashicorp.com/boundary/tutorials/enterprise/ent-reference-architecture#network-considerations) for more information. Monitor the networking metrics of Boundary Enterprise workers to prevent situations where they are unable to initiate session connections. Review your provider-specific virtual machine networking limitations. You must increase the VM size to achieve higher network throughput.
+
+### Network connectivity
+
+Refer to [Network Connectivity](https://developer.hashicorp.com/boundary/tutorials/enterprise/ent-reference-architecture#network-connectivity) for the minimum requirements for Boundary Enterprise cluster nodes. You may also need to grant the Boundary Enterprise nodes outbound access to additional services that live elsewhere, either within your internal network or over the Internet. Examples may include:
+
+- Authentication provider backends, such as Okta, Auth0, or Microsoft Entra ID
+- Remote log handlers, such as a Splunk or ELK environment
+- Metrics collection, such as Prometheus
+
+## Storage
+
+Enable audit logging in Boundary Enterprise. For optimal performance, writing audit logs on a separate disk is advisable. The worker stores session recordings locally during the recording process, if enabled. When estimating worker storage needs, consider the number of concurrent sessions recorded on that worker. Refer to the [storage guidelines](https://developer.hashicorp.com/boundary/docs/configuration/session-recording#storage-considerations) to determine the appropriate amount of storage to allocate for recordings on the worker nodes.
+
+## KMS
+
+Boundary Enterprise controllers and workers require different types of cryptographic keys. The KMS provider provides the root of trust for keys used for various purposes, such as protecting secrets, authenticating workers, recovering data, encrypting values in Boundary Enterprise's configuration. Refer to the [KMS](https://developer.hashicorp.com/boundary/tutorials/enterprise/ent-deployment-guide#prepare-kms-keys) section for more information.
+
+## Traffic encryption
+
+Boundary Enterprise is secure by default, and uses TLS for all network traffic communication. Boundary Enterprise has three types of connections, as described in the previous [TLS](/validated-designs/boundary/installation-guide/architecture#transport-layer-security-(tls)) section:
+
+- Client-to-controller TLS
+- Client-to-worker TLS
+- Worker-to-upstream TLS
+
+Refer to the [TLS](https://developer.hashicorp.com/boundary/docs/concepts/security/connections-tls#client-to-controller-tls) documentation for detailed information on each connection type.
+
+From a load balancing requirement, always configure TLS pass-through. The load balancing section provides more information on this.
+
+## Load balancing
+
+A layer 4 load balancer meets Boundary Enterprise's requirements. However, organizations may implement layer 7-capable load balancers for additional controls. Regardless of which, follow these requirements:
+
+- HTTPS listener with valid TLS certificate for the domain it is serving or TLS pass-through
+- Use TCP 9203 for health checks
+
+Each major cloud provider offers one or more managed load-balancing services suitable for Boundary Enterprise. Follow the guidance provided in the [load balancer recommendations](https://developer.hashicorp.com/boundary/tutorials/enterprise/ent-reference-architecture#load-balancer-recommendations).
+
+### Client-to-controller
+
+Place Boundary Enterprise controller nodes in a private network and not exposed directly to the public Internet. Expose services such as the API and administrative console using a load balancer. This design utilizes a layer 4 load balancer with additional network security controls, such as security groups or firewall access control lists, to restrict the network flow to the load balancer interface.
+
+![Boundary Enterprise client-to-controller](/img/boundary/solution-design-guides/boundary-enterprise/0020-boundary-detailed-design-client-to-controller.svg)
+
+#### Health check
+
+Use a load balancer to monitor the health of the Boundary Enterprise controller nodes. Do this by detecting the status of the `/health` endpoint.
+
+This endpoint does not support any input. It returns an empty bodies to API responses.
+
+| Status | Description |
+|-|-|
+| 200 | GET `/health` returns HTTPS status `200` if the controller's API gRPC service is up. |
+| 5xx | GET `/health` returns HTTPS status `5xx` or request timeout if unhealthy. |
+| 503 | GET `/health` returns HTTPS status `503` Service Unavailable status if the controller is shutting down. |
+
+Use the listener stanza to configure the controller's operational endpoints. By default, it listens on TCP 9203. The operational endpoint exposes both health and metrics endpoints.
+
+##### Operational endpoint stanza configuration
+
+```hcl
+# Ops listener for operations like health checks for load balancers
+listener "tcp" {
+  # Should be the address of the interface where your external systems' load balancer and/or metrics collectors etc. will connect on.
+  address = "0.0.0.0:9203"
+  # The purpose of this listener block
+  purpose = "ops"
+
+  tls_disable   = false
+  tls_cert_file = "/etc/boundary.d/tls/boundary-cert.pem"
+  tls_key_file  = "/etc/boundary.d/tls/boundary-key.pem"
+}
+```
+
+### Worker-to-controller
+
+Workers connect directly to each Boundary Enterprise controller on TCP 9201 (the cluster port). A dedicated load balancer for worker-to-controller connectivity is not recommended.
+
+For multi-cloud or multi-region deployments operating a single control plane, for example workers in another cloud or on-premises, it may be necessary to expose TCP 9201 externally so that remote workers can reach each controller directly. Each controller must be individually addressable on TCP 9201 — do not route this traffic through a shared load balancer. Assign each controller a stable IP address or DNS hostname to minimise configuration changes when controllers are replaced.
+
+![Boundary Enterprise Worker-to-controller](/img/boundary/solution-design-guides/boundary-enterprise/0020-boundary-detailed-design-worker-to-controller.svg)
+
+Use the `worker` stanza to configure `initial_upstreams` with the address of each controller. List each controller individually — do not use a shared load balancer address.
+
+##### Worker stanza configuration
+
+```hcl
+worker {
+  # List each controller node individually by its cluster port address.
+  # Do not use a shared load balancer address.
+  initial_upstreams = [
+    "controller-1.internal.example.com:9201",
+    "controller-2.internal.example.com:9201",
+    "controller-3.internal.example.com:9201",
+  ]
+}
+```
+
+### Worker-to-worker (multi-hop sessions)
+
+With multi-hop sessions, workers operate as intermediaries or egress workers. Do not place workers behind a shared load balancer. Each worker that has downstream workers must be individually addressable and must advertise its own address using the `public_addr` configuration field. The Boundary control plane manages session distribution across available workers when clients initiate sessions.
+
+Configure `initial_upstreams` on each downstream worker with the explicit IP address or fully qualified domain name (FQDN) of each individual upstream worker. Do not set `initial_upstreams` to the address of a shared load balancer fronting multiple workers.
+
+![Boundary Enterprise Worker-to-worker](/img/boundary/solution-design-guides/boundary-enterprise/0020-boundary-detailed-design-worker-to-worker.svg)
+
+Use `public_addr` on each ingress worker so that it is individually addressable, and configure `initial_upstreams` on each egress worker to list each upstream worker explicitly.
+
+##### Ingress worker stanza configuration
+
+```hcl
+worker {
+  # Advertise a stable, individually addressable address to downstream workers and clients.
+  public_addr = "ingress-worker-1.internal.example.com"
+  initial_upstreams = [
+    "controller-1.internal.example.com:9201",
+  ]
+}
+```
+
+##### Egress worker stanza configuration
+
+```hcl
+worker {
+  # List each upstream (ingress) worker individually by address.
+  # Do not use a shared load balancer address.
+  initial_upstreams = [
+    "ingress-worker-1.internal.example.com:9201",
+  ]
+}
+```
+
+When an upstream worker is replaced or a new worker is added, update the `initial_upstreams` list on the downstream workers that connect to it. Send a `SIGHUP` signal to the downstream worker process to reload the configuration without restarting it.
+
+To minimise configuration changes when workers are recycled, consider assigning each upstream worker a static IP address or a stable DNS hostname.
+
+## Monitoring
+
+Gaining visibility into Boundary Enterprise's controllers and workers is essential for production environments. It enables operators to manage, scale, and troubleshoot Boundary Enterprise efficiently and assists in detecting and mitigating anomalies in a deployment.
+
+### Logs
+
+If events are not configured, for example using the [events stanza](https://developer.hashicorp.com/boundary/docs/configuration/events), Boundary Enterprise outputs logs to stdout/stderr by default. Linux distributions typically capture Boundary Enterprise's log output to the system journal.
+
+In production environments, use the events stanza to increase control over event logging. Event logging configured using the events stanza overrides the default behavior. For example, if configuring Boundary Enterprise to send events to a file, logs are no longer emitted to standard output or standard error.
+
+Aggregate logs using a centralized platform for analysis, audit, and compliance, and aid in troubleshooting.
+
+#### Minimum configuration
+
+```hcl
+events {
+  audit_enabled = true
+  observations_enabled = true
+  sysevents_enabled = true
+  telemetry_enabled = false
+  sink "stderr" {
+    name = "all-events"
+    description = "All events sent to stderr"
+    event_types = ["*"]
+    format = "hclog-text"
+  }
+}
+```
+
+### Metrics
+
+Metrics for controllers and workers are available for ingestion by third-party telemetry platforms, such as Prometheus and Grafana. The metrics use the OpenMetric exposition format. Refer to the Boundary Enterprise metrics [documentation](https://developer.hashicorp.com/boundary/docs/operations/metrics) for a list of all available metrics.
+
+Boundary Enterprise provides metrics through the /metrics path using a listener with the "ops" purpose.
+
+Configure the controller's operational endpoints using the listener stanza. By default, it listens on TCP-9203. The operational `ops` listener exposes both health and metrics endpoints.
+
+#### Operational endpoint stanza configuration
+
+```hcl
+# Ops listener for operations like health checks for load balancers
+listener "tcp" {
+  # Should be the address of the interface where your external systems'
+  # (eg: Load-Balancer and metrics collectors) will connect on.
+  address = "0.0.0.0:9203"
+  # The purpose of this listener block
+  purpose = "ops"
+
+  tls_disable   = false
+  tls_cert_file = "/etc/boundary.d/tls/boundary-cert.pem"
+  tls_key_file  = "/etc/boundary.d/tls/boundary-key.pem"
+}
+```
+
+## Failure considerations
+
+Organizations must rely on the experience from their architecture, cloud, and platform teams to provide the appropriate levels of availability for Boundary Enterprise that meet their requirements. This architecture design leverages several principles and standard infrastructure services with major cloud providers to provide the highest availability and fault tolerance while balancing costs.
+
+- **Auto scaling** to enhance fault tolerance. For example, if a Boundary Enterprise instance is unhealthy, the auto scaling service can replace it. You can also configure the service to use multiple availability zones and launch instances in another availability zone to compensate if one becomes unavailable.
+- **Templating** images to decrease the time to deploy controllers and workers during the initial deployment, notably failure and scaling scenarios.
+- **Infrastructure-as-code** to produce consistent, known deployments that reduce configuration errors.
+- **Availability zones** to protect against data center failures. Spread Boundary Enterprise components across at least three availability zones in production environments. If deploying Boundary Enterprise to three availability zones is not possible, you can use the same architecture across one or two availability zones at the expense of a reliability risk in case of an availability zone outage.
+- **Load balancing** to provide traffic redirection and health checking.
+
+### Controllers
+
+Boundary Enterprise controllers are stateless. They store all state and configuration within PostgreSQL and can withstand failure scenarios where only one node is accessible. When a controller node fails, users are still be able to interact with other Boundary Enterprise controllers, assuming the presence of additional nodes behind a load balancer. Boundary Enterprise controllers depend on a PostgreSQL database. Ensure the database is reachable to all Boundary Enterprise controller nodes. It must also inherit the same levels of availability as the controllers. Do not deploy PostgreSQL on the controller nodes.
+
+### Workers
+
+Boundary Enterprise uses workers as either proxies or reverse proxies. Workers routinely communicate with the controllers to report their health. In the event of a worker node failure, it is best practice to have at least three workers per network boundary and per type (ingress and egress) for production environments. Therefore, the controller assigns a user's proxy session to an active Boundary Enterprise worker node.
+
+### Availability zone failures
+
+The following section provides recommendations for controllers and workers to overcome availability zone outages.
+
+#### Controllers
+
+By deploying Boundary Enterprise controllers in the recommended architecture across three availability zones with load balancing in front of them, the Boundary Enterprise control plane can survive outages in up to 2 availability zones.
+
+To continue to serve Boundary Enterprise controller requests during a regional outage, a deployment like the one outlined in this guide must be in a different region. Use a multi-regional database technology to allow the nodes in the secondary region to communicate with the PostgreSQL database. For example, promote secondary region AWS RDS read replicas to read-write in the event the primary region fails.
+
+Use services like AWS Global Accelerator for AWS, Cross-region Load Balancer for Azure, and GCP Cloud Load Balancer for GCP to load balance healthy Boundary Enterprise controller requests across regions.
+
+#### Workers
+
+We recommend deploying at least one worker per availability zone.
+
+Should networking still be operational in an otherwise-failed availability zone, correct configuration of security rules allowing cross-subnet/AZ communication results in Boundary Enterprise proxying a user's session connection through a worker in another AZ.
+
+If a Boundary Enterprise worker cannot reach its upstream worker or a controller, the user cannot establish a proxied session to the target.

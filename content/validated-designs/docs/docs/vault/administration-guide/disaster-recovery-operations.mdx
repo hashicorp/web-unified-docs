@@ -1,0 +1,155 @@
+---
+title: Disaster recovery operations
+description: Operate Vault Enterprise disaster recovery replication, including promotion and failback procedures.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-07-06T12:00:00.000Z
+last_modified: 2026-07-06T12:00:00.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Disaster recovery operations
+
+<Note>
+
+This page covers recurring disaster recovery operations. For initial disaster recovery replication setup, see the Installation Guide: [Disaster recovery initial setup](/validated-designs/vault/installation-guide/vms/disaster-recovery-initial-setup).
+
+</Note>
+
+## DR cluster promotion
+
+Deciding when to initiate a DR process on Vault can be a complex decision. Due to the difficulty in accurately evaluating why a failover should or should not happen, Vault Enterprise deliberately does not support an automatic failover/promotion of a DR secondary cluster. However, It is possible to automate accurate detection with your own development/tooling, and triggering/orchestrating failover by leveraging Vault's API, specifically the <a href="https://www.vaultproject.io/api/system/replication" target="_blank" rel="noopener">Replication</a> and <a href="https://www.vaultproject.io/api/system/replication/replication-dr" target="_blank" rel="noopener">DR</a> APIs.
+
+In this section, we will outline the identification and manual activities to failover to a DR cluster.
+
+### When to initiate a DR process
+
+We might think we will be able to identify a situation that should drive a DR process at the time it occurs, but usually this is not the case. Complex network topographies, ephemeral cloud resources, and unreliable metrics/health indicators can all falsely alert to an outage or quietly suppress a true outage.
+
+Initiating a DR process for Vault is usually part of an organization-wide issue such as connectivity or a datacenter outage, versus a siloed problem with the Vault cluster. Vault itself is designed and should be deployed in a <a href="https://www.vaultproject.io/docs/concepts/ha" target="_blank" rel="noopener">highly-available</a> model that is tolerable to common issues such as a server losing a disk drive.
+
+When Vault is deployed inline with the architecture outlined in the HashiCorp Vault Enterprise Installation Guide, two availability zones can fail with Vault still maintaining quorum, operation, and performance.
+
+In the diagram below, the Vault leader node (voter) is in Availability Zone B. If it fails, the follower node (non-voter) in Availability Zone B will be elected as the new leader node (voter) and continue operation. The specifics of how active node step-down, leadership lost, and Raft election are outside the scope of this document.
+
+[![Vault DR Failover](https://developer.hashicorp.com/.extracted/hvd/img/vault/solution-design-guides/vault-enterprise/030-hvd-vault-cluster-architecture-diagram.png)](https://developer.hashicorp.com/.extracted/hvd/img/vault/solution-design-guides/vault-enterprise/030-hvd-vault-cluster-architecture-diagram.png)
+
+Vault operators should have a runbook to handle every combination of losing a node or nodes in the above architecture. For example, if a node in Zone C fails overnight it might be acceptable to wait until the next day to replace it in the cluster. However, a loss of connectivity entirely to Zone B and C might trigger action to replace those lost nodes immediately in Zone A, as once 4 nodes are lost the cluster has no more redundancy for maintaining quorum.
+
+In the context of DR, two scenarios should initiate an immediate process to failover to a DR cluster:
+
+1. A rapid loss of all voter nodes such as a failure of all three availability zones.
+2. Failure of more than 4 nodes across all three availability zones - a minimum of 2 voter nodes are required to maintain quorum.
+
+#### Identification of issues
+##### Reactive awareness
+
+Initial awareness and triage of a condition that could trigger a DR move is the first step to understanding what is going on, where the breakdown is, and which team/platform needs to be involved to resolve it.
+A few examples of methods for this include the following.
+
+- Application alerting (ie, application cannot connect to Vault)
+- Container/Server logs
+- APM/tracing tools (Zipkin, Jaeger, Dynatrace, Datadog APM, etc)
+- Vault logs
+- Vault telemetry
+- End-user complaints
+
+##### Proactive action
+
+Outside of reactive awareness of an issue, there are situations that your business continuity plan might prescribe a move to a DR environment ahead of the actual event.  Examples of this include expecting and planning for a pending disaster, such as many financial organizations failing over to non-coastal datacenters when hurricane Sandy approached the New York area in 2012.
+
+#### Confirmation of issue
+
+Upon notification that something might be wrong, your organization should take one of two paths of action depending on the criticality and urgency of the possible outage.
+
+- Immediately begin failover procedures.
+- Execute a pre-authored and pre-tested triage runbook to verify which components are functioning and which have failed. Then, staff will decide to initiate a failover, fix the system within the primary environment, or possibly accept the period of outage.
+
+The triage runbook is a specific set of verifications and conditions to assure staff makes the best decision to perform a DR move or not. For Vault, these can include:
+
+- Are all services that use Vault experiencing problems, or one/subset?
+- Is Vault itself (logs, telemetry) indicating a problem?
+- Is there current maintenance that is possibly causing false alarms?
+- Is Vault the actual issue, or could it be downstream (ie, the auth Vault uses to a cloud provider has been revoked)?
+- Is the Vault cluster and each node responding if accessed directly vs through the load balancer?
+- Is the issue something that would have been replicated to the DR cluster already (ie, accidental mass-revocation of tokens, or configuration change)
+- WIll DR resolve this issue? Or will we need to restore from backup?
+
+Confirmation of issue is important to protect the uptime of the service. Having an automated means to failover may reduce outage time, but we do not recommend fully automated failover.
+
+### How to initiate a DR process
+
+Once an outage has been confirmed, operations staff should have a standard set of procedures to address the outage in order to minimize downtime, ensure data consistency, and notify others about outages, rollbacks, or new infrastructure to employ in a DR event.
+Given the multi-cluster architecture below as documented in the Vault Installation Guide,  in the event of a failure of DR primary cluster in Region 1, the recommended steps to promote the DR secondary cluster in Region 2 as the new primary are:
+
+![Vault DR Procedure](/img/vault/operating-guides/adoption/image19.png)
+
+The prerequisite is to have generated a <a href="https://developer.hashicorp.com/vault/tutorials/enterprise/disaster-recovery#generate-a-dr-operation-token" target="_blank" rel="noopener">Batch DR operation token</a> as per the advice above.
+
+Follow the steps below.
+
+1. Disable load balancing/routing while failover is in progress:
+  1. Disable the network load balancer to Region 1 Vault nodes.
+  1. Disable global load balancer (e.g. F5 GSLB, Amazon Route53 Failover Record, HashiCorp Consul). Recall the requirement of a [failover mechanism](/validated-designs/vault/installation-guide/vms/architecture#failover-mechanism) in the Vault Installation Guide.
+1. Promote Region 2 DR secondary cluster to become the new primary cluster.
+  1. Configure your working environment:
+    1. Set `VAULT_ADDR` to the address of the DR secondary cluster load balancer.
+    1. Verify connectivity and cluster information with `vault status`.
+  1. <a href="https://developer.hashicorp.com/vault/tutorials/enterprise/disaster-recovery#promote-a-dr-secondary-cluster" target="_blank" rel="noopener">Promote DR secondary cluster from secondary to primary</a>
+  1. Verify Region 2 Vault cluster is acting as a primary, that it has no secondaries, mode is primary, and its state is running:
+
+    ```
+    vault read sys/replication/dr/status --format=json
+    {
+    "request_id": "ba05db44-2d64-174c-6857-9d7507fcf625",
+    ...
+    "data": {
+        "cluster_id": "78a9148d-0c9b-49e9-f025-a997811e756e",
+        "known_secondaries": [],
+        "last_dr_wal": 3476845,
+        "last_reindex_epoch": "0",
+        "last_wal": 3476845,
+        "merkle_root": "83ca160168dd2609ae8be43595915ebcd4d3415a",
+        "mode": "primary",
+        "primary_cluster_addr": "",
+        "secondaries": [],
+        "state": "running"
+    }
+    ```
+
+1. Enable load balancing to the new cluster:
+  1. Configure global load balancer to target Region 2 Vault cluster load balancer.
+  1. Verify connectivity to Region 2 Vault cluster via browser.
+1. Notify Vault consumers and stakeholders Vault is back online.
+1. As soon as the old primary is accessible, demote it to prevent split brain scenario, since Region 2 is now Primary.
+  1. Set `VAULT_ADDR` to the address of a Region 1 DR primary node.
+  1. <a href="https://developer.hashicorp.com/vault/tutorials/enterprise/disaster-recovery#option-1-demote-dr-primary-to-secondary" target="_blank" rel="noopener">Demote Region 1 DR primary to secondary</a>.
+
+### How to failback
+
+After the original primary has been restored to operation, it may be necessary or desirable to revert the configuration to the preferred topology. The recommended steps to failback are in <a href="https://developer.hashicorp.com/vault/tutorials/enterprise/disaster-recovery#dr-failback" target="_blank" rel="noopener">this section</a> of the public documentation on the subject, and additional considerations are below. In the example above, Region 2 is the current Primary, and Region 1 was the old primary and will be promoted again.
+
+The prerequisite is to have generated a <a href="https://developer.hashicorp.com/vault/tutorials/enterprise/disaster-recovery#generate-a-dr-operation-token" target="_blank" rel="noopener">Batch DR operation token</a> as per the advice above.
+
+#### Considerations
+
+1. If you have not yet demoted the Region 1 old primary (see Step 5 above), you must do that before bringing it online and resuming replication. Demote Region 1 DR primary cluster to become secondary.
+1. <a href="https://developer.hashicorp.com/vault/tutorials/monitoring/monitor-replication" target="_blank" rel="noopener">Monitor Vault replication</a> to ensure that the WAL (write ahead logs) are in sync:
+    1. Ensure that state of the secondary is `stream-wals`.
+    1. `merkle_root` on the primary and secondary should match.
+    1. The `last_dr_wal` on the primary should match the `last_remote_wal` on the secondary.
+1. Notify Vault consumers and stakeholders of planned outage for failback to Region 1.
+1. Disable load balancing/routing while failback is in progress:
+    1. Disable load balancer to Region 2 DR primary.
+    1. Disable global load balancer.
+1. Demote Region 2 DR primary to a secondary:
+    1. Set `VAULT_ADDR` to a Region 2 DR secondary node.
+    1. Demote the Region 2 DR primary to secondary.
+1. <a href="https://developer.hashicorp.com/vault/tutorials/enterprise/disaster-recovery#promote-dr-secondary-to-primary" target="_blank" rel="noopener">Promote Region 1 DR secondary as the new primary</a> and verify Region 1 Vault cluster is acting as a primary, that it has no secondaries, mode is primary, and its state is running.
+1. Establish replication between Region 2 DR secondary and Region 1 DR primary cluster.
+    1. Generate a secondary activation token from Region 1 DR primary.
+    1. Copy the generated `wrapping_token`, you will need it in the next step to update the primary for Region 2 DR secondary.
+    1. Update the primary of Region 2 DR secondary using the batch DR operation token and the secondary activation token from Region 1 DR primary.
+1. Enable load balancer.
+    1. Enable network load balancer to Region 1 DR primary and Region 2 DR secondary.
+    1. Enable global load balancer.
+1. Notify Vault consumers and stakeholders Vault is back online.

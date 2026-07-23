@@ -1,0 +1,56 @@
+---
+title: Troubleshooting
+description: Anti-patterns, failure modes, failure scenarios, and recovery guidance for Vault Enterprise on OpenShift.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-07-06T12:00:00.000Z
+last_modified: 2026-07-06T12:00:00.000Z
+# END AUTO GENERATED METADATA
+---
+
+## Failure scenarios and recovery
+
+Understanding failure scenarios helps you design resilient Vault clusters and plan recovery procedures. The following scenarios describe common failures and their impact on OpenShift deployments.
+
+### Pod failure
+
+A Pod failure occurs when a Vault process crashes or the container fails health checks. The `kubelet` restarts the Vault container according to the Pod restart policy. If Kubernetes recreates the Pod, the StatefulSet controller preserves the Pod identity and the new Pod mounts the same PersistentVolumeClaim (PVC). The restarted Vault instance rejoins the Raft cluster using its persisted state. Probe timing affects how quickly the cluster detects and recovers from Pod failures.
+
+### Node failure
+
+A node failure causes all Pods on that node to become unavailable. After a configurable timeout, the node controller marks the node NotReady and applies `node.kubernetes.io/not-ready` and `node.kubernetes.io/unreachable` taints with the `NoExecute` effect. Pods tolerate these taints for a default of 300 seconds before eviction.
+
+The StatefulSet controller creates replacement Pods and the Kubernetes scheduler assigns them to available nodes. If the Pod's PVC uses zone-local storage, the replacement Pod must schedule in the same zone. If the PVC uses a local persistent volume bound to a specific node, the replacement Pod must return to that node.
+
+The cluster's quorum tolerance determines whether it can sustain the disruption. In the reference 6-pod redundancy zones topology, the cluster has 3 voters. When one node fails and its Vault Pod becomes unavailable, if that Pod is a voter, the remaining 2 of 3 voters maintain quorum. If the failed Pod is a non-voter, the failure does not affect quorum. In the 5-pod topology, the cluster preserves quorum as long as at least 3 voting Pods remain available. With the recommended node-level anti-affinity, a single node failure normally removes 1 Vault Pod and leaves 4 of 5 voters available.
+
+Node failure recovery time depends on the node controller detection period, taint toleration duration, Pod replacement scheduling, PVC reattachment, and Vault startup. These stages vary by environment, CSI driver, and node controller configuration. If the Pod's PVC uses zone-local storage, or a local persistent volume bound to the failed node, the replacement Pod can remain `Pending` after permanent loss of that zone or node. Recovery then depends on the storage backend and CSI driver and can require manual intervention.
+
+For permanent loss of a non-voting Pod, dead server cleanup removes the failed peer from the Raft configuration after the configured threshold, as described in the Dead server cleanup section. For permanent loss of a voting Pod, Autopilot can also remove the failed voter automatically, but it may wait until the cluster satisfies safety conditions, such as preserving `min_quorum` and avoiding removal of the last remaining server in a redundancy zone. Use manual `vault operator raft remove-peer` only when Autopilot cannot remove the failed voter automatically. If Autopilot removes a non-voting peer before the Pod recovers, the returning Pod cannot rejoin with its existing PersistentVolumeClaim. For details, refer to the Dead server cleanup section.
+
+### Failure domain loss
+
+Failure domain loss affects all nodes and storage within a failure domain. A 6-pod redundancy-zones cluster maintains quorum after any single zone loss when you distribute Pods with one voter per zone. A 5-pod cluster spread across 3 failure domains, such as 2-2-1, maintains quorum when a failure domain goes offline. A 5-pod cluster split 3-2 across 2 failure domains loses quorum if the 3-pod domain fails.
+
+When Vault PersistentVolumes use zonal block storage or local persistent volumes bound to individual nodes, replacement Pods for the failed domain can remain `Pending` because the volumes bind to the lost zone or node and cannot move automatically to surviving zones. Some storage backends, such as regional or zone-redundant disks, can recover across zones, but that behavior depends on the storage platform and CSI driver rather than Vault. Pods resume with their existing data only when the failed domain returns or the storage backend supports cross-zone recovery.
+
+Remaining Pods serve requests while quorum holds. In a redundancy-zones cluster, Autopilot promotes a stable non-voter in a surviving zone to restore the 3-voter count, which temporarily places two voters in one surviving zone. After that promotion, one surviving zone holds 2 voters and the other holds 1. The cluster tolerates a second sequential zone loss only if the second loss hits the 1-voter zone. The surviving zone that receives the temporary extra voter depends on which stable non-voter Autopilot promotes. Entire-site loss requires DR replication, refer to the Multi-region architectures section.
+
+### Split-brain prevention
+
+Split-brain prevention relies on Raft consensus semantics. A Vault node cannot become the leader without receiving votes from a majority of the cluster. If network partitions divide the cluster, only the partition containing a majority can elect a leader and serve requests. Nodes in minority partitions cannot elect a leader and cannot process requests that require an active node until the network restores connectivity.
+
+Health check timing affects failure detection and recovery speed. Aggressive probe intervals detect failures quickly but can cause unnecessary restarts during transient issues. Conservative intervals reduce false positives but delay failure detection. Probe timing affects how quickly Kubernetes routes traffic away from unhealthy Pods and restarts failed processes. For detailed probe configuration guidance, refer to the Health endpoint monitoring section.
+
+## Common anti-patterns
+
+The following table describes deployment patterns that can cause reliability issues or reduce cluster resilience.
+
+| Anti-pattern | Risk |
+| :---- | :---- |
+| Not configuring explicit `topologySpreadConstraints` | Without explicit constraints, the scheduler relies on soft defaults that do not prevent uneven placement under resource pressure. Configure `server.topologySpreadConstraints` with DoNotSchedule as described in the Pod topology spread constraints section. |
+| Even replica counts without redundancy zones (2, 4) | Even numbers do not improve fault tolerance over odd numbers. A 4-node cluster tolerates only 1 failure, the same as a 3-node cluster, but with higher resource cost. |
+| Routing replication traffic through `<release>` instead of `<release>-active` | Replication traffic on port 8201/tcp must reach the active Vault node. The `<release>` service distributes traffic to all Pods, so replication requests may reach standby nodes that cannot process them. Use the `<release>-active` service for replication traffic. |
+| Not customizing health probes | By default, the Vault Helm chart enables a readiness probe that runs `vault status` and disables the liveness probe. Customize probe paths to account for standby, performance standby, DR secondary, sealed, and uninitialized states. Without tailored probes, the `kubelet` may restart Pods unnecessarily during expected state transitions, or fail to detect an unresponsive Vault process that continues to count toward quorum. |
+| Undersized resource requests | Pods with low resource requests are eviction candidates during node memory pressure. Leader eviction causes cluster disruption and election delays. |
+| Spanning exactly 2 availability zones | Quorum loss risk. If you split voting members evenly, a zone-to-zone partition prevents either side from reaching quorum. If you place a majority in one zone, losing that zone causes an outage. Use at least 3 zones for production deployments. |
+| Ignoring network latency requirements | Raft consensus requires responses within election timeouts. Network latency exceeding 8 ms can cause election instability and leader oscillation. |

@@ -1,0 +1,75 @@
+---
+title: Detailed design
+description: Review the common software configuration, external component requirements, and baseline sizing that apply to every Terraform Enterprise deployment.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-07-06T12:00:00.000Z
+last_modified: 2026-07-06T12:00:00.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Detailed design
+
+The [architecture](/validated-designs/terraform/installation-guide/architecture) page describes the Terraform Enterprise software building blocks and the operational modes that arrange them. This page goes a level deeper into the software components and configuration that are **common to every deployment**, regardless of the platform you run on.
+
+Use this page to understand the external components Terraform Enterprise depends on, the baseline resources those components require, and the cross-cutting concerns — such as load balancing and networking — that every deployment must satisfy. The platform-specific implementation of these concerns, including cloud instance types and managed-service SKUs, lives on the relevant [_Deployment_](/validated-designs/terraform/installation-guide/deployment-vm-container) page.
+
+<!-- EDITORIAL: this page was rebuilt. It previously duplicated the architecture page (~85% identical). It now carries common software-component detail per the page-ownership split: Architecture = building blocks + operational modes; Detailed design = component requirements, baseline sizing, and common cross-cutting concerns; Deployment = platform-specific implementation. -->
+
+## Terraform Enterprise application configuration
+
+The following software configuration decisions apply to every Terraform Enterprise deployment. The mechanism you use to set them varies by platform (environment variables in a Docker `compose.yml`, Helm overrides on Kubernetes, and so on), but the decisions themselves are common.
+
+- **Encryption and the embedded Vault**: Terraform Enterprise uses an embedded instance of HashiCorp Vault for data-security operations. The `TFE_ENCRYPTION_PASSWORD` decrypts the Vault token stored in the database, and Terraform Enterprise then uses that token for all subsequent encryption and decryption. Treat this value as a sensitive company secret and generate it in line with your corporate password policy.
+- **Run concurrency**: `TFE_CAPACITY_CONCURRENCY` controls the number of concurrent workspace runs per Terraform Enterprise instance (default `10`), and each concurrent run reserves memory (default `2 GB`, set by `TFE_CAPACITY_MEMORY`). These values drive the compute sizing for both the application and the execution layer, so decide them before you size any platform. The per-platform sizing calculations that build on these defaults are on the _Deployment_ pages.
+- **TLS**: Terraform Enterprise terminates TLS on the application. Every deployment requires a server certificate and private key whose DNS SAN includes the FQDN that resolves to the load balancer. We do not recommend self-signed certificates in any environment. Terraform Enterprise cannot use passphrase-protected private keys.
+
+## External components
+
+In any production operational mode (`external` or `active-active`), Terraform Enterprise depends on three external components. These are software requirements common to all platforms; how you provision them — self-managed or through a Platform-as-a-Service (PaaS) offering — is a platform decision covered on the _Deployment_ pages.
+
+### PostgreSQL
+
+PostgreSQL is the primary store of Terraform Enterprise application data, such as workspace and user settings. Terraform Enterprise requires PostgreSQL version 13.x or later; we recommend a version later than 15.x for new installations because <a href="https://developer.hashicorp.com/terraform/enterprise/deploy/configuration/storage/connect-database/postgres" target="_blank" rel="noreferrer">some 14.x versions are not supported</a>. There are also specific schema requirements documented at that link, so involve your DBA team early so that all parties understand the requirements at the outset.
+
+### Redis
+
+Redis provides caching and coordination between the web and background workers. An external Redis instance is a hard requirement whenever more than one Terraform Enterprise application node is active — that is, for `active-active` mode. Terraform Enterprise uses Redis internally on single-node deployments, so `disk` and single-node `external` deployments do not require a separate Redis instance. Supported versions are 6.2 and later, and version 7, which we recommend. Redis Sentinel is not supported.
+
+### Object storage
+
+Object storage holds Terraform state files, plan files, configuration, and output logs. Any S3-compatible object store, Google Cloud Storage, or Azure Blob Storage meets the requirement. All objects are encrypted before they are written: each object is encrypted with a unique key using 128-bit AES in CTR mode, and the embedded Vault transit secrets engine wraps that key material (AES-GCM with a 256-bit key and a 96-bit nonce) alongside the object — a pattern known as envelope encryption. Object store consumption grows with both the number of workspace runs and the size of the configuration directories submitted to the API, so keep configuration repositories limited to the files a run genuinely needs.
+
+## Baseline component sizing
+
+The following baseline is a **vendor-agnostic minimum specification** for the Terraform Enterprise application and its external components. It is appropriate for most initial production deployments and for development or testing environments. Treat it as the target that every deployment must meet or exceed, whichever platform you choose:
+
+- A **self-managed** deployment (for example a manual private-cloud install) provisions PostgreSQL and Redis to these specifications directly.
+- A **PaaS** deployment (for example AWS Aurora and ElastiCache, or the Azure and GCP equivalents) selects a managed-service tier that meets or exceeds these specifications.
+
+| Component | vCPU / cores | Memory | Disk |
+| --------- | ------------ | ------ | ---- |
+| Terraform Enterprise application (per node) | 4 vCPU | 32 GB | 1 TB |
+| PostgreSQL | 4 core | 32 GB | 2 TB |
+| Redis | 4 core | 16 GB | 500 GB |
+
+Configure CPU and memory identically across Terraform Enterprise application nodes. Many scaled customers begin with 8 vCPU and 32 GB RAM for the application as an initial production specification, and expect to scale past the baseline as adoption grows. Disk backing the application must sustain at least 3000 IOPS, and the Terraform Enterprise application requires at least 40 GB of available space (for Docker deployments this must be available to `/var/lib/docker`; the limit does not apply to Kubernetes).
+
+The mapping of this baseline to concrete cloud instance types and managed-service SKUs is platform-specific and is documented in the resource-sizing table on each _Deployment_ page.
+
+## Load balancing
+
+Every production deployment places a **layer 4 (TCP) load balancer** in front of the Terraform Enterprise application nodes. A layer 4 load balancer is required because certificates must be present on the compute nodes for Terraform Enterprise to operate, and terminating TLS on the application — rather than at the load balancer — is more secure and avoids re-encrypting traffic behind the load balancer. This design decision is common to all platforms; the specific load balancer resource and its configuration are covered on each _Deployment_ page.
+
+## Networking
+
+Terraform Enterprise has a defined set of ingress and egress requirements that apply to every deployment. Refer to the <a href="https://developer.hashicorp.com/terraform/enterprise/deploy/configuration/network" target="_blank" rel="noreferrer">network requirements page</a> for the authoritative list. In summary:
+
+- We do not recommend exposing Terraform Enterprise to the public internet; users should reach the API and UI from the company network.
+- Terraform Enterprise typically requires egress to the HashiCorp container registry and to HashiCorp service APIs (for example `registry.terraform.io`, `releases.hashicorp.com`, and `reporting.hashicorp.services`), plus any VCS, SAML, and cost-estimation endpoints your use case needs.
+- Where outbound access is restricted, Terraform Enterprise can run fully air-gapped by hosting provider and Terraform binaries in its own registry.
+
+The application architecture is single-region. How you implement these requirements — subnets, security groups, egress controls, and air-gapping — is platform-specific and is covered on each _Deployment_ page.
+
+## Observability
+
+Terraform Enterprise exposes metrics and logs that every deployment should collect. The setup of this software and general-component observability — enabling metrics, forwarding logs and audit trails, and collecting agent telemetry — is covered in [Observability setup](/validated-designs/terraform/installation-guide/observability-setup). Platform-specific observability, such as the log and metric destinations native to each cloud, is covered in an observability section on the relevant _Deployment_ page. Ongoing, day-2 observability and alerting belongs in the [Administration Guide](/validated-designs/terraform/administration-guide/observability-and-alert-management).

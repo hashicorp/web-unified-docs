@@ -1,0 +1,184 @@
+---
+title: Observability
+description: Telemetry, logging, audit log forwarding, health probes, and observability for Vault Enterprise on OpenShift.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-07-06T12:00:00.000Z
+last_modified: 2026-07-06T12:00:00.000Z
+# END AUTO GENERATED METADATA
+---
+
+Exposing and routing Vault telemetry, logs, and health signals on OpenShift requires coordinating Vault-side configuration with platform-level collection and forwarding infrastructure. This section covers the configuration requirements for exposing, collecting, forwarding, and alerting on Vault telemetry and logs on OpenShift. The Vault-side configuration applies to any Prometheus-compatible metrics stack and log aggregation platform, including OpenShift Cluster Monitoring, the LGTM stack (Loki, Grafana, Tempo, and Mimir), Elastic, Splunk, and Datadog. The following subsections cover Vault-side configuration first, then platform-specific integration points such as ServiceMonitor label matching and log forwarding rules. Each profile in the [reference Helm values for this HVD](https://github.com/hashicorp-validated-designs/vault-enterprise/tree/main/vault-on-openshift-hvd) implements the telemetry, logging, audit, and health probe settings from this section as part of a complete server configuration you can adapt.
+
+## Telemetry
+
+Telemetry metrics provide measurable signals about Vault cluster health, request latency, and resource consumption. Use these metrics to detect anomalies, trigger alerts, and inform capacity planning decisions. This section covers the Prometheus metrics endpoint configuration, metrics collection design for OpenShift, and alerting rule strategy.
+
+Vault exposes Prometheus-format metrics at the `/v1/sys/metrics` endpoint. For telemetry stanza parameters and recommended defaults, refer to [Vault: Installation Guide - Detailed Design: telemetry stanza](/validated-designs/vault/installation-guide/vms/detailed-design#telemetry-stanza).
+
+### Enable the Prometheus metrics endpoint
+
+Vault requires authentication to access `/v1/sys/metrics` by default. Set `unauthenticated_metrics_access` to `true` in the listener-level telemetry block so your monitoring stack can scrape health and performance data from each Vault Pod without a token. With the default authenticated-only access, the following limitations affect metrics collection:
+
+- **Standby visibility loss**: Regular standbys cannot validate tokens locally, so they respond with a 307 redirect to the active node instead of serving local metrics. Prometheus receives only the active node's metrics, losing visibility into the health, resource usage, and performance of each standby Pod.  
+- **Sealed Pod gap**: Sealed Pods reject all requests before Vault processes authentication, making metrics inaccessible until unseal completes.  
+- **DR secondary visibility gaps**: DR secondaries cannot run performance standbys, so every non-active Pod is a regular standby that redirects metrics requests to the active node rather than serving local data. With authenticated access using an orphan batch token, only the unsealed active node returns metrics. Unauthenticated access is the only configuration that returns local metrics from every Pod in a DR secondary cluster.
+
+Performance standby Pods can validate tokens locally and serve authenticated metrics requests, but unauthenticated access provides consistent per-pod metrics collection regardless of Vault Pod role, including sealed and standby Pods.
+
+Configure a top-level `telemetry` block outside the listener stanza, and a `telemetry` block inside the `listener "tcp"` stanza. Place both blocks in the `server.ha.raft.config` Helm chart value as HashiCorp Configuration Language (HCL).
+
+```hcl
+listener "tcp" {
+  telemetry {
+    unauthenticated_metrics_access = true
+  }
+}
+
+telemetry {
+  prometheus_retention_time = "12h"
+  disable_hostname          = true
+}
+```
+
+In the top-level telemetry block, set `prometheus_retention_time` to 12h, lower than the Vault default of 24h. The retention window must exceed the scrape interval so metric series do not expire between scrapes, and 12h also tolerates temporary scraping interruptions, such as Prometheus Pod restarts, without losing metric continuity.
+
+Set `disable_hostname` to `true` to prevent Vault from embedding the Pod hostname in metric names. Without `disable_hostname`, metric names include the Pod hostname and break time series continuity when OpenShift replaces Pods.
+
+### Metrics collection on OpenShift
+
+After you enable the metrics endpoint, configure your monitoring stack to discover and scrape each Vault Pod. The configuration varies depending on whether you use OpenShift built-in monitoring, a standalone Prometheus Operator, or a direct metrics collection agent.
+
+Set `serverTelemetry.serviceMonitor.enabled` to `true` in the Helm chart values to create a ServiceMonitor custom resource. The Helm chart applies a default label of `release: prometheus` to the ServiceMonitor. If your Prometheus instance uses a different selector, override the label through `serverTelemetry.serviceMonitor.selectors` to match your Prometheus configuration.
+
+The Helm chart sets `serverTelemetry.serviceMonitor.matchLabels` to an empty map by default. In HA mode, when `matchLabels` is empty, the ServiceMonitor template applies `vault-active: "true"` as a fallback, which scrapes only the active Pod. Override `matchLabels` to `vault-internal: "true"` to scrape all Pods.
+
+Scraping only the active Pod misses standby metrics, including read request latency from performance standbys and per-pod Raft health.
+
+Performance standby Pods emit metrics independently, and in read-heavy deployments, their metrics provide most of the request latency data. Key metrics that are unavailable when you scrape only the active Pod include:
+
+- Write request forwarding latency  
+- Per-pod Raft storage health  
+- Heartbeat connectivity to the active Pod  
+- Read request latency from performance standbys
+
+Keep the default scrape interval of `30s`. This interval provides sufficient granularity for alerting and dashboards. Shorter intervals increase metric storage and CPU overhead without meaningfully improving anomaly detection for Vault workloads.
+
+Vault disaster recovery (DR) and performance replication (PR) secondary clusters also serve the `/v1/sys/metrics` endpoint when you enable `unauthenticated_metrics_access`. Monitor replication secondaries to verify that each Vault Pod remains unsealed, track replication health, and confirm promotion readiness before failover. For replication health monitoring recommendations, refer to [Monitor enterprise replication](https://developer.hashicorp.com/vault/tutorials/monitoring/monitor-replication).
+
+**OpenShift built-in monitoring.** The Cluster Monitoring Operator (CMO) manages OpenShift built-in monitoring and includes the Prometheus Operator, so you do not need to install a separate operator. OpenShift's default Prometheus does not scrape Pods in user namespaces. Enable user workload monitoring by setting `enableUserWorkload: true` in the `cluster-monitoring-config` ConfigMap in the `openshift-monitoring` namespace. This deploys a dedicated Prometheus instance that discovers ServiceMonitors in user namespaces, including the Vault ServiceMonitor.
+
+The Cluster Observability Operator (COO) provides optional monitoring stack customization but is not required for Vault metrics collection or alerting.
+
+**Standalone Prometheus Operator.** Standalone installations use the same ServiceMonitor and `matchLabels` configuration described in this section. Install the Prometheus Operator and its custom resource definitions before deploying the Vault Helm chart. The Helm chart renders the ServiceMonitor manifest when you set `serverTelemetry.serviceMonitor.enabled` to `true`. If you have not installed the ServiceMonitor custom resource definition, the Helm chart installation fails.
+
+**Direct metrics collection without Prometheus Operator.** Organizations using metrics collection agents that do not rely on ServiceMonitor custom resources, such as Grafana Alloy with Kubernetes service discovery, can scrape the Vault metrics endpoint directly. Configure your metrics agent to target `/v1/sys/metrics?format=prometheus` on each Vault Pod using the `<release>-internal` headless Service for Pod discovery. The Vault-side configuration for unauthenticated access, hostname handling, and retention applies regardless of scraping method.
+
+### Alerting
+
+Alert rules convert telemetry data into actionable notifications for your operations team. Define thresholds that detect degraded Vault health or performance before degradation affects users.
+
+Set `serverTelemetry.prometheusRules.enabled` to `true` and define rules in `serverTelemetry.prometheusRules.rules` to create a PrometheusRule custom resource. Setting `global.serverTelemetry.prometheusOperator` to `true` achieves the same result. Set `serverTelemetry.prometheusRules.selectors` to match the `ruleSelector` on your Prometheus custom resource if it differs from the default `release: prometheus`.
+
+After you enable user workload monitoring, user-defined PrometheusRule alerts route through the default platform Alertmanager. Alerts from user-defined projects appear in the OpenShift Console under **Observe > Alerting** alongside platform alerts. With a standalone Prometheus Operator, alerts route through the configured Alertmanager instance. Organizations not using the Prometheus Operator define equivalent alert rules in their alerting platform, such as Grafana Alerting or Mimir Ruler, using the same Vault metrics.
+
+For critical alert categories, recommended thresholds, and detailed metric guidance for Vault Enterprise, refer to [Vault: validated design guidance - Monitoring and observability: telemetry](/validated-designs/vault/installation-guide/vms/observability-setup#telemetry).
+
+OpenShift provides the following pod-level metrics in addition to Vault's own telemetry:
+
+- **Restart counts**: Indicate crash loops or failed health checks  
+- **Memory usage**: Signals risk of out-of-memory (OOM) termination, which causes a Pod restart and service interruption until the replacement Pod completes initialization  
+- **CPU throttling**: Degrades request latency without triggering pod restarts  
+- **Disk usage**: Increases steadily on write-heavy clusters because BoltDB backing files (`vault.db` and `raft.db`) grow over time and do not shrink automatically
+
+## Logging
+
+Vault produces two types of logs: **operational logs** and **audit logs**. Operational logs record server activity, errors, and diagnostic information. Audit logs record API requests and responses, including failed authentication attempts, for security analysis. Configure your log forwarding pipeline to collect and route both log types from the Vault namespace.
+
+### Operational logs
+
+Operational logs are the primary data source for troubleshooting Vault server issues and understanding cluster behavior. Configure log format and collection to ensure these logs reach your aggregation platform in a structured, parseable format.
+
+Set `server.logFormat` to `"json"` in the Helm chart values. JSON format enables field-level filtering in log aggregation pipelines.
+
+Vault defaults to `info` log level, which captures errors, warnings, and lifecycle events. This level provides sufficient detail for production monitoring and initial troubleshooting.
+
+Do not run `debug` or `trace` log levels in production. These levels significantly increase log volume and degrade Vault performance. Use them only during active troubleshooting and revert to `info` immediately after.
+
+By default, the Vault container writes operational logs to standard error (stderr).
+
+When you install the Red Hat OpenShift Logging Operator, it deploys log collection and forwarding infrastructure and automatically captures container output. Configure a ClusterLogForwarder custom resource to define log outputs and routing rules. The operator supports forwarding to destinations such as Splunk, Loki, Kafka, and Syslog.
+
+You can substitute any Kubernetes-compatible log collector, such as Fluent Bit, Grafana Alloy, or Vector, for the OpenShift Logging Operator.
+
+For additional guidance on operational log content, refer to [Vault: validated design guidance - Monitoring and observability: operational logs](/validated-designs/vault/administration-guide/monitoring-and-observability#operational-logs).
+
+### Audit logs
+
+Vault halts all client operations when every configured audit device fails. Configure at least two audit devices with different output paths for redundancy, and choose paths that integrate with container log collection.
+
+Configure the `file` audit device with `file_path` set to `stdout` to write audit log entries to the container's standard output. Your log collector captures audit entries alongside operational logs from the same container output stream. Writing to stdout does not require a PersistentVolumeClaim (PVC) for the audit device.
+
+We recommend a `file` audit device writing to stdout as the primary device. Add a `socket` audit device sending to an external TCP collector as the secondary device. If no external TCP collector is available, use a second `file` audit device writing to PVC-backed storage. The Helm chart creates a PVC and mounts it at `/vault/audit` when you set `server.auditStorage.enabled` to `true`. Different output paths prevent a single pipeline failure from disabling both audit devices. For audit device types and configuration parameters, refer to the [Vault audit devices documentation](https://developer.hashicorp.com/vault/docs/audit).
+
+### Audit log forwarding and SIEM integration
+
+Operational logs and audit logs serve different purposes and must reach different downstream systems. Separate them in your log forwarding pipeline so that operational logs feed monitoring workflows and audit logs feed security and compliance analysis.
+
+Because the container log stream merges stdout and stderr, identify audit entries by the `type` field (`request` or `response`) and operational entries by the `@level` field. Route operational logs to your monitoring system and audit logs to your security information and event management (SIEM) platform.
+
+The ClusterLogForwarder supports this separation through `parse` and `drop` filters that match on `.structured.type` field values, with separate pipelines routing audit and operational logs to different outputs. Standalone log collectors, such as Fluent Bit, Grafana Alloy, or Vector provide equivalent field-based filtering and pipeline routing.
+
+For the full list of observable audit log patterns, refer to [Vault: validated design guidance - Monitoring and observability: usage patterns](/validated-designs/vault/administration-guide/monitoring-and-observability#usage-patterns). For the list of privileged endpoints that require SIEM alerts, refer to [Vault: validated design guidance - Monitoring and observability: privileged endpoints](/validated-designs/vault/administration-guide/monitoring-and-observability#privileged-endpoints).
+
+## Health endpoint monitoring
+
+The health API provides a lightweight way to verify the operational state of each Vault Pod independently of telemetry metrics and log analysis. Use the health endpoint for Kubernetes readiness and liveness probes and for external uptime monitoring.
+
+On OpenShift, the Vault Helm chart uses the health endpoint for readiness and liveness probes. The `/v1/sys/health` API returns HTTP status codes that reflect the state of the Vault Pod you query. For status code definitions and alerting guidance, refer to [Vault: validated design guidance - Monitoring and observability: health API](/validated-designs/vault/installation-guide/vms/observability-setup#health-api) and the [Vault /sys/health API documentation](https://developer.hashicorp.com/vault/api-docs/system/health).
+
+Probe design depends on which Vault states each probe must treat as healthy. Readiness signals Pod health to consumers such as external load balancers, Kubernetes Operators, and rollout tooling. Liveness controls when the `kubelet` restarts the container. A liveness query string that treats sealed or uninitialized states as unhealthy can restart Pods that operate as designed. A readiness query string that treats standby, performance standby, or disaster recovery (DR) secondary states as unhealthy can mark healthy Pods unavailable.
+
+### Readiness probe
+
+The readiness probe drives the Pod Ready condition and provides a role-aware health signal that Kubernetes Operators, rollout tooling, and external probers can align with.
+
+We recommend the following readiness path:
+
+```text
+/v1/sys/health?standbyok=true&perfstandbyok=true&drsecondarycode=200
+```
+
+Once the cluster initializes and all Pods unseal, this query string returns HTTP 200 for every healthy Pod in the cluster, so external probers see a uniform ready signal across the cluster. Sealed and uninitialized Pods continue to return their default non-2xx status (503 sealed, 501 uninitialized), which is the intended behavior for readiness.
+
+By default, the chart enables `server.readinessProbe.enabled` but leaves `server.readinessProbe.path` unset, which configures an `exec` probe that runs `vault status`. Setting `path` switches the chart to an `httpGet` probe against that path. Set `server.readinessProbe.path` to the recommended readiness path, and configure external load balancers separately to probe the same path so both checks use the same `/v1/sys/health` semantics.
+
+The chart-default values for `failureThreshold`, `initialDelaySeconds`, `periodSeconds`, and `timeoutSeconds` are a reasonable starting point for the readiness probe.
+
+### Liveness probe
+
+The liveness probe determines when the `kubelet` stops and restarts the Vault container. A sealed Vault Pod is not unhealthy: unsealing requires an external action, and a restart does not recover a sealed cluster. The recommended liveness query string treats sealed and uninitialized states as healthy in addition to the states the readiness path accepts.
+
+We recommend the following liveness path:
+
+```text
+/v1/sys/health?standbyok=true&perfstandbyok=true&drsecondarycode=200&sealedcode=204&uninitcode=204
+```
+
+The added query parameters cover Vault states that must not trigger a restart:
+
+- Setting `sealedcode=204` makes a sealed Pod report healthy to the `kubelet` so that auto-unseal failures or operator-driven seals do not cause restart loops.  
+- Setting `uninitcode=204` makes an uninitialized Pod report healthy during first bootstrap.
+
+By default, the chart sets `server.livenessProbe.enabled` to `false` and `server.livenessProbe.path` to `/v1/sys/health?standbyok=true`. Enable the liveness probe and set `server.livenessProbe.path` to the recommended liveness path. The chart default returns a non-2xx status for sealed Pods, so the `kubelet` treats sealed Pods as failed and restarts the container.
+
+Keep the chart default `server.livenessProbe.initialDelaySeconds` of 60. Do not lower `initialDelaySeconds` without measuring startup time in your environment. Auto-unseal dependencies and Raft join can extend startup beyond the default.
+
+## Common anti-patterns
+
+The following patterns create observability gaps that are difficult to detect until an incident exposes them. Review your configuration against this list before promoting to production.
+
+| Anti-pattern | Risk |
+| :---- | :---- |
+| Enabling only one audit device | Vault halts all client operations when the audit device fails. |
+| Scraping only the active Vault Pod | Loses per-pod visibility into standby metrics. Refer to the Metrics collection on OpenShift section. |
+| Omitting `disable_hostname` in the top-level telemetry block | Metric names include the Pod hostname, which causes series discontinuity when OpenShift replaces Pods and breaks dashboards and alert rules that reference those series. |

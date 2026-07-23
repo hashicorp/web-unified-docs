@@ -1,0 +1,421 @@
+---
+title: Architecture
+description: Deployment options, high availability topologies, StatefulSet design, redundancy zones, Autopilot upgrades, and storage topology for Vault Enterprise on OpenShift.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-07-06T12:00:00.000Z
+last_modified: 2026-07-06T12:00:00.000Z
+# END AUTO GENERATED METADATA
+---
+
+## Deployment options
+
+This section describes the recommended deployment options and example tooling patterns for running Vault Enterprise on OpenShift. We provide these examples as reference architectures. Your organization may select a different toolchain or integration pattern based on existing platform standards, security controls, and operational constraints.
+
+For security considerations on OpenShift, refer to the official documentation:
+
+- [Red Hat - Using RBAC to define and apply permissions](https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/authentication_and_authorization/using-rbac)  
+- [Red Hat - Managing security context constraints](https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/authentication_and_authorization/managing-pod-security-policies)  
+- [Red Hat - Reference of security context constraints commands](https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/authentication_and_authorization/managing-pod-security-policies#security-context-constraints-command-reference_configuring-internal-oauth)
+
+### Package & install manager - Helm
+
+OpenShift supports Helm as a package and install manager that standardizes and simplifies the deployment of containerized applications on Kubernetes. Helm charts define repeatable, auditable deployments which can optionally integrate with GitOps workflows.
+
+We recommend using the official [Vault Helm chart](https://github.com/hashicorp/vault-helm) to install and configure Vault on OpenShift, with a GitOps-based workflow as the preferred operating model. The chart supports multiple deployment patterns based on the provided values. Refer to the Initial configuration section of the [Vault: validated design guidance](/validated-designs/vault/administration-guide/introduction) for general cluster configuration details.
+
+- [Reference Helm values repository for this HVD](https://github.com/hashicorp-validated-designs/vault-enterprise/tree/main/vault-on-openshift-hvd): a set of reference configurations that map this guide's recommendations to concrete deployment scenarios you can adapt to your environment.
+- [Docs: Run Vault on OpenShift](https://developer.hashicorp.com/vault/docs/deploy/kubernetes/helm/openshift)  
+
+### GitOps - Argo CD
+
+OpenShift GitOps uses Argo CD to manage the Vault deployment lifecycle. It integrates with your version control system (VCS), treating Helm chart configuration as the source of truth. We recommend standardizing Vault deployment and management through Argo CD to ensure consistency, auditability, and controlled operations across environments. Deliver changes through Git, with Argo CD continuously reconciling cluster state to the desired configuration. Limit manual modifications outside of this flow to exceptional cases.
+
+On OpenShift, install the Argo CD Operator from OperatorHub. For multi-cluster deployments, scope access using Argo CD Projects to enforce clear boundaries between environments. When enabling auto-sync across multiple Vault clusters, ensure ApplicationSets and subchart references are uniquely named and isolated to avoid conflicts. Refer to the [Argo CD Projects documentation](https://argo-cd.readthedocs.io/en/stable/user-guide/projects/) for additional details.
+
+### Helm values precedence
+
+When Argo CD renders the Vault Helm charts, value precedence follows this order (highest to lowest):
+
+```text
+parameters > valuesObject > values > valueFiles > chart defaults
+```
+
+The lowest-precedence layer, chart defaults, is the set of values bundled in the chart's `values.yaml`. Platform teams must understand the configuration precedence order to avoid misconfiguration. Subcharts must not define opaque defaults through helper templates. Because application teams often lack visibility into these templates, hidden defaults make troubleshooting difficult and increase operational risk.
+
+Keep configuration values explicit and document any overrides. This enables scalable Vault deployments across OpenShift projects while minimizing environment-specific customizations.
+
+Refer to the official Red Hat documentation for additional details:
+
+- [Red Hat - Understanding OpenShift GitOps](https://docs.redhat.com/en/documentation/red_hat_openshift_gitops/1.20/html/understanding_openshift_gitops/index)  
+- [Red Hat - GitOps CLI Argo CD Reference](https://docs.redhat.com/en/documentation/red_hat_openshift_gitops/1.20/html/gitops_cli_argocd_reference)  
+- [GitHub: Red Hat Developer - OpenShift GitOps Usage Guide](https://github.com/redhat-developer/gitops-operator/blob/master/docs/OpenShift%20GitOps%20Usage%20Guide.md)
+
+## High availability topologies
+
+Vault Enterprise achieves high availability (HA) through clustering with integrated storage based on the Raft consensus algorithm. On OpenShift, the platform manages Pod placement and lifecycle dynamically, so topology decisions that affect Raft quorum require explicit scheduling and storage constraints. Pod rescheduling, persistent storage, and topology-aware scheduling all affect how Vault maintains quorum and recovers from failures.
+
+The following sections cover OpenShift-specific topology decisions for HA cluster design: Pod distribution across failure domains, storage topology, redundancy zones, and Service topology.
+
+For foundational concepts about Vault clustering, quorum, redundancy zones, and Autopilot, refer to [Vault Enterprise Architecture](/validated-designs/vault/installation-guide/vms/architecture).
+
+## StatefulSet architecture
+
+Vault requires a StatefulSet rather than a Deployment because the StatefulSet controller provides capabilities essential for running a distributed consensus system on Kubernetes. Each Pod receives a predictable DNS name based on its ordinal index and maintains its own PersistentVolumeClaim that persists across Pod rescheduling.
+
+### Pod identity and storage
+
+The StatefulSet controller assigns each Pod a stable network identity based on its ordinal index. For a StatefulSet named `vault`, the Pods receive DNS names such as `vault-0.vault-internal`, `vault-1.vault-internal`, and `vault-2.vault-internal`. Vault uses these stable identities for Raft peer communication and cluster formation.
+
+Each Pod maintains its own PersistentVolumeClaim (PVC) that persists across Pod rescheduling. When Kubernetes recreates the Pod, the new Pod mounts the same PVC, preserving the Raft data directory. This behavior ensures that a restarted Pod rejoins the cluster with its existing state rather than as a new member.
+
+The Vault Helm chart creates PVCs through `volumeClaimTemplates` in the StatefulSet specification. Configure the storage requirements in the Helm values file under `server.dataStorage`. For Raft storage configuration details, refer to the Storage topology section.
+
+### Anti-affinity and Pod distribution
+
+Pod anti-affinity rules prevent the scheduler from co-locating multiple Vault Pods on the same node, which would create a single point of failure.
+
+The Vault Helm chart defaults to `requiredDuringSchedulingIgnoredDuringExecution` with `topologyKey: kubernetes.io/hostname`. If you override this setting with `preferredDuringSchedulingIgnoredDuringExecution`, the scheduler may co-locate Pods under resource pressure.
+
+This default anti-affinity keeps Vault Pods on separate nodes. It does not enforce distribution across higher-level failure domains such as availability zones or rack groups. Topology labels provide fault isolation only when each label value maps to infrastructure that can fail independently. Apply the labels consistently across all Vault-eligible nodes. For example, different values for `topology.kubernetes.io/zone` do not improve isolation if the nodes still share the same power feed, network path, or storage failure point. Configure explicit `topologySpreadConstraints` with DoNotSchedule, as described in the Pod topology spread constraints section, so the scheduler enforces the intended spread when placing new Pods.
+
+For specific anti-affinity configuration values, refer to the [affinity configuration](https://developer.hashicorp.com/vault/docs/platform/k8s/helm/configuration#affinity) in the Vault Helm chart documentation.
+
+### Pod disruption budgets
+
+A Pod Disruption Budget (PDB) limits how many Pods a voluntary disruption can remove simultaneously. Voluntary disruptions include node drains during cluster upgrades, maintenance operations, and manual Pod deletions. Pod Disruption Budgets (PDBs) do not affect involuntary disruptions such as hardware failures.
+
+For a Vault cluster to maintain quorum, a majority of voting Pods must remain available. Configure a PDB that ensures the cluster retains quorum during voluntary disruptions. When you enable HA mode (`server.ha.enabled: true`), the Vault Helm chart creates a PDB by default (`server.ha.disruptionBudget.enabled` defaults to `true`). The chart expresses the PDB using `maxUnavailable` and lets you override it with `server.ha.disruptionBudget.maxUnavailable`.
+
+For a 5-pod cluster, the Helm chart calculates `maxUnavailable` to `2`, which allows node drains to evict up to two Pods simultaneously while maintaining quorum with the remaining three voting members. This default preserves quorum but leaves no margin for error. If a third Pod fails while two are already unavailable, the cluster loses quorum. Setting `maxUnavailable` to `1` provides additional headroom by keeping four voters available during each eviction, at the cost of slower drain operations.
+
+For a 6-pod redundancy zones cluster, the Helm chart defaults `maxUnavailable` to `1` when `server.ha.raft.redundancyZones.enabled` is `true`. The PDB cannot distinguish between voting and non-voting Pods, and the standard formula `floor((n-1)/2)` evaluates to `2` for 6 Pods. Allowing 2 simultaneous evictions risks quorum loss when both evicted Pods are voting members. If you override `maxUnavailable` through `server.ha.disruptionBudget.maxUnavailable`, ensure the value accounts for the reduced number of voting members in a redundancy zones architecture.
+
+When the Kubernetes control plane initiates a node drain, it sends eviction requests that the API server validates against PDBs. The API server rejects evictions that would violate the PDB constraint, so the drain process evicts Pods sequentially as PDB conditions allow. This behavior prevents drain operations from simultaneously evicting enough Vault Pods to break quorum.
+
+## Redundancy zones
+
+Redundancy zones provide automatic failover within failure domains by grouping one voting and one or more non-voting Vault nodes per zone. When a voter fails, Autopilot can promote a stable non-voting server to restore the intended voter distribution across zones. Autopilot first prefers a stable server from the same zone. If no same-zone candidate is available, Autopilot can temporarily place two voters in one surviving zone. After the failed zone recovers and a stable server is available there again, Autopilot demotes the temporary extra voter and returns to one voter per zone. We recommend this architecture for production Vault deployments on OpenShift. In this section, zone refers to a failure domain. On managed platforms, a zone usually maps to a cloud availability zone. On self-managed OpenShift, a zone can map to another independent failure domain, such as a rack group or power domain, that you expose through node labels.
+
+For more information on redundancy zones and Autopilot behavior, refer to [Redundancy Zones](https://developer.hashicorp.com/vault/docs/enterprise/redundancy-zones).
+
+### Recommended: 6-pod architecture with redundancy zones
+
+Deploy 6 Vault Pods across 3 zones, with 2 Pods per zone. On self-managed OpenShift, those zones can represent independent rack groups, power domains, or other low-latency failure boundaries. In each zone, one Pod serves as a voting member and one as a non-voting member. This architecture provides the following benefits:
+
+- **Intra-zone failover**: If a voting Pod fails, Autopilot first attempts to promote the non-voting Pod in the same zone to voting status, restoring the intended one-voter-per-zone layout. If no same-zone candidate is available or meets stability criteria, Autopilot promotes a stable non-voter from another zone, temporarily placing two voters in that zone. The cluster can tolerate up to 4 Pod failures, but only in a sequential scenario where each promotion completes before the next failure. For a side-by-side summary of the 6-pod redundancy-zones architecture and the 5-pod fallback architecture, refer to the [Architecture comparison](#architecture-comparison) table.  
+- **Cross-zone resilience**: With one voting member in each zone, the cluster tolerates the loss of any single zone because the remaining 2 of 3 voters preserve quorum. If Autopilot completes a promotion after the first zone loss, the cluster can tolerate a second sequential zone loss only when that second loss removes the remaining zone with a single voter.  
+- **Reduced recovery time**: Non-voting Pods replicate Raft state from the leader. Because a non-voter already holds a current copy of the data, promotion changes Raft membership instead of requiring a full data resynchronization.  
+- **Smaller quorum window**: With 3 voters, the Raft leader needs only one additional acknowledgment to commit writes, so it does not wait for the slowest voter. If one zone experiences higher latency or storage contention, the voter in the third zone can satisfy quorum independently.
+
+This architecture requires the PodTopologyLabels admission controller, which enables Pods to obtain node topology labels through the Downward API. Kubernetes 1.35 and later versions enable this feature by default. OpenShift 4.22 and newer includes the corresponding Kubernetes version. You also need a Vault Helm chart version that supports redundancy zones automation on Kubernetes (v0.33.0 or later). Verify feature and chart availability in your platform and Helm chart release notes.
+
+In Vault Helm chart versions that support redundancy zones, set `server.ha.raft.redundancyZones.enabled` to `true` and add `autopilot_redundancy_zone = "VAULT_REDUNDANCY_ZONE"` entry to `server.ha.raft.config`. When nodes have the `topology.kubernetes.io/zone` label, the chart exposes that value to each Pod through the `VAULT_REDUNDANCY_ZONE` environment variable. At startup, the chart substitutes that value into the Raft storage configuration. If a Pod does not receive the zone label, Vault startup fails, so verify Pod labels before you rely on zone assignment. Autopilot then uses the zone value for voter placement and promotion decisions.
+
+### On-premises and custom failure domains
+
+On self-managed OpenShift where you control node labeling and node lifecycle, the topology inputs for redundancy zones and scheduling constraints are not limited to cloud availability zones. You can use any failure domain as a zone if it is a real fault boundary and your node provisioning and replacement process consistently applies the correct zone label to every node in that domain. Common examples in on-premises data centers include separate data halls, rack rows with independent power and network paths, and separate buildings within the same campus. Do not treat domains as independent when they still share the same power feed, network path, or storage failure point. Evaluate failure dimensions such as power distribution, network uplink, and rack independence to identify independent domains. Map those domains to node labels and use them as topology inputs for scheduling and redundancy zone configuration.
+
+#### Decision framework
+
+Use the following framework to select the appropriate topology based on your failure domain characteristics.
+
+**3 or more independent failure domains.** When the deployment has at least 3 independent failure domains, deploy the 6-pod reference architecture with redundancy zones. On managed platforms, these are typically cloud availability zones. On self-managed OpenShift, use the failure domains identified in the On-premises and custom failure domains section. We recommend at least 3 zones because Autopilot targets one voter per zone. In a 2-zone layout, the cluster converges to 2 voters, so loss of either zone loses quorum. Vault can run with 2 configured zones, but we do not recommend that layout for production.
+
+In the 3-zone reference topology, loss of one zone removes 1 voter and 1 non-voter. The remaining 2 voters preserve quorum. Autopilot then promotes a stable non-voter in a surviving zone to restore the 3-voter count. That temporary placement can leave one surviving zone with 2 voters and the other with 1. One-voter-per-zone resumes after the failed zone recovers and Autopilot demotes the extra voter.
+
+**Exactly 2 failure domains.** A single Vault cluster across exactly 2 failure domains does not meet zone-failure HA goals. Without redundancy zones, a 3-2 voter split loses quorum when the 3-voter domain fails. With redundancy zones, the cluster converges to 2 voters regardless of Pod placement, so the loss of either zone loses quorum.
+
+We recommend splitting the environment into 3 independent failure domains where possible. When 3 domains are not achievable, deploy separate Vault clusters in each failure domain and connect them with DR replication or performance replication to provide site-level resilience. For multi-cluster replication architecture, refer to the Multi-region architectures section.
+
+If you must run a single cluster across exactly 2 failure domains as a constrained fallback, deploy 5 voting Pods without redundancy zones and place them 3-2. Accept that loss of the 3-voter domain causes an outage. Configure `topologySpreadConstraints` to help maintain the intended 3-2 shape using a zone key. The Helm chart's default node-level anti-affinity helps distribute Pods across different nodes within each zone. For fallback architecture details, refer to the Fallback: 5-pod architecture without redundancy zones section.
+
+**No independent higher-level failure domains.** When all nodes share the same power, cooling, network uplink, and storage infrastructure with no failure domain above the individual host, deploy 5 voting Pods without redundancy zones. When `topology.kubernetes.io/zone` does not represent a real failure domain, zone-based scheduling and redundancy zones provide no fault isolation above the node level. Node-level anti-affinity (`topologyKey: kubernetes.io/hostname`) remains the minimum distribution constraint. DR replication is the minimum recommendation for site-level resilience because the entire site shares a single affected scope. Performance replication addresses read locality and horizontal scale but is not a substitute for disaster recovery. For architecture details, refer to the Fallback: 5-pod architecture without redundancy zones section. For DR replication architecture, refer to the Multi-region architectures section.
+
+#### Label mapping
+
+Map failure domains to node labels consistently so the scheduler and Vault evaluate the same topology. Incorrect or inconsistent labels can make placement appear balanced without creating real fault isolation.
+
+Map your chosen failure domain to `topology.kubernetes.io/zone` for redundancy zones. The Helm chart's redundancy-zones feature reads zone assignment from this label. Use the same key in `topologySpreadConstraints` to keep Vault and the scheduler aligned. On self-managed OpenShift where you control node labeling end to end and your storage and network topology align with the label, map custom failure domains to `topology.kubernetes.io/zone` before deploying Vault. On managed platforms that already expose `topology.kubernetes.io/zone`, such as Red Hat OpenShift Service on AWS (ROSA), Azure Red Hat OpenShift (ARO), and OpenShift Dedicated, use the platform-provided label values directly.
+
+### Pod topology spread constraints
+
+Pod topology spread constraints provide fine-grained control over how the scheduler distributes Pods across failure domains. Unlike anti-affinity rules that prevent co-location, topology spread constraints control how the scheduler distributes Pods across specified topology keys. The appropriate constraint configuration depends on your topology.
+
+By default, the Vault Helm chart does not set `topologySpreadConstraints`. When you do not define `server.topologySpreadConstraints`, the scheduler may still apply [Kubernetes cluster-level default topology spread constraints](https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/#cluster-level-default-constraints). These defaults use `ScheduleAnyway` semantics, so they remain soft preferences and do not prevent uneven placement under resource pressure. For production deployments, configure `server.topologySpreadConstraints` with DoNotSchedule so the scheduler enforces the configured Pod distribution across failure domains when placing new Pods.
+
+**3 failure domains (reference topology).** Set `topology.kubernetes.io/zone` as the topology key with `whenUnsatisfiable` set to DoNotSchedule. If placing a new Pod would increase zone imbalance beyond `maxSkew`, the scheduler leaves that Pod Pending instead of placing it in the wrong zone. The scheduler does not move existing Pods to rebalance the cluster. This maintains the intended 2-2-2 shape for the 6-pod redundancy zones architecture and the 2-2-1 shape for a 5-pod cluster during scheduling.
+
+**2 failure domains (constrained fallback).** Use `topology.kubernetes.io/zone` as the topology key to help maintain the intended 3-2 placement for the 5-pod architecture. Set `maxSkew` to 1 and `whenUnsatisfiable` to DoNotSchedule. The scheduler distributes Pods across the two zones but cannot achieve even placement with an odd replica count, so expect one zone to hold one more Pod than the other.
+
+**No independent failure domains.** When `topology.kubernetes.io/zone` does not map to a real failure domain, or all nodes carry the same zone value, topology spread constraints on that key do not provide fault isolation above the node level. In this environment, node-level anti-affinity (`topologyKey: kubernetes.io/hostname`) remains the minimum distribution constraint. Configure topology spread constraints on `topology.kubernetes.io/zone` only if you later expose real failure domains through node labels.
+
+### Fallback: 5-pod architecture without redundancy zones
+
+This fallback topology preserves quorum across Pod failures but does not provide automatic voter replacement. Deploy 5 voting Pods without redundancy zones when any of the following conditions apply:
+
+1. The OpenShift version does not yet support the PodTopologyLabels admission controller (versions before 4.22), preventing the Helm chart from automating redundancy zone assignment.  
+2. The deployment environment does not have 3 or more independent failure domains, as described in the On-premises and custom failure domains section.
+
+All 5 Pods are voting members, so the cluster tolerates 2 simultaneous Pod failures. A 5-voter cluster maintains quorum after losing a failure domain only when that domain contains no more than two voters.
+
+When you have 3 independent failure domains but cannot use redundancy zones, place the 5 voters in a 2-2-1 distribution across those domains.
+
+A 3-2 split across 2 failure domains does not tolerate loss of the 3-voter domain. If your environment has only 2 failure domains, deploy separate Vault clusters in each domain and connect them with DR replication or performance replication instead of running a single cluster that cannot survive zone loss. If a single cluster across 2 domains is unavoidable, place voters 3-2 and accept the zone-failure risk.
+
+In environments with only 1 independent failure domain, rely on node-level anti-affinity across nodes.
+
+When the platform version is the only blocker, treat this architecture as interim and plan OpenShift and Helm chart upgrades so you can enable redundancy zones. When your environment cannot provide 3 independent failure domains, the 5-pod architecture is the appropriate long-term topology.
+
+For the 5-pod architecture without redundancy zones, refer to the [Vault Raft Reference Architecture](https://developer.hashicorp.com/vault/tutorials/day-one-raft/raft-reference-architecture).
+
+### Migration from 5-pod to 6-pod architecture
+
+Migrate to the 6-pod redundancy-zones architecture only when your environment has 3 independent failure domains and your OpenShift release supports the pod topology labels required for redundancy zones. If your environment cannot provide 3 independent failure domains, the 5-pod architecture remains the appropriate long-term topology and this migration does not apply.
+
+A Helm upgrade updates the StatefulSet template, but existing Vault Pods do not adopt redundancy zone settings until you recreate them. Because the Vault server StatefulSet uses the OnDelete update strategy, complete the OpenShift and Helm changes first, then recreate the existing Pods one at a time before you scale the cluster to 6 replicas.
+
+The general migration approach includes the following steps:
+
+1. Upgrade OpenShift to version 4.22 or later so the platform supports the pod topology labels required for redundancy zones  
+2. Update the Vault Helm chart to the latest supported version that includes redundancy-zones support (v0.33.0 or later)  
+3. Configure redundancy zones and topology spread constraints in the Vault Helm chart  
+4. Recreate the existing Vault Pods one at a time so they start with the updated redundancy zone configuration  
+5. Scale the StatefulSet from 5 to 6 replicas  
+6. Run `vault operator raft autopilot state` to verify that Autopilot correctly identifies zones and designates one voter and one non-voter per zone
+
+Coordinate this migration during a maintenance window. Apply the OpenShift and Helm changes first, recreate the existing Pods one at a time, and then scale to 6 replicas. Validate zone assignment and Autopilot state as the recreated Pods rejoin and again after the scale event to confirm that the cluster converges on the intended one-voter, one-non-voter pattern in each zone.
+
+### Architecture comparison
+
+The following table compares the two architectures to help you select the appropriate topology.
+
+| Aspect | 6-pod with redundancy zones | 5-pod without redundancy zones |
+| :---- | :---- | :---- |
+| OpenShift version | 4.22 or later (Kubernetes 1.35) | No specific minimum |
+| Helm chart version | v0.33.0 or later | Latest supported Vault Helm chart version |
+| Failure domain requirement | At least 3 independent failure domains mapped to 3 zone values. A 2-zone redundancy-zones layout converges to 2 voters, so loss of either zone loses quorum | Constrained fallback when the platform cannot support redundancy zones or the environment cannot provide 3 independent failure domains |
+| Voting members | 3 | 5 |
+| Non-voting members | 3 (1 per zone) | 0 |
+| Automatic voter replacement | Yes. Autopilot can promote a stable non-voting server to restore the intended voter distribution across zones. Autopilot demotes temporary extra voters after the failed zone recovers and a stable server is available there again | No, the cluster operates with fewer voters until the Pod recovers |
+| Pod failure tolerance | Up to 4 Pods in a sequential failure scenario, but only if each failure occurs one at a time and Autopilot completes each promotion before the next failure | 2 Pods |
+| Single zone failure | Tolerated (2 of 3 voters remain) | Tolerated only when no single failure domain contains more than 2 voters. A 2-2-1 distribution across 3 failure domains tolerates loss of any single domain. A 3-2 split across 2 domains does not tolerate loss of the 3-voter domain. A single cluster across 2 failure domains does not meet zone-failure HA goals. We recommend 3 failure domains or separate clusters with DR/performance replication |
+| Sequential second zone failure | Conditional: the cluster tolerates a second zone loss only if it affects the 1-voter zone after the first successful promotion. After the first zone loss and promotion, one surviving zone temporarily holds 2 voters and the other holds 1 | Not tolerated |
+
+For values files that implement both topologies in this comparison, refer to the [reference Helm values for this HVD](https://github.com/hashicorp-validated-designs/vault-enterprise/tree/main/vault-on-openshift-hvd). The `-rz` profiles deploy the recommended 6-pod redundancy-zones architecture with the matching `topologySpreadConstraints` and `autopilot_redundancy_zone` settings, and `values-awskms-no-rz.yaml` deploys the 5-pod fallback for environments that cannot run redundancy zones.
+
+## Multi-region architectures
+
+Multi-region Vault deployments provide geographic redundancy and can improve latency for globally distributed applications. Vault Enterprise supports two replication modes for multi-region architectures: disaster recovery (DR) replication and performance replication (PR).
+
+DR replication creates a standby cluster in a secondary region that can assume operations if the primary cluster becomes unavailable. The secondary cluster replicates data from the primary, but it does not serve client requests during normal operation. For DR replication architecture and failover procedures, refer to [Vault Enterprise Architecture](/validated-designs/vault/installation-guide/vms/architecture).
+
+Performance replication replicates Vault data to secondary clusters that can serve client requests independently, though tokens and leases remain local to each cluster. This approach reduces latency for applications in remote regions and distributes load across multiple clusters. Performance replication secondaries forward write operations and certain consistency-sensitive requests to the primary cluster. For performance replication design and scaling considerations, refer to [Performance Replication](/validated-designs/vault/installation-guide/vms/performance-replication-architecture-and-setup).
+
+On OpenShift, multi-region architectures require network connectivity between clusters for replication traffic. Configure OpenShift networking to allow the primary and secondary Vault clusters to communicate over ports 8200/tcp (API) and 8201/tcp (cluster). For OpenShift-specific network configuration and replication traffic considerations, refer to the Networking, routes, and TLS section in this guide.
+
+## Service topology
+
+In HA mode, the Vault Helm chart creates Services you can use to target the active node, standby nodes, or all server Pods. The `<release>-active` and `<release>-standby` Services select Pods by the `vault-active` label, which Vault maintains when the server configuration includes the `service_registration "kubernetes" {}` stanza.
+
+The following table describes the Service endpoints that the Vault Helm chart creates in HA mode.
+
+| Service | Purpose |
+| :---- | :---- |
+| `<release>` | Selects all Vault server Pods for this release. Exposes ports `8200/tcp` (API) and `8201/tcp` (cluster). Route client API traffic to this Service. |
+| `<release>-active` | Selects the active Vault Pod (`vault-active: "true"`). Exposes ports `8200/tcp` and `8201/tcp`. Use this Service when traffic must reach the active node, such as replication traffic on port `8201/tcp`. |
+| `<release>-standby` | Selects standby Vault Pods (`vault-active: "false"`). Use this Service only when you have a specific requirement to target standby nodes. |
+| `<release>-internal` | Headless Service (`clusterIP: None`) providing a stable DNS name per Pod, such as `vault-0.vault-internal`, for Raft peer communication. Do not use this Service for client traffic. |
+
+Route client API traffic through `<release>` on port `8200/tcp` so requests can reach all Vault Pods. With Vault Enterprise, standby nodes operate as performance standbys that handle the majority of common client requests locally, so distributing traffic across all Pods reduces load on the active node. Performance standbys automatically forward write operations and other requests that modify shared state to the active node. For replication traffic, use `<release>-active` on port `8201/tcp` because replication must connect to the active node.
+
+A headless Service without a ClusterIP returns all Pod IPs in DNS responses. If you use this approach for client traffic, create a dedicated headless Service for that purpose. Do not use `<release>-internal`, which Vault uses for Raft peer communication.
+
+Not all OpenShift deployments include cloud load balancer integration. On-premises and self-managed OpenShift clusters typically use MetalLB, HAProxy, or external load balancers. When configuring Services for external access, select the appropriate Service type for your platform.
+
+## OpenShift platform considerations
+
+OpenShift provides additional configuration options that affect Vault Pod scheduling and resource allocation. This section covers two design concerns for a Vault Enterprise deployment on OpenShift: node placement, which determines where Vault Pods run, and resource management, which determines how the cluster allocates CPU and memory to Vault.
+
+### Node placement strategies
+
+Node placement controls which worker nodes the scheduler runs Vault Pods on. The choice affects fault isolation, resource availability during bursts, and the cluster's ability to reschedule Pods during node drains and unplanned node loss. This section covers the node selection mechanisms available in the Vault Helm chart and the per-zone node count required by the reference topology.
+
+For the reference 6-pod, 3-zone topology, provision at least 3 Vault-eligible worker nodes per zone. Two nodes per zone satisfy `kubernetes.io/hostname` Pod anti-affinity for the 2 Vault Pods in each zone. The third node gives the scheduler in-zone scheduling headroom during node drains, machine configuration rollouts, OpenShift upgrades, and unplanned node loss. The reference topology therefore requires 9 worker nodes; weigh this headroom against the recovery delay you accept without it.
+
+Without the third node, anti-affinity blocks rescheduling inside the zone and `topologySpreadConstraints` with DoNotSchedule blocks rescheduling to another zone, so the evicted Pod remains Pending until the drained node returns.
+
+This headroom helps only when the Pod's PersistentVolumeClaim can reattach to another node in the same zone, as with zone-local block storage. A local PersistentVolume bound to a single node cannot follow, so the Pod stays Pending until its original node returns, regardless of spare capacity.
+
+Control placement through `server.nodeSelector`, `server.affinity`, and `server.tolerations` in the Helm values. The redundancy-zones feature reads zone assignment from `topology.kubernetes.io/zone`, so align node labels with that key as described in the Label mapping section.
+
+When you override `server.affinity`, include the chart's default `podAntiAffinity` block from `values.yaml` alongside your node affinity rules so the override does not weaken the `kubernetes.io/hostname` anti-affinity guarantee. To reserve dedicated nodes for Vault, taint those nodes and pair `server.tolerations` with a `nodeAffinity` rule or `server.nodeSelector` so Vault Pods schedule only there and other workloads cannot.
+
+Verify that project-wide node selectors and default tolerations in the Vault namespace do not conflict with the placement rules configured through the Vault Helm chart.
+
+We recommend deploying Vault on a dedicated worker node pool for production workloads. Dedicated nodes prevent application workloads from competing with Vault, at the cost of higher infrastructure spend and a separate node pool to maintain. If your organization cannot allocate dedicated nodes, shared nodes are a supported fallback; the Resource management section covers the required resource profile for both models.
+
+The Cluster Autoscaler and the Descheduler can move Vault Pods outside planned maintenance windows, triggering an avoidable leader election and a brief write interruption. Prevent the Cluster Autoscaler from scaling down nodes that host Vault Pods, especially when those Pods use zone-local or node-local storage that cannot move to another node. Ensure any Descheduler policy respects the Vault PodDisruptionBudget rather than evicting Vault Pods to rebalance the cluster.
+
+Before draining the node that hosts the active Vault Pod, transfer leadership with `vault operator step-down` and confirm a new active node, so the write interruption happens at a controlled moment rather than mid-operation. Increase `server.terminationGracePeriodSeconds` from its default of 10 seconds so the `kubelet` does not send SIGKILL while Vault is still draining in-flight requests during shutdown. Involuntary disruptions such as unplanned node loss still cause an election, so this practice reduces rather than removes write interruption.
+
+### Resource management
+
+Resource requests, limits, Quality of Service (QoS) class, and Pod priority influence Vault scheduling and eviction behavior on OpenShift. This section recommends resource profiles for dedicated and shared node deployments and identifies platform controls that must preserve those profiles.
+
+The Vault Helm chart does not set resource requests or limits by default. Without explicit resources or namespace defaults, Vault Pods receive BestEffort QoS, which provides the least eviction protection under node memory pressure. Refer to the [Kubernetes documentation on Pod selection for kubelet eviction](https://kubernetes.io/docs/concepts/scheduling-eviction/node-pressure-eviction/#pod-selection-for-kubelet-eviction).
+
+Set equal memory requests and limits on every container in the Pod, including init containers, extra containers, and admission-injected sidecars. Any container with mismatched or omitted requests and limits downgrades the entire Pod's QoS class, so disable automatic sidecar injection in the Vault namespace unless the injected containers carry matching CPU and memory requests and limits.
+
+Size the memory request and limit from the observed peak working set and [vault-benchmark](https://github.com/hashicorp/vault-benchmark) results, with enough headroom to avoid Vault restarts during peak load. Size Vault against node allocatable capacity so it accounts for platform reservations and DaemonSet usage.
+
+Set `server.resources.requests.cpu` to reserve enough CPU for Vault's normal load, covering at least steady-state usage plus operational headroom. CPU limits, by contrast, can throttle Vault during bursts even when the node has idle CPU, which increases latency for CPU-intensive operations. Refer to [Hardware sizing for Vault servers](https://developer.hashicorp.com/vault/tutorials/day-one-raft/raft-reference-architecture#hardware-sizing-for-vault-servers) for initial sizing.
+
+The deployment model determines whether to cap CPU. Equal memory requests and limits, together with a dedicated PriorityClass, already give Vault strong eviction protection in both models, so the remaining decision is whether the cost of a CPU limit is justified. On dedicated nodes, omit the CPU limit so Vault can burst into idle CPU, which produces Burstable QoS. This is the preferred profile: no application workloads compete for the node's memory, so a stronger guarantee adds little, while uncapped CPU avoids throttling the active node.
+
+On shared nodes, set CPU requests equal to CPU limits on every container, including init containers and injected sidecars, to reach Guaranteed QoS, and size both from benchmarked peak demand. A co-tenant memory spike can exhaust the node faster than the `kubelet` evicts, and Guaranteed QoS gives Vault the strongest out-of-memory protection in that case. The cost is CPU throttling once demand exceeds the limit, which on a voting Pod can delay Raft heartbeats and trigger an unnecessary leader election. Size the limit from peak rather than steady-state demand, monitor throttling against latency objectives, and move Vault to dedicated nodes rather than raising the limit without bounds.
+
+OpenShift admission controls can silently rewrite the resource configuration the Helm chart applies and defeat the intended QoS class. LimitRange defaults, ResourceQuota constraints, the Cluster Resource Override Operator, and VerticalPodAutoscaler all mutate Pod resources, so design the deployment to exclude Vault from these controls.
+
+Set `server.priorityClassName` to a dedicated PriorityClass that ranks Vault above application workloads and below the platform's system-critical Pods, such as the networking and storage agents that run as `system-node-critical`. Set `preemptionPolicy` to Never on this class so Vault waits in the scheduling queue for capacity instead of evicting application workloads, because OpenShift honors PodDisruptionBudgets only at a best-effort level during preemption. Priority reduces eviction risk, but spare per-zone capacity remains the primary recovery mechanism for node drains and node loss.
+
+The following table compares resource management considerations for dedicated and shared node deployment models.
+
+| Consideration | Dedicated nodes (recommended) | Shared nodes (fallback) |
+| :---- | :---- | :---- |
+| Resulting QoS class | Burstable (memory request=limit; CPU limit omitted). | Guaranteed (CPU and memory request=limit). |
+| Memory request and limit | Set equal for every container. | Set equal for every container. |
+| CPU limit | Omit, so Vault can use idle CPU on the dedicated node during bursts. | Set equal to the CPU request, sized from benchmarked peak. Throttling can delay Raft heartbeats and force an election; escalate to dedicated nodes rather than raise the limit. |
+| PriorityClass | Strongly recommended. Create a dedicated class with `preemptionPolicy` set to Never, ranked above application workloads. Confirm your networking and storage agents use `system-node-critical`, or another class above Vault, so Vault never outranks the components it depends on. | Strongly recommended; co-tenant pressure makes Vault's eviction-ranking protection matter more. Use the same dedicated non-preempting class and run the same agent-priority check. |
+| Cost and operational overhead | Higher. A separate node pool to provision and maintain. | Lower. Reuses existing capacity, but co-tenancy adds the QoS and throttling risks in the other rows. |
+
+
+Evicting the active Vault Pod triggers a Raft leader election and briefly prevents the cluster from processing writes. Resource configuration and PriorityClass reduce eviction risk but do not eliminate it under severe node pressure.
+
+
+## Performance standbys
+
+Performance standbys handle most requests locally and forward write operations and other requests that modify shared persistent state to the active node.
+
+Performance standby behavior is separate from voting and non-voting membership. Voting and non-voting membership affects quorum and leader election, while performance standby behavior affects how Vault handles client requests on standby nodes.
+
+For foundational performance standby concepts and behavior, refer to [Vault Enterprise Architecture](/validated-designs/vault/installation-guide/vms/architecture).
+
+This guide assumes your Vault Enterprise license includes the performance standbys feature. If your license does not include this feature, standby nodes operate as standard standbys that forward all requests, including reads, to the active node.
+
+### Deploying performance standbys
+
+Deploy additional standby capacity by increasing the StatefulSet replica count. The Vault Helm chart configures replicas through `server.ha.replicas`. Autopilot manages Raft membership and can add voting and non-voting members based on your cluster configuration.
+
+Performance standbys increase the total number of Raft peers, which affects cluster communication overhead. Each additional Raft peer receives log entries from the leader, so monitor replication lag and leader resource utilization when scaling. For read-heavy workloads such as Transit operations and key-value secret reads, add non-voting Pods to increase throughput without affecting quorum. With redundancy zones enabled, Autopilot manages non-voting membership automatically.
+
+## Scaling and Autopilot behavior
+
+The StatefulSet controller manages Vault Pod scaling, while Vault's Autopilot feature manages Raft cluster membership. These systems interact during scale-up and scale-down operations.
+
+### Scaling up
+
+When you increase the StatefulSet replica count, the StatefulSet controller creates new Pods with sequential ordinal indices. Each new Pod starts Vault, which attempts to join the existing Raft cluster. Autopilot evaluates the new node and determines whether it becomes a voting or non-voting member based on the cluster configuration and zone topology.
+
+### Scaling down
+
+When you scale down a StatefulSet, Kubernetes deletes Pods in descending ordinal order. For example, scaling from 6 to 5 replicas deletes `vault-5`. The StatefulSet controller manages Pod lifecycle but has no awareness of Raft cluster membership. When Kubernetes deletes a Pod, its Raft peer entry remains in the cluster configuration as a dead server. By default, Kubernetes retains the PVC for the deleted Pod, which protects the Pod's Raft data.
+
+Scaling the StatefulSet back up recreates the Pod with the same ordinal index and reattaches the retained PVC. Because the PVC still contains valid Raft data, the Pod resumes its previous cluster identity without requiring data synchronization from the leader.
+
+Before permanently reducing the replica count, verify cluster health using `vault operator raft list-peers` and confirm that the cluster can maintain quorum with fewer voting members. Run `vault operator raft remove-peer` for the departing peer before you reduce the replica count. After the scale-down completes, delete the orphaned PVC for the removed Pod. If you already removed the Raft peer but then scale back up, the returning Pod cannot rejoin with its existing data. You must delete the PVC and allow the Pod to join as a new member.
+
+### Dead server cleanup
+
+Autopilot removes dead servers automatically when you enable `cleanup_dead_servers`. In the reference 6-pod, 3-zone topology, set `min_quorum` to 3 so automatic cleanup does not remove a required voter while the cluster is restoring zone balance. If a failed voter is the last remaining server in its zone, Autopilot does not remove it automatically.
+
+Set `dead_server_last_contact_threshold` to the smallest value that still exceeds the longest Pod recovery time in your environment; 15m is a reasonable starting point when Pod recovery completes within minutes. This threshold determines when Autopilot removes a peer that has stopped sending heartbeats. If Autopilot removes a non-voter before its Pod recovers, the returning Pod cannot rejoin the cluster with its existing data. You must delete the Pod's PersistentVolumeClaim and allow it to join as a new member.
+
+For Autopilot configuration and behavior, refer to the [Autopilot documentation](https://developer.hashicorp.com/vault/docs/concepts/integrated-storage/autopilot).
+
+## Vault Autopilot upgrades
+
+We recommend [Autopilot Upgrades](/validated-designs/vault/administration-guide/upgrade-procedures#autopilot) combined with the StatefulSet OnDelete update strategy for Vault Enterprise version upgrades on OpenShift. Autopilot Upgrades treats the version transition as a controlled Raft membership change, promoting target-version candidates and demoting old-version voters in an order that preserves quorum and transfers leadership without an unplanned election. A manual upgrade that deletes standbys first and the leader last still forces a leader election when Kubernetes deletes the leader Pod, which causes a write outage during the election timeout window, and the manual flow has no automated check that the cluster can safely tolerate the next deletion. The recommended procedure differs between the 6-pod redundancy zones topology and the 5-pod fallback topology because each starts from a different voter and non-voter composition.
+
+This section covers the recommended upgrade strategy, the procedure for each topology, and automation fundamentals. Dead server cleanup, described in the Dead server cleanup section, is not relevant during an upgrade because Pods rejoin with their existing PersistentVolumeClaims and the same Raft IDs.
+
+### Upgrade strategy and the scale-out anti-pattern
+
+We recommend in-place Pod replacement under the OnDelete update strategy, which is the Vault Helm chart default. Update the Helm release with the target Vault image, and then delete Pods in the order specified by the topology-specific procedures in the following sections to trigger replacement on the target image. Each Pod retains its PersistentVolumeClaim and rejoins the cluster with the same Raft ID. Because the StatefulSet template change does not restart Pods, you control the deletion order.
+
+Do not scale the StatefulSet out to add target-version Pods and then scale it back in. StatefulSet scale-down removes the highest-ordinal Pods first, and the Vault Helm chart sets `podManagementPolicy` to Parallel, so scale-down can happen concurrently. Scaling from 6 to 9 to add `vault-6`, `vault-7`, and `vault-8`, then scaling back to 6, removes the freshly upgraded Pods and leaves the original old-version Pods in place. The result is the opposite of the intended upgrade.
+
+Direct `oc delete pod` bypasses the eviction API and therefore the chart's PodDisruptionBudget, described in the Pod disruption budgets section. The StatefulSet controller still recreates the deleted Pod from the current template, which now references the target Vault image.
+
+When you enable redundancy zones, the chart's default PodDisruptionBudget permits one eviction at a time because `maxUnavailable` is `1`. In the 5-pod fallback topology, the default `maxUnavailable` follows the formula `floor((n-1)/2)`, which permits two evictions for five replicas. Because these procedures delete one Pod at a time, automation must enforce pacing instead of relying on the PodDisruptionBudget.
+
+### Recommended upgrade procedure for the 6-pod redundancy zones topology
+
+In the 6-pod redundancy zones topology, you upgrade the non-voter in each zone first, so target-version candidates are already in place before Autopilot changes any voter membership. The cluster maintains quorum because Autopilot keeps at least one voter in each zone and demotes an old-version voter only after a target-version voter can replace it. You do not need to change voter membership manually.
+
+The procedure has two operator actions separated by an Autopilot-driven voter swap: replace the existing non-voters with target-version Pods, wait for Autopilot to swap voters, then replace the remaining old-version Pods.
+
+1. Apply the Helm upgrade so the StatefulSet template uses the target Vault image. The OnDelete update strategy means no Pods restart yet.  
+2. Delete the non-voter Pods one at a time. Wait for each rescheduled Pod to return healthy on the target image before deleting the next. Deleting one at a time provides a per-Pod recovery checkpoint, preserves performance-standby read capacity during the upgrade, and avoids interaction with concurrent operations such as node drains. After this step, each redundancy zone holds one old-version voter and one target-version non-voter.  
+3. Wait for Autopilot to complete the voter swap. You do not act during this phase. Autopilot promotes the 3 target-version non-voters to voters, demotes 2 of the 3 old-version voters (keeping the leader for now), transfers leadership to a target-version voter, and then demotes the old leader.  
+4. Confirm the 3 remaining old-version Pods are now non-voters by reading `vault operator raft autopilot state`.  
+5. Delete the old-version non-voter Pods one at a time so they restart on the target image. Wait for each to return healthy on the target image before deleting the next.  
+6. Confirm Autopilot returns to `idle` and all Pods report the target version.
+
+Throughout the procedure the cluster maintains quorum because non-voter deletions do not affect the voter count, and Autopilot keeps at least one voter per zone during promotion and demotion.
+
+### Upgrade procedure for the 5-pod fallback topology
+
+The 5-pod cluster has no non-voters that can return on the target version before Autopilot changes voter membership. Each returning Pod rejoins as a voter using its existing PersistentVolumeClaim. Autopilot demotes the first returning voters back to non-voters until 3 target-version servers exist in the cluster, at which point Autopilot transitions to `promoting` and stops demoting target-version servers. Autopilot then promotes the target-version non-voters, demotes the old-version voters, and transfers leadership without manual voter changes. Delete Pods strictly one at a time and upgrade the leader last.
+
+The procedure has two operator actions separated by an Autopilot-driven voter swap: replace 3 of the 4 standby Pods so Autopilot accumulates 3 target-version servers and starts the swap, wait for Autopilot to finish the swap, then replace the 2 remaining old-version Pods (the original leader and the one untouched standby).
+
+1. Apply the Helm upgrade so the StatefulSet template uses the target Vault image. The OnDelete update strategy means no Pods restart yet.  
+2. Delete 3 of the 4 standby Pods one at a time, leaving the leader and one standby for later. Wait for each Pod to return healthy on the target image before deleting the next. The first and second returning Pods rejoin as voters and Autopilot demotes them back to non-voters because the cluster is in `await-new-voters`. The third returning Pod also rejoins as a voter, but its arrival gives Autopilot 3 target-version servers against 2 old-version voters, which transitions the upgrade to `promoting`. That third Pod stays a voter, alongside the 2 stable target-version non-voters and the 2 remaining old-version voters.  
+3. Wait for Autopilot to complete the voter swap. You do not act during this phase. Autopilot promotes the 2 target-version non-voters to voters, demotes the remaining old-version voter that is not the leader, transfers leadership to a target-version voter, and then demotes the old leader.  
+4. Confirm the 2 remaining old-version Pods are now non-voters by reading `vault operator raft autopilot state`.  
+5. Delete the 2 old-version non-voter Pods one at a time so they restart on the target image. Wait for each to return healthy on the target image before deleting the next.  
+6. Confirm Autopilot returns to `idle` and all Pods report the target version.
+
+A healthy 5-voter cluster tolerates 2 unavailable voters, but Autopilot's demotions during this procedure temporarily reduce the configured voter count to as few as 3, where the cluster tolerates only 1 unavailable voter. Delete only one Pod at a time, and wait until Autopilot reports the previous one as healthy on the target version before deleting the next.
+
+### Automating the upgrade procedure
+
+The upgrade procedure has deterministic steps and repetitive verification, which makes it a good automation candidate. Two reasonable patterns exist, and both share the same fundamentals.
+
+The first pattern is a pipeline-driven, manually triggered upgrade. A continuous-delivery pipeline runs the upgrade as a job. The existing GitOps flow applies the target Vault image to the Helm release. Because the StatefulSet uses OnDelete, the specification change does not restart Pods. The upgrade pipeline then performs the Pod deletions and Autopilot state checks. Per-cluster environment approvals provide the safety gate so that each cluster requires a separate approval before the pipeline acts on it.
+
+For multi-cluster deployments with replication, upgrade downstream clusters before their upstream sources, working one tier at a time so the primary upgrades last. This order prevents an upstream cluster from running a newer Vault version than its downstream replicas. For the full replication-aware upgrade ordering, refer to the [Vault replicated deployment upgrade guide](https://developer.hashicorp.com/vault/docs/upgrade/replicated-deployment).
+
+The second pattern is a dedicated OpenShift operator. A purpose-built operator watches a custom resource that describes the desired Vault image and orchestrates the same steps. The operator pattern offers tighter integration with OpenShift but requires more engineering investment to build and maintain.
+
+Regardless of pattern, the automation must implement the following safety fundamentals:
+
+- **Run a pre-flight health gate.** Before any Pod deletion, confirm `healthy` is true, `optimistic_failure_tolerance` is at least 1, the previously deleted Pod has returned with `version` equal to the target, and active replication is steady. Refuse to proceed if the pre-flight check fails.  
+- **Define an explicit starting order.** For a single cluster, follow the topology-specific procedure in the preceding sections. For a multi-cluster deployment with replication, follow the same downstream-before-upstream order described earlier in this section so the primary upgrades last.  
+- **Wait for stabilization between steps.** After each Pod replacement, wait until the replacement server appears in `/sys/storage/raft/autopilot/state` with `healthy` true, `version` equal to the target version, and `upgrade_info.status` either remaining in the expected transition state for the current step or advancing toward `idle`. Autopilot reports the upgrade through a sequence of transition statuses such as `await-new-voters`, `promoting`, `demoting`, `leader-transfer`, `await-new-servers`, and `await-server-removal` before returning to `idle`. Treat forward movement through these statuses as healthy progress, not failure.  
+- **Fail closed on safety violations.** If `healthy` becomes false, `optimistic_failure_tolerance` drops to 0, or the upgrade status regresses, stop and surface the problem. Do not delete the next Pod.
+
+We recommend identifying Pods through Vault's Kubernetes service registration labels to simplify the automation. When the Vault configuration includes the `service_registration "kubernetes" {}` stanza (the chart's default), Vault applies the `vault-active`, `vault-sealed`, `vault-initialized`, `vault-perf-standby`, and `vault-version` labels to its own Pods. Reading these labels through the Kubernetes API retrieves Pod status without requiring Vault authentication. Use `vault-active=true` to find the leader and skip Pods where `vault-sealed=true` or `vault-initialized=false`. The labels do not distinguish voters from non-voters, so read voter status from `vault operator raft autopilot state` when you need that detail. For label semantics, refer to the [Vault Kubernetes service registration](https://developer.hashicorp.com/vault/docs/configuration/service-registration/kubernetes) documentation.
+
+For the full Autopilot state response schema, refer to the [Autopilot state API reference](https://developer.hashicorp.com/vault/api-docs/system/storage/raftautopilot). For Autopilot Upgrades concepts and prerequisites, refer to the [Autopilot documentation](https://developer.hashicorp.com/vault/docs/enterprise/automated-upgrades).
+
+## Storage topology
+
+Vault integrated storage uses PersistentVolumeClaims for Raft data persistence. The storage configuration affects cluster reliability, performance, and recovery capabilities. For integrated storage internals and Raft configuration parameters, refer to the [Vault integrated storage documentation](https://developer.hashicorp.com/vault/docs/internals/integrated-storage).
+
+Each Vault Pod requires its own PVC with ReadWriteOnce (RWO) access mode. Integrated storage requires exclusive access to the data directory. Do not use ReadWriteMany (RWX) access modes, which allow multiple Pods to mount the same volume simultaneously.
+
+Select a StorageClass that provides low latency and high IOPS. Raft consensus involves frequent disk writes for log entries and snapshots. Storage performance directly affects Raft election timeouts and cluster stability. For storage sizing and IOPS requirements, refer to [Hardware sizing for Vault servers](https://developer.hashicorp.com/vault/tutorials/day-one-raft/raft-reference-architecture#hardware-sizing-for-vault-servers).
+
+Storage requirements vary based on your workload mix. A write-heavy workload, such as high-volume KV secret updates or authentication at scale, produces significantly more storage I/O than a read-heavy workload because each write commits a Raft log entry to disk across a majority of voters. Slow disk on any single voter delays the entire Raft commit pipeline, and when storage cannot keep pace with the commit rate, followers miss heartbeat windows, triggering unnecessary leader elections and write unavailability. We recommend p99 write latency below 10 ms on `vault.raft-storage.put` and p99 read latency below 5 ms on `vault.raft-storage.get` for the storage backing Vault data PVCs. Use [vault-benchmark](https://github.com/hashicorp/vault-benchmark) to simulate your expected workload against a non-production cluster and validate that your StorageClass, CPU, and memory configuration meet performance requirements before deploying to production.
+
+The following table outlines storage considerations across OpenShift variants.
+
+| Platform | Storage options | Considerations |
+| :---- | :---- | :---- |
+| Self-managed OpenShift (on-premises or cloud-hosted) | Local storage, storage area network (SAN), NFS | Configure zone topology if using distributed storage. Local storage provides lowest latency but complicates Pod rescheduling. We do not recommend NFS for Vault integrated storage because it does not provide the filesystem consistency guarantees integrated storage requires. |
+| Red Hat OpenShift Service on AWS (ROSA), a Red Hat and AWS co-managed service | Amazon EBS (gp3, io1, io2) | The default `gp3` StorageClass is suitable. Consider `io1` or `io2` for high-throughput clusters. |
+| Azure Red Hat OpenShift (ARO), a Red Hat and Azure co-managed service | Azure Managed Disks (Premium solid-state drive (SSD), Ultra Disk) | Premium SSD is suitable for most deployments. Ultra Disk provides lower latency for high-performance requirements. |
+| OpenShift Dedicated (GCP or AWS), a Red Hat managed service | Cloud provider storage (varies by hosting platform) | Use the default StorageClass or request a high-performance class from your platform provider. |
+
+For foundational integrated storage architecture and design considerations, refer to [Vault Enterprise Architecture](/validated-designs/vault/installation-guide/vms/architecture).
