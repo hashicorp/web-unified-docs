@@ -24,7 +24,7 @@ locals {
 # add the env vars we want to manage, while the latter would completely replace
 # anything not included in the array specified in the configuration.
 resource "vercel_project_environment_variable" "sensitive" {
-  for_each = local.vercel_env
+  for_each   = local.vercel_env
   project_id = var.vercel_project_id
   team_id    = var.vercel_team_id
   key        = each.value.client_visible && !startswith(each.key, "NEXT_PUBLIC_") ? format("NEXT_PUBLIC_%s", each.key) : each.key
