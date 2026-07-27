@@ -287,6 +287,17 @@ export const PRODUCT_CONFIG = {
 		versionedDocs: true,
 		websiteDir: 'website',
 	},
+	'terraform-policy': {
+		assetDir: '',
+		basePaths: ['policy'],
+		contentDir: 'docs',
+		dataDir: 'data',
+		navDataPath: 'policy',
+		productSlug: 'terraform',
+		semverCoerce: semver.coerce,
+		versionedDocs: true,
+		websiteDir: 'website',
+	},
 	'terraform-docs-agents': {
 		/**
 		 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
