@@ -114,11 +114,184 @@ Consul resolves gateway scaling in the following order:
 
 1. A user-managed HPA that targets the gateway deployment
 1. Gateway scaling annotations
-1. Deprecated `GatewayClassConfig.spec.deployment` fields
+1. Deprecated Helm chart `connectInject.apiGateway.managedGatewayClass.deployment` fields
 
 If a user-managed HPA already targets the gateway deployment, Consul does not create or manage its own HPA for that gateway.
 
-`GatewayClassConfig.spec.deployment.defaultInstances`, `minInstances`, and `maxInstances` are deprecated. Keep using gateway annotations for new configurations and migrations. Refer to the [`GatewayClassConfig` reference](/consul/docs/reference/k8s/api-gateway/gatewayclassconfig) for the full resource schema.
+### Precedence examples
+
+**Case 1: User-managed HPA wins over Gateway annotations**
+
+If you create your own `HorizontalPodAutoscaler` that targets the gateway deployment and the `Gateway` resource also has scaling annotations, Consul uses the user-managed HPA and ignores the annotations entirely. Consul will not create or overwrite the existing HPA.
+
+```yaml
+# User-managed HPA — this takes priority
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: my-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api-gateway
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+```
+
+Even if the `Gateway` resource below has `hpa-enabled: "true"`, Consul defers to `my-hpa` above and does not create a second HPA.
+
+```yaml
+# Gateway annotations are ignored when a user-managed HPA already exists
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: Gateway
+metadata:
+  name: api-gateway
+  annotations:
+    consul.hashicorp.com/hpa-enabled: "true"
+    consul.hashicorp.com/hpa-minimum-replicas: "3"
+    consul.hashicorp.com/hpa-maximum-replicas: "25"
+spec:
+  gatewayClassName: consul
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 8080
+```
+
+**Case 2: Gateway annotations win over deprecated Helm values**
+
+If the `Gateway` resource has a `default-replicas` annotation and the Helm chart still has a `deployment.defaultInstances` value set, the annotation takes effect and the Helm value is ignored. Note that `scaling.enabled` must be `true` for annotations to be evaluated at all.
+
+```yaml
+# values.yaml — scaling must be enabled; the deprecated defaultInstances is ignored
+connectInject:
+  apiGateway:
+    managedGatewayClass:
+      scaling:
+        enabled: true       # required for annotations to take effect
+      deployment:
+        defaultInstances: 2   # ignored because the annotation below is present
+```
+
+```yaml
+# gateway.yaml — annotation wins
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: Gateway
+metadata:
+  name: api-gateway
+  annotations:
+    consul.hashicorp.com/default-replicas: "4"   # this value is used
+spec:
+  gatewayClassName: consul
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 8080
+```
+
+**Case 3: Deprecated Helm values are the only source**
+
+If there are no Gateway annotations and no user-managed HPA, Consul falls back to the deprecated `deployment.*` Helm values. The gateway deployment is created with `defaultInstances` replicas, and the controller enforces `minInstances` and `maxInstances` as bounds.
+
+```yaml
+# values.yaml — used only as a fallback when no annotations exist
+connectInject:
+  apiGateway:
+    managedGatewayClass:
+      deployment:
+        defaultInstances: 3
+        minInstances: 1
+        maxInstances: 5
+```
+
+The following Helm values under `connectInject.apiGateway.managedGatewayClass.deployment` are deprecated and will be removed in a future release. Migrate each one to the equivalent Gateway annotation.
+
+### Migrate `deployment.defaultInstances`
+
+**Before (deprecated):**
+
+<CodeBlockConfig filename="values.yaml">
+
+```yaml
+connectInject:
+  apiGateway:
+    managedGatewayClass:
+      deployment:
+        defaultInstances: 4
+```
+
+</CodeBlockConfig>
+
+**After:**
+
+<CodeBlockConfig filename="gateway.yaml">
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: Gateway
+metadata:
+  name: api-gateway
+  annotations:
+    consul.hashicorp.com/default-replicas: "4"
+spec:
+  gatewayClassName: consul
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 8080
+```
+
+</CodeBlockConfig>
+
+### Migrate `deployment.minInstances` and `deployment.maxInstances`
+
+**Before (deprecated):**
+
+<CodeBlockConfig filename="values.yaml">
+
+```yaml
+connectInject:
+  apiGateway:
+    managedGatewayClass:
+      deployment:
+        minInstances: 2
+        maxInstances: 10
+```
+
+</CodeBlockConfig>
+
+**After:**
+
+<CodeBlockConfig filename="gateway.yaml">
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: Gateway
+metadata:
+  name: api-gateway
+  annotations:
+    consul.hashicorp.com/hpa-enabled: "true"
+    consul.hashicorp.com/hpa-minimum-replicas: "2"
+    consul.hashicorp.com/hpa-maximum-replicas: "10"
+spec:
+  gatewayClassName: consul
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 8080
+```
+
+</CodeBlockConfig>
+
+Refer to the [Helm chart reference for `connectInject.apiGateway`](/consul/docs/reference/k8s/helm#v-connectinject-apigateway-managedgatewayclass-deployment) for the full list of deprecated fields.
 
 ## Manual scaling behavior
 
