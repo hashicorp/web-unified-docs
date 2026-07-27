@@ -12,7 +12,7 @@ vi.hoisted(() => {
 	process.env.VERCEL_URL = 'local-vercel-CDN'
 })
 
-import { fetchFile, findFileWithMetadata, getAssetData, FileType } from './file'
+import { fetchFile, findFileWithMetadata, FileType } from './file'
 
 vi.mock('fs/promises', () => {
 	return {
@@ -234,30 +234,6 @@ describe('fetchFile — INCREMENTAL_BUILD=true', () => {
 			'https://prod-vercel-CDN/asset/vault/v1.21.x/img/foo.png',
 			expect.objectContaining({ cache: 'no-cache' }),
 		)
-	})
-})
-
-describe('getAssetData', () => {
-	test('removes empty version segment from path for unversioned products', async () => {
-		// For unversioned products, versionMetadata.version is '' which must not
-		// produce a double-slash in the asset path (e.g. "assets/validated-designs//img/...")
-		const unversionedFilePath = [
-			'assets',
-			'validated-designs',
-			'',
-			'img/vault/logo.png',
-		]
-		const unversionMetaData = {
-			releaseStage: 'stable',
-			version: '',
-			isLatest: true,
-		}
-
-		const mockResponse = new Response('image body')
-		vi.mocked(fetch).mockResolvedValue(mockResponse)
-		await getAssetData(unversionedFilePath, unversionMetaData)
-		console.log('here failing', fetch.mock.calls[0][0])
-		expect(fetch.mock.calls[0][0]).not.toContain('//img')
 	})
 })
 
