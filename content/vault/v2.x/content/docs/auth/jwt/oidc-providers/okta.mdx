@@ -23,3 +23,108 @@ Note your policy will need `oidc_scopes` to include `profile` to get a full prof
 You will also need to configure bound audience along the lines of
 `"bound_audiences": ["api://default", "0a4........."]` if you are using the default
 authorization server.
+
+### Optional Okta-specific configuration
+
+Okta silently truncates the `groups` claim in the ID token for users that belong
+to the default authorization server group claim limit (100 or more groups).
+Vault provides Okta-specific
+handling to detect when truncation occurs and retrieve the complete group list
+directly from the Okta Groups API.
+
+#### Setup
+
+To set up the Okta-specific handling, you need:
+
+- A dedicated Okta service account user. Create one under
+  **Directory > People > Add person** in the Okta Admin Console. We strongly
+  recommend using a dedicated service account rather than a personal admin
+  account.
+- A custom admin role assigned to that service account, granting only
+  **View users and their details** and **View groups and their details**. Create and
+  assign custom roles under **Security > Administrators > Create new role** in the
+  Okta Admin Console. The built-in **Read-Only Administrator** role also works but
+  grants broader access than necessary.
+- An Okta API token (SSWS) generated for that service account, under
+  **Security > API > Tokens** in the Okta Admin Console. Copy the token value
+  immediately after creation.
+
+Vault authenticates to the Okta Groups endpoint (`/api/v1/users/{userId}/groups`)
+with the SSWS API token to process truncated `groups` claims. The authentication
+constraint comes from Okta, not Vault. The Groups endpoint is admin-only, so
+Vault cannot use an end-user OAuth access token, regardless of the `okta.*`
+scopes granted. 
+
+#### Configuration
+
+- `provider` `(string: <required>)` - Name of the provider. Must be set to `"okta"`.
+- `fetch_groups` `(bool: false)` - When `fetch_groups` is `false`, Vault always
+  uses the groups present in the ID token, which may be incomplete for users in
+  100 or more groups. When `fetch_groups` is `true`, Vault checks whether the
+  `groups` claim in the ID token is absent or has reached `groups_cap`. If the
+  claim is unusable, Vault fetches the complete group list from the Okta Groups
+  API. 
+- `org_url` `(string: "")` - The full Okta org base URL including `https://`. For
+  example, `https://example.okta.com`. If you leave `org_url` unset, Vault
+  derives the URL from `oidc_discovery_url` using the scheme and host minus any
+  custom authorization server paths such as `/oauth2/...`. You only need to set
+  the org URL explicitly if your OIDC discovery URL uses a vanity domain or any
+  other domain that differs from your Okta org.
+- `api_token` `(string: "")` - An Okta API token (SSWS) for the service account.
+  Vault requires an API token when `fetch_groups` is `true`. If you leave the API
+  token unset, Vault returns an authentication error at login for users that
+  reach `groups_cap`. Vault treats the API token as a sensitive field and masks
+  the value in audit logs and `vault read` output.
+- `user_id_claim` `(string: <user_claim>)` - The ID token claim whose value identifies
+  the user in the Okta API call. Okta accepts a user ID, login (email/UPN), or unique
+  login shortname.
+- `groups_cap` `(int: 100)` - The threshold at which Vault treats the `groups` claim as
+  potentially truncated. If the claim is absent, or its length is equal
+  to `groups_cap`, Vault fetches the complete list from the Okta API when `fetch_groups`
+  is `true`. The cap value should match the group claim limit configured on your Okta
+  authorization server.
+- `groups_filter` `(string: "")` - A Go regular expression that defines
+  which group names Vault accepts for policy mapping. Vault applies the filter
+  consistently to groups coming from the ID token and the Okta API. Filtering is
+  useful when a user belongs to many Okta groups but only a subset is relevant
+  to Vault. Leave `groups_filter` unset to pass through every group Okta returns.
+
+Example configuration:
+
+```shell
+vault write auth/oidc/config - <<EOF
+{
+  "oidc_discovery_url": "https://example.okta.com/oauth2/default",
+  "oidc_client_id": "your_client_id",
+  "oidc_client_secret": "your_client_secret",
+  "default_role": "your_default_role",
+  "provider_config": {
+    "provider": "okta",
+    "fetch_groups": true,
+    "org_url": "https://example.okta.com",
+    "api_token": "00ABCxyz...",
+    "groups_cap": 100,
+    "user_id_claim": "sub",
+    "groups_filter": "^vault-"
+  }
+}
+EOF
+```
+
+#### Role
+
+Vault uses the [user_claim](/vault/api-docs/auth/jwt#user_claim) value of the role as the
+fallback user identifier for the Okta API lookup when you leave `user_id_claim` unset in
+`provider_config`. Set `user_claim` to a claim that Okta accepts as a user identifier, for example `email`.
+
+Example role:
+
+```shell
+vault write auth/oidc/role/your_default_role \
+    allowed_redirect_uris="http://localhost:8200/ui/vault/auth/oidc/oidc/callback,http://localhost:8250/oidc/callback" \
+    user_claim="sub" \
+    groups_claim="groups" \
+    oidc_scopes="openid profile groups email" \
+    bound_audiences="api://default,0a4........." \
+    policies="default"
+```
