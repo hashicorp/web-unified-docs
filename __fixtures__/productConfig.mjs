@@ -387,6 +387,18 @@ export const PRODUCT_CONFIG = {
 		versionedDocs: true,
 		websiteDir: 'website',
 	},
+	'tfctl-cli': {
+		assetDir: 'img',
+		basePaths: ['tfctl-cli'],
+		contentDir: 'docs',
+		dataDir: 'data',
+		navDataPath: 'tfctl-cli',
+		productSlug: 'terraform',
+		semverCoerce: semver.coerce,
+		versionedDocs: true,
+		websiteDir: 'website',
+	},
+
 	'terraform-plugin-sdk': {
 		/**
 		 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
