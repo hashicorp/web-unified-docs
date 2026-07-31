@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
- locals {
+locals {
   repositories = toset([
     var.github_repository,
     "${var.github_repository}-internal",
