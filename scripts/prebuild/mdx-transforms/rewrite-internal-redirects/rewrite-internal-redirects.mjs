@@ -19,6 +19,7 @@ import * as pathToRegexp from 'path-to-regexp'
  * Loads redirects from the file-system and "caches" them in memory.
  */
 const cachedRedirects = {}
+const loggedRedirectErrorPaths = new Set()
 export const loadRedirects = async (version = 'default', redirectsDir) => {
 	// Return the cached redirects if they are already present
 	if (cachedRedirects[version]?.length > 0) {
@@ -27,7 +28,7 @@ export const loadRedirects = async (version = 'default', redirectsDir) => {
 
 	let redirectsSource = []
 
-	// Attempt to load from redirects.js
+	// Attempt to load from redirects.jsonc
 	try {
 		const redirectsPath = path.join(redirectsDir, 'redirects.jsonc')
 		const redirectsString = await readFile(redirectsPath, 'utf-8')
@@ -37,8 +38,12 @@ export const loadRedirects = async (version = 'default', redirectsDir) => {
 			allowTrailingComma: true,
 		})
 
-		if (parserError.length > 0) {
-			console.log(`JSONC parse errors: ${JSON.stringify(parserError, null, 2)}`)
+		if (
+			parserError.length > 0 &&
+			!loggedRedirectErrorPaths.has(redirectsPath)
+		) {
+			loggedRedirectErrorPaths.add(redirectsPath)
+			console.log(`\n❌ Failed to load redirects from ${redirectsPath}\n`)
 		}
 
 		if (Array.isArray(redirects)) {
@@ -70,6 +75,12 @@ export const loadRedirects = async (version = 'default', redirectsDir) => {
 					destUrl.pathname = newPath
 
 					return destUrl.href
+				}
+			} else {
+				// Static external destination (no tokens to interpolate).
+				// Wrap in a function so it can be called uniformly.
+				destination = () => {
+					return redirect.destination
 				}
 			}
 		} else {
@@ -138,7 +149,7 @@ export const rewriteInternalRedirectsPlugin = ({ redirects }) => {
 }
 
 /**
- * Loads the redirects defined in redirects.js or redirects.next.js and attempts to apply them to any
+ * Loads the redirects defined in redirects.jsonc and attempts to apply them to any
  * matching links in the document.
  */
 export const transformRewriteInternalRedirects = async (
