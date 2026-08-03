@@ -21,6 +21,11 @@ variable "slack_alerting_channel_id" {
   default     = "d921s4i0j8og0p7ogbeg"
 }
 
+variable "instana_dashboard_prefix" {
+  description = "Used as the prefix to all of our resources and dashboards in Instana to make it easier to find things that we own"
+  type = string
+}
+
 variable "instana_agent_key" {
   description = "Agent key used to submit metrics to Instana. Obtained from: https://prod-hashicorp.instana.io/#/instanaagent/installation"
   type        = string
@@ -46,5 +51,18 @@ variable "instana_repo_sync_failed_warning_threshold" {
 
 variable "github_repository" {
   description = "Canonical name of the GitHub repository to manage."
+  type        = string
+}
+
+# -------------------------
+# Vercel
+# -------------------------
+variable "vercel_team_id" {
+  description = "Team ID of the \"hashicorp\" team"
+  type        = string
+}
+
+variable "vercel_project_id" {
+  description = "Vercel project ID. Find it in Project Settings → General."
   type        = string
 }
