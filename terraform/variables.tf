@@ -1,5 +1,5 @@
 /**
- * Copyright IBM Corp. 2024, 2026
+ * Copyright IBM Corp. 2025, 2026
  * SPDX-License-Identifier: BUSL-1.1
  */
 
@@ -19,6 +19,11 @@ variable "slack_alerting_channel_id" {
   description = "Instana alerting channel ID for Slack notifications. This resource is owned by an external Terraform workspace; do not manage it here."
   type        = string
   default     = "d921s4i0j8og0p7ogbeg"
+}
+
+variable "instana_dashboard_prefix" {
+  description = "Used as the prefix to all of our resources and dashboards in Instana to make it easier to find things that we own"
+  type = string
 }
 
 variable "instana_agent_key" {
