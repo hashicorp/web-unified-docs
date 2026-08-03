@@ -1,10 +1,10 @@
 /**
- * Copyright IBM Corp. 2024, 2026
+ * Copyright IBM Corp. 2025, 2026
  * SPDX-License-Identifier: BUSL-1.1
  */
 
 resource "instana_application_config" "udr" {
-  label          = var.app_name
+  label          = "${var.instana_dashboard_prefix} ${var.app_name}"
   boundary_scope = "ALL"
   scope          = "INCLUDE_ALL_DOWNSTREAM"
   tag_filter     = "otel_resource.service.name@dest EQUALS '${var.otel_service_name}'"
