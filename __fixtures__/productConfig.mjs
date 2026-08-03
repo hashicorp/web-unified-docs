@@ -387,7 +387,7 @@ export const PRODUCT_CONFIG = {
 		versionedDocs: true,
 		websiteDir: 'website',
 	},
-	'tfctl-cli': {
+	'terraform-tfctl-cli': {
 		assetDir: 'img',
 		basePaths: ['tfctl-cli'],
 		contentDir: 'docs',
