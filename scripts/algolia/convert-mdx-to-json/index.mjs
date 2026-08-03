@@ -35,9 +35,24 @@ export async function getLatestProductVersionDirectories(dir, versionMetadata) {
 
 			// getLatestVersion will return null for versionless products
 			// if directory is for versionless docs, return null
-			return latestProductVersion == 'v0.0.x'
-				? directoryPath
-				: path.join(directoryPath, latestProductVersion)
+			if (latestProductVersion == 'v0.0.x') {
+				return directoryPath
+			}
+
+			// Non-stable versions (e.g. beta, rc) are written to disk in a directory
+			// suffixed with the release stage, e.g. `v0.1.x (beta)`, so we need to
+			// reconstruct that same directory name here to avoid an ENOENT.
+			const latestVersionMetadata = versionMetadata[directory.name]?.find(
+				(version) => {
+					return version.isLatest
+				},
+			)
+			const latestVersionDirName =
+				latestVersionMetadata && latestVersionMetadata.releaseStage !== 'stable'
+					? `${latestProductVersion} (${latestVersionMetadata.releaseStage})`
+					: latestProductVersion
+
+			return path.join(directoryPath, latestVersionDirName)
 		}),
 	)
 	return productDirectories
