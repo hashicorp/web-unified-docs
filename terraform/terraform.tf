@@ -1,5 +1,5 @@
 /**
- * Copyright IBM Corp. 2024, 2026
+ * Copyright IBM Corp. 2025, 2026
  * SPDX-License-Identifier: BUSL-1.1
  */
 
@@ -41,4 +41,9 @@ provider "github" {
   owner = "hashicorp"
   # PAT comes from env var in HCP:
   # GITHUB_TOKEN
+}
+
+provider "vercel" {
+  # PAT comes from env var in HCP:
+  # VERCEL_TOKEN
 }
