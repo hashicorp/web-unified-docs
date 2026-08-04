@@ -133,14 +133,53 @@ A\t${TERRAFORM_V1_14_PATH}/docs/partials/alpha.mdx`)
 		expect(fs.promises.writeFile).toHaveBeenCalledTimes(1)
 	})
 
+	it('uses an explicit mergeBase override when provided (forward-port mode)', async () => {
+		vi.mocked(execSync).mockReturnValueOnce(
+			`A\t${TERRAFORM_V1_14_PATH}/docs/new.mdx`,
+		)
+
+		const result = await getChangedContentFiles({
+			mergeBase: 'explicit-sha',
+		})
+
+		expect(execSync).toHaveBeenCalledTimes(1)
+		expect(execSync).toHaveBeenCalledWith(
+			'git diff --name-status explicit-sha HEAD -- content/',
+			{ encoding: 'utf-8' },
+		)
+		expect(result).toEqual({
+			added: [`${TERRAFORM_V1_14_PATH}/docs/new.mdx`],
+			modified: [],
+			removed: [],
+		})
+	})
+
+	it('can disable partial fan-out when includePartials is false', async () => {
+		vi.mocked(execSync)
+			.mockReturnValueOnce('merge-base-sha\n')
+			.mockReturnValueOnce(`M\t${TERRAFORM_V1_14_PATH}/docs/partials/alpha.mdx`)
+
+		vi.mocked(getFilesUsingPartial).mockReturnValue([
+			`${TERRAFORM_V1_14_PATH}/docs/consumer.mdx`,
+		])
+
+		const result = await getChangedContentFiles({ includePartials: false })
+
+		expect(getFilesUsingPartial).not.toHaveBeenCalled()
+		expect(result).toEqual({
+			added: [],
+			modified: [`${TERRAFORM_V1_14_PATH}/docs/partials/alpha.mdx`],
+			removed: [],
+		})
+	})
+
 	it('logs and exits when building changed files fails', async () => {
-		const error = new Error('git failed')
 		const consoleErrorSpy = vi
 			.spyOn(console, 'error')
 			.mockImplementation(() => {})
 
 		vi.mocked(execSync).mockImplementation(() => {
-			throw error
+			throw new Error('git failed')
 		})
 
 		vi.spyOn(process, 'exit').mockImplementation(
@@ -152,7 +191,11 @@ A\t${TERRAFORM_V1_14_PATH}/docs/partials/alpha.mdx`)
 		await expect(getChangedContentFiles()).rejects.toThrow('process.exit(1)')
 		expect(consoleErrorSpy).toHaveBeenCalledWith(
 			'Error getting changed content files:',
-			error,
+			expect.objectContaining({
+				message: expect.stringContaining(
+					'Failed to find merge-base with origin/main',
+				),
+			}),
 		)
 	})
 })
