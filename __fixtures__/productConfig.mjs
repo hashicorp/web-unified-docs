@@ -392,7 +392,7 @@ export const PRODUCT_CONFIG = {
 		basePaths: ['tfctl-cli'],
 		contentDir: 'docs',
 		dataDir: 'data',
-		navDataPath: 'tfctl-cli',
+		navDataPath: 'terraform-tfctl-cli',
 		productSlug: 'terraform',
 		semverCoerce: semver.coerce,
 		versionedDocs: true,
