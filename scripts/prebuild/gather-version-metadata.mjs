@@ -152,6 +152,11 @@ export async function gatherVersionMetadata(contentDir) {
 				isLatest: idx === latestVersionIndex,
 			})
 		}
+
+		// If only one version exists, it should always be the latest regardless of release stage
+		if (versionMetadata[product].length === 1) {
+			versionMetadata[product][0].isLatest = true
+		}
 	}
 	// Return the version metadata
 	return versionMetadata

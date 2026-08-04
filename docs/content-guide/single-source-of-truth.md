@@ -156,6 +156,26 @@ The function only copies files when the source path exists. If a source path is 
 
 ---
 
+## Content exclusion directives in shared content
+
+Shared internal-product content can use content exclusion directives (for example, `<!-- BEGIN: TFEnterprise:only -->` or `<!-- BEGIN: Vault:>=v1.21.x -->`). Because the same file is imported into multiple products, the directives are resolved against the **consuming** product rather than the internal product.
+
+To make this work, the prebuild treats internal products specially:
+
+1. **Internal source files keep their directives intact.** During the internal product's own MDX transform pass, content exclusion is skipped (the `internalProduct` flag in `productConfig.mjs` signals this). The directives are written to the internal product's output unchanged.
+2. **Directives are resolved at copy time.** After `copyInternalOnlyProductDocs` copies the content into a consuming product, it reprocesses the copied `.mdx` files and evaluates each directive using the consuming product's slug and version.
+
+This means a directive's product tag is matched against the product the content is copied into:
+
+- A `:only` directive whose tag does **not** match the consuming product is removed, including its `BEGIN`/`END` comments.
+- A version directive (for example, `Vault:>=v1.21.x`) is only version-compared when the consuming product matches the tag; in every other product the block is removed.
+
+Author shared content with the tags of the products the file is shared into. For the full directive syntax and cross-product behavior, refer to the [content exclusion transform README](../../scripts/prebuild/mdx-transforms/exclude-content/README.md).
+
+> **Note:** Version directives need the consuming product's version. Only use version directives in content shared into versioned products.
+
+---
+
 ## Naming conventions
 
 The following naming conventions are required for the internal-only product flow to work correctly:
