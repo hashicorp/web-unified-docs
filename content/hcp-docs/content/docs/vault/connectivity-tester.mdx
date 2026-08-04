@@ -1,0 +1,420 @@
+---
+page_title: HCP Vault Connectivity Tester
+sidebar_title: Connectivity tester
+description: >-
+  Use the HCP Connectivity Tester to diagnose reachability from your HCP Vault Virtual Network (HVN) to private internal resources before configuring Vault integrations.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-08-04T13:57:53-05:00
+last_modified: 2026-08-04T19:28:07+05:30
+# END AUTO GENERATED METADATA
+---
+
+# Test HCP Vault connectivity
+
+The HCP Connectivity Tester is a self-service diagnostic tool that verifies network reachability from your HCP Vault Dedicated cluster to internal resources, including databases, identity providers, LDAP servers, and DNS resolvers. It lets you confirm that DNS resolution and TCP reachability are working correctly across your HashiCorp Virtual Network (HVN) **before** configuring Vault integrations such as database secrets engines, LDAP authentication, or MFA providers.
+
+Without this tool, network failures only surface after you deploy a Vault configuration, producing vague error logs that require engineering escalation. The connectivity tester gives you clear, structured diagnostics modeled on familiar CLI primitives — equivalent to running `dig` and `nc` — without needing to interpret raw logs or configure Vault first.
+
+## Supported tests
+
+| Test | CLI equivalent | What it checks |
+|---|---|---|
+| **DNS lookup** | `dig +noall +answer <hostname> @<nameserver>` | Resolves a hostname using your DNS server and returns the resolved IP addresses |
+| **TCP reachability** | `nc -z -v <hostname> <port>` | Attempts a TCP connection to a hostname and port and reports open, closed, or unreachable |
+| **TLS connectivity** | `openssl s_client -brief -connect <hostname>:<port>` | Performs a TLS handshake to confirm a TLS-capable service is reachable |
+| **Ping (ICMP)** | `ping -c 5 <hostname>` | Sends ICMP echo requests to verify basic host reachability |
+| **Traceroute** | `traceroute <hostname>` | Maps the network path between the Vault cluster and the target host |
+
+## Limitations
+
+- The connectivity tester is available for HCP Vault Dedicated clusters only.
+- The cluster must be in the `RUNNING` state.
+- Only one connectivity test can execute at a time per cluster. Concurrent requests are queued and executed sequentially.
+- Tests time out after **30 seconds** per command.
+- The connectivity tester is scoped to the primary HVN. After a backup region is promoted, connectivity to features such as BYO-DNS or PrivateLink is not retained in the promoted region.
+- This tool does not validate application-layer protocols (for example, LDAP bind or database authentication).
+- This tool does not perform continuous monitoring or alerting. It is an on-demand diagnostic tool.
+- Hostnames, IP addresses, and domains belonging to HashiCorp or IBM internal infrastructure are blocked and cannot be tested. Refer to [Blocked addresses](#blocked-addresses) for the full list.
+
+## Prerequisites
+
+- Access to the [HCP Portal](https://portal.cloud.hashicorp.com/sign-in).
+- An HCP Vault Dedicated cluster in the `RUNNING` state.
+- A VPC peering connection or Transit Gateway attachment established between your customer VPC and the HVN. Refer to [HVN peering](/hcp/docs/hcp/network/hvn-aws/hvn-peering) for setup instructions.
+- _(Optional)_ [BYO-DNS](/hcp/docs/vault/private-dns) configured in the HVN to test private DNS resolution against your internal resolver.
+- _(Optional)_ [AWS PrivateLink](/hcp/docs/vault/aws-privatelink) configured to test reachability over a private endpoint.
+- An [HCP service principal](/vault/tutorials/manage-hcp-vault-dedicated/terraform-hcp-provider-vault#create-a-service-principal-and-key) with a client ID and secret, or a logged-in HCP Portal session.
+
+## Run connectivity tests
+
+You can run connectivity tests from the **HCP Portal UI** or via the **HCP API**.
+
+### HCP Portal
+
+1. Sign in to the [HCP Portal](https://portal.cloud.hashicorp.com/sign-in).
+
+1. In the left navigation, select **Vault Dedicated**.
+
+1. Select the cluster you want to test from the cluster list.
+
+1. Select the **Connectivity** tab on the cluster detail page.
+
+1. In the **Connectivity Tester** panel, select the test type (DNS, TCP, TLS, Ping, or Traceroute).
+
+1. Enter the required parameters for the selected test type, then select **Run Test**.
+
+1. Review the structured diagnostic output displayed in the results panel.
+
+### HCP API
+
+#### Retrieve an HCP API token
+
+<Tabs>
+<Tab heading="HCP API">
+
+1. Set environment variables for your HCP organization, project, and cluster.
+
+   ```shell-session
+   $ export HCP_ORG_ID=<HCP_ORG_ID> \
+       HCP_PROJ_ID=<HCP_PROJ_ID> \
+       HCP_CLUSTER_ID=<HCP_CLUSTER_ID>
+   ```
+
+1. Set environment variables for your HCP service principal credentials.
+
+   ```shell-session
+   $ export HCP_CLIENT_ID=<HCP_CLIENT_ID> HCP_CLIENT_SECRET=<HCP_CLIENT_SECRET>
+   ```
+
+1. Retrieve an HCP API token and store it in the `HCP_API_TOKEN` variable.
+
+   ```shell-session
+   $ HCP_API_TOKEN=$(curl --location "https://auth.idp.hashicorp.com/oauth2/token" \
+       --header "Content-Type: application/x-www-form-urlencoded" \
+       --data-urlencode "client_id=$HCP_CLIENT_ID" \
+       --data-urlencode "client_secret=$HCP_CLIENT_SECRET" \
+       --data-urlencode "grant_type=client_credentials" \
+       --data-urlencode "audience=https://api.hashicorp.cloud" | jq -r .access_token)
+   ```
+
+</Tab>
+<Tab heading="HCP CLI">
+
+1. Set environment variables for your HCP service principal credentials.
+
+   ```shell-session
+   $ export HCP_CLIENT_ID=<HCP_CLIENT_ID> HCP_CLIENT_SECRET=<HCP_CLIENT_SECRET>
+   ```
+
+1. Authenticate to HCP.
+
+   ```shell-session
+   $ hcp auth login
+   ```
+
+1. Complete the browser-based authentication workflow.
+
+1. Set environment variables for your HCP organization and project.
+
+   ```shell-session
+   $ export HCP_ORG_ID=$(hcp profile display --format json | jq -r .OrganizationID) \
+        HCP_PROJ_ID=$(hcp profile display --format json | jq -r .ProjectID)
+   ```
+
+1. Set the environment variable for your cluster.
+
+   ```shell-session
+   $ export HCP_CLUSTER_ID=<HCP_CLUSTER_ID>
+   ```
+
+1. Retrieve an HCP API token.
+
+   ```shell-session
+   $ HCP_API_TOKEN=$(hcp auth print-access-token)
+   ```
+
+</Tab>
+</Tabs>
+
+#### API endpoint
+
+```text
+POST /vault/2020-11-25/organizations/{organization_id}/projects/{project_id}/clusters/{cluster_id}/test-connectivity
+```
+
+**Authorization:** Bearer token from an authenticated HCP Portal session or HCP service principal.
+
+#### Request body
+
+The request body accepts a `connection_info` array. Each element specifies a `command_type` and its associated parameters. You can submit one or more tests in a single request.
+
+```json
+{
+  "connection_info": [
+    {
+      "<command_type>": {
+        "param1": "<value>",
+        "param2": "<value>"
+      }
+    }
+  ]
+}
+```
+
+#### Command types and parameters
+
+| Command type | Parameters | Description |
+|---|---|---|
+| `dig` | `hostname` (required), `nameserver` (optional) | DNS lookup. Resolves `hostname` using the specified `nameserver` IP. Omit `nameserver` to use the HVN default resolver. |
+| `nc` | `hostname` (required), `port` (required) | TCP reachability check. Attempts a TCP connection to `hostname` on `port`. |
+| `ping` | `hostname` (required) | ICMP reachability check. Sends 5 echo requests to `hostname`. |
+| `openssl` | `hostname` (required), `port` (required) | TLS handshake check. Verifies TLS connectivity to `hostname` on `port`. |
+| `traceroute` | `hostname` (required) | Network path trace from the Vault cluster to `hostname`. |
+
+#### Field validation
+
+| Field | Type | Required | Validation rules |
+|---|---|---|---|
+| `command_type` | enum | Yes | Must be one of: `dig`, `nc`, `ping`, `openssl`, `traceroute` |
+| `hostname` | string | Yes | Valid FQDN or IPv4 address. Max 253 characters. RFC 1123 compliant. No whitespace, shell metacharacters (`;`, `&`, `\|`, `` ` ``, `$`), or flag prefixes (`-`). |
+| `port` | uint32 | Yes (`nc`, `openssl` only) | Integer in range 1–65535. |
+| `nameserver` | string | Yes (`dig` only, if specified) | Valid IPv4 or IPv6 address. Validated against the blocked address list. |
+
+#### Example: DNS lookup and TCP reachability
+
+The following example runs a DNS lookup for `database.internal.corp` against resolver `10.5.5.10`, and a TCP reachability check to `database.internal.corp` on port `6689`.
+
+```shell-session
+$ curl --location "https://api.cloud.hashicorp.com/vault/2020-11-25/organizations/$HCP_ORG_ID/projects/$HCP_PROJ_ID/clusters/$HCP_CLUSTER_ID/test-connectivity" \
+    --request POST \
+    --header 'Content-Type: application/json' \
+    --header "Authorization: Bearer $HCP_API_TOKEN" \
+    --data '{
+      "connection_info": [
+        {
+          "dig": {
+            "hostname": "database.internal.corp",
+            "nameserver": "10.5.5.10"
+          }
+        },
+        {
+          "nc": {
+            "hostname": "database.internal.corp",
+            "port": 6689
+          }
+        }
+      ]
+    }' | jq
+```
+
+**Example output (success):**
+
+<CodeBlockConfig hideClipboard>
+
+```json
+{
+  "connection_results": [
+    {
+      "command_type": "dig",
+      "status": "success",
+      "detail": "database.internal.corp resolved to [10.0.1.42]"
+    },
+    {
+      "command_type": "nc",
+      "status": "success",
+      "detail": "Connection to database.internal.corp port 6689 [tcp] succeeded"
+    }
+  ]
+}
+```
+
+</CodeBlockConfig>
+
+**Example output (failure):**
+
+<CodeBlockConfig hideClipboard>
+
+```json
+{
+  "connection_results": [
+    {
+      "command_type": "dig",
+      "status": "failure",
+      "error": {
+        "code": "NAMESERVER_UNREACHABLE",
+        "message": "Nameserver unreachable for dig"
+      }
+    },
+    {
+      "command_type": "nc",
+      "status": "failure",
+      "error": {
+        "code": "TCP_CONNECTION_FAILED",
+        "message": "connect to database.internal.corp port 6689 (tcp) failed: connection refused"
+      }
+    }
+  ]
+}
+```
+
+</CodeBlockConfig>
+
+#### Example: TLS connectivity check
+
+```shell-session
+$ curl --location "https://api.cloud.hashicorp.com/vault/2020-11-25/organizations/$HCP_ORG_ID/projects/$HCP_PROJ_ID/clusters/$HCP_CLUSTER_ID/test-connectivity" \
+    --request POST \
+    --header 'Content-Type: application/json' \
+    --header "Authorization: Bearer $HCP_API_TOKEN" \
+    --data '{
+      "connection_info": [
+        {
+          "openssl": {
+            "hostname": "internal-api.corp",
+            "port": 443
+          }
+        }
+      ]
+    }' | jq
+```
+
+<CodeBlockConfig hideClipboard>
+
+```json
+{
+  "connection_results": [
+    {
+      "command_type": "openssl",
+      "status": "success",
+      "detail": "TLS handshake to internal-api.corp:443 succeeded"
+    }
+  ]
+}
+```
+
+</CodeBlockConfig>
+
+#### Example: Traceroute
+
+```shell-session
+$ curl --location "https://api.cloud.hashicorp.com/vault/2020-11-25/organizations/$HCP_ORG_ID/projects/$HCP_PROJ_ID/clusters/$HCP_CLUSTER_ID/test-connectivity" \
+    --request POST \
+    --header 'Content-Type: application/json' \
+    --header "Authorization: Bearer $HCP_API_TOKEN" \
+    --data '{
+      "connection_info": [
+        {
+          "traceroute": {
+            "hostname": "database.internal.corp"
+          }
+        }
+      ]
+    }' | jq
+```
+
+<CodeBlockConfig hideClipboard>
+
+```json
+{
+  "connection_results": [
+    {
+      "command_type": "traceroute",
+      "status": "success",
+      "detail": "traceroute to database.internal.corp (10.0.1.42), 30 hops max\n 1  10.0.0.1  1.234 ms\n 2  10.0.1.42  2.456 ms"
+    }
+  ]
+}
+```
+
+</CodeBlockConfig>
+
+## Response reference
+
+### TestConnectivityResponse
+
+| Field | Type | Description |
+|---|---|---|
+| `connection_results` | array | List of results, one per submitted test command. |
+| `connection_results[].command_type` | string | The command type that was executed (e.g., `dig`, `nc`). |
+| `connection_results[].status` | string | `success` or `failure`. |
+| `connection_results[].detail` | string | Human-readable output for a successful test. |
+| `connection_results[].error.code` | string | Machine-readable error code for a failed test. |
+| `connection_results[].error.message` | string | Human-readable error message for a failed test. |
+
+### Error codes
+
+| Error code | Applies to | Description |
+|---|---|---|
+| `TIMEOUT` | All | The command did not complete within 30 seconds. |
+| `CANCELLED` | All | The connectivity test was cancelled. |
+| `HOSTNAME_UNRESOLVABLE` | All | The hostname could not be resolved. |
+| `NAMESERVER_UNREACHABLE` | `dig` | The specified nameserver could not be reached. |
+| `NAMESERVER_CONNECTION_REFUSED` | `dig` | The nameserver refused the connection. |
+| `TCP_CONNECTION_FAILED` | `nc` | TCP connection attempt was refused or reset. |
+| `TLS_HANDSHAKE_FAILED` | `openssl` | TLS handshake to the target host failed. |
+| `INTERNAL_ERROR` | All | An unexpected internal error occurred. |
+
+## Blocked addresses
+
+The connectivity tester blocks tests targeting HashiCorp and IBM internal infrastructure and cloud metadata services. Requests to the following addresses or domains are rejected before any connection is attempted.
+
+| Pattern | Type | Reason |
+|---|---|---|
+| `169.254.169.254` | IP | AWS instance metadata service |
+| `168.63.129.16` | IP | Azure instance metadata service |
+| `127.0.0.0/8` | CIDR | Loopback addresses |
+| `10.x.x.x` (HCP-internal ranges) | CIDR | HCP internal infrastructure |
+| `*.hcp.dev`, `*.hcp.to`, `*.hashicorp.cloud`, `*.hashicorp.com`, `*.hashicorp.io`, `*.hashicorp.services` | Domain | HashiCorp internal domains |
+| `*.ibm.com`, `*.ibmcloud.com`, `*.ibm.cloud`, `*.cloud.ibm.com` | Domain | IBM internal domains |
+
+<Note>
+
+The blocklist is enforced at both input validation and post-DNS-resolution stages. This prevents DNS rebinding attacks where a hostname initially passes validation but resolves to a blocked internal IP at runtime.
+
+</Note>
+
+## Audit logging
+
+Every connectivity test invocation is recorded in the HCP audit log with the following fields:
+
+- Caller identity: `organization_id`, `project_id`, and user token subject
+- Timestamp of invocation
+- Cluster ID
+- Test result: `success` or `failure`
+
+## Troubleshooting
+
+**DNS lookup returns no results**
+
+Verify that:
+- BYO-DNS is configured and the nameserver IP is correct and reachable from the HVN.
+- The target hostname exists in your private DNS zone.
+- Security groups on your DNS server allow inbound UDP/TCP traffic on port 53 from the HVN CIDR.
+
+**TCP test reports `connection refused`**
+
+Verify that:
+- The target service is running and listening on the specified port.
+- Security groups or firewall rules allow inbound traffic on the port from the HVN CIDR.
+- VPC peering or Transit Gateway routes are correctly configured.
+
+**TCP test reports `unreachable` or the test times out**
+
+Verify that:
+- VPC peering or Transit Gateway attachment is established and in the `ACTIVE` state.
+- Route tables in both the HVN and the target VPC include entries for the other network's CIDR.
+- There are no network ACLs blocking traffic between the two networks.
+
+**TLS handshake fails**
+
+Verify that:
+- The service on the target host is TLS-enabled and configured with a valid certificate.
+- Port 443 (or the specified port) is open and reachable (confirm with a TCP test first).
+
+**`INTERNAL_ERROR` is returned**
+
+If an unexpected internal error occurs, retry the test. If the error persists, [create a support ticket](https://support.hashicorp.com/hc/en-us/requests/new) and include the cluster ID and the test parameters you submitted.
+
+## API reference
+
+- [Test connectivity](/hcp/api-docs/vault#TestConnectivity)
