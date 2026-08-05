@@ -10,8 +10,8 @@ locals {
   ])
 
   secrets = {
-    INSTANA_OTLP_AGENT_TOKEN = var.instana_agent_key
-    INSTANA_OTLP_ENDPOINT    = var.instana_otlp_endpoint
+    INSTANA_AGENT_TOKEN   = var.instana_agent_key
+    INSTANA_OTLP_ENDPOINT = var.instana_otlp_endpoint
   }
 
   variables = {}
