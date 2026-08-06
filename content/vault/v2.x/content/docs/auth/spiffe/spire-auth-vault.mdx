@@ -1,0 +1,507 @@
+---
+layout: docs
+page_title: Authenticate to Vault using the SPIFFE auth method with SPIRE
+description: Step-by-step guide to authenticating Vault Enterprise workloads using the SPIFFE auth method with SPIRE, covering server setup, agent config, workload registration, and X.509 or JWT-SVID login.
+---
+
+# Authenticate to Vault using the SPIFFE auth method with SPIRE
+
+@include 'alerts/enterprise-only.mdx'
+
+You can authenticate to Vault using the SPIFFE auth
+method via SPIRE (SPIFFE Runtime Environment), a
+production ready implementation of the full SPIFFE framework and set of
+standards for identifying and securing communications between application
+services.
+
+If you are not familiar with SPIFFE, refer to the [SPIFFE
+overview](/vault/docs/auth/spiffe) to learn more about how SPIFFE authentication
+works in Vault.
+
+This document is meant to be followed as written. Following these steps on
+production hosts will change their configuration. Refer to the [setup
+guide](/vault/docs/auth/spiffe/spiffe) for general configuration instructions.
+
+## Requirements
+
+- An active Vault Enterprise license.
+- [Vault Enterprise](/vault/install/enterprise) installed.
+- [SPIRE server](https://spiffe.io/docs/latest/deploying/install-server/)
+  installed.
+- [SPIRE agent](https://spiffe.io/docs/latest/deploying/install-agents/)
+  installed.
+- A Linux server/instance to run the tutorial on.
+
+## Set up Vault and SPIRE
+
+This section walks through the minimum configuration needed to get a workload
+authenticating to Vault via SPIRE. It is not a SPIRE install or hardening guide.
+Refer to the [SPIRE documentation](https://spiffe.io/docs/latest/spire-about/spire-concepts/)
+for more information.
+
+<Note>
+
+This walkthrough runs SPIRE and Vault on the same local machine, so
+addresses below use `127.0.0.1`. Substitute your own reachable
+addresses if any of these components run on separate hosts.
+
+</Note>
+
+### Example SPIRE server setup
+
+Set up a SPIRE server. A SPIRE agent connects to the server to issue SVIDs to
+workloads.
+
+1. Create a working directory for the SPIRE server.
+
+   ```shell-session
+   $ mkdir ~/spire-server && cd ~/spire-server
+   ```
+
+   This step is necessary for the minimal setup shown in this doc. Typically the
+   SPIRE Server and SPIRE Agent run on different nodes. You are isolating the
+   configuration and data directory here to avoid conflicts.
+
+1. Create a minimal SPIRE server config.
+
+   ```shell-session
+   $ tee spire-server.conf <<EOF
+   # spire-server.conf
+   server {
+     trust_domain = "example.org"
+     bind_address = "0.0.0.0"
+     bind_port    = "8081"
+     data_dir     = "./.data"
+   
+     federation {
+       bundle_endpoint {
+         address = "0.0.0.0"
+         port    = 8443
+   
+         profile "https_spiffe" {}
+       }
+     }
+   }
+   
+   plugins {
+     DataStore "sql" {
+       plugin_data {
+         database_type     = "sqlite3"
+         connection_string = "./.data/datastore.sqlite3"
+       }
+     }
+     NodeAttestor "join_token" {
+       plugin_data {}
+     }
+     KeyManager "disk" {
+       plugin_data {
+         keys_path = "./.data/keys.json"
+       }
+     }
+   }
+   EOF
+   ```
+
+   <Warning>
+
+   `bind_address = "0.0.0.0"` and the federation `address = "0.0.0.0"` bind
+   to all network interfaces. This is acceptable for a local lab environment
+   where SPIRE runs on the same machine as the workload. In production,
+   replace both values with the specific IP address or hostname the SPIRE
+   server should listen on.
+
+   </Warning>
+
+   <Note>
+
+   Bundle endpoints always use TLS — there is no plain-HTTP mode. The
+   `https_spiffe` profile authenticates the endpoint using the SPIRE
+   server's own SVID, so it doesn't need a certificate from an external
+   CA or a real, resolvable domain, which is why it's used here. The
+   alternative `https_web` profile does require an externally issued
+   certificate (or ACME automation) and is a better fit if you're
+   federating with an endpoint Vault reaches over the public internet.
+   Refer to SPIRE's [Federation
+   docs](https://spiffe.io/docs/latest/spire-about/spire-concepts/#federation)
+   for details on both profiles.
+
+   </Note>
+
+1. Start the SPIRE server.
+
+   ```shell-session
+   $ spire-server run -config ./spire-server.conf &
+   ```
+
+1. Create a one-time join token for the SPIRE agent to connect to.
+
+   ```shell-session
+   $ JOIN_TOKEN=$(spire-server token generate -spiffeID spiffe://example.org/agent/example-node | sed 's/^Token: //')
+   ```
+
+   This example uses join-token node attestation for simplicity. A join token
+   is single-use, similar to a Vault wrapping token. It bootstraps exactly
+   one agent and is then no longer valid. Production deployments should use a
+   platform-specific node attestor (`aws_iid`, `gcp_iit`, `k8s_psat`,
+   `x509pop`, etc.) instead of shared join tokens.
+
+### Example SPIRE agent setup
+
+The agent is what actually issues SVIDs to workloads. The SPIRE server and a
+registration entry alone do not enable authentication.
+
+1. Create a working directory for the SPIRE agent.
+
+   ```shell-session
+   $ mkdir ~/spire-agent && cd ~/spire-agent
+   ```
+
+1. Get the trust bundle from the SPIRE server and save it to a file.
+
+   ```shell-session
+   $ spire-server bundle show > initial_bundle.crt
+   ```
+
+   The SPIRE Agent will need this when you start the agent.
+
+1. Create a minimal SPIRE agent config.
+
+   ```shell-session
+   $ tee spire-agent.conf <<EOF
+   # agent.conf
+   agent {
+     data_dir          = "./.data"
+     server_address    = "127.0.0.1"
+     server_port       = "8081"
+     socket_path       = "/tmp/spire-agent/public/api.sock"
+     trust_bundle_path = "./initial_bundle.crt"
+     trust_domain      = "example.org"
+   }
+    
+   plugins {
+     NodeAttestor "join_token" {
+       plugin_data {}
+     }
+     KeyManager "disk" {
+       plugin_data {
+         directory = "./.data"
+       }
+     }
+     WorkloadAttestor "unix" {
+       plugin_data {}
+     }
+   }
+   EOF
+   ```
+
+   The `trust_bundle_path` requires manually copying the server's initial trust
+   bundle onto the node before the agent's first start. In a production
+   environment, provision this file through your existing configuration management,
+   and secrets injection workflow at provisioning time, or use `trust_bundle_url`
+   to fetch it. Refer to SPIRE's [agent configuration
+   reference](https://spiffe.io/docs/latest/deploying/spire_agent/) for both
+   options.
+
+1. Start the agent with the join token from the server configuration section.
+
+   ```shell-session
+   $ spire-agent run -config spire-agent.conf -joinToken $JOIN_TOKEN &
+   ```
+
+### Register a workload
+
+1. Register a workload on the SPIRE server. The selector used when registering
+   the workload must match the agent configuration.
+
+   ```shell-session
+   $ spire-server entry create \
+      -parentID spiffe://example.org/agent/example-node \
+      -spiffeID  spiffe://example.org/ns/prod/sa/payment-service \
+      -selector  unix:uid:$(id -u)
+   ```
+
+   The `WorkloadAttestor` `unix` plugin in the agent config above matches the
+   `unix:uid:...` selector. Replace both together if you are attesting
+   workloads a different way (Kubernetes, Docker, etc.). The example command uses
+   `$(id -u)` to grab your own UID at run time. This works as long as you are
+   the one both registering the entry and later fetching the SVID. In a real
+   deployment where an operator registers entries for a separate service account,
+   substitute that account's UID explicitly instead — `$(id -u)` would capture the
+   operator's UID, not the workload's.
+
+1. Request a workload SVID.
+
+   <Tabs>
+   <Tab heading="x509" group="x509">
+
+   ```shell-session
+   $ spire-agent api fetch x509 -write ~/spire-agent
+   ```
+
+   This writes `~/spire-agent/svid.0.pem` and `~/spire-agent/svid.0.key`.
+
+   </Tab>
+   <Tab heading="JWT" group="jwt">
+
+   ```shell-session
+   $ JWT=$(spire-agent api fetch jwt -audience vault -output json | jq -r '.[0].svids[0].svid')
+   ```
+
+   For a JWT-SVID, there's no `-write` flag, the token prints to stdout.
+
+   </Tab>
+   </Tabs>
+
+   Manually fetching and writing an SVID to disk confirms the setup works, but it
+   doesn't rotate or renew the SVID. Production workloads should call the Workload API
+   directly (via a SPIFFE SDK) or use [SPIFFE
+   Helper](https://github.com/spiffe/spiffe-helper).
+
+### Vault auth config
+
+Configure Vault with the SPIFFE auth method to match the SPIRE configuration.
+
+1. Create a working directory for the Vault server.
+
+   ```shell-session
+   $ mkdir ~/vault-dev && cd ~/vault-dev
+   ```
+
+1. Export your Vault Enterprise license as an environment variable.
+
+   ```shell-session
+   $ export VAULT_LICENSE=C10WMSH0W...snip...S3ASM3STR33T
+   ```
+
+1. Start a Vault dev mode server.
+
+   ```shell-session
+   $ vault server -dev -dev-tls -dev-root-token-id root &
+   ```
+
+   The dev server runs completely in memory and listens on the loopback
+   interface at 127.0.0.1 on TCP port 8200 with TLS  enabled. At runtime, the
+   dev server also automatically unseals, and prints the unseal  key and initial
+   root token values to the standard output.
+
+   <Warning title="Root tokens">
+   
+   The dev mode server starts with an initial root token value set.
+   
+   Root token use should be extremely guarded in production environments because
+   it provides full access to the Vault server.
+   
+   You can supply the root token value to start Vault in dev mode for
+   convenience and to keep the steps here focused on the learning goals of
+   this tutorial.
+   
+   </Warning>
+
+
+1. Copy the environment variables for the Vault dev mode server.
+
+   <Note>
+
+   Copy the full `VAULT_CACERT=...` from your dev mode server's output.
+
+   </Note>
+
+1. Export the required Vault environment variables.
+
+   ```shell-session
+   $ export VAULT_TOKEN=root VAULT_ADDR=https://127.0.0.1:8200 VAULT_CACERT='/path/from/stdout'
+   ```
+
+1. Request the trust bundle for Vault.
+
+   ```shell-session
+   $ spire-server bundle show -format spiffe > initial_bundle.jwks
+   ```
+
+1. Enable the SPIFFE auth method. 
+
+   ```shell-session
+   $ vault auth enable \
+     -passthrough-request-headers="Authorization" \
+     spiffe
+   ```
+
+1. Write the SPIFFE auth method configuration.
+
+   ```shell-session
+   $ vault write auth/spiffe/config \
+       trust_domain="example.org" \
+       profile="https_spiffe_bundle" \
+       bundle=@initial_bundle.jwks \
+       endpoint_url="https://127.0.0.1:8443" \
+       endpoint_spiffe_id="spiffe://example.org/spire/server" \
+       audience="vault"
+   ```
+
+   `audience` is mount-wide, not per-role. Every role on this mount shares
+   this same JWT audience allow-list. X.509-SVIDs carry no `aud` claim,
+   so X.509-SVID auth is unaffected by this setting.
+
+1. Create a role for the workload.
+
+   ```shell-session
+   $ vault write auth/spiffe/role/payment-role \
+     workload_id_patterns="ns/prod/sa/payment-service" \
+     token_policies="payment-vault-policy" \
+     token_ttl="1h"
+   ```
+
+   `workload_id_patterns` matches on the **workload ID** — the SPIFFE ID with
+   the `spiffe://<trust_domain>/` prefix stripped, not the full URI. Supports
+   `*` (prefix) and `+` (single path segment) wildcards.
+
+### Authenticate a workload to Vault
+
+Production services use a SPIFFE SDK (go-spiffe for Go, py-spiffe for
+Python, java-spiffe for Java, etc.) to call the Workload API directly.
+
+This walk through uses the spire-agent CLI and `cURL` to authenticate to Vault
+for simplicity.
+
+1. Use `cURL` to authenticate to Vault.
+
+   <Tabs>
+   <Tab heading="X.509" group="x509">
+   
+   ```shell-session
+   $ curl \
+       --cacert "$VAULT_CACERT" \
+       --cert ~/spire-agent/svid.0.pem \
+       --key ~/spire-agent/svid.0.key \
+       --request POST \
+       --data '{"role": "payment-role"}' \
+       $VAULT_ADDR/v1/auth/spiffe/login | jq
+   ```
+
+   **Example output:**
+
+   <CodeBlockConfig hideClipboard>
+
+   ```json
+   {
+     "request_id": "0f7905fb-6194-c4c7-5f0a-5c5bf4f042c5",
+     "lease_id": "",
+     "renewable": false,
+     "lease_duration": 0,
+     "data": null,
+     "wrap_info": null,
+     "warnings": null,
+     "auth": {
+       "client_token": "hvs.CAESID_Uge-45...snip...WRzUmdicTJ3UEpVZ2o",
+       "accessor": "MTBqnsBvoRuhqMN3kYFt0iRS",
+       "policies": [
+         "default",
+         "payment-vault-policy"
+       ],
+       "token_policies": [
+         "default",
+         "payment-vault-policy"
+       ],
+       "metadata": {
+         "role": "payment-role",
+         "spiffe_id": "spiffe://example.org/ns/prod/sa/payment-service",
+         "trust_domain": "example.org"
+       },
+       "lease_duration": 3600,
+       "renewable": true,
+       "entity_id": "707d32fd-8021-7fc7-9d08-c3c9a7ae7374",
+       "token_type": "service",
+       "orphan": true,
+       "mfa_requirement": null,
+       "num_uses": 0
+     },
+     "mount_type": ""
+   }
+   ```
+
+   </CodeBlockConfig>
+   
+   </Tab>
+   <Tab heading="JWT-SVID" group="jwt">
+   
+   When the workload requests a JWT-SVID from the SPIRE Workload API, it must
+   specify an `audience` that matches the `audience` value configured on
+   `auth/spiffe/config`. This is set by the workload at request time, not by
+   anything on the SPIRE server. A mismatch here shows up as a rejected
+   login on Vault's side rather than an error from SPIRE.
+   
+   ```shell-session
+   $ curl \
+     --cacert "$VAULT_CACERT" \
+     --header "Authorization: Bearer $JWT" \
+     --request POST \
+     --data '{"role": "payment-role"}' \
+     $VAULT_ADDR/v1/auth/spiffe/login | jq
+   ```
+
+   **Example output:**
+
+   <CodeBlockConfig hideClipboard>
+
+   ```json
+   {
+     "request_id": "532107ce-39f4-7d26-6a02-54dd9d567ada",
+     "lease_id": "",
+     "renewable": false,
+     "lease_duration": 0,
+     "data": null,
+     "wrap_info": null,
+     "warnings": null,
+     "auth": {
+       "client_token": "hvs.CAESIHB5e5y7Mn3eB_VJL6zrcfPSeGl5hHffwUGFBxB2AzpxGh4KHGh2cy53bVduUGlLdjVXTHgxU2xxUWRoc3JwRXo",
+       "accessor": "sDokTIFDY619Yj1dOLWWmIgw",
+       "policies": [
+         "default",
+         "payment-vault-policy"
+       ],
+       "token_policies": [
+         "default",
+         "payment-vault-policy"
+       ],
+       "metadata": {
+         "role": "payment-role",
+         "spiffe_id": "spiffe://example.org/ns/prod/sa/payment-service",
+         "trust_domain": "example.org"
+       },
+       "lease_duration": 3600,
+       "renewable": true,
+       "entity_id": "707d32fd-8021-7fc7-9d08-c3c9a7ae7374",
+       "token_type": "service",
+       "orphan": true,
+       "mfa_requirement": null,
+       "num_uses": 0
+     },
+     "mount_type": ""
+   }
+   ```
+
+   </CodeBlockConfig>
+   
+   </Tab>
+   </Tabs>
+
+   Optionally set `"type"` in the request body (`auto`, `cert`, or `jwt`) to
+   force which SVID source Vault should use; `auto` (the default) prefers a
+   JWT-SVID if present, falling back to the peer x.509 certificate.
+
+   Upon successful validation, Vault returns a standard Vault client token
+   bound to the role's policies.
+
+## SPIFFE plugin API
+
+The SPIFFE auth method has a full HTTP API. Refer to the [SPIFFE auth API
+documentation](/vault/api-docs/auth/spiffe) for more details.
+
+## Terraform
+
+You can use the `vault_auth_backend` resource to enable the SPIFFE auth method
+and the `vault_spiffe_auth_backend_config` to manage the configuration.
+
+- [Vault auth backend resource](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/auth_backend)
+- [Vault SPIFFE auth backend config resource](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/spiffe_auth_backend_config)
+- [Vault SPIFFE auth backend role resource](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/spiffe_auth_backend_role)
