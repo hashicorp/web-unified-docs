@@ -1,0 +1,831 @@
+---
+layout: docs
+page_title: Secure agent permissions with Verify and Vault
+description: >-
+  Use Verify and Vault to secure agent permissions with the Agent Registry, OAuth resource server profiles, and ceiling policies.
+---
+
+# Secure agent permissions with Verify and Vault
+
+@include 'alerts/enterprise-and-hcp.mdx'
+
+Vault Enterprise enables an agent or other AI application to authenticate with
+an OAuth access token that carries a Rich Authorization Request (RAR) claim,
+and the solution works for any AI application.
+
+This least-privilege approach implements zero trust principles by ensuring
+agent credentials are ephemeral and narrowly scoped through delegation. The
+agent acts on behalf of a human developer and receives an effective permission
+set.
+
+IBM Verify functions as an authorization server to issue OAuth RAR tokens to
+an agent or other AI applcation, which that agent or application can then use
+to authenticate with Vault.
+
+## How the request flow works
+
+![Agentic AI workflow](/img/agentic-ai/diagram-agentic-iam-flow-light.svg#light-theme-only)
+
+![Agentic AI workflow](/img/agentic-ai/diagram-agentic-iam-flow-dark.svg#dark-theme-only)
+
+## Requirements
+
+You must have the following to secure agent permissions with Verify and Vault.
+
+- An IBM Verify tenant. You can
+  [sign up for a free trial](https://docs.verify.ibm.com/verify/docs/getting-started-signing-up-for-a-free-trial)
+  to use for the purposes of evaluating the integration.
+- [oauth2c](https://github.com/SecureAuthCorp/oauth2c)
+  command-line tool installed and in your system `PATH`.
+- An operating Vault Enterprise server instance.
+- A Vault token with sufficient ACL policies attached to enable the operations
+  described in this document.
+- [curl](https://curl.se/) or another tool installed and in your system `PATH`
+  for API requests.
+- [jq](https://jqlang.org/) installed and in your system `PATH` for
+  API responses.
+
+## Configure Verify
+
+Access your Verify tenant as an admin user to complete configuration steps.
+
+### Configure user accounts
+
+(Admin user)
+
+Add a user accounts for for both the human user and for their agent or other AI
+application that will act on behalf of a human user.
+
+1. Click **Directory** in the navigation menu.
+
+2. Click **Users & groups**.
+
+3. Click **Add user**.
+
+4. Select and identity provider, such as **IBMid** or your preferred provideer.
+
+5. In the **User name** field, enter a username value.
+
+6. In the **Preferred e-mail** field, enter a valid email address.
+
+7. Click **Save**.
+
+All other fields are optional, but you can complete any of the fields as needed.
+
+After you create a user, you must make note of the user ID value.
+
+1. Click **Directory**.
+
+2. Click **Users & groups**.
+
+3. For the user you just created, click the **User details** icon.
+
+4. The user ID appears on the user profile page. You need this user ID value to
+   later configure the external ID in the Vault entity alias.
+
+### Configure OIDC Application
+
+(Admin user)
+
+Configure an OIDC Application that issues JWT access tokens for the user, and
+the agent or AI application that performs on-behalf-of operations for the
+user (subject).
+
+<Tip>
+
+The application you configure can either be a
+[public or a confidential client](https://datatracker.ietf.org/doc/html/rfc6749#section-2.1). For the purpose of this document, you configure a
+private client application.
+
+</Tip>
+
+1. In the navigation menu, click **Applications** > **Applications**.
+
+2. Click **Add an application**.
+
+3. For appplication type, click **OpenID Connect**.
+
+4. Click **Add Application**.
+
+#### General
+
+![Verify general application settings](/img/agentic-ai/screenshot-verify-app0.png)
+
+1. Under **OpenID Connect** enter a name for the application, like the example
+   value shown: `hashicups-print-service`.
+
+2. Update the **Description** field as necessary.
+
+3. For **Company name**, enter the required value.
+
+4. Click **Add owner** to assign an admin user as the owner of this application.
+
+5. Enter an admin username in the search field.
+
+6. Click an admin user to highlight it.
+
+   ![Verify application owner](/img/agentic-ai/screenshot-verify-app1.png)
+
+7. Click **OK** to assign the admin user to this applcation.
+
+#### Sign-on
+
+![Application sign-on settings](/img/agentic-ai/screenshot-verify-app2.png)
+
+1. Click **Sign-on** to configure the application sign on settings.
+
+2. In the **Application URL** field, enter the main URL or home page of the app
+   to add as the resource server. You can configure this value to be appropriate for your AI application UI or chat interface. This is the entry point of the user to interact.
+
+3. Enable the necessary grant types. Browser driven flows use the Authorization
+   code grant, and the resource server needs Client Credentials to
+   authenticate with the authorization server to exchange the code for the security token.
+
+   For **Grant types**, click and enable the following:
+
+  - **Authorization code**.
+  - **Client credentials**.
+  - **Resource owner password credentials (ROPC)**
+
+  <Warning>
+
+  The ROPC grant is enabled for demonstration of a script-driven on-behalf-of
+  workflow in this document.
+  **Do not enable ROPC in non-development environments**.
+
+  </Warning>
+
+1. For **Response types** click the response of the Authorization server when
+  the user authenticates. Click the check box for **code** to use an Authz Code
+  Grant flow.
+
+2. For **Response modes** uncheck every mode except for **query**.
+
+3. Ensure that **Public client (no client secret)** is unchecked to enforce
+   a private client application.
+
+   ![Application sign-on settings](/img/agentic-ai/screenshot-verify-app3.png)
+
+4. In the **Redirect URIs** field, enter a valid URI for the authorization
+   server redirect to the URL containing the code as a query parameter.
+
+5. Under **Token settings** > **Access token format**, select **JWT**.
+
+6. Click the **Generate refresh token** checkbox.
+
+   ![Application sign-on settings continued](/img/agentic-ai/screenshot-verify-app4.png)
+7. Click **Save** to save the application settings.
+
+8. After saving the application, you arrive at the **Entitelments** tab where
+   you must click the **Automatic access for all users and groups** radio
+   button to enable access.
+
+9. Click **Save** to save the application settings.
+
+10. When prompted to update the workflow, click **OK**.
+
+#### Endpoint configuration
+
+(Admin user)
+
+Continue to add endpoint configuration under the **Sign-on** tab for
+the application.
+
+Get your application's values by following these steps in the Verify UI.
+
+1. Click **Applications** > **Applications**.
+
+2. Click the gear icon next to your application name to open settings.
+
+3. Click **Sign-on**.
+
+4. Scroll down to **Client ID** and copy the value.
+
+5. Scroll down to **Endpoint configuration**.
+
+6. Next to the **Introspect** settings, click the edit icon that resembles
+   a pencil.
+
+7. Click the Arrow next to **Add attribute**.
+
+8. Click **Add custom rule**.
+
+9. Within the **Request rule** text area, enter the following JSON which
+   uses the client ID of then OIDC application. Paste the client ID value you
+   just copied to replace the "CLIENT_ID" placeholder text.
+
+   ```json
+   {"client_id":"CLIENT_ID"}
+   ```
+
+10. Click **OK**.
+
+11. Map the custom rule to the **Target attribute** `may_act`.
+
+12. Click **OK**.
+
+13. Scroll down to **Custom scopes and API access**.
+
+14. Prevent the client from requesting unknown scopes by checking
+   **Restrict custom scopes**.
+
+15. Add `email` to a custom scope.
+
+16. Add `openid` to a custom scope.
+
+17. Add `profile` to a custom scope.
+
+18. Click **Save**.
+
+#### Well-known URL
+
+A well-known URL like `/.well-known/openid-configuration` enables a
+standardized endpoint used by clients to automatically discover an
+identity provider's metadata, such as supported scopes, public keys, and endpoint locations. This location allows your application to configure itself
+dynamically without you having to hardcode every individual API URL.
+
+Your well known URL resembles this example (replace "TENANT_NAME" with your
+actual name):
+
+<CodeBlockConfig hideClipboard>
+
+```plaintext
+https://TENANT_NAME.verify.ibm.com/oauth2/.well-known/openid-configuration
+```
+
+</CodeBlockConfig>
+
+Note your well known URL for use later when you configure Vault.
+
+### Configure on behalf of relationship
+
+Configure the on behalf of (OBO) relationship between the user/subject and the
+agent or AI application. You must configure the `act` and `may_act` claims in
+the configured OIDC application introspection endpoints.
+
+### Configure API client access
+
+(Admin user)
+
+Configure a new API client for the IBM Verify tenant for API access.
+
+1. In the navigation menu, click **Security**.
+
+2. Click **Add API client**.
+
+3. Click the checkbox for each client access entitlment that your agent or
+   AI applicaiton use case requires.
+
+4. Click **Next**.
+
+5. The client ID gets automatically generated. Choose the client authentication
+   method your use case requires or leave at **Default**.
+
+6. Click **Next**.
+
+7. Leave the custom scopes which the client can request unchanged unless your
+   use case requires changing them.
+
+8. Click **Next**.
+
+9. Leave the IP filtering setting unchanged unless you need to filter them
+   client API access by IP address or subnetwork.
+
+10. Click **Next**.
+
+11. If your use case requires additional properties, enter their names and
+   values, otherwise you can just click **Next**.
+
+12. In the **Name** field, enter a machine friendly name like
+   `hashicups-print-agent`. Add a description and any tags as well.
+
+13. Click **Create API client**.
+
+Reference the [Verify API documenation](https://docs.verify.ibm.com/verify/page/api-documentation) to learn more.
+
+### Create authorization detail type
+
+(Admin user)
+
+You need to create an authorization details schema to define how information
+gets structured, validated, and presented for consent.
+
+1. Click **Applications**.
+
+2. Click **Authorization detail types**.
+
+3. Click **Create**.
+
+4. Under **General details**, select the **Custom** radio button.
+
+5. In the **Name** field, define a name for this authorization detail type,
+   enter the string `vault:path_access`.
+
+6. In the **Description** field, enter a description for the type.
+
+7. In the **Schema** text area, paste the JSON schema defining the
+   `authorization_details` query parameter:
+
+   ```json
+   {
+     "type": "object",
+     "required": [
+       "type",
+       "path",
+       "capabilities"
+     ],
+     "additionalProperties": false,
+     "properties": {
+       "type": {
+         "const": "vault:path_access"
+       },
+       "path": {
+         "type": "string",
+         "pattern": "^[A-Za-z0-9._/:-]+$"
+       },
+       "capabilities": {
+         "type": "array",
+         "uniqueItems": true,
+         "items": {
+           "type": "string",
+           "enum": [
+             "read",
+             "create",
+             "update",
+             "delete",
+             "sudo",
+             "list",
+             "deny"
+           ]
+         }
+       }
+     }
+   }
+   ```
+
+8. Leave **Consent mapping** settings unchanged, and click **Next**.
+
+9. For **Consent configuration** method, select **Inline HTML**.
+
+10. For **Consent text**, enter `<div>EXAMPLE CONSENT TEXT</div>`.
+
+11. Click **Create**.
+
+### Configure secure token service client
+
+(Admin user)
+
+Configure a security token service (STS) client for performing token exchange.
+This STS client performs both the token exchange representing OBO semantics,
+and the addition of an `authorization_details` Rich Authorization Requests
+(RAR) claim.
+
+1. Click **Applications**.
+
+2. Click **STS clients**.
+
+3. Click **Add STS client**.
+
+#### General settings
+
+1. The **Client ID** value gets autogenerated, so leave that field as-is.
+
+2. In the **Name** field, enter a machine-friendly hyphen-separated name
+   like the example `vv-sts-client`.
+
+3. Leave the other values as-is.
+
+4. Click **Next**.
+
+#### Client authentication settings
+
+1. Leave the client authentication method at **Default**.
+
+2. Click **Next**.
+
+#### Token exchange settings
+
+1. Click **Subject token** dropdown and check **Access token**.
+
+2. Click **Actor token** dropdown and check **Access token**.
+
+3. Click **Requested token** dropdown and check **Access token**.
+
+4. Leave other token exchange settings as-is.
+
+5. Click **Next**.
+
+#### Requested token settings
+
+Click the **Access token format** dropdown and select **JWT**.
+
+Leave all other values at their default settings and click **Next**.
+
+#### Proof-of-possession settings
+
+Unless you need to change them, you can accept all proof-of-possession settings
+defaults, and click **Next**.
+
+#### Endpoint configuration
+
+At a minimum, you need to configure the **Introspect mapping** value in the
+endpoint configuration.
+
+1. Under **Introspect mapping** click the **Add attribute** dropdown.
+
+2. Click **Add custom rule**.
+
+3. In the **Request rule** text area, enter this custom rule:
+
+   ```json
+   {"sub":requestContext["actor_token"].sub}
+   ```
+
+4. In the **Target attribute** field, enter `actor-token`.
+
+5. Click **OK**.
+
+## Define custom scopes and API access
+
+1. Unless you need to relax any settings, you can leave everything except for
+   **Authorization detail types** unchanged.
+
+2. For **Authorization detail types**, select **vault:path_access**.
+
+3. Check the box for all the user permissions your use case requires.
+
+4. Click **Next**.
+
+#### Access policy settings
+
+You do not neeed to apply access policy, and can instead click
+**Complete setup**.
+
+## Validate token retrieval
+
+Use `ouauth2c` to get a token from Verify as a validation step. Before trying
+this validation, you must get your application's client ID and client
+secret values.
+
+Get your application's values by following these steps in the Verify UI.
+
+(Admin user)
+
+1. Click **Applications** > **Applications**.
+
+2. Click the gear icon next to your application name to open settings.
+
+3. Click **Sign-on**.
+
+4. Scroll down to **Client ID** and copy the value; paste the value somewhere
+   safe to use later.
+
+5. Click the copy to clipboard icon next to **Client secret** and then paste
+   the value somewhere safe to use later.
+
+6. In a terminal session, export your Verify tenant name, client ID, and
+   secret as the values of `IBM_VERIFY_TENANT`, `IBM_VERIFY_CLIENT_ID`,
+   and `IBM_VERIFY_CLIENT_SECRET`.
+
+    ```shell-session
+    export IBM_VERIFY_TENANT=`<tenant name>`
+        IBM_VERIFY_CLIENT_ID=`<client ID generated from previous step>` \
+        IBM_VERIFY_CLIENT_SECRET=`<client secret generated from previous step>`
+    ```
+
+7. Request an example token with the oauth2c command-line tool.
+
+    ```shell-session
+    $ oauth2c https://"${IBM_VERIFY_TENANT}".verify.ibm.com/oauth2 \
+        --pkce \
+        --client-id "${IBM_VERIFY_CLIENT_ID}" \
+        --client-secret "${IBM_VERIFY_CLIENT_SECRET}" \
+        --response-types code \
+        --response-mode query \
+        --grant-type authorization_code \
+        --auth-method client_secret_basic --no-browser
+    ```
+
+8. Note the URL under `Go to the following URL:` in the output. Visit that
+   URL in a browser to complete the authentication flow. The workflow then
+   outputs more indicators of success.
+
+   <CodeBlockConfig hideClipboard>
+
+   ```plaintext
+   ...snip...
+    SUCCESS  Obtained authorization code
+   ...snip...
+   SUCCESS  Exchanged authorization code for access token
+   ```
+
+   </CodeBlockConfig>
+
+The final output string after the SUCCESS messages represents the JWT value,
+which validates both the workflow and token issuance from Verify.
+
+You can also exchange the Actor and Subject tokens with RAR
+`authorization_detail` claims with a similar workflow by providing a token
+issued for both the subject and actor.
+
+```shell-session
+$ export DELEGATION_TOKEN=$(curl --request POST \
+  --url https://vv-agentic-iam-demo.ite4.idng.ibmcloudsecurity.com/oauth2/token \
+  --header 'Content-Type: application/x-www-form-urlencoded' \
+  --data grant_type=urn:ietf:params:oauth:grant-type:token-exchange \
+  --data subject_token=<subject token> \
+  --data subject_token_type=urn:ietf:params:oauth:token-type:access_token \
+  --data actor_token=<actor token> \
+  --data actor_token_type=urn:ietf:params:oauth:token-type:access_token \
+  --data client_id="${IBM_VERIFY_CLIENT_ID}" \
+  --data client_secret="${IBM_VERIFY_CLIENT_SECRET}" \
+  --data 'authorization_details=[{"type":"vault:path_access","path":"secret-v2/data/shared-secret/foo", "capabilities":["create"]}]' | jq -r '.access_token)
+```
+
+## Configure Vault Enterprise
+
+Configure Vault to natively accept JWTs with `authorization_details`, and OBO
+semantics as means to perform authorized operations on Vault.
+
+### Export environment variables
+
+You can export some environment variables to prepare for interacting with your
+Vault Enterprise instance.
+
+- VAULT_ADDR: The API address of your Vault Enterprise server.
+- VAULT_TOKEN: Token ID with sufficient capabilities to configure Vault.
+- DELEGATED_JWT: The OBO with authorization details JWT as obtained after token
+  exchange via the STS client.
+- ISSUER: The issuer retrieved from the Well known Open ID configuration of
+  the application created in Verify.
+- SUBJECT_EXT_ID: User ID of the subject user as noted in the user
+  creation step.
+- ACTOR_EXT_ID: User ID of the actor user as noted in the user creation step.
+
+Export the environment variables, ensuring to replace all placeholder values
+with your actual values.
+
+```shell-session
+export VAULT_ADDR="http://127.0.0.1:8200" \
+    VAULT_TOKEN="root" \
+    DELEGATED_JWT="<idp-issued-jwt>"
+    ISSUER="https://vv-agentic-iam-demo.ite4.idng.ibmcloudsecurity.com/oauth2" #
+    SUBJECT_EXT_ID="811006P2MZ"
+    ACTOR_EXT_ID="811006P2N1"
+```
+
+### Enable activation flag
+
+Enable Vault to accept OAuth resource server tokens natively, by setting the
+appropriate activation flag. The necessary features will not function
+without you first performing this step.
+
+```shell-session
+$ vault write -force sys/activation-flags/oauth-resource-server/activate
+Key            Value
+---            -----
+activated      [oauth-resource-server]
+unactivated    [secrets-import secrets-sync]
+```
+
+### Create entities
+
+Map Verify users in Vault by creating corresponding entities and aliases.
+
+Create a new subject entity in for the human user.
+
+```shell-session
+$ vault write identity/entity name="obo-subject" external_id="$SUBJECT_EXT_ID"
+Key        Value
+---        -----
+aliases    <nil>
+id         0427b0f5-ac11-4f25-75f6-5764b85176aa
+name       obo-subject
+```
+
+Capture the entity id from the response, and export it to an environment
+variable.
+
+```shell-session
+$ export OBO_SUBJECT_CANONICAL_ID="0427b0f5-ac11-4f25-75f6-5764b85176aa"
+```
+
+Create a new actor entity for the agent user.
+
+```shell-session
+$ vault write identity/entity name="obo-actor" external_id="$ACTOR_EXT_ID"
+Key        Value
+---        -----
+aliases    <nil>
+id         ef897bd9-0060-1fa4-68ba-65ae5b0747ec
+name       obo-actor
+```
+
+Capture the entity id from the response.
+
+```shell-session
+$ export OBO_ACTOR_CANONICAL_ID="ef897bd9-0060-1fa4-68ba-65ae5b0747ec"
+```
+
+### Create the OAuth resource server profile
+
+Create a new OAuth resource server configuration profile in a json file
+named `default-profile.json`. Update the parameters to your actual values
+before you write the file.
+
+1. Write the OAuth resource server confiugration file.
+
+    ```shell-session
+    $ cat > default-profile.json << EOF
+    {
+    "issuer_id": "https://hashicups-print.verify.ibm.com/oauth2",
+    "use_jwks": true,
+    "user_claim": "sub",
+    "supported_algorithms": ["RS256"],
+    "jwks_uri": "hashicups-print.verify.ibm.com/oauth2/jwks"
+    }
+    EOF
+    ```
+
+    <Warning>
+
+    **IBM Verify Limitation**: The example avoids validating with the `audiences` as the STS client configured to perform the OBO token exchange with RAR `authorization_details` does not support addition of `audience` mapping in the access token mapping.
+
+    </Warning>
+
+2. Create the OAuth resource server profile.
+
+    ```shell-session
+    $ vault write sys/config/oauth-resource-server/e2e-profile \
+        @default-profile.json
+    WARNING! The following warnings were returned from Vault:
+    * algorithm "RS256" is functional but consider using PS256 (RSA-PSS) for
+    better security
+    * profile supports only one algorithm family - consider supporting multiple
+    families for flexibility
+    ```
+
+3. Read the profile to check for correctness, and make a note of the
+   `config_id` value to formulate the mount accessor to associate with the
+   alias of the subject and actor entities.
+
+    ```shell-session
+    $ vault read sys/config/oauth-resource-server/e2e-profile
+    vault read sys/config/oauth-resource-server/e2e-profile
+    Key                     Value
+    ---                     -----
+    audiences               [https://localhost:8200/v1]
+    clock_skew_leeway       0
+    config_id               de81dc66-e00d-23c6-7dfc-9cdbc5aaf97e
+    enabled                 true
+    issuer_id               https://hashicups-print.verify.ibm.com/oauth2
+    jwks_uri                https://hashicups-print.verify.ibm.com/oauth2/jwks
+    jwt_type                access_token
+    no_default_policy       false
+    profile_name            e2e-profile
+    supported_algorithms    [RS256]
+    use_jwks                true
+    ```
+
+In this example, the mount accessor is constructed as follows:
+
+<CodeBlockConfig hideClipboard>
+
+```plaintext
+oauth-resource-server + _ + namespace ID + _ + OAuth resource server profile config_id
+```
+
+</CodeBlockConfig>
+
+If operating in the root namespace, the mount accessor for this example profile
+becomes `oauth-resource-server_root_de81dc66-e00d-23c6-7dfc-9cdbc5aaf97e`.
+
+### Create entity aliases
+
+You can now create the entity aliases for the human and AI users.
+
+1. Export the mount accessor value as `CONFIG_PROFILE_MOUNT_ACCESSOR`.
+
+   ```shell-session
+   $ export CONFIG_PROFILE_MOUNT_ACCESSOR="oauth-resource-server_root_de81dc66-e00d-23c6-7dfc-9cdbc5aaf97e"
+   ```
+
+2. Create the entity alias for the subject entity with the mount accessor
+   and issuer values included.
+
+   ```shell-session
+   $ vault write identity/entity-alias \
+     name="jwt-binding-subject" \
+     canonical_id="$OBO_SUBJECT_CANONICAL_ID" \
+     mount_accessor="$CONFIG_PROFILE_MOUNT_ACCESSOR" \
+     issuer="$ISSUER" \
+     external_id="$SUBJECT_EXT_ID"
+
+   Key             Value
+   ---             -----
+   canonical_id    0427b0f5-ac11-4f25-75f6-5764b85176aa
+   id              e3b9d5b0-c623-1f02-b1ef-95503ad7be03
+   ```
+
+3. Create the entity alias for the actor entity with the mount accessor
+   and issuer values included.
+
+   ```shell-session
+   $ vault write identity/entity-alias \
+     name="jwt-binding-actor" \
+     canonical_id="$OBO_ACTOR_CANONICAL_ID" \
+     mount_accessor="$CONFIG_PROFILE_MOUNT_ACCESSOR" \
+     issuer="$ISSUER" \
+     external_id="$ACTOR_EXT_ID"
+
+   Key             Value
+   ---             -----
+   canonical_id    ef897bd9-0060-1fa4-68ba-65ae5b0747ec
+   id              e929f437-f655-45c0-03e7-eb6212dba58d
+   ```
+
+### Create ceiling policy
+
+
+Create a ceiling policy to encompass all the possible operations you can perform in the example commands as `ceiling-policy.hcl`.
+
+```shell-session
+$ cat > ceiling-policy.hcl << EOF
+# Allow KV2 read and write
+path "secret-v2/data/shared-secret/*" {
+  capabilities = ["create", "read", "update", "delete", "list"]
+}
+
+path "secret-v2/metadata/shared-secret/*" {
+  capabilities = ["list"]
+}
+
+# Allow PKI operations
+path "pki/issue/example-dot-com" {
+  capabilities = ["create", "update"]
+}
+
+path "pki/cert/*" {
+  capabilities = ["read"]
+}
+
+path "pki/certs" {
+  capabilities = ["list"]
+}
+
+# Allow transit engine operations
+path "transit/encrypt/app-key" {
+  capabilities = ["update", "create", "read"]
+}
+
+# Allow decrypt
+path "transit/decrypt/app-key" {
+  capabilities = ["update", "create", "read"]
+}
+
+# Optional: allow key metadata read (safe)
+path "transit/keys/app-key" {
+  capabilities = ["read"]
+}
+EOF
+```
+
+Write the ceiling policy.
+
+```shell-session
+$ vault policy write ceiling-all ceiling-policy.hcl
+Success! Uploaded policy: ceiling-all
+```
+
+### Register the agent in the Agent Registry
+
+Create an entry in the agent registry for the actor / AI agent user.
+
+```shell-session
+$ vault write agent-registry/register \
+  display_name="obo-actor" \
+  entity_id="$OBO_ACTOR_CANONICAL_ID" \
+  ceiling_policies='["ceiling-all"]'
+
+Key             Value
+---             -----
+display_name    obo-actor
+```
+
+## Validate Vault operations
+
+Use these methods to validate Vault operations with tokens issued by Verify.
+
+- Token lookups and sanity checks
+- Cubbyhole access example
+- CRUD operations on KV version 2
+- Fetch, use, and rotate dynamic secrets
+- Perform encryption/decryption operations on a transit secrets engine instance
+
+## Tutorial
+
+- [Secure agent permissions with Vault](/vault/tutorials/enterprise/secure-agent-permissions-with-vault) shows how to configure Auth0 as the authorization server for the same workflow explained here.
+
+## Next steps
+
+> FIXME: Introduce related tasks that either enhance this topic or are necessary to achieve a larger goal. Next steps link to other usage pages, rather than additional conceptual or reference information.
