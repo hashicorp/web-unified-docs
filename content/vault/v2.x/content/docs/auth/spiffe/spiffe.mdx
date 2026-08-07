@@ -1,0 +1,249 @@
+---
+layout: docs
+page_title: SPIFFE - auth methods
+description: >-
+  Configure the Vault Enterprise SPIFFE auth method: enable the plugin, set passthrough headers for JWT-SVIDs, configure a trust bundle and roles, and manage bundle refresh.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-04-15T00:14:29.000Z
+last_modified: 2026-04-15T00:14:29.000Z
+# END AUTO GENERATED METADATA
+---
+
+# SPIFFE auth method
+
+@include 'alerts/enterprise-only.mdx'
+
+Each [SPIFFE auth backend](/vault/docs/auth/spiffe) instance has a single trust
+domain and an associated trust bundle and a role-level configuration that maps
+SPIFFE workload IDs to Vault token policies. Vault accepts trust bundles
+provided as part of the configuration or fetched from a remote endpoint over
+HTTPS.
+
+<Note>
+
+To use the SPIFFE plugin with x.509 SPIFFE IDs, you must have `tls_disable` and
+`tls_disable_client_certs` set to false in your Vault configuration to allow
+the certificates through TLS.
+
+</Note>
+
+## JWT-SVID requirements
+
+To use JWT based SPIFFE SVIDs, you must include the `Authorization` header
+in the set of passthrough request headers for the SPIFFE plugin so clients can
+provide the SVID in the `Authorization` header as a `Bearer` token. For example:
+
+```plaintext
+Authorization: Bearer <svid-jwt>
+```
+
+Use the `-passthrough-request-headers` flag when you enable or tune the SPIFFE
+plugin to add `Authorization` to the set of allowed passthrough headers.
+
+For example, to configure the headers when you mount the plugin, use
+`-passthrough-request-headers` with `vault auth enable`:
+
+```shell-session
+$ vault auth enable -passthrough-request-headers="Authorization" spiffe
+```
+
+Or, to configure the headers on an existing mount, use
+`-passthrough-request-headers` with `vault auth tune`:
+
+```shell-session
+$ vault auth tune -passthrough-request-headers="Authorization" spiffe
+```
+
+## Audience validation
+
+When using JWT based SPIFFE SVIDs, you must configure the plugin with a list of
+allowable audience values and clients must set the
+[audience](/vault/api-docs/auth/spiffe#audience) parameter with one of the
+appropriate values. 
+
+The `audience` parameter defines an array used to validate the SVID.
+
+1. The `aud` claim baked into the JWT-SVID when the workload requests a SVID from a
+   SPIFFE compliant service (e.g. SPIRE).
+
+1. Vault's `audience` allow-list on `auth/spiffe/config`. 
+
+Vault allows any client with a matching element to authenticate. If the list of
+allowable values is empty, Vault denies all JWT based SVIDs.
+
+## Enable SPIFFE auth method
+
+Enabling the SPIFFE auth method follows the same general flow as most auth methods.
+
+1. Run `vault auth enable` to enable the SPIFFE auth method.
+
+   ```shell-session
+   $ vault auth enable \
+     -passthrough-request-headers="Authorization" \
+     spiffe
+   ```
+
+1. Configure the SPIFFE auth method. Replace the example parameters with the
+   values for your environment.
+
+   <Note>
+   `endpoint_spiffe_id` must match the SPIFFE ID your federation endpoint
+   actually presents. This depends on your SPIRE server's configuration,
+   so confirm the real value for your deployment rather than reusing the
+   example above as-is.
+   
+   </Note>
+
+   #### need help validating from here
+
+   ```shell-session
+   $ vault write auth/spiffe/config \
+     trust_domain="example.org" \
+     profile="https_spiffe_bundle" \
+     endpoint_url="https://spire-server.example.org:8443" \
+     endpoint_spiffe_id="spiffe://example.org/spire-federation" \
+     audience="vault.example.org"
+   ```
+
+   To validate JWT-SVIDs, configure a JWKS-format bundle by using the `static`
+   profile with a JWKS `bundle`, or the `https_web_bundle` /
+   `https_spiffe_bundle` profiles. 
+   
+   `https_web_pem` fetches a PEM certificate and does not support JWT-SVIDs.
+   
+   `audience` is mount-wide, not per-role. Every role on this mount shares
+   this same JWT audience allow-list.
+
+   #### to here
+
+1. Configure a role for each workload type.
+
+   ```shell-session
+   $ vault write auth/spiffe/role/payment-role \
+     workload_id_patterns="ns/prod/sa/payment-service" \
+     token_policies="payment-vault-policy" \
+     token_ttl="1h"
+   ```
+
+## Refreshing remote trust bundles
+
+Vault caches trust bundles fetched from remote endpoints and refreshes the
+bundle periodically based on the provided refresh hint. If the bundle does not
+provide a refresh hint, Vault uses a default refresh interval of 1 hour.
+
+The active node within a Vault cluster performs the initial fetch and subsequent
+refreshes on the trust bundle on behalf of all nodes in the cluster. But all
+active nodes on Performance replica clusters fetch and refresh the trust
+bundle independently.
+
+You can force an immediate refresh by calling the
+[configuration endpoint](/vault/api-docs/auth/spiffe#create-configuration)
+with an empty payload and read the details about a fetched trust bundle,
+including the last refresh time and calculated refresh interval by calling the
+[read configuration endpoint](/vault/api-docs/auth/spiffe#read-configuration).
+
+## Load balancer and proxy considerations
+
+If a reverse proxy or load balancer terminates TLS in front of Vault, the
+following four things all have to be true together — this isn't a menu of
+options, it's one topology with four required parts:
+
+1. The frontend/proxy forwards the *validated* client certificate to Vault
+   in a request header.
+1. The Vault listener is configured to accept and trust that header from
+   the proxy.
+1. The frontend performs full TLS verification of the client certificate
+   itself — an unverified cert must never pass through.
+1. The connection between the frontend and Vault is itself secured,
+   ideally with mutual TLS.
+
+### Example: NGINX
+
+```nginx
+# nginx — terminates workload mTLS, forwards the validated cert to Vault
+
+upstream vault_backend {
+    server 127.0.0.1:8200;
+}
+
+server {
+    listen 443 ssl;
+    server_name vault.example.org;
+
+    ssl_certificate     /etc/nginx/certs/proxy-server.crt;
+    ssl_certificate_key /etc/nginx/certs/proxy-server.key;
+
+    # Requirement 3: full TLS verification against the SPIFFE trust bundle CA
+    ssl_client_certificate /etc/nginx/certs/spiffe-trust-bundle-ca.pem;
+    ssl_verify_client       on;
+    ssl_verify_depth        2;
+
+    location / {
+        # Requirement 1: forward the validated cert. $ssl_client_escaped_cert
+        # is URL-encoded PEM — matches Vault's built-in NGINX decoder preset
+        # ("URL,DER": URL-decode, then PEM to DER).
+        proxy_set_header X-Client-Cert $ssl_client_escaped_cert;
+
+        proxy_pass https://vault_backend;
+
+        # Requirement 4: mTLS between nginx and Vault
+        proxy_ssl_certificate         /etc/nginx/certs/proxy-to-vault-client.crt;
+        proxy_ssl_certificate_key     /etc/nginx/certs/proxy-to-vault-client.key;
+        proxy_ssl_trusted_certificate /etc/nginx/certs/vault-internal-ca.pem;
+        proxy_ssl_verify              on;
+        proxy_ssl_verify_depth        2;
+        proxy_ssl_server_name         on;
+    }
+}
+```
+
+Matching Vault listener config:
+
+```hcl
+listener "tcp" {
+  address       = "127.0.0.1:8200"
+  tls_cert_file = "/etc/vault/certs/vault-internal.crt"
+  tls_key_file  = "/etc/vault/certs/vault-internal.key"
+
+  # mTLS with nginx (requirement 4, Vault's side)
+  tls_client_ca_file                 = "/etc/vault/certs/proxy-client-ca.pem"
+  tls_require_and_verify_client_cert = true
+
+  # Trust the header nginx populates
+  x_forwarded_for_client_cert_header          = "X-Client-Cert"
+  x_forwarded_for_client_cert_header_decoders = "URL,DER"
+}
+```
+
+<Note>
+
+`x_forwarded_for_client_cert_header` is a listener-level setting. Vault
+parses the forwarded certificate at the listener before routing the
+request to any auth method, so it applies to `spiffe` the same way it
+does to `cert`. Test the full path end-to-end (a real login request
+reaching Vault with the header populated) rather than trusting the
+listener config alone. A proxy that forwards the header in a format
+that doesn't match your configured decoder will fail at the listener,
+not with an auth-method-specific error, which can be confusing to
+troubleshoot if you haven't seen it before.
+
+</Note>
+
+## SPIFFE plugin API
+
+The SPIFFE auth method has a full HTTP API. Refer to the [SPIFFE auth API
+documentation](/vault/api-docs/auth/spiffe) for more details.
+
+## Terraform
+
+You can use the `vault_auth_backend` resource to enable the SPIFFE auth method
+and the `vault_spiffe_auth_backend_config` to manage the configuration.
+
+- [Vault auth backend resource](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/auth_backend)
+- [Vault SPIFFE auth backend config resource](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/spiffe_auth_backend_config)
+- [Vault SPIFFE auth backend role resource](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/spiffe_auth_backend_role)
+
+## Next steps
+
+Follow the [Authenticate to Vault using the SPIFFE auth method with
+SPIRE](/vault/docs/auth/spiffe/spire-auth-vault) for a complete working example.
