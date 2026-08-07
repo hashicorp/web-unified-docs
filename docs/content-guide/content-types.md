@@ -3,7 +3,7 @@
 The content we create and host on developer.hashicorp.com follows the principles of the [Diátaxis method for structured documentation](https://diataxis.fr/), which use the following basic content types:
 
 - Explanation
-- Usage
+- How-to
 - Reference
 - Tutorials
 
@@ -11,7 +11,6 @@ Because tutorials are hosted in a separate repository, this README focuses on th
 
 Within the "Explanation" category, we use three different types of pages, each of which has a distinct purpose.
 
-- **Index** pages provide lists of links to supporting documentation on a subject. [Example: Deploy Consul](https://developer.hashicorp.com/consul/docs/deploy)
 - **Overview** pages provide an introduction to a subject and serve as a central information point. [Example: Expand service network east/west](https://developer.hashicorp.com/consul/docs/east-west)
 - **Concept** pages provide discursive explanations of Consul's underlying systems and their operations. [Example: Consul catalog](https://developer.hashicorp.com/consul/docs/concept/catalog)
 
@@ -20,7 +19,7 @@ wiki](https://hashicorp.atlassian.net/wiki/x/eYBVnw) for detailed explanations.
 
 ## Page templates
 
-### Usage template
+### How-to template
 
 ```markdown
 ---
@@ -70,7 +69,7 @@ Depending on the context, you can either add an introduction statement about the
 
 ## Next steps
 
-Introduce related tasks that either enhance this topic or are necessary to achieve a larger goal. Next steps link to other usage pages, rather than additional conceptual or reference information. 
+Introduce related tasks that either enhance this topic or are necessary to achieve a larger goal. Next steps link to other how-to pages, rather than additional conceptual or reference information.
 
 ```
 
@@ -144,7 +143,7 @@ The overall process for {end goal of workflow} consists of the following steps.
 1. Second action for completing this workflow. Try to keep workflow steps symmetrical, so if you use two sentences for one step, use two sentences for the other steps.
 1. Final action common to the workflow. After this action, users will take actions specific to their organization or operational needs.
 
-If a dedicated usage page exists, follow the workflow with a [link to refer the reader to the usage page](https://developer.hashicorp.com).
+If a dedicated how-to page exists, follow the workflow with a [link to refer the reader to the how-to page](https://developer.hashicorp.com).
 
 ### Alternative or secondary workflow
 
@@ -177,21 +176,21 @@ Some users land on an overview page and do not know where to go next. Use this s
 - To learn how to {do what the tutorial describes}, complete the [Name of tutorial](https://link-to-tutorial).
 - To learn how to {do what the tutorial describes}, complete the [Name of tutorial](https://link-to-tutorial).
 
-### Usage documentation
+### How-to documentation
 
 Grouping links into lists that align with the order of the workflows on this page and the order of pages in the nav bar.
 
-- [Usage page title](https://developer.hashicorp.com)
-- [Usage page title](https://developer.hashicorp.com)
-- [Usage page title](https://developer.hashicorp.com)
+- [How-to page title](https://developer.hashicorp.com)
+- [How-to page title](https://developer.hashicorp.com)
+- [How-to page title](https://developer.hashicorp.com)
 
-### Runtime specific usage documentation
+### Runtime specific how-to documentation
 
-You can also separate usage docs according to environment, runtime, or other logical segments:
+You can also separate how-to docs according to environment, runtime, or other logical segments:
 
-- [Usage page title](https://developer.hashicorp.com)
-- [Usage page title](https://developer.hashicorp.com)
-- [Usage page title](https://developer.hashicorp.com)
+- [How-to page title](https://developer.hashicorp.com)
+- [How-to page title](https://developer.hashicorp.com)
+- [How-to page title](https://developer.hashicorp.com)
 
 ### Reference
 
@@ -206,7 +205,7 @@ The most experienced users want to quickly find the reference information for sp
 List limitations that inhibit functionality. When creating new content, we typically refer to this section as "constraints and limitations" and update its contents as new features are added. When a release goes GA and all runtimes/environments are supported, you can refer to this section as "Basic troubleshooting".
 
 - List limitations such as constraints on names or operating features simultaneously.
-- List alternate approaches for completing usage tasks (example: Two admin partitions in the same datacenter cannot be peered. Use the `exported-services` configuration entry instead.)
+- List alternate approaches for completing how-to tasks (example: Two admin partitions in the same datacenter cannot be peered. Use the `exported-services` configuration entry instead.)
 ```
 
 ### Reference templates
