@@ -13,7 +13,7 @@ locals {
       sensitive      = false
       targets        = ["production", "preview"]
     },
-    INSTANA_AGENT_TOKEN = {
+    INSTANA_AGENT_KEY = {
       value          = var.instana_agent_key
       comment        = "Instana agent key used to authenticate to Instana when submitting metrics and telemetry."
       client_visible = false

@@ -27,7 +27,7 @@
  *
  * The OTLP endpoint and token are read from the environment:
  * - INSTANA_OTLP_ENDPOINT  (required) OTLP endpoint (`endpoint`).
- * - INSTANA_AGENT_TOKEN (required) Instana API token (`apiToken`).
+ * - INSTANA_AGENT_KEY (required) Instana API token (`agentKey`).
  */
 
 import { parseArgs } from 'node:util'
