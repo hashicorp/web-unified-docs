@@ -1,3 +1,9 @@
+/**
+ * Copyright IBM Corp. 2024, 2026
+ * SPDX-License-Identifier: BUSL-1.1
+ */
+
+
 locals {
   vercel_env = {
     INSTANA_OTLP_ENDPOINT = {
@@ -7,9 +13,9 @@ locals {
       sensitive      = false
       targets        = ["production", "preview"]
     },
-    INSTANA_OTLP_AGENT_TOKEN = {
+    INSTANA_AGENT_KEY = {
       value          = var.instana_agent_key
-      comment        = "Instana OTel agent key. Used to submit build metrics to Instana for tracking build times."
+      comment        = "Instana agent key used to authenticate to Instana when submitting metrics and telemetry."
       client_visible = false
       sensitive      = true
       targets        = ["production", "preview"]
@@ -17,9 +23,9 @@ locals {
   }
 }
 
-# Enviornment variables
+# Environment variables
 #
-# The `vercel_project_environment_variable` resource is used here isntead of
+# The `vercel_project_environment_variable` resource is used here instead of
 # `vercel_project_environment_variables` because the former allows us to just
 # add the env vars we want to manage, while the latter would completely replace
 # anything not included in the array specified in the configuration.
