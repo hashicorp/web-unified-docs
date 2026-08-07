@@ -6,9 +6,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { batchPromises } from './batch-promises.mjs'
-import { listFiles } from './list-files.mjs'
-
-import { PRODUCT_CONFIG } from '#productConfig.mjs'
 
 /**
  * Check if a file is an image based on its extension.
@@ -23,15 +20,9 @@ export function isFileAnImage(file) {
 /**
  * Copy all asset files (images) from the source to the destination directory.
  */
-export async function copyAssetFiles(sourceDir, destDir, changedFiles = null) {
-	const filesToCheck = changedFiles
-		? [...changedFiles.added, ...changedFiles.modified]
-		: await listFiles(sourceDir)
-
+export async function copyAssetFiles(sourceDir, destDir, filesToCheck) {
 	const assetFiles = filesToCheck.filter((filePath) => {
-		const relativePath = path.relative(sourceDir, filePath)
-		const repoSlug = relativePath.split('/')[0]
-		return isFileAnImage(filePath) && repoSlug in PRODUCT_CONFIG
+		return isFileAnImage(filePath)
 	})
 
 	console.log(`\nCopying Assets from ${assetFiles.length} files...`)
