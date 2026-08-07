@@ -84,7 +84,7 @@ const STATUS_CODE_ERROR = 2
  * Defaults to `process.env.INSTANA_OTLP_ENDPOINT`.
  *
  * @property {string} [apiToken] The Instana OTLP API token. Defaults to
- * `process.env.INSTANA_OTLP_AGENT_TOKEN`.
+ * `process.env.INSTANA_AGENT_TOKEN`.
  */
 function buildSpan({ name, attributes = {}, status, durationMs = 1 }) {
 	// Timestamps in nanoseconds (millisecond precision). Give the span a small
@@ -126,7 +126,7 @@ export function emitOtelSpan({
 	scopeName,
 	hostId = process.env.INSTANA_HOST_ID ?? serviceName,
 	endpoint = process.env.INSTANA_OTLP_ENDPOINT,
-	apiToken = process.env.INSTANA_OTLP_AGENT_TOKEN,
+	agentToken = process.env.INSTANA_AGENT_TOKEN,
 }) {
 	if (!endpoint) {
 		return Promise.reject(
@@ -135,10 +135,10 @@ export function emitOtelSpan({
 			),
 		)
 	}
-	if (!apiToken) {
+	if (!agentToken) {
 		return Promise.reject(
 			new Error(
-				'emitOtelSpan: missing OTLP API token (set INSTANA_OTLP_AGENT_TOKEN or pass `apiToken`)',
+				'emitOtelSpan: missing OTLP API token (set INSTANA_AGENT_TOKEN or pass `apiToken`)',
 			),
 		)
 	}
@@ -168,7 +168,7 @@ export function emitOtelSpan({
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json',
-			'x-instana-key': apiToken,
+			'x-instana-key': agentToken,
 			'x-instana-host': hostId,
 		},
 		body: JSON.stringify(payload),
