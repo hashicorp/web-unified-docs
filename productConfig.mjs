@@ -387,6 +387,7 @@ export const PRODUCT_CONFIG = {
 		 * `terraform-plugin-mux/website/data: No such file or directory`
 		 * This likely indicates that older versions of docs have a different
 		 * directory structure that needs to be accounted for. Need to confirm.
+
 		 * See note at top of this document on `pages` directories for details.
 		 */
 		assetDir: 'img',
@@ -394,6 +395,17 @@ export const PRODUCT_CONFIG = {
 		contentDir: 'docs',
 		dataDir: 'data',
 		navDataPath: 'plugin-mux',
+		productSlug: 'terraform',
+		semverCoerce: semver.coerce,
+		versionedDocs: true,
+		websiteDir: 'website',
+	},
+	'terraform-tfctl-cli': {
+		assetDir: 'img',
+		basePaths: ['tfctl-cli'],
+		contentDir: 'docs',
+		dataDir: 'data',
+		navDataPath: 'tfctl-cli',
 		productSlug: 'terraform',
 		semverCoerce: semver.coerce,
 		versionedDocs: true,
