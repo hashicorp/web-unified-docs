@@ -1,0 +1,501 @@
+---
+layout: api
+page_title: TPM - Auth Methods - HTTP API
+description: |-
+  This is the API documentation for the Vault TPM authentication method.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-04-15T00:13:43.000Z
+last_modified: 2026-04-15T00:13:43.000Z
+# END AUTO GENERATED METADATA
+---
+
+# TPM auth method (API)
+
+<EnterpriseAlert product="vault" />
+
+This is the API documentation for the Vault TPM authentication method. The TPM
+auth method allows clients that hold a TPM (Trusted Platform Module) device to
+authenticate using TLS client certificates backed by hardware attestation.
+
+Before a TPM can authenticate, it must be enrolled via the [`identity/tpm`](/vault/api-docs/system/identity-tpm) endpoint
+in the same namespace as the TPM auth method is mounted in, and the TPM
+auth method must be configured with at least one role.
+
+This documentation assumes the TPM auth method is mounted at the `/auth/tpm`
+path in Vault. Since it is possible to enable auth methods at any location,
+please update your API calls accordingly.
+
+---
+
+## Configure
+
+Set the internal CA parameters for the TPM auth backend. The backend manages
+its own CA that it uses to issue and verify client certificates. Writing to
+this endpoint on first use initialises the CA; subsequent writes update the
+CA rotation parameters and may rotate the active CA if the new settings
+require it.
+
+| Method | Path              |
+| :----- | :---------------- |
+| `POST` | `/auth/tpm/config` |
+
+### Parameters
+
+- `ca_lifetime` `(duration: "8760h")` – How long each CA certificate is valid
+  once it becomes the active CA. The backend always pre-generates a *Next* CA
+  before the *Active* CA expires, so there is no gap in signing capability.
+  Accepts a Go duration string (e.g. `"8760h"`, `"365d"`) or an integer number
+  of seconds.
+
+- `ca_soft_expiry` `(duration: "720h")` – How long before the hard expiry of
+  the Active CA it stops signing new certificates. When the Active CA's
+  remaining lifetime drops below this window it is retired and the pre-generated
+  Next CA is promoted. Must be less than `ca_lifetime / 2`. Accepts a Go
+  duration string or an integer number of seconds.
+
+- `default_cert_ttl` `(duration: "")` – Default lifetime for client
+  certificates issued by the [`gentpmcert`](#begin-tpm-certificate-issuance)
+  endpoint when the role does not specify `cert_ttl`. When unset or `0`, the
+  effective TTL falls back to `ca_soft_expiry`. The actual certificate lifetime
+  is always capped by the signing CA's remaining validity.
+
+### Sample payload
+
+```json
+{
+  "ca_lifetime": "8760h",
+  "ca_soft_expiry": "720h",
+  "default_cert_ttl": "168h"
+}
+```
+
+### Sample request
+
+```shell-session
+$ curl \
+    --header "X-Vault-Token: ..." \
+    --request POST \
+    --data @payload.json \
+    https://127.0.0.1:8200/v1/auth/tpm/config
+```
+
+### Sample response
+
+```json
+{
+  "data": {
+    "ca_lifetime": "8760h0m0s",
+    "ca_soft_expiry": "720h0m0s",
+    "default_cert_ttl": "168h0m0s"
+  }
+}
+```
+
+---
+
+## Read configuration
+
+Return the current CA configuration.
+
+| Method | Path              |
+| :----- | :---------------- |
+| `GET`  | `/auth/tpm/config` |
+
+### Sample request
+
+```shell-session
+$ curl \
+    --header "X-Vault-Token: ..." \
+    https://127.0.0.1:8200/v1/auth/tpm/config
+```
+
+### Sample response
+
+```json
+{
+  "data": {
+    "ca_lifetime": "8760h0m0s",
+    "ca_soft_expiry": "720h0m0s",
+    "default_cert_ttl": ""
+  }
+}
+```
+
+---
+
+## Create or update role
+
+Creates or updates a named role. Roles define which TPM devices (by individual
+ID or by group membership) may obtain client certificates and authenticate
+against this mount, and also govern the Vault token parameters issued on
+successful login.
+
+At least one of `tpm_ids` or `tpmgroup_ids` is required.
+
+| Method | Path                  |
+| :----- | :-------------------- |
+| `POST` | `/auth/tpm/role/:name` |
+
+### Parameters
+
+- `name` `(string: <required>)` – Name of the role. Used in API paths and
+  stored in lower-case.
+
+- `tpm_ids` `(array: [] or comma-delimited string: "")` – List of TPM record
+  IDs (EK SHA-256 hashes in the form `sha256-<hex>`) that are authorized to
+  use this role. TPMs are enrolled via the
+  [`identity/tpm`](/vault/api-docs/system/identity-tpm) endpoint.
+
+- `tpmgroup_ids` `(array: [] or comma-delimited string: "")` – List of TPM
+  group IDs whose members are authorised to use this role. Group membership is
+  evaluated at login time.
+
+- `display_name` `(string: "")` – The display name attached to tokens issued
+  when authenticating with this role. Defaults to the role name if not set.
+
+- `cert_ttl` `(duration: "")` – Lifetime for client certificates issued by the
+  [`gentpmcert`](#begin-tpm-certificate-issuance) endpoint for this role. Zero
+  means inherit the global `default_cert_ttl` from config, falling back to
+  `ca_soft_expiry`. Accepts a Go duration string or an integer number of
+  seconds.
+
+@include 'tokenfields.mdx'
+
+### Sample payload
+
+```json
+{
+  "tpm_ids": ["sha256-abc123..."],
+  "display_name": "my-device",
+  "token_ttl": "1h",
+  "token_policies": ["default", "my-policy"]
+}
+```
+
+### Sample request
+
+```shell-session
+$ curl \
+    --header "X-Vault-Token: ..." \
+    --request POST \
+    --data @payload.json \
+    https://127.0.0.1:8200/v1/auth/tpm/role/my-role
+```
+
+### Sample response
+
+```json
+{
+  "data": {
+    "name": "my-role",
+    "display_name": "my-device",
+    "tpm_ids": ["sha256-abc123..."],
+    "tpmgroup_ids": [],
+    "cert_ttl": 0,
+    "token_ttl": 3600,
+    "token_max_ttl": 0,
+    "token_policies": ["default", "my-policy"]
+  }
+}
+```
+
+---
+
+## Read role
+
+Return the configuration of an existing role.
+
+| Method | Path                  |
+| :----- | :-------------------- |
+| `GET`  | `/auth/tpm/role/:name` |
+
+### Parameters
+
+- `name` `(string: <required>)` – Name of the role.
+
+### Sample request
+
+```shell-session
+$ curl \
+    --header "X-Vault-Token: ..." \
+    https://127.0.0.1:8200/v1/auth/tpm/role/my-role
+```
+
+### Sample response
+
+```json
+{
+  "data": {
+    "name": "my-role",
+    "display_name": "my-role",
+    "tpm_ids": ["sha256-abc123..."],
+    "tpmgroup_ids": [],
+    "cert_ttl": 0,
+    "token_ttl": 3600,
+    "token_max_ttl": 0,
+    "token_policies": ["default"]
+  }
+}
+```
+
+---
+
+## List roles
+
+List all configured role names.
+
+| Method | Path             |
+| :----- | :--------------- |
+| `LIST` | `/auth/tpm/role` |
+
+### Sample request
+
+```shell-session
+$ curl \
+    --header "X-Vault-Token: ..." \
+    --request LIST \
+    https://127.0.0.1:8200/v1/auth/tpm/role
+```
+
+### Sample response
+
+```json
+{
+  "data": {
+    "keys": ["my-role", "another-role"]
+  }
+}
+```
+
+---
+
+## Delete role
+
+Delete a named role.
+
+| Method   | Path                  |
+| :------- | :-------------------- |
+| `DELETE` | `/auth/tpm/role/:name` |
+
+### Parameters
+
+- `name` `(string: <required>)` – Name of the role to delete.
+
+### Sample request
+
+```shell-session
+$ curl \
+    --header "X-Vault-Token: ..." \
+    --request DELETE \
+    https://127.0.0.1:8200/v1/auth/tpm/role/my-role
+```
+
+---
+
+## Begin TPM certificate issuance
+
+Phase 1 of the two-phase TPM attestation protocol. The client submits its
+Endorsement Key (EK) public key and Attestation Key (AK) parameters. Vault
+verifies that the EK corresponds to a TPM enrolled under the given role, then
+generates an encrypted credential challenge using the EK.
+
+This endpoint is **unauthenticated** — no Vault token is required.
+
+| Method | Path                                    |
+| :----- | :-------------------------------------- |
+| `POST` | `/auth/tpm/role/:role_name/gentpmcert/begin` |
+
+### Parameters
+
+- `role_name` `(string: <required>)` – Name of the role to issue a certificate
+  for.
+
+- `ek_public_key` `(string: <required>)` – PEM-encoded RSA or EC public key
+  for the TPM's Endorsement Key. The TPM ID is derived as
+  `sha256-<hex(SHA-256(DER bytes))>` and matched against the enrolled TPM
+  records.
+
+- `ak_params` `(string: <required>)` – Base64-encoded JSON object containing
+  the Attestation Key's TPM 2.0 public parameters. The object has the following
+  fields:
+
+  | Field | Type | Description |
+  | :---- | :--- | :---------- |
+  | `public` | `bytes` | AK canonical encoding (TPM2B\_PUBLIC / TPMT\_PUBLIC). |
+  | `create_data` | `bytes` | TPMS\_CREATION\_DATA structure for the AK. |
+  | `create_attestation` | `bytes` | TPMS\_ATTEST structure for the AK. |
+  | `create_signature` | `bytes` | TPMT\_SIGNATURE over `create_attestation`. |
+  | `use_tcsd_activation_format` | `bool` | Set when the trousers daemon (tcsd) is used. |
+
+### Sample request
+
+```shell-session
+$ curl \
+    --request POST \
+    --data @payload.json \
+    https://127.0.0.1:8200/v1/auth/tpm/role/my-role/gentpmcert/begin
+```
+
+### Sample response
+
+The `encrypted_credentials` value is a base64-encoded JSON blob containing a
+TPM2 `EncryptedCredential` structure. The client must pass it to the TPM's
+`TPM2_ActivateCredential` command using the AK handle and the EK handle; the
+TPM returns the raw secret bytes if and only if the AK was created on the same
+TPM as the EK.
+
+```json
+{
+  "data": {
+    "challenge_id": "dGVzdGNoYWxsZW5nZQ==",
+    "encrypted_credentials": "base64-encoded-credential-blob..."
+  }
+}
+```
+
+The challenge expires after **5 minutes**. At most one outstanding challenge
+per TPM is kept; submitting a new `/begin` request for the same EK invalidates
+any previous challenge. Requests from the same EK are rate-limited to one every
+10 seconds.
+
+---
+
+## Finish TPM certificate issuance
+
+Phase 2 of the two-phase TPM attestation protocol. The client submits the
+decrypted challenge response (proving hardware possession) along with a CSR and
+key certification parameters (proving the application key was created on the
+same TPM). Vault verifies all inputs and, if successful, issues a client
+certificate signed by the backend's active CA.
+
+This endpoint is **unauthenticated** — no Vault token is required.
+
+| Method | Path                                     |
+| :----- | :--------------------------------------- |
+| `POST` | `/auth/tpm/role/:role_name/gentpmcert/finish` |
+
+### Parameters
+
+- `role_name` `(string: <required>)` – Name of the role the certificate is
+  being issued for. Must match the role supplied to `/begin`.
+
+- `ek_public_key` `(string: <required>)` – PEM-encoded EK public key.  Must
+  match the key used in the corresponding `/begin` call.
+
+- `challenge_id` `(string: <required>)` – The `challenge_id` value returned by
+  the `/begin` call.
+
+- `challenge_response` `(string: <required>)` – Base64-encoded raw bytes
+  returned by the TPM's `TPM2_ActivateCredential` command. Must equal the
+  secret generated during `/begin`.
+
+- `csr` `(string: <required>)` – PEM-encoded PKCS#10 Certificate Signing
+  Request for the application key. The key in the CSR must be TPM-resident (see
+  `key_certification`).
+
+- `key_certification` `(string: <required>)` – Base64-encoded JSON object
+  containing the TPM certification parameters that prove the application key
+  (matching the CSR) was created inside the same TPM. The object has the
+  following fields:
+
+  | Field | Type | Description |
+  | :---- | :--- | :---------- |
+  | `public` | `bytes` | Application key canonical encoding (TPMT\_PUBLIC). |
+  | `create_data` | `bytes` | TPMS\_CREATION\_DATA structure for the key. |
+  | `create_attestation` | `bytes` | TPMS\_ATTEST structure for the key. |
+  | `create_signature` | `bytes` | TPMT\_SIGNATURE over `create_attestation`, signed by the AK. |
+
+### Sample request
+
+```shell-session
+$ curl \
+    --request POST \
+    --data @payload.json \
+    https://127.0.0.1:8200/v1/auth/tpm/role/my-role/gentpmcert/finish
+```
+
+### Sample response
+
+```json
+{
+  "data": {
+    "certificate": "-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----",
+    "ca_chain": [
+      "-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----"
+    ]
+  }
+}
+```
+
+The issued certificate embeds two OtherName SAN extensions:
+
+| OID suffix | Value |
+| :--------- | :---- |
+| `1.3.6.1.4.1.55813.1.1.1` | TPM ID (`sha256-<hex>`) derived from the EK public key. |
+| `1.3.6.1.4.1.55813.1.1.2` | Role name used during issuance. |
+
+Both values are verified at login time.
+
+---
+
+## Login
+
+Authenticate using a TPM-backed client certificate obtained from the
+[`gentpmcert`](#begin-tpm-certificate-issuance) endpoints. The certificate
+must be presented as the TLS client certificate on the connection; Vault
+verifies the chain against its internal CA, checks the TPM ID and role-name
+OtherName SANs, confirms the TPM is enrolled, and checks role authorisation
+before issuing a token.
+
+This endpoint is **unauthenticated** — no Vault token is required.
+
+| Method | Path              |jjjjjjjjjjjjjjj
+| :----- | :---------------- |
+| `POST` | `/auth/tpm/login` |
+
+### Parameters
+
+- `role_name` `(string: <required>)` – The name of the role to authenticate
+  against. Must match the role name embedded in the client certificate's
+  OtherName SAN.
+
+### Sample payload
+
+```json
+{
+  "role_name": "my-role"
+}
+```
+
+### Sample request
+
+There is no mechanism in curl to use a TPM-embedded private key, so instead here's how to do it with the Vault cli:
+
+```bash
+vault login -method=cert -tpm-state-dir=/private -role_name=my-role
+```
+
+
+### Sample response
+
+```json
+{
+  "auth": {
+    "client_token": "cf95f87d-f95b-47ff-b1f5-ba7bff850425",
+    "policies": ["default", "my-policy"],
+    "metadata": {
+      "role_name": "my-role",
+      "common_name": "tpm-client",
+      "serial_number": "123456789",
+      "subject_key_id": "aa:bb:cc:...",
+      "authority_key_id": "dd:ee:ff:...",
+      "tpm_id": "sha256-abc123..."
+    },
+    "lease_duration": 3600,
+    "renewable": true
+  }
+}
+```
+
+The token alias name is set to the TPM ID (`sha256-<hex>`), which allows
+consistent entity mapping across certificate rotations.
