@@ -4,8 +4,8 @@ page_title: Create multi-hop sessions for HCP
 description: >-
   Configure multi-hop sessions for HCP Boundary. Chain together two or more workers across multiple networks to reach a target without exposing private networks.
 # START AUTO GENERATED METADATA, DO NOT EDIT
-created_at: 2025-11-18T17:04:41-05:00
-last_modified: 2026-01-26T11:20:17-05:00
+created_at: 2026-05-11T10:18:43-04:00
+last_modified: 2026-08-10T22:18:17.000Z
 # END AUTO GENERATED METADATA
 ---
 
@@ -13,42 +13,41 @@ last_modified: 2026-01-26T11:20:17-05:00
 
 @include 'alerts/hcp-only.mdx'
 
-Many organizations have strict network policies that prohibit all inbound traffic into their networks. In these scenarios, you can use HCP-managed workers as the ingress workers. To establish a connection into the network, a self-managed worker configured as an egress worker initiates an outbound connection to the HCP-managed worker, creating a persistent connection. As a result, when end users connect to a target, the end user's connection would hop from the Boundary client to the HCP-managed worker (ingress worker) to the self-managed worker (egress worker) to the target (or other intermediary workers if needed).
+Many organizations have strict network policies that prohibit all inbound traffic into their networks.
+In these scenarios, you can use HCP-managed workers as the ingress workers.
+A self-managed worker inside the private network initiates an outbound connection to the HCP-managed worker, which creates a persistent connection that Boundary uses in both directions.
 
-## Configure HCP-managed workers for ingress
+When an end user connects to a target, the session traverses the following chain:
 
-To configure end user traffic to ingress through HCP-managed workers, you must configure the self-managed worker (enterprise version). On your self-managed worker that you use for egress to the HCP-managed worker, set the configuration file with the following parameters:
-- `hcp_boundary_cluster_id` - The HCP Boundary cluster ID, which can be found in the HCP Boundary cluster's URL.
-- Omit the `public_addr` parameter. A public address is not needed since the self-managed worker initiates the connection to HCP-managed workers.
-- Omit the `initial_upstreams` parameter. This is not needed because the `hcp_boundary_cluster_id` parameter is sufficent to indicate the HCP-managed workers as the upstream.
-- Include a [worker tag](/boundary/docs/workers/worker-tags) in the `worker` stanza which will be used to select multi-hop routes for each target.
+1. The Boundary client connects to the HCP-managed worker, which acts as the ingress worker.
+1. The HCP-managed worker connects to the self-managed worker, which acts as the egress worker or an intermediate worker in multi-hop deployments.
+1. The egress worker connects to the target.
 
-### Example self-managed worker configuration:
-```
-hcp_boundary_cluster_id = "7acdefe2c-1234-4ff1-b710-123456789876"
+If you need to reach further into a private network, you can add intermediate workers between the ingress and egress workers.
+Refer to [Multi-hop sessions](/boundary/docs/workers/multi-hop) for more information about the worker roles.
 
-listener "tcp" {
-  address = "0.0.0.0:9202"
-  purpose = "proxy"
-}
+## Requirements
 
-worker {
-  auth_storage_path = "/home/ubuntu/boundary/worker1"
-  tags {
-    tag = ["multihop"]
-  }
-  recording_storage_path = "/tmp/worker1"
-}
-```
+Before you configure multi-hop sessions for HCP Boundary, you must have:
+
+- An HCP Boundary cluster, and the cluster ID from its URL.
+- At least one host inside the private network with the Boundary Enterprise binary installed. Refer to [Install Boundary](/boundary/docs/deploy/self-managed/install).
+- Outbound network access from the self-managed worker to the HCP-managed workers on port `9202`.
+- Permission to register workers in the `global` scope.
+
+You do not need inbound network rules.
+The self-managed worker initiates the connection to the HCP-managed workers.
+
 ## Allow-list outbound network traffic to HCP-managed workers
 
-Some organizations require explicit destination addresses set in their network firewall rules for any outbound traffic. In this scenario, you should use the fully qualified domain name (FQDN) of the HCP-managed workers:
+Some organizations require explicit destination addresses in their network firewall rules for any outbound traffic.
+In this scenario, use the fully qualified domain name (FQDN) of the HCP-managed workers:
 
-```
+```plaintext
 <cluster_uuid>.proxy.boundary.hashicorp.cloud
 ```
 
-where the `cluster_uuid` is the HCP Boundary cluster ID. You can find your HCP Boundary cluster ID in the HCP Boundary cluster's URL.
+The `cluster_uuid` value is the HCP Boundary cluster ID, which you can find in the HCP Boundary cluster's URL.
 
 <Note>
 
@@ -61,9 +60,175 @@ where the `cluster_uuid` is the HCP Boundary cluster ID. You can find your HCP B
 
 </Note>
 
-## Route end user traffic to targets through HCP-managed workers
+## Configure the workers
 
-To route traffic through the HCP-managed workers, you should set the egress filters of each target to match the tag set in the self-managed worker's configuration file. You do not need to set additional ingress filters on the targets.
+An HCP Boundary multi-hop chain uses HCP-managed workers for ingress and at least one self-managed worker for egress.
+The following sections describe the role each worker performs and the configuration it requires.
+
+### Ingress workers
+
+HCP Boundary deploys HCP-managed workers with your cluster, and those workers act as the ingress workers.
+You do not create or configure them.
+
+### Egress worker configuration
+
+Configure the self-managed worker that connects to the HCP-managed workers and reaches the target.
+Set the following parameters:
+
+- `hcp_boundary_cluster_id` - The HCP Boundary cluster ID. Set this parameter at the top level of the file, outside the `worker` stanza.
+- Omit the `public_addr` parameter. The self-managed worker initiates the connection to the HCP-managed workers, so it does not need a reachable address.
+- Omit the `initial_upstreams` parameter. The `hcp_boundary_cluster_id` parameter already identifies the HCP-managed workers as the upstream.
+- Include a [worker tag](/boundary/docs/workers/worker-tags) in the `worker` stanza. You use this tag to select multi-hop routes for each target.
+
+<CodeBlockConfig filename="/etc/boundary.d/egress-worker.hcl">
+
+```hcl
+hcp_boundary_cluster_id = "abcd1234-e567-f890-1ab2-cde345f6g789"
+
+listener "tcp" {
+  address = "0.0.0.0:9202"
+  purpose = "proxy"
+}
+
+worker {
+  auth_storage_path = "/var/lib/boundary"
+
+  tags {
+    type = ["multihop", "egress"]
+  }
+}
+```
+
+</CodeBlockConfig>
+
+<Warning>
+
+  Do not set both `hcp_boundary_cluster_id` and `initial_upstreams` in the same configuration file.
+  The two parameters are mutually exclusive, and the worker fails to start:
+
+  ```plaintext
+  Initial upstreams and HCPB cluster ID are mutually exclusive fields
+  ```
+
+</Warning>
+
+### Intermediate worker configuration
+
+If the target sits deeper in the private network, you can add intermediate workers between the self-managed worker that connects to HCP Boundary and the worker that reaches the target.
+
+The worker that connects to the HCP-managed workers is the one that sets `hcp_boundary_cluster_id`.
+Each worker below it sets `initial_upstreams` to the address of the worker above it, and omits `hcp_boundary_cluster_id`.
+
+Refer to [Configure multi-hop sessions for Boundary Enterprise](/boundary/docs/workers/multi-hop/enterprise#intermediate-worker-configuration) for the intermediate and egress worker configurations.
+Those workers connect to an upstream worker rather than to HCP Boundary, so they use the same configuration as they do in a self-managed deployment.
+
+## Start and register the worker
+
+Start the worker on its host:
+
+```shell-session
+$ boundary server -config=/etc/boundary.d/egress-worker.hcl
+```
+
+Refer to [Start and verify a worker](/boundary/docs/workers/start) to run the worker under systemd or in a container.
+
+Register the worker with your HCP Boundary cluster using the [worker-led](/boundary/docs/workers/registration/worker-led) or [controller-led](/boundary/docs/workers/registration/controller-led) method.
+You cannot combine the external KMS method with the `hcp_boundary_cluster_id` parameter.
+You also cannot configure a `worker-auth` KMS key for a worker that connects directly to the HCP-managed workers.
+
+If you add intermediate workers, start and register them in order from the top of the chain down.
+A downstream worker cannot connect until its upstream is running and authorized.
+
+## Verify the chain
+
+@include '/workers/verify-worker.mdx'
+
+In a chain with more than one self-managed worker, the `Directly Connected Downstream Workers` field confirms the shape of the chain.
+Read each worker in turn and check that it lists the worker below it.
+The worker at the end of the chain has no downstream workers.
+
+## Route target traffic through the chain
+
+To route traffic through the HCP-managed workers, set the egress worker filter on each target to match the tag you set in the self-managed worker's configuration file.
+You do not need to set an ingress worker filter, because the HCP-managed workers already act as the ingress workers.
+
+<Tabs>
+<Tab heading="UI" group="ui">
+
+1. Log in to Boundary.
+1. Select the org, and then select the project that contains the target.
+1. Select **Targets**, and then select the target.
+1. Select the **Workers** tab.
+1. Beside **Egress workers**, click **Add Worker Filter**, and enter a filter that matches the self-managed worker's tags:
+
+   ```plaintext
+   "egress" in "/tags/type"
+   ```
+
+1. Click **Save**.
 
 ![Multi-hop egress worker filter](/img/ui/multi-hop-egress-filter_light.png#light-theme-only)
 ![Multi-hop egress worker filter](/img/ui/multi-hop-egress-filter_dark.png#dark-theme-only)
+
+
+<Note>
+
+  The button reads **Add Worker Filter** when the target has no filter for that role, and **Edit Worker Filter** when a filter already exists.
+
+</Note>
+
+<Tip>
+
+  The filter editor includes a generator that formats the filter for you from a worker tag or a worker name.
+  Refer to [Generate a filter in the Admin UI](/boundary/docs/workers/filters#generate-a-filter-in-the-admin-ui).
+
+</Tip>
+
+</Tab>
+<Tab heading="CLI" group="cli">
+
+Set an egress worker filter that matches the self-managed worker's tags:
+
+```shell-session
+$ boundary targets update tcp -id ttcp_uPVxp2NGiD \
+  -egress-worker-filter='"egress" in "/tags/type"'
+```
+
+</Tab>
+<Tab heading="Terraform" group="terraform">
+
+Apply the following Terraform configuration:
+
+```hcl
+resource "boundary_target" "private_web" {
+  type                 = "tcp"
+  name                 = "private-web"
+  description          = "Multi-hop target"
+  scope_id             = boundary_scope.project.id
+  default_port         = 443
+  egress_worker_filter = "\"egress\" in \"/tags/type\""
+}
+```
+
+</Tab>
+</Tabs>
+
+Refer to [Configure a worker filter](/boundary/docs/workers/filters) for more filter examples.
+
+## Test the connection
+
+Connect to the target to confirm that the session traverses the chain:
+
+```shell-session
+$ boundary connect -target-id ttcp_uPVxp2NGiD
+```
+
+If the session fails because no workers match the filter, refer to [Troubleshoot workers](/boundary/docs/workers/troubleshoot#sessions-to-a-target-fail-with-no-available-workers).
+
+## Next steps
+
+After you configure the chain, you can:
+
+- [Verify SSH host identity](/boundary/docs/workers/ssh-host-key) on the worker that connects to targets.
+- [Manage workers](/boundary/docs/workers/manage) to reload configuration or drain sessions.
+- [Configure self-managed workers for HCP Boundary](/hcp/docs/boundary/self-managed-workers) for installation and sizing guidance.

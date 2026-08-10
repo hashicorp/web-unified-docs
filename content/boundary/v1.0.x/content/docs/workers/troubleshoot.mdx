@@ -1,0 +1,373 @@
+---
+layout: docs
+page_title: Troubleshoot workers
+description: >-
+  Diagnose Boundary worker problems. Resolve upstream connection failures, registration errors, worker filter mismatches, and session recording storage issues.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-08-10T22:18:19.000Z
+last_modified: 2026-08-10T22:18:19.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Troubleshoot workers
+
+Boundary workers fail in a small number of recognizable ways.
+A worker cannot reach its upstream, it never finishes registering, a worker filter excludes it from a session, or it runs out of local storage.
+Each of the following symptoms includes the exact error Boundary returns, its cause, and the resolution.
+
+## Collect diagnostic information
+
+Start with the following sources when you diagnose a worker problem:
+
+1. The worker's own events. If you run the worker under systemd, use the following command:
+
+   ```shell-session
+   $ sudo journalctl -u boundary-worker -n 100
+   ```
+
+1. The worker resource on the controller:
+
+   ```shell-session
+   $ boundary workers read -id w_UJ3Qq63Jx0
+   ```
+
+   A stale `Last Status Time` value means the worker stopped reporting to its upstream.
+
+1. The contents of the worker's `auth_storage_path` directory:
+
+   ```shell-session
+   $ ls /var/lib/boundary
+   ```
+
+   A worker that registered has a `nodecreds` directory.
+   A worker that has not registered also has an `auth_request_token` file.
+
+1. The worker's health endpoint, if you configured the worker with a listener that has the `ops` purpose:
+
+   ```shell-session
+   $ curl -s "http://localhost:9203/health?worker_info=1"
+   ```
+
+   The response reports whether the worker can reach its upstream:
+
+   <CodeBlockConfig hideClipboard>
+
+   ```plaintext
+   {"worker_process_info":{"state":"active","active_session_count":0,"upstream_connection_state":"READY"}}
+   ```
+
+   </CodeBlockConfig>
+
+   An `upstream_connection_state` value of `READY` means the worker is connected. Any other value, such as `TRANSIENT_FAILURE`, means it is not.
+
+   <Warning>
+
+     The worker health endpoint always returns `200 OK`, even when the worker cannot reach its upstream.
+     Check the `upstream_connection_state` field in the response body rather than the HTTP status code.
+
+   </Warning>
+
+   Refer to [Boundary health endpoints](/boundary/docs/monitor/health) for the full response reference.
+
+## The worker does not appear in the worker list
+
+**Symptom:** You started the worker, but `boundary workers list` does not include it.
+
+**Cause:** The worker generated a registration request, but no one submitted it to a controller.
+Workers that use the controller-led or worker-led methods do not appear until you register them.
+
+**Resolution:** Check whether the `auth_request_token` file exists in the worker's `auth_storage_path` directory.
+If the file exists, the worker has not registered.
+Complete the registration for the method you chose:
+
+- [Register a worker using the controller-led method](/boundary/docs/workers/registration/controller-led)
+- [Register a worker using the worker-led method](/boundary/docs/workers/registration/worker-led)
+
+Boundary deletes the `auth_request_token` file after the worker registers.
+
+## The worker cannot reach its upstream
+
+**Symptom:** The worker logs the following errors:
+
+<CodeBlockConfig hideClipboard>
+
+```plaintext
+worker.(Worker).upstreamDialerFunc: (nodeenrollment.protocol.Dial) unable to dial to server:
+dial tcp 10.0.0.1:9201: connect: connection refused
+
+worker.monitorUpstreamConnectionState: upstream connection entered transient failure state;
+worker cannot reach upstream
+```
+
+</CodeBlockConfig>
+
+**Cause:** The worker cannot open a TCP connection to the address in `initial_upstreams`.
+The upstream is unreachable, the address is wrong, or a firewall blocks the traffic.
+
+**Resolution:** Complete the following checks:
+
+1. Confirm the upstream address and port in the worker configuration file.
+Workers reach controllers on port `9201` and other workers on port `9202`.
+
+1. Confirm that the worker host can reach the upstream:
+
+   ```shell-session
+   $ nc -vz 10.0.0.1 9201
+   ```
+
+1. Confirm that the upstream controller has a `listener` stanza with the `cluster` purpose, and that it binds an address the worker can reach.
+A controller that binds `127.0.0.1` accepts connections only from its own host.
+
+1. Check your security group or firewall rules for the network path between the worker and its upstream.
+
+## The worker fails TLS handshakes with its upstream
+
+**Symptom:** The worker logs a TLS error rather than a connection error:
+
+<CodeBlockConfig hideClipboard>
+
+```plaintext
+(nodeenrollment.protocol.attemptFetch) error tls handshaking connection on client:
+remote error: tls: internal error
+```
+
+</CodeBlockConfig>
+
+**Cause:** The worker reached its upstream, but the upstream rejected its credentials.
+There are two common causes:
+
+- Someone deleted the worker resource, and the worker restarted with the credentials still stored in its `auth_storage_path` directory.
+The controller no longer recognizes those credentials.
+- For workers that use an external KMS, the `worker-auth` key does not match a key the upstream trusts.
+
+**Resolution:** Complete the following checks:
+
+1. If someone deleted the worker resource, clear the worker's `auth_storage_path` directory and register the worker again.
+A worker that starts with stale credentials does not generate a new activation token.
+Refer to [Clean up and re-register a worker](/boundary/docs/workers/manage#clean-up-and-re-register-a-worker).
+
+1. If the worker connects to a controller, confirm that the worker's `worker-auth` KMS block references the same key as the controller's `worker-auth` block.
+
+1. If the worker connects to another worker, confirm that the worker's `worker-auth` key matches one of the `downstream-worker-auth` keys on the upstream worker.
+Refer to [Authenticate downstream workers](/boundary/docs/workers/multi-hop/downstream-worker-auth).
+
+1. Confirm that the worker host can reach the KMS provider, and that its credentials allow the decrypt operation.
+
+## The worker reports that it is not authorized
+
+**Symptom:** A worker that used to work logs the following error:
+
+<CodeBlockConfig hideClipboard>
+
+```plaintext
+worker.(Worker).upstreamDialerFunc: unknown, unknown: error #0: node is not yet authorized
+```
+
+</CodeBlockConfig>
+
+**Cause:** Someone deleted the worker resource on the controller while the worker process continued to run.
+The credentials in the worker's `auth_storage_path` directory no longer match a worker the controller knows about.
+
+**Resolution:** Complete the following steps:
+
+1. Stop the worker.
+1. Delete the contents of the worker's `auth_storage_path` directory.
+1. Start the worker and [register it](/boundary/docs/workers/registration) again.
+
+Refer to [Clean up and re-register a worker](/boundary/docs/workers/manage#clean-up-and-re-register-a-worker) for the full procedure.
+
+Workers that registered through an external KMS recover on their own.
+They register themselves again the next time they start.
+
+## Registration fails because the token was already used
+
+**Symptom:** The `boundary workers create worker-led` command returns the following error:
+
+<CodeBlockConfig hideClipboard>
+
+```plaintext
+Error information:
+  Kind:      Internal
+  Message:   workers.(Service).CreateWorkerLed: workers.(Service).createInRepo:
+  unable to create worker: server.(Repository).CreateWorker: db.DoTx:
+  server.(Repository).CreateWorker: unable to authorize node: unknown: error #0:
+  (nodeenrollment.registration.AuthorizeNode) authorize node cannot be called on
+  an existing node
+```
+
+</CodeBlockConfig>
+
+**Cause:** Registration tokens are single use, and this worker already registered.
+
+**Resolution:** Check whether the worker already appears in `boundary workers list`.
+If it does, the registration succeeded and you can ignore the error.
+
+To register the worker again, stop the worker and delete both the worker resource and the contents of the `auth_storage_path` directory.
+Start the worker to generate a new token.
+Refer to [Clean up and re-register a worker](/boundary/docs/workers/manage#clean-up-and-re-register-a-worker).
+
+## Sessions to a target fail with no available workers
+
+**Symptom:** The `boundary connect` command returns the following error:
+
+<CodeBlockConfig hideClipboard>
+
+```plaintext
+Error information:
+  Kind:      Internal
+  Message:   server.(Repository).SelectSessionWorkers: server.filterWorkersEnt:
+  No egress workers can handle this session, as they have all been filtered out.:
+  state violation: error #133
+```
+
+</CodeBlockConfig>
+
+Boundary returns the matching error for the ingress side when the ingress worker filter excludes every worker:
+
+<CodeBlockConfig hideClipboard>
+
+```plaintext
+No ingress workers can handle this session, as they have all been filtered out.
+```
+
+</CodeBlockConfig>
+
+**Cause:** The target's worker filter does not match any registered worker.
+Boundary excludes a worker from the filter results if the worker lacks a tag key the filter references.
+
+**Resolution:** Complete the following checks:
+
+1. Read the target and note its ingress and egress worker filters:
+
+   ```shell-session
+   $ boundary targets read -id ttcp_uPVxp2NGiD
+   ```
+
+1. Read the workers you expect to match and compare their `Canonical` tags to the filter:
+
+   ```shell-session
+   $ boundary workers read -id w_pkx59YrH6g
+   ```
+
+1. Confirm that the tag key in the filter exists on the worker.
+A filter such as `"egress" in "/tags/type"` excludes every worker that has no `type` tag.
+
+1. If you changed the tags in the worker configuration file, confirm that you reloaded the worker.
+Refer to [Reload the worker configuration](/boundary/docs/workers/manage#reload-the-worker-configuration).
+
+Refer to [Configure a worker filter](/boundary/docs/workers/filters) for filter syntax.
+
+## Multi-hop sessions fail because a worker does not support multi-hop
+
+**Symptom:** A session to a target that uses a multi-hop chain fails with one of the following errors:
+
+<CodeBlockConfig hideClipboard>
+
+```plaintext
+No ingress workers can handle this multi-hop session.
+```
+
+```plaintext
+No egress workers can handle this multi-hop session.
+```
+
+</CodeBlockConfig>
+
+**Cause:** Boundary matched workers against the target's filters, but then excluded them because they do not support multi-hop sessions.
+Multi-hop requires Boundary version `0.12.0` or later on every worker in the chain.
+
+These errors differ from the `as they have all been filtered out` errors.
+The filter matched at least one worker, but no matching worker runs a version that supports multi-hop.
+
+**Resolution:** Read each worker in the chain and check its release version:
+
+```shell-session
+$ boundary workers list
+```
+
+Compare the `ReleaseVersion` value for each worker against the `0.12.0` minimum, and [upgrade any worker](/boundary/docs/workers/manage#upgrade-a-worker) that runs an earlier version.
+
+## The worker fails to start after you add a known hosts file
+
+**Symptom:** The worker exits at startup with the following error:
+
+<CodeBlockConfig hideClipboard>
+
+```plaintext
+Error initializing worker: error loading ssh known hosts file:
+open /etc/ssh/ssh_known_hosts: no such file or directory
+```
+
+</CodeBlockConfig>
+
+**Cause:** The path in the `ssh_known_hosts_path` parameter does not exist.
+Boundary requires that the file exists before the worker starts.
+
+**Resolution:** Create the known hosts file at the configured path, or remove the `ssh_known_hosts_path` parameter.
+The worker skips host key verification when you omit the parameter.
+Refer to [Verify SSH host identity](/boundary/docs/workers/ssh-host-key).
+
+## The worker fails to start because the address is in use
+
+**Symptom:** The worker exits at startup with the following error:
+
+<CodeBlockConfig hideClipboard>
+
+```plaintext
+Error initializing listener of type tcp: listen tcp 0.0.0.0:9202: bind: address already in use
+```
+
+</CodeBlockConfig>
+
+**Cause:** Another process, often an earlier instance of the worker, still holds the proxy port.
+
+**Resolution:** Find and stop the process that holds the port, then start the worker again:
+
+```shell-session
+$ sudo lsof -i :9202
+```
+
+Confirm that the earlier worker exited.
+A worker in graceful shutdown continues to hold its port until its sessions drain or you send a second interrupt.
+
+## The worker cannot record sessions
+
+**Symptom:** Boundary does not select the worker to record sessions, or session recording fails.
+
+**Cause:** The worker's local storage state is not `available`, or the worker cannot reach the external storage.
+
+**Resolution:** Read the worker and check the `Local Storage State` field:
+
+```shell-session
+$ boundary workers read -id w_pkx59YrH6g
+```
+
+The following values indicate a problem:
+
+- `not configured` - The worker has no `recording_storage_path` value. Add the parameter and restart the worker.
+- `low storage` - Available disk space fell below the `recording_storage_minimum_available_capacity` value.
+- `critically low storage` - Available disk space fell below half the `recording_storage_minimum_available_capacity` value.
+- `out of storage` - The worker has less than 1 MB of available disk space.
+
+To recover, free disk space on the worker.
+The worker returns to the `available` state on its own, without a restart.
+
+<Note>
+
+  A worker in an unhealthy storage state does not return to `available` as soon as it crosses back over the threshold.
+  Available disk space must reach 125 percent of the `recording_storage_minimum_available_capacity` value.
+  Boundary requires the extra headroom so that a worker near the threshold does not flip back and forth between states.
+
+</Note>
+
+Refer to [Configure workers for session recording](/boundary/docs/session-recording/configuration/configure-worker-storage) for the storage requirements, and to [Troubleshoot recorded sessions](/boundary/docs/session-recording/configuration/troubleshoot-recorded-sessions) for recording problems.
+
+## More information
+
+Refer to the following topics for more information:
+
+- [Manage workers](/boundary/docs/workers/manage)
+- [Register workers](/boundary/docs/workers/registration)
+- [Boundary health endpoints](/boundary/docs/monitor/health)
+- [Boundary metrics](/boundary/docs/monitor/metrics)
+- [Monitor events](/boundary/docs/monitor/events/filter-events)

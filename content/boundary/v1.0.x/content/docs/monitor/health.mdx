@@ -2,29 +2,48 @@
 layout: docs
 page_title: Boundary health endpoints
 description: >-
-  Learn about using health endpoints to verify controller and worker server status. Check their health using wget. View an example response and configuration.
+  Verify Boundary controller and worker status using the health endpoint. Configure an ops listener, check a worker with wget, and read the response fields.
 # START AUTO GENERATED METADATA, DO NOT EDIT
-created_at: 2025-11-18T17:04:41-05:00
-last_modified: 2025-11-18T17:04:41-05:00
+created_at: 2026-05-11T10:18:43-04:00
+last_modified: 2026-08-10T22:18:14.000Z
 # END AUTO GENERATED METADATA
 ---
 
 # Boundary health endpoints
 
-Boundary provides health monitoring through the `/health` path using a listener with the `"ops"` purpose. By default, a listener with that purpose runs on port `9203`. See the [example configuration](#example-configuration) section for an example listener stanza in a `config.hcl` file.
+Boundary provides health monitoring through the `/health` path using a listener with the `"ops"` purpose. By default, a listener with that purpose runs on port `9203`. Refer to the [example configuration](#example-configuration) section for an example listener stanza in a configuration file.
+
+Controllers and workers both serve a health endpoint, but they behave differently.
+The controller endpoint reports its status using the HTTP status code.
+The worker endpoint always returns `200 OK`, and reports its status in the response body.
 
 ## Requirements
 
+Both endpoints require a listener with the `ops` purpose in the configuration file of the server you want to monitor.
+
+### Controller health requirements
+
 To enable the controller health endpoint, any Boundary instance must be started with a controller. That is, a `controller` block and a `purpose = "api"`
-listener must be defined in Boundary's configuration file. Additionally, a `purpose = "ops"` listener must also be defined in Boundary's configuration file. Under these conditions, the `ops` server (which hosts the controller health api) will be exposed.
+listener must be defined in Boundary's configuration file. Additionally, a `purpose = "ops"` listener must also be defined in Boundary's configuration file. Under these conditions, Boundary exposes the `ops` server, which hosts the controller health API.
+
+### Worker health requirements
+
+To enable the worker health endpoint, define a `purpose = "ops"` listener in the worker's own configuration file.
+The worker serves its own health endpoint, so you do not query the controller to determine the health of a worker.
+
+If a single Boundary instance runs both a controller and a worker, the instance serves the controller health endpoint.
+In that case, you request the worker information from the controller endpoint using the `worker_info` parameter.
 
 ## Shutdown grace period
 
-Optionally, when the controller health endpoint is enabled, you can configure the controller health response to `503 Service Unavailable` upon receiving a shutdown signal, and wait a configurable amount of time before starting the shutdown process.
+When the controller health endpoint is enabled, you can configure the controller to respond with `503 Service Unavailable` when it receives a shutdown signal.
+The controller then waits a configurable amount of time before it starts the shutdown process.
 
 This feature supports load balancing by reducing the risk of an outgoing Boundary instance causing disruption to incoming requests.
 
-In this state, Boundary is still capable of processing requests as normal, but will report as unhealthy through the controller health endpoint. In load-balanced environments, this would cause this "unhealthy" instance to be removed from the pool of instances eligible to handle requests, reducing the likelihood that it will receive a request to handle during shutdown.
+In this state, Boundary still processes requests as normal, but reports as unhealthy through the controller health endpoint.
+In load-balanced environments, the load balancer removes the unhealthy instance from the pool of instances eligible to handle requests.
+This reduces the likelihood that the instance receives a request during shutdown.
 
 This feature is disabled by default, even if the controller health endpoint is enabled. You can enable it by defining `graceful_shutdown_wait_duration` in the `controller` block of Boundary's configuration file. The value should be set to a string that is parseable by [ParseDuration](https://pkg.go.dev/time#ParseDuration).
 
@@ -38,24 +57,41 @@ The controller health service introduces a single read-only endpoint:
 | `5xx`        | `GET /health` returns HTTP status `5XX` or request timeout if unhealthy |
 | `503`        | `GET /health` returns HTTP status `503 Service Unavailable` status if the controller is shutting down |
 
-All responses return empty bodies. `GET /health` does not support any input.
+All controller responses return empty bodies. `GET /health` does not support any input.
+
+The worker health service uses the same path, but it accepts the `worker_info` query parameter and returns its status in the response body:
+
+| Request | Response |
+|---------|----------|
+| `GET /health` | Returns `200 OK` with an empty JSON object, `{}` |
+| `GET /health?worker_info=1` | Returns `200 OK` with a `worker_process_info` object |
+
+<Warning>
+
+  The worker health endpoint always returns `200 OK`, even when the worker cannot reach its upstream.
+  A health check that tests only the HTTP status code reports a disconnected worker as healthy.
+
+  To determine whether a worker is ready to proxy sessions, request the worker information and check the `upstream_connection_state` field.
+
+</Warning>
 
 ## Check the health endpoint using `wget`
 
 The Boundary Docker image includes `wget`. You can use it to check the health endpoint. Enterprise edition users can check the health of controllers and workers. HCP Boundary users can check the health of their self-managed workers.
 
-Use the following command to check a worker's status to determine if it is healthy:
+Use the following command to check whether a worker is connected to its upstream:
 
 ```shell-session
-$ wget -q -O - http://localhost:9203/health?worker_info=1 | grep -c 'READY'
+$ wget -q -O - http://localhost:9203/health?worker_info=1 | grep -q 'READY'
 ```
 
-- `-q` - Prints the response instead of saving it to a file.
-- `-0` - Allows Boundary to pass the worker's URL.
+- `-q` - Runs in quiet mode, which suppresses the progress output that `wget` writes to `stderr`.
+- `-O -` - Writes the response body to `stdout` instead of saving it to a file.
 
-If the command prints 1 to `stdout` or exits with exit code 0, it means the worker is healthy. If the exit code is greater than 0, the worker is unhealthy.
+The `grep -q 'READY'` command exits with code `0` if the worker's upstream connection is in the `READY` state, and a non-zero code otherwise.
+Because the worker endpoint always returns `200 OK`, you must inspect the response body like this rather than rely on the HTTP status code.
 
-You can also use the following command without `grep -c 'READY'` to print a more verbose response that includes the worker's state, active session count, and connection state:
+Use the following command to print the full response, which includes the worker's state, active session count, and connection state:
 
 ```shell-session
 $ wget -q -O - http://localhost:9203/health?worker_info=1
@@ -63,17 +99,23 @@ $ wget -q -O - http://localhost:9203/health?worker_info=1
 
 ## Example response
 
-When you check the health endpoint using `wget`, Boundary returns a response with the following worker information:
+The following example shows the response from a worker that is connected to its upstream:
+
+<CodeBlockConfig hideClipboard>
 
 ```shell-session
-$ wget -q -O - http://localhost:9203/health?worker_info=1 | grep -c 'READY'
-{"worker_process_info":{"state":"active", "active_session_count":0, "upstream_connection_state":"READY"}}
+$ wget -q -O - http://localhost:9203/health?worker_info=1
+{"worker_process_info":{"state":"active","active_session_count":0,"upstream_connection_state":"READY"}}
 ```
 
-When you check the health endpoint using `curl`, Boundary returns a response with the following worker information:
+</CodeBlockConfig>
+
+You can make the same request using `curl`:
+
+<CodeBlockConfig hideClipboard>
 
 ```shell-session
-$ curl "worker:9403/health?worker_info=1"
+$ curl -s "http://localhost:9203/health?worker_info=1" | jq
 {
    "worker_process_info":{
       "state":"active",
@@ -83,25 +125,46 @@ $ curl "worker:9403/health?worker_info=1"
 }
 ```
 
+</CodeBlockConfig>
+
+If you omit the `worker_info` parameter, the worker returns an empty JSON object:
+
+<CodeBlockConfig hideClipboard>
+
+```shell-session
+$ curl -s "http://localhost:9203/health"
+{}
+```
+
+</CodeBlockConfig>
+
 The response contains the following fields:
 
-- `state` - The operational state of the worker. Possible worker states include active, shutdown, and unknown.
+- `state` - The operational state of the worker. Possible worker states include `active`, `shutdown`, and `unknown`.
 - `active_session_count` - The number of active sessions on the worker.
+- `session_connections` - A map of session IDs to the number of open connections for each session. Boundary omits this field when the worker has no active connections.
 - `upstream_connection_state` - The connection state of the worker. This value indicates whether the worker can connect to an upstream address or connection. It can be any of the following states:
    - `CONNECTING` - The channel is trying to make a connection and is waiting for name resolution or the connection establishment.
    - `READY` - The channel has successfully established a connection, and any attempts to communicate have succeeded.
    - `TRANSIENT_FAILURE` - The channel suffered a transient failure such as a time out or socket error.
-   A channel in this state will switch to the `CONNECTING` state and try to establish a connection.
+   A channel in this state switches to the `CONNECTING` state and tries to establish a connection.
    - `IDLE` - The channel is not attempting to create a connection because there are no calls.
    - `SHUTDOWN` - The channel is shutting down.
    Any new calls fail immediately.
    Pending calls may continue running until Boundary cancels them.
 
+<Note>
+
+  Boundary omits fields that are set to their zero value from the response.
+  A worker that has never connected to an upstream may return only the fields that have values.
+
+</Note>
+
 ## Example configuration
 
-Health checks are available for a controller defined with a `purpose = "ops"` listener stanza. For details on what fields are allowed in this stanza, refer to the documentation about [TCP Listener](/boundary/docs/monitor/listeners/tcp).
+Health checks are available for a controller or worker defined with a `purpose = "ops"` listener stanza. For details on what fields are allowed in this stanza, refer to the documentation about [TCP Listener](/boundary/docs/monitor/listeners/tcp).
 
-An example listener stanza:
+An example controller listener stanza:
 
 ```hcl
 controller {
@@ -122,6 +185,26 @@ listener "tcp" {
 }
 ```
 
+An example worker listener stanza:
+
+```hcl
+worker {
+  auth_storage_path = "/var/lib/boundary"
+  initial_upstreams = ["10.0.0.1:9201"]
+}
+
+listener "tcp" {
+	address = "0.0.0.0:9202"
+	purpose = "proxy"
+}
+
+listener "tcp" {
+	address = "0.0.0.0:9203"
+	purpose = "ops"
+	tls_disable = true
+}
+```
+
 To enable a shutdown grace period, update the `controller` block with a defined wait duration:
 
 ```hcl
@@ -135,3 +218,11 @@ controller {
 ```
 
 A complete example can be found under the [Controller configuration](/boundary/docs/configuration/controller#complete-configuration-example) docs.
+
+## More information
+
+Refer to the following topics for more information:
+
+- [Monitor metrics](/boundary/docs/monitor/metrics) for the controller and worker metrics that Boundary exports
+- [Troubleshoot workers](/boundary/docs/workers/troubleshoot) for common worker problems and their resolutions
+- [Manage workers](/boundary/docs/workers/manage) for the worker life cycle operations
