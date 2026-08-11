@@ -57,13 +57,19 @@ Audit logs are enabled in Vault by configuring an audit device. Audit devices de
 ### Types of audit devices
 #### File audit device
 
-The file audit device writes logs to a file. New logs are appended to the log file. The device does not support log rotation. It is up to the operator to use third-party tools such as _logrotate_ to manage log rotation. Sending a SIGHUP to the Vault process will cause file audit devices to close and re-open their underlying file, which can assist with log rotation needs.
+The file audit device writes logs to a file and is the recommended primary audit device for most Vault deployments. New logs are appended to the log file. The device does not support log rotation. It is up to the operator to use third-party tools such as _logrotate_ to manage log rotation. Sending a SIGHUP to the Vault process will cause file audit devices to close and re-open their underlying file, which can assist with log rotation needs.
 
 <Warning>
 
 It is important to rotate and archive audit log files to prevent it from growing to a size that consumes the entire disk space. Vault will not respond to any API requests if there is a <a href="https://developer.hashicorp.com/vault/tutorials/monitoring/blocked-audit-devices#blocked-file-audit-device">blocked file audit device</a>.
 
 </Warning>
+
+<Note>
+
+Place the file audit device on a dedicated disk volume, separate from Vault's data storage and the operating system root volume. Disk contention between audit logs and Vault's integrated storage can degrade performance, and a full volume is a blocking condition that prevents Vault from responding to requests.
+
+</Note>
 
 Configuration details for this option can be found <a href="https://developer.hashicorp.com/vault/docs/audit/file" target="_blank" rel="noopener">here</a>.
 
@@ -93,13 +99,22 @@ Since the audit log is verbose, we recommend that you only keep a few days of au
 
 #### Syslog audit device
 
-The `syslog` audit device writes audit logs to `syslog`. It does not support remote `syslog` destinations and always sends audit logs to a local `syslog` agent. The `syslog` audit device is usually configured to write to a local file for either log collection or as a second option for audit device configuration.
+The `syslog` audit device writes audit logs to the local `syslog` agent and is the recommended secondary audit device. It does not support remote `syslog` destinations; entries always go to the local agent, which your existing log forwarding infrastructure (`rsyslog`, `syslog-ng`, Fluentd, or Fluent Bit) can route to a centralised SIEM or log aggregation platform. Because the `syslog` device writes using a local Unix socket, enabling it does not add direct disk I/O alongside the file audit device.
 
-Configuration details for this option can be found <a href="https://developer.hashicorp.com/vault/docs/audit/syslog" target="_blank" rel="noopener">here</a>
+<Warning>
+
+Some audit log entries exceed the maximum size of a single UDP packet. If a message exceeds the UDP limit, the Syslog daemon drops it without notification and Vault has no visibility into the loss. Configure your Syslog daemon to use a TCP listener to prevent log drops.
+
+</Warning>
+
+Configuration details for this option can be found <a href="https://developer.hashicorp.com/vault/docs/audit/syslog" target="_blank" rel="noopener">here</a>.
 
 #### Socket audit device
 
-The `socket` audit device writes to a TCP, UDP, or UNIX socket. Due to the unreliable nature of the underlying protocol, we do not recommend enabling the `socket` audit device unless it is absolutely necessary. If you do enable it, always enable a secondary non-socket audit device to ensure accuracy and to guarantee that audit logs will not be lost.
+The `socket` audit device writes to a TCP, UDP, or UNIX socket. We do not recommend the socket audit device as a primary or secondary device. If you do enable it, use a local UNIX socket to a log collection process on the same host and always enable a second non-socket audit device.
+
+- UDP connections drop entries without notification if a log message exceeds the maximum packet size. Vault has no visibility into the loss.
+- TCP connections can cause a blocked audit device if the connection is interrupted, which prevents Vault from responding to requests.
 
 Configuration details for this option can be found <a href="https://developer.hashicorp.com/vault/docs/audit/socket" target="_blank" rel="noopener">here</a>.
 
@@ -117,6 +132,17 @@ There are two types of audit device failures: blocking and non-blocking.
 
 When multiple audit devices are enabled, if any of them fail in a non-blocking fashion, Vault requests can still complete successfully provided at least one audit device successfully writes the audit record. If any of the audit devices fail in a blocking fashion however, Vault requests will hang until the blocking is resolved.
 
+#### Recommended two-device setup
+
+Enable a `file` audit device as your primary and a `syslog` audit device as your secondary. The file device provides a reliable local copy on a dedicated volume for immediate operational access. The `syslog` device integrates with your existing log forwarding infrastructure to deliver entries to your SIEM or log aggregation platform without adding disk I/O.
+
+We recommend configuring the following options on both devices when enabling them:
+
+- `elide_list_responses=true` - omits response bodies from list operation entries, which significantly reduces log volume on active mounts without removing the record that a list occurred.
+- `hmac_accessor=false` - stores token accessors in plaintext. Token accessors are not sensitive; they cannot authenticate as the token. Keeping them readable makes it practical to look up and revoke specific tokens directly from audit log entries.
+
+Vault sends every audit log entry to all enabled devices. When correlating logs across devices or cluster nodes, use the `request.id` field to remove duplicate entries. For guidance on monitoring audit device health with telemetry metrics, refer to the [Audit device metrics](/validated-designs/vault/administration-guide/monitoring-and-observability#audit-device-metrics) section of the observability guide.
+
 **Checking and verification**
 
 Configuring multiple audit devices provides you not only with redundant copies, but also a way to check for data tampering in the logs themselves. We recommend that you set up one audit log for analysis, and another for secure storage and archiving. In case there are concerns about the integrity of the analysis logs, you can refer to the archived logs for verification. For archival purposes, a second audit device should be enabled to write to a filesystem or syslog destination which is configured with strict access control permissions. Read-only access to these logs can be granted in the case where there is a need to reconcile with the main audit log, but otherwise these logs can remain untouched. This ensures there is an unaltered version of the audit log for security review. When writing to a `file` audit backend it is important to monitor disk space on the disk where the logs are being written. If disk space fills up, it will result in a blocked audit device, preventing Vault from responding to requests.
@@ -133,14 +159,14 @@ Audit device configuration is replicated to all nodes within a cluster by defaul
 
 We recommend that you enable a `file` audit device as well as a `syslog` audit device (see [Multiple Audit Devices](#multiple-audit-devices)).
 
-#### Step 1: Ensure you have the correct system permissions
+#### Ensure correct system permissions
 
 It is important to ensure that the Vault process user has the correct system permissions to write to the configured audit device.
 
 For the `file` audit device, the Vault process user must have write access to the location of the file.
 For the `syslog` audit device, the Vault process user must have the correct <a href="http://man7.org/linux/man-pages/man7/capabilities.7.html" target="_blank" rel="noopener">capabilities</a> such as `CAP_SYSLOG` and permissions where required to write to the system log.
 
-#### Step 2: Enable the audit device
+#### Enable the audit device
 
 First, set your root token using the Vault CLI.
 
@@ -155,10 +181,13 @@ The `VAULT_TOKEN` environment variable sets the authentication token that the Va
 
 </Note>
 
-The following command enables a `file` audit device. The output logs are stored in the `/vault/vault-audit.log` file.
+The following command enables a `file` audit device with the recommended options. The audit log is written to the `/vault/vault-audit.log` file.
 
-```
-$ vault audit enable file file_path=/vault/vault-audit.log
+```shell
+$ vault audit enable file \
+  file_path=/vault/vault-audit.log \
+  elide_list_responses=true \
+  hmac_accessor=false
 ```
 
 If the Vault process user does not have permission to write to the file provided in the `file_path` parameter, you can observe the error below.
@@ -172,10 +201,14 @@ Code: 400. Errors:
 * sanity check failed; unable to open "/vault/vault-audit.log" for writing: open /vault/vault-audit.log: permission denied
 ```
 
-The following command enables a `syslog` audit device, specifying the syslog facility and tag to use.
+The following command enables a `syslog` audit device with the recommended options.
 
-```
-$ vault audit enable syslog tag="vault" facility="AUTH"
+```shell
+$ vault audit enable syslog \
+  tag="vault" \
+  facility="AUTH" \
+  elide_list_responses=true \
+  hmac_accessor=false
 ```
 
 If syslog is not accessible on the system, you can observe errors in the operational log like this when Vault tries to write to it, and when you first try to enable it.
@@ -200,7 +233,39 @@ A typical audit log entry can be 1kb-3kb, meaning a node servicing 10,000 reques
 
 </Note>
 
-For more information on how to use the audit log, please refer to the [Audit Usage](/validated-designs/vault/administration-guide/monitoring-and-observability#audit-logs) section of this document.
+#### Verify both audit devices are active
+
+Confirm that both devices are enabled before proceeding with further configuration.
+
+```shell
+$ vault audit list
+Path     Type    Description
+----     ----    -----------
+file/    file    n/a
+syslog/  syslog  n/a
+```
+
+The output lists each enabled audit device with its path and type. Both `file/` and `syslog/` appear in the output. If either device is missing, Vault is not logging to it and you must investigate before continuing.
+
+For more information on audit log usage patterns, query guidance, and a reference of the log entry schema, refer to the [Vault audit log](/validated-designs/vault/administration-guide/monitoring-and-observability#audit-logs) section of the observability guide.
+
+### Enterprise audit device features
+
+Vault Enterprise provides additional controls for managing audit log volume and routing in high-throughput deployments.
+
+#### Audit device filtering
+
+Vault Enterprise 1.16 and later. Configure predicate expressions on an audit device to control which entries it receives. Common uses include routing high-volume secrets engine traffic (such as Transit encryption operations) to a dedicated device, and excluding status or health-check paths from your primary audit log. Configure filtering with the `filter` option when enabling or tuning an audit device.
+
+#### Fallback audit device
+
+If all non-fallback audit devices filter out an entry, that entry is permanently lost. Designate one audit device per Vault cluster as the fallback using `fallback=true`. The fallback device captures any entries that no other device accepts.
+
+#### Audit entry exclusion
+
+Vault Enterprise 1.18 and later. Configure JSON condition expressions to exclude specific fields from audit entries on a per-device basis. This reduces the size of entries from high-throughput operations where the response payload is large and not required for compliance purposes.
+
+For full configuration details, see the [Vault Enterprise audit documentation](https://developer.hashicorp.com/vault/docs/enterprise/audit).
 
 ## Namespaces
 
