@@ -111,9 +111,9 @@ You can configure the following types of gateways:
 - _Terminating gateways_ - Lets services be connected services externally
 ```
 
-## Do not use parentheses, en dashes, em dashes, colons, or semicolons in prose
+## Do not use parentheses, en dashes, em dashes, colons, or semicolons to combine ideas or sentences
 
-- **keywords**: grammar, punctuation, parentheses, dashes  
+- **keywords**: grammar, punctuation, parentheses, dashes, colons, semicolons  
 - **content sets**: docs, WAF, tutorials, certifications
 
 Don't use specialized punctuation to combine ideas or sentences. Use commas to separate phrases and periods to separate ideas. Refer to [Write sentences that contain a single idea](content-organization#write-simple-sentences-that-contain-a-single-idea) for more information.
