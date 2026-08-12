@@ -13,7 +13,7 @@ last_modified: 2025-10-29T10:56:20-04:00
 
 Workers authenticate to Boundary using an activation token. They require an
 accessible directory defined by `auth_storage_path` for credential storage and
-rotation. Transport level communication between the worker & Controller is secured through PKI.
+rotation. Transport level communication between the worker and controller is secured through PKI.
 
 Example (not safe for production!):
 
@@ -24,11 +24,9 @@ worker {
 }
 ```
 
-## Authorization methods
+There are three mechanisms that can be used to initially register a worker to the cluster, controller-led, worker-led, and registration through an external KMS.
 
-There are three mechanisms that can be used to initially register a worker to the cluster, Controller-Led, Worker-Led, and registration through an external KMS.
-
-### Controller-led authorization flow
+## Controller-led authorization
 
 In this flow, the operator fetches an activation token from the controller's
 `workers:create:controller-led` action (on the CLI, this is via `boundary
@@ -51,13 +49,13 @@ cluster. Note that this token is one-time-use; it is safe to keep it here even
 after the worker has successfully authorized and authenticated, as it will be
 unusable at that point.
 
-Note: If this value is not present at worker startup time and the worker is not
+If this value is not present at worker startup time and the worker is not
 authorized, it will print and write out suitable information for the worker-led
 flow, described below. If the worker-led flow has not been used to
 authorize the worker, and the controller-generated activation token is provided
 and the worker restarted, it will make use of it.
 
-### Worker-led authorization flow
+## Worker-led authorization
 
 In this flow, the worker prints out an authorization request token to two
 places: the startup information printed to stdout, and a file called
@@ -66,14 +64,12 @@ token can be submitted to a controller at the `workers:create:worker-led` path;
 on the CLI this would be via `boundary workers create worker-led
 -worker-generated-auth-token`. No values are needed in the configuration file.
 
-### KMS-led authorization & authentication flow
+### KMS-led authorization and authentication
 
 In this flow, the worker authenticates upstream, either to a controller or worker, using a shared KMS provided by the customer. This mechanism auto-registers the worker in addition to authenticating it, and does not require on-disk storage for credentials since each time it connects, it re-authenticates using the trusted KMS.
 
-Optionally with the Multi-Hop workers feature, trusted Workers can authenticate downstream nodes using a separate KMS.
-
 Workers using KMS-led authorization require a `name` field. This specifies a unique name of this worker
-within the Boundary cluster and _must be unique across workers_. The `name`
+within the Boundary cluster and must be unique across workers. The `name`
 value can be:
 - a direct name string (must be all lowercase)
 - a reference to a file on disk (`file://`) from which the name is read
@@ -108,32 +104,7 @@ The upstream controller or worker must have a `kms` block that references the
 same key and purpose. If both a controller and worker are running as the same
 server process, only one stanza is needed.
 
-For Multi-Hop workers, It is also possible to specify a `kms` block with the `downstream-worker-auth` purpose. If specified, this will be a separate KMS that can be used for authenticating new downstream nodes. Blocks with this purpose can be specified multiple times. This allows a single upstream node to authenticate with one key to its own upstream (via the `worker-auth` purpose) and then serve as an authenticating upstream to nodes
-across various networks, each with their own separate KMS system or key:
-
-```hcl
-kms "aead" {
-	purpose = "downstream-worker-auth"
-	aead_type = "aes-gcm"
-	key = "XthZVtFtBD1Bw1XwAWhZKVrIwRhR7HcZ"
-	key_id = "iot-nodes-auth"
-}
-
-kms "aead" {
-	purpose = "downstream-worker-auth"
-	aead_type = "aes-gcm"
-	key = "OLFhJNbEb3umRjdhY15QKNEmNXokY1Iq"
-	key_id = "production-nodes-auth"
-}
-```
-
-In the examples above we are encoding key bytes directly in the configuration
-file. This is because we are using the `aead` method where you directly supply a
-key; in production you'd want to use a KMS such as AWS KMS, GCP CKMS, Azure
-KeyVault, or HashiCorp Vault. For a complete guide to all available KMS types,
-refer to [Data encryption in Boundary](/boundary/docs/secure/encryption/data-encryption).
-
-## Complete configuration example
+### Complete configuration example
 
 ```hcl
 listener "tcp" {
@@ -174,15 +145,122 @@ kms "aead" {
 [`initial_upstreams`](/boundary/docs/configuration/workers#initial_upstreams)
 are used to connect to upstream Boundary clusters.
 
-## Resources
+### Downstream worker authentication in multi-hop deployments
 
-For more on how `tags{}` in the above configuration are used to facilitate
-routing to the correct target, refer to [Route traffic through a worker](/boundary/docs/workers/worker-tags).
+In multi-hop deployments, Boundary distinguishes between upstream and downstream workers:
 
+- An upstream worker connects directly to controllers or to another upstream worker.
+It authenticates using a KMS key with the `worker-auth` purpose.
+- A downstream worker connects to an upstream worker instead of directly to controllers.
+It authenticates using the same KMS-based mechanism, but its trust anchor is the upstream worker rather than a controller.
 
-## KMS configuration
+You configure the `downstream-worker-auth` KMS purpose only on upstream workers.
+This configuration tells the upstream worker which KMS keys to trust when it validates authentication tokens presented by downstream workers.
 
-When using Controller or Worker-led Authentication, a worker’s generated activation token is stored in clear-text on disk. Using an external KMS, a Workers' credentials can be encrypted by including an optional KMS stanza with the purpose `worker-auth-storage`.
+Downstream workers use a `worker-auth` KMS stanza that references the same key material or an equivalent key in the same KMS backend.
+The upstream worker uses a corresponding `downstream-worker-auth` stanza that points to that key.
+
+This model lets you:
+
+- Use a single KMS key for controller-to-worker trust, `worker-auth`
+- Use different KMS keys, or even different KMS backends, to isolate downstream networks, `downstream-worker-auth`
+- Delegate authentication of edge workers to trusted upstream workers without exposing controller KMS keys in those environments.
+
+#### Multiple `downstream-worker-auth` keys per upstream worker
+
+You can specify multiple `kms` blocks with the `purpose = "downstream-worker-auth"` attribute on a single upstream worker.
+Each block represents a separate trust domain for downstream workers.
+
+Some typical use cases include:
+
+- Different networks or environments - You could configure one key per data center or per cloud account, for example.
+- Different sensitivity levels - You could configure separate keys for production or non-production downstream workers.
+- Gradual migration - You could bring new downstream workers online using a new key, while existing workers continue to use the old key so that you gradually phase out the older key.
+
+A downstream worker must use a `worker-auth` stanza that references one of the keys configured with `downstream-worker-auth` on its upstream.
+The upstream worker rejects any downstream workers that present tokens derived from unknown keys.
+
+#### Operational considerations for `downstream-worker-auth`
+
+When you design multi-hop topologies that use `downstream-worker-auth`, keep the following considerations in mind:
+
+- Key rotation - Rotating a `downstream-worker-auth` key requires coordinating the changes on both the upstream and all affected downstream workers.
+Staggered roll outs in which you add a new key, migrate workers, and then remove the old key minimize downtime.
+- Blast radius - Because a `downstream-worker-auth` key defines a trust domain, isolating different environments with distinct keys limits the impact of a compromised key.
+- KMS backends - Upstream workers can use different KMS backends for `worker-auth` and `downstream-worker-auth`.
+For example, controllers might use an on-premises KMS, while edge workers use a cloud KMS in the target region.
+- Auditability - Authentication events for workers are recorded in the event log.
+You can correlate them with the `name` and the KMS key used to help you verify which trust domain a worker belonged to at a given point in time.
+
+### Multi-hop example configuration
+
+The following example shows a controller, an ingress worker that connects to the controller, and an egress worker that connects only to the ingress worker:
+
+Controller configuration:
+
+```hcl
+# Controller uses worker-auth to authenticate workers that connect directly.
+kms "awskms" {
+  purpose    = "worker-auth"
+  key_id     = "arn:aws:kms:us-east-1:111111111111:key/controller-workers"
+  region     = "us-east-1"
+}
+
+controller {
+  # ...
+}
+```
+
+Ingress (upstream) worker configuration:
+
+```hcl
+worker {
+  name             = "ingress-1"
+  initial_upstreams = ["10.0.0.10:9201"] # controller
+  public_addr      = "ingress-1.example.internal"
+}
+
+# Used to authenticate the ingress worker to the controllers
+kms "awskms" {
+  purpose    = "worker-auth"
+  key_id     = "arn:aws:kms:us-east-1:111111111111:key/controller-workers"
+  region     = "us-east-1"
+}
+
+# Used by the ingress worker to authenticate downstream workers
+kms "awskms" {
+  purpose    = "downstream-worker-auth"
+  key_id     = "arn:aws:kms:us-east-1:111111111111:key/edge-workers"
+  region     = "us-east-1"
+}
+```
+
+Egress (downstream) worker configuration:
+
+```hcl
+worker {
+  name              = "egress-1"
+  initial_upstreams = ["ingress-1.example.internal:9201"]
+  public_addr       = "egress-1.example.internal"
+}
+
+# Used to authenticate the egress worker to its upstream (ingress-1)
+kms "awskms" {
+  purpose    = "worker-auth"
+  key_id     = "arn:aws:kms:us-east-1:111111111111:key/edge-workers"
+  region     = "us-east-1"
+}
+```
+
+In this topology:
+
+- The controller and ingress worker share the `worker-auth` key `controller-workers`.
+- The ingress worker and egress worker share a different key, `edge-workers`.
+- The ingress worker has both purposes configured, `worker-auth` and `downstream-worker-auth`, allowing it to act as a client to controllers and as an authenticating upstream for additional workers.
+
+## KMS registration
+
+When you use controller or worker-led authentication, a worker’s generated activation token is stored in clear-text on disk. When you use an external KMS, you can encrypt a worker's credentials by including an optional KMS stanza with the purpose `worker-auth-storage`.
 
 Example (not safe for production!):
 ```hcl
@@ -196,6 +274,11 @@ kms "aead" {
 
 <Note>
 
-The `name` and `description` fields are not valid configuration fields for workers that use worker-led or controller-led authorization. You can only set these fields through the API and they are only valid for workers that use the [KMS authorization method](/boundary/docs/workers/registration#kms-led-authorization-authentication-flow).
+You can only set the `name` and `description` fields for workers that use the [KMS-led authorization and authentication method](/boundary/docs/workers/registration#kms-led-authorization-and-authentication).
 
 </Note>
+
+## Resources
+
+For more on how `tags{}` in the above configuration are used to facilitate
+routing to the correct target, refer to [Route traffic through a worker](/boundary/docs/workers/worker-tags).

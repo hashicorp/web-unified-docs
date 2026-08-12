@@ -1,25 +1,725 @@
 ---
-page_title: CircleCI
-description: Learn how to integrate CircleCI with HashiCorp Vault for secure secrets management.
+page_title: Secure CircleCI secrets with HashiCorp Vault
+description: Learn how to secure CircleCI CI/CD secrets with HashiCorp Vault using JWT/OIDC, self-hosted runner auth patterns, and least-privilege Vault policies.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2025-07-16T16:24:50-05:00
-last_modified: 2025-08-06T17:40:00-05:00
+last_modified: 2026-05-04T19:59:51.000Z
 # END AUTO GENERATED METADATA
 ---
 
-# CircleCI
+# Secure CircleCI secrets with HashiCorp Vault
 
-[CircleCI](https://circleci.com/) uses [OIDC tokens](https://circleci.com/docs/openid-connect-tokens) to authenticate with Vault.
-Vault [supports OIDC](/vault/docs/auth/jwt) and
-has a lab to help practitioners learn Vault's [OIDC Auth Method](/vault/tutorials/auth-methods/oidc-auth).
-We recommend practitioners complete the lab before setting up CircleCI Vault integration.
+CircleCI can issue a signed OIDC token for jobs that use OIDC-based identity
+patterns. The token contains claims that identify what is running — including
+the organization, project, context membership, and VCS branch. This makes
+JWT/OIDC auth the natural integration point for most CircleCI deployments: no
+credential pre-provisioning, no long-lived secrets stored in CircleCI, and a
+Vault token scoped to the duration of the job.
 
-- Rosemary Wang (Developer Advocate, HashiCorp) pairs with Angel Rivera (Developer Advocate, CircleCI) to inject static secrets from HashiCorp Vault into a CircleCI pipeline in their [HashiTalks video](https://www.youtube.com/watch?v=l6lG7FR5_Ow).
-  - Video Resources:
-    - [Code examples](https://github.com/punkdata/nodejs-circleci/tree/vault) from the video
-    - [CircleCI Configuration Reference](https://circleci.com/docs/configuration-reference)
-    - [HashiCorp Vault AppRole Auth Method](/vault/docs/auth/approle)
+CircleCI's OIDC issuer URL is unique to each organization rather than shared
+across the platform. Vault must be configured with your specific organization's
+discovery URL, and in multi-organization environments each organization requires
+its own JWT auth configuration in Vault.
+
+<VideoEmbed url="https://www.youtube.com/watch?v=l6lG7FR5_Ow" />
+
+## Architecture
+
+The job-to-Vault authentication flow follows the same high-level pattern as the
+other CI/CD integrations in this section, but the verification step here is
+based on CircleCI-issued OIDC tokens:
+
+1. CircleCI platform issues an org-scoped OIDC token to the job, available as `$CIRCLE_OIDC_TOKEN_V2`
+1. The job presents the token to Vault's JWT auth endpoint
+1. Vault fetches signing keys from the org-specific CircleCI OIDC discovery URL and validates the token signature
+1. Vault evaluates `bound_claims` against CircleCI-specific claims such as
+   project ID, context membership, and VCS ref to match a Vault role
+1. Vault issues a short-lived token scoped to the policies attached to the matching role
+
+The job can now retrieve secrets based on the policy for that role.
+
+![Diagram showing JWT authentication flow between CircleCI and Vault](/img/well-architected-framework/diagram-cicd-circleci-auth.png#light-theme-only)
+![Diagram showing JWT authentication flow between CircleCI and Vault](/img/well-architected-framework/diagram-cicd-circleci-auth-dark.png#dark-theme-only)
+
+### Runner hosting and auth method selection
+
+The right auth method depends on where CircleCI executors run. JWT/OIDC auth
+works for all executor types because CircleCI issues an OIDC token regardless
+of the underlying infrastructure. However, when jobs run on infrastructure you
+control, additional auth methods become available that can provide stronger
+identity guarantees or remove the dependency on CircleCI's token issuer entirely.
+
+- **CircleCI cloud executors** — JWT/OIDC is the practical option. You do
+  not control the underlying infrastructure, so there is no instance or pod
+  identity to leverage.
+- **Self-hosted runners on Kubernetes** — Kubernetes auth is available in
+  addition to JWT. The runner pod's service account token is verified directly
+  by the cluster API, independent of CircleCI.
+- **Self-hosted runners on AWS, Azure, or GCP** — Cloud provider auth methods
+  (AWS IAM, Azure Managed Identity, GCP IAM) are available. The runner instance
+  or container already has a platform identity that Vault can validate against
+  the cloud provider's API — no credential to provision or rotate.
+- **Self-hosted runners on bare metal or air-gapped environments** — AppRole
+  with response wrapping, or TLS certificate auth for persistent runner fleets.
+  In air-gapped CircleCI Server environments where OIDC token issuance is not
+  available, AppRole becomes the required fallback.
+
+## Authentication options
+
+Use JWT/OIDC auth for CircleCI cloud executors and for self-hosted runners where
+CircleCI-issued workload identity is the most practical identity source. For
+self-hosted runners, choose the auth method that best matches the underlying
+infrastructure.
+
+The following table summarizes when each auth method fits best.
+
+| Auth method | Security posture | Credential lifecycle | Best suited for |
+|---|---|---|---|
+| JWT / OIDC | High; per-job identity bound to CircleCI project and context metadata | Token issued per job by CircleCI, no rotation needed | CircleCI cloud executors; self-hosted runners with access to CircleCI's OIDC endpoint |
+| Cloud provider auth methods | Highest for cloud-hosted runners; identity is the platform infrastructure itself | Managed by cloud provider; no rotation required | Self-hosted runners on EC2, Azure VMs/ACI, or GCE instances with an assigned instance identity |
+| Kubernetes | Highest for in-cluster; service account token verified directly by the cluster API | Short-lived projected service account token, auto-rotated by Kubernetes | Self-hosted runners deployed as pods in a Kubernetes cluster |
+| TLS Certificate | High; mutual authentication | Certificate with defined expiry; requires rotation process | Long-lived, persistent runner fleets where mTLS is part of the existing security posture |
+| AppRole | Moderate; requires secure secret ID delivery | Secret ID is single-use with response wrapping; RoleID is long-lived | Air-gapped CircleCI Server installations; environments where no platform identity is available |
+
+<Tabs>
+<Tab heading="JWT / OIDC">
+
+JWT auth is the right choice for most CircleCI jobs, whether using CircleCI
+cloud executors or self-hosted runners that can reach CircleCI's OIDC endpoint.
+
+There are two important structural differences from other platforms. First,
+many CircleCI Vault integration patterns use a context so the job can access
+shared configuration and claim-based controls tied to that context. Second,
+CircleCI provides two token versions:
+`$CIRCLE_OIDC_TOKEN` (v1) and `$CIRCLE_OIDC_TOKEN_V2`. Prefer v2 — it uses a
+more precise `sub` claim format and is the version CircleCI recommends for new
+integrations.
+
+CircleCI's OIDC token contains the following claims that Vault can use as
+binding conditions:
+
+| Claim | Example value | Use for |
+|---|---|---|
+| `sub` | `org/org_id/project/project_id/user/user_id` | Primary identity combining org, project, and user |
+| `oidc.circleci.com/project-id` | `abc123-...` | Restrict to a specific project |
+| `oidc.circleci.com/context-ids` | `["uvw456-..."]` | Restrict to jobs that have access to specific contexts |
+| `oidc.circleci.com/vcs-origin` | `https://github.com/org/repo` | Restrict to a specific VCS repository |
+| `oidc.circleci.com/vcs-ref` | `refs/heads/main` | Restrict to a specific branch or tag |
+
+The `oidc.circleci.com/context-ids` claim is one of the most useful
+CircleCI-specific security controls. Binding a Vault role to a specific context
+UUID means a job must have been explicitly granted access to that context by a
+CircleCI organization admin before it can authenticate. This creates a two-
+factor access model: project identity plus operator-controlled context
+membership.
+
+### Role configuration
+
+CircleCI's namespaced claims use dot-notation keys that require the
+claim names to be matched exactly as written. CircleCI's `sub` claim is a normal
+top-level string claim, not a JSON pointer path. An unconstrained role
+that accepts any JWT from your CircleCI organization gives every project access
+to those secrets — always bind to at minimum `project-id` and where possible
+also to `context-ids`.
+
+```shell
+# Vault JWT auth config — issuer URL is org-specific, not a global CircleCI URL
+# Each CircleCI organization requires its own JWT auth configuration in Vault
+vault write auth/jwt/config \
+  oidc_discovery_url="https://oidc.circleci.com/org/your-org-id" \
+  bound_issuer="https://oidc.circleci.com/org/your-org-id"
+
+# Vault role scoped to a specific project and context
+vault write auth/jwt/role/circleci-production-deploy \
+  role_type=jwt \
+  user_claim=sub \
+  bound_audiences="your-org-id" \
+  bound_claims='{
+    "oidc.circleci.com/project-id": "your-project-id",
+    "oidc.circleci.com/context-ids": ["your-context-id"],
+    "oidc.circleci.com/vcs-ref": "refs/heads/main"
+  }' \
+  token_policies=circleci-production-deploy-policy \
+  ttl=15m
+```
+
+The JWT auth configuration trusts only your CircleCI organization's OIDC issuer.
+The role then narrows access to a specific project, context, and branch before
+Vault issues a token.
+
+### Workflow configuration
+
+The following example uses a context to provide shared configuration such as the
+Vault address and role name. If you use context-based claim restrictions in
+Vault, the job must reference the matching context.
+
+```yaml
+version: 2.1
+
+jobs:
+  deploy:
+    docker:
+      - image: hashicorp/vault:1.19
+    steps:
+      - checkout
+      - run:
+          name: Retrieve secrets from Vault
+          command: |
+            # Authenticate using the CircleCI OIDC token (v2)
+            # This example uses the v2 token together with a production context
+            export VAULT_TOKEN=$(vault write -field=token auth/jwt/login \
+              role=circleci-production-deploy \
+              jwt=$CIRCLE_OIDC_TOKEN_V2)
+
+            # Retrieve only the secrets this job needs
+            export DATABASE_PASSWORD=$(vault kv get \
+              -field=password secret/ci/production/db)
+            export API_KEY=$(vault kv get \
+              -field=key secret/ci/production/api)
+
+            # Pass to subsequent steps via BASH_ENV
+            echo "export DATABASE_PASSWORD=$DATABASE_PASSWORD" >> $BASH_ENV
+            echo "export API_KEY=$API_KEY" >> $BASH_ENV
+      - run:
+          name: Deploy
+          command: deploy.sh
+
+workflows:
+  deploy:
+    jobs:
+      - deploy:
+          context:
+            # Store VAULT_ADDR and VAULT_ROLE here, not secrets
+            - vault-production
+```
+
+The job exchanges the CircleCI OIDC token for a short-lived Vault token, then
+retrieves only the secrets required for the deployment. The CircleCI context
+supplies shared configuration and, when used in `bound_claims`, adds an
+additional authorization boundary.
+
+If your pipeline needs to authenticate with a custom `aud` claim — for example,
+to differentiate Vault tokens from other cloud provider OIDC flows in the same
+job — generate a token with a custom audience using the CircleCI CLI:
+
+```yaml
+- run:
+    name: Retrieve secrets with custom audience
+    command: |
+      CUSTOM_TOKEN=$(circleci run oidc get --claims '{"aud": "vault"}')
+      export VAULT_TOKEN=$(vault write -field=token auth/jwt/login \
+        role=circleci-production-deploy \
+        jwt=$CUSTOM_TOKEN)
+```
+
+This pattern is useful when the same job participates in multiple OIDC-based
+trust flows and you want Vault-specific audience separation.
+
+</Tab>
+<Tab heading="Cloud provider auth methods">
+
+When self-hosted CircleCI runners execute on cloud infrastructure, the instance
+or container already has a platform identity that Vault can validate against
+the cloud provider's API. This avoids storing cloud credentials in CircleCI
+to bootstrap Vault login.
+
+<Tabs>
+<Tab heading="AWS">
+
+CircleCI self-hosted runners on EC2 instances or ECS tasks with an IAM role
+attached can authenticate to Vault using the AWS auth method. Vault calls AWS
+STS to validate the instance or task role identity. No credential needs to be
+provisioned on the runner.
+
+### Role configuration
+
+Bind the Vault role to the specific IAM role ARN attached to your runner
+instances. The `iam` auth type is preferred over `ec2` — it works for both
+EC2 and ECS and validates against the assumed-role ARN.
+
+```shell
+# Vault role bound to the IAM role attached to CircleCI runner instances
+vault write auth/aws/role/circleci-runner \
+  auth_type=iam \
+  bound_iam_principal_arn=arn:aws:iam::123456789012:role/circleci-runner-role \
+  token_policies=circleci-runner-policy \
+  ttl=1h
+```
+
+The role binds Vault authentication to the IAM role attached to the runner.
+Vault issues a token only when the runner proves that AWS identity.
+
+### Workflow configuration
+
+```yaml
+version: 2.1
+
+jobs:
+  build:
+    machine: true
+    resource_class: your-namespace/your-runner-name  # Required: targets your self-hosted runner on EC2
+    steps:
+      - checkout
+      - run:
+          name: Retrieve secrets via AWS IAM auth
+          command: |
+            # No credentials required — AWS metadata service provides identity
+            export VAULT_TOKEN=$(vault login -method=aws -field=token \
+              role=circleci-runner)
+
+            export REGISTRY_PASSWORD=$(vault kv get \
+              -field=password secret/ci/build/registry)
+
+            echo "export REGISTRY_PASSWORD=$REGISTRY_PASSWORD" >> $BASH_ENV
+
+workflows:
+  build:
+    jobs:
+      - build
+```
+
+The runner logs in to Vault with its AWS identity and retrieves only the secret
+needed for the build. This avoids storing a bootstrap credential in CircleCI.
+
+If Vault is configured with `iam_server_id_header_value`, include the matching
+`header_value` argument in the login command.
+
+</Tab>
+<Tab heading="Azure">
+
+CircleCI self-hosted runners on Azure VMs or Azure Container Instances with a
+managed identity assigned can authenticate to Vault using the Azure auth method.
+Vault validates the identity against the Azure Instance Metadata Service (IMDS).
+No credential needs to be provisioned on the runner.
+
+### Role configuration
+
+Bind the Vault role to the managed identity's service principal ID and Azure
+subscription. This ensures only runners with that specific managed identity can
+authenticate.
+
+```shell
+# Vault role bound to the managed identity assigned to CircleCI runner VMs
+vault write auth/azure/role/circleci-runner \
+  token_policies=circleci-runner-policy \
+  bound_subscription_ids=your-subscription-id \
+  bound_resource_groups=your-resource-group \
+  bound_service_principal_ids=your-managed-identity-object-id \
+  ttl=1h
+```
+
+The role binds Vault authentication to the managed identity assigned to the
+runner. Vault issues a token only when the runner presents the expected Azure
+identity.
+
+### Workflow configuration
+
+```yaml
+version: 2.1
+
+jobs:
+  build:
+    machine: true
+    resource_class: your-namespace/your-runner-name  # Required: targets your self-hosted runner on Azure VM
+    steps:
+      - checkout
+      - run:
+          name: Retrieve secrets via Azure Managed Identity auth
+          command: |
+            AZURE_JWT=$(curl -s -H "Metadata: true" \
+              "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://management.azure.com/" \
+              | jq -r '.access_token')
+
+            # bound_service_principal_ids is set on the role — no VM metadata required
+            export VAULT_TOKEN=$(vault write -field=token auth/azure/login \
+              role=circleci-runner \
+              jwt=$AZURE_JWT)
+
+            export REGISTRY_PASSWORD=$(vault kv get \
+              -field=password secret/ci/build/registry)
+
+            echo "export REGISTRY_PASSWORD=$REGISTRY_PASSWORD" >> $BASH_ENV
+
+workflows:
+  build:
+    jobs:
+      - build
+```
+
+The runner retrieves an Azure access token from IMDS, exchanges it for a Vault
+token, and then reads only the secret needed for the build.
+
+</Tab>
+<Tab heading="GCP">
+
+CircleCI self-hosted runners on Google Compute Engine instances with a service
+account attached can authenticate to Vault using the GCP auth method. Vault
+validates the runner's identity against Google Cloud. For self-hosted runners on
+GCE, use an `iam` role when you want to bind authentication to the attached
+service account identity. No credential needs to be provisioned on the runner.
+
+### Role configuration
+
+Bind the Vault role to the specific GCP service account email attached to your
+runner instances.
+
+```shell
+# Vault role bound to the service account attached to CircleCI runner instances
+vault write auth/gcp/role/circleci-runner \
+  type=iam \
+  token_policies=circleci-runner-policy \
+  bound_service_accounts=circleci-runner@your-project.iam.gserviceaccount.com \
+  ttl=1h
+```
+
+The role binds Vault authentication to the Google Cloud service account attached
+to the runner. Vault issues a token only when the runner presents that GCP
+identity.
+
+### Workflow configuration
+
+```yaml
+version: 2.1
+
+jobs:
+  build:
+    machine: true
+    resource_class: your-namespace/your-runner-name  # Required: targets your self-hosted runner on GCE
+    steps:
+      - checkout
+      - run:
+          name: Retrieve secrets via GCP IAM auth
+          command: |
+            export VAULT_TOKEN=$(vault login -method=gcp -token-only \
+              role=circleci-runner)
+
+            export REGISTRY_PASSWORD=$(vault kv get \
+              -field=password secret/ci/build/registry)
+
+            echo "export REGISTRY_PASSWORD=$REGISTRY_PASSWORD" >> $BASH_ENV
+
+workflows:
+  build:
+    jobs:
+      - build
+```
+
+The runner logs in with its Google Cloud identity instead of using a bootstrap
+credential stored in CircleCI. The resulting Vault token is then used only for
+the required secret read.
+
+</Tab>
+</Tabs>
+
+</Tab>
+<Tab heading="Kubernetes">
+
+When CircleCI self-hosted runners are deployed as pods in a Kubernetes cluster,
+each runner pod has a projected service account token that Vault can validate
+directly against the Kubernetes API. This is more authoritative than the
+CircleCI JWT in that context and does not introduce a dependency on CircleCI's
+OIDC endpoint.
+
+### Role configuration
+
+The Vault role binds to the runner's service account and namespace, following
+the same pattern as any other Kubernetes workload.
+
+```shell
+# Vault role for CircleCI self-hosted runner pods on Kubernetes
+vault write auth/kubernetes/role/circleci-runner \
+  bound_service_account_names=circleci-runner-sa \
+  bound_service_account_namespaces=circleci-runners \
+  token_policies=circleci-runner-policy \
+  ttl=1h
+```
+
+The role ties Vault access to a specific Kubernetes service account and
+namespace. Vault accepts only runner pod identities from that workload
+boundary.
+
+### Workflow configuration
+
+The runner pod already has the service account token mounted at the default
+path. Authenticate to Vault using the Kubernetes auth method directly in
+the job step:
+
+```yaml
+version: 2.1
+
+jobs:
+  build:
+    docker:
+      - image: hashicorp/vault:1.19
+    resource_class: your-namespace/your-runner-name  # Required: targets your self-hosted runner pod on Kubernetes
+    steps:
+      - checkout
+      - run:
+          name: Retrieve secrets via Kubernetes auth
+          command: |
+            export VAULT_TOKEN=$(vault write -field=token auth/kubernetes/login \
+              role=circleci-runner \
+              jwt=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token))
+
+            export REGISTRY_PASSWORD=$(vault kv get \
+              -field=password secret/ci/build/registry)
+
+            echo "export REGISTRY_PASSWORD=$REGISTRY_PASSWORD" >> $BASH_ENV
+
+workflows:
+  build:
+    jobs:
+      - build
+```
+
+The runner authenticates with the pod's projected service account token and
+retrieves only the secret required for the build. This keeps the trust boundary
+inside the Kubernetes cluster.
+
+</Tab>
+<Tab heading="TLS Certificate">
+
+TLS cert auth applies when self-hosted runners are long-lived, persistent agents
+rather than ephemeral cloud instances or pods. Vault validates the client
+certificate presented during the connection, with the certificate's CN or SANs
+serving as the identity binding. Certificate lifecycle management for these
+runners should itself use Vault's PKI secrets engine to keep rotation automated.
+
+### Role configuration
+
+```shell
+# Vault TLS cert role for a persistent on-premise CircleCI runner fleet
+vault write auth/cert/certs/circleci-runner-fleet \
+  display_name=circleci-runner-fleet \
+  certificate=@/path/to/runner-fleet-ca.crt \
+  allowed_common_names="runner-*.build.example.com" \
+  token_policies=circleci-runner-fleet-policy \
+  ttl=4h
+```
+
+The certificate role binds Vault access to runners that present certificates
+from the expected trust chain and matching allowed names. Vault then applies the
+runner fleet policy to the token it issues.
+
+### Workflow configuration
+
+```yaml
+version: 2.1
+
+jobs:
+  build:
+    machine: true
+    resource_class: your-namespace/your-runner-name  # Required: targets your persistent self-hosted runner
+    steps:
+      - checkout
+      - run:
+          name: Retrieve secrets via TLS cert auth
+          command: |
+            # Certificate and key provisioned on runner by Vault PKI engine
+            export VAULT_TOKEN=$(vault login -method=cert \
+              -client-cert=/etc/vault/tls/tls.crt \
+              -client-key=/etc/vault/tls/tls.key \
+              -field=token)
+
+            export SIGNING_KEY=$(vault kv get \
+              -field=key secret/ci/build/signing)
+
+            echo "export SIGNING_KEY=$SIGNING_KEY" >> $BASH_ENV
+
+workflows:
+  build:
+    jobs:
+      - build
+```
+
+The runner authenticates with its client certificate and retrieves only the
+secret needed for the signing workflow. This pattern fits persistent runners
+that already participate in an mTLS-based operating model.
+
+</Tab>
+<Tab heading="AppRole">
+
+AppRole is appropriate when self-hosted runners operate in environments where
+no platform identity is available. This includes air-gapped CircleCI Server
+installations where OIDC token issuance is unavailable — in those environments,
+AppRole becomes the required fallback rather than an optional alternative.
+
+### Role configuration
+
+The same response wrapping requirement applies here as elsewhere. Delivering a
+raw `secret_id` to a pipeline often turns into a manually distributed bootstrap
+secret.
+The `secret_id` should be issued by an external privileged process and delivered
+to the runner as a single-use wrapping token. Store the `VAULT_ROLE_ID` and
+wrapping token as CircleCI context variables scoped to the specific project and
+environment that needs them.
+
+```shell
+# AppRole with tight constraints on secret_id lifecycle
+vault write auth/approle/role/circleci-runner-airgapped \
+  secret_id_ttl=10m \
+  secret_id_num_uses=1 \
+  token_ttl=1h \
+  token_max_ttl=2h \
+  token_policies=circleci-runner-policy
+```
+
+The AppRole configuration constrains bootstrap material to short-lived,
+single-use delivery and limits the Vault token lifetime for the job.
+
+### Workflow configuration
+
+```yaml
+version: 2.1
+
+jobs:
+  build:
+    docker:
+      - image: hashicorp/vault:1.19
+    steps:
+      - checkout
+      - run:
+          name: Retrieve secrets via AppRole
+          command: |
+            # Unwrap the single-use wrapping token to retrieve the actual secret_id
+            # VAULT_WRAPPING_TOKEN is injected from the CircleCI context
+            export SECRET_ID=$(VAULT_TOKEN=$VAULT_WRAPPING_TOKEN \
+              vault unwrap -field=secret_id)
+
+            export VAULT_TOKEN=$(vault write -field=token auth/approle/login \
+              role_id=$VAULT_ROLE_ID \
+              secret_id=$SECRET_ID)
+
+            export DB_PASSWORD=$(vault kv get \
+              -field=password secret/ci/production/db)
+
+            echo "export DB_PASSWORD=$DB_PASSWORD" >> $BASH_ENV
+
+workflows:
+  build:
+    jobs:
+      - build:
+          context:
+            - vault-approle-production
+```
+
+The runner unwraps the single-use `secret_id` just before login and exchanges it
+for a short-lived Vault token. The job then uses that token only for the secret
+reads authorized by the AppRole policy.
+
+</Tab>
+</Tabs>
+
+## Policy
+
+The Vault policy for any role should follow least privilege. A pipeline that
+deploys to production should not be able to read staging secrets, and vice
+versa.
+
+```hcl
+# Vault policy: scope to exactly the paths this pipeline needs
+path "secret/data/ci/production/db" {
+  capabilities = ["read"]
+}
+
+path "secret/data/ci/production/api" {
+  capabilities = ["read"]
+}
+
+# Deny staging paths explicitly if path structure overlaps
+path "secret/data/ci/staging/*" {
+  capabilities = ["deny"]
+}
+```
+
+The policy limits the job to the exact production secret paths it needs.
+Explicit deny rules are useful when path structures overlap and you want to
+prevent accidental access to staging data.
+
+## Security considerations
+
+There are several CircleCI-specific security considerations you need to align
+with your organizational risk tolerance and operational constraints:
+
+- **Context references and OIDC claims.** CircleCI can issue OIDC tokens
+  without a context reference, but many Vault integration patterns use a
+  context to scope access and supply shared configuration. If your Vault role
+  binds to `oidc.circleci.com/context-ids`, the job must reference the
+  corresponding context or authentication will fail.
+- **`context-ids` binding as a security gate.** Binding a Vault role to
+  `oidc.circleci.com/context-ids` means a job must have been explicitly granted
+  access to that context by a CircleCI organization admin. This is the
+  recommended pattern for production-scoped roles — it creates a two-factor
+  access model where project identity alone is not sufficient to authenticate.
+- **Forked PR builds and OIDC exposure.** CircleCI does not generate OIDC
+  tokens for forked PR builds by default. If you enable this setting, you must
+  add `oidc.circleci.com/vcs-origin` to `bound_claims` to prevent a fork from
+  authenticating to the same Vault roles as the upstream repository.
+- **Clock skew and token validation.** A known operational issue exists where
+  Vault rejects CircleCI OIDC tokens with a "token not yet valid" error due to
+  clock skew between CircleCI's token issuance and Vault's validation. Mitigate
+  this by setting `clock_skew_leeway` on the JWT auth configuration in Vault.
+- **Air-gapped CircleCI Server.** CircleCI Server installations in air-gapped
+  environments may not be able to use OIDC token issuance, depending on how the
+  deployment is configured. In those environments, AppRole with response
+  wrapping becomes the required auth method.
+
+For a list of additional security considerations, refer to the [CI/CD security
+considerations](/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets/security-considerations)
+page.
+
+The CI/CD security considerations page also covers general topics such as JWT
+role constraints, policy least privilege, and namespace isolation.
+
+## Integrate HCP Vault Radar
+
+Before migrating to Vault-based secrets management, Vault Radar can scan
+existing CircleCI pipeline definitions and connected repositories for
+credentials stored as hardcoded values or as CircleCI project and context
+environment variables that should be moving to Vault. This is particularly
+relevant for organizations that have distributed credentials across multiple
+CircleCI contexts, projects, and organizations over time.
+
+After migration, Vault Radar can monitor repositories continuously for new
+secret introductions — catching cases where developers hardcode credentials
+that should be going through Vault, or where a pipeline references a variable
+that was deprecated as part of the migration.
+
+Refer to the [HCP Vault Radar quick start
+tutorials](/hcp/tutorials/get-started-hcp-vault-radar) to learn about HCP
+Vault Radar.
+
+## HashiCorp resources
+
+### Vault
+
+- Read the [JWT/OIDC auth method](/vault/docs/auth/jwt) documentation to configure Vault to validate CircleCI OIDC tokens.
+- Read the [Kubernetes auth method](/vault/docs/auth/kubernetes) documentation to authenticate self-hosted runner pods using projected service account tokens.
+- Read the [AWS auth method](/vault/docs/auth/aws) documentation to authenticate self-hosted runners running on AWS compute.
+- Read the [Azure auth method](/vault/docs/auth/azure) documentation to authenticate self-hosted runners running on Azure compute.
+- Read the [GCP auth method](/vault/docs/auth/gcp) documentation to authenticate self-hosted runners running on Google Cloud.
+- Read the [AppRole auth method](/vault/docs/auth/approle) documentation to configure bootstrap credentials for isolated environments.
+- Read the [TLS certificate auth method](/vault/docs/auth/cert) documentation to configure mTLS-based authentication for persistent runners.
+- Read the [Response wrapping](/vault/docs/concepts/response-wrapping) documentation to learn how to deliver single-use secret IDs securely.
+- Follow the [Dynamic secrets: database credentials](/vault/tutorials/db-credentials/database-secrets) tutorial to generate short-lived database credentials from Vault.
+- Follow the [Generate cloud credentials with Vault](/vault/tutorials/secrets-management/azure-secrets) tutorial to issue temporary cloud provider credentials for pipeline jobs.
+
+### Terraform
+
+- Read the [Vault provider for Terraform](https://registry.terraform.io/providers/hashicorp/vault/latest/docs) documentation to manage Vault configuration as code.
+
+### External resources
+
+- Read [Integrate CircleCI with HashiCorp Vault using OIDC](https://circleci.com/blog/oidc-with-vault/) for a walkthrough of the CircleCI and Vault OIDC integration.
+- Read [Role-based credential management with OIDC](https://circleci.com/blog/role-based-credential-management-with-oidc/) to learn how to scope Vault access by CircleCI job context.
+- Read [Using OpenID Connect tokens in jobs](https://circleci.com/docs/openid-connect-tokens/) for the official CircleCI documentation on OIDC token issuance.
+- Read [OIDC tokens with custom claims](https://circleci.com/docs/oidc-tokens-with-custom-claims/) to understand the claims available for Vault role binding.
+- Read [Connect CircleCI with Vault using OIDC](https://fieldguide.circleci-labs.com/credentials/oidc_circleci_vault/) for a field guide walkthrough of the integration.
 
 ## Next steps
 
-In this section of [managing CI/CD secrets](/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets), you learned about CircleCI and Vault integration. CircleCI and Vault integration is part of the [Secure systems pillar](/well-architected-framework/secure-systems).
+In this section of [managing CI/CD
+secrets](/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets),
+you learned how to bind CircleCI job identity to Vault auth methods and how to
+select the right auth method based on where your runners are deployed. Secure
+CircleCI secrets with HashiCorp Vault is part of the [Secure systems pillar](/well-architected-framework/secure-systems).
