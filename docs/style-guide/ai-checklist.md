@@ -469,6 +469,19 @@ Headings must be action-oriented for procedural content.
 
 Use Oxford commas (serial commas).
 
+### Do not use parentheses, en dashes, em dashes, colons, or semicolons to combine ideas or sentences
+
+- **keywords**: grammar, punctuation, parentheses, dashes, colons, semicolons
+- **content sets**: docs, WAF, tutorials, certifications
+- **priority**: standard
+- **auto-fixable**: no
+- **detail**: [general/grammar.md](general/grammar.md)
+
+Don't use specialized punctuation to combine ideas or sentences. Use commas to separate
+phrases and periods to separate ideas. Only use en dashes to represent a range, only use
+colons to introduce other constructions, and only use parentheses to introduce acronyms or
+as characters in code samples.
+
 ### Spell out numbers under 10
 
 - **keywords**: numbers

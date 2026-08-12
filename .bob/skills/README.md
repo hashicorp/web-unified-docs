@@ -43,7 +43,7 @@ section directory, registers it in the nav sidebar, and finishes by running
 free-form natural-language request. Both go through the same confirmation
 and safety checks.
 
-**Structured form**:
+**Structured form**
 
 ```text
 /create-page <content-type> <product>/<version>/<section> <title> --artifacts <path> [<path> ...]
@@ -64,8 +64,10 @@ Example:
 /create-page how-to vault/v1.21.x/docs "Rotate the root token" --artifacts notes/root-token-rotation.md
 ```
 
-**Natural-language form** — describe the page and point at sources in
-plain English; version/section can be omitted:
+**Natural-language form**
+
+Describe the page and point at sources in
+plain English. You can omit version and section.
 
 ```text
 /create-page Create a Nomad concept page that explains allocations. Look at
@@ -78,41 +80,51 @@ are and how they work.
 Content type and product are always required and never guessed. If version
 or section is left unstated, the skill proposes a default (newest version,
 `docs` section) and shows it clearly marked as *proposed* in the
-confirmation step below — it's never silently assumed.
+confirmation step. It's never silently assumed.
 
 This skill runs in IBM Bob and uses Bob's MCP tools for
 sources it can't read from the local filesystem.
 
-**Source types** — each entry (file/flag or URL mentioned in natural
-language) is classified and handled differently:
+**Source types**
+
+Each entry (file/flag or URL mentioned in natural
+language) is classified and handled differently.
 
 | Type | How it's resolved |
 | --- | --- |
 | Local file | Read directly |
 | Local directory (codebase) | Investigated with a scoped, topic-focused search — never bulk-read |
-| Jira / Confluence URL | Fetched via the `atlassian-rovo` MCP tool (authenticated — expected to succeed, not pre-assumed to fail) |
-| Any other URL | Fetched via the `tavily` MCP tool |
+| Jira / Confluence URL | Fetched using the `atlassian-rovo` MCP tool (authenticated — expected to succeed, not pre-assumed to fail) |
+| Any other URL | Fetched using the `tavily` MCP tool |
 | A source that can't be retrieved, regardless of type | The skill stops and asks you to paste the relevant content instead of drafting without it |
 
-**What it does, in order**: validates your inputs against the real
-filesystem (asks rather than guessing if a product/version/section doesn't
-exist); reads the matching template and the style-guide checklist; classifies
-and resolves every source; derives the target file path and URL and **asks
-you to confirm — including any proposed version/section defaults — before
-writing anything**; drafts the page from the resolved sources; writes the
-file; lints it with a bundled `markdownlint-cli2` config; adds an entry to
-the matching `*-nav-data.json`; runs `/docs-review` on the result; and
-reports everything it did, including which sources contributed what, any
-source that needed the paste-fallback, and any facts it couldn't verify
-(left as `TODO` placeholders rather than invented).
+**What it does, in order**
 
-**What it won't do**: fabricate a command, flag, or config value that isn't
-in a resolved source; silently proceed when a source can't be fetched;
-overwrite an existing file at the target path; invent new navigation
-structure (it asks if no matching nav group exists yet); write the
-auto-generated metadata block (your pre-commit hook already does that);
-create a new product or version directory; or run `/docs-review --fix`
-automatically.
+1. Validates your inputs against the real filesystem; asks rather than guessing
+if a product/version/section doesn't exist
+1. Reads the matching template and the style-guide checklist
+1. Classifies and resolves every source
+1. Derives the target file path and URL and asks you to confirm, including any
+proposed version/section defaults, before writing anything
+1. Drafts the page from the resolved sources
+1. Writes the file
+1. Lints it with a bundled `markdownlint-cli2` config
+1. Adds an entry to the matching `*-nav-data.json`
+1. Runs `/docs-review` on the result
+1. Reports everything it did, including which sources contributed what, any
+source that needed the paste-fallback, and any facts it couldn't verify (left as
+`TODO` placeholders rather than invented).
+
+**What it won't do**
+
+- Fabricate a command, flag, or config value that isn't in a resolved source
+- Silently proceed when a source can't be fetched
+- Overwrite an existing file at the target path
+- Invent new navigation structure. It asks if no matching nav group exists yet
+- Write the auto-generated metadata block. The pre-commit hook already does
+that.
+- Create a new product or version directory
+- Run `/docs-review --fix` automatically.
 
 Full details: [`create-page/SKILL.md`](create-page/SKILL.md).
 
@@ -151,7 +163,7 @@ Full details: [`docs-review/SKILL.md`](docs-review/SKILL.md).
 ## `seo-review`
 
 Checks docs, blog posts, or general web content against Google Search
-Central's official guidelines — titles, meta descriptions, headings, URL
+Central's official guidelines. Reviews titles, meta descriptions, headings, URL
 structure, images, internal linking, structured data, E-E-A-T, and spam
 policies. Not limited to files in this repo; it also accepts pasted content.
 
@@ -177,14 +189,14 @@ Full details: [`seo-review/SKILL.md`](seo-review/SKILL.md).
 
 ## Notes
 
-- None of these skills auto-load. If a description says "manually invoked
-  only," that's a hard rule, not a suggestion — don't infer intent to run
+- None of these skills auto-loads. If a description says "manually invoked
+  only," that's a hard rule, not a suggestion. Don't infer intent to run
   one from context alone.
 - There's no repo-wide markdownlint config; `create-page` bundles its own
-  (`create-page/markdownlint.jsonc`), invoked via `npx markdownlint-cli2` on
-  the one file it just wrote. `docs-review` and `seo-review` don't lint —
-  they review and score instead.
+  (`create-page/markdownlint.jsonc`), invoked using `npx markdownlint-cli2` on
+  the one file it just wrote. `docs-review` and `seo-review` don't lint. They
+  review and score instead.
 - If you change a rule in `docs/style-guide/ai-checklist.md` or a template
   under `docs/content-guide/templates/`, all three skills pick it up
-  automatically next run — none of them hardcode style or format rules
+  automatically next run. None of them hardcodes style or format rules
   locally.
