@@ -1,0 +1,440 @@
+---
+title: Airgapped deployment
+description: Requirements and design considerations for deploying Terraform Enterprise in environments that restrict or prohibit outbound internet access.
+---
+
+# Airgapped deployment
+
+This page assumes readers are familiar with an existing Terraform Enterprise deployment and <a href="https://developer.hashicorp.com/validated-designs/terraform-solution-design-guides-terraform-enterprise/architecture#active-active-mode-(multiple-compute-instances)" target="_blank" rel="noreferrer">architecture</a>.
+Terraform Enterprise supports deployment in network-restricted environments, commonly referred to as `airgapped`. Where outbound Internet access is limited or prohibited. This page covers the five primary components that require internal hosting in an airgapped environment, the design decisions you need to make before deployment begins, and the operational commitments that come with maintaining those components over time.
+
+## Network egress
+
+Terraform Enterprise makes outbound connections to several public endpoints at startup, during runs, and when optional integrations are active. In an airgapped environment, each endpoint must either be replaced with an internal equivalent, allowed through as a deliberate firewall exception, or disabled if the associated feature is not in use.
+
+| Destination | Purpose | Airgap treatment |
+|---|---|---|
+| `images.releases.hashicorp.com` | Application container image | Stage in internal registry; one-time egress during initial image staging |
+| `s3-r-w.us-east-1.amazonaws.com`<br/>`s3-r-w.us-west-2.amazonaws.com`<br/>`s3-r-w.eu-central-1.amazonaws.com`<br/>`s3-r-w.eu-west-1.amazonaws.com` | CDN origin for container image layer traffic | Required during initial image staging; these S3 endpoints are globally routable and subject to change — verify the current list in the <a href="https://developer.hashicorp.com/terraform/enterprise/deploy/configuration/network#domains-to-whitelist-for-airgapped-environments" target="_blank" rel="noreferrer">network configuration reference</a> |
+| `helm.releases.hashicorp.com` | Helm chart for Kubernetes deployments | Pull the chart to an internal Helm repository for fully airgapped Kubernetes installs |
+| `releases.hashicorp.com` | Terraform CLI and Sentinel binaries | Stage on internal HTTPS artifact server |
+| `releases.hashicorp.com/tfc-agent` | HCP Terraform agent image and binaries | Stage in internal registry/artifact server; set `TFC_AGENT_AUTO_UPDATE=disabled` on agent hosts |
+| `registry.terraform.io` | Terraform provider binaries and public module registry | Replace with internal network mirror or Terraform Enterprise private registry |
+| `reporting.hashicorp.services` | Automated license entitlement reporting | Deliberate egress exception, or route through an authenticated internal proxy; see <a href="#license-validation-and-reporting" target="_blank" rel="noreferrer">license reporting</a> |
+| `yy0ffni7mf-dsn.algolia.net` | Terraform Registry search index | Disable public registry search or allow as a deliberate egress exception |
+| VCS provider endpoints | Webhook delivery and API access for VCS-driven workflows | Internal VCS: no egress. SaaS VCS (GitHub.com, GitLab.com, Azure DevOps): deliberate egress exception |
+| SAML / OIDC identity provider | User authentication | Internal IdP: no egress. SaaS IdP (Okta, Entra ID): deliberate egress exception |
+| `api.pricing.us-east-1.amazonaws.com`<br/>`cloudbilling.googleapis.com`<br/>`prices.azure.com` | Real-time pricing data for cost estimation | Disable cost estimation if egress is unavailable |
+
+For the complete list of ports and all network configuration variables, see <a href="https://developer.hashicorp.com/terraform/enterprise/deploy/configuration/network" target="_blank" rel="noreferrer">Configure network settings</a> in the Terraform Enterprise deployment documentation.
+
+## Five components to stage internally
+
+Terraform Enterprise depends on five external sources that must have internal equivalents before you can operate in an airgapped environment.
+
+| Component | Default public source | When it is fetched |
+|---|---|---|
+| Terraform Enterprise application container image | `images.releases.hashicorp.com` | At every Terraform Enterprise container startup and host spawn |
+| Terraform CLI binaries | `releases.hashicorp.com/terraform` | Before each workspace plan or apply run |
+| Sentinel CLI binaries | `releases.hashicorp.com/sentinel` | Before each workspace run that enforces Sentinel policies |
+| Terraform provider binaries | `registry.terraform.io` | During `terraform init` inside each run |
+| HCP Terraform agent container image and binaries | `releases.hashicorp.com/tfc-agent` | When provisioning or updating agent pool hosts; at agent startup if `TFC_AGENT_AUTO_UPDATE` is not disabled |
+
+Each component has a different fetch timing, which shapes your staging priorities:
+
+- Stage the **application container image first** — Terraform Enterprise cannot start without it.
+- Stage **CLI binaries before enabling workspaces** — Terraform Enterprise starts successfully, but every run fails until at least one Terraform version is reachable.
+- Stage **provider binaries progressively** — you can add providers and versions after Terraform Enterprise is running and workspaces are in use.
+- Stage the **agent image or binaries before creating agent pools** — *ONLY* required if you intend to horizontally scale or broach network boundaries. Runs that target an agent pool fail immediately if the agent cannot start. Set `TFC_AGENT_AUTO_UPDATE=disabled` to prevent the agent from attempting a runtime pull from the internet.
+
+## Application container image
+
+### Staging the image
+
+Pull the Terraform Enterprise image from HashiCorp's registry on an internet-connected workstation, then push it to your internal container registry. Authentication to `images.releases.hashicorp.com` requires your Terraform Enterprise license file (`.hclic`).
+
+```bash
+# Authenticate to HashiCorp's registry using the license file as the password
+echo "<TFE_LICENSE_CONTENTS>" | docker login \
+  --username terraform \
+  --password-stdin \
+  images.releases.hashicorp.com
+
+# Pull the target version
+docker pull images.releases.hashicorp.com/hashicorp/terraform-enterprise:<vYYYYMM-#>
+
+# Tag and push to your internal registry
+docker tag \
+  images.releases.hashicorp.com/hashicorp/terraform-enterprise:<vYYYYMM-#> \
+  <internal-registry-host>/<repo>:<vYYYYMM-#>
+
+docker push <internal-registry-host>/<repo>:<vYYYYMM-#>
+```
+
+### Configuring TFE to use the internal registry
+
+**Docker or Podman on VM (HVD module):**
+
+```hcl
+tfe_image_repository_url      = "internal-registry.example.com"
+tfe_image_name                = "example/terraform-enterprise"
+tfe_image_tag                 = "v202505-1"
+tfe_image_repository_username = "registry-user"
+tfe_image_repository_password = "registry-password"
+```
+
+**Kubernetes (Helm):**
+
+```yaml
+image:
+  repository: internal-registry.example.com
+  name: example/terraform-enterprise
+  tag: v202505-1
+```
+
+Create the image pull secret in the TFE namespace before running the Helm install:
+
+```bash
+kubectl create secret docker-registry terraform-enterprise \
+  --namespace <TFE_NAMESPACE> \
+  --docker-server=internal-registry.example.com \
+  --docker-username=registry-user \
+  --docker-password=registry-password
+```
+
+### TLS and proxy requirements
+
+- The internal registry must serve HTTPS on port 443. Terraform Enterprise does not support HTTP-only registries.
+- If the registry uses a certificate signed by an internal CA, set `TFE_TLS_CA_BUNDLE_FILE` to the path of your CA bundle on the Terraform Enterprise host.
+- Add the internal registry hostname to `TFE_NO_PROXY`. Routing registry traffic through an external proxy adds unnecessary complexity and latency.
+- Confirm that the container runtime daemon on each Terraform Enterprise host also trusts the internal CA — a daemon-level pull failure occurs before TFE's own configuration is evaluated.
+
+For the full configuration reference, see <a href="https://developer.hashicorp.com/terraform/enterprise/deploy/reference/configuration" target="_blank" rel="noreferrer">Terraform Enterprise deployment configuration reference</a>.
+
+### Terraform run pipeline (optional)
+
+Terraform Enterprise ships with a version of the terraform agent image. This image is used by the terraform run pipeline to execute terraform runs in an isolated environment. Should you require use of the Custom Agent Image on the core platform you can do so through use of the <a href="https://developer.hashicorp.com/terraform/enterprise/deploy/reference/configuration#tfe_run_pipeline_image" target="_blank" rel="noreferrer">`tfe_run_pipeline_image`</a> configuration. This configuration can utilize the <a href="#custom-agent-images" target="_blank" rel="noreferrer">terraform agent images</a>
+
+## Client binaries
+
+Terraform Enterprise does not bundle Terraform CLI binaries inside the application container. It fetches the appropriate binary before each workspace run. In an airgapped environment, you replace the default `releases.hashicorp.com` endpoint with an internal HTTPS server.
+
+From an internet-connected workstation, download the `linux_amd64` build and its SHA-256 checksum for each Terraform version your workspaces require:
+
+```bash
+TERRAFORM_VERSION="1.9.8"
+BASE_URL="https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}"
+
+curl -O "${BASE_URL}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip"
+curl -O "${BASE_URL}/terraform_${TERRAFORM_VERSION}_SHA256SUMS"
+
+# Verify checksum before staging
+grep "linux_amd64" terraform_${TERRAFORM_VERSION}_SHA256SUMS | sha256sum --check
+```
+
+Upload the `.zip` file to your internal HTTPS artifact server (Artifactory, Nexus, S3-compatible storage, or a plain nginx-served directory). A custom API is not required — a static file server is sufficient.
+
+If your run environments use ARM hosts, also download and stage `linux_arm64` builds and register them separately.
+
+### Registering versions in Terraform Enterprise
+
+Do not enable a version in Terraform Enterprise before its binary is reachable at the configured URL. Terraform Enterprise marks the version as enabled and attempts to download it on the next run that targets that version. A download failure produces a confusing run error, not a clear configuration warning.
+
+**Using the Admin UI:** Navigate to **Admin Settings → Terraform Versions**, click **Add Terraform Version**, and fill in the version string, the internal URL, and the SHA-256 checksum.
+
+**Using the Admin API:**
+
+```bash
+curl \
+  --header "Authorization: Bearer $TFE_TOKEN" \
+  --header "Content-Type: application/vnd.api+json" \
+  --request POST \
+  --data '{
+    "data": {
+      "type": "terraform-versions",
+      "attributes": {
+        "version": "1.9.8",
+        "url": "https://internal-artifacts.example.com/terraform/1.9.8/terraform_1.9.8_linux_amd64.zip",
+        "sha": "<sha256-checksum>",
+        "enabled": true,
+        "deprecated": false,
+        "beta": false
+      }
+    }
+  }' \
+  https://<TFE_HOSTNAME>/api/v2/admin/terraform-versions
+```
+
+**Using the TFE Terraform provider** for version-controlled lifecycle management:
+
+```hcl
+resource "tfe_terraform_version" "v1_9_8" {
+  version    = "1.9.8"
+  url        = "https://internal-artifacts.example.com/terraform/1.9.8/terraform_1.9.8_linux_amd64.zip"
+  sha        = "<sha256-checksum>"
+  enabled    = true
+  deprecated = false
+  beta       = false
+}
+```
+
+For the full API reference, see <a href="https://developer.hashicorp.com/terraform/enterprise/api-docs/admin/terraform-versions" target="_blank" rel="noreferrer">Admin Terraform Versions API</a>.
+
+## Sentinel CLI binaries
+
+Sentinel CLI binaries follow the same model as Terraform CLI binaries. Terraform Enterprise fetches them from `releases.hashicorp.com/sentinel` by default. Stage them on the same internal HTTPS server and register each version using the equivalent Admin Sentinel Versions API or the `tfe_sentinel_version` Terraform provider resource.
+
+Stage Sentinel versions for any workspaces that enforce Sentinel policy-as-code checks.
+
+## Provider binaries
+
+Workspace runs call `terraform init`, which downloads required providers. Two approaches replace the default `registry.terraform.io` endpoint.
+
+### Option 1 — Network mirror protocol
+
+Host a static HTTPS directory that implements the <a href="https://developer.hashicorp.com/terraform/internals/provider-network-mirror-protocol" target="_blank" rel="noreferrer">Terraform network mirror protocol</a>. This is the simpler option to stand up — a static file server is sufficient, and no GPG signing is required.
+
+Populate the mirror from an internet-connected workstation:
+
+```bash
+terraform providers mirror \
+  -platform=linux_amd64 \
+  /path/to/local-mirror-directory
+```
+
+This command reads your `required_providers` block and downloads correctly structured provider archives. Upload the directory to your internal HTTPS file server.
+
+Configure workspace runs to use the mirror by setting `TF_CLI_CONFIG_FILE` to a file containing:
+
+```hcl
+provider_installation {
+  network_mirror {
+    url     = "https://internal-mirror.example.com/terraform-providers/"
+    include = ["registry.terraform.io/*/*"]
+  }
+  direct {
+    exclude = ["registry.terraform.io/*/*"]
+  }
+}
+```
+
+Set this environment variable in workspace settings or mount the file via a custom agent worker image.
+
+### Option 2 — Terraform Enterprise private registry
+
+Publish provider releases to the Terraform Enterprise built-in private registry. Workspace configurations reference the private registry address in `required_providers` blocks. This option makes provider versions visible and searchable in the Terraform Enterprise web UI, but requires GPG signing for each published release and a manual publication workflow per version.
+
+### Choosing between the two options
+
+| Factor | Network mirror | Private registry |
+|---|---|---|
+| Terraform Enterprise UI discoverability | No | Yes |
+| GPG signing required | No | Yes |
+| Server-side complexity | Low (static files) | Low (TFE built-in) |
+| Version enforcement model | Pre-staged at mirror population time | Per-published release |
+
+For the CLI reference and configuration details, see <a href="https://developer.hashicorp.com/terraform/cli/commands/providers/mirror" target="_blank" rel="noreferrer">terraform providers mirror</a> and <a href="https://developer.hashicorp.com/terraform/cli/config/config-file#provider-installation" target="_blank" rel="noreferrer">provider installation configuration</a>.
+
+## Additional egress considerations
+
+Several Terraform Enterprise features introduce egress dependencies beyond the five core components.
+
+### SAML and single sign-on
+
+Terraform Enterprise's SAML 2.0 integration requires connectivity to the identity provider (IdP) metadata endpoint at login time. Internal IdPs (Active Directory Federation Services, on-premises Okta, Ping Identity) typically do not require public egress. SaaS-hosted IdPs (Okta SaaS, Microsoft Entra ID) require a deliberate egress exception for Terraform Enterprise to reach the IdP's HTTPS endpoints.
+
+### VCS integration
+
+Terraform Enterprise's VCS integration requires outbound API calls to the VCS provider and the ability to receive inbound webhook events. Self-managed VCS systems (GitHub Enterprise Server, GitLab self-managed, Bitbucket Data Center) typically work within the same network segment. SaaS VCS providers (GitHub.com, GitLab.com, Azure DevOps) require an outbound egress exception.
+
+If egress to a cloud-hosted VCS is not possible, the CLI-driven or API-driven workflow provides an alternative: a CI system handles VCS communication and pushes plans and applies to Terraform Enterprise via the API, removing the need for Terraform Enterprise to connect to the VCS directly.
+
+### HCP Terraform agents
+
+`tfc-agent` pools route workspace runs to isolated execution environments. When an agent handles a run, the **agent host** — not the Terraform Enterprise container — is where `terraform init`, provider downloads, and plan or apply execution occur. Every internal resource an agent needs must be reachable from agent hosts, not necessarily from the Terraform Enterprise application host.
+
+#### Staging the agent
+
+The agent ships as both an official Docker container image and a standalone Linux binary. Stage whichever you intend to use.
+
+**Container image:**
+
+```bash
+docker pull hashicorp/tfc-agent:latest
+docker tag hashicorp/tfc-agent:latest <internal-registry-host>/hashicorp/tfc-agent:latest
+docker push <internal-registry-host>/hashicorp/tfc-agent:latest
+```
+
+**Standalone binary:**
+
+Download both `tfc-agent` and `tfc-agent-core` — both binaries must reside in the same directory on the agent host or the agent will not start.
+
+```bash
+TFC_AGENT_VERSION="1.18.1"
+BASE_URL="https://releases.hashicorp.com/tfc-agent/${TFC_AGENT_VERSION}"
+
+curl -O "${BASE_URL}/tfc-agent_${TFC_AGENT_VERSION}_linux_amd64.zip"
+curl -O "${BASE_URL}/tfc-agent_${TFC_AGENT_VERSION}_SHA256SUMS"
+
+grep "linux_amd64" tfc-agent_${TFC_AGENT_VERSION}_SHA256SUMS | sha256sum --check
+```
+
+Upload the extracted binaries to your internal artifact server and distribute to agent hosts.
+
+#### Disable auto-update — required in airgapped environments
+
+By default, the agent automatically updates itself to the latest minor version by downloading from `releases.hashicorp.com`. In an airgapped environment this **must** be explicitly disabled. If `TFC_AGENT_AUTO_UPDATE` is not set, the agent attempts to reach the internet at startup and on a background timer, producing connection errors that can cause the agent process to exit unexpectedly.
+
+Set `TFC_AGENT_AUTO_UPDATE=disabled` on every agent host before starting the process:
+
+```bash
+# Docker or Podman
+docker run -d \
+  -e TFC_AGENT_TOKEN=<agent-pool-token> \
+  -e TFC_AGENT_NAME=<agent-name> \
+  -e TFC_AGENT_AUTO_UPDATE=disabled \
+  <internal-registry-host>/hashicorp/tfc-agent:latest
+
+# Standalone binary
+export TFC_AGENT_TOKEN=<agent-pool-token>
+export TFC_AGENT_NAME=<agent-name>
+export TFC_AGENT_AUTO_UPDATE=disabled
+./tfc-agent
+```
+
+When auto-update is disabled, include agent binary or image version management in the same internal staging and promotion pipeline used for Terraform CLI binaries.
+
+#### Agent host requirements
+
+| Requirement | Minimum |
+|---|---|
+| Architecture | x86_64 or ARM64 |
+| Free disk space | 4 GB |
+| System memory | 2 GB |
+| `git` on PATH | Version 2.3 or later |
+| `ssh` on PATH | Required for `git` over SSH |
+
+Optional but recommended for broad `local-exec` and external data source support: `curl`, `wget`, `jq`, `unzip`, `tar`, `gzip`.
+
+The pool architecture is determined by the first agent to register. Attempting to register an agent with a different architecture than the existing pool members produces an error. All agents in a pool must share the same architecture.
+
+#### Agent egress requirements
+
+Agents have their own egress surface that is separate from Terraform Enterprise's. In a TFE deployment the following endpoints resolve to the TFE host — not to HashiCorp's cloud — but verify with your network team before setting firewall rules.
+
+| Destination | Port | Purpose | Airgap treatment |
+|---|---|---|---|
+| `<TFE_HOSTNAME>` | tcp/443 | Job polling, status updates, artifact storage, private module downloads | Internal — no public egress required |
+| `<TFE_HOSTNAME>` | tcp/7146 | Agent RPC (request forwarding, Hold Your Own Key) | Internal — only required if request forwarding is enabled |
+| `releases.hashicorp.com` | tcp/443 | Agent self-update and Terraform binary downloads | Block; set `TFC_AGENT_AUTO_UPDATE=disabled`; serve Terraform binaries from internal artifact server |
+| `registry.terraform.io` | tcp/443 | Provider and public module downloads | Internal network mirror or Terraform Enterprise private registry |
+| Cloud provider APIs | tcp/443 | Terraform plan and apply execution | Must be reachable from agent hosts for the target cloud(s) |
+
+### Custom agent images
+
+For workflows that require additional tooling during `local-exec` provisioner scripts or external data sources, extend the staged agent image see <a href="https://developer.hashicorp.com/terraform/enterprise/deploy/custom-image" target="_blank" rel="noreferrer">custom worker image</a> page.
+
+For the full configuration reference, see <a href="https://developer.hashicorp.com/terraform/cloud-docs/agents/agents" target="_blank" rel="noreferrer">HCP Terraform Agents</a> and <a href="https://developer.hashicorp.com/terraform/cloud-docs/agents/requirements" target="_blank" rel="noreferrer">Agent requirements</a>.
+
+### License validation and reporting
+
+Terraform Enterprise validates the `.hclic` license file locally at startup — no outbound connection is required for validation. License renewal requires obtaining a new `.hclic` from HashiCorp and restarting Terraform Enterprise with the updated file or environment variable.
+
+Automated license entitlement reporting is a separate feature that sends usage data to `reporting.hashicorp.services`. This service is active by default in FDO deployments. In an airgapped environment, configure a firewall exception for this endpoint or route it through an internal proxy. For details, see <a href="https://developer.hashicorp.com/terraform/enterprise/deploy/manage/license-report" target="_blank" rel="noreferrer">Enable automated license reports</a>.
+
+### Cost estimation
+
+When <a href="https://developer.hashicorp.com/terraform/enterprise/application-administration/integration#cost-estimation-integration" target="_blank" rel="noreferrer">cost estimation</a> is enabled, Terraform Enterprise calls the following endpoints to retrieve real-time pricing data:
+
+- `api.pricing.us-east-1.amazonaws.com` (AWS)
+- `cloudbilling.googleapis.com` (GCP)
+- `prices.azure.com` (Azure)
+
+If egress to these endpoints is not available, disable cost estimation in Admin Settings to prevent run failures for workspaces that target those cloud providers.
+
+
+### Summary of egress dependencies
+
+| Component or feature | Public egress required? | Notes |
+|---|---|---|
+| TFE container image — initial pull | Yes, once | Pull from `images.releases.hashicorp.com` + S3 CDN origins before internal staging |
+| TFE container image — ongoing | No | Served from internal registry |
+| Terraform CLI binaries — staging | Yes, once per version | Download from `releases.hashicorp.com` before staging |
+| Terraform CLI binaries — runtime | No | Served from internal HTTPS server |
+| Provider binaries — staging | Yes, once per version | Download from `registry.terraform.io` or GitHub Releases |
+| Provider binaries — runtime | No | Served from internal mirror or private registry |
+| SAML / SSO | Depends on IdP location | Internal IdP requires no public egress; SaaS IdP does |
+| VCS integration | Depends on VCS location | Self-managed VCS requires no public egress; SaaS VCS does |
+| HCP Terraform agents — job polling | No | Agents call TFE API on the internal network |
+| HCP Terraform agents — provider downloads | No | Agents reach internal mirror or private registry |
+| License validation | No | `.hclic` validated locally at startup |
+| Automated license reporting | Yes | `reporting.hashicorp.services`; configure egress exception or internal proxy |
+| Registry search (Algolia) | Yes | `yy0ffni7mf-dsn.algolia.net`; disable public registry search if egress is unavailable |
+| Cost estimation | Yes, if enabled | Three cloud pricing APIs; disable cost estimation if egress is unavailable |
+| Support diagnostics | No | Bundles generated locally and uploaded manually |
+
+## Pre-baked VM images with Packer
+
+For environments where repeated runtime pulls are operationally unacceptable, consider baking the TFE container image (and optionally the agent image) into a base VM image using <a href="https://developer.hashicorp.com/packer/docs" target="_blank" rel="noreferrer">HashiCorp Packer</a>. A temporary build VM with controlled egress pulls the required images once, seeds a local <a href="https://distribution.github.io/distribution/about/configuration/" target="_blank" rel="noreferrer">Docker Registry v2</a> instance, and bakes the registry data into the VM image. Runtime hosts launch from this pre-baked image and have no pull dependency at deployment time.
+
+The build-time provisioner pattern:
+
+```bash
+#!/usr/bin/env bash
+# Minimum skeleton — see Packer shell provisioner docs for full context
+TFE_IMAGE="images.releases.hashicorp.com/hashicorp/terraform-enterprise:${TFE_VERSION}"
+TFE_LOCAL_TAG="localhost:5000/hashicorp/terraform-enterprise:${TFE_VERSION}"
+
+# Start a seed registry
+docker run -d --name tfe-registry-seed -p 5000:5000 \
+  -v /var/lib/registry:/var/lib/registry registry:2
+
+# Authenticate, pull, retag, push to local registry
+cat /tmp/tfe.hclic | docker login --username terraform \
+  --password-stdin images.releases.hashicorp.com
+docker pull "${TFE_IMAGE}"
+docker tag "${TFE_IMAGE}" "${TFE_LOCAL_TAG}"
+docker push "${TFE_LOCAL_TAG}"
+
+# Clean up credentials and upstream tags before image capture
+docker logout images.releases.hashicorp.com
+rm -f /root/.docker/config.json /tmp/tfe.hclic
+docker rmi "${TFE_IMAGE}" || true
+```
+
+Key security controls for Packer builds:
+
+- Never commit the `.hclic` license file — upload it to a temporary path during the build and delete it before image capture
+- Remove Docker credential files before the image is finalized
+- Remove upstream image tags so the baked image contains only local registry references
+
+For full Packer template patterns and platform-specific notes (AWS, Azure, GCP, VMware), see the <a href="https://developer.hashicorp.com/packer/docs" target="_blank" rel="noreferrer">Packer documentation</a>.
+
+## Ongoing operational commitments
+
+Airgapped operation creates an ongoing maintenance obligation that does not exist in internet-connected deployments.
+
+**You must re-mirror every new version you want to use.** This applies to:
+
+- Each new Terraform Enterprise version you deploy or upgrade to.
+- Each new Terraform CLI version workspaces need.
+- Each new provider version workspace configurations reference.
+- Each new `tfc-agent` version deployed to agent pool hosts.
+
+**Automate version lifecycle management** to keep this overhead manageable:
+
+- A CI pipeline that watches `releases.hashicorp.com` and syncs new CLI binaries to the internal artifact server.
+- A downstream step that calls the Admin API to register and enable the new version.
+- A mirror refresh job that runs `terraform providers mirror` for any newly required provider versions and uploads the results.
+- A pipeline stage that stages new `tfc-agent` images or binaries to the internal registry/artifact server and updates agent pool hosts.
+
+**Confirm TLS is in place everywhere.** The internal registry, the CLI binary server, and the provider mirror all need certificates that Terraform Enterprise and your run environments trust. Missing or misconfigured CA bundles are the most common failure cause in airgapped deployments.
+
+## Additional considerations
+
+Terraform enterprise enables several capabilities that you should also consider when designing your airgapped deployment.
+
+- Run tasks, require access to  technology partners integrations or custom integrations. <a href="https://developer.hashicorp.com/terraform/enterprise/integrations/run-tasks" target="_blank" rel="noreferrer">Run tasks</a>
+- Workspace notifications, Terraform can use webhooks to notify external systems about run progress and other events. <a href="https://developer.hashicorp.com/terraform/enterprise/workspaces/settings/notifications" target="_blank" rel="noreferrer">Notifications</a>
+- Log forwarding, We strongly recommend using an external log forwarding solution that aligns with your existing observability solutions. <a href="https://developer.hashicorp.com/terraform/enterprise/deploy/manage/monitor/logs#external-log-forwarding" target="_blank" rel="noreferrer">External Log Forwarding</a>
+- Integrations, The Terraform Enterprise ecosystem features a variety of integrations to let Terraform Enterprise connect with third-party systems and platforms. <a href="https://developer.hashicorp.com/terraform/enterprise/integrations" target="_blank" rel="noreferrer">Integrations</a>
