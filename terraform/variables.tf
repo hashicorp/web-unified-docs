@@ -33,7 +33,7 @@ variable "instana_agent_key" {
 }
 
 variable "instana_otlp_endpoint" {
-  description = "Instana OTLP endpoint for sending metrics to Instana."
+  description = "Instana OTLP endpoint for sending traces. Must include the full path, e.g. https://otlp-http-red-saas.instana.io:443/v1/traces"
   type        = string
 }
 
