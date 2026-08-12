@@ -38,7 +38,7 @@ free-form natural-language form. Both converge on the same internal values
 ```
 
 - `<content-type>`: one of `how-to`, `concept`, `overview`, `reference`,
-  `troubleshooting`, `release-notes` — matches a filename under
+  `troubleshooting`, `what-is` — matches a filename under
   `docs/content-guide/templates/` exactly.
 - `<product>/<version>/<section>`: a single slash-delimited token identifying
   where the page belongs, for example `vault/v1.21.x/docs`.

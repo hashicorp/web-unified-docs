@@ -149,9 +149,9 @@ in the batch.
    - `docs/content-guide/templates/how-to.md`
    - `docs/content-guide/templates/concept.md`
    - `docs/content-guide/templates/overview.md`
+   - `docs/content-guide/templates/what-is.md`
    - `docs/content-guide/templates/reference.md`
    - `docs/content-guide/templates/troubleshooting.md`
-   - `docs/content-guide/templates/release-notes.md`
 
 2. **Example docs**:
 
@@ -161,9 +161,9 @@ in the batch.
 
    - Overview: `content/consul/v2.0.x/content/docs/connect/index.mdx`. This is a well-formatted overview doc used as a concrete model. Note its frontmatter fields, heading hierarchy, tone, code block usage, admonition style, link formatting, and overall structure. **Note**: this is a Consul document used as a format reference only. Do not apply Consul product conventions (terminology, URL structure, component choices) to non-Consul docs.
 
-   - Troubleshooting: `content/consul/v2.0.x/content/docs/troubleshoot/service-communication.mdx`. This is a well-formatted troubleshooting doc used as a concrete model. Note its frontmatter fields, heading hierarchy, tone, code block usage, admonition style, link formatting, and overall structure. **Note**: this is a Consul document used as a format reference only. Do not apply Consul product conventions (terminology, URL structure, component choices) to non-Consul docs.
+   - What is: `content/nomad/v2.0.x/content/docs/what-is-nomad.mdx`. This is a well-formatted "what is" doc used as a concrete model. Note its frontmatter fields, heading hierarchy, tone, code block usage, admonition style, link formatting, and overall structure. **Note**: this is a Nomad document used as a format reference only. Do not apply Nomad product conventions (terminology, URL structure, component choices) to non-Nomad docs.
 
-   - Release notes: `content/nomad/v2.0.x/content/docs/release-notes/v1-11-x.mdx`. This is a well-formatted release notes doc used as a concrete model. Note its frontmatter fields, heading hierarchy, tone, code block usage, admonition style, link formatting, and overall structure. **Note**: this is a Nomad document used as a format reference only. Do not apply Nomad product conventions (terminology, URL structure, component choices) to non-Nomad docs.
+   - Troubleshooting: `content/consul/v2.0.x/content/docs/troubleshoot/service-communication.mdx`. This is a well-formatted troubleshooting doc used as a concrete model. Note its frontmatter fields, heading hierarchy, tone, code block usage, admonition style, link formatting, and overall structure. **Note**: this is a Consul document used as a format reference only. Do not apply Consul product conventions (terminology, URL structure, component choices) to non-Consul docs.
 
 If the core style guide files (`docs/style-guide/index.md` and
 `docs/style-guide/top-12.md`) cannot be found, stop and report the missing
@@ -187,9 +187,9 @@ with the content types defined in the project's content guide.
 | **How-to** | Walks users through completing a specific task | Some prior knowledge assumed |
 | **Concept** | Provides context and background to help readers understand a product, feature, or topic | Curious, not necessarily doing a task |
 | **Overview** | Orients readers to a topic area, summarizes key workflows and use cases, and links to child pages | Navigating or exploring |
+| **What is** | Top-of-funnel landing page for a product or sub-product; answers "why would I use this?" | Hasn't decided to use the product yet |
 | **Reference** | Technical details like API endpoints, CLI commands, and configuration options | User knows what they're looking for |
 | **Troubleshooting** | Helps users resolve common issues | User is encountering a problem |
-| **Release notes** | Communicates new features, bug fixes, and changes | Tracking product changes |
 
 > **Note on template conventions**: The project's how-to template (`docs/content-guide/templates/how-to.md`) uses `## Steps` as the heading for the procedural section. If you encounter a file that uses `## Steps` as its procedure heading, treat that as the expected how-to pattern — not a violation.
 
@@ -202,7 +202,7 @@ the user before continuing.
 
 Each doc type's template and Checklist live in a dedicated file under
 `docs/content-guide/templates/` (all six already loaded in Step 1): `how-to.md`,
-`concept.md`, `overview.md`, `reference.md`, `troubleshooting.md`, `release-notes.md`. Use the
+`concept.md`, `overview.md`, `what-is.md`, `reference.md`, `troubleshooting.md`. Use the
 Checklist in the file matching the identified doc type, then apply the Universal checklist in
 `docs/content-guide/content-types.md` (also loaded in Step 1). Use the example doc for the
 identified doc type (loaded in Step 1) as a concrete model for what correct formatting looks
@@ -231,8 +231,8 @@ differently in the file under review. Call these out explicitly.
 | How-to | `content/hcp-docs/content/docs/vault-radar/get-started/add-data-sources/slack.mdx` |
 | Concept | `content/consul/v2.0.x/content/docs/concept/catalog.mdx` |
 | Overview | `content/consul/v2.0.x/content/docs/connect/index.mdx` |
+| What is | `content/nomad/v2.0.x/content/docs/what-is-nomad.mdx` |
 | Troubleshooting | `content/consul/v2.0.x/content/docs/troubleshoot/service-communication.mdx` |
-| Release notes | `content/nomad/v2.0.x/content/docs/release-notes/v1-11-x.mdx` |
 | Reference | `content/consul/v2.0.x/content/commands/` — pick the command file most similar to the file under review; apply universal checks plus the Reference format checklist |
 
 Remember: the example doc is a format model, not a product template. Apply

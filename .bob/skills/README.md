@@ -1,8 +1,8 @@
 # Documentation skills
 
 This directory holds the manually-invoked skills used to create and review
-content under `content/`. None of them auto-load — each one only runs when
-you explicitly call its slash command.
+content under `content/`. None of them auto-load. Each one only runs when
+you explicitly call it.
 
 | Skill | Command | Purpose | Writes files? |
 |---|---|---|---|
@@ -29,7 +29,7 @@ in one place fixes it for every skill that uses it:
 ```
 
 For an existing page you're editing by hand instead of drafting from
-scratch, just run `/docs-review` and `/seo-review` directly — you don't need
+scratch, just run `/docs-review` and `/seo-review` directly. You don't need
 `create-page` for edits to files that already exist.
 
 ---
@@ -40,7 +40,7 @@ Drafts a brand-new page: picks the right content-guide template, writes
 content from sources you supply, places it in the correct product/version/
 section directory, registers it in the nav sidebar, and finishes by running
 `/docs-review` on its own output. Accepts a structured invocation or a
-free-form natural-language request — both go through the same confirmation
+free-form natural-language request. Both go through the same confirmation
 and safety checks.
 
 **Structured form**:
@@ -50,7 +50,7 @@ and safety checks.
 ```
 
 - `<content-type>` — one of `how-to`, `concept`, `overview`, `reference`,
-  `troubleshooting`, `release-notes`.
+  `troubleshooting`, `what-is`.
 - `<product>/<version>/<section>` — where the page belongs, for example
   `vault/v1.21.x/docs`. Section isn't a fixed set — it's whatever
   subdirectories actually exist under that product/version.
@@ -80,7 +80,7 @@ or section is left unstated, the skill proposes a default (newest version,
 `docs` section) and shows it clearly marked as *proposed* in the
 confirmation step below — it's never silently assumed.
 
-This skill runs in **IBM Bob**, not Claude Code, and uses Bob's MCP tools for
+This skill runs in IBM Bob and uses Bob's MCP tools for
 sources it can't read from the local filesystem.
 
 **Source types** — each entry (file/flag or URL mentioned in natural

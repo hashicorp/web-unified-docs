@@ -6,7 +6,8 @@
 ---
 page_title: Match the H1 and nav title 
 description: |-
-  Include target keywords and keyword phrases so that users can easily search. 
+  {Feature} to {things you can do with the feature}. Use {feature} to {user-focused goal}.
+  Learn how to {user-focused goal} with {feature or topic}.
 ---
 
 # Title
@@ -21,6 +22,11 @@ The requirements block describes the following information necessary to operate 
 - environment
 - software requirements
 - product version: Note that because we have versioned docs, specifying the core product version is not as important as version requirements for ancillary software, such as `kubectl`.
+
+Requirements and prerequisites are not the same thing: requirements are conditions that must
+already hold true to proceed (for example, "a running Kubernetes cluster"), while
+prerequisites are steps the reader must complete first (for example, "install `kubectl`").
+Group related requirements or prerequisites under an `###` subheading when there are several.
 
 ## Steps
 
@@ -60,7 +66,9 @@ Introduce related tasks that either enhance this topic or are necessary to achie
 - [ ] Title is action-oriented (describes the task the reader will complete)
 - [ ] Brief intro paragraph states the goal
 - [ ] `## Requirements` section lists system, environment, and software prerequisites (may be absent if the doc has no meaningful prerequisites)
+- [ ] Distinguishes requirements (conditions that must already hold) from prerequisites (steps the reader must complete first), rather than conflating the two
 - [ ] Procedural content uses numbered steps, grouped under a `## Steps` heading or concrete action-oriented subheadings (for example, `## Configure the agent`, `## Deploy the service`)
 - [ ] Does not over-explain concepts — stays task-focused
+- [ ] Uses inline command/API examples to support individual steps, not a standalone Examples section — full, standalone example configurations belong on the matching reference page, not duplicated here
 - [ ] `## Next steps` section links to related how-to pages (optional but encouraged)
 - [ ] Optional but encouraged: troubleshooting section at the end

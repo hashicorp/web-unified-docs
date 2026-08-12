@@ -759,3 +759,49 @@ Do not describe tasks as "trivial", "obvious", or "self-explanatory".
 
 Do not assume the reader's environment or prior knowledge beyond what is stated in the
 prerequisites.
+
+## Visual aids
+
+### Introduce diagrams in prose, not with embedded legends
+
+- **keywords**: visual aids, diagrams, accessibility
+- **content sets**: docs, tutorials, WAF, certifications
+- **priority**: standard
+- **auto-fixable**: no
+
+Describe what a diagram shows in the prose that introduces it, rather than building legends
+or explainer text into the image itself. This improves maintainability, portability, and
+accessibility.
+
+### Introduce a visual aid immediately before it, without directional language
+
+- **keywords**: visual aids, screenshots, diagrams, flow
+- **content sets**: docs, tutorials, WAF, certifications
+- **priority**: standard
+- **auto-fixable**: no
+
+Introduce a screenshot or diagram in the prose immediately before it. Do not use directional
+language like "above" or "the following image" — the position of visual aids on a page can
+change over time. This extends the same reasoning as "Organize content so that it flows in a
+single direction from beginning to end" to visual aids specifically.
+
+### Use one image per step or concept
+
+- **keywords**: visual aids, screenshots, composite images
+- **content sets**: docs, tutorials, WAF, certifications
+- **priority**: standard
+- **auto-fixable**: no
+
+Use one image per step or concept. Do not create a single multi-step composite screenshot,
+and do not place a series of screenshots one after another.
+
+### Describe UI icons and symbols in words
+
+- **keywords**: visual aids, icons, symbols, accessibility
+- **content sets**: docs, tutorials, WAF, certifications
+- **priority**: standard
+- **auto-fixable**: no
+
+Describe UI icons and symbols in words instead of trying to reproduce them, even when
+documenting an interface that uses them instead of text-based labels. For example, describe
+"the refresh button" rather than trying to reproduce the refresh icon.
