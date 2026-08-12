@@ -80,15 +80,19 @@ or section is left unstated, the skill proposes a default (newest version,
 `docs` section) and shows it clearly marked as *proposed* in the
 confirmation step below — it's never silently assumed.
 
+This skill runs in **IBM Bob**, not Claude Code, and uses Bob's MCP tools for
+sources it can't read from the local filesystem.
+
 **Source types** — each entry (file/flag or URL mentioned in natural
 language) is classified and handled differently:
 
 | Type | How it's resolved |
 | --- | --- |
 | Local file | Read directly |
-| Local directory (codebase) | Explored by a topic-scoped Explore subagent — never bulk-read |
-| Public URL | Fetched with WebFetch |
-| Auth-gated URL (Jira, Confluence, Google Docs, etc.) | Fetch is expected to fail — the skill stops and asks you to paste the relevant content instead of drafting without it |
+| Local directory (codebase) | Investigated with a scoped, topic-focused search — never bulk-read |
+| Jira / Confluence URL | Fetched via the `atlassian-rovo` MCP tool (authenticated — expected to succeed, not pre-assumed to fail) |
+| Any other URL | Fetched via the `tavily` MCP tool |
+| A source that can't be retrieved, regardless of type | The skill stops and asks you to paste the relevant content instead of drafting without it |
 
 **What it does, in order**: validates your inputs against the real
 filesystem (asks rather than guessing if a product/version/section doesn't
