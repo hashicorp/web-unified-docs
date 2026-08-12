@@ -5,6 +5,7 @@ This document provides writing style guidance for authors who create and maintai
 ## Table of contents
 
 - [Top 12 guidelines](top-12.md)
+- [AI agent checklist](ai-checklist.md)
 - [General writing guidelines](general/index.md)
    - [Active voice](general/active-voice.md)
    - [Alert boxes](general/alerts.md)

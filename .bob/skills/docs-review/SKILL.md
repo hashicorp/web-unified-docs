@@ -81,45 +81,21 @@ reference, what was changed) for inclusion in the output.
 
 #### Auto-fix rules {#auto-fix-rules}
 
-Apply these mechanical corrections. They require no content judgment.
-
-**Latin abbreviations**
-- `e.g.` or `e.g` → `for example`
-- `i.e.` or `i.e` → `that is`
-- Trailing `, etc.` or ` etc.` → if the sentence already uses "such as",
-  "including", or "for example", remove `etc.` (the list is implicitly
-  open-ended and `etc.` is redundant). Otherwise, flag for manual fix and
-  do not edit.
-
-**Minimizing language in instructional sentences**
-- Remove `simply` where it modifies a verb (for example, "simply run" → "run")
-- Remove `just` where it modifies a verb (for example, "just click" → "click")
-- Remove `easily` where it modifies a verb (for example, "you can easily configure"
-  → "you can configure")
-- Remove `easy` only when it describes a task in a way that trivializes it
-  (for example, "it is easy to set up" → remove the sentence or rewrite); do not
-  remove `easy` from proper names or unambiguous non-trivializing uses
-- Remove `please` from any instructional sentence (for example, "Please run the
-  following" → "Run the following"; "Please note that" → "Note that" or rewrite
-  as prose; "Please ensure" → "Ensure")
-
-**Heading case**
-- Convert title-case headings to sentence case. Rules:
-  - Lowercase every word except the first word of the heading and proper
-    nouns (product names, acronyms, trademarked terms)
-  - Do not alter code or command text inside headings
-
-**Missing blank lines between block elements**
-- Insert a blank line between any two adjacent block elements that lack one:
-  headings, paragraphs, lists, code fences, admonition components, and
-  horizontal rules
+The style guide's [AI agent checklist](../../../docs/style-guide/ai-checklist.md) (already
+loaded in Step 1) tags every rule with `auto-fixable: yes`, `no`, or `partial`, plus
+`detect`/`fix` fields for anything tagged `yes` or `partial`. Apply a correction for every
+entry tagged `auto-fixable: yes`, using its `detect`/`fix` fields. For entries tagged
+`auto-fixable: partial`, apply only the mechanical sub-case described in `fix` and leave the
+judgment-based sub-case alone — the entry's `fix` field spells out which is which. Treat
+`auto-fixable: no` entries the same as "Not auto-fixable" below: report and suggest, do not
+edit.
 
 #### Not auto-fixable (reported only, not changed)
 
-- Passive voice constructions
-- Inline prose placeholder casing (for example, `` `your_token` `` → `YOUR_TOKEN`) — too risky to auto-apply; flag and suggest instead
-- `"via"` used as a preposition — replacement word depends on context ("through", "using", "with", "by"); flag and suggest
-- `"allows you to"` / `"enables you to"` constructions — replace with a direct active verb; flag and suggest
+Every `ai-checklist.md` entry tagged `auto-fixable: no` — flag it and suggest a fix, but do
+not edit the file. This includes cases that need file-specific context the checklist can't
+encode mechanically, such as:
+
 - Link text that is non-descriptive ("click here", "this page") — requires
   knowing the link target
 - Missing doc sections (prerequisites, "Next steps", and so on)
@@ -141,6 +117,7 @@ in the batch.
 1. **Style guide** — read each of the following files:
    - `docs/style-guide/index.md`
    - `docs/style-guide/top-12.md`
+   - `docs/style-guide/ai-checklist.md`
    - `docs/style-guide/appendix.md`
    - `docs/style-guide/ui-components.md`
    - `docs/style-guide/general/active-voice.md`
@@ -169,6 +146,12 @@ in the batch.
    - `docs/style-guide/numbers-dates-time/format-numbers.md`
    - `docs/style-guide/numbers-dates-time/words-as-numbers.md`
    - `docs/content-guide/content-types.md`
+   - `docs/content-guide/templates/how-to.md`
+   - `docs/content-guide/templates/concept.md`
+   - `docs/content-guide/templates/overview.md`
+   - `docs/content-guide/templates/reference.md`
+   - `docs/content-guide/templates/troubleshooting.md`
+   - `docs/content-guide/templates/release-notes.md`
 
 2. **Example docs**:
 
@@ -208,7 +191,7 @@ with the content types defined in the project's content guide.
 | **Troubleshooting** | Helps users resolve common issues | User is encountering a problem |
 | **Release notes** | Communicates new features, bug fixes, and changes | Tracking product changes |
 
-> **Note on template conventions**: The project's how-to template (`docs/content-guide/content-types.md`) uses `## Steps` as the heading for the procedural section. If you encounter a file that uses `## Steps` as its procedure heading, treat that as the expected how-to pattern — not a violation.
+> **Note on template conventions**: The project's how-to template (`docs/content-guide/templates/how-to.md`) uses `## Steps` as the heading for the procedural section. If you encounter a file that uses `## Steps` as its procedure heading, treat that as the expected how-to pattern — not a violation.
 
 If you cannot determine the doc type from the file content or frontmatter, ask
 the user before continuing.
@@ -217,209 +200,23 @@ the user before continuing.
 
 ### Step 3 — Check format for the doc type
 
-Use the checklist for the identified doc type. Use the example doc for the
-identified doc type (loaded in Step 1) as a concrete model for what correct
-formatting looks like.
-
-#### How-to
-
-- [ ] Frontmatter includes `page_title`, `description`, and any required metadata
-- [ ] Title is action-oriented (describes the task the reader will complete)
-- [ ] Brief intro paragraph states the goal
-- [ ] `## Requirements` section lists system, environment, and software prerequisites (may be absent if the doc has no meaningful prerequisites)
-- [ ] Procedural content uses numbered steps, grouped under a `## Steps` heading or concrete action-oriented subheadings (for example, `## Configure the agent`, `## Deploy the service`)
-- [ ] Does not over-explain concepts — stays task-focused
-- [ ] `## Next steps` section links to related how-to pages (optional but encouraged)
-- [ ] Optional but encouraged: troubleshooting section at the end
-
-#### Concept
-
-- [ ] Frontmatter includes `page_title`, `description`, and any required metadata
-- [ ] Opens with a clear definition or "what is X" statement
-- [ ] Uses prose paragraphs, not numbered steps
-- [ ] Explains *why* something exists or works the way it does
-- [ ] Links to related tutorials or how-to guides for hands-on follow-up
-- [ ] Does not include step-by-step instructions
-
-#### Reference
-
-- [ ] Frontmatter includes `page_title`, `description`, and any required metadata
-- [ ] Highly structured: uses consistent heading hierarchy and tables where applicable
-- [ ] Each item/entry is complete and self-contained
-- [ ] No prose narrative — scannable by design
-- [ ] Parameters, flags, or fields include: name, type, required/optional, description, and default value where applicable
-- [ ] No how-to steps or conceptual explanations inline
-
-#### Troubleshooting
-
-- [ ] Frontmatter includes `page_title`, `description`, and any required metadata
-- [ ] Title clearly indicates troubleshooting content (for example, "Troubleshoot [feature]")
-- [ ] Organized by symptom or error message
-- [ ] Each issue follows: symptom/error → cause → resolution
-- [ ] Resolution steps are numbered and actionable
-- [ ] Does not mix conceptual explanations into resolution steps
-- [ ] Links to related how-to or reference docs where relevant
-
-#### Overview
-
-- [ ] Frontmatter includes `page_title`, `description`, and any required metadata
-- [ ] Opens with a brief intro paragraph describing the topic area and its purpose
-- [ ] Summarizes key workflows or use cases to orient the reader
-- [ ] Links to all relevant child pages (how-to, concept, and reference) with short descriptions
-- [ ] May include contextual prose to explain what to expect as readers progress through the topic
-- [ ] Does not contain full procedural steps or deep conceptual explanations — those belong in dedicated how-to or concept docs
-- [ ] Organized logically (by workflow order, complexity, or category)
-
-#### Release notes
-
-- [ ] Frontmatter includes `page_title`, `description`, and any required metadata; `description` accurately reflects the actual content of this version, not a prior version
-- [ ] Clearly states the version or date of each release
-- [ ] Organizes changes by version, then by feature or change area within each version (the Nomad/Consul pattern); or by category (Features, Bug fixes, Breaking changes, Deprecations) if the product uses that pattern — check the reference example for the product's convention
-- [ ] Each entry is concise — one to three sentences per item with a link to the relevant docs
-- [ ] Breaking changes and deprecations are prominently highlighted with `<Warning>` admonitions
-- [ ] Does not include how-to instructions
-- [ ] Uses `@include` partials for standardized messages (EOL chart, enterprise alerts) rather than custom inline text
-
-#### All doc types — universal checks
-
-- [ ] Heading hierarchy is correct: H1 → H2 → H3, no skipped levels
-- [ ] Exactly one H1 per file (the page title)
-- [ ] Shell/CLI commands use `` ```shell-session `` (not `` ```bash ``), with a `$` prompt prefix for each command
-- [ ] Other code blocks have an appropriate language identifier (`` ```hcl ``, `` ```json ``, `` ```yaml ``, and so on)
-- [ ] Stand-in placeholder values inside code blocks use angle brackets: `<path/to/file>`, not ALL_CAPS
-- [ ] Images (if any) have descriptive alt text that describes content, not just "screenshot"
-- [ ] Links use the correct format per the style guide (relative vs. absolute)
-- [ ] Admonitions/callouts use correct syntax and are used appropriately
-- [ ] Standardized messages (beta, enterprise, deprecation, EOL) use `@include` partials, not custom inline alerts
-- [ ] No broken links or references to non-existent sections
-- [ ] Optimized for SEO: action-oriented headings, titles, and descriptions
-- [ ] Blank line before and after every heading, paragraph, list, code block, and admonition component
+Each doc type's template and Checklist live in a dedicated file under
+`docs/content-guide/templates/` (all six already loaded in Step 1): `how-to.md`,
+`concept.md`, `overview.md`, `reference.md`, `troubleshooting.md`, `release-notes.md`. Use the
+Checklist in the file matching the identified doc type, then apply the Universal checklist in
+`docs/content-guide/content-types.md` (also loaded in Step 1). Use the example doc for the
+identified doc type (loaded in Step 1) as a concrete model for what correct formatting looks
+like.
 
 ---
 
 ### Step 4 — Check style guide compliance
 
-Flag every violation found.
-
-#### Voice, tone, and point of view
-
-- Address readers as **"you"** when describing actions the reader performs
-- Use **"we"** only when referring to HashiCorp actions or recommendations — for
-  example, "We recommend…", "We added…", "We deprecated…". Do **not** use "we"
-  to guide readers through examples ("In this example, we configure…")
-- Do not use "let's", "our" (when referring to the reader's environment), or
-  first-person plural to describe reader actions
-- Use **active voice** — avoid passive constructions (for example, "the secret is stored" → "Vault stores the secret")
-- Use **present tense** — avoid future tense ("will"). Write "the command returns" not "the command will return"
-- Use **imperative mood** for instructions — "Run the command" not "You should run the command"
-- Do not use "please" in instructions
-- Do not use "simple", "easy", "just", or other minimizing language
-
-#### Terminology and product names
-
-- Flag any terms the style guide marks as preferred, avoided, or with specific casing
-- HashiCorp product names must be capitalized correctly (for example, "Vault", "Terraform", "HCP Vault Radar")
-- Use the full HCP product name on first reference, then the short name:
-  - "HCP Vault Radar" then "Vault Radar"
-  - "HCP Vault Dedicated" then "HCP Vault"
-- Spell out acronyms on first use (for example, "Key-Value (KV) secrets engine" then "KV" thereafter)
-- For non-HashiCorp products, use the vendor's correct capitalization and spelling (for example, "Slack", not "slack")
-- Do not use Latin abbreviations: write "for example" not "e.g.", "that is" not "i.e.", avoid "etc."
-- Do not use unofficial product abbreviations: TF, TFE, TFC, TFC4B, TFCB, HCP TF, VSO, COM
-
-#### Word choice
-
-- Do not use words that reference points in time to describe product state: "new", "old", "now", "currently" (exception: release notes and beta callouts)
-- Do not use shortened or abbreviated forms: "repository" not "repo", "directory" not "dir", "configuration" not "config"
-- Do not use jargon or non-English words without explanation: avoid "via", "sanity check", "smoke test", "blast radius", "carte blanche", "ergo", "vice versa"
-- Do not use speculative or hypothetical framing: avoid "imagine", "suppose", "pretend"
-- Do not use rhetorical questions in headings or prose
-- Do not use weak enabling constructions: "allows you to" and "enables you to" should be replaced with a direct active verb (for example, "Vault allows you to store secrets" → "Vault stores secrets")
-- Use shorter, more common words where possible (for example, "use" not "utilize", "start" not "initiate")
-- Flag sentences over approximately 30 words as candidates for splitting
-
-#### Formatting
-
-- **UI elements**: use bold for UI labels (for example, **Save**, **Settings**)
-- **Code elements**: use code formatting for commands, values, file paths, API endpoints, and configuration keys
-- **Inline placeholders** (in prose): use ALL_CAPS for user-supplied values (for example, `YOUR_TOKEN`)
-- **Code block placeholders**: use angle brackets (for example, `<path/to/file>`, `<cluster-name>`) — not ALL_CAPS
-- **Bold and italics**: do not overuse — bold for emphasis or UI labels; italics sparingly
-- Do not place the same type of element immediately adjacent to another of the same type: no consecutive alerts, consecutive headings without intervening prose, consecutive tables, or consecutive lists
-
-#### Code blocks
-
-- CLI/shell commands must use `` ```shell-session `` with a `$` prompt, not `` ```bash ``
-- Commands longer than 100 characters must be split with the shell line continuation character (`\`)
-- JSON that contains comments must use the `javascript` syntax label, not `json`
-- Long commands in a numbered list must be indented four spaces to preserve list numbering
-- Do not use code comments to explain what the code does — introduce the block with a sentence instead
-
-#### Headings
-
-- Use **sentence case** for all headings
-- Do not start headings with gerunds (-ing words)
-- Do not start headings with articles (a, an, the)
-- Keep headings under 12 words
-- Headings must be action-oriented for procedural content
-
-#### Numbers, punctuation, and spelling
-
-- Use **Oxford commas** (serial commas)
-- Spell out numbers under 10; use numerals for 10 and above
-- Use American English spelling throughout (for example, "initialize" not "initialise", "center" not "centre")
-
-#### Links
-
-- Use descriptive link text — never "click here" or "this page"
-- Use relative links for internal cross-references where the style guide specifies
-- Verify link text accurately describes the target
-
-#### Alerts and admonitions
-
-Alert types and their correct use:
-
-- `<Tip>`: best practices or optional settings and workflow (information not required to complete the task)
-- `<Note>`: information the user may need to act on
-- `<Warning>`: information the user **must** act on — only for breaking changes, security vulnerabilities, critical compatibility issues, or catastrophic consequences
-- `<EnterpriseAlert>` / `<EnterpriseAlert inline/>`: paid-edition feature callouts; use the appropriate partial, not a custom `<Note>`
-
-Documentation-specific rules (stricter than tutorials):
-
-- **Avoid `<Note>` and `<Tip>` in docs** — integrate supplemental information into prose instead; alerts lose effectiveness when overused
-- Use **Markdown blockquotes** to link to tutorials from docs: `` > **Hands-on:** Try the [Tutorial title](URL) tutorial. `` — not a `<Note>` component
-- Use `<Warning>` for upgrade, compatibility, and security situations in docs
-- Place `<Warning>` **immediately before** the step or config it applies to
-- **Never begin a page with an alert**
-- **Never place consecutive alert boxes** — always separate with prose
-- For beta, deprecated, enterprise, or paid-tier features, use the product's standardized `@include` partial — do not write a custom inline alert
-
-#### Lists
-
-- Use **numbered lists** for sequential or procedural steps
-- Use **bulleted lists** for non-sequential items
-- Maintain **parallel structure** within a list (all items start with the same part of speech)
-- Be consistent with punctuation at the end of list items
-
-#### Inclusive language
-
-**Gendered language**
-- Avoid gendered pronouns; use "they/them" for the singular third person
-- Refer to roles ("developer", "administrator") rather than gendered nouns
-
-**Ableist language**
-- Do not use "see <link>" — use "refer to <link>"
-- Do not use "sanity check" — use "preliminary check" or "verification"
-- Do not use "dummy" to describe placeholder values — use "example" or "placeholder"
-
-**Violent language**
-- Do not use "hit" for button or key presses — use "press" or "click"
-- Do not use "kill" for processes when an alternative exists — use "stop" or "end"; note that `kill` as a literal command name is acceptable
-- Do not use "abort" for user-initiated cancellation — use "cancel" or "stop"
-
-**Speculative or exclusionary framing**
-- Do not describe tasks as "trivial", "obvious", or "self-explanatory"
-- Do not assume the reader's environment or prior knowledge beyond what is stated in the prerequisites
+Apply every entry in the style guide's [AI agent checklist](../../../docs/style-guide/ai-checklist.md)
+(already loaded in Step 1) to the file under review. Flag every violation found. When citing
+a violation in the report's "Rule / Convention" column, use the entry's heading text (for
+example, "Do not use weak enabling constructions") so the citation is traceable back to the
+checklist.
 
 ---
 
