@@ -111,19 +111,17 @@ You can configure the following types of gateways:
 - _Terminating gateways_ - Lets services be connected services externally
 ```
 
-## Do not use parentheses, en dashes, em dashes, colons, or semicolons to combine ideas or sentences
+## Do not use parentheses, en dashes, or em dashes to separate ideas or phrases
 
-- **keywords**: grammar, punctuation, parentheses, dashes, colons, semicolons  
+- **keywords**: grammar, punctuation, parentheses, dashes  
 - **content sets**: docs, WAF, tutorials, certifications
 
-Don't use specialized punctuation to combine ideas or sentences. Use commas to separate phrases and periods to separate ideas. Refer to [Write sentences that contain a single idea](content-organization#write-simple-sentences-that-contain-a-single-idea) for more information.
+En dashes represent a range. Em dashes are similar to commas, but many writers use them in place of colons, semicolons, parentheses, or to create stylistic pauses. In documentation, only use parentheses when introducing acronyms or when they are characters in code samples. For consistency, use commas to separate phrases and periods to separate ideas. 
 
-Only use en dashes to represent a range. Refer to guidance in [Words as numbers](numbers-dates-time/words-as-numbers) for more information.
+Refer to the following guidelines for additional information:
 
-Only use colons to introduce other constructions. Refer to [Use colons to introduce lists, tables, and visual aids](#use-colons-to-introduce-lists-tables-and-visual-aids) for more information.
-
-Only use parentheses to introduce acronyms or as characters in code samples. Refer to [Spell out a phrase and place the acronym form in parentheses on first use](language#spell-out-a-phrase-and-place-the-acronym-form-in-parentheses-on-first-use)
-
+- [Spell out a phrase and place the acronym form in parentheses on first use](language#spell-out-a-phrase-and-place-the-acronym-form-in-parentheses-on-first-use)  
+- [Write sentences that contain a single idea](content-organization#write-simple-sentences-that-contain-a-single-idea)
 
 ### Examples
 
