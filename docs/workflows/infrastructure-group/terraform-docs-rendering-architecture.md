@@ -174,7 +174,7 @@ API slug: `terraform-docs-agents` · Versioned: yes (semver, for example `v1.25.
 
 ### `content/terraform-enterprise/`: Terraform Enterprise
 
-API slug: `terraform-enterprise` · Versioned: yes (date-based, for example `v202507-1`)
+API slug: `terraform-enterprise` · Versioned: yes (semver, for example `v2.0.x`)
 
 | URL path | Source file | Nav-data file |
 |---|---|---|
@@ -186,7 +186,7 @@ API slug: `terraform-enterprise` · Versioned: yes (date-based, for example `v20
 **Example (versioned):** `https://developer.hashicorp.com/terraform/enterprise/v202504-1/deploy`
 → `content/terraform-enterprise/v202504-1/docs/enterprise/deploy/index.mdx`
 
-> Terraform Enterprise uses calendar-date versions (`v202507-1`) rather than
+> Before August 11, 2025, Terraform Enterprise used calendar-date versions (`v202507-1`) rather than
 > semver. Refer to [Terraform Enterprise: Special
 > Versioning](#terraform-enterprise-special-versioning) for the custom sort
 > logic.
