@@ -8,9 +8,10 @@ you explicitly call it.
 |---|---|---|---|
 | [`create-page`](#create-page) | `/create-page` | Draft a new `.mdx` page from source material | Yes |
 | [`docs-review`](#docs-review) | `/docs-review` | Score a doc against the style guide and doc-type format rules | Only with `--fix`, and only mechanical fixes |
+| [`hashicorp-style-checklist`](#hashicorp-style-checklist) | `/hashicorp-style-checklist` | Check content against just the style guide, skipping doc-type/SEO/nav checks | Only with `--fix`, and only mechanical fixes |
 | [`seo-review`](#seo-review) | `/seo-review` | Check content against Google's SEO guidelines | Only with `--fix`, and only `[AUTO-FIX]` items |
 
-All three share the same source of truth for content rules, so fixing a rule
+All four share the same source of truth for content rules, so fixing a rule
 in one place fixes it for every skill that uses it:
 
 - `docs/content-guide/content-types.md` and `docs/content-guide/templates/*.md`
@@ -160,6 +161,28 @@ Full details: [`docs-review/SKILL.md`](docs-review/SKILL.md).
 
 ---
 
+## `hashicorp-style-checklist`
+
+Checks content against `docs/style-guide/ai-checklist.md` only. It's the style-only subset
+of `docs-review`, without content-type template validation, SEO, or nav registration. Use it
+for a fast style pass on prose that doesn't need a full `docs-review`, such as a code
+comment, a project README, or a draft still in progress.
+
+```text
+/hashicorp-style-checklist <path/to/file>    review a single file
+/hashicorp-style-checklist                   review content pasted into the conversation
+/hashicorp-style-checklist <path> --fix      also auto-apply mechanical corrections first
+```
+
+Findings are grouped by priority (critical, important, standard), and `--fix` applies the
+same `auto-fixable: yes`/`partial` rules `docs-review` does, from the same source file. For
+files under `content/` that are ready for a complete review, use `docs-review` instead. It
+covers this same style checklist plus doc-type structure and SEO in one pass.
+
+Full details: [`hashicorp-style-checklist/SKILL.md`](hashicorp-style-checklist/SKILL.md).
+
+---
+
 ## `seo-review`
 
 Checks docs, blog posts, or general web content against Google Search
@@ -194,9 +217,9 @@ Full details: [`seo-review/SKILL.md`](seo-review/SKILL.md).
   one from context alone.
 - There's no repo-wide markdownlint config; `create-page` bundles its own
   (`create-page/markdownlint.jsonc`), invoked using `npx markdownlint-cli2` on
-  the one file it just wrote. `docs-review` and `seo-review` don't lint. They
-  review and score instead.
+  the one file it just wrote. `docs-review`, `hashicorp-style-checklist`, and
+  `seo-review` don't lint. They review and score instead.
 - If you change a rule in `docs/style-guide/ai-checklist.md` or a template
-  under `docs/content-guide/templates/`, all three skills pick it up
+  under `docs/content-guide/templates/`, all four skills pick it up
   automatically next run. None of them hardcodes style or format rules
   locally.
