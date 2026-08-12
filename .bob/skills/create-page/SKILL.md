@@ -136,30 +136,50 @@ a proposed default, proceed to Step 0.5.
 
 ### Step 0.5 — Classify and resolve sources {#step-05}
 
+This skill runs in IBM Bob, not Claude Code — source resolution below uses
+Bob's available MCP tools (`atlassian-rovo`, `tavily`), not Claude-Code-only
+tools. **Tool selection here is automatic and mandatory, not something to
+wait for the user to request.** Classifying a URL as Jira/Confluence and
+then not using `atlassian-rovo` for it is a bug in following this skill, not
+an acceptable fallback.
+
 Classify each entry in the source list by inspection, then resolve it:
 
-- **Local file** — exists and is a file. Read it directly with the Read
-  tool. If unreadable, stop and report exactly which path.
-- **Local directory (codebase)** — exists and is a directory. Launch an
-  Explore agent (`Agent` tool, `subagent_type: Explore`, run in the
-  foreground — Step 5's draft depends on its result, so this can't be a
-  background/fire-and-forget call) scoped to that directory, with a prompt
-  built from the topic — for example: "In `<path>`, find where `<topic>` is
-  defined and how it works: struct/type definitions, core logic, state
-  transitions, and any doc comments." Treat the agent's returned summary as
-  the resolved source. Never bulk-read an entire external codebase into
-  context directly.
-- **URL** — starts with `http://` or `https://`. Fetch with `WebFetch`,
-  prompted toward the topic. If `WebFetch` reports a redirect, follow it
-  once, per its documented behavior.
-- **Unreachable URL** (auth-gated domains like `atlassian.net`, `confluence`,
-  `docs.google.com` — or any URL that fails to fetch, or whose fetched
-  content looks like a login page rather than real content): **stop and ask
-  the user to paste the relevant content** instead of proceeding with that
-  source silently absent. This applies to any source that turns out
-  unreachable, not just pre-recognized domains — never silently treat a
-  failed fetch as "no information" and draft anyway. Once content is pasted,
-  treat it as an inline text source and continue.
+- **Local file** — exists and is a file. Read it directly. If unreadable,
+  stop and report exactly which path.
+- **Local directory (codebase)** — exists and is a directory. Investigate it
+  in a scoped, targeted way: search/grep for the topic and read the files
+  that actually matter (struct/type definitions, core logic, state
+  transitions, doc comments). If Bob exposes an agentic code-search
+  capability, use it, scoped to the topic; otherwise do the targeted search
+  directly. Never bulk-read an entire codebase into context.
+- **Atlassian URL — check for this first, before any generic URL handling.**
+  Match the URL against these patterns: domain contains `atlassian.net` or
+  `atlassian.com`; path contains `/browse/`, `/wiki/`, `/jira/`, or
+  `/confluence/`; or the request describes it as a "Jira ticket," "Jira
+  issue," or "Confluence page" even if the URL itself doesn't obviously say
+  so. Any match means: **before doing anything else with this source, look
+  through your available tools for one belonging to the `atlassian-rovo` MCP
+  server and call it directly to fetch the content.** Do this automatically —
+  do not ask the user for permission first, do not try a generic web-fetch
+  tool on it first, and do not skip straight to the paste-fallback without
+  having actually attempted the `atlassian-rovo` call. This is authenticated
+  access, so it should succeed for anything the engineer has permission to
+  see — don't pre-assume Jira/Confluence links are unreachable. If no tool
+  from the `atlassian-rovo` MCP server appears to be available in this
+  session at all, say so explicitly to the user rather than silently
+  substituting a different tool or skipping the source.
+- **Any other URL**: fetch it with the **`tavily` MCP tool**, prompted
+  toward the topic.
+- **Unreachable source** (the matched MCP tool errors, returns nothing
+  usable, or returns something that reads like a permission/login denial
+  rather than real content — or, for an Atlassian URL, no `atlassian-rovo`
+  tool was available to even attempt the call): **stop and ask the user to
+  paste the relevant content** instead of proceeding with that source
+  silently absent. This applies to any source that turns out unreachable,
+  regardless of type — never silently treat a failed fetch as "no
+  information" and draft anyway. Once content is pasted, treat it as an
+  inline text source and continue.
 - **Anything else** (a path that doesn't exist, a malformed URL): stop and
   report exactly which source and why, rather than skipping it silently.
 
@@ -247,8 +267,8 @@ Three possible outcomes:
 ### Step 5 — Draft content from sources
 
 Using the template loaded in Step 1 and the sources resolved in Step 0.5
-(file contents, Explore-agent summaries, WebFetch summaries, and any pasted
-text from an unreachable-source fallback):
+(file contents, codebase-search findings, `atlassian-rovo`/`tavily` fetch
+results, and any pasted text from an unreachable-source fallback):
 
 - Map source content onto the template's sections (for example: extract
   ordered steps and commands for a how-to; extract definitions and rationale
@@ -345,7 +365,7 @@ and format compliance scoring without re-implementing it.
 
 | Source | Type | Contribution |
 |---|---|---|
-| `<path or URL>` | file / codebase / URL / pasted | [one-line summary of what it contributed — for a codebase source, summarize what the Explore agent found] |
+| `<path or URL>` | file / codebase / URL / pasted | [one-line summary of what it contributed — for a codebase source, summarize what the targeted search found] |
 
 Note explicitly if any source required the paste-fallback after being
 unreachable, and why (auth wall, fetch failure, and so on).
@@ -404,11 +424,14 @@ does it need more source material or manual writing first?
   ambiguous (Step 0/Step -1). Version and section may be proposed as
   defaults, but only when explicitly flagged as proposed and confirmed in
   Step 3 — never presented as though they were stated.
-- Never treat an unreachable source as silently absent — an auth-gated or
-  otherwise unfetchable URL stops the flow and asks the user to paste the
-  content (Step 0.5).
-- Never bulk-read an entire local codebase directly — investigate it via a
-  topic-scoped Explore agent instead (Step 0.5).
+- Never treat an unreachable source as silently absent — if the matched MCP
+  tool (`atlassian-rovo`, `tavily`, or otherwise) can't retrieve a source,
+  stop and ask the user to paste the content (Step 0.5).
+- Never assume a Jira or Confluence link is unreachable — `atlassian-rovo`
+  provides authenticated access in this environment; only fall back to the
+  paste-prompt if it actually fails (Step 0.5).
+- Never bulk-read an entire local codebase directly — investigate it with a
+  topic-scoped, targeted search instead (Step 0.5).
 - When sources disagree on a fact, flag the discrepancy rather than
   silently picking one (Step 5).
 - Never author the auto-generated metadata block — that belongs to the
