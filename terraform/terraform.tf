@@ -42,3 +42,8 @@ provider "github" {
   # PAT comes from env var in HCP:
   # GITHUB_TOKEN
 }
+
+provider "vercel" {
+  # PAT comes from env var in HCP:
+  # VERCEL_TOKEN
+}
