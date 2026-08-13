@@ -1,6 +1,14 @@
 # Terraform docs rendering architecture
 
-How `web-unified-docs` Terraform content directories become `developer.hashicorp.com/terraform` pages.
+How `web-unified-docs` Terraform content directories become
+`developer.hashicorp.com/terraform` pages.
+
+The Terraform documentation at `developer.hashicorp.com/terraform` is produced by two cooperating Next.js applications:
+
+- `web-unified-docs`: the content store and unified docs API. It holds all versioned MDX content under `content/`, runs a prebuild pipeline to transform that content, and exposes a REST API that the frontend consumes.
+- `dev-portal`: the frontend. It calls `web-unified-docs` at build time (SSG) and at request time (ISR) to fetch content, nav trees, and version metadata, then renders them into HTML.
+
+`web-unified-docs` is both a content repository and a running HTTP server. `dev-portal` treats it purely as a remote API (`UNIFIED_DOCS_API`) and never reads files directly.
 
 ## System architecture
 

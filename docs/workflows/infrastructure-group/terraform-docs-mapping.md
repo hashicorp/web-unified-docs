@@ -1,11 +1,14 @@
 # Terraform docs directory to published location mapping
 
-The Terraform documentation at `developer.hashicorp.com/terraform` is produced by two cooperating Next.js applications:
+Terraform documentation on `developer.hashicorp.com/terraform` is assembled from
+13 separate content directories in `web-unified-docs`, one for each Terraform
+sub-product. This page describes those directories, shows how each maps to a
+`productConfig.mjs` entry and a published URL path, and provides a URL-to-file
+reference for locating the source file behind any given page.
 
-- `web-unified-docs`: the content store and unified docs API. It holds all versioned MDX content under `content/`, runs a prebuild pipeline to transform that content, and exposes a REST API that the frontend consumes.
-- `dev-portal`: the frontend. It calls `web-unified-docs` at build time (SSG) and at request time (ISR) to fetch content, nav trees, and version metadata, then renders them into HTML.
-
-`web-unified-docs` is both a content repository and a running HTTP server. `dev-portal` treats it purely as a remote API (`UNIFIED_DOCS_API`) and never reads files directly.
+Refer to [Terraform docs rendering
+architecture](terraform-docs-rendering-architecture.md) for engineering-level
+detail on how the `dev-portal` platform renders all the Terraform docs content.
 
 ## The 13 Terraform content directories
 
