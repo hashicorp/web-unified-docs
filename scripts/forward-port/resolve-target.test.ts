@@ -99,7 +99,10 @@ describe('resolveTarget', () => {
 	})
 
 	it('uses config values even when a comment file is also provided', () => {
-		vol.fromJSON({ [CONFIG_PATH]: SAMPLE_CONFIG, [COMMENT_PATH]: VALID_COMMENT })
+		vol.fromJSON({
+			[CONFIG_PATH]: SAMPLE_CONFIG,
+			[COMMENT_PATH]: VALID_COMMENT,
+		})
 
 		// Config wins — not the comment's boundary values
 		const { result } = resolveTarget({
@@ -114,7 +117,10 @@ describe('resolveTarget', () => {
 	// ── Scenario B: comment-driven (slug not in config) ──────────────────────
 
 	it('falls back to the comment file when the slug is not found in the config', () => {
-		vol.fromJSON({ [CONFIG_PATH]: SAMPLE_CONFIG, [COMMENT_PATH]: VALID_COMMENT })
+		vol.fromJSON({
+			[CONFIG_PATH]: SAMPLE_CONFIG,
+			[COMMENT_PATH]: VALID_COMMENT,
+		})
 
 		const { result } = resolveTarget({
 			configPath: CONFIG_PATH,
@@ -139,7 +145,10 @@ describe('resolveTarget', () => {
 
 	it('returns an error when the comment first line has the wrong slug', () => {
 		// VALID_COMMENT has "forward-port:boundary-1.0" but label is boundary-2.0
-		vol.fromJSON({ [CONFIG_PATH]: SAMPLE_CONFIG, [COMMENT_PATH]: VALID_COMMENT })
+		vol.fromJSON({
+			[CONFIG_PATH]: SAMPLE_CONFIG,
+			[COMMENT_PATH]: VALID_COMMENT,
+		})
 
 		const { error } = resolveTarget({
 			configPath: CONFIG_PATH,
