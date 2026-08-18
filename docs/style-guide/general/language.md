@@ -141,8 +141,9 @@ Short sentences are easier to understand than sentences that contain filler word
 
 ### Examples
 
-- Instead of "in order to", use "to"
-- Instead of "in the case that", use "when"
+- Instead of "in order to", use "to".
+- Instead of "in the case that", use "when".
+- Don't use "please". It is more polite to write shorter sentences.
 - Avoid adding filler words, especially words that editorialize, such as "simply", "just", "very", and "actually". Refer to [Avoid editorializing on the difficulty or comprehensibility of an action or concept](#do-not-editorialize-about-the-difficulty-or-comprehensibility-of-an-action-or-concept).
 
 ## Use the simplest word possible
