@@ -1,0 +1,269 @@
+---
+layout: docs
+page_title: TPM - Auth Methods
+description: >-
+  The TPM auth method allows machine authentication using TLS client certificates
+  backed by Trusted Platform Module (TPM) hardware attestation.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-04-15T00:14:29.000Z
+last_modified: 2026-04-15T00:14:29.000Z
+# END AUTO GENERATED METADATA
+---
+
+# TPM auth method
+
+@include 'alerts/enterprise-only.mdx'
+
+The `tpm` auth method allows machines to authenticate with Vault using TLS
+client certificates that are cryptographically bound to a
+[Trusted Platform Module (TPM)](https://trustedcomputinggroup.org/resource/tpm-library-specification/)
+chip. The auth method issues certificates itself through a hardware-attested
+enrollment protocol to ensure the private key of each certificate was generated
+inside, and never left, a specific TPM.
+
+## Overview
+
+Authentication with the `tpm` auth method requires two preliminary steps before
+a machine can call `login`:
+
+1. **Enroll the TPM**. You must use the
+   [`identity/tpm`](/vault/api-docs/secret/identity/tpm#create-a-tpm) endpoint
+   to register the TPM device with the Vault identity store. Vault uses the TPM
+   endorsement key (EK) to derive and assign the TPM a stable ID.
+
+2. **Configure the auth method and create a role**. Use the `/auth/tpm/config`
+   endpoint to setup the mount, then create at least one role that authorizes the enrolled
+   TPM (either by its ID or by group membership).
+
+Now the machine can run the two-phase certificate
+enrollment (`gentpmcert/begin` &rarr; `gentpmcert/finish`) to obtain a client
+certificate, and then use that certificate to call `/auth/tpm/login` to receive
+a Vault token.
+
+### TPM ID
+
+A TPM is identified by the SHA-256 hash of the DER-encoded bytes of its
+Endorsement Key public key, formatted as `sha256-<hex>`. For example:
+
+```
+sha256-a3f2c1d8e4b5678901234567890abcdef01234567890abcdef01234567890abcdef
+```
+
+The TPM ID is stable for the lifetime of the TPM and embedded in every
+client certificate issued by the auth method.
+
+## Certificate enrollment
+
+The `gentpmcert` endpoints implement a remote attestation protocol based on
+[TPM 2.0 credential activation](https://trustedcomputinggroup.org/resource/tpm-library-specification/).
+The protocol proves two things without ever transmitting a private key:
+
+- The EK (and therefore the machine's identity) belongs to a genuine TPM chip.
+- The application key in the CSR is resident on the same TPM as the EK.
+
+### Phase 1 — begin
+
+The client calls `POST /auth/tpm/role/:role_name/gentpmcert/begin` with:
+
+- Its **EK public key** (PEM). Vault derives the TPM ID from the provided key and
+  verifies that the TPM is enrolled and authorized for the role.
+- **AK parameters** (base64-encoded JSON). The Attestation Key (AK) is a
+  signing key created inside the TPM. Vault requires the public AK parameters to
+  construct the activation challenge.
+
+Vault responds with a TPM 2.0 `EncryptedCredential` structure as an
+`encrypted_credentials` blob that can only be decrypted by the TPM that holds
+the EK. The blob also contains a random secret that Vault checks in phase 2.
+
+The challenge expires after **5 minutes**. Each TPM is limited to one
+outstanding challenge at a time, and new requests from the same EK are
+rate-limited to one every 10 seconds.
+
+### Phase 2 — finish
+
+The client passes the `encrypted_credentials` blob to the TPM using the
+`TPM2_ActivateCredential` command, which returns the decrypted secret if and
+only if the EK matches. The client then calls
+`POST /auth/tpm/role/:role_name/gentpmcert/finish` with:
+
+- The decrypted **challenge response** (base64-encoded).
+- A **CSR** (PEM) for the application key — the key pair that will be used for
+  TLS client authentication going forward.
+- **Key certification parameters** (base64-encoded JSON) — a TPM attestation
+  structure signed by the AK, proving the application key was created on the
+  same TPM.
+
+Vault verifies the challenge response, validates the AK-signed key
+certification against the CSR public key. If all the checks pass, Vault signs and
+returns a client certificate.
+
+### Issued certificate
+
+The signed certificate contains two
+[OtherName SAN](https://datatracker.ietf.org/doc/html/rfc5280#section-4.2.1.6)
+extensions that Vault uses to bind the certificate to a specific TPM and role:
+
+| Extension | Content |
+| :-------- | :------ |
+| TPM ID OID | `sha256-<hex>` of the EK public key |
+| Role name OID | Name of the role used during enrollment |
+
+Both values are verified during `login`. A certificate issued for one role
+cannot be used to authenticate against a different role.
+
+## CA management
+
+The `tpm` auth method manages its own internal CA. Vault initializes the CA the first
+time `/auth/tpm/config` is written, and Vault automatically rotates the CA
+according to the configured parameters.
+
+The backend maintains a ring of CA materials with three states:
+
+| State | Purpose |
+| :---- | :------ |
+| **Active** | Signs new client certificates |
+| **Next** | Pre-generated; promoted when the Active CA nears soft expiry |
+| **Retired** | Previously active; still trusted for login until its hard expiry |
+
+The *soft expiry* window (`ca_soft_expiry`) defines how far before its hard
+expiry the Active CA stops signing new certificates. When the remaining lifetime
+for the Active CA falls below `ca_soft_expiry`, Vault promotes the Next CA to
+Active, and generates a new Next CA. Clients with certificates issued just before
+a rotation continue authenticating through the retired CA until it reaches hard
+expiry.
+
+`ca_lifetime` must be at least twice `ca_soft_expiry`. For example, with a
+1-year `ca_lifetime` and a 30-day `ca_soft_expiry`, the Active CA signs
+certificates for ~11 months and then gracefully retires.
+
+## Roles and authorization
+
+A role maps one or more TPM devices to a set of Vault token parameters. A TPM
+may be authorized via:
+
+- **`tpm_ids`** — an explicit list of TPM IDs (EK hashes). Use TPM IDs for
+  individual-device authorization.
+- **`tpmgroup_ids`** — a list of TPM group IDs.
+
+At least one of the two must be set. If you set both, Vault authorizes any
+TPM to use the role if either its ID is present in `tpm_ids` or if the ID is
+a member of one or more of `tpmgroup_ids`.
+
+The `cert_ttl` field controls how long issued client certificates are valid.
+The resolution order for cert TTL is:
+
+1. **`cert_ttl`** on the role (if non-zero)
+2. **`default_cert_ttl`** on the config (if non-zero)
+3. **`ca_soft_expiry`** from the config (fallback)
+
+The actual certificate lifetime is always capped at the remaining validity of
+the signing CA, so a certificate will never outlive the CA that signed it.
+
+Roles also carry the standard Vault token parameters
+(`token_ttl`, `token_max_ttl`, `token_policies`, `token_bound_cidrs`, etc.).
+
+## Login token
+
+On a successful `login` call Vault returns a token with:
+
+- **Display name** set to the `display_name` value of the role. If the role does
+  not have a display name, Vault uses the role name by default.
+- **Metadata** that includes `role_name`, `common_name`, `serial_number`,
+  `subject_key_id`, `authority_key_id`, and `tpm_id`.
+
+The alias name used is the TPM ID (`sha256-<hex>`).
+
+## Renewal
+
+Token renewal re-validates the TLS client certificate presented on the
+connection. Vault denies the renewal if:
+
+- The `SubjectKeyId` or `AuthorityKeyId` values in the  certificate differ from
+  the values recorded at login time.
+- Token policies for the role have changed since the token was issued.
+
+If Vault denies the renewal, you must issue a new login request to receive a new token.
+
+## TLS requirements
+
+The `tpm` auth method requires mutual TLS. Ensure `tls_disable` and
+`tls_disable_client_certs` are both `false` in the Vault listener
+configuration. `tls_require_and_verify_client_cert` must also be false,
+as that would require the client to already have a client certificate trusted by Vault
+during the attestation workflow, but the purpose of the attestation workflow is to
+obtain just such a client certificate.
+
+The client certificate presented to Vault during login attempts must be the certificate
+obtained from the `gentpmcert` workflow and not a separately managed certificate.
+
+If Vault is fronted by a reverse proxy or load balancer that terminates TLS, the
+proxy must forward the validated client certificate in a header and the Vault
+listener must be
+[configured to accept it](/vault/docs/configuration/listener/tcp#tcp-listener-parameters).
+We strongly recommend securing the connection between the proxy and Vault with mutual TLS.
+
+## Configuration
+
+Auth methods must be configured before machines can authenticate. These steps
+are typically performed by an operator or configuration management tool.
+
+1. Enroll the TPM within identity.  For example, you can run the following example command on the
+   client machine that has the TPM so you can fetch the TPM EK using tpm2_createek from tpm2-tools:
+
+  ```shell-session
+  $ vault write identity/tpm tpm_ek_public_key="$(sudo tpm2_createek -G rsa -u /dev/stdout -c ./ek.ctx -f pem)"
+  ```
+
+  You need to use the returned TPM ID to set up the roles to grant it access.
+
+1. Enable the TPM auth method:
+
+   ```shell-session
+   $ vault auth enable tpm
+   ```
+
+1. Configure the internal CA. The defaults (1-year lifetime, 30-day soft
+   expiry) are suitable for most deployments:
+
+   ```shell-session
+   $ vault write auth/tpm/config \
+       ca_lifetime="8760h" \
+       ca_soft_expiry="720h" \
+       default_cert_ttl="168h"
+   ```
+
+1. Create a role that authorizes one or more TPMs. You can authorize specific
+   TPMs by ID:
+
+   ```shell-session
+   $ vault write auth/tpm/role/my-role \
+       tpm_ids="sha256-a3f2c1d8..." \
+       token_ttl="1h" \
+       token_policies="default,my-policy"
+   ```
+
+   Or authorize all members of a TPM group:
+
+   ```shell-session
+   $ vault write auth/tpm/role/fleet-role \
+       tpmgroup_ids="group-id-abc123" \
+       token_ttl="1h" \
+       token_policies="default,fleet-policy"
+   ```
+
+1. On the client machine, run the attestation command to obtain a certificate:
+
+   ```shell-session
+   $ vault tpm attest -tpm-state-dir=/private -role-name=my-role
+   ```
+
+1. On the client machine, authenticate using the issued certificate:
+
+   ```shell-session
+   $ vault login -method=tpm -tpm-state-dir=/private role_name=my-role
+   ```
+
+## API
+
+The TPM auth method has a full HTTP API. Refer to the
+[TPM auth API documentation](/vault/api-docs/auth/tpm) for more details.
