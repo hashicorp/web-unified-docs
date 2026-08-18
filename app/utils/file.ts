@@ -172,10 +172,9 @@ export const getAssetData = async (
 	filePath: string[],
 	versionMetaData: ProductVersionMetadata,
 ) => {
-	const newFilePath = ifNeededAddReleaseStageToPath(
-		filePath,
-		versionMetaData.releaseStage,
-	).join('/')
+	const newFilePath = joinFilePath(
+		ifNeededAddReleaseStageToPath(filePath, versionMetaData.releaseStage),
+	)
 
 	try {
 		const fetchResult = await fetchFile(newFilePath, FileType.Asset)
