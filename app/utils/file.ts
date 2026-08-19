@@ -34,6 +34,48 @@ const incBuildPRPreview = incBuild && process.env.VERCEL_ENV === 'preview'
 const incBuildLocalDev =
 	incBuild && process.env.NODE_ENV === 'development' && !incBuildPRPreview
 
+let _buildMdxTransforms:
+	| ((
+			targetDir: string,
+			outputDir: string,
+			versionMetadata: unknown,
+			changedFiles: { added: string[]; modified: string[] } | null,
+	  ) => Promise<void>)
+	| null = null
+let _versionMetadataForTransforms: unknown = null
+
+async function getBuildMdxTransforms() {
+	if (_buildMdxTransforms && _versionMetadataForTransforms) {
+		return {
+			buildMdxTransforms: _buildMdxTransforms,
+			versionMetadata: _versionMetadataForTransforms,
+		}
+	}
+	const CWD = process.cwd()
+	const MDX_TRANSFORMS_FILE = path.join(
+		CWD,
+		'scripts',
+		'prebuild',
+		'mdx-transforms',
+		'build-mdx-transforms.mjs',
+	)
+	const { buildMdxTransforms } = await import(
+		/* webpackIgnore: true */ pathToFileURL(MDX_TRANSFORMS_FILE).href
+	)
+	const versionMetadataPath = path.join(
+		CWD,
+		'app',
+		'api',
+		'versionMetadata.json',
+	)
+	const versionMetadata = JSON.parse(
+		await readFile(versionMetadataPath, 'utf-8'),
+	)
+	_buildMdxTransforms = buildMdxTransforms
+	_versionMetadataForTransforms = versionMetadata
+	return { buildMdxTransforms, versionMetadata }
+}
+
 const EXT_TO_CONTENT_TYPE: Record<string, string> = {
 	'.avif': 'image/avif',
 	'.gif': 'image/gif',
@@ -151,31 +193,9 @@ export const fetchFile = async (
 			const CWD = process.cwd()
 			const CONTENT_DIR = path.join(CWD, 'content')
 			const CONTENT_DIR_OUT = path.join(CWD, 'public', 'content')
-			const MDX_TRANSFORMS_FILE = path.join(
-				CWD,
-				'scripts',
-				'prebuild',
-				'mdx-transforms',
-				'build-mdx-transforms.mjs',
-			)
 
-			// Use a runtime file URL and webpackIgnore so Next.js does not statically
-			// trace the prebuild remark-mdx/@babel dependencies into API bundles.
-			// This is fine as we only do this in local dev, not preview or prod
-			const { buildMdxTransforms } = await import(
-				/* webpackIgnore: true */ pathToFileURL(MDX_TRANSFORMS_FILE).href
-			)
-
-			// load the file app/api/versionMetadata.json
-			const versionMetadataPath = path.join(
-				CWD,
-				'app',
-				'api',
-				'versionMetadata.json',
-			)
-			const versionMetadata = JSON.parse(
-				await readFile(versionMetadataPath, 'utf-8'),
-			)
+			const { buildMdxTransforms, versionMetadata } =
+				await getBuildMdxTransforms()
 
 			try {
 				// See if the file exist as MDX files can exist in the path of
