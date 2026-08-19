@@ -15,6 +15,10 @@ export async function copyRedirectFiles(sourceDir, destDir, filesToCheck) {
 		return filePath.endsWith('redirects.jsonc')
 	})
 
+	if (redirectFiles.length === 0) {
+		return
+	}
+
 	console.log(`\nCopying Redirects from ${redirectFiles.length} files...`)
 
 	await batchPromises('Redirects', redirectFiles, async (filePath) => {

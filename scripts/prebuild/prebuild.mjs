@@ -38,13 +38,15 @@ const PREBUILD_TRACE_FILE = path.join(CWD, 'scripts', 'prebuild', 'trace')
 
 const getCommandLineArgs = () => {
 	const args = process.argv.slice(2).reduce(
-		(args, arg) => {
+		(args, arg, i, argv) => {
 			if (arg === '--only-build-version-metadata') {
 				args.onlyVersionMetadata = true
 			} else if (arg === '--build-algolia-index') {
 				args.buildAlgoliaIndex = true
 			} else if (arg === '--get-real-file-changed-metadata') {
 				args.getRealFileChangedMetadata = true
+			} else if (arg === '--changed-file') {
+				args.changedFile = argv[i + 1]
 			}
 
 			return args
@@ -53,6 +55,7 @@ const getCommandLineArgs = () => {
 			onlyBuildVersionMetadata: false,
 			buildAlgoliaIndex: false,
 			getRealFileChangedMetadata: false,
+			changedFile: null,
 		},
 	)
 
@@ -82,9 +85,31 @@ async function main() {
 
 	const incBuild = process.env.INCREMENTAL_BUILD === 'true'
 	const incBuildPRPreview = incBuild && process.env.VERCEL_ENV === 'preview'
-	const incBuildLocalDev = incBuild && process.env.VERCEL_ENV === 'development'
+	const incBuildLocalDev = incBuild && !incBuildPRPreview
 
 	const args = getCommandLineArgs()
+
+	// Fast path: when a single changed file is provided, only process that file
+	if (args.changedFile) {
+		const absChangedFile = path.resolve(args.changedFile)
+		const ext = path.extname(absChangedFile).toLowerCase()
+		const versionMetadata = JSON.parse(fs.readFileSync(VERSION_METADATA_FILE, 'utf-8'))
+
+		if (ext === '.mdx' || ext === '.md') {
+			await buildMdxTransforms(CONTENT_DIR, CONTENT_DIR_OUT, versionMetadata, {
+				added: [absChangedFile],
+				modified: [],
+			})
+		} else if (absChangedFile.includes('nav-data.json')) {
+			await copyNavDataFiles(CONTENT_DIR, CONTENT_DIR_OUT, versionMetadata, [absChangedFile])
+		} else if (absChangedFile.includes('redirects.jsonc')) {
+			await copyRedirectFiles(CONTENT_DIR, CONTENT_DIR_OUT, [absChangedFile])
+		} else {
+			await copyAssetFiles(CONTENT_DIR, CONTENT_DIR_OUT_ASSETS, [absChangedFile])
+		}
+
+		return
+	}
 
 	console.log(
 		`Running prebuild script with args: ${JSON.stringify(args, null, 2)}\n`,
@@ -101,7 +126,7 @@ async function main() {
 		)
 	} else if (incBuildLocalDev) {
 		// Files are served dynamically in local dev
-		changedFiles = []
+		changedFiles = { added: [], modified: [], removed: [] }
 	}
 
 	// Gather and write out version metadata
@@ -126,10 +151,10 @@ async function main() {
 
 	// Determine which files to check for copying and transforms
 	let filesToCheck
-	if (changedFiles !== null && !Array.isArray(changedFiles)) {
+	if (changedFiles) {
 		filesToCheck = [...changedFiles.added, ...changedFiles.modified]
 	} else {
-		filesToCheck = await listFiles(CONTENT_DIR).filter((filePath) => {
+		filesToCheck = (await listFiles(CONTENT_DIR)).filter((filePath) => {
 			const relativePath = path.relative(CONTENT_DIR, filePath)
 			const repoSlug = relativePath.split('/')[0]
 			return repoSlug in PRODUCT_CONFIG

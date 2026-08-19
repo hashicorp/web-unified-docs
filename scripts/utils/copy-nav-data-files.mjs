@@ -21,6 +21,10 @@ export async function copyNavDataFiles(
 		return filePath.endsWith('-nav-data.json')
 	})
 
+	if (navDataFiles.length === 0) {
+		return
+	}
+
 	console.log(`\nCopying NavData from ${navDataFiles.length} files...`)
 
 	await batchPromises('NavData', navDataFiles, async (filePath) => {

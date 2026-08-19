@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 import { readFile } from 'node:fs/promises'
+import { execFileSync } from 'node:child_process'
 import path from 'node:path'
 
 import grayMatter from 'gray-matter'
@@ -134,27 +135,27 @@ export const fetchFile = async (
 			servedFrom: ServedFrom.Production,
 		})
 	} else if (incBuildLocalDev) {
-		const markdownFileExtensions = ['.md', '.mdx']
-		const isMarkdownFile = markdownFileExtensions.some((ext: string) => {
-			return filePath.toLowerCase().endsWith(ext)
-		})
-
-		let localFilePath = filePath
-		if (fileType === FileType.Asset) {
-			const parts = filePath.split('/')
-			parts[0] = 'content'
-			localFilePath = parts.join('/')
-		} else {
-			// Content files are written to public/ by prebuild and kept up to date by watch-content
-			const parts = filePath.split('/')
-			parts.unshift('public')
-			localFilePath = parts.join('/')
-		}
+		const CWD = process.cwd()
+		const sourceFilePath = path.join(CWD, filePath)
 
 		try {
-			const fileContent = isMarkdownFile
-				? await readFile(localFilePath, 'utf-8')
-				: fileType === FileType.Asset
+			execFileSync(
+				'node',
+				[
+					path.join(CWD, 'scripts', 'prebuild', 'run-prebuild.mjs'),
+					'--changed-file',
+					sourceFilePath,
+				],
+				{ stdio: 'inherit' },
+			)
+		} catch {
+			return Err(`Failed to process file at path: ${filePath}`)
+		}
+
+		const localFilePath = ['public', ...filePath.split('/')].join('/')
+		try {
+			const fileContent =
+				fileType === FileType.Asset
 					? await readFile(localFilePath)
 					: await readFile(localFilePath, 'utf-8')
 

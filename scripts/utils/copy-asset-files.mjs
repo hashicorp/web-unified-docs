@@ -25,6 +25,10 @@ export async function copyAssetFiles(sourceDir, destDir, filesToCheck) {
 		return isFileAnImage(filePath)
 	})
 
+	if (assetFiles.length === 0) {
+		return
+	}
+
 	console.log(`\nCopying Assets from ${assetFiles.length} files...`)
 
 	await batchPromises('Assets', assetFiles, async (filePath) => {
