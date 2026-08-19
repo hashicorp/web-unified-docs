@@ -182,11 +182,12 @@ export const fetchFile = async (
 				// "doc.mdx" or "doc/index.mdx" and we often have to check for both
 				await readFile(localFilePath)
 
+				const absoluteFilePath = path.join(CWD, localFilePath)
 				await buildMdxTransforms(
 					CONTENT_DIR,
 					CONTENT_DIR_OUT,
 					versionMetadata,
-					{ added: [localFilePath], modified: [] },
+					{ added: [absoluteFilePath], modified: [] },
 				)
 			} catch (error) {
 				return Err(
