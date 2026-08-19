@@ -36,6 +36,10 @@ export const getProductVersionMetadata = (
 			},
 		)
 
+		if (!foundVersion) {
+			return Err(`Product, ${productSlug}, has no version with isLatest=true`)
+		}
+
 		releaseStage = foundVersion.releaseStage
 		isLatest = foundVersion.isLatest
 		if (!PRODUCT_CONFIG[productSlug].versionedDocs) {

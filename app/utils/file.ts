@@ -4,7 +4,6 @@
  */
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
-import { pathToFileURL } from 'node:url'
 
 import grayMatter from 'gray-matter'
 import { parse as jsoncParse } from 'jsonc-parser'
@@ -33,48 +32,6 @@ const incBuild = process.env.INCREMENTAL_BUILD === 'true'
 const incBuildPRPreview = incBuild && process.env.VERCEL_ENV === 'preview'
 const incBuildLocalDev =
 	incBuild && process.env.NODE_ENV === 'development' && !incBuildPRPreview
-
-let _buildMdxTransforms:
-	| ((
-			targetDir: string,
-			outputDir: string,
-			versionMetadata: unknown,
-			changedFiles: { added: string[]; modified: string[] } | null,
-	  ) => Promise<void>)
-	| null = null
-let _versionMetadataForTransforms: unknown = null
-
-async function getBuildMdxTransforms() {
-	if (_buildMdxTransforms && _versionMetadataForTransforms) {
-		return {
-			buildMdxTransforms: _buildMdxTransforms,
-			versionMetadata: _versionMetadataForTransforms,
-		}
-	}
-	const CWD = process.cwd()
-	const MDX_TRANSFORMS_FILE = path.join(
-		CWD,
-		'scripts',
-		'prebuild',
-		'mdx-transforms',
-		'build-mdx-transforms.mjs',
-	)
-	const { buildMdxTransforms } = await import(
-		/* webpackIgnore: true */ pathToFileURL(MDX_TRANSFORMS_FILE).href
-	)
-	const versionMetadataPath = path.join(
-		CWD,
-		'app',
-		'api',
-		'versionMetadata.json',
-	)
-	const versionMetadata = JSON.parse(
-		await readFile(versionMetadataPath, 'utf-8'),
-	)
-	_buildMdxTransforms = buildMdxTransforms
-	_versionMetadataForTransforms = versionMetadata
-	return { buildMdxTransforms, versionMetadata }
-}
 
 const EXT_TO_CONTENT_TYPE: Record<string, string> = {
 	'.avif': 'image/avif',
@@ -184,50 +141,22 @@ export const fetchFile = async (
 
 		let localFilePath = filePath
 		if (fileType === FileType.Asset) {
-			// Adjust the file path to match the paths in the content directory
 			const parts = filePath.split('/')
 			parts[0] = 'content'
 			localFilePath = parts.join('/')
-		} else if (isMarkdownFile) {
-			// Apply MDX transforms, writing out transformed MDX files to `public`
-			const CWD = process.cwd()
-			const CONTENT_DIR = path.join(CWD, 'content')
-			const CONTENT_DIR_OUT = path.join(CWD, 'public', 'content')
-
-			const { buildMdxTransforms, versionMetadata } =
-				await getBuildMdxTransforms()
-
-			try {
-				// See if the file exist as MDX files can exist in the path of
-				// "doc.mdx" or "doc/index.mdx" and we often have to check for both
-				await readFile(localFilePath)
-
-				const absoluteFilePath = path.join(CWD, localFilePath)
-				await buildMdxTransforms(
-					CONTENT_DIR,
-					CONTENT_DIR_OUT,
-					versionMetadata,
-					{ added: [absoluteFilePath], modified: [] },
-				)
-			} catch (error) {
-				return Err(
-					`Failed to read local file at path: ${localFilePath}, error: ${error}`,
-				)
-			}
-
-			// Add /public to the path for markdown files to match the transformed output directory
+		} else {
+			// Content files are written to public/ by prebuild and kept up to date by watch-content
 			const parts = filePath.split('/')
 			parts.unshift('public')
 			localFilePath = parts.join('/')
 		}
 
 		try {
-			const fileContent =
-				fileType === FileType.Asset
+			const fileContent = isMarkdownFile
+				? await readFile(localFilePath, 'utf-8')
+				: fileType === FileType.Asset
 					? await readFile(localFilePath)
 					: await readFile(localFilePath, 'utf-8')
-
-			// Wrap the file content in a Response object to mimic the fetch API's Response which is expected downstream.
 
 			const response = new Response(fileContent, {
 				headers: {
