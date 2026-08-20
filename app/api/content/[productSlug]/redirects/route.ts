@@ -42,9 +42,7 @@ export async function GET(
 		'redirects.jsonc',
 	]
 
-	const readFileResult = await findFileWithMetadata(filePath, versionMetadata, {
-		loadFromContentDir: process.env.NODE_ENV === 'development',
-	})
+	const readFileResult = await findFileWithMetadata(filePath, versionMetadata)
 	if (!readFileResult.ok) {
 		return new Response('Not found', { status: 404 })
 	}
