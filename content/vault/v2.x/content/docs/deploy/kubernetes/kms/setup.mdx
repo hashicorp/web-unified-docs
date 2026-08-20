@@ -11,7 +11,6 @@ last_modified: 2026-06-15T21:26:18.000Z
 
 # Set up Vault Kubernetes Key Management
 
-@include '../../../global/partials/alerts/status/beta.mdx'
 
 @include '../../../global/partials/alerts/ent/ent-only.mdx'
 
@@ -36,7 +35,7 @@ for use with Vault Kubernetes Key Management.
 
 ## Step 1: Configure the Transit plugin 
 
-1. Enable the Transit secret engine. For example, to enable the plugin at the 
+1. Enable the Transit secret engine. For example, to enable the plugin at the
    path `k8s-transit`:
 
   ```shell-session
@@ -45,7 +44,7 @@ for use with Vault Kubernetes Key Management.
   Success! Enabled the transit secrets engine at: k8s-transit/
   ```
 
-1. Create a named encryption key. For example, to create a key called `kms-kek`:
+2. Create a named encryption key. For example, to create a key called `kms-kek`:
 
   ```shell-session
   $ vault write -f k8s-transit/keys/kms-kek
@@ -71,7 +70,7 @@ for use with Vault Kubernetes Key Management.
     type                      aes256-gcm96
   ```
 
-1. Create an access policy file, `kms-policy.hcl` to control access to the
+3. Create an access policy file, `kms-policy.hcl` to control access to the
    encryption key stored by the Transit plugin. For example to create a basic
    policy with the minimum required permissions:
 
@@ -93,7 +92,7 @@ for use with Vault Kubernetes Key Management.
   }
   ```
 
-1. Save the policy to Vault. For example, to save the policy as
+4. Save the policy to Vault. For example, to save the policy as
    `k8s-kms-policy`:
 
   ```shell-session
@@ -110,6 +109,18 @@ for use with Vault Kubernetes Key Management.
 
 </Note>
 
+<Note title="Cross-namespace authentication (Vault Enterprise)">
+
+  If your AppRole auth method and Transit secrets engine are in different Vault
+  namespaces, configure [cross-namespace access](https://developer.hashicorp.com/vault/docs/enterprise/namespaces/configure-cross-namespace-access)
+  on the Vault server and then set the `--vault-auth-namespace` flag (or
+  `VAULT_KUBE_KMS_VAULT_AUTH_NAMESPACE` environment variable)
+  to the namespace containing the AppRole mount. Set `--vault-namespace` to the
+  namespace containing the Transit engine. When `--vault-auth-namespace` is omitted,
+  both operations use the namespace set by `--vault-namespace`.
+
+</Note>
+
 1. Enable the AppRole plugin:
 
   ```shell-session
@@ -118,7 +129,7 @@ for use with Vault Kubernetes Key Management.
   Success! Enabled the approle auth method at: k8s-approle/
   ```
 
-1. Create a named role for authentication that uses your Transit access policy.
+2. Create a named role for authentication that uses your Transit access policy.
    For example, to create a new role called `k8s-kms-role`:
 
   ```shell-session
@@ -129,7 +140,7 @@ for use with Vault Kubernetes Key Management.
   Success! Data written to: auth/k8s-approle/role/k8s-kms-role
   ```
 
-1. Generate a secret ID for the new role for later use when configuring the
+3. Generate a secret ID for the new role for later use when configuring the
    Vault Kubernetes Key Management static Pod:
 
   ```shell-session
@@ -143,7 +154,7 @@ for use with Vault Kubernetes Key Management.
     secret_id_ttl         0s
   ```
 
-1. Fetch the role ID associated with the role for later use when configuring the
+4. Fetch the role ID associated with the role for later use when configuring the
    Vault Kubernetes Key Management static Pod:
 
     ```shell-session
@@ -159,8 +170,10 @@ for use with Vault Kubernetes Key Management.
 
 The Vault Kubernetes Key Management process, `vault-kube-kms`, communicates with the kube-apiserver process over a Unix
 socket. As a
-result, `vault-kube-kms` must run on the control plane node as a
-[static Pod](https://kubernetes.io/docs/tasks/configure-pod-container/static-pod/).
+result, `vault-kube-kms` must run on the control plane node. Choose the deployment model
+that matches your environment:
+- [Static Pod](https://kubernetes.io/docs/tasks/configure-pod-container/static-pod/) — for nodes with a container runtime (most clusters).
+- [systemd service](#systemd-deployment-bare-metal) — for bare-metal or VM nodes without a container runtime.
 
 1. Create an EncryptionConfiguration file, `encryption-config.yaml` for your
    nodes. Make sure `endpoint` matches the path where the `vault-kube-kms`
@@ -182,15 +195,15 @@ resources:
 
   ```
 
-1. Save the EncryptionConfiguration file on each control-plane node. Make sure
+2. Save the EncryptionConfiguration file on each control-plane node. Make sure
    to use a path that exists on every control-plane node. We recommend using a
    path like `/etc/kubernetes/encryption/encryption-config.yaml`.
 
-1. Copy the AppRole secret ID from your Transit plugin to each control plane
+3. Copy the AppRole secret ID from your Transit plugin to each control plane
    node at `/etc/vault-kms/approle-secret-id`.
 
-1. Create a manifest file, `vault-kms-plugin.yaml`, for the `vault-kube-kms`
-   process. For example: 
+4. Create a manifest file, `vault-kms-plugin.yaml`, for the `vault-kube-kms`
+   process. For example:
 
   <CodeBlockConfig highlight="13,16-22">
 
@@ -214,9 +227,27 @@ resources:
           - --listen-address=unix:///var/run/kmsplugin/kms.sock
           - --approle-role-id=<approle_id_from_vault>
           - --approle-secret-id-path=/etc/vault-kms/approle-secret-id
-          - --transit-mount=k8s-transit
-          - --transit-key=kms-kek
+          - --vault-key-path=k8s-transit/keys/kms-kek
           - --zap-log-level=info
+          # Optional: set --vault-namespace if your Transit engine is in a
+          # Vault Enterprise namespace.
+          # - --vault-namespace=<transit_namespace>
+          # Optional: set --vault-auth-namespace only when AppRole authentication
+          # lives in a different Vault namespace from the Transit engine
+          # (cross-namespace auth). Omit when both share the same namespace.
+          # - --vault-auth-namespace=<auth_namespace>
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 10
         volumeMounts:
           - name: kmsplugin-sockdir
             mountPath: /var/run/kmsplugin
@@ -245,7 +276,7 @@ resources:
   
   </CodeBlockConfig>
 
-1. Save your manifest file to `/etc/kubernetes/manifests/` on the control-plane
+5. Save your manifest file to `/etc/kubernetes/manifests/` on the control-plane
    node where you run your Kubernetes API server. If you run multiple API
    servers, you must deploy the `vault-kube-kms` process on each control-plane node, so
    each Kubernetes API server instance can dial its own local Unix socket.
@@ -253,7 +284,75 @@ resources:
 The kubelet process should find your manifest file and start `vault-kube-kms` as
 a static Pod automatically.
 
+### systemd deployment (bare-metal)
 
+Use this model for bare-metal or VM control-plane nodes that do not have a
+container runtime. The plugin binary runs as a native systemd service. systemd
+manages the process lifecycle — it starts the plugin before `kube-apiserver`,
+restarts it automatically on failure, and creates the Unix socket directory via
+`RuntimeDirectory=`.
+
+The unit file (`vault-kube-kms.service`) and environment template
+(`vault-kube-kms.env`) are included in the release archive under
+`config/systemd/`.
+
+1. Install the plugin binary on the control-plane node:
+
+  ```shell-session
+  $ install -m 0755 vault-kube-kms /usr/local/bin/vault-kube-kms
+  ```
+
+2. Install the systemd unit file:
+
+  ```shell-session
+  $ install -m 0444 vault-kube-kms.service \
+      /etc/systemd/system/vault-kube-kms.service
+  ```
+
+3. Create the configuration directory and install the environment file:
+
+  ```shell-session
+  $ mkdir -p /etc/vault-kube-kms
+  $ install -m 0600 vault-kube-kms.env \
+      /etc/vault-kube-kms/vault-kube-kms.env
+  ```
+
+4. Edit `/etc/vault-kube-kms/vault-kube-kms.env` and set the required values:
+
+  ```shell-session
+  VAULT_KUBE_KMS_VAULT_ADDRESS=https://vault.example.com:8200
+  VAULT_KUBE_KMS_VAULT_KEY_PATH=k8s-transit/keys/kms-kek
+  VAULT_KUBE_KMS_APPROLE_ROLE_ID=<role-id-from-step-2>
+  VAULT_KUBE_KMS_APPROLE_SECRET_ID_PATH=/etc/vault-kube-kms/approle-secret-id
+  VAULT_KUBE_KMS_LISTEN_ADDRESS=unix:///run/vault-kube-kms/vault-kube-kms.sock
+  ```
+
+5. Copy the AppRole secret ID from Step 2 to the node:
+
+  ```shell-session
+  $ install -m 0600 approle-secret-id \
+      /etc/vault-kube-kms/approle-secret-id
+  ```
+
+6. Enable and start the service:
+
+  ```shell-session
+  $ systemctl daemon-reload
+  $ systemctl enable --now vault-kube-kms
+  $ systemctl status vault-kube-kms
+  ```
+
+  The service must show `active (running)` before you proceed to Step 4.
+
+<Warning>
+
+`VAULT_KUBE_KMS_LISTEN_ADDRESS` in `vault-kube-kms.env` **must match** the
+`endpoint:` value in your `EncryptionConfiguration`. The systemd unit creates
+`/run/vault-kube-kms/` automatically via `RuntimeDirectory=` — no manual
+`mkdir` is needed. Update both files to agree on the same socket path before
+enabling encryption in Step 4.
+
+</Warning>
 
 ## Step 4: Enable encryption at rest
 
@@ -264,7 +363,7 @@ each control-plane to enable encryption at rest.
    encryption configuration file at
    `/etc/kubernetes/encryption/encryption-config.yaml`.
 
-1. Update the manifest with a named volume linked to the
+2. Update the manifest with a named volume linked to the
    `encryption-config.yaml` file. For example:
 
   ```yaml
@@ -275,7 +374,7 @@ volumes:
       type: File
   ```
 
-1. Update the `volumeMounts` stanza in the manifest to mount the
+3. Update the `volumeMounts` stanza in the manifest to mount the
    `encryption-config.yaml` file:
 
   ```yaml
@@ -285,7 +384,7 @@ volumeMounts:
     readOnly: true
   ```
 
-1. Update the `kube-apiserver` command to add `--encryption-provider-config` and set it to your
+4. Update the `kube-apiserver` command to add `--encryption-provider-config` and set it to your
    `encryption-config.yaml` file. For example:
 
   ```yaml
@@ -295,4 +394,4 @@ volumeMounts:
     ...
   ```
 
-1. Save the manifest so the kubelet restarts the `kube-apiserver` static Pod.
+5. Save the manifest so the kubelet restarts the `kube-apiserver` static Pod.
