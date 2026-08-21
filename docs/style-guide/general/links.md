@@ -82,7 +82,7 @@ Refer to [Use linked text that explicitly tells readers about the destination co
 
 When readers encounter hyperlinks embedded in sentences or paragraphs, they must make a decision whether to click for more information or keep reading. Multiple hyperlinks create additional cognitive load and can cause readers to lose focus. If a reader clicks the hyperlink, they might miss important context from the original page.
 
-Additionally, some screen readers pause and announce each link, making it difficult for users to follow along the surrounding text.
+Additionally, some screen readers pause and announce each link, making it difficult for users to follow the surrounding text.
 
 As a best practice, use inline links sparingly. Put links at the end of a section or the end of the page when possible.
 
@@ -93,7 +93,7 @@ As a best practice, use inline links sparingly. Put links at the end of a sectio
 ```
 A session is a set of related connections between a user and a host. A session may include a set of credentials which define the permissions granted to the user on the host for the duration of the session.
 
-For more information about the resources related to sessions, refer to the following domain model topics:
+For more information about related resources, refer to the following domain model topics:
 
 - [credentials](/boundary/docs/domain-model/credentials)
 - [connections](/boundary/docs/domain-model/session-connections)
