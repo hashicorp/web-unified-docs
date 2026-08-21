@@ -1,0 +1,157 @@
+---
+layout: docs
+page_title: Load balancing Boundary controllers
+description: >-
+  Configure load balancing for Boundary's API and cluster listeners, which have opposite requirements, using public_cluster_addr and initial_upstreams settings.
+---
+
+# Load balancing Boundary controllers
+
+Boundary controllers expose two listeners with different load balancing
+requirements. Load balance the API listener, which serves clients: round-robin
+across controllers is supported and recommended. Do not load balance worker
+traffic across the cluster listener. Workers balance across controllers
+themselves, and a load balancer at that layer breaks it. Use one only to serve
+a worker's first connection.
+
+## Context
+
+Clients reach the API listener on port `9200` by default. Workers reach the
+cluster listener on port `9201` by default. The two serve unrelated traffic, and
+each controller runs both.
+
+Refer to [System requirements](/boundary/docs/architecture/system-requirements)
+for the full set of ports and network paths.
+
+## Load balance the API listener
+
+For the highest levels of reliability and stability, we recommend that you use
+some load balancing technology to distribute requests to your Boundary
+controller nodes.
+
+Boundary workers do not require any load balancing.
+The Boundary controller manages load balancing for the Boundary workers when
+clients initiate sessions to Boundary targets.
+
+To monitor the health of Boundary controller nodes, configure the load balancer
+to poll the `/health` API endpoint to detect the status of the node and direct
+traffic accordingly.
+
+Each major cloud provider offers one or more managed load balancing services:
+
+| Cloud | Layer               | Layer | Managing load balancing service                                                                                        |
+|-------|---------------------|-------|----------------------------------------------------------------------------------------------------------------|
+| AWS   | Network             | 4     | [Network load balancer](https://docs.aws.amazon.com/elasticloadbalancing/latest/network/introduction.html)         |
+| AWS   | Application         | 7     | [Application load balancer](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/introduction.html) |
+| Azure | Network             | 4     | [Azure load balancer](https://learn.microsoft.com/en-us/azure/load-balancer/)                                      |
+| Azure | Application         | 7     | [Azure application gateway](https://learn.microsoft.com/en-us/azure/application-gateway/)                          |
+| GCP   | Network/Application | 4/7   | [Cloud load balancing](https://cloud.google.com/load-balancing/docs/load-balancing-overview)                     |
+
+There are also a number of self-hosted options, as well as service discovery
+systems like Consul.
+
+Refer to the [listener stanza](/boundary/docs/configuration/listeners)
+documentation for more information about configuring operational endpoints.
+
+## Worker connections and the cluster listener
+
+Workers connect to the cluster listener, not the API listener. Do not place a
+load balancer between workers and controllers as a permanent path for worker
+traffic, and do not round-robin across controllers at this layer. Workers
+already balance across controllers themselves, and a load balancer in that
+position defeats it.
+
+A load balancer has one supported role here: serving a worker's first
+connection, as described in
+[Use a load balancer for the initial connection](#use-a-load-balancer-for-the-initial-connection).
+The guidance in this section applies only to the cluster listener, and it
+differs from the guidance for
+[the API listener](#load-balance-the-api-listener).
+
+### How workers find controllers
+
+A worker's `initial_upstreams` value tells it where to make its first
+connection. After that connection succeeds, the controller returns the current
+set of controller addresses, and the worker replaces its upstream list with
+that set. From then on the worker connects directly to individual controllers
+and balances across them itself.
+
+Each address in that set comes from one controller. If a controller sets
+`public_cluster_addr`, Boundary advertises that value. If it does not, Boundary
+advertises the address of that controller's `cluster` listener.
+
+### `public_cluster_addr` is per controller
+
+`public_cluster_addr` is not a single shared address for the cluster. Each
+controller sets its own, and the value must be an address at which workers can
+reach **that controller directly**.
+
+Setting every controller to the same address, such as the address of a load
+balancer, defeats the worker's client-side load balancing: every worker
+connection resolves to whichever controller the load balancer happens to pick,
+and the worker cannot distribute its connections or fail over between
+controllers.
+
+The value is the cluster address, not the API address. If you omit the port,
+Boundary appends the default cluster port `9201`. Pointing this value at the API
+port causes workers to connect to a listener that does not serve them.
+
+Refer to
+[`public_cluster_addr`](/boundary/docs/configuration/controller#public_cluster_addr)
+for the parameter reference.
+
+### Use a load balancer for the initial connection
+
+You can put a load balancer in front of the cluster listeners to serve the
+worker's first connection. Configure it as follows:
+
+- Run the load balancer in TCP mode. The cluster listener does not carry HTTP
+  traffic that a layer 7 load balancer can inspect.
+- Point it at each controller's cluster address, round robin.
+- Set each worker's `initial_upstreams` to the address of the load balancer.
+- Do not use the load balancer address as any controller's
+  `public_cluster_addr`, and do not use it as a cluster listener address.
+
+The load balancer serves the first connection only. After that, workers use the
+addresses the controller returned, so they connect to controllers directly.
+
+### Proxy a single controller
+
+If you want a proxy in front of an individual controller's
+`public_cluster_addr`, that works, subject to two constraints:
+
+- The proxy must run in TCP mode.
+- It must forward from one controller's `public_cluster_addr` to that same
+  controller's cluster listener, one to one.
+
+Do not balance across controllers at this layer. Doing so produces connectivity
+problems and defeats the built-in client-side load balancing, for the reason
+described in
+[`public_cluster_addr` is per controller](#public_cluster_addr-is-per-controller).
+
+## When you do not need a load balancer
+
+A load balancer is not required for worker to controller traffic. If workers can
+reach the controllers directly, you can list the controllers' cluster addresses
+in each worker's `initial_upstreams` and set `public_cluster_addr` on each
+controller as needed, with no load balancer or proxy involved.
+
+Consider adding one when you want to:
+
+- Change the set of controllers without editing every worker's
+  `initial_upstreams`. Workers reach the load balancer, and the controller set
+  they receive after connecting reflects the current controllers.
+- Place a TCP proxy in front of each cluster address for reasons unrelated to
+  balancing, such as network segmentation. This works as long as you do not
+  balance across controllers and you keep `initial_upstreams` current.
+
+## Related
+
+Refer to the following topics for related information:
+
+- [`public_cluster_addr`](/boundary/docs/configuration/controller#public_cluster_addr)
+  in the controller configuration reference.
+- [System requirements](/boundary/docs/architecture/system-requirements) for
+  ports and network paths.
+- [High availability](/boundary/docs/architecture/high-availability) for
+  controller redundancy.
