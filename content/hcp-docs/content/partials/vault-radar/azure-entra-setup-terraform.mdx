@@ -1,0 +1,183 @@
+Before you configure the data source in HCP Vault Radar, you need to:
+
+- [Register an application in Microsoft Entra ID](https://learn.microsoft.com/en-us/entra/identity-platform/quickstart-register-app)
+- [Enable token ID issuance](https://learn.microsoft.com/en-us/entra/identity-platform/v2-protocols-oidc#enable-id-tokens)
+- [Configure the required graph permissions]((https://learn.microsoft.com/en-us/entra/identity-platform/quickstart-configure-app-access-web-apis))
+- [Create a client secret](https://learn.microsoft.com/en-us/entra/identity-platform/how-to-add-credentials?tabs=client-secret)
+- [Grant tenant-wide admin consent](https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/grant-admin-consent)
+
+<details>
+<summary><b>Example Terraform configuration</b></summary>
+
+This example Terraform configuration creates the required Azure resources to
+use HCP Vault Radar agent scans with Azure services such as SharePoint or OneDrive. 
+
+<Warning>
+
+Review the configuration with your security team to ensure it complies with your
+organizations policies and procedures.
+
+</Warning>
+
+Replace static values in the configuration with your preferred naming
+conventions.
+
+```hcl
+terraform {
+  required_providers {
+    azuread = {
+      source  = "hashicorp/azuread"
+      version = "~> 3.0"
+    }
+    time = {
+      source  = "hashicorp/time"
+      version = "~> 0.13"
+    }
+  }
+}
+
+provider "azuread" {}
+
+variable "app_display_name" {
+  type    = string
+  default = "HashiCorp Vault Radar"
+}
+
+variable "sign_in_audience" {
+  description = "AzureADMyOrg for single tenant, AzureADMultipleOrgs for multitenant"
+  type        = string
+  default     = "AzureADMyOrg"
+}
+
+data "azuread_client_config" "current" {}
+
+# Resolves Microsoft Graph's application ID without hardcoding the GUID,
+# which can differ across sovereign clouds (e.g. Azure Government).
+data "azuread_application_published_app_ids" "well_known" {}
+
+resource "azuread_service_principal" "msgraph" {
+  client_id    = data.azuread_application_published_app_ids.well_known.result.MicrosoftGraph
+  use_existing = true
+}
+
+# --- Register a Microsoft Entra application ---
+resource "azuread_application" "vault_radar" {
+  display_name     = var.app_display_name
+  sign_in_audience = var.sign_in_audience
+  owners           = [data.azuread_client_config.current.object_id]
+
+  # --- Enable ID token issuance ---
+  web {
+    implicit_grant {
+      id_token_issuance_enabled = true
+    }
+  }
+
+  # --- Configure Microsoft Graph permissions ---
+  required_resource_access {
+    resource_app_id = data.azuread_application_published_app_ids.well_known.result.MicrosoftGraph
+
+    # Application permissions
+    resource_access {
+      id   = azuread_service_principal.msgraph.app_role_ids["Sites.Read.All"]
+      type = "Role"
+    }
+    resource_access {
+      id   = azuread_service_principal.msgraph.app_role_ids["Files.Read.All"]
+      type = "Role"
+    }
+    resource_access {
+      id   = azuread_service_principal.msgraph.app_role_ids["Organization.Read.All"]
+      type = "Role"
+    }
+    resource_access {
+      id   = azuread_service_principal.msgraph.app_role_ids["User.Read.All"]
+      type = "Role"
+    }
+
+    # Delegated permissions
+    resource_access {
+      id   = azuread_service_principal.msgraph.oauth2_permission_scope_ids["openid"]
+      type = "Scope"
+    }
+    resource_access {
+      id   = azuread_service_principal.msgraph.oauth2_permission_scope_ids["profile"]
+      type = "Scope"
+    }
+    resource_access {
+      id   = azuread_service_principal.msgraph.oauth2_permission_scope_ids["offline_access"]
+      type = "Scope"
+    }
+  }
+}
+
+# The app needs its own service principal (enterprise app object) before
+# admin consent can be granted to it.
+resource "azuread_service_principal" "vault_radar" {
+  client_id = azuread_application.vault_radar.client_id
+  owners    = [data.azuread_client_config.current.object_id]
+}
+
+# --- Grant admin consent: application permissions ---
+resource "azuread_app_role_assignment" "sites_read_all" {
+  app_role_id         = azuread_service_principal.msgraph.app_role_ids["Sites.Read.All"]
+  principal_object_id = azuread_service_principal.vault_radar.object_id
+  resource_object_id  = azuread_service_principal.msgraph.object_id
+}
+
+resource "azuread_app_role_assignment" "files_read_all" {
+  app_role_id         = azuread_service_principal.msgraph.app_role_ids["Files.Read.All"]
+  principal_object_id = azuread_service_principal.vault_radar.object_id
+  resource_object_id  = azuread_service_principal.msgraph.object_id
+}
+
+resource "azuread_app_role_assignment" "organization_read_all" {
+  app_role_id         = azuread_service_principal.msgraph.app_role_ids["Organization.Read.All"]
+  principal_object_id = azuread_service_principal.vault_radar.object_id
+  resource_object_id  = azuread_service_principal.msgraph.object_id
+}
+
+resource "azuread_app_role_assignment" "user_read_all" {
+  app_role_id         = azuread_service_principal.msgraph.app_role_ids["User.Read.All"]
+  principal_object_id = azuread_service_principal.vault_radar.object_id
+  resource_object_id  = azuread_service_principal.msgraph.object_id
+}
+
+# --- Grant admin consent: delegated permissions (all users) ---
+resource "azuread_service_principal_delegated_permission_grant" "vault_radar" {
+  service_principal_object_id          = azuread_service_principal.vault_radar.object_id
+  resource_service_principal_object_id = azuread_service_principal.msgraph.object_id
+  claim_values                         = ["openid", "profile", "offline_access"]
+  # user_object_id intentionally omitted: this grants consent for all users
+}
+
+# --- Create a client secret ---
+resource "time_rotating" "vault_radar_secret" {
+  rotation_days = 180
+}
+
+resource "azuread_application_password" "vault_radar" {
+  application_id = azuread_application.vault_radar.id
+  display_name   = "vault-radar"
+  start_date     = time_rotating.vault_radar_secret.id
+  end_date       = timeadd(time_rotating.vault_radar_secret.id, "4320h") # ~180 days
+}
+
+output "client_id" {
+  value = azuread_application.vault_radar.client_id
+}
+
+output "tenant_id" {
+  value = data.azuread_client_config.current.tenant_id
+}
+
+output "client_secret" {
+  value     = azuread_application_password.vault_radar.value
+  sensitive = true
+}
+```
+
+When the Terraform run completes, export the `client_id`, `tennant_id`, and
+`client_secret` as environment variables on the HCP Vault Radar agent.
+
+</details>
