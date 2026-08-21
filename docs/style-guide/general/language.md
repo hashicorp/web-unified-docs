@@ -47,14 +47,14 @@ Refer to general roles, such as a "developer", "engineer", or "administrator", i
 - **keywords**: writing, word choice, pronouns, ambiguity
 - **content sets**: docs, tutorials, WAF, certifications
 
-Using “this” in place of a noun can create ambiguous sentences that confuse users about who or what is performing the action.
+Using “this” in place of a noun can create ambiguous sentences that confuse users about who or what is performing the action. If you use "this", make sure it has a clear noun referent.
 
 ### Examples
 
 **Do:**
 
 - `Update the worker configuration file and restart the worker. Restarting the worker ensures that the new authentication settings take effect.`
-- `Create a user account and assign the user to an administrator role. The administrator role grants access to manage targets.`
+- `Create a user account and assign the user to an administrator role. This role grants access to manage targets.`
 
 **Don't:**
 
