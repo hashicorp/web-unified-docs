@@ -27,7 +27,7 @@ have questions, reach out to your product's tech writer team for help.
 
    The path in the version content directory becomes the URL route. For example,
    if you add `my-new-page.mdx` to
-   `web-unified-docs/content/vault/v1.20.x/docs/concepts` and v1.20.x is the latest
+   `web-unified-docs/content/vault/v1.20.x/content/docs/concepts` and v1.20.x is the latest
    version, the website URL is `https://developer.hashicorp.com/vault/docs/concepts/my-new-page`.
 
 1. Create a file ending in `.mdx` in the appropriate directory. Choose a file
@@ -40,7 +40,7 @@ Use the appropriate page content type as a template for your new content. Refer
 to the Page templates section in the [Content
 types](./content-types.md) guide for examples.
 
-Follow the Education style guide's [top 12 guidelines](./docs/style-guide/top-12.md) when you create your content.
+Follow the Education style guide's [top 12 guidelines](../style-guide/top-12.md) when you create your content. For a full, machine-checkable rule set, refer to the style guide's [AI agent checklist](../style-guide/ai-checklist.md).
 
 ## Add your page to the navigation sidebar
 
@@ -50,7 +50,7 @@ to render in the website. Sidebar files are located in the product's
 `docs` directory.
 
 In the following example, the new file's location is
-`web-unified-docs/content/vault/v1.20.x/docs/concepts/tokens.mdx`. The page's
+`web-unified-docs/content/vault/v1.20.x/content/docs/concepts/tokens.mdx`. The page's
 title is "Tokens". In the`docs-nav-data.json` file, add the new page to the
 section that corresponds to the filesystem directory.
 
