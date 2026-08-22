@@ -44,6 +44,27 @@ types](./content-types.md) guide to choose the right one, and to
 Follow the Education style guide's [top 12 guidelines](../style-guide/top-12.md)
 when you create your content.
 
+## Do not add date metadata by hand
+
+Published pages carry a `created_at` and `last_modified` block in their
+frontmatter, between `# START AUTO GENERATED METADATA, DO NOT EDIT` and
+`# END AUTO GENERATED METADATA` markers:
+
+```mdx
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2025-11-18T17:04:41-05:00
+last_modified: 2026-01-26T14:35:46-05:00
+# END AUTO GENERATED METADATA
+```
+
+The husky `pre-commit` hook generates and updates this block by running
+`scripts/add-date-metadata.mjs` against every staged `.mdx` file under
+`content/`, then re-stages the file. Contributors who do not use Node can use
+the fallback hooks in `.githooks/`.
+
+Do not write this block yourself, and do not edit its values. The templates
+omit it for that reason.
+
 ## Add your page to the navigation sidebar
 
 You must add an entry to the navigation sidebar file in order or your new page
