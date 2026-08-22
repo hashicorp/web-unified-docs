@@ -27,6 +27,7 @@ product's information architecture.
 | | [CLI reference](content-types/cli-reference.md) | You are documenting CLI command options and usage. | [command](templates/cli-reference-command.mdx), [command group](templates/cli-reference-command-group.mdx), [global flags](templates/cli-reference-global-flags.mdx) |
 | | [Core reference](content-types/core-reference.md) | The information is product-supporting but resists a standard format: specifications, error messages, troubleshooting, benchmarks, collections of best practices. | None — [pattern-match a sibling page](#types-without-a-template) |
 | | API reference | You are documenting HTTP API options and usage. | None — [pattern-match a sibling page](#types-without-a-template) |
+| | [Release notes and product updates](#types-without-a-template) | You are documenting what changed in a release, or maintaining a change tracker, deprecation notice, or important-changes page. | None — follow the product's existing pattern |
 
 Index pages, which provide lists of links to supporting documentation on a
 subject, are a variant of the overview type rather than a separate content type.
@@ -35,8 +36,10 @@ Refer to [Overview](content-types/overview.md) and to
 
 ## Types without a template
 
-Two content types have no canonical template yet: **API reference** and **core
-reference**. Guidance for these types is still in development.
+Three content types have no canonical template: **API reference**, **core
+reference**, and **release notes and product updates**. Guidance for the first
+two is still in development. Release notes are deliberately not templated,
+because each product structures them differently.
 
 Until a template exists, do not invent a structure. Instead:
 
@@ -48,6 +51,12 @@ Until a template exists, do not invent a structure. Instead:
 
 Consistency within a product matters more than consistency across products for
 these types.
+
+Release notes vary the most. Boundary keeps `updates/release-notes` and
+`updates/change-tracker`; Vault adds `updates/important-changes` and
+`updates/deprecation`; Consul and Nomad organize theirs differently again. Read
+the product's existing `updates` section and match it. Do not introduce a new
+structure, and do not port another product's structure across.
 
 ## Building blocks
 
