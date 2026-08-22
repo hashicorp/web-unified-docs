@@ -67,6 +67,14 @@ content/<product>/<version>/img/architecture-overview_light.png
 content/<product>/<version>/img/architecture-overview_dark.png
 ```
 
+There is no enforced convention for organizing the `img` directory itself.
+Follow whatever structure the product already uses. Screenshots conventionally
+sit under `img/ui`, as described in
+[Store and reference screenshots](#store-and-reference-screenshots).
+
+The images in `docs/content-guide/images` exist only as examples for the content
+guide and style guide. Do not put product images there.
+
 ### Commit the diagram sources
 
 Commit the editable source alongside the exported PNGs so that the next author
