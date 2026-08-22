@@ -72,3 +72,13 @@ implementation.
 - Seeking guidance and attempting to avoid implementation gotchas.
 - Searches on general sets of information, such as "best practices for
   \<product\>" or "system requirements for \<product\>".
+
+## Writing style
+
+Content types organize information. For word choice, formatting, headings,
+links, and other page-level rules, refer to the
+[style guide](../../style-guide/index.md), starting with the
+[top 12 guidelines](../../style-guide/top-12.md).
+
+For calling out paid editions and pre-GA releases on this page type, refer to
+[Use inline alerts when calling out edition considerations on reference pages](../../style-guide/general/enterprise-releases.md#use-inline-alerts-when-calling-out-edition-considerations-on-reference-pages).

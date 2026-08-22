@@ -51,3 +51,13 @@ optimized for the following practitioners.
 - Has allocated time to read and absorb the page in its entirety instead of
   quickly scanning for terms to address an immediate need.
 - Focused on "what" and learning patterns.
+
+## Writing style
+
+Content types organize information. For word choice, formatting, headings,
+links, and other page-level rules, refer to the
+[style guide](../../style-guide/index.md), starting with the
+[top 12 guidelines](../../style-guide/top-12.md).
+
+For calling out paid editions and pre-GA releases on this page type, refer to
+[Use an enterprise alert to create a partial that calls out paid edition considerations on overview and concept pages](../../style-guide/general/enterprise-releases.md#use-an-enterprise-alert-to-create-a-partial-that-calls-out-paid-edition-considerations-on-overview-and-concept-pages).

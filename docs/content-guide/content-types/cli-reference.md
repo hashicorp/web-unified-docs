@@ -235,16 +235,12 @@ input.
 
 ### Description
 
-Add a full description after the summary block. Place this information under the
-"Description" heading.
+The description block introduces the topic and states the page's purpose. It is
+required on every page type. Aim for approximately 60 words, and keep it aligned
+with the page's `description` frontmatter field.
 
-Follow reference content type principles when adding descriptions. Describe
-behaviors, but avoid describing workflows. Instead, link to related topics in the
-[Related](#related) section.
-
-Some commands may have complex exceptions or special behaviors depending on
-certain conditions. Add subheadings as necessary to group related information
-about the command to improve scannability.
+Refer to [Description](building-blocks.md#description) for the full guidance and
+examples, and to [metadata.md](metadata.md) for meta description patterns.
 
 ### Command arguments
 
@@ -397,3 +393,13 @@ Use this template even if the command only has one use case, concept, workflow,
 or related command associated with it. Every command has a purpose, so you should
 always include at least one link that connects the reference to product
 functionality.
+
+## Writing style
+
+Content types organize information. For word choice, formatting, headings,
+links, and other page-level rules, refer to the
+[style guide](../../style-guide/index.md), starting with the
+[top 12 guidelines](../../style-guide/top-12.md).
+
+For calling out paid editions and pre-GA releases on this page type, refer to
+[Use inline alerts when calling out edition considerations on reference pages](../../style-guide/general/enterprise-releases.md#use-inline-alerts-when-calling-out-edition-considerations-on-reference-pages).
