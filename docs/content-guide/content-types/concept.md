@@ -104,67 +104,43 @@ Use this structure when a single concept needs in-depth treatment.
 
 ### Description
 
-The first section is the description block. It introduces the topic or topic area
-that the page is about and clearly states the purpose of the page. **The
-description block is required for all page types**.
+The description block introduces the topic and states the page's purpose. It is
+required on every page type. Aim for approximately 60 words, and keep it aligned
+with the page's `description` frontmatter field.
 
-**Aim for approximately 60 words to meet best practices for SEO and GEO**. Because
-a concept page exists to explain related terms, the description should describe
-the overarching idea that bridges those terms.
-
-To disambiguate content and provide alternate options for user journeys, use a
-second paragraph with a hyperlink that directs users to an appropriate
-alternative.
-
-The contents of the description block should align with the meta description
-field for the markdown file. Refer to [metadata.md](metadata.md) for meta
-description patterns, and to [Description](building-blocks.md#description) for
-examples.
+Refer to [Description](building-blocks.md#description) for the full guidance and
+examples, and to [metadata.md](metadata.md) for meta description patterns.
 
 ### Context
 
-The context block introduces the concept by explaining the relationship between
-the product and the concept. It may contain information about the concept in the
-larger cloud computing and networking field, so that practitioners can begin
-conceptualizing nuances between similar constructs.
+The context block explains the relationship between the product and the concept,
+including how the concept relates to the wider field. It is optional. When you
+use one, place it immediately after the description and use "Introduction" or
+"Background" for the heading.
 
-The context block is optional. When you use one, always place it immediately
-after the description and give it an H2 (`##`) heading. Use one of the following
-labels, based on the kind of context you provide:
-
-| Heading | Description | Example |
-| --- | --- | --- |
-| Introduction | Introduces terms, constructs, architectural components, and workflows to help a user understand a concept and its importance. For general-purpose introductions, use an "Introduction" heading. | [Introduction](https://developer.hashicorp.com/hcp/docs/packer/manage/audit-logs#introduction) to enabling audit log streaming in HCP Packer |
-| Background | Provides historical or situational context, especially in the context of a product's release history and available features. Background-oriented introductions focus on how the topic relates to other processes or concepts, as opposed to highlighting its importance. | [Background](https://developer.hashicorp.com/consul/docs/deploy/server/vm/bootstrap) for bootstrapping a Consul server |
-| Overview | Orients users to the process the page describes. Overviews focus on summarizing the contents of the topic, as opposed to highlighting its importance or providing background information. | [Overview](https://developer.hashicorp.com/terraform/mcp-server/deploy/local#overview) of deploying a local MCP server |
-
-Refer to [Introduction](building-blocks.md#introduction) for examples.
+Refer to [Introduction](building-blocks.md#introduction) for the heading options,
+the full guidance, and examples.
 
 ### General subtopic
 
-Place information about a concept, feature, or subject into general subtopics.
-General blocks glue pieces of the documentation together and provide space to
-describe how processes and concepts relate to other sections in the topic. You
-can embed visual elements and format content as lists, tables, tabs, or any other
-form so long as it is consistent with our writing styles and the following
-principles:
+General subtopics hold information about a concept, feature, or subject, and
+connect the parts of a page to each other. Use headings that clearly signal what
+each subtopic covers, and keep each one focused on a single aspect of the main
+topic.
 
-- **Modular subtopics that tell a story:** Write subtopics so that they are
-  comprehensible to practitioners that scan the page and practitioners that read
-  the page from top to bottom. Each general block supports a single aspect of the
-  main topic. Arrange the blocks in a logical order on the page. Group and nest
-  subtopics in a manner that is consistent with our style guidance.
-- **Headings:** Use headings that clearly signal to readers what the subtopic is
-  about.
-- **Stay in type:** Do not mix information associated with other content types,
-  such as usage or reference information, into the concept.
+Concepts are the most dense type of content. Look for opportunities to break
+information into digestible chunks with lists, subheadings, and visual aids.
 
-Concepts are the most dense type of content. Look for opportunities to visually
-break information up into digestible chunks:
+Refer to [General subtopic](building-blocks.md#general-subtopic) for the full
+guidance and examples, and to [visual-aids.md](visual-aids.md) for diagram
+conventions.
 
-- Use a bulleted list when describing three or more components.
-- Use diagrams, video, and other media as necessary. Refer to
-  [visual-aids.md](visual-aids.md) for guidance.
-- Use subheadings to segment and organize information.
+## Writing style
 
-Refer to [General subtopic](building-blocks.md#general-subtopic) for examples.
+Content types organize information. For word choice, formatting, headings,
+links, and other page-level rules, refer to the
+[style guide](../../style-guide/index.md), starting with the
+[top 12 guidelines](../../style-guide/top-12.md).
+
+For calling out paid editions and pre-GA releases on this page type, refer to
+[Use an enterprise alert to create a partial that calls out paid edition considerations on overview and concept pages](../../style-guide/general/enterprise-releases.md#use-an-enterprise-alert-to-create-a-partial-that-calls-out-paid-edition-considerations-on-overview-and-concept-pages).

@@ -91,49 +91,22 @@ Configuration reference pages use content blocks in the following order:
 
 ### Description
 
-The first section is the description block. It introduces the topic or topic area
-that the page is about and clearly states the purpose of the page. **The
-description block is required for all page types**.
+The description block introduces the topic and states the page's purpose. It is
+required on every page type. Aim for approximately 60 words, and keep it aligned
+with the page's `description` frontmatter field.
 
-**Aim for approximately 60 words to meet best practices for SEO and GEO**. If you
-need additional space to introduce the topic, add background information, or
-provide an overview of the procedures that the topic contains, add an
-introduction section.
-
-We recommend using overt language that states the purpose, for example:
-
-> This topic describes how to register a service with Consul.
-
-Explicitly stating the purpose helps readers and AIs determine if they have found
-the correct topic. If the purpose is implied, you can exclude language that
-explicitly states the purpose and describe the topic directly.
-
-The contents of the description block should align with the meta description
-field for the markdown file. Refer to [metadata.md](metadata.md) for meta
-description patterns, and to [Description](building-blocks.md#description) for
-examples.
+Refer to [Description](building-blocks.md#description) for the full guidance and
+examples, and to [metadata.md](metadata.md) for meta description patterns.
 
 ### Introduction
 
-The introduction block serves one or more of the following purposes:
+The introduction block adds context or background, summarizes the main points, or
+connects the topic to the reader's goals. Omit it when the description already
+covers the topic. Use "Introduction", "Background", or "Overview" for the
+heading, depending on the kind of context you provide.
 
-1. To provide additional context or background about the topic.
-1. To summarize main points described on the page.
-1. To help users understand how the topic helps them achieve their goals.
-
-Introductions have H2 (`##`) headings and immediately follow the description. You
-can omit the introduction section when the page description clearly describes the
-topic.
-
-Use one of the following heading types for the introduction section:
-
-| Heading | Description | Example |
-| --- | --- | --- |
-| Introduction | The general introduction provides additional context to help readers understand why the topic is important. For general-purpose introductions, use an "Introduction" heading. | [Introduction](https://developer.hashicorp.com/hcp/docs/packer/manage/audit-logs#introduction) to enabling audit log streaming in HCP Packer |
-| Background | For topics that require significant background knowledge, use the "Background" heading for the introduction. Background-oriented introductions focus on how the topic relates to other processes or concepts, as opposed to highlighting its importance. | [Background](https://developer.hashicorp.com/consul/docs/deploy/server/vm/bootstrap) for bootstrapping a Consul server |
-| Overview | Use an "Overview" heading to orient users to the process the page describes. Overviews focus on summarizing the contents of the topic, as opposed to highlighting its importance or providing background information. | [Overview](https://developer.hashicorp.com/terraform/mcp-server/deploy/local#overview) of deploying a local MCP server |
-
-Refer to [Introduction](building-blocks.md#introduction) for examples.
+Refer to [Introduction](building-blocks.md#introduction) for the heading options,
+the full guidance, and examples.
 
 ### Configuration model
 
@@ -409,3 +382,13 @@ that changes are correctly documented across all tabs.
 - Make the change in section titles and tables (both tabs).
 - Make the change in the three example tabs.
 - Confirm links and anchors. Search for the `#anchor` and check each one.
+
+## Writing style
+
+Content types organize information. For word choice, formatting, headings,
+links, and other page-level rules, refer to the
+[style guide](../../style-guide/index.md), starting with the
+[top 12 guidelines](../../style-guide/top-12.md).
+
+For calling out paid editions and pre-GA releases on this page type, refer to
+[Use inline alerts when calling out edition considerations on reference pages](../../style-guide/general/enterprise-releases.md#use-inline-alerts-when-calling-out-edition-considerations-on-reference-pages).
