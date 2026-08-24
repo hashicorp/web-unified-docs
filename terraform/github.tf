@@ -3,15 +3,15 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
- locals {
+locals {
   repositories = toset([
     var.github_repository,
     "${var.github_repository}-internal",
   ])
 
   secrets = {
-    INSTANA_OTLP_AGENT_TOKEN = var.instana_agent_key
-    INSTANA_OTLP_ENDPOINT    = var.instana_otlp_endpoint
+    INSTANA_AGENT_KEY     = var.instana_agent_key
+    INSTANA_OTLP_ENDPOINT = var.instana_otlp_endpoint
   }
 
   variables = {}
