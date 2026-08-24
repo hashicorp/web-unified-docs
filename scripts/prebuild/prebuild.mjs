@@ -93,19 +93,24 @@ async function main() {
 	if (args.changedFile) {
 		const absChangedFile = path.resolve(args.changedFile)
 		const ext = path.extname(absChangedFile).toLowerCase()
-		const versionMetadata = JSON.parse(fs.readFileSync(VERSION_METADATA_FILE, 'utf-8'))
+		const versionMetadata = JSON.parse(
+			fs.readFileSync(VERSION_METADATA_FILE, 'utf-8'),
+		)
 
 		if (ext === '.mdx' || ext === '.md') {
-			await buildMdxTransforms(CONTENT_DIR, CONTENT_DIR_OUT, versionMetadata, {
-				added: [absChangedFile],
-				modified: [],
-			})
+			await buildMdxTransforms(CONTENT_DIR, CONTENT_DIR_OUT, versionMetadata, [
+				absChangedFile,
+			])
 		} else if (absChangedFile.includes('nav-data.json')) {
-			await copyNavDataFiles(CONTENT_DIR, CONTENT_DIR_OUT, versionMetadata, [absChangedFile])
+			await copyNavDataFiles(CONTENT_DIR, CONTENT_DIR_OUT, versionMetadata, [
+				absChangedFile,
+			])
 		} else if (absChangedFile.includes('redirects.jsonc')) {
 			await copyRedirectFiles(CONTENT_DIR, CONTENT_DIR_OUT, [absChangedFile])
 		} else {
-			await copyAssetFiles(CONTENT_DIR, CONTENT_DIR_OUT_ASSETS, [absChangedFile])
+			await copyAssetFiles(CONTENT_DIR, CONTENT_DIR_OUT_ASSETS, [
+				absChangedFile,
+			])
 		}
 
 		return

@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 import { readFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import path from 'node:path'
 
@@ -137,6 +138,10 @@ export const fetchFile = async (
 	} else if (incBuildLocalDev) {
 		const CWD = process.cwd()
 		const sourceFilePath = path.join(CWD, filePath)
+
+		if (!existsSync(sourceFilePath)) {
+			return Err(`File not found at path: ${filePath}`)
+		}
 
 		try {
 			execFileSync(
