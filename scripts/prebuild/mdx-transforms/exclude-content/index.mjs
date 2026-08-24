@@ -16,6 +16,7 @@ export const EXCLUSION_DIRECTIVE_TAGS = {
 	Vault: 'vault',
 	TFC: 'terraform-docs-common',
 	TFEnterprise: 'terraform-enterprise',
+	Boundary: 'boundary',
 }
 
 /**
