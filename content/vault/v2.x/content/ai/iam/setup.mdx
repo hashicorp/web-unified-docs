@@ -1,0 +1,469 @@
+---
+layout: docs
+page_title: Secure agent permissions with Vault
+description: >-
+  Use Vault and your ID provider to secure agent permissions with the agent
+  registry, OAuth resource server profiles, and ceiling policies.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-08-21T20:52:47.000Z
+last_modified: 2026-08-21T20:52:47.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Secure agent permissions with Vault
+
+@include 'alerts/beta.mdx'
+
+@include 'alerts/enterprise-and-hcp.mdx'
+
+Use Vault Enterprise and your ID provider to implement zero trust principles
+with delegated ephemeral and narrowly scoped agent credentials. Accept JWTs with
+RAR authorization details, and OBO semantics as means to perform authorized
+operations on Vault.
+
+
+## Before you start
+
+- **You must have a Vault Enterprise or HCP Vault Dedicated server deployed**.
+
+- **You must configure a supported identity provider**:
+
+    - [Configure IBM Verify for agent IAM](/vault/docs/ai/iam/providers/verify)
+
+- **You must have admin permissions on Vault**. You need a Vault token with
+  sufficient ACL policies attached to configure and modify your Vault deployment.
+
+
+## Step 1: Set useful environment variables
+
+We recommend setting the following environment variables to make configuration
+more convenient:
+
+Variable         | Purpose 
+---------------- | -------------------------------------------------------------
+`DELEGATED_JWT`  | The OBO with authorization details JWT as obtained after token exchange via the STS client.
+`ISSUER`         | The issuer retrieved from the well-known Open ID configuration of the JWT issuer.
+`SUBJECT_EXT_ID` | User ID of the **subject** user from your IdP application
+`ACTOR_EXT_ID`   | User ID of the **actor** user from your IdP application
+
+For example:
+
+```shell-session
+$ export                               \
+    VAULT_ADDR="http://127.0.0.1:8200" \
+    VAULT_TOKEN="root"                 \
+    DELEGATED_JWT="<idp-issued-jwt>"   \
+    SUBJECT_EXT_ID="811006P2MZ"        \
+    ACTOR_EXT_ID="811006P2N1"          \
+    ISSUER="https://vv-agentic-iam-demo.ite4.idng.ibmcloudsecurity.com/oauth2"
+```
+
+## Step 2: Create entities
+
+Map your JWT users in Vault by creating corresponding entities and aliases.
+
+1. Create a new subject entity in for the human user.
+
+    ```shell-session
+    $ vault write identity/entity name="obo-subject" external_id="$SUBJECT_EXT_ID"
+
+    Key        Value
+    ---        -----
+    aliases    <nil>
+    id         0427b0f5-ac11-4f25-75f6-5764b85176aa
+    name       obo-subject
+    ```
+
+1. Capture the entity id from the response and export it to an environment
+   variable:
+
+    ```shell-session
+    $ export OBO_SUBJECT_CANONICAL_ID="0427b0f5-ac11-4f25-75f6-5764b85176aa"
+    ```
+
+1. Create a new actor entity for the AI agent user.
+
+    ```shell-session
+    $ vault write identity/entity name="obo-actor" external_id="$ACTOR_EXT_ID"
+
+    Key        Value
+    ---        -----
+    aliases    <nil>
+    id         ef897bd9-0060-1fa4-68ba-65ae5b0747ec
+    name       obo-actor
+    ```
+
+1. Capture the entity id from the response and export it to an environment
+   variable:
+
+    ```shell-session
+    $ export OBO_ACTOR_CANONICAL_ID="ef897bd9-0060-1fa4-68ba-65ae5b0747ec"
+    ```
+
+## Step 3: Create the OAuth resource server profile
+
+Create a new OAuth resource server configuration profile in a json file
+named `default-profile.json`.
+
+1. Write the OAuth resource server confiugration file.
+
+    ```shell-session
+    $ cat > default-profile.json << EOF
+    {
+    "issuer_id": "<oauth2_url>",
+    "use_jwks": true,
+    "user_claim": "sub",
+    "supported_algorithms": ["RS256"],
+    "jwks_uri": "<oauth2_jwks_url>"
+    }
+    EOF
+    ```
+
+  For example:
+
+    ```shell-session
+    $ cat > default-profile.json << EOF
+    {
+    "issuer_id": "https://hashicups-print.verify.ibm.com/oauth2",
+    "use_jwks": true,
+    "user_claim": "sub",
+    "supported_algorithms": ["RS256"],
+    "jwks_uri": "hashicups-print.verify.ibm.com/oauth2/jwks"
+    }
+    EOF
+    ```
+
+    <Warning title="IBM Verify limitation">
+
+    Avoid validating with the `audiences` value with Verify STS clients as the
+    client performing the OBO token exchange with RAR authorization details
+    does not support `audience` mapping in the access token mapping.
+
+    </Warning>
+
+1. Create the OAuth resource server profile.
+
+    ```shell-session
+    $ vault write sys/config/oauth-resource-server/e2e-profile @default-profile.json
+ 
+    WARNING! The following warnings were returned from Vault:
+    * algorithm "RS256" is functional but consider using PS256 (RSA-PSS) for
+    better security
+    * profile supports only one algorithm family - consider supporting multiple
+    families for flexibility
+    ```
+
+1. Read the profile to check for correctness.
+
+    ```shell-session
+    $ vault read sys/config/oauth-resource-server/e2e-profile
+ 
+    vault read sys/config/oauth-resource-server/e2e-profile
+    Key                     Value
+    ---                     -----
+    audiences               [https://localhost:8200/v1]
+    clock_skew_leeway       0
+    config_id               de81dc66-e00d-23c6-7dfc-9cdbc5aaf97e
+    enabled                 true
+    issuer_id               https://hashicups-print.verify.ibm.com/oauth2
+    jwks_uri                https://hashicups-print.verify.ibm.com/oauth2/jwks
+    jwt_type                access_token
+    no_default_policy       false
+    profile_name            e2e-profile
+    supported_algorithms    [RS256]
+    use_jwks                true
+    ```
+
+## Step 4: Create entity aliases
+
+Create entity aliases in Vault for the human and AI users:
+
+1. Create the entity alias for the subject entity with the issuer value included.
+
+   ```shell-session
+   $ vault write identity/entity-alias               \
+     name="jwt-binding-subject"                      \
+     canonical_id="$OBO_SUBJECT_CANONICAL_ID"        \
+     issuer="$ISSUER"                                \
+     external_id="$SUBJECT_EXT_ID"
+
+   Key             Value
+   ---             -----
+   canonical_id    0427b0f5-ac11-4f25-75f6-5764b85176aa
+   id              e3b9d5b0-c623-1f02-b1ef-95503ad7be03
+   ```
+
+3. Create the entity alias for the actor entity with the issuer value included.
+
+   ```shell-session
+   $ vault write identity/entity-alias                \
+     name="jwt-binding-actor"                         \
+     canonical_id="$OBO_ACTOR_CANONICAL_ID"           \
+     issuer="$ISSUER"                                 \
+     external_id="$ACTOR_EXT_ID"
+
+   Key             Value
+   ---             -----
+   canonical_id    ef897bd9-0060-1fa4-68ba-65ae5b0747ec
+   id              e929f437-f655-45c0-03e7-eb6212dba58d
+   ```
+
+
+Vault automatically creates and assigns a `mount_accessor` value for both aliases.
+The aliases are not associated with an auth mount. Instead, the aliases point to the
+issuer that grants access. Vault uses the following format for the mount accessor:
+
+`oauth-resource-server + _ + <namespace ID> + _ + <OAuth resource server profile config_id>`
+
+For example, a mount accessor in the `root` namespace would be:
+`oauth-resource-server_root_de81dc66-e00d-23c6-7dfc-9cdbc5aaf97e`.
+
+## Step 5: Create a ceiling policy
+
+Create a ceiling policy to encompass all the possible operations the user might
+perform.
+
+1. Write the ceiling policy to the file `ceiling-policy.hcl`. For example:
+
+    ```shell-session
+    $ cat > ceiling-policy.hcl << EOF
+    # Allow KV2 read and write
+    path "secret-v2/data/shared-secret/*" {
+      capabilities = ["create", "read", "update", "delete", "list"]
+    }
+
+    path "secret-v2/metadata/shared-secret/*" {
+      capabilities = ["list"]
+    }
+
+    # Allow PKI operations
+    path "pki/issue/example-dot-com" {
+      capabilities = ["create", "update"]
+    }
+
+    path "pki/cert/*" {
+      capabilities = ["read"]
+    }
+
+    path "pki/certs" {
+      capabilities = ["list"]
+    }
+
+    # Allow transit engine operations
+    path "transit/encrypt/app-key" {
+      capabilities = ["update", "create", "read"]
+    }
+
+    # Allow decrypt
+    path "transit/decrypt/app-key" {
+      capabilities = ["update", "create", "read"]
+    }
+
+    # Optional: allow key metadata read (safe)
+    path "transit/keys/app-key" {
+      capabilities = ["read"]
+    }
+    EOF
+    ```
+
+1. Write the ceiling policy to Vault:
+
+    ```shell-session
+    $ vault policy write ceiling-all ceiling-policy.hcl
+
+    Success! Uploaded policy: ceiling-all
+    ```
+
+
+## Step 6: Register the agent with Vault
+
+Create an entry in the Vault Agent Registry for the AI agent or application
+(actor) user.
+
+```shell-session
+$ vault write agent-registry/register \
+  display_name="obo-danielle-agent"   \
+  entity_id="$OBO_ACTOR_CANONICAL_ID" \
+  ceiling_policies='["ceiling-all"]'
+
+Key             Value
+---             -----
+display_name    obo-danielle-agent
+```
+
+## Step 7: Validate Vault operations
+
+You can use KV version 2 operations with delegated RAR tokens to validate the
+ACL and ceiling policies.
+
+1. Enable a KV version 2 secrets engine at the path `secret-v2`.
+
+    ```shell-session
+    $ vault secrets enable -path=secret-v2 kv-v2
+    Success! Enabled the kv-v2 secrets engine at: secret-v2/
+    Create a policy to perform KV operations and link it to the subject entity.
+    ```
+
+1. Create a KV only policy to link to the human (subject) entity.
+
+    ```shell-session
+    $ vault policy write kv-policy - <<'EOF'
+    path "secret-v2/data/shared-secret/*" {
+    capabilities = ["create", "read", "update", "delete", "list"]
+    }
+    path "secret-v2/metadata/shared-secret/*" {
+    capabilities = ["list"]
+    }
+    EOF
+    Success! Uploaded policy: kv-policy
+    ```
+
+    <Tip>
+
+    Use the following set of commands to create new policies for each kind of
+    Vault operation, unlink existing policies with the subject entity, and link
+    the new policy with the subject entity.
+
+    </Tip>
+
+1. Create a new policy file in `kv2-policy.hcl`.
+
+    ```shell-session
+    $ cat > kv2-policy.hcl <<'EOF'
+    path "secret-v2/data/shared-secret/*" {
+    capabilities = ["create", "read", "update", "delete", "list"]
+    }
+    path "secret-v2/metadata/shared-secret/*" {
+    capabilities = ["list"]
+    }
+    EOF
+    ```
+
+1. Write the new policy to Vault.
+
+    ```shell-session
+    $ vault policy write kv2-policy kv2-policy.hcl
+    Success! Uploaded policy: kv2-policy
+    ```
+
+1. Check existing policies for the subject user. You should expect none linked.
+
+    ```shell-session
+    $ vault read identity/entity/name/obo-subject
+    Key                    Value
+    ---                    -----
+    aliases                [map[canonical_id:dfee09b9-3b37-0ff3-0324-49b4909c566c creation_time:2026-06-16T12:03:12.361169Z custom_metadata:<nil> id:124d59ef-2efe-af30-bdda-c4cc9be4e184 last_update_time:2026-06-16T12:03:12.361169Z local:false merged_from_canonical_ids:<nil> metadata:<nil> mount_accessor:oauth-resource-server_root_774005a7-6e38-d8cf-37ce-9b91b2910322 name:jwt-binding-subject]]
+    creation_time          2026-06-16T12:03:12.085015Z
+    direct_group_ids       []
+    disabled               false
+    group_ids              []
+    id                     dfee09b9-3b37-0ff3-0324-49b4909c566c
+    inherited_group_ids    []
+    last_update_time       2026-06-16T12:23:59.527254Z
+    merged_entity_ids      <nil>
+    metadata               <nil>
+    mfa_secrets            map[]
+    name                   obo-subject
+    namespace_id           root
+    policies               []
+    ```
+
+1. Unlink and relink a policy.
+
+    ```shell-session
+    $ vault write identity/entity/name/obo-subject policies='kv2-policy'
+    ```
+
+1. Verify the policy linkage.
+
+    ```shell-session
+    $ vault read identity/entity/name/obo-subject
+    Key                    Value
+    ---                    -----
+    aliases                [map[canonical_id:dfee09b9-3b37-0ff3-0324-49b4909c566c creation_time:2026-06-16T12:03:12.361169Z custom_metadata:<nil> id:124d59ef-2efe-af30-bdda-c4cc9be4e184 last_update_time:2026-06-16T12:03:12.361169Z local:false merged_from_canonical_ids:<nil> metadata:<nil> mount_accessor:oauth-resource-server_root_774005a7-6e38-d8cf-37ce-9b91b2910322 name:jwt-binding-subject]]
+    creation_time          2026-06-16T12:03:12.085015Z
+    direct_group_ids       []
+    disabled               false
+    group_ids              []
+    id                     dfee09b9-3b37-0ff3-0324-49b4909c566c
+    inherited_group_ids    []
+    last_update_time       2026-06-16T12:23:59.527254Z
+    merged_entity_ids      <nil>
+    metadata               <nil>
+    mfa_secrets            map[]
+    name                   obo-subject
+    namespace_id           root
+    policies               [kv2-policy]
+    ```
+
+    <Tip>
+
+    To clear the policy from an entity, you can write a set of empty quotes:
+
+    ```shell-session
+    $ vault write identity/entity/name/obo-subject policies=''
+    ```
+
+    </Tip>
+
+
+1. Actor policies are not taken into consideration when performing OBO operations.
+   Only the intersection of the actor ceiling, subject and RAR constraints are
+   used for evaluation of policies. Use the token obtained from the token
+   exchange to perform a KV2 operation:
+
+    ```shell-session
+    $ echo '{"data": {"foo": "bar"}}' | VAULT_TOKEN=$DELEGATION_TOKEN vault write secret-v2/data/shared-secret/foo -
+    Key                Value
+    ---                -----
+    created_time       2026-06-11T07:41:13.074Z
+    custom_metadata    <nil>
+    deletion_time      n/a
+    destroyed          false
+    version            1
+    ```
+
+1. Try to perform vault secret write on the same path. This results in an update
+   operation, but updates get prohibited by the current RAR policy.
+
+    ```shell-session
+    $ echo '{"data": {"foo": "bar_new"}}' | VAULT_TOKEN=$DELEGATION_TOKEN vault write secret-v2/data/shared-secret/foo -
+    Error writing data to secret-v2/data/shared-secret/foo: Error making API request.
+    URL: PUT http://127.0.0.1:8200/v1/secret-v2/data/shared-secret/foo
+    Code: 403. Errors:
+    * 2 errors occurred:
+    	* RAR_NO_MATCH: No valid authorization_details claim found matching this request.
+    	* permission denied
+    ```
+
+1. Try to perform the same operation by obtaining a new token with update and
+   read capabilities on the token. Get a new token with update.
+
+    ```shell-session
+    $ export DELEGATION_TOKEN=$(curl --request POST \
+    ...
+    --data 'authorization_details=[{"type":"vault:path_access","path":"secret-v2/data/shared-secret/foo", "capabilities":["create", "update", "read"]}]' | jq -r '.access_token)
+    ```
+
+1. Write a new secret.
+
+    ```shell-session
+    $ echo '{"data": {"foo": "bar_new"}}' | VAULT_TOKEN=$DELEGATION_TOKEN vault write secret-v2/data/shared-secret/foo -
+    Key                Value
+    ---                -----
+    created_time       2026-06-11T08:02:39.161111Z
+    custom_metadata    <nil>
+    deletion_time      n/a
+    destroyed          false
+    version            2
+    ```
+
+1. Try to read the new secret value with the updated token.
+
+    ```shell-session
+    $ VAULT_TOKEN=$DELEGATION_TOKEN vault read secret-v2/data/shared-secret/foo
+    Key         Value
+    ---         -----
+    data        map[foo:bar_new]
+    metadata    map[created_time:2026-06-11T08:04:13.817972Z custom_metadata:<nil> deletion_time: destroyed:false version:2]
+    ```
