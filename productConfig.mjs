@@ -118,7 +118,7 @@ export const PRODUCT_CONFIG = {
 		versionedDocs: false,
 		websiteDir: '.',
 	},
-	'hcp-vault-radar': {
+	'vault-radar-hcp': {
 		assetDir: 'img',
 		contentDir: 'docs',
 		dataDir: 'data',
