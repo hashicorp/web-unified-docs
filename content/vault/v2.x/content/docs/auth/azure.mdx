@@ -53,6 +53,27 @@ against the claim parameters:
 
 If either check fails, the login also fails.
 
+## Authentication types
+
+The Azure auth method supports multiple mechanisms for how Vault itself authenticates
+to Azure APIs when validating workload identities. Use the `auth_type` parameter on
+the [`auth/azure/config`](/vault/api-docs/auth/azure#configure) endpoint to select
+the desired mechanism.
+
+| `auth_type` value | Description |
+| ----------------- | ----------- |
+| `root_creds` | Uses a static Azure Service Principal `client_id` and `client_secret` configured directly in the auth mount. |
+| `plugin_wif` | Uses a Vault-issued OIDC plugin identity token. Azure must be configured to trust tokens issued by Vault via [workload identity federation](https://learn.microsoft.com/en-us/entra/workload-id/workload-identity-federation). <EnterpriseAlert product="vault" inline /> |
+| `msi` | Uses the Azure Managed Identity attached to the host resource where Vault is running. |
+| `aks_wi` | Uses [AKS Workload Identity](https://learn.microsoft.com/en-us/azure/aks/workload-identity-overview) federation. Vault exchanges the Kubernetes-projected service account token for a short-lived Microsoft Entra access token. Supports both single-tenant and cross-tenant deployments. |
+
+If `auth_type` is not set, Vault falls back to its existing credential discovery logic
+for full backward compatibility: it checks for `client_secret` (root_creds), then
+`identity_token_audience` (plugin_wif), then the `AZURE_FEDERATED_TOKEN_FILE`
+environment variable (aks_wi), and finally falls back to Managed Identity (msi).
+Setting `auth_type` explicitly short-circuits this discovery and locks the mount to a
+single, predictable credential mechanism.
+
 ## Prerequisites
 
 The Azure auth method requires client credentials to access Azure APIs. The following
@@ -358,6 +379,241 @@ server:
 ```shell
 AZURE_SDK_GO_LOGGING=all
 ```
+
+## AKS Workload Identity Federation (AKS WI)
+
+Use `auth_type=aks_wi` when Vault runs on AKS with
+[Workload Identity](https://learn.microsoft.com/en-us/azure/aks/workload-identity-overview)
+enabled. AKS injects a projected Kubernetes service account token into the Vault pod.
+Vault exchanges that token for a short-lived Microsoft Entra access token scoped to the
+configured `tenant_id` and uses it to validate Azure workload identities through Azure APIs.
+
+~> **Note:** `aks_wi` also resolves the `InvalidAuthenticationTokenTenant` error that
+occurs in cross-tenant deployments when using `msi`. `WorkloadIdentityCredential`
+explicitly pins the `tenant_id` and `client_id` from Vault configuration, so the issued
+access token is scoped to the target workload tenant, not Vault's home tenant.
+
+### Authentication flow
+
+1. AKS injects a projected Kubernetes service account token into the Vault pod.
+1. Vault reads the token from the `AZURE_FEDERATED_TOKEN_FILE` path injected by the
+   AKS workload identity webhook.
+1. Vault exchanges the token with Microsoft Entra using the federated identity credential
+   on the App Registration.
+1. Microsoft Entra validates the token's `iss` and `sub` claims against the federated
+   credential and returns a short-lived access token.
+1. Vault uses the access token to validate the workload identity through Azure APIs and
+   issues a Vault token to the authenticating workload.
+
+### Prerequisites
+
+Complete the following steps before setting `auth_type=aks_wi` in Vault:
+
+1. **Enable OIDC issuer on the AKS cluster** that hosts Vault:
+
+   ```shell-session
+   $ az aks update \
+       --name <AKS_CLUSTER> \
+       --resource-group <RESOURCE_GROUP> \
+       --enable-oidc-issuer
+   ```
+
+1. **Retrieve the AKS OIDC issuer URL** — required when creating the federated
+   identity credential in the next step:
+
+   ```shell-session
+   $ az aks show \
+       --name <AKS_CLUSTER> \
+       --resource-group <RESOURCE_GROUP> \
+       --query "oidcIssuerProfile.issuerUrl" -o tsv
+   ```
+
+1. **Create or identify a Microsoft Entra App Registration** for Vault. Use
+   `AzureADMyOrg` for single-tenant deployments or `AzureADMultipleOrgs` for
+   cross-tenant deployments:
+
+   ```shell-session
+   # Single-tenant
+   $ az ad app create \
+       --display-name vault-aks-wi \
+       --sign-in-audience AzureADMyOrg
+
+   # Cross-tenant
+   $ az ad app create \
+       --display-name vault-aks-wi \
+       --sign-in-audience AzureADMultipleOrgs
+   ```
+
+1. **Configure a federated identity credential** on the App Registration to trust the
+   Vault pod's projected service account token:
+
+   ```shell-session
+   $ az ad app federated-credential create \
+       --id <APP_OBJECT_ID> \
+       --parameters '{
+         "name": "vault-workload-identity",
+         "issuer": "<AKS_OIDC_ISSUER_URL>",
+         "subject": "system:serviceaccount:<VAULT_NAMESPACE>:<VAULT_SERVICE_ACCOUNT>",
+         "audiences": ["api://AzureADTokenExchange"]
+       }'
+   ```
+
+   Set `issuer` to the OIDC issuer URL from the previous step. Configure this value
+   once in Azure — Vault never reads or sends it. Microsoft Entra uses it to validate
+   the `iss` claim on the projected service account token at every login.
+
+1. **Annotate the Vault Kubernetes service account** with the Azure client ID:
+
+   ```shell-session
+   $ kubectl annotate serviceaccount <VAULT_SERVICE_ACCOUNT> \
+       -n <VAULT_NAMESPACE> \
+       azure.workload.identity/client-id=<APP_CLIENT_ID>
+   ```
+
+1. **Label the Vault pod or Deployment** to enable workload identity injection:
+
+   ```yaml
+   labels:
+     azure.workload.identity/use: "true"
+   ```
+
+1. **Restart Vault pods** so AKS injects the projected service account token and the
+   `AZURE_FEDERATED_TOKEN_FILE`, `AZURE_CLIENT_ID`, and `AZURE_TENANT_ID` environment
+   variables.
+
+### Single-tenant configuration
+
+Use this configuration when Vault and the workloads it authenticates are in the same
+Microsoft Entra tenant.
+
+1. Enable the Azure auth method and configure it with `auth_type=aks_wi`:
+
+   ```shell-session
+   $ vault auth enable azure
+   $ vault write auth/azure/config \
+       tenant_id=<TENANT_ID> \
+       resource=https://management.azure.com/ \
+       client_id=<APP_CLIENT_ID> \
+       auth_type=aks_wi
+   ```
+
+1. Create a role:
+
+   ```shell-session
+   $ vault write auth/azure/role/dev-role \
+       policies="dev" \
+       bound_subscription_ids=<SUBSCRIPTION_ID> \
+       bound_resource_groups=<RESOURCE_GROUP> \
+       bound_service_principal_ids=<SERVICE_PRINCIPAL_ID>
+   ```
+
+No cross-tenant consent or role assignment is required.
+
+### Cross-tenant (multi-tenant) configuration
+
+Use this configuration when Vault runs in one Microsoft Entra tenant (Tenant A) and
+the workloads it authenticates reside in a separate tenant (Tenant B).
+
+**Why `aks_wi` fixes the cross-tenant problem:** The `msi` fallback issues tokens scoped
+to Vault's home tenant (Tenant A). Calling Azure Resource Manager APIs in Tenant B with
+that token produces an `InvalidAuthenticationTokenTenant` error. With `aks_wi`,
+`WorkloadIdentityCredential` pins the `tenant_id` and `client_id` from Vault
+configuration, so Entra issues a token scoped to Tenant B instead.
+
+1. As a **Tenant B admin**, grant admin consent to provision a service principal for
+   Vault's App Registration in Tenant B. Navigate to:
+
+   ```text
+   https://login.microsoftonline.com/<TENANT_B_ID>/adminconsent?client_id=<APP_CLIENT_ID>
+   ```
+
+1. In **Tenant B**, grant the Reader role to that service principal on the resources
+   Vault needs to validate:
+
+   ```shell-session
+   $ az login --tenant <TENANT_B_ID>
+   $ az role assignment create \
+       --role "Reader" \
+       --assignee <APP_CLIENT_ID> \
+       --scope "/subscriptions/<SUBSCRIPTION_B_ID>/resourceGroups/<RESOURCE_GROUP_B>"
+   ```
+
+1. Configure the Azure auth method with `tenant_id` set to the **workload tenant**
+   (Tenant B):
+
+   ```shell-session
+   $ vault write auth/azure/config \
+       tenant_id=<TENANT_B_ID> \
+       resource=https://management.azure.com/ \
+       client_id=<APP_CLIENT_ID> \
+       auth_type=aks_wi
+   ```
+
+1. Create a role bound to resources in Tenant B:
+
+   ```shell-session
+   $ vault write auth/azure/role/cross-tenant-role \
+       policies="default" \
+       bound_subscription_ids=<SUBSCRIPTION_B_ID> \
+       bound_resource_groups=<RESOURCE_GROUP_B> \
+       ttl=1h
+   ```
+
+Configure the federated identity credential (issuer/subject/audience) on the App
+Registration in Tenant A — the projected service account token is always issued by the
+AKS cluster hosting Vault, regardless of the target workload tenant.
+
+### Migrating from `root_creds` to AKS WI
+
+To migrate from a static `client_secret` to secretless AKS Workload Identity:
+
+1. Complete the [prerequisites](#prerequisites-2) above.
+
+1. Update the Azure auth configuration to use `aks_wi`:
+
+   ```shell-session
+   $ vault write auth/azure/config \
+       tenant_id=<TENANT_ID> \
+       resource=https://management.azure.com/ \
+       client_id=<APP_CLIENT_ID> \
+       auth_type=aks_wi
+   ```
+
+1. Verify that authentication and workload login flows succeed.
+
+1. Remove `client_secret` from the Vault Azure auth configuration and from the
+   Microsoft Entra App Registration.
+
+Existing Azure auth roles, Vault policies, and workload login configuration require
+no changes.
+
+### Federated credential propagation delay (AADSTS70021)
+
+Federated identity credentials take up to 60 seconds to propagate after creation or
+modification. During this window, token acquisition fails with `AADSTS70021`. When
+`auth_type=aks_wi` is set, Vault proactively verifies the credential during login and
+returns a clear error instead of a generic 500. Wait 60 seconds after configuring the
+federated credential, then retry.
+
+### Terraform configuration
+
+Configure AKS Workload Identity using the Vault Terraform provider:
+
+```hcl
+resource "vault_azure_auth_backend_config" "example" {
+  backend   = "azure"
+  tenant_id = var.tenant_id
+  client_id = var.client_id
+  resource  = "https://management.azure.com/"
+  auth_type = "aks_wi"
+}
+```
+
+The Azure SDK automatically refreshes the short-lived Entra access token before it
+expires (default lifetime: 1 hour). No TTL configuration is required in Vault.
+
+Please see the [API documentation](/vault/api-docs/auth/azure#configure)
+for more details on the fields associated with AKS Workload Identity.
 
 ## Plugin Workload Identity Federation (WIF)
 
