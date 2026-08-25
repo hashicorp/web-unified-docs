@@ -1,0 +1,1986 @@
+---
+layout: docs
+page_title: Configure PingFederate for agent IAM
+description: >-
+  Use Verify and Vault to secure agent permissions with the agent registry, OAuth
+  resource server profiles, and ceiling policies.
+---
+
+# Configure Ping for agent IAM
+
+@include 'alerts/beta.mdx'
+
+@include 'alerts/enterprise-and-hcp.mdx'
+
+Configure users and OIDC applications in PingFederate to use with Vault Enterprise agentic IAM.
+
+## Before you start
+
+- **You must have an [PingFederate](https://www.pingidentity.com/en/product/pingfederate.html) client.**
+
+- **You must have [`curl`](https://curl.se/)** or some other tool to make API
+  calls.
+
+- **You must have [`jq`](https://jqlang.org/) installed** to use the example
+  commands as written.
+
+## Configure `PingFederate` token issuance
+
+### Step 1 - create the default JWT access token manager for RAR
+
+You will create the Default JWT Access Token Manager used for RAR-capable tokens.
+
+PingFederate issues OAuth access tokens as signed JWTs. Vault, as an OAuth resource server, validates these JWTs and maps their claims to a Vault identity.
+
+This Default Access Token Manager is configured with Authorization Details Claim Name = `authorization_details` so PingFederate can emit a populated `authorization_details` claim for RAR requests.
+
+Do not use this Access Token Manager for autonomous or OBO output tokens. Those non-RAR flows use the separate Autonomous Access Token Manager so PingFederate omits `authorization_details` entirely.
+
+1. Navigate through the UI to:
+
+<CodeBlockConfig hideClipboard>
+
+```plain-text
+APPLICATIONS → OAuth → Access Token Management → Create New Instance 
+```
+
+</CodeBlockConfig>
+
+Set the instance to have the following properties:
+
+| Field | Value |
+|-------|-------|
+| Instance Name | Default |
+| Instance ID | default |
+| Type | JSON Web Tokens |
+| Parent Instance | None |
+
+On the Session Validation tab, leave all four options unchecked:
+
+- Include Session Identifier in Access Token
+- Check for Valid Authentication Session
+- Check Session Revocation Status
+- Update Authentication Session Activity
+
+Vault is validating the JWT itself as an OAuth resource server. These tokens are not tying PingFederate to browser sessions, so session validation would add an extra dependency we do not need. The warning on the page is expected because authentication sessions aren't enabled globally.
+
+#### Access Token Attribute Contract
+
+Define which claims PingFederate is allowed to issue from the Default JWT Access Token Manager. This contract includes `authorization_details` because this manager is used for RAR tokens.
+
+Navigate to `Applications → OAuth → Access Token Management → Default → Access Token Attribute Contract`
+
+Configure the contract with these attributes:
+
+| Attribute Name |
+|----------------|
+| `authorization_details` |
+| `client_id` |
+| `iss` |
+| `sub` | 
+
+![Access token contact](/img/agentic-ai/screenshot-ping-access-token-contact.png)
+
+Save the Access Token Attribute Contract with `USER_KEY`  as the subject attribute and `authorization_details`, `client_id`, `iss`, and `sub` added to the contract.
+
+After that, leave the Token Endpoint Attribute Contract, Resource URIs, and Access Control tabs at their defaults and finish the JWT Access Token Manager setup.
+
+###  Step 2 - Configure the default client-credentials access-token mapping for RAR
+
+Configure the client-credentials access-token mapping for the Default JWT Access Token Manager.
+
+The Default Access Token Manager is the RAR-capable token manager. It includes the `authorization_details` contract attribute used by `vault-rar-client`.
+
+This mapping allows PingFederate to issue client-credentials JWTs that can include a populated `authorization_details` claim when the RAR client supplies one in the token request.
+
+Do not use this mapping for `vault-agent-autonomous`. The autonomous flow uses a separate client-credentials mapping for the Autonomous Access Token Manager so `authorization_details` is omitted entirely. 
+
+1. Navigate to `APPLICATIONS → OAuth → Access Token Mappings`.
+
+   Create the mapping with these values:
+
+   | Field | Value |
+   |-------|-------|
+   | Context | Client Credentials |
+   | Access Token Manager | Default |
+   | Attribute Sources & User Lookup | Leave Data Sources empty |
+
+   ![Access token mappings](/img/agentic-ai/screenshot-ping-token-mappings.png)
+
+1. In the **Contract Fulfillment** tab Configure the following mappings.
+
+   | Contract attribute | Source | Value |
+   |--------------------|--------|-------|
+   | authorization_details | No Mapping | Leave unmapped |
+   | client_id | Context | ClientId |
+   | iss | Text | https://localhost:9031 |
+   | sub | Context | ClientId |
+
+   <Note>
+      
+      The `authorization_details` is intentionally left as No Mapping here. For RAR, PingFederate populates `authorization_details` from the client-supplied `authorization_details` request parameter after configuring the `vault:path_access` authorization detail type and processor.
+
+      For non-RAR client-credentials tokens, do not rely on No Mapping to suppress the claim. If the Access Token Manager has Authorization Details Claim Name set to `authorization_details`, PingFederate can still emit `authorization_details`: []. Non-RAR flows use the separate Autonomous Access Token Manager instead.
+      
+   </Note>
+
+   ![Contract fulfillment](/img/agentic-ai/screenshot-ping-access-token-mappings-contract-fulfillment.png)
+
+   Leave all issuance criteria fields empty.
+
+   Do not add a source, attribute, condition, value, or error result.
+
+1. Click **Next** to continue to the **Summary** tab.
+
+   Before saving, confirm the summary shows:
+
+   - Context: Client Credentials
+   - Access Token Manager: Default
+   - `authorization_details` set to No Mapping
+   - `client_id` mapped from Context → ClientId
+   - `iss` mapped from Text → https://localhost:9031
+   - `sub` mapped from Context → ClientId
+   - No issuance criteria
+
+   ![Summary](/img/agentic-ai/screenshot-ping-access-token-summary.png)
+
+1. After confirming the summary matches these values, click Save.
+
+   After saving, the Default client-credentials mapping is ready for RAR-capable tokens issued to `vault-rar-client`.
+
+### Step 3 - Create the autonomous JWT access token manager for non-RAR tokens
+
+You will create the JWT Access Token Manager used for non-RAR tokens.
+
+- `vault-agent-autonomous` uses this Access Token Manager for autonomous client-credentials tokens
+- `vault-obo-client` for exchanged OBO output tokens
+
+Unlike the Default Access Token Manager, this manager must not emit `authorization_details`. The Authorization Details Claim Name must be left blank, and `authorization_details` must not be added to the Access Token Attribute Contract.
+
+Navigate to: Applications → OAuth → Access Token Management → Create New Instance
+
+Create a second JWT Access Token Manager for the autonomous no-RAR flow.
+
+Type tab
+
+Field             Value
+Instance Name     Autonomous
+Instance ID       autonomous
+Type              JSON Web Tokens
+Parent Instance   None
+Instance Configuration
+
+Use the same JWT configuration values as the Default Access Token Manager, except for the authorization details settings below.
+
+Field                               Value
+Authorization Details Claim Name    blank
+
+Access Token Attribute Contract
+
+Add only these contract attributes:
+
+- `client_id`
+- iss
+- sub
+
+<Note title='Warning'>
+   Do not enter `authorization_details` for this Access Token Manager. If this field is set, PingFederate can emit `authorization_details`: [] for non-RAR tokens, which causes Vault to treat the request as RAR and reject it with `RAR_NO_MATCH`.
+</Note>
+
+Completion check
+
+Before saving, confirm:
+
+Instance ID is autonomous
+
+- Authorization Details Claim Name is blank
+- The Access Token Attribute Contract contains `client_id`, iss, and sub
+- The contract does not contain `authorization_details`
+
+After saving, the Autonomous Access Token Manager is ready to issue clean non-RAR JWTs for autonomous and OBO flows.
+
+<Note title='Note'>
+
+The previous autonomous test failed because the shared Default JWT Access Token Manager had Authorization Details Claim Name set to `authorization_details`, which caused PingFederate to emit `authorization_details`: []. Vault then rejected the request with RAR_NO_MATCH. The dedicated Autonomous Access Token Manager prevents this by omitting the claim entirely.
+
+</Note>
+
+![Token details no-RAR](content/vault/v2.x/img/agentic-ai/screenshot-ping-access-token-no-RAR.png)
+
+### Step 4 - Configure the Autonomous client-credentials access-token mapping
+
+Configure the client-credentials access-token mapping for the Autonomous JWT Access Token Manager.
+
+This mapping is used by `vault-agent-autonomous`  to issue clean non-RAR client-credentials JWTs.
+
+The mapping fulfills only the claims needed for Vault identity resolution:
+
+- `client_id`
+- iss
+- sub
+
+It must not include `authorization_details`.
+
+Navigate to Applications → OAuth → Access Token Mappings
+
+Click Add Mapping.
+
+Mapping configuration
+
+Configure the mapping with:
+
+| Field | Value |
+| Context | Client Credentials |
+| Access Token Manager | Autonomous |
+
+Click Select.
+
+Attribute Sources & User Lookup
+
+Leave Data Sources empty.
+
+No user lookup is required because the OAuth client identity is used as the JWT subject.
+
+Click Next.
+
+Contract Fulfillment
+
+Configure the mappings as follows:
+
+| Contract attribute | Source | Value | 
+| `client_id` | Context | ClientId |
+| `iss` | Text | https://localhost:9031 |
+| `sub` | Context | ClientId |
+
+The `authorization_details` attribute should not appear in this contract because it was not added to the Autonomous Access Token Manager.
+
+Issuance Criteria
+
+Leave all issuance criteria fields empty.
+
+Do not add:
+- a source
+- an attribute
+- a condition
+- a comparison value
+- an error result
+
+Click Next.
+
+Verify the summary
+
+Confirm that the summary shows:
+
+- Context: Client Credentials
+- Access Token Manager: Autonomous
+- No data sources
+- `client_id` mapped from Context → ClientId
+- `iss` mapped from Text → https://localhost:9031
+- `sub` mapped from Context → ClientId
+- No `authorization_details` mapping
+- No issuance criteria
+
+Click Save.
+
+![Verify summary](content/vault/v2.x/img/agentic-ai/screenshot-ping-autonomous-client-credentials-access-token-mapping.png)
+
+After saving, the Autonomous Access Token Manager can issue client-credentials JWTs for `vault-agent-autonomous`  without emitting `authorization_details`.
+
+## Step 5: Create the OAuth clients and assign Access Token Managers
+
+Create the three OAuth clients under Applications → OAuth → Clients → Add Client.
+
+Each client should be assigned to the Access Token Manager that matches its flow:
+
+- `vault-agent-autonomous` uses Autonomous because it must omit `authorization_details`.
+- `vault-rar-client` uses Default because it must emit `authorization_details` for RAR.
+- `vault-obo-client` uses Autonomous because the exchanged OBO token must omit `authorization_details`.
+
+![vault-agent-autonomous config](/img/agentic-ai/screenshot-ping-vault-agent-autonomous-config.png)
+
+![more config](/img/agentic-ai/screenshot-ping-vault-agent-autonomous-oauth-allowed-grant-types.png)
+
+For each client:
+
+- Set Client Authentication to Client Secret.
+- Generate and store each client secret securely.
+- Leave unrelated OIDC, redirect, refresh token, and consent settings at their defaults unless the flow requires them.
+- Assign the Access Token Manager shown in the table above.
+
+| Client ID | Grant types | Default Access Token Manager | Restrict to Default Access Token Manager | Authorization Details | 
+| `vault-agent-autonomous`  | Client Credentials | Autonomous | Checked | Disabled / unchecked |
+| `vault-rar-client`  | Client Credentials | Default | Checked | Enabled, select `vault:path_access`  after the RAR type is created |
+| `vault-obo-client`  | Token Exchange | Autonomous | Checked | Disabled / unchecked |
+
+<Note title=''>
+
+   Note: The `vault-rar-client`  authorization detail type cannot be selected until the VaultPathAccessProcessor plugin is installed and the global `vault:path_access`  authorization detail type is created. If the type is not available yet, create the client first, then return to the client after Step 13 and enable `vault:path_access`  in Step 14.
+
+</Note>
+
+### Configure TLS and Vault OAuth Resource Server prerequisites
+6-7a
+## Step 6 — Activate OAuth resource server support
+
+Enable Vault's OAuth resource server functionality so Vault can accept and validate OAuth JWTs issued by PingFederate.
+
+Run this command from the root namespace:
+
+```shell-session
+vault write -f sys/activation-flags/oauth-resource-server/activate
+```
+
+ADD EXAMPLE OUTPUT HERE
+
+Vault requires this activation before OAuth resource server profiles can be created or OAuth JWTs can be used for requests.
+
+### Step 7 — Create the PingFederate OAuth resource server profile
+
+Configure Vault to trust JWTs issued by PingFederate.
+
+This profile tells Vault to validate PingFederate-issued JWTs using the PingFederate JWKS endpoint:
+
+```shell-session
+https://localhost:9031/pf/JWKS
+```
+
+
+Run from the test workspace:
+
+```shell-session
+$ cd ~/code/ping-vault-test
+CA_PEM=$(cat certs/pingfederate-localhost/pf-local-ca.crt)
+jq -n \
+  --arg ca "$CA_PEM" \
+  '{
+    issuer_id: "https://localhost:9031",
+    use_jwks: true,
+    jwks_uri: "https://localhost:9031/pf/JWKS",
+    jwks_ca_pem: $ca,
+    supported_algorithms: ["RS256"],
+    user_claim: "sub",
+    optional_authorization_details: true
+  }' | vault write sys/config/oauth-resource-server/ping -
+```
+
+Expected warnings:
+
+<CodeBlockConfig hideClipboard>
+
+```shell-session
+WARNING! The following warnings were returned from Vault:
+
+  * algorithm "RS256" is functional but consider using PS256 (RSA-PSS) for
+    better security
+
+  * profile supports only one algorithm family - consider supporting multiple
+    families for flexibility
+```
+
+</CodeBlockConfig>
+
+Vault saved the OAuth resource server profile without the JWKS x509 trust warning.
+
+### Step 7a — Verify the saved OAuth resource server profile
+
+Run:
+
+```shell-session
+$ vault read sys/config/oauth-resource-server/ping
+```
+
+**Example output:**
+
+<CodeBlockConfig hideClipboard>
+
+```shell-session
+clock_skew_leeway                 0
+config_id                         <generated-config-id>
+enabled                           true
+issuer_id                         https://localhost:9031
+jwks_ca_pem                       -----BEGIN CERTIFICATE-----
+                                  <PingFederate Local Test CA certificate>
+                                  -----END CERTIFICATE-----
+jwks_uri                          https://localhost:9031/pf/JWKS
+jwt_type                          access_token
+no_default_policy                 false
+optional_authorization_details    true
+profile_name                      ping
+supported_algorithms              [RS256]
+use_jwks                          true
+user_claim                        sub
+
+```
+
+</CodeBlockConfig>
+
+The saved profile matches the expected PingFederate OAuth resource server configuration.
+
+## Configure shared Vault test data and autonomous identity
+8-10
+
+### Step 8 — Prepare Vault identity objects for the autonomous agent
+
+Run from the test workspace:
+
+```shell-session
+$ cd ~/code/ping-vault-test
+```
+
+Create the Vault policy for the autonomous client:
+
+```shell-session
+$ vault policy write ping-autonomous-read - <<'HCL'
+path "secret/data/alice" {
+  capabilities = ["read"]
+}
+HCL
+```
+
+Create the Vault Identity entity:
+
+```shell-session
+$ ENTITY_ID=$(vault write -field=id identity/entity \
+  name="vault-agent-autonomous" \
+  policies="ping-autonomous-read")
+
+echo "$ENTITY_ID"
+```
+
+Get the OAuth resource server profile config ID and build the alias accessor:
+
+```shell-session
+$ CONFIG_ID=$(vault read -field=config_id sys/config/oauth-resource-server/ping)
+OAUTH_ACCESSOR="oauth-resource-server_root_${CONFIG_ID}"
+echo "$OAUTH_ACCESSOR"
+```
+
+Create the entity alias for the PingFederate JWT subject:
+
+```shell-session
+$ vault write identity/entity-alias \
+  name="vault-agent-autonomous" \
+  canonical_id="$ENTITY_ID" \
+  mount_accessor="$OAUTH_ACCESSOR"
+```
+
+Register the entity as an agent:
+
+```shell-session
+$ jq -n \
+  --arg entity_id "$ENTITY_ID" \
+  '{
+    display_name: "vault-agent-autonomous",
+    entity_id: $entity_id,
+    description: "PingFederate autonomous client credentials test agent",
+    owner: "Vault identity storage integration test",
+    optional_authorization_details: true
+  }' | vault write agent-registry/register -
+```
+
+Vault has a policy, identity entity, OAuth resource server entity alias, and Agent Registry record for the PingFederate autonomous client. This step is required because Vault resolves OAuth JWTs to Identity entities and requires an Agent Registry record for direct OAuth JWT requests.
+
+### Step 9 — Create the test KV secret
+
+Run:
+
+```shell-session
+$ vault secrets list
+```
+
+Confirm that a secret/ KV mount exists.
+
+If secret/ does not exist, enable KV v2:
+
+```shell-session
+$ vault secrets enable -path=secret kv-v2
+```
+
+Create the test secret:
+
+```shell-session
+$ vault kv put secret/alice message="hello from vault"
+```
+
+Verify the secret exists with your normal Vault token:
+
+```shell-session
+$ vault kv get secret/alice
+```
+
+**Example output:**
+
+<CodeBlockConfig hideClipboard>
+
+```shell-session
+====== Secret Path ======
+secret/data/alice
+
+======= Data =======
+Key        Value
+---        -----
+message    hello from vault
+```
+
+</CodeBlockConfig>
+
+
+Result:
+
+**Example output:**
+
+<CodeBlockConfig hideClipboard>
+
+```shell-session
+Result: PASS
+
+The test KV v2 secret exists at secret/data/alice and can be read with a normal Vault token.
+```
+
+</CodeBlockConfig>
+
+After this, Step 10 is the actual autonomous JWT test against Vault.
+
+### Step 10 — Verify autonomous access
+
+Verify that `vault-agent-autonomous`  receives a clean client-credentials JWT from PingFederate and that Vault accepts the JWT directly as the request credential.
+
+This verifies the final autonomous configuration:
+
+| Requirement | Expected behavior |
+| OAuth client | `vault-agent-autonomous` |
+| Grant type | `client_credentials` |
+| Access Token Manager | Autonomous | 
+| JWT identity claims | `client_id`, iss, and `sub` |
+| `authorization_details` | Omitted entirely |
+| Vault identity resolution | sub=vault-agent-autonomous resolves through the OAuth resource server entity alias |
+| Vault authorization | `ping-autonomous-read` policy authorizes secret/data/alice |
+
+Do not reuse any token from earlier testing. Request a fresh token after assigning `vault-agent-autonomous`  to the Autonomous Access Token Manager.
+
+#### Request a fresh autonomous token
+
+Run from the test workspace:
+
+```shell-session
+$ cd ~/code/ping-vault-test
+```
+
+Set the variables:
+
+```shell-session
+$ export VAULT_ADDR="http://127.0.0.1:8200"
+
+PF_TOKEN_ENDPOINT="https://localhost:9031/as/token.oauth2"
+AUTONOMOUS_CLIENT_ID="vault-agent-autonomous"
+AUTONOMOUS_CLIENT_SECRET="<client-secret>"
+```
+
+Request a fresh token:
+
+```shell-session
+$ TOKEN_RESPONSE=$(curl -sk \
+  -u "$AUTONOMOUS_CLIENT_ID:$AUTONOMOUS_CLIENT_SECRET" \
+  -X POST "$PF_TOKEN_ENDPOINT" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data-urlencode "grant_type=client_credentials")
+```
+
+Confirm that PingFederate returned a bearer token:
+
+```shell-session
+$ printf '%s\n' "$TOKEN_RESPONSE" |
+  jq '{token_type, expires_in, access_token_present: (.access_token != null)}'
+```
+
+Expected result:
+
+| Field | Expected value |
+| token_type | Bearer |
+| expires_in | Positive number |
+| access_token_present | true |
+
+Save the access token:
+
+```shell-session
+$ ACCESS_TOKEN=$(printf '%s' "$TOKEN_RESPONSE" | jq -r '.access_token')
+```
+
+Decode the JWT payload
+
+```shell-session
+$ printf '%s' "$ACCESS_TOKEN" \
+  | cut -d'.' -f2 \
+  | tr '_-' '/+' \
+  | awk '{l=length($0)%4; if(l==2)$0=$0"=="; else if(l==3)$0=$0"="; print}' \
+  | base64 -d \
+  | jq
+```
+
+Expected JWT claims:
+
+| Claim | Expected value |
+| `client_id` | `vault-agent-autonomous`  |
+| `sub` | `vault-agent-autonomous`  |
+| `iss` | https://localhost:9031 |
+| scope | "" |
+| iat | Present |
+| exp | Present |
+| jti | Present | 
+| `authorization_details` | Not present |
+
+<Note title='Important'>
+
+   `authorization_details` must be omitted entirely. The decoded JWT must not contain either of these values:
+
+</Note>
+
+<CodeBlockConfig hideClipboard>
+
+```shell-session
+   "authorization_details": []
+   "authorization_details": null
+```
+
+</CodeBlockConfig>
+
+Observed JWT claims:
+
+The decoded autonomous JWT contained:
+
+- `client_id` = `vault-agent-autonomous`  
+- `sub` = `vault-agent-autonomous`  
+- `iss` = https://localhost:9031 
+- scope = "" 
+- iat, exp, and jti present
+
+`authorization_details` was absent.
+
+Result: PASS
+
+Use the PingFederate JWT directly against Vault
+
+**Example output:**
+
+<CodeBlockConfig hideClipboard>
+
+```shell-session
+curl -sS \
+  -H "X-Vault-Token: $ACCESS_TOKEN" \
+  "$VAULT_ADDR/v1/secret/data/alice" |
+  jq
+
+```
+
+</CodeBlockConfig>
+
+**Example output:**
+
+<CodeBlockConfig hideClipboard>
+
+```shell-session
+{
+  "data": {
+    "data": {
+      "message": "hello from vault"
+    }
+  }
+}
+```
+
+</CodeBlockConfig>
+
+Vault may also include additional fields such as request_id, lease_id, renewable, lease_duration, metadata, wrap_info, warnings, auth, or mount_type.
+
+Observed Vault API result:
+
+Vault accepted the PingFederate-issued JWT through X-Vault-Token and returned the KV v2 secret at `secret/data/alice`.
+
+**Example output:**
+
+<CodeBlockConfig hideClipboard>
+
+```shell-session
+Result: PASS
+```
+
+</CodeBlockConfig>
+
+#### Optional Vault CLI verification
+
+Use the same PingFederate JWT through the Vault CLI:
+
+**Example output:**
+
+<CodeBlockConfig hideClipboard>
+
+```shell-session
+VAULT_TOKEN="$ACCESS_TOKEN" \
+VAULT_ADDR="http://127.0.0.1:8200" \
+vault kv get secret/alice
+```
+
+</CodeBlockConfig>
+
+Expected CLI result:
+
+**Example output:**
+
+<CodeBlockConfig hideClipboard>
+
+```shell-session
+== Secret Path ==
+secret/data/alice
+
+====== Metadata ======
+Key              Value
+---              -----
+created_time     <timestamp>
+custom_metadata  <nil>
+deletion_time    n/a
+destroyed        false
+version          1
+
+==== Data ====
+Key        Value
+---        -----
+message    hello from vault
+```
+
+</CodeBlockConfig>
+
+Observed Vault CLI result:
+
+The same PingFederate-issued JWT also worked through the Vault CLI when passed through `VAULT_TOKEN`.
+
+**Example output:**
+
+<CodeBlockConfig hideClipboard>
+
+```shell-session
+Result: PASS
+```
+
+</CodeBlockConfig>
+
+**Example output:**
+
+<CodeBlockConfig hideClipboard>
+
+```shell-session
+For the autonomous flow, vault kv get secret/alice succeeded. For RAR verification later, use vault read secret/data/alice because vault kv get can perform extra mount-discovery requests that may not match a narrow RAR path.
+```
+
+</CodeBlockConfig>
+
+## Configure and verify RAR
+11-18
+
+### Step 11 — Verify the RAR Authorization Detail Processor
+
+Verify that PingFederate discovered the custom VaultPathAccessProcessor plugin before creating the `vault:path_access`  authorization detail type.
+
+This processor is required because PingFederate must understand and validate this custom RAR structure:
+
+<CodeBlockConfig hideClipboard>
+
+```shell-session
+{
+  "type": "vault:path_access",
+  "path": "secret/data/alice",
+  "capabilities": ["read"]
+} 
+```
+
+</CodeBlockConfig>
+
+Verify the processor descriptor through the Admin API
+
+Run from:
+
+<CodeBlockConfig hideClipboard>
+
+```shell-session
+cd ~/code/ping-vault-test 
+```
+
+</CodeBlockConfig>
+
+Set the PingFederate Admin API variables:
+
+```shell-session
+$ PF_ADMIN="https://localhost:9999/pf-admin-api/v1"
+PF_AUTH="Administrator:<admin-password>"
+H="X-XSRF-Header: PingFederate"
+```
+
+Query the authorization detail processor descriptors:
+
+<CodeBlockConfig hideClipboard>
+
+```shell-session
+curl -sk \
+  -u "$PF_AUTH" \
+  -H "$H" \
+  "$PF_ADMIN/oauth/authorizationDetailProcessors/descriptors" |
+jq '.items[]
+  | select(.id == "com.hashicorp.vault.ping.VaultPathAccessProcessor")
+  | {
+      id,
+      name,
+      className,
+      supportedAuthorizationDetailTypes
+    }' 
+```
+
+</CodeBlockConfig>
+
+Observed result
+
+<CodeBlockConfig hideClipboard>
+
+```shell-session
+{
+  "id": "com.hashicorp.vault.ping.VaultPathAccessProcessor",
+  "name": "Vault Path Access Processor",
+  "className": "com.hashicorp.vault.ping.VaultPathAccessProcessor",
+  "supportedAuthorizationDetailTypes": [
+    "vault:path_access"
+  ]
+} 
+```
+
+</CodeBlockConfig>
+
+Figure: PingFederate Admin API response showing that the custom Vault authorization detail processor descriptor was discovered and supports the `vault:path_access` authorization detail type.
+
+This confirms that:
+
+| Check | Result |
+|-------|--------|
+| PingFederate loaded the custom processor JAR | PASS |
+| The processor descriptor is available through the Admin API | PASS |
+| The processor class is com.hashicorp.vault.ping.VaultPathAccessProcessor | PASS |
+| The processor supports `vault:path_access`  | PASS |
+
+#### If the descriptor list is empty
+
+If the response is empty, confirm that the plugin JAR contains the PingFederate processor metadata file:
+
+<CodeBlockConfig hideClipboard>
+
+```shell-session
+PF-INF/authorization-detail-processors 
+```
+
+</CodeBlockConfig>
+
+Also confirm the JAR is deployed under the PingFederate server deploy directory:
+
+<CodeBlockConfig hideClipboard>
+
+```plain-text
+/opt/out/instance/server/default/deploy 
+```
+
+</CodeBlockConfig>
+
+Then restart PingFederate and query the descriptors endpoint again.
+
+Completion check
+
+<CodeBlockConfig hideClipboard>
+
+```plain-text
+Result: PASS 
+```
+
+</CodeBlockConfig>
+
+PingFederate returned the custom authorization detail processor descriptor for VaultPathAccessProcessor. The environment is ready to create a configured processor instance for `vault:path_access` .
+
+### Step 12 — Create the RAR processor instance through the GUI
+
+Create a PingFederate authorization detail processor instance from the discovered VaultPathAccessProcessor descriptor.
+
+Step 11 confirmed that PingFederate can see the plugin. This step creates the actual processor instance that will be used later when configuring the `vault:path_access`  authorization detail type.
+
+#### GUI path
+
+In the PingFederate admin console, go to:
+
+Applications → OAuth → Authorization Detail Processors → Create New Instance
+
+Type tab
+
+Configure the processor instance with the following values:
+
+| Field | Value |
+|-------|--------|
+| Instance Name | Vault Path Access Processor |
+| Instance ID | vaultpathaccessprocessor |
+| Type | Vault Path Access Processor |
+| Parent Instance | None |
+
+![Auth detail for processor](/img/agentic-ai/screenshot-ping-auth-detail-processor.png)
+
+Figure: PingFederate processor instance type configuration for the custom Vault Path Access Processor.
+
+Click Next.
+
+### Instance Configuration tab
+
+No additional fields are required for this processor.
+
+Click Next.
+
+### Summary tab
+
+Review the summary before saving.
+
+Expected values:
+
+| Field | Expected value |
+|-------|----------------|
+| Instance Name | Vault Path Access Processor |
+| Instance ID | `vaultpathaccessprocessor` |
+| Type | Vault Path Access Processor |
+| Class Name | `com.hashicorp.vault.ping.VaultPathAccessProcessor` |
+| Supported Authorization Detail Types | `vault:path_access` |
+| Parent Instance Name | None |
+
+![Access token summary](/img/agentic-ai/screenshot-ping-access-token-summary.png)
+
+Figure: Processor instance summary showing the custom class name and supported `vault:path_access` authorization detail type.
+
+Click Save.
+
+Verify the processor instance through the Admin API
+
+Run:
+
+```shell-session
+$ curl -sk \
+  -u "$PF_AUTH" \
+  -H "$H" \
+  "$PF_ADMIN/oauth/authorizationDetailProcessors" |
+jq '.items[]
+  | select(.id == "vaultpathaccessprocessor")
+  | {
+      id,
+      name,
+      pluginDescriptorRef
+    }'
+```
+
+
+**Example output:**
+
+<CodeBlockConfig hideClipboard>
+
+```json
+{
+  "id": "vaultpathaccessprocessor",
+  "name": "Vault Path Access Processor",
+  "pluginDescriptorRef": {
+    "id": "com.hashicorp.vault.ping.VaultPathAccessProcessor",
+    "location": "https://localhost:9999/pf-admin-api/v1/oauth/authorizationDetailProcessors/descriptors/com.hashicorp.vault.ping.VaultPathAccessProcessor"
+  }
+}
+```
+
+</CodeBlockConfig>
+
+
+Figure: Admin API verification confirming that the vaultpathaccessprocessor instance was created and is backed by the VaultPathAccessProcessor plugin descriptor.
+
+What this confirms
+
+| Check | Result |
+|-------|--------|
+| Processor instance was created | PASS |
+| Instance ID is vaultpathaccessprocessor | PASS |
+| Instance uses the custom Vault processor descriptor | PASS |
+| Processor supports `vault:path_access` | PASS |
+
+PingFederate now has a configured authorization detail processor instance named `vaultpathaccessprocessor`. The environment is ready to create the global `vault:path_access`  authorization detail type.
+
+### Step 13 — Create the `vault:path_access` authorization detail type
+
+Register Vault's RAR authorization detail type globally in PingFederate and associate it with the processor instance created in Step 12.
+
+This allows PingFederate to recognize incoming authorization details with the type `vault:path_access`
+
+and send them to the custom `VaultPathAccessProcessor`.
+
+GUI path
+
+In the PingFederate admin console, go to:
+
+System → OAuth Settings → Authorization Detail Types
+
+Click Add Authorization Detail Type.
+
+#### Authorization detail type configuration
+
+Configure the authorization detail type with the following values:
+
+| Field | Value |
+|-------|-------|
+| Type | `vault:path_access` |
+| Description | Vault path and capability authorization details |
+| Authorization Detail Processor | Vault Path Access Processor |
+
+![add auth type](/img/agentic-ai/screenshot-ping-add-auth-detail-type.png)
+
+Click Save.
+
+The custom processor was built specifically to validate this Vault-defined schema.
+
+What this does: This associates incoming RAR authorization details with the custom processor.
+
+When PingFederate receives an authorization detail like:
+
+<CodeBlockConfig hideClipboard>
+
+```shell-session
+{
+  "type": "vault:path_access",
+  "path": "secret/data/alice",
+  "capabilities": ["read"]
+}
+```
+
+</CodeBlockConfig>
+
+it can route that object to VaultPathAccessProcessor for validation.
+
+PingFederate now has a globally registered `vault:path_access`  authorization detail type associated with the **Vault Path Access Processor**.
+
+<Note title='Information'>
+
+   This associates incoming authorization details with the custom processor. When PingFederate receives an authorization detail whose type is `vault:path_access` , it can send the object to VaultPathAccessProcessor for validation and enrichment.
+
+</Note>
+
+
+<Note title=''>
+
+   The type must be entered exactly as:
+
+   `vault:path_access`
+
+   The value is case-sensitive and must match both the plugin’s advertised type and the value that will be sent in the OAuth request. The custom processor was built specifically to validate this Vault-defined schema.
+
+</Note>
+
+### Step 14 — Enable `vault:path_access` on the RAR client
+
+Enable the `vault-rar-client`  OAuth client to request the custom RAR authorization detail type:
+
+<CodeBlockConfig hideClipboard>
+
+```plain-text
+vault:path_access
+```
+
+</CodeBlockConfig>
+
+This step connects the globally registered authorization detail type from Step 13 to the specific OAuth client that will request RAR-scoped Vault access.
+
+**GUI path**
+
+In the PingFederate admin console, go to:
+
+<CodeBlockConfig hideClipboard>
+
+```plain-text
+Applications → OAuth → Clients 
+```
+
+</CodeBlockConfig>
+
+Open the client:
+
+```plain-text
+$ vault-rar-client 
+```
+
+**Client configuration**
+
+In the client settings, confirm the client is configured for client credentials and RAR support.
+
+Use the following values:
+
+| Field | Expected value |
+|-------|----------------|
+| Client ID | `vault-rar-client`  |
+| Allowed Grant Type | Client Credentials |
+| Access Token Manager | Default |
+| Restrict Scopes | Checked |
+| Allow Authorization Details | Checked |
+| Authorization Detail Type | `vault:path_access` |
+
+Click Save.
+
+The RAR flow requires a populated `authorization_details` claim. The autonomous flow intentionally omits that claim.
+
+**Why this matters**
+
+If `vault-rar-client` is not allowed to request `vault:path_access`, PingFederate may reject the token request or omit the requested authorization details.
+
+For the RAR test to work, PingFederate must accept an OAuth request containing:
+
+```json
+$ [
+  {
+    "type": "vault:path_access",
+    "path": "secret/data/alice",
+    "capabilities": ["read"]
+  }
+]
+```
+
+and issue a token that includes the same authorization detail.
+
+<Note title='Note'>
+
+   Restricting the client to the Default Access Token Manager prevents PingFederate from selecting the Autonomous manager, which cannot emit `authorization_details`.
+
+</Note>
+
+Expected configuration 
+| Setting | Expected result |
+|---------|-----------------|
+| Client Credentials enabled | Yes |
+| Authorization details enabled | Yes |
+| Allowed type | `vault:path_access` |
+| Default Access Token Manager | Default |
+| Restricted to Default manager | Yes |
+
+In this setup:
+
+| Access Token Manager | Used for | `authorization_details` behavior |
+|----------------------|----------|----------------------------------|
+| Default | RAR client | Emits populated `authorization_details` |
+| Autonomous | Autonomous and OBO clients | Omits `authorization_details` |
+
+The `vault-rar-client`  OAuth client is configured to accept `vault:path_access` authorization details and issue its JWT through the RAR-capable Default Access Token Manager.
+
+The next step will request a client-credentials token containing a dynamic `authorization_details` parameter.
+
+### Step 15 — Request a RAR client-credentials token
+
+Request a PingFederate client-credentials token from `vault-rar-client`  that includes a populated `authorization_details` claim.
+
+This verifies that PingFederate accepts the custom `vault:path_access`  authorization detail type and includes it in the issued JWT.
+
+Run from the test directory
+
+<CodeBlockConfig hideClipboard>
+
+```shell-session
+cd ~/code/ping-vault-test 
+```
+
+</CodeBlockConfig>
+
+Set the token endpoint and client variables:
+
+```shell-session
+$ PF_TOKEN_ENDPOINT="https://localhost:9031/as/token.oauth2"
+
+RAR_CLIENT_ID="vault-rar-client"
+RAR_CLIENT_SECRET="<rar-client-secret>"
+```
+
+Request a RAR token
+
+```shell-session
+$ RAR_TOKEN_RESPONSE=$(curl -sk \
+  -u "$RAR_CLIENT_ID:$RAR_CLIENT_SECRET" \
+  -X POST "$PF_TOKEN_ENDPOINT" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data-urlencode "grant_type=client_credentials" \
+  --data-urlencode 'authorization_details=[{"type":"vault:path_access","path":"secret/data/alice","capabilities":["read"]}]')
+```
+
+Print the token response:
+
+```shell-session
+$ printf '%s\n' "$RAR_TOKEN_RESPONSE" | jq
+```
+
+Expected result
+
+The response should include an access_token, a bearer token type, a positive expiration value, and the requested `authorization_details`.
+
+```shell-session
+$ {
+  "access_token": "<jwt-access-token>",
+  "authorization_details": [
+    {
+      "type": "vault:path_access",
+      "path": "secret/data/alice",
+      "capabilities": [
+        "read"
+      ]
+    }
+  ],
+  "token_type": "Bearer",
+  "expires_in": 7199
+}
+```
+
+`expires_in` may vary. The important checks are:
+
+| Field | Expected result |
+|-------|-----------------|
+| `access_token` | Present |
+| `token_type` | `Bearer` |
+| `authorization_details[].type` | `vault:path_access` |
+| `authorization_details[].path` | `secret/data/alice` |
+| `authorization_details`[].capabilities | Includes `read` |
+
+Figure: PingFederate token response showing that `vault-rar-client`  received a bearer token with populated `authorization_details`.
+
+Decode the JWT payload
+
+Extract the access token:
+
+```shell-session
+$ RAR_ACCESS_TOKEN=$(printf '%s' "$RAR_TOKEN_RESPONSE" | jq -r '.access_token')
+
+Decode the JWT payload:
+
+printf '%s' "$RAR_ACCESS_TOKEN" |
+cut -d. -f2 |
+base64 -d 2>/dev/null |
+jq
+```
+
+If macOS base64 padding causes an error, use:
+
+```shell-session
+$ python3 - <<'PY'
+import os, json, base64
+
+token = os.environ["RAR_ACCESS_TOKEN"]
+payload = token.split(".")[1]
+payload += "=" * (-len(payload) % 4)
+
+print(json.dumps(json.loads(base64.urlsafe_b64decode(payload)), indent=2))
+PY
+```
+
+Expected JWT claims
+
+The decoded JWT should include:
+
+```shell-session
+$ {
+  "iss": "https://localhost:9031",
+  "sub": "vault-rar-client",
+  "client_id": "vault-rar-client",
+  "authorization_details": [
+    {
+      "type": "vault:path_access",
+      "path": "secret/data/alice",
+      "capabilities": [
+        "read"
+      ]
+    }
+  ]
+}
+```
+
+Figure: Decoded RAR JWT payload showing `authorization_details` with type=vault:path_access, path=secret/data/alice, and capabilities=["read"].
+
+Why this matters
+
+This confirms the RAR side of PingFederate is working before testing Vault authorization.
+
+At this point, PingFederate has proven that it can:
+
+| Check | Result |
+|-------|--------|
+| Accept a dynamic `authorization_details` request parameter | PASS |
+| Recognize the `vault:path_access`  type | PASS |
+| Validate the `vault:path_access`  object through the configured RAR path | PASS |
+| Issue a JWT containing populated `authorization_details` | PASS |
+
+Completion check
+
+Result: PASS
+
+PingFederate issued a RAR client-credentials JWT containing a populated `authorization_details` claim for secret/data/alice with the read capability.
+
+### Step 16 — Prepare Vault identity objects for the RAR client
+
+Prepare the Vault-side identity objects for the RAR client.
+
+The RAR token issued in Step 15 uses this subject:
+
+<CodeBlockConfig hideClipboard>
+
+```plain-text
+sub=vault-rar-client 
+```
+
+</CodeBlockConfig>
+
+Vault must be able to resolve that subject to a Vault identity entity before it can authorize the request. RAR narrows the request through `authorization_details`, but Vault still needs an entity alias and policy for the token subject.
+
+Run from the test directory
+
+```shell-session
+$ cd ~/code/ping-vault-test
+```
+
+Set the Vault address:
+
+```shell-session
+$ export VAULT_ADDR="http://127.0.0.1:8200"
+```
+
+Confirm you are authenticated to Vault with an administrative token:
+
+```shell-session
+$ vault token lookup
+```
+
+Create the RAR read policy
+
+Create a policy that allows reading the KV v2 secret path used in the RAR request:
+
+```shell-session
+$ vault policy write ping-rar-read - <<'EOF'
+path "secret/data/alice" {
+  capabilities = ["read"]
+}
+EOF
+```
+
+Verify the policy:
+
+```shell-session
+$ vault policy read ping-rar-read
+```
+
+Expected policy:
+
+<CodeBlockConfig hideClipboard>
+
+```shell-session
+path "secret/data/alice" {
+  capabilities = ["read"]
+} 
+```
+
+</CodeBlockConfig>
+
+Figure: Vault policy used by the RAR client entity to allow read access to secret/data/alice.
+
+Create the RAR client identity entity
+
+Create a Vault identity entity for the RAR client subject:
+
+```shell-session
+$ vault write identity/entity/name/vault-rar-client \
+  policies="ping-rar-read"
+```
+
+
+Read the entity back:
+
+```shell-session
+$ vault read identity/entity/name/vault-rar-client
+```
+
+Expected result:
+
+<CodeBlockConfig hideClipboard>
+
+```shell-session
+name        vault-rar-client
+policies    [ping-rar-read] 
+```
+
+</CodeBlockConfig>
+
+Figure: Vault identity entity for the RAR client with the ping-rar-read policy attached.
+
+Get the RAR entity ID
+
+```shell-session
+$ RAR_ENTITY_ID=$(vault read -field=id identity/entity/name/vault-rar-client)
+echo "$RAR_ENTITY_ID"
+```
+
+Build the OAuth Resource Server alias accessor
+
+Read the OAuth Resource Server profile config_id and build the OAuth RS alias accessor:
+
+```shell-session
+$ CONFIG_ID=$(vault read -field=config_id sys/config/oauth-resource-server/ping)
+
+OAUTH_ACCESSOR="oauth-resource-server_root_${CONFIG_ID}"
+
+echo "$OAUTH_ACCESSOR"
+```
+
+This accessor must match the OAuth RS profile used by Vault when validating PingFederate-issued JWTs.
+
+Info: This accessor must match the OAuth RS profile used by Vault when validating PingFederate-issued JWTs.
+
+Create the entity alias for the RAR token subject
+
+Create an alias that maps the RAR JWT subject to the Vault identity entity:
+
+```shell-session
+$ vault write identity/entity-alias \
+  name="vault-rar-client" \
+  canonical_id="$RAR_ENTITY_ID" \
+  mount_accessor="$OAUTH_ACCESSOR"
+```
+
+Next, verify the alias points to the right accessor:
+
+```shell-session
+$ vault read -format=json identity/entity-alias/id/640cc352-7a2f-ed8b-6caf-e07b11ab79f5 |
+jq '.data | {name, canonical_id, mount_accessor}'
+```
+
+Figure: Vault identity alias mapping the RAR token subject `vault-rar-client`  to the RAR client entity through the OAuth Resource Server accessor.
+
+### Step 17 — Verify the RAR token with Vault using curl
+
+Use the PingFederate-issued RAR JWT directly against Vault’s HTTP API.
+
+This verifies the end-to-end path from PingFederate token issuance to Vault authorization for a RAR-scoped request.
+
+Run the Vault API request
+
+Use the RAR access token returned in Step 15:
+
+```shell-session
+$ curl -sS \
+  -H "X-Vault-Token: <paste-rar-access-token>" \
+  "http://127.0.0.1:8200/v1/secret/data/alice" |
+jq
+```
+
+Expected result
+
+```shell-session
+$ {
+  "data": {
+    "data": {
+      "message": "hello from vault"
+    }
+  }
+}
+```
+
+Vault may also return metadata, lease fields, warnings, or mount information.
+
+Figure: Vault HTTP API response showing that the PingFederate-issued RAR JWT authorized access to secret/data/alice.
+
+What this confirms
+
+| Check | Result |
+|-------|--------|
+| Vault accepted the PingFederate-issued RAR JWT | PASS |
+| Vault validated the JWT through the OAuth RS profile | PASS |
+| Vault matched the `authorization_details` path and capability | PASS |
+| Vault authorized secret/data/alice | PASS |
+| Vault returned the KV v2 secret | PASS |
+
+<Note title='Note'>
+
+   For RAR verification, use vault read secret/data/alice instead of vault kv get secret/alice. The vault kv get command performs an internal mount-discovery preflight request to /sys/internal/ui/mounts/... before reading the secret. That preflight path does not match the RAR claim, which authorizes only the exact KV v2 API path secret/data/alice, so Vault can reject it with RAR_NO_MATCH.
+
+</Note>
+
+### Step 18 — Verify the RAR token with Vault CLI
+
+Use the same PingFederate-issued RAR JWT with the Vault CLI:
+
+```shell-session
+$ VAULT_TOKEN="<rar-access-token>" \
+VAULT_ADDR="http://127.0.0.1:8200" \
+vault read secret/data/alice
+```
+
+
+If this step fails request a token again:
+
+```shell-session
+$ RAR_TOKEN_RESPONSE=$(curl -sk \
+  -u "$RAR_CLIENT_ID:$RAR_CLIENT_SECRET" \
+  -X POST "$PF_TOKEN_ENDPOINT" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data-urlencode "grant_type=client_credentials" \
+  --data-urlencode 'authorization_details=[{"type":"vault:path_access","path":"secret/data/alice","capabilities":["read"]}]')
+
+RAR_ACCESS_TOKEN=$(printf '%s' "$RAR_TOKEN_RESPONSE" | jq -r '.access_token')
+
+echo "${RAR_ACCESS_TOKEN}"
+```
+
+The response contains the RAR access token used for Vault verification.
+
+The Vault CLI accepted the PingFederate-issued RAR JWT when using vault read secret/data/alice.
+
+<Note title='Note'>
+
+   For RAR verification, use vault read secret/data/alice instead of vault kv get secret/alice. The vault kv get command can perform extra mount-discovery requests that may not match the narrow RAR path.
+
+</Note>
+
+
+Conclusion
+
+The RAR flow works end-to-end:
+
+| Stage | Result |
+|-------|--------|
+| PingFederate accepts `vault:path_access`  authorization details | PASS |
+| PingFederate issues a signed JWT containing the RAR claim | PASS |
+| Vault accepts the RAR JWT through curl | PASS |
+| Vault accepts the RAR JWT through the Vault CLI | PASS |
+| Vault returns secret/data/alice | PASS |
+
+<Note title='Information'>
+
+   This verifies successful RAR interoperability between PingFederate and Vault for the requested path and capability.
+
+</Note>
+
+#### OBO flow: PingFederate token exchange to Vault
+
+This section verifies an on-behalf-of style OAuth token exchange flow from PingFederate to Vault.
+
+In this setup, `vault-agent-autonomous` receives the original subject access token. Then `vault-obo-client`  exchanges that subject token for a new PingFederate-issued access token. Vault accepts the exchanged token when PingFederate preserves the original subject in `sub` and omits `authorization_details`.
+
+| Component | Purpose |
+|-----------|---------|
+| `vault-agent-autonomous`  | Gets the original subject access token |
+| `vault-obo-client`  | Performs token exchange |
+| Vault OBO Token Exchange | PingFederate token exchange processor policy |
+| OAuth Bearer Access Token Token Processor | Validates the incoming Ping-issued subject access token |
+| autonomous Access Token Manager | Issues the exchanged OBO token without `authorization_details` |
+
+<Note title='Important'>
+
+   The OBO output token must not contain `authorization_details`. If PingFederate emits `authorization_details`: [], Vault treats the request as RAR-style and can reject it with RAR_NO_MATCH.
+
+</Note>
+
+## Configure and verify OBO
+Step 19 — Configure the OBO client
+
+Configure `vault-obo-client`  as the PingFederate OAuth client that performs token exchange.
+
+The exchanged output token must be issued through the Autonomous Access Token Manager so `authorization_details` is omitted entirely.
+
+In PingFederate, go to:
+
+<CodeBlockConfig hideClipboard>
+
+```shell-session
+Applications → OAuth → Clients → `vault-obo-client`  
+```
+
+</CodeBlockConfig>
+
+Configure:
+
+| Field | Value |
+|-------|-------|
+| Client ID | `vault-obo-client` |
+| Client Authentication | Client Secret |
+| Allowed Grant Types | Token Exchange |
+| Default Access Token Manager | autonomous |
+| Restrict to Default Access Token Manager | Checked |
+| Authorization Details | Disabled / unchecked |
+
+Save the client.
+
+The OBO output token must not include an empty `authorization_details`: [] claim. Reusing the autonomous Access Token Manager works because it already emits non-RAR tokens.
+
+### Step 20 — Create the OBO token exchange processor policy
+
+Create the PingFederate token exchange processor policy used by the OBO flow.
+
+This policy controls how PingFederate validates the incoming subject token during token exchange.
+
+GUI path
+
+Go to:
+
+<CodeBlockConfig hideClipboard>
+
+```plain-text
+Applications → OAuth → Token Exchange → Processor Policies 
+```
+
+</CodeBlockConfig>
+
+Create a new policy:
+
+| Field | Value |
+|-------|-------|
+| Policy Name | Vault OBO Token Exchange |
+| Policy ID | `vaultobotokenexchange` |
+
+Set it as the default token exchange processor policy if needed.
+
+### Step 21 — Create the OAuth access-token processor
+
+Create the token processor that validates the incoming subject token.
+
+Use the OAuth Bearer Access Token Token Processor, not JWT Token Processor 2.0.
+
+Even though the incoming subject token is physically a JWT, it is semantically a PingFederate-issued OAuth access token. During testing, the JWT processor rejected the subject token as invalid. The OAuth bearer access-token processor successfully validated it.
+
+Go to:
+
+<CodeBlockConfig hideClipboard>
+
+```plain-text
+Applications → OAuth → Token Exchange → Processor Policies → Vault OBO Token Exchange → Manage Token Processors 
+```
+
+</CodeBlockConfig>
+
+Create a new token processor.
+
+| Field | Value |
+|-------|-------|
+| Instance Name | Vault OBO Access Token Processor |
+| Instance ID | vaultoboaccesstoken |
+| Type | OAuth Bearer Access Token Token Processor |
+| Access Token Manager | autonomous |
+| Scope value as single string | Unchecked |
+
+On Extended Contract, add:
+
+<CodeBlockConfig hideClipboard>
+
+```plain-text
+sub 
+```
+
+</CodeBlockConfig>
+
+Save the token processor.
+
+<Note title='Important'>
+
+   Important: Use the OAuth Bearer Access Token Token Processor, not JWT Token Processor 2.0.
+
+   Even though the subject token is physically a JWT, it is semantically a PingFederate-issued OAuth access token. The JWT processor rejected the token as invalid. The OAuth bearer access-token processor successfully validated it.
+
+</Note>
+
+
+### Step 22 — Create the token processor mapping
+
+Map the incoming subject token's `sub` claim into the token exchange processor policy contract.
+
+This preserves the original subject from the autonomous token so the exchanged OBO token can keep:
+
+<CodeBlockConfig hideClipboard>
+
+```shell-session
+sub=vault-agent-autonomous 
+```
+
+</CodeBlockConfig>
+
+Go back to:
+
+<CodeBlockConfig hideClipboard>
+
+```plain-text
+Applications → OAuth → Token Exchange → Processor Policies → Vault OBO Token Exchange → Token Processor Mapping 
+```
+
+</CodeBlockConfig>
+
+Create or update the mapping:
+
+| Field | Value |
+|-------|-------|
+| Subject Token Processor | Vault OBO Access Token Processor |
+| Subject Token Type | `urn:ietf:params:oauth:token-type:access_token` |
+| Actor Token Processor | blank |
+| Actor Token Type | blank |
+
+On Contract Fulfillment, configure:
+
+Processor policy contract
+
+| Source | Value |
+|-------|-------|
+| subject | Subject Token | `sub` |
+
+Save the mapping.
+
+### Step 23 — Create the token-exchange access-token mapping
+
+Create the access-token mapping used when PingFederate issues the exchanged OBO token.
+
+This mapping emits only the claims Vault needs for identity resolution:
+
+client_id
+iss
+sub
+
+It must not emit `authorization_details`.
+
+Go to:
+
+Applications → OAuth → Access Token Mappings
+
+Create a mapping with:
+
+Field
+
+Value
+
+Context
+
+Token Exchange Processor Policy: Vault OBO Token Exchange
+
+Access Token Manager
+
+autonomous
+
+On Contract Fulfillment, map:
+
+Contract attribute
+
+Source
+
+Value
+
+client_id
+
+Context
+
+ClientId
+
+iss
+
+Text
+
+https://localhost:9031
+
+sub
+
+Token Exchange Processor Policy
+
+subject
+
+There should be no `authorization_details` contract attribute in this mapping.
+
+Save the mapping.
+
+Why: The previous Default Access Token Manager mapping emitted:
+
+"authorization_details": []
+
+Vault treated that as a RAR token and rejected it with RAR_NO_MATCH. The working OBO token must omit `authorization_details` entirely.
+
+Step 24 — Request a subject token
+
+Request a fresh autonomous subject token from `vault-agent-autonomous` .
+
+This token is the original subject token that `vault-obo-client`  will exchange.
+
+Request a fresh autonomous token:
+
+curl -sk \
+  -u "vault-agent-autonomous:<AUTONOMOUS_CLIENT_SECRET>" \
+  -X POST "https://localhost:9031/as/token.oauth2" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data-urlencode "grant_type=client_credentials" |
+  jq
+
+Expected response:
+
+<CodeBlockConfig hideClipboard>
+
+```json
+{
+  "access_token": "<subject-access-token>",
+  "token_type": "Bearer",
+  "expires_in": 7199
+} 
+```
+
+</CodeBlockConfig>
+
+Copy the full `access_token`.
+
+### Step 25 — Exchange the subject token for an OBO token
+
+Use `vault-obo-client`  to exchange the autonomous subject token for a new OBO access token.
+
+```shell-session
+$ curl -sk \
+  -u "vault-obo-client:<OBO_CLIENT_SECRET>" \
+  -X POST "https://localhost:9031/as/token.oauth2" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data-urlencode "grant_type=urn:ietf:params:oauth:grant-type:token-exchange" \
+  --data-urlencode "subject_token_type=urn:ietf:params:oauth:token-type:access_token" \
+  --data-urlencode "subject_token=PASTE_FULL_AUTONOMOUS_ACCESS_TOKEN_HERE" |
+  jq 
+```
+
+Expected response:
+
+<CodeBlockConfig hideClipboard>
+
+```json
+{
+  "access_token": "<obo-access-token>",
+  "issued_token_type": "urn:ietf:params:oauth:token-type:access_token",
+  "token_type": "Bearer",
+  "expires_in": 7199
+} 
+```
+
+</CodeBlockConfig>
+
+### Step 26 — Decode the OBO token
+
+Decode the exchanged OBO JWT and verify that it contains the expected identity claims without `authorization_details`.
+
+Replace `PASTE_FULL_OBO_ACCESS_TOKEN_HERE` with the exchanged token:
+
+```shell-session
+printf '%s' 'PASTE_FULL_OBO_ACCESS_TOKEN_HERE' \
+  | cut -d'.' -f2 \
+  | tr '_-' '/+' \
+  | awk '{l=length($0)%4; if(l==2)$0=$0"=="; else if(l==3)$0=$0"="; print}' \
+  | base64 -d \
+  | jq 
+```
+
+Expected payload:
+
+<CodeBlockConfig hideClipboard>
+
+```json
+{
+  "scope": "",
+  "client_id": "vault-obo-client",
+  "sub": "vault-agent-autonomous",
+  "iss": "https://localhost:9031"
+} 
+```
+
+</CodeBlockConfig>
+
+Confirm that the token does not contain:
+
+<CodeBlockConfig hideClipboard>
+
+```json
+"authorization_details": [] 
+```
+
+</CodeBlockConfig>
+
+### Step 27 — Verify the OBO token against Vault using curl
+
+Use the exchanged OBO access token directly against Vault’s HTTP API.
+
+This verifies that Vault accepts the PingFederate-issued OBO token and authorizes the KV v2 read.
+
+Replace `PASTE_FULL_OBO_ACCESS_TOKEN_HERE` with the exchanged OBO token:
+
+```shell-session
+$ curl -sS \
+  -H "X-Vault-Token: PASTE_FULL_OBO_ACCESS_TOKEN_HERE" \
+  "http://127.0.0.1:8200/v1/secret/data/alice" |
+  jq
+```
+
+Expected response:
+
+<CodeBlockConfig hideClipboard>
+
+```json
+{
+  "data": {
+    "data": {
+      "message": "hello from vault"
+    }
+  },
+  "mount_type": "kv"
+} 
+```
+
+</CodeBlockConfig>
+
+This confirms Vault accepted the exchanged PingFederate OBO token.
+
+### Step 28 — Verify the OBO token with the Vault CLI
+
+Use the exchanged OBO access token with the Vault CLI:
+
+```shell-session
+$ VAULT_TOKEN="PASTE_FULL_OBO_ACCESS_TOKEN_HERE" \
+VAULT_ADDR="http://127.0.0.1:8200" \
+vault read secret/data/alice
+```
+
+Expected response:
+
+<CodeBlockConfig hideClipboard>
+
+```plain-text
+Key         Value
+---         -----
+data        map[message:hello from vault]
+metadata    map[created_time:2026-07-14T06:22:43.066267Z custom_metadata:<nil> deletion_time: destroyed:false version:1] 
+```
+
+</CodeBlockConfig>
+
+<Note title='Note'>
+
+   Use vault read secret/data/alice instead of vault kv get secret/alice. The vault kv get command can perform extra KV mount-discovery requests before reading the secret, while vault read directly calls the KV v2 API path that matches the request verified with curl.
+
+</Note>
+
+Final OBO result
+
+The working OBO flow requires three key details:
+
+| Issue | Working fix |
+| Ping rejected the subject token as Invalid Token | Use OAuth Bearer Access Token Token Processor, not JWT Token Processor 2.0 |
+| Vault rejected OBO token with RAR_NO_MATCH | Do not emit `authorization_details`: [] |
+| OBO output token needed clean claims | Use the autonomous Access Token Manager for OBO output |
+
+Summary:
+
+PingFederate successfully performs OAuth token exchange for the OBO flow. The working configuration validates the incoming PingFederate-issued subject access token with an OAuth Bearer Access Token Token Processor, preserves the original subject in sub, emits `client_id`=vault-obo-client, and issues the exchanged token through an Access Token Manager that does not emit `authorization_details`. Vault accepts the resulting token for KV v2 access. 
+
+## Next steps
+
+Now that you have your user IDs (human and aget) and OBO authorization details, you can
+[configure Vault Enterprise to use PingFederate as an identity provider](/vault/docs/ai/iam/setup) for AI agents.
+
+Vault requires the following information for setup:
+
+Variable         | Purpose 
+---------------- | -------------------------------------------------------------
+`DELEGATED_JWT`  | The OBO with authorization details JWT as obtained after token exchange via the STS client.
+`ISSUER`         | The issuer retrieved from the Well known Open ID configuration of the JWT issuer.
+`SUBJECT_EXT_ID` | User ID of the **subject** user from your IdP application
+`ACTOR_EXT_ID`   | User ID of the **actor** user from your IdP application
