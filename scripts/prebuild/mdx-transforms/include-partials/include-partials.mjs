@@ -1,5 +1,5 @@
 /**
- * Copyright IBM Corp. 2025
+ * Copyright IBM Corp. 2024, 2026
  * SPDX-License-Identifier: BUSL-1.1
  */
 
@@ -20,12 +20,20 @@ import { remarkIncludePartialsPlugin } from './remark-include-partials.mjs'
  * @param {string} mdxString The MDX string in which `@include` partials will be processsed
  * @param {string} partialsDir The directory in which partials are located
  * @param {string} filePath The file path to the MDX file being processed, used to log errors.
- * @returns {string} the provided mdxString with partials inlined
+ * @param {object} options Optional include behavior options.
+ * @param {string} options.targetDir Root directory used when resolving internal-product aliases.
+ * @returns {Promise<string>} the provided mdxString with partials inlined
  */
-export async function includePartials(mdxString, partialsDir, filePath) {
+export async function includePartials(
+	mdxString,
+	partialsDir,
+	filePath,
+	options = {},
+) {
+	const { targetDir } = options
 	const contents = await remark()
 		.use(remarkMdx)
-		.use(remarkIncludePartialsPlugin, { partialsDir, filePath })
+		.use(remarkIncludePartialsPlugin, { partialsDir, targetDir, filePath })
 		.process(mdxString)
 	return String(contents)
 }

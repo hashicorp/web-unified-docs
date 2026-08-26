@@ -1,5 +1,5 @@
 /**
- * Copyright IBM Corp. 2025
+ * Copyright IBM Corp. 2024, 2026
  * SPDX-License-Identifier: BUSL-1.1
  */
 
@@ -45,8 +45,21 @@ export async function createAlgoliaRecordObject(
 	 * extracts file path from docs directory and removes .mdx extension
 	 * filePath: 'public/content/terraform-enterprise/v202410-1/docs/enterprise/application-administration/github-app-integration.mdx'
 	 * docsPath: 'enterprise/application-administration/github-app-integration'
+	 *
+	 * well-architected-framework and validated-designs store content under a
+	 * docs/docs/ double-nest: contentDir is "docs" but the publishable files live
+	 * one level deeper in a literal docs/ subdirectory. Splitting on /docs/ leaves
+	 * a leading docs/ in docPath that is not part of the public URL, so strip it
+	 * explicitly for these two products only.
 	 */
-	const docPath = filePath.split(`/${contentDir}/`).at(-1).replace('.mdx', '')
+	const DOUBLE_DOCS_PRODUCTS = new Set([
+		'well-architected-framework',
+		'validated-designs',
+	])
+	let docPath = filePath.split(`/${contentDir}/`).at(-1).replace('.mdx', '')
+	if (DOUBLE_DOCS_PRODUCTS.has(directory) && docPath.startsWith('docs/')) {
+		docPath = docPath.replace(/^docs\//, '')
+	}
 
 	const objectID = `docs_${productSlug}/${docPath}`
 	const headings = await collectHeadings(markdownFile)
