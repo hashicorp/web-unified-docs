@@ -1,5 +1,5 @@
 /**
- * Copyright IBM Corp. 2025
+ * Copyright IBM Corp. 2024, 2026
  * SPDX-License-Identifier: BUSL-1.1
  */
 
@@ -72,7 +72,7 @@ describe('Build Algolia Records', () => {
 			join(__dirname, '../', path),
 		)
 		expect(objectID).toBe(
-			'docs_well-architected-framework/docs/secure-systems/zero-trust-security',
+			'docs_well-architected-framework/secure-systems/zero-trust-security',
 		)
 	})
 

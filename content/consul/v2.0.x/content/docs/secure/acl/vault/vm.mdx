@@ -1,0 +1,323 @@
+---
+layout: docs
+page_title: Use Vault for ACL management with Consul on VMs
+description: >-
+  Configure the Consul secrets engine in Vault to deliver Vault-managed Consul Access Control tokens.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-03-31T20:46:20.000Z
+last_modified: 2026-03-31T20:46:20.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Use Vault for ACL management with Consul on VMs
+
+This page describes the process to manage Consul's ACL tokens using Vault. 
+
+## Introduction
+
+Access Control Lists (ACLs) are a Consul security layer that provides fine-grained access to Consul resources using tokens associated with policies and identities.
+
+HashiCorp's Vault has a secrets engine dedicated to generating short-lived Consul tokens: the [Consul Secrets Engine](/vault/docs/secrets/consul). This engine generates Consul ACL tokens dynamically based on your ACL policies.
+
+### Token lease duration and rotation
+
+The tokens created using Vault's Consul secrets engine have a default Time To Live (TTL) of 768 hours (30 days). 
+
+After the TTL expires, the token is no longer valid and it is automatically removed from Consul.
+
+To avoid Consul outages, you need to establish processes to periodically generate new tokens and apply them to the servers.
+
+## Prerequisites
+
+- **Consul:** you need at least one Consul server node, with ACL enabled and bootstrapped. Follow [Deploy Consul on VMs](/consul/tutorials/get-started-vms/virtual-machine-gs-deploy) to learn how to deploy a Consul agent. 
+  - Configure your terminal to interact with Consul by setting `CONSUL_HTTP_ADDR`, and `CONSUL_HTTP_TOKEN`. 
+  - Use a token associated with the [`global-management`policy](/consul/docs/secure/acl/policy#global-management) since you need to create ACL tokens.
+
+- **Vault:** you need a running Vault cluster in your network. You can use a [local Vault dev server](/vault/tutorials/get-started/setup#set-up-the-lab) or an existing Vault deployment. 
+  - Configure your terminal to interact with Vault cluster by setting `VAULT_ADDR`, `VAULT_CACERT`, and `VAULT_TOKEN`.
+
+The diagram below shows the minimal architecture needed to demonstrate the functionality.
+
+![Architectural diagram showing a Consul server and a Vault server with an operator issuing a command to start an automation](/img/vault-consul/consul-vault-acl.png)
+
+<Note>
+
+You can use the [Nomad sandbox](/nomad/sandbox) to follow along in a hosted terminal session in your browser. This sandbox includes pre-configured Consul and Vault deployments.
+
+</Note>
+
+## Workflow 
+
+The workflow to configure Vault and use it to manage Consul ACL token consists of the following steps:
+
+1. [Configure the Consul secrets engine in Vault](#configure-the-consul-secrets-engine-in-vault)
+1. [Generate Consul server tokens using Vault](#generate-consul-server-tokens-using-vault)
+1. [Set Consul server agent token](#set-consul-server-agent-token)
+
+You can also adjust the TTL of the tokens you create to [generate short-lived Consul tokens](#generate-short-lived-consul-tokens).
+
+## Configure the Consul secrets engine in Vault
+
+Enable Consul secrets engine in Vault.
+
+```shell-session
+$ vault secrets enable consul
+
+Success! Enabled the consul secrets engine at: consul/
+```
+
+Configure Vault to access with Consul's address and management token.
+
+```shell-session
+$ vault write consul/config/access address=${CONSUL_HTTP_ADDR} token=${CONSUL_HTTP_TOKEN}
+
+Success! Data written to: consul/config/access
+```
+
+## Generate Consul server tokens using Vault
+
+To secure your Consul datacenter, we recommend creating individual tokens for the server agents. That way they can interact with the rest of the Consul datacenter without being assigned a high-level administrative token with the global management policy attached.
+
+The steps required to generate ACL tokens for Consul servers are the following:
+
+1. [Create a Consul ACL policy for server nodes](#create-a-consul-acl-policy-for-server-nodes)
+1. [Create a Vault role associated with the policy](#create-a-vault-role-associated-with-the-policy)
+1. [Generate Consul ACL tokens from Vault](#generate-consul-acl-tokens-from-vault)
+
+### Create a Consul ACL policy for server nodes
+
+Create a file named `server_policy.hcl` with the following content.
+
+<CodeBlockConfig filename="server_policy.hcl">
+
+```hcl
+node_prefix "consul-server-" {
+  policy = "write"
+}
+node_prefix "" {
+  policy = "read"
+}
+service_prefix "" {
+  policy = "read"
+}
+```
+
+</CodeBlockConfig>
+
+<Tip>
+
+For this scenario, the server nodes are named following the schema `consul-server-<count_or_id>`. Adapt the `node_prefix` value to your scenario.
+
+</Tip>
+
+Create the policy with the `consul acl` command.
+
+```shell-session
+$ consul acl policy create \
+    -name consul-servers \
+    -rules @server_policy.hcl
+```
+
+Example output:
+
+<CodeBlockConfig hideClipboard>
+
+```hcl
+ID:           0d275732-ba15-9457-d9c0-65e914b7e404
+Name:         consul-servers
+Description:
+Datacenters:
+Rules:
+node_prefix "consul-server-" {
+  policy = "write"
+}
+node_prefix "" {
+  policy = "read"
+}
+service_prefix "" {
+  policy = "read"
+}
+```
+
+</CodeBlockConfig>
+
+It is now possible to create different tokens associated with the Consul policy.
+
+### Create a Vault role associated with the policy
+
+Create a Vault role that will use the policy to create Consul tokens.
+
+```shell-session
+$ vault write consul/roles/consul-server-role policies=consul-servers
+Success! Data written to: consul/roles/consul-server-role
+```
+
+When you create a token using a Vault role, the token receives permissions according to the policies associated with the role at token creation time. 
+
+If you make a change to the role configuration, such as associating it with a new policy, the change does not apply to previously generated tokens. That prevents you from mistakenly adding extra permissions to pre-existing tokens.
+
+You can also use Consul's [node identity](/consul/commands/acl/token/create#node-identity) and [service identity](/consul/commands/acl/token/create#service-identity) when creating the role. For more information, refer to [Consul secrets engine in the Vault documentation](/vault/docs/secrets/consul).
+
+### Generate Consul ACL tokens from Vault
+
+Create a Consul token using the existing Vault role.
+
+```shell-session
+$ vault read consul/creds/consul-server-role | tee consul-server.token
+Key                 Value
+---                 -----
+lease_id            consul/creds/consul-server-role/tzsDqyEEQqA3iuTVjdvxlSOp
+lease_duration      768h
+lease_renewable     true
+accessor            d5cf3fa4-18ac-eb1d-e5e8-eda5cde4cfc2
+consul_namespace    n/a
+local               false
+partition           n/a
+token               7092c156-4ca2-55ab-57e4-ce59d0a8e67b
+```
+
+The way Vault and Consul refer to tokens in the command output is slightly different. The following table expresses the relationship between the two outputs.
+
+| Consul       | Vault      | Meaning                                                       |
+| ------------ | ---------- | ------------------------------------------------------------- |
+| `AccessorID` | `accessor` | The unique identifier for the token inside Consul and Vault.  |
+| `SecretID`   | `token`    | The actual token to be used for configuration and operations. |
+
+Using Vault's Consul secrets engine ensures that these values are kept consistent when the tokens are replicated to Consul.
+
+Retrieve the `accessor` value from the file.
+
+```shell-session
+$ export CONSUL_SERVER_ACCESSOR=$(cat consul-server.token | grep accessor | awk '{print $2}')
+```
+
+Verify that the token is created correctly in Consul by looking it up by its `accessor`.
+
+```shell-session
+$ consul acl token read -accessor-id ${CONSUL_SERVER_ACCESSOR}
+AccessorID:       d5cf3fa4-18ac-eb1d-e5e8-eda5cde4cfc2
+SecretID:         7092c156-4ca2-55ab-57e4-ce59d0a8e67b
+Description:      Vault consul-server-role token 1764259659418057347
+Local:            false
+Create Time:      2025-11-27 16:07:39.419416889 +0000 UTC
+Policies:
+   0d275732-ba15-9457-d9c0-65e914b7e404 - consul-servers
+```
+
+## Set Consul server agent token
+
+When your Consul server agents are not configured with an ACL, they may not be able to fully join the datacenter. A warning is output to the agent's log:
+
+<CodeBlockConfig hideClipboard>
+
+```log
+[WARN]  agent: Coordinate update blocked by ACLs: accessorID="anonymous token"
+[WARN]  agent: Coordinate update blocked by ACLs: accessorID="anonymous token"
+```
+
+</CodeBlockConfig>
+
+These warnings indicate that:
+
+- the agent is trying to update its info in your Consul datacenter, but has been denied by the ACL system because it does not have the correct permissions.
+- the agent does not have an assigned token to perform the request and is using the `anonymous token`.
+
+Retrieve the token value from the token file generated in the previous step.
+
+```shell-session
+$ export CONSUL_SERVER_TOKEN=$(cat consul-server.token | grep token | awk '{print $2}')
+```
+
+Then set the Consul server's agent token using the token value.
+
+```shell-session
+$ consul acl set-agent-token agent ${CONSUL_SERVER_TOKEN}
+ACL token "agent" set successfully
+```
+
+Once the token is applied, check the Consul logs once more and verify that the warning lines are not being logged anymore.
+
+<CodeBlockConfig hideClipboard>
+
+```log
+## ...
+[INFO]  agent: Updated agent's ACL token: token=agent
+[INFO]  agent: Synced node info
+## ...
+```
+
+</CodeBlockConfig>
+
+## Generate short-lived Consul tokens
+
+One strategy when managing Consul ACL tokens with Vault is to leverage configurable TTLs to generate tokens with elevated privileges. That way you can grant high-level access without keeping powerful tokens valid for long periods of time.
+
+The most powerful tokens you can generate in Consul are the ones associated with the [`global-management`policy](/consul/docs/secure/acl/policy#global-management). These tokens are required every time you need to configure the ACL system, but they also have unlimited access to Consul datacenter resources. These tokens are extremely risky to your datacenter's security if leaked.
+
+In Vault, create a role that uses the `global-management` policy to create Consul tokens and assign them a TTL of `1h`.
+
+```shell-session
+$ vault write consul/roles/global-management-role policies=global-management ttl=1h
+Success! Data written to: consul/roles/global-management-role
+```
+
+Create a Consul token using the Vault role.
+
+```shell-session
+$ vault read consul/creds/global-management-role | tee global-management.token
+```
+
+You can verify that the token has a `lease_duration` of `1h`.
+
+<CodeBlockConfig hideClipboard highlight="4">
+
+```plaintext
+Key                 Value
+---                 -----
+lease_id            consul/creds/global-management-role/Ql5Xz8s0Hh7FQsTNr3NhPJyw
+lease_duration      1h
+lease_renewable     true
+accessor            67f99086-12f5-d25c-7696-9cd043814102
+consul_namespace    n/a
+local               false
+partition           n/a
+token               f708a2c8-365f-e742-bff8-7317db8276e8
+```
+
+</CodeBlockConfig>
+
+Retrieve the `accessor` value from the file.
+
+```shell-session
+$ export CONSUL_TOKEN_ACCESSOR=$(cat global-management.token | grep accessor | awk '{print $2}')
+```
+
+Verify that the token is created correctly in Consul by looking it up by its `accessor`.
+
+```shell-session
+$ consul acl token read -accessor-id ${CONSUL_TOKEN_ACCESSOR}
+AccessorID:       67f99086-12f5-d25c-7696-9cd043814102
+SecretID:         f708a2c8-365f-e742-bff8-7317db8276e8
+Description:      Vault global-management-role token 1764262053977248719
+Local:            false
+Create Time:      2025-11-27 16:47:33.978778011 +0000 UTC
+Policies:
+   00000000-0000-0000-0000-000000000001 - global-management
+```
+
+After the TTL expires, the token is automatically removed from Consul. You can verify its removal by attempting to retrieve the token again.
+
+```shell-session
+$ consul acl token read -accessor-id ${CONSUL_TOKEN_ACCESSOR}
+Error reading token "67f99086-12f5-d25c-7696-9cd043814102": Unexpected response code: 403 (token does not exist: ACL not found)
+```
+
+## Next steps
+
+This page described the process to configure Vault's Consul secrets engine so that you can generate Consul tokens using Vault for secrets management. To learn more about using Consul and Vault integrations, refer to the following resources:
+
+To continue securing your datacenter with Vault, refer to [Generate mTLS Certificates for Consul with Vault and Consul Template](/consul/docs/automate/consul-template/vault/mtls).
+
+To learn how to configure gossip encryption for Consul using Vault for secrets storage and management, refer to [Generate and manage gossip encryption for Consul with Vault and Consul Template](/consul/docs/automate/consul-template/vault/gossip).
+
+To use Vault as Consul service mesh certification authority, refer to [Vault as Consul service mesh certification authority](/consul/tutorials/operate-consul/vault-pki-consul-connect-ca).

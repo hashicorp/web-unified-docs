@@ -1,5 +1,5 @@
 /**
- * Copyright IBM Corp. 2025
+ * Copyright IBM Corp. 2024, 2026
  * SPDX-License-Identifier: BUSL-1.1
  */
 
@@ -18,6 +18,10 @@ const runTransform = async (markdown, options) => {
 
 // Mock product configs
 const vaultConfig = {
+	supportsExclusionDirectives: true,
+}
+
+const boundaryConfig = {
 	supportsExclusionDirectives: true,
 }
 
@@ -166,6 +170,68 @@ This should stay.
 
 Final content.`)
 	})
+
+	it('should handle double x versions correctly', async () => {
+		const markdown = `
+<!-- BEGIN: Vault:>=v2.x.x -->
+This should be removed.
+<!-- END: Vault:>=v2.x.x -->
+<!-- BEGIN: Vault:<=v2.x.x -->
+This should stay.
+<!-- END: Vault:<=v2.x.x -->
+Final content.
+`
+		const result = await runTransform(markdown, vaultOptions)
+
+		expect(result.trim()).toBe(`<!-- BEGIN: Vault:<=v2.x.x -->
+
+This should stay.
+
+<!-- END: Vault:<=v2.x.x -->
+
+Final content.`)
+	})
+})
+
+describe('transformExcludeContent - Boundary Directives', () => {
+	const boundaryOptions = {
+		filePath: 'boundary/some-file.md',
+		version: '1.0.x',
+		repoSlug: 'boundary',
+		productConfig: boundaryConfig,
+	}
+
+	it('should remove content when Boundary version condition is not met', async () => {
+		const markdown = `
+<!-- BEGIN: Boundary:>=v1.1.x -->
+This content should be removed.
+<!-- END: Boundary:>=v1.1.x -->
+This content should stay.
+`
+		const result = await runTransform(markdown, boundaryOptions)
+
+		expect(result).toBe('This content should stay.\n')
+	})
+})
+
+describe('transformExcludeContent - Cross-Product Version Directives', () => {
+	it('should remove a Vault version directive when processed outside vault', async () => {
+		const options = {
+			filePath: 'terraform-enterprise/some-file.md',
+			version: 'v2.0.x',
+			repoSlug: 'terraform-enterprise',
+			productConfig: terraformEnterpriseConfig,
+		}
+
+		const markdown = `
+<!-- BEGIN: Vault:>=v1.21.x -->
+This content should be removed.
+<!-- END: Vault:>=v1.21.x -->
+This content should stay.
+`
+		const result = await runTransform(markdown, options)
+		expect(result.trim()).toBe('This content should stay.')
+	})
 })
 
 describe('transformExcludeContent - TFC/TFEnterprise Directives', () => {
@@ -286,7 +352,7 @@ This content should stay.
 
 ## 2025-05-1
 
--   Add \`agent-pool\` relationship to the [run task API](/terraform/enterprise/api-docs/run-tasks/run-tasks), which you can use to assign a run task to an agent pool.		
+-   Add \`agent-pool\` relationship to the [run task API](/terraform/enterprise/api-docs/run-tasks/run-tasks), which you can use to assign a run task to an agent pool.
 	<!-- BEGIN: TFEnterprise:only name:revoke -->
 -   You can now revoke, and revert the revocation of, module versions. Learn more about [Managing module versions](/terraform/enterprise/api-docs/private-registry/manage-module-versions).
 	<!-- END: TFEnterprise:only name:revoke -->
@@ -298,7 +364,7 @@ This content should stay.
 		const result = await runTransform(markdown, options)
 		expect(result.trim()).toBe(`## 2025-05-1
 
--   Add \`agent-pool\` relationship to the [run task API](/terraform/enterprise/api-docs/run-tasks/run-tasks), which you can use to assign a run task to an agent pool.		
+-   Add \`agent-pool\` relationship to the [run task API](/terraform/enterprise/api-docs/run-tasks/run-tasks), which you can use to assign a run task to an agent pool.
 -   You can now revoke, and revert the revocation of, module versions. Learn more about [Managing module versions](/terraform-docs-common/api-docs/private-registry/manage-module-versions).
 
 This content should stay.`)
@@ -384,7 +450,7 @@ This content should throw an error.
 `
 		await expect(async () => {
 			return await runTransform(markdown, vaultOptions)
-		}).rejects.toThrow('Invalid Vault directive: "invalid"')
+		}).rejects.toThrow('Invalid "Vault:invalid" directive')
 	})
 
 	it('should throw an error for unexpected END block', async () => {

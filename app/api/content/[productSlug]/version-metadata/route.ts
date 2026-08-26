@@ -1,5 +1,5 @@
 /**
- * Copyright IBM Corp. 2025
+ * Copyright IBM Corp. 2024, 2026
  * SPDX-License-Identifier: BUSL-1.1
  */
 
@@ -12,8 +12,11 @@ import { ProductParam } from '#api/types'
  */
 export type GetParams = ProductParam
 
-export async function GET(request: Request, { params }: { params: GetParams }) {
-	const { productSlug } = params
+export async function GET(
+	request: Request,
+	{ params }: { params: Promise<GetParams> },
+) {
+	const { productSlug } = await params
 
 	const productVersionMetadataResult = getProductMetadata(productSlug)
 
