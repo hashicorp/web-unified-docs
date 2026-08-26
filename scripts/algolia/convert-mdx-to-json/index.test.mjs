@@ -1,5 +1,5 @@
 /**
- * Copyright IBM Corp. 2025
+ * Copyright IBM Corp. 2024, 2026
  * SPDX-License-Identifier: BUSL-1.1
  */
 import path from 'node:path'
@@ -60,6 +60,27 @@ describe('getLatestProductVersionDirectories', () => {
 		)
 		expect(result).toEqual([
 			path.join('public/content', 'terraform-docs-common'),
+		])
+	})
+
+	test('should append the release stage suffix for products whose latest version is not stable', async () => {
+		readdir.mockResolvedValue([
+			{
+				name: 'terraform-policy',
+				isDirectory: () => {
+					return true
+				},
+			},
+		])
+
+		const result = await getLatestProductVersionDirectories('public/content', {
+			...versionMetadata,
+			'terraform-policy': [
+				{ version: 'v0.1.x', releaseStage: 'beta', isLatest: true },
+			],
+		})
+		expect(result).toEqual([
+			path.join('public/content', 'terraform-policy', 'v0.1.x (beta)'),
 		])
 	})
 

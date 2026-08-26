@@ -1,5 +1,5 @@
 #
-# Copyright IBM Corp. 2025
+# Copyright IBM Corp. 2024, 2026
 # SPDX-License-Identifier: BUSL-1.1
 #
 # ------------------------------------------------------------------------------
@@ -27,7 +27,7 @@ if [[ "${targetBranch}" == "main" ]] ; then
   branchTarget="main"
 else 
   branchTarget="main..${targetBranch}"
-fi 
+fi
 
 cd "${repoRoot}"
 
@@ -42,6 +42,7 @@ dateString=$(
   ${branchTarget} |    \
   tail -1
 )
+
 
 branchDate="$(getUTCDate "${dateString}")"
 
