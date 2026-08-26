@@ -1,0 +1,618 @@
+---
+layout: docs
+page_title: Rich Authorization Requests (RAR)
+description: >-
+  Learn about Rich Authorization Requests (RAR) in Vault, including path access constraints, capabilities, parameter-level controls, IdP integration, and operational guidance.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-06-26T12:06:53-07:00
+last_modified: 2026-08-03T18:37:00.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Rich authorization requests (RAR)
+
+@include 'alerts/enterprise-only.mdx'
+
+@include 'alerts/beta.mdx'
+
+Rich Authorization Requests (RAR) provide fine-grained authorization constraints
+for OAuth 2.0 tokens used with Vault's [AI agent support](/vault/docs/concepts/native-ai-agent-support).
+RAR embeds detailed access control rules directly in JWT tokens,
+enabling path-level and parameter-level restrictions beyond what standard ACL
+policies provide.
+
+[RFC 9396](https://datatracker.ietf.org/doc/html/rfc9396) defines RAR and
+extends OAuth 2.0 to support complex authorization scenarios. In Vault, RAR
+constraints work alongside ACL policies to narrow permissions without ever expanding
+them.
+
+## Overview
+
+Vault implements comprehensive support for OAuth 2.0 Rich Authorization Requests (RAR) as defined in [RFC 9396](https://datatracker.ietf.org/doc/html/rfc9396). This enables fine-grained authorization constraints using `authorization_details` claims in OAuth 2.0 access tokens, allowing Authorization Servers (IdPs) to issue tokens with precise path and capability restrictions that Vault enforces at request time.
+
+Vault's RAR implementation:
+
+- **Validates authorization_details claims** in OAuth 2.0 access tokens against published type schemas
+- **Enforces fine-grained constraints** on Vault paths and capabilities at request time
+- **Publishes type metadata** via RFC 9728 OAuth Protected Resource Metadata endpoints for automated discovery
+- **Supports multiple IdP vendors** including Auth0, Microsoft Entra ID, Okta, and Ping Identity
+- **Uses JSON Schema validation** (Draft 2020-12) to ensure correctness of authorization_details payloads
+- **Provides versioning and extensibility** through semantic versioning and lifecycle management
+
+## How RAR works with Vault
+
+When a client presents an OAuth JWT containing RAR constraints in the
+`authorization_details` claim, Vault evaluates both the entity's ACL policies
+and the RAR constraints. For a request to succeed:
+
+1. The request path and operation must match at least one RAR constraint
+1. The entity's ACL policies must permit the operation
+1. Any parameter-level constraints in the RAR must be satisfied
+
+RAR constraints can only restrict access, never granting permissions beyond
+what ACL policies allow. This **intersection authorization model** ensures that:
+
+- **Entity policies** define the baseline permissions (birthright access)
+- **RAR constraints** narrow those permissions to specific paths and capabilities
+- **Effective permissions** = Entity policies ∩ RAR constraints
+
+## RAR type: vault:path_access
+
+Vault supports the `vault:path_access` RAR type for fine-grained path and
+parameter authorization. Each authorization detail object in the
+`authorization_details` claim must conform to the following structure.
+
+### Type definition
+
+- **Type**: `vault:path_access`
+- **Status**: Generally Available (GA)
+- **Schema Version**: `1.0.0`
+- **Introduced In**: Vault 2.0.0-ent
+
+### Required fields
+
+| Field | Type | Description |
+| ----- | ---- | ----------- |
+| `type` | string | Must be `vault:path_access` to indicate a Vault path access constraint. |
+| `path` | string | The Vault path the constraint applies to. Supports identity templating (e.g., `{{identity.entity.name}}`). |
+| `capabilities` | array of strings | List of capabilities permitted for the path. |
+
+The `capabilities` field uses the same capability values as [Vault ACL policies](/vault/docs/concepts/policies#capabilities), including:
+
+- `read` - Read data
+- `list` - List keys
+- `create` - Create new data
+- `update` - Update existing data
+- `delete` - Delete data
+- `patch` - Partial update
+- `sudo` - Root-protected operations
+- `subscribe` - Event subscriptions
+- `recover` - Recovery operations
+
+### Optional fields
+
+| Field | Type | Description |
+| ----- | ---- | ----------- |
+| `allowed_parameters` | object | Map of parameter names to arrays of allowed values. Restricts which request parameters and values Vault permits. When specified, Vault allows only the listed parameters. An empty array `[]` allows any value for that parameter. |
+| `denied_parameters` | object | Map of parameter names to arrays of denied values. Blocks specific parameter values. Takes precedence over `allowed_parameters`. |
+| `required_parameters` | array of strings | List of parameter names that must be present in the request. Vault rejects requests missing any required parameter. |
+
+These parameter control fields work similarly to the parameter controls available in [Vault ACL policies](/vault/docs/concepts/policies#fine-grained-control). RAR parameter controls provide an additional layer of restriction on top of policy-level controls, enabling fine-grained authorization directly within OAuth tokens.
+
+### Examples
+
+**Basic path access constraint:**
+
+```json
+{
+  "type": "vault:path_access",
+  "path": "kv/data/team-a/secrets",
+  "capabilities": ["read"]
+}
+```
+
+**With identity templating:**
+
+```json
+{
+  "type": "vault:path_access",
+  "path": "kv/data/users/{{identity.entity.name}}/*",
+  "capabilities": ["read", "update"]
+}
+```
+
+**With parameter constraints:**
+
+```json
+{
+  "type": "vault:path_access",
+  "path": "database/creds/readonly",
+  "capabilities": ["read"],
+  "allowed_parameters": {
+    "ttl": ["1h", "2h", "4h"]
+  }
+}
+```
+
+## Interaction with ACL policies
+
+RAR constraints work alongside Vault ACL policies, not as a replacement. Both
+ACL policies and RAR constraints must permit an operation for the operation to succeed.
+
+### Policy-level parameter controls
+
+Vault ACL policies also support `allowed_parameters`, `denied_parameters`, and
+`required_parameters`. When both policy-level and RAR-level controls are present:
+
+- **RAR constraints narrow policy permissions**: RAR can only further restrict what policies allow
+- **Denied parameters take precedence**: When either policy or RAR denies a parameter, Vault denies the parameter
+- **Allowed parameters are intersected**: A parameter must be allowed by both policy and RAR
+- **Required parameters are combined**: All required parameters from both sources must be present
+
+**Example:**
+
+Policy:
+```hcl
+path "secret/data/*" {
+  capabilities = ["create", "update"]
+  allowed_parameters = {
+    "data" = []
+    "metadata" = []
+  }
+}
+```
+
+RAR constraint:
+```json
+{
+  "type": "vault:path_access",
+  "path": "secret/data/app-config",
+  "capabilities": ["create", "update"],
+  "allowed_parameters": {
+    "data": []
+  }
+}
+```
+
+**Result**: Vault allows only the `data` parameter (intersection of policy and RAR).
+The RAR constraint blocks the `metadata` parameter even though the policy
+allows the parameter.
+
+## Multiple RAR constraints
+
+A JWT can include multiple authorization detail objects in the
+`authorization_details` array. Vault evaluates each constraint independently and
+allows the request when the request matches at least one constraint that permits the
+operation.
+
+**Example with multiple constraints:**
+
+```json
+{
+  "authorization_details": [
+    {
+      "type": "vault:path_access",
+      "path": "database/creds/readonly-role",
+      "capabilities": ["read"]
+    },
+    {
+      "type": "vault:path_access",
+      "path": "pki/issue/my-role",
+      "capabilities": ["create", "update"],
+      "required_parameters": ["common_name"]
+    },
+    {
+      "type": "vault:path_access",
+      "path": "secret/data/app-*",
+      "capabilities": ["read", "list"],
+      "denied_parameters": {
+        "version": ["1"]
+      }
+    }
+  ]
+}
+```
+
+The JWT above allows:
+- Reading from `database/creds/readonly-role`
+- Creating or updating at `pki/issue/my-role` (with `common_name` required)
+- Reading or listing from `secret/data/app-*` paths (except version 1)
+
+## IdP integration pattern
+
+Vault uses an **IdP-level type registration pattern** where administrators manually configure supported authorization_details types in their Authorization Server (IdP). This approach provides:
+
+- **Explicit control** over which types the IdP will issue
+- **Vendor compatibility** across Auth0, Entra ID, Okta, and Ping Identity
+- **Standards alignment** with OAuth 2.0 and OpenID Connect specifications
+- **Security validation** at token issuance time
+
+### Integration flow
+
+```
+┌─────────────────┐         ┌──────────────────┐         ┌─────────────────┐
+│                 │         │                  │         │                 │
+│  Client App     │────────▶│  Authorization   │────────▶│  Vault          │
+│                 │  (1)    │  Server (IdP)    │  (3)    │  (Resource      │
+│                 │  Auth   │                  │  Token  │   Server)       │
+└─────────────────┘  Request└──────────────────┘  w/ RAR └─────────────────┘
+                       │                              │
+                       │ (2) Validate                 │ (4) Enforce
+                       │     authorization_details    │     Constraints
+                       │     against registered       │     at Request
+                       │     types                    │     Time
+                       ▼                              ▼
+```
+
+**Steps**:
+
+1. **Client requests authorization** with `authorization_details` parameter
+2. **IdP validates** authorization_details against registered Vault types
+3. **IdP issues token** with validated authorization_details claim
+4. **Vault enforces** constraints when token is used for API requests
+
+### Manual configuration workflow
+
+Administrators must configure authorization_details types in their IdP:
+
+1. **Discover supported types** via Vault's discovery endpoints
+2. **Retrieve type schemas** for validation rules
+3. **Register types in IdP** following vendor-specific procedures
+4. **Configure OAuth profile in Vault** to trust the IdP
+5. **Test token issuance** and constraint enforcement
+
+## Schema-driven validation
+
+Vault uses **JSON Schema (Draft 2020-12)** to validate authorization_details payloads. This provides:
+
+- **Machine-readable contracts** that IdPs and clients can consume
+- **Automatic validation** of authorization_details structure and values
+- **Clear error messages** when validation fails
+- **Extensibility** for future type additions
+
+### Validation flow
+
+1. **Token received** with authorization_details claim
+2. **Schema lookup** for each authorization_details entry by type
+3. **Schema validation** against JSON Schema Draft 2020-12
+4. **Constraint evaluation** against current request
+5. **Access decision** (allow/deny with reason)
+
+### Validation errors
+
+When validation fails, Vault returns detailed error messages:
+
+- `RAR_MALFORMED`: authorization_details structure is invalid
+- `RAR_UNKNOWN_TYPE`: Type is not supported (when default behavior is "deny")
+- `RAR_NO_MATCH`: No authorization_details entry matches the request
+- `RAR_MISSING`: authorization_details claim is required but missing
+- `RAR_PARAMETER_DENIED`: Request parameters violate constraints
+
+## Discovery endpoints
+
+Vault publishes OAuth Protected Resource Metadata following [RFC 9728](https://datatracker.ietf.org/doc/html/rfc9728) for automated discovery.
+
+### Well-known endpoint
+
+**Endpoint**: `/.well-known/oauth-protected-resource`
+
+**Authentication**: None required (public endpoint)
+
+**Response**:
+
+```json
+{
+  "resource": "https://vault.example.com",
+  "authorization_servers": [
+    "https://auth.example.com"
+  ],
+  "authorization_details_types_supported": [
+    "vault:path_access"
+  ],
+  "bearer_methods_supported": ["header"],
+  "rar_types_metadata_endpoint": "/v1/sys/oauth-resource-server/authorization-details-types"
+}
+```
+
+### Type catalog endpoint
+
+**Endpoint**: `GET /sys/oauth-resource-server/authorization-details-types`
+
+**Authentication**: None required (public endpoint)
+
+Returns catalog metadata for all supported authorization_details types, including type identifiers, lifecycle status, schema versions, and documentation links.
+
+### Type schema endpoint
+
+**Endpoint**: `GET /sys/oauth-resource-server/authorization-details-types/{type}/schema`
+
+**Authentication**: None required (public endpoint)
+
+Returns the machine-readable JSON Schema for a specific authorization_details type, enabling automated validation by IdPs and clients.
+
+## Making RAR optional
+
+By default, Vault requires the `authorization_details` claim in OAuth JWTs used
+with the Agent Registry. Operators can make RAR optional in two ways:
+
+1. **Per OAuth resource server profile**: Set `optional_authorization_details` to `true` on the
+   [OAuth resource server configuration](/vault/api-docs/system/oauth-resource-server)
+1. **Per agent registration**: Set `optional_authorization_details` to `true` on the
+   [Agent Registry record](/vault/api-docs/system/agent-registry)
+
+When RAR is optional, Vault permits authentication without the
+`authorization_details` claim and uses only the entity's ACL policies for
+authorization.
+
+For more information about RAR enforcement modes and configuration options, see
+[RAR enforcement](/vault/docs/concepts/native-ai-agent-support#rar-enforcement)
+in the AI agent support overview.
+
+## Administrator guide
+
+### Prerequisites
+
+- Vault Enterprise 2.0.0 or later
+- `oauth-resource-server` feature flag enabled
+- Authorization Server (IdP) that supports OAuth 2.0 and RAR
+
+### Step 1: Enable feature flag
+
+Enable the `oauth-resource-server` feature flag:
+
+```shell-session
+$ vault write sys/activation-flags/oauth-resource-server enabled=true
+```
+
+Verify activation:
+
+```shell-session
+$ vault read sys/activation-flags/oauth-resource-server
+Key        Value
+---        -----
+enabled    true
+```
+
+### Step 2: Configure OAuth profile
+
+Create an OAuth Resource Server configuration profile to trust your IdP:
+
+```shell-session
+$ vault write sys/config/oauth-resource-server/my-idp \
+    issuer_id="https://auth.example.com" \
+    audiences="vault-api" \
+    use_jwks=true \
+    jwks_uri="https://auth.example.com/.well-known/jwks.json" \
+    user_claim="sub" \
+    jwt_type="access_token" \
+    supported_algorithms="RS256,ES256"
+```
+
+**Key parameters**:
+
+- `issuer_id`: IdP's issuer identifier (iss claim)
+- `audiences`: Accepted audience values (aud claim)
+- `use_jwks`: Use JWKS URI for key validation (recommended)
+- `jwks_uri`: IdP's JWKS endpoint URL
+- `user_claim`: JWT claim to use as Vault entity identifier
+- `jwt_type`: Token type (`access_token` or `transaction_token`)
+- `optional_authorization_details`: Make authorization_details optional (default: false)
+
+### Step 3: Discover supported types
+
+Query Vault's type catalog:
+
+```shell-session
+$ curl https://vault.example.com/v1/sys/oauth-resource-server/authorization-details-types
+```
+
+Or use the well-known endpoint:
+
+```shell-session
+$ curl https://vault.example.com/.well-known/oauth-protected-resource
+```
+
+### Step 4: Configure IdP
+
+Configure your Authorization Server to support Vault's authorization_details types. The process varies by vendor:
+
+#### Auth0 configuration
+
+1. Navigate to **Actions** → **Flows** → **Login**
+2. Create a custom action to add authorization_details:
+
+```javascript
+exports.onExecutePostLogin = async (event, api) => {
+  if (event.client.client_id === 'vault-client-id') {
+    const authDetails = [
+      {
+        type: 'vault:path_access',
+        path: 'kv/data/team-a/secrets',
+        capabilities: ['read']
+      }
+    ];
+    api.accessToken.setCustomClaim('authorization_details', authDetails);
+  }
+};
+```
+
+3. Add the action to your login flow
+4. Test token issuance
+
+#### Microsoft Entra ID configuration
+
+1. Navigate to **App registrations** → Your app → **Token configuration**
+2. Add optional claim `authorization_details`
+3. Configure claim transformation policy to include RAR constraints
+
+#### Okta configuration
+
+1. Navigate to **Security** → **API** → Your authorization server
+2. Add custom claim `authorization_details`:
+
+```javascript
+// Expression
+JSON.parse('[{"type":"vault:path_access","path":"kv/data/secrets","capabilities":["read"]}]')
+```
+
+3. Include in access tokens
+4. Test token issuance
+
+#### Ping Identity configuration
+
+1. Navigate to **Applications** → Your application → **Attribute Mapping**
+2. Add custom attribute `authorization_details`
+3. Configure attribute value with RAR constraints
+4. Test token issuance
+
+### Step 5: Configure entity and policies
+
+Create Vault entity and policies for the user:
+
+```shell-session
+# Create policy granting broad access
+$ vault policy write team-a-policy - <<EOF
+path "kv/data/team-a/*" {
+  capabilities = ["create", "read", "update", "delete", "list"]
+}
+path "kv/data/shared/*" {
+  capabilities = ["read", "list"]
+}
+EOF
+
+# Create entity
+$ vault write identity/entity \
+    name="alice" \
+    external_id="alice@example.com" \
+    policies="team-a-policy"
+
+# Create entity alias binding to OAuth profile
+$ vault write identity/entity-alias \
+    name="alice@example.com" \
+    canonical_id="<entity-id>" \
+    mount_accessor="<oauth-profile-accessor>"
+```
+
+### Step 6: Test RAR enforcement
+
+Request a token from your IdP with authorization_details:
+
+```shell-session
+# Example: Request token with authorization_details
+$ curl -X POST https://auth.example.com/oauth/token \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    -d "grant_type=client_credentials" \
+    -d "client_id=vault-client" \
+    -d "client_secret=secret" \
+    -d "audience=vault-api" \
+    -d 'authorization_details=[{"type":"vault:path_access","path":"kv/data/team-a/secrets","capabilities":["read"]}]'
+```
+
+Use the token with Vault:
+
+```shell-session
+# This should succeed (matches RAR constraint)
+$ VAULT_TOKEN="<access-token>" vault kv get kv/team-a/secrets
+
+# This should fail (path not in RAR constraint)
+$ VAULT_TOKEN="<access-token>" vault kv get kv/team-a/other
+Error: permission denied
+```
+
+### Troubleshooting
+
+#### Token rejected: "RAR_MISSING"
+
+**Cause**: authorization_details claim is required but missing from token
+
+**Solution**: 
+- Verify IdP is including authorization_details in tokens
+- Or set `optional_authorization_details=true` on profile or agent registration
+
+#### Token rejected: "RAR_NO_MATCH"
+
+**Cause**: No authorization_details entry matches the requested path/capability
+
+**Solution**:
+- Verify authorization_details includes the requested path
+- Check capability list includes the requested operation
+- Review entity policies grant baseline access
+
+#### Token rejected: "RAR_UNKNOWN_TYPE"
+
+**Cause**: authorization_details contains unsupported type
+
+**Solution**:
+- Verify type name matches published types (e.g., `vault:path_access`)
+- Check for typos in type field
+- Confirm feature flag is enabled
+
+#### Token rejected: "RAR_MALFORMED"
+
+**Cause**: authorization_details structure is invalid
+
+**Solution**:
+- Validate against published JSON Schema
+- Check required fields are present
+- Verify field types match schema
+
+## Token header size
+
+RAR-enriched JWTs can carry large `authorization_details` payloads. Vault rejects request with token 
+header size exceeding default 8 KB limit. Raise `max_token_header_size` on the TCP listener to 
+accommodate larger tokens. Refer to [Token header size](/vault/docs/configuration/listener/tcp#token-header-size)
+in the TCP listener configuration for details.
+
+## Security considerations
+
+### Unauthenticated endpoint security
+
+Discovery endpoints are intentionally unauthenticated to support automated discovery:
+
+- **No sensitive data exposure**: Only type metadata is published
+- **Rate limiting**: Protects against DoS attacks
+- **Caching headers**: Reduces load on Vault
+- **Feature flag gated**: Endpoints return 404 when feature is disabled
+
+### Schema validation as security boundary
+
+JSON Schema validation acts as a security control:
+
+- **Prevents malformed payloads** from reaching authorization logic
+- **Enforces type safety** for all fields
+- **Rejects unknown fields** via `additionalProperties: false`
+- **Validates value constraints** (enums, ranges, patterns)
+
+### Audit logging
+
+All RAR enforcement decisions are logged:
+
+```json
+{
+  "type": "response",
+  "auth": {
+    "jwt_authorization_details_claim_present": true,
+    "jwt_issuer": "https://auth.example.com"
+  },
+  "request": {
+    "path": "kv/data/secrets",
+    "operation": "read"
+  },
+  "response": {
+    "rar_check_results": {
+      "allowed": false,
+      "denied_reason": "RAR_NO_MATCH: No valid authorization_details claim found matching this request."
+    }
+  }
+}
+```
+
+## Related resources
+
+- [AI agent support](/vault/docs/concepts/native-ai-agent-support)
+- [Agent Registry API](/vault/api-docs/system/agent-registry)
+- [OAuth Resource Server API](/vault/api-docs/system/oauth-resource-server)
+- [RFC 9396: OAuth 2.0 Rich Authorization Requests](https://datatracker.ietf.org/doc/html/rfc9396)
+- [RFC 9728: OAuth 2.0 Protected Resource Metadata](https://datatracker.ietf.org/doc/html/rfc9728)
+- [JSON Schema Draft 2020-12](https://json-schema.org/draft/2020-12/json-schema-core.html)
+- [TCP listener — Token header size](/vault/docs/configuration/listener/tcp#token-header-size)
