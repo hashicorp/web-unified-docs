@@ -1,0 +1,360 @@
+---
+layout: docs
+page_title: Configure Microsoft Entra ID for agent IAM
+description: >-
+   Use Microsoft Entra ID and Vault to secure agent permissions with App registrations, OAuth resource server profiles, and entity aliases.
+---
+
+# Configure Microsoft Entra ID for agent IAM
+
+@include 'alerts/enterprise-and-hcp.mdx'
+
+Configure an App registration and OAuth resource server profile in Microsoft Entra ID to use with Vault Enterprise agentic IAM.
+
+## Before you start
+
+- **You must have admin access** to an Azure Tenant/Subscription.
+
+- **You must have enough permissions** to create an App registration.
+
+- **You must have [`curl`](https://curl.se/)** or some other tool to make API calls.
+
+- **You must have [`jq`](https://jqlang.org/) installed** to use the example commands as written.
+
+## Step 1: Create an App registration
+
+Create a new **App Registration** that represents your agent's authentication entry point.
+
+1. Select **App registrations**.
+
+   ![App registrations banner](/img/agentic-ai/screenshot-entra-app-registrations.png)
+
+1. Select **New Registration**.
+
+   ![new registration list](/img/agentic-ai/screenshot-entra-new-registration.png)
+
+1. Name the App registration `vault-oauth-test`. The default values are fine for everything else. Then choose **Register** at the bottom.
+
+   ![Update the name for the App registration](/img/agentic-ai/screenshot-entra-name-it.png)
+
+## Step 2: Create a client secret
+
+Create a client secret under the App registration. Your agent uses this secret to authenticate with Microsoft Entra ID.
+
+1. Select the **Certificates & secrets** in the **Manage** section.
+
+1. Select **+ New client secret**.
+
+1. Enter a description and set an appropriate expiration.
+
+   ![Add a new client secret](/img/agentic-ai/screenshot-entra-new-client-secret.png)
+
+   Click **Add** at the bottom.
+
+1. Copy the secret name, value and ID.  You will use these values in a later step.
+
+## Step 3: Expose an API for App registration
+
+Generate an Application ID URI by exposing an API for the App registration. For  scoped token requests, Application ID URI identifies the resource server.
+
+1. Select **Expose an API** in the left navigation panel.
+
+1. Click **Add** next to **Application ID URI**. The default is fine for now, and choose **Save** at the bottom.
+
+1. Copy the **Application ID URI** for use later.  You will use these values in a later step.
+
+## Step 4: Update App registration manifest
+
+Add `requestedAccessTokenVersion: 2` to the manifest so Entra ID issues an access token that Vault can validate.  You will use these values in a later step.
+
+1. Click **Manifest** and add `”requestedAccessTokenVersion”: 2` to the manifest in the `api` section.
+
+   <CodeBlockConfig hideClipboard>
+
+   ```json
+      ...
+      "api": {
+         "acceptMappedClaims": null,
+         "knownClientApplications": [],
+         "requestedAccessTokenVersion": 2,
+         "oauth2PermissionScopes": [],
+         "preAuthorizedApplications": []
+      },
+      ... 
+   ```
+
+   </CodeBlockConfig>
+
+   Click **Save**.
+
+## Step 5: Gather OAuth metadata
+
+Vault needs some information to configure the OAuth resource server config Profile. For this example setup you need to find the `issuer_id`, `jwks_uri`, and `token_endpoint`.
+
+1. Select **Overview** in the left navigation panel.
+
+1. Select **Endpoints**.
+
+1. Find the **OpenID Connect metadata document URL** and copy it.
+
+1. Using the **OpenID Connect metadata document URL** run the following `curl` command to fetch the metadata document.
+
+   ```shell-session
+   $ curl -s <YOUR OPEN ID METADATA DOCUMENT URL> | jq -r "{token_endpoint, jwks_uri, issuer}"
+   ```
+
+   The response is a JSON document. Note the `token_endpoint`, `jwks_uri`, and `issuer` values for use later.
+
+   **Example output:**
+   
+   <CodeBlockConfig hideClipboard>
+   
+   ```json
+   {
+      "token_endpoint": "https://login.microsoftonline.com/0e3e2e88-8caf-41ca-b4da-e3b33b6c52ec/oauth2/v2.0/token",
+      "jwks_uri": "https://login.microsoftonline.com/0e3e2e88-8caf-41ca-b4da-e3b33b6c52ec/discovery/v2.0/keys",
+      "issuer": "https://login.microsoftonline.com/0e3e2e88-8caf-41ca-b4da-e3b33b6c52ec/v2.0",
+   }
+   ```
+  
+   </CodeBlockConfig>
+
+1. Close out the **Endpoints** page. You are back on the **Overview**.
+
+1. Select your application name next to **Managed application in local directory**.
+
+   ![Name of the managed application in local directory](/img/agentic-ai/screenshot-entra-managed-application.png)
+
+1. Copy the **Object ID** and save for later.  You will use these values in a later step.
+
+   ![Find the Object ID](/img/agentic-ai/screenshot-entra-object-id.png)
+
+1. Using these gathered values export environment variables using the values from the OpenID Connect metadata document.  Copy and update these with the following table.
+
+   | Noted value | environmental variable | Explanation |
+   |------|------|------|
+   | Object ID | EXTERNAL_ID | a globally unique identifier (GUID) for the application |
+   | Token endpoint | TOKEN_ENDPOINT | Endpoint used to obtain access and ID tokens|
+   | JSON Web Key Set URI | JWKS_URI | Endpoint that provides public cryptographic keys in JSON format |
+   | Issuer URL | ISSUER | URL identifying  identity provider |
+
+   Export these values as environment variables for use in Vault commands.
+
+   ```shell-session
+   $ export                                    \
+      VAULT_ADDR="http://127.0.0.1:8200"     \
+      VAULT_TOKEN="root"                     \
+      EXTERNAL_ID=<YOUR OBJECT ID>         \
+      TOKEN_ENDPOINT=<YOUR TOKEN ENDPOINT>   \
+      JWKS_URI=<YOUR JWKS URI>               \
+      ISSUER=<YOUR ISSUER URI>               \
+      APP_ID=<YOUR APP ID>                   \
+      SECRET_VALUE=<YOUR SECRET VALUE>
+   ```
+
+## Step 6: Configure Vault for Entra ID
+
+Use the values gathered from Microsoft Entra ID to configure an OAuth resource server profile in Vault that validates agent JWTs.
+
+<Note>
+
+   Microsoft Entra ID JWTs use `uti` as the unique identifier claim instead of the standard `jti`. Set `unique_id_claim` to `uti` and set `optional_authorization_details` to `true` to make the `authorization_details` claim optional in issued JWTs.
+
+</Note>
+
+1. Open a new terminal and activate the Vault OAuth resource server.
+
+   ```shell-session
+   $ vault write -f sys/activation-flags/oauth-resource-server/activate
+   Key            Value
+   ---            -----
+   activated      [oauth-resource-server]
+   unactivated    [secrets-import secrets-sync]
+   ```
+   
+1. Configure `oauth-resource-server`.
+
+   ```shell-session
+   $ vault write sys/config/oauth-resource-server/entra -<<EOF
+   {
+      "optional_authorization_details": true,
+      "use_jwks": true,
+      "issuer_id": "$ISSUER",
+      "user_claim": "oid",
+      "unique_id_claim": "uti",
+      "jwks_uri": "$JWKS_URI",
+      "jwt_type": "access_token"
+   }
+   EOF
+   ```
+   **Example output:**
+   
+   <CodeBlockConfig hideClipboard>
+   
+   ```shell-session
+   WARNING! The following warnings were returned from Vault:
+
+   * user_claim "oid" is not a standard JWT claim - ensure this claim exists in your JWTs 
+   ```
+   
+   </CodeBlockConfig>
+   
+## Step 7: Create an entity and alias for your agent
+
+The `entity-alias` requires the `external_id` and `issuer` values you gathered in the [Step 5](#step-5-gather-oauth-metadata).
+
+In this example the `external_id` is the **Object ID** value copied representing the agent's application registration. 
+
+1. Create the entity for the agent in Vault.
+
+   ```shell-session
+   $ vault write identity/entity name="vault-oauth-agent-test"
+   Key        Value
+   ---        -----
+   aliases    <nil>
+   id         93dd3414-2ba8-4e55-94f9-185cb01c92d8
+   name       vault-oauth-agent-test
+   ```
+
+1. Use the `id` from this response to set an environmental variable.
+   
+   ```shell-session
+   export CANONICAL_ID=...
+   ```
+   
+1. Create an entity alias for that agent entity. 
+
+   The `external_id` is the **Object ID** representing the agent's application registration.
+
+   The `canonical_id` is the `id` from the `vault-oauth-agent-test` entity creation.
+
+   Output of the entity-alias creation displays the dynamically synthesized `mount_accessor`.
+
+   ```shell-session
+   $ vault write identity/entity-alias \
+      name="vault-oauth-agent-test-alias" \
+      external_id="$EXTERNAL_ID" \
+      issuer="$ISSUER" \
+      canonical_id="$CANONICAL_ID"
+   ```
+
+   **Example output:**
+   
+   <CodeBlockConfig hideClipboard>
+   
+   ```shell-session
+   Key             Value
+   ---             -----
+   canonical_id    93dd3414-2ba8-4e55-94f9-185cb01c92d8
+   id              8268e2d2-7222-7a77-170a-e23767179c81
+   ```
+   
+   </CodeBlockConfig>
+
+   <Tip>
+   
+   Normally, creating an `entity-alias` requires a `mount_accessor`. For `entity-aliases` that represent an agent, you can omit this field if and only if you provide both the `external_id` and `issuer` field.  The issuer field must matches that of an existing OAuth Resource Server Configuration Profile. Vault will synthesize the correct mount accessor for you. Otherwise Vault displays an error.
+   
+   </Tip>
+
+1. Set the ALIAS_IS environment variable.
+
+   ```shell-session
+   $ export ALIAS_ID=...
+   ```
+   
+   
+1. Use the `id` from the alias to double check to alias.
+
+   ```shell-session
+   $ vault read identity/entity-alias/id/$ALIAS_ID
+   Key                          Value
+   ---                          -----
+   canonical_id                 93dd3414-2ba8-4e55-94f9-185cb01c92d8
+   creation_time                2026-08-21T21:25:50.266178551Z
+   custom_metadata              map[]
+   external_id                  7f8f298a-f4b1-48df-a51b-dc67849ac8fd
+   id                           7d854573-9eec-189f-bd94-c85171901a70
+   issuer                       https://login.microsoftonline.com/0e3e2e88-8caf-41ca-b4da-e3b33b6c52ec/v2.0
+   last_update_time             2026-08-21T21:25:50.266178551Z
+   local                        false
+   merged_from_canonical_ids    <nil>
+   metadata                     <nil>
+   mount_accessor               oauth-resource-server_root_af26e9e9-e0dd-7c13-3d98-9e0379e0d4a4
+   name                         vault-oauth-agent-test-alias
+   namespace_id                 root
+   ```
+
+1. Create a registration for this agent and its Entity in the agent registry. Use the `CANONICAL_ID` as the `entity_id` value in this command.
+
+   ```shell-session
+   $ vault write agent-registry/register \
+      entity_id="$CANONICAL_ID" \
+      display_name="vault-oauth-agent"
+   ```
+
+   **Example output:**
+   
+   <CodeBlockConfig hideClipboard>
+   
+   ```shell-session
+   Key             Value
+   ---             -----
+   display_name    vault-oauth-agent
+   id              22ca4375-ca9a-9ea4-f0ff-2bbbcaaa2a2b
+   ```
+   
+   </CodeBlockConfig>
+   
+## Step 8: Validate the token flow
+
+Now that you created the Vault entity and alias, use the values you gathered to mint and validate the token in Vault.
+
+1. Use curl with the App registration's ID and the Client Secret generated earlier. The scope is the `$ISSUER` URL with `.default` appended.
+
+   Run the following command to export the JWT token into `DELEGATED_JWT`.
+
+   ```shell-session
+   $ export DELEGATED_JWT=$(curl -s -X POST \
+      -H "Content-Type:application/x-www-form-urlencoded" \
+      -d "client_id=$APP_ID" \
+      -d "client_secret=$SECRET_VALUE" \
+      -d "scope=api://$APP_ID/.default" \
+      -d "grant_type=client_credentials" \
+      $TOKEN_ENDPOINT | jq -r '.access_token')
+   ```
+
+1. Test this by using the token with Vault. 
+
+   Run vault token lookup using the access token to verify the configuration. Vault validates the token against the OAuth resource server config profile, resolves the entity alias, and returns the default policy.
+   
+   ```shell-session
+   $ VAULT_TOKEN=$DELEGATED_JWT vault token lookup
+   Key                 Value
+   ---                 -----
+   accessor            41s75ML7VIHmb559MGkcYChN
+   creation_time       1786737450
+   creation_ttl        52m21s
+   display_name        JWT Token with Unique Identifier: zgDSchnDlkqnruyuSv50AA
+   entity_id           06980be9-4a5c-77f8-258c-7e20aec87a8f
+   expire_time         2026-08-14T16:49:52-04:00
+   explicit_max_ttl    0s
+   id                  <access_token_from_curl>
+   issue_time          2026-08-14T15:57:30-04:00
+   meta                <nil>
+   num_uses            0
+   orphan              true
+   path                auth/token/lookup-self
+   policies            [default]
+   renewable           false
+   ttl                 52m22s
+   type                ent
+   ```
+
+## Next steps
+
+You have configured Microsoft Entra ID and Vault for agentic IAM. Your agents can now authenticate to Vault using Entra ID-issued access tokens, and Vault will resolve the token to the correct entity and apply the appropriate policies.
+
+You can configure Vault agentic IAM with other identity providers:
+
+- [Configure IBM Verify for agent IAM](/vault/docs/ai/iam/providers/verify)
