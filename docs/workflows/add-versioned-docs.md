@@ -84,10 +84,10 @@ Before merging these changes, make changes to the `web-unified-docs` API. Refer 
       ]
    ```
 
-1. If you need a specific team to act as reviewers, add the group to the repository `CODEOWERS` file. The following example adds the `team-docs-packer-and-terraform ` team to the MCP server documentation: 
+1. If you need a specific team to act as reviewers, add the group to the repository `CODEOWERS` file. The following example adds the `team-devrel-infrastructure-education` team to the MCP server documentation:
 
    ```text
-   content/terraform-mcp-server @hashicorp/team-docs-packer-and-terraform
+   content/terraform-mcp-server @hashicorp/team-devrel-infrastructure-education
    ```
 
 1. Add an entry for your docs to the `productConfig.mjs` file. Use the following syntax:
