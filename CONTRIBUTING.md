@@ -125,7 +125,9 @@ Use this workflow when you want to update existing documentation that is already
    needed.
 
    Content should adhere to the [Education style guide][edu-style-guide]
-   and the [content types guide][content-types-guide].
+   and the [content types guide][content-types-guide]. Check
+   [product conventions][product-conventions] for how your product implements
+   those content types before choosing a template.
 
    If you need to create a new page, refer to [How to create a new page][new-page-guide] for instructions.
 
@@ -197,7 +199,9 @@ Check with your team for the exact branch name.
 1. Make your changes in current release folder.
 
    Content should adhere to the [Education style guide][edu-style-guide]
-   and the [content types guide][content-types-guide].
+   and the [content types guide][content-types-guide]. Check
+   [product conventions][product-conventions] for how your product implements
+   those content types before choosing a template.
 
    If you need to create a new page, refer to the [How to create a new page][new-page-guide] guide for instructions.
 
@@ -274,7 +278,9 @@ the name of the branch and folder.
 1. Make your changes in upcoming release folder.
 
    Content should adhere to the [Education style guide][edu-style-guide]
-   and the [content types guide][content-types-guide].
+   and the [content types guide][content-types-guide]. Check
+   [product conventions][product-conventions] for how your product implements
+   those content types before choosing a template.
 
    If you need to create a new page, refer to the [How to create a new page][new-page-guide] guide for instructions.
 
@@ -452,5 +458,6 @@ local images and then rebuild with `make`.
 
 [edu-style-guide]: ./docs/style-guide/index.md
 [content-types-guide]: ./docs/content-guide/content-types.md
+[product-conventions]: ./docs/content-guide/products/index.md
 [new-page-guide]: ./docs/content-guide/create-new-page.md
 [redirects-guide]: ./docs/content-guide/redirects.md
