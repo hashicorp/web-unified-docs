@@ -10,7 +10,8 @@ Follow these steps to create a new content page:
 ## Decide content type
 
 Decide if your content is a concept, guide, or reference. Refer to the [Content
-types](content-types.md) guide for detailed explanations and templates. If you
+types](content-types.md) guide for detailed explanations and templates, and to
+[products/](products/index.md) for how your product implements them. If you
 have questions, reach out to your product's tech writer team for help.
 
 ## Create the page file
@@ -36,10 +37,22 @@ have questions, reach out to your product's tech writer team for help.
 
 ## Create your content
 
-Copy the template for your content type from
-[templates/](./templates/) and fill it in. Refer to the [Content
-types](./content-types.md) guide to choose the right one, and to
-[indexing.md](./indexing.md) for file and folder naming conventions.
+Copy the template for your content type and fill it in. Resolve which template
+in this order:
+
+1. **Check [products/](./products/index.md) for your product.** If your product
+   has a page there, its tables name the template to use. That may be a template
+   under `templates/<product>/`, a template in `templates/`, or no template at
+   all when the product does not use that content type.
+1. **Otherwise use the template in [templates/](./templates/)** named for your
+   content type.
+
+The product page decides, not the presence or absence of a file in a product
+subdirectory. A product subdirectory that has no template for a given type does
+not mean "fall back to the global one" — it means whatever the product page says.
+
+Refer to the [Content types](./content-types.md) guide to choose the right type,
+and to [indexing.md](./indexing.md) for file and folder naming conventions.
 
 Follow the Education style guide's [top 12 guidelines](../style-guide/top-12.md)
 when you create your content.

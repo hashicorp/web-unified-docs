@@ -7,6 +7,34 @@ lacks prescriptive guidance for producing consistent content at scale. To fill
 this gap, we have developed several content types, which are subsets of Diátaxis
 categories.
 
+## Check your product first
+
+Products implement these content types differently. Some rename a type, some
+split one, some add a type this taxonomy does not have, and some do not use a
+type at all.
+
+**Before choosing a type from the table below, check
+[products/](products/index.md) for your product.** If your product has a page
+there, it takes precedence for the differences it records, and it names the
+template to use. Everything it does not mention follows the table below.
+
+| Product | Records differences in |
+| --- | --- |
+| [Boundary](products/boundary.md) | Domain model pages, closing block, CLI reference, generated API reference |
+| [Consul](products/consul.md) | CLI reference, API reference |
+| [Nomad](products/nomad.md) | CLI reference, configuration reference, API reference, task driver and autoscaler plugin pages |
+| [Packer](products/packer.md) | Configuration reference |
+| [Terraform](products/terraform.md) | Backend and meta-argument pages |
+| [Terraform (HCP Terraform)](products/terraform-docs-common.md) | API reference, parallel with Terraform Enterprise |
+| [Terraform Enterprise](products/terraform-enterprise.md) | Release notes, parallel with HCP Terraform |
+| [Vault](products/vault.md) | Usage renamed to how-to, plugin pages, cookbook, CLI reference, configuration reference, API reference |
+| [Well-Architected Framework](products/well-architected-framework.md) | Guidance pages, pillar pages, closing blocks |
+
+The templates in this guide remain the standard for new documentation where a
+product has expressed no preference. Refer to
+[products/index.md](products/index.md) for how those pages are maintained and
+what their status labels mean.
+
 ## Determine content type
 
 When developing content, either manually or with the assistance of an AI agent,
@@ -24,9 +52,10 @@ product's information architecture.
 | | [What is](content-types/what-is.md) | You are introducing a product or sub product, or a workflow complex enough to need its own landing page. | [what-is.mdx](templates/what-is.mdx) |
 | **Reference** — technical description of an entity | [Structured configuration reference](content-types/structured-configuration-reference.md) | The artifact you are documenting has a schema or hierarchy, such as HCL, JSON, or YAML configuration. | [structured-configuration-reference.mdx](templates/structured-configuration-reference.mdx), [single-language](templates/structured-configuration-reference-single.mdx) |
 | | [Tabular reference](content-types/tabular-reference.md) | The information is non-hierarchical or nearly flat: compatibility matrices, error codes, metrics, flat configuration items. | [tabular-reference.mdx](templates/tabular-reference.mdx) |
+| | [Function reference](content-types/function-reference.md) | You are documenting a single function in a configuration or templating language, such as an HCL function. | [function-reference.mdx](templates/function-reference.mdx) |
 | | [CLI reference](content-types/cli-reference.md) | You are documenting CLI command options and usage. | [command](templates/cli-reference-command.mdx), [command group](templates/cli-reference-command-group.mdx), [global flags](templates/cli-reference-global-flags.mdx) |
 | | [Core reference](content-types/core-reference.md) | The information is product-supporting but resists a standard format: specifications, error messages, troubleshooting, benchmarks, collections of best practices. | None — [pattern-match a sibling page](#types-without-a-template) |
-| | API reference | You are documenting HTTP API options and usage. | None — [pattern-match a sibling page](#types-without-a-template) |
+| | [API reference](content-types/api-reference.md) | You are documenting HTTP API endpoints, their parameters, and their requests and responses. **Check first whether your product generates its API reference from a specification** — if so, this guide does not govern it. | [api-reference.mdx](templates/api-reference.mdx) |
 | | [Release notes and product updates](#types-without-a-template) | You are documenting what changed in a release, or maintaining a change tracker, deprecation notice, or important-changes page. | None — follow the product's existing pattern |
 
 Index pages, which provide lists of links to supporting documentation on a
@@ -36,10 +65,11 @@ Refer to [Overview](content-types/overview.md) and to
 
 ## Types without a template
 
-Three content types have no canonical template: **API reference**, **core
-reference**, and **release notes and product updates**. Guidance for the first
-two is still in development. Release notes are deliberately not templated,
-because each product structures them differently.
+Two content types have no canonical template: **core reference** and **release
+notes and product updates**. Guidance for core reference is still in development.
+Release notes are deliberately not templated, because each product structures
+them differently — though [Terraform Enterprise](products/terraform-enterprise.md)
+is a documented exception, with 83 release pages on a fixed heading set.
 
 Until a template exists, do not invent a structure. Instead:
 
@@ -74,6 +104,8 @@ Table, Examples, and Next steps.
 | [content-types/metadata.md](content-types/metadata.md) | Page titles and meta description templates per content type |
 | [content-types/examples.md](content-types/examples.md) | When and how to use examples, and which content types own them |
 | [content-types/visual-aids.md](content-types/visual-aids.md) | Diagrams, screenshots, icons, and symbols |
+| [products/](products/index.md) | How each product implements these types, and which template to use |
+| [products/census.md](products/census.md) | Scope, method, and accuracy of the census the product pages cite |
 | [indexing.md](indexing.md) | Navigation labels, folder names, and file names |
 | [create-new-page.md](create-new-page.md) | The mechanics of adding a page and its sidebar entry |
 | [single-source-of-truth.md](single-source-of-truth.md) | Avoiding duplicated content |
