@@ -27,6 +27,7 @@ operations on Vault.
 
     - [Use IBM Verify for agent IAM](/vault/ai/iam/providers/verify)
     - [Use Entra ID for agent IAM](/vault/ai/iam/providers/entraid)
+    - [Use Auth0 for agent IAM](/vault/ai/iam/providers/auth0)
 
 - **You must have admin permissions on Vault**. You need a Vault token with
   sufficient ACL policies attached to configure and modify your Vault deployment.
@@ -151,6 +152,76 @@ claim optional in the issued JWTs.
 
 </Tab>
 
+<Tab heading="Auth0" group="auth0">
+
+Create the profile definition using JWKS mode to fetch signing keys from Auth0.
+The profile accepts both `ES256` and `PS256` algorithms as Auth0 recommends.
+
+1. Create an OAuth resource server configuration file called `auth0-oauth.json`
+   using the previously stored environment variables:
+
+    ```shell-session
+    $ cat > auth0-oauth.json <<EOF
+    {
+      "issuer_id": "${APP_ISS_URL}",
+      "use_jwks": true,
+      "audiences": ["${AUDIENCE_ADDR}"],
+      "user_claim": "sub",
+      "supported_algorithms": ["ES256", "PS256"],
+      "jwks_uri": "${APP_JWKS_URI}"
+    }
+    EOF
+    ```
+
+1. Create an OAuth resource server profile using the JSON file:
+
+    ```shell-session
+    $ vault write sys/config/oauth-resource-server/auth0 @auth0-oauth.json
+
+    Success! Data written to: sys/config/oauth-resource-server/auth0
+    ```
+
+1. Read the profile to check for correctness.
+
+    ```shell-session
+    $ vault read sys/config/oauth-resource-server/auth0
+
+    Key                     Value
+    ---                     -----
+    audiences               [<AUDIENCE_ADDR>]
+    clock_skew_leeway       0
+    config_id               d2838e74-86b6-ef9f-5a8c-c0ff33e095fc
+    enabled                 true
+    issuer_id               <APP_ISS_URL>
+    jwks_uri                <APP_JWKS_URI>
+    jwt_type                access_token
+    no_default_policy       false
+    profile_name            auth0
+    supported_algorithms    [ES256 PS256]
+    use_jwks                true
+    user_claim              sub
+    ```
+
+    Confirm `enabled` is `true` and `config_id` is a valid UUID. If `enabled` is
+    `false`, verify the oauth-resource-server activation flag is set correctly.
+
+    <Note>
+
+    Vault normalizes `issuer_id` by trimming any trailing slash and lowercasing
+    it. Auth0's `iss` claim ends in a slash (`https://...auth0.com/`) while the
+    stored `issuer_id` shows without one. The trailing slash difference is
+    expected and still matches.
+
+    </Note>
+
+1. Export the `config_id` for use in creating entity aliases.
+
+    ```shell-session
+    $ export APP_CONFIG_ID="d2838e74-86b6-ef9f-5a8c-c0ff33e095fc"
+    ```
+
+</Tab>
+
 </Tabs>
 
 
@@ -195,7 +266,6 @@ Map your external identity to a Vault entity.
       OBO_AGENT_CANONICAL_ID="ef897bd9-0060-1fa4-68ba-65ae5b0747ec"
     ```
 
-
 </Tab>
 
 <Tab heading="Entra" group="entra">
@@ -216,6 +286,51 @@ Map your external identity to a Vault entity.
 
     ```shell-session
     $ export OIDC_APP_CANONICAL_ID="93dd3414-2ba8-4e55-94f9-185cb01c92d8"
+    ```
+
+</Tab>
+
+<Tab heading="Auth0" group="auth0">
+
+1. Create a new subject entity in for the human user.
+
+    ```shell-session
+    $ vault write identity/entity name="obo-user"
+
+    Key        Value
+    ---        -----
+    aliases    <nil>
+    id         1b75bc66-28e3-9126-5c18-c0ff33d83c5c
+    name       obo-user
+    ```
+
+1. Create a new actor entity for the AI agent user.
+
+    ```shell-session
+    $ vault write identity/entity name="obo-agent"
+
+    Key        Value
+    ---        -----
+    aliases    <nil>
+    id         0ca161e7-a74e-2827-f3a1-c0ff331f1599
+    name       obo-agent
+    ```
+
+1. Save the IDs for the human and agent entities to environment variables:
+
+    ```shell-session
+    $ export OBO_USER_CANONICAL_ID="1b75bc66-28e3-9126-5c18-c0ff33d83c5c" \
+        OBO_AGENT_CANONICAL_ID="0ca161e7-a74e-2827-f3a1-c0ff331f1599"
+    ```
+
+1. Set the external IDs. These are the `sub` values your identity provider
+   issues for the human and the agent. For the Auth0 path, the agent external
+   ID is the `sub` you captured in the **Capture a baseline token** step.
+   Choose a distinct subject identity for Danielle.
+
+    ```shell-session
+    $ export SUBJECT_EXTERNAL_ID='auth0|obo-user-0001' \
+    ACTOR_EXTERNAL_ID="${APP_JWT_SUB}"
     ```
 
 </Tab>
@@ -248,7 +363,7 @@ For example, a mount accessor in the `root` namespace would be:
 
 <CodeBlockConfig hideClipboard>
 
-```
+```text
 oauth-resource-server_root_de81dc66-e00d-23c6-7dfc-9cdbc5aaf97e
 ```
 
@@ -334,6 +449,66 @@ oauth-resource-server_root_de81dc66-e00d-23c6-7dfc-9cdbc5aaf97e
    name                         oidc-app-alias
    namespace_id                 root
    ```
+
+</Tab>
+
+<Tab heading="Auth0" group="auth0">
+
+1. Create an entity alias for user entity.
+
+    ```shell-session
+    $ vault write identity/entity-alias \
+        name="${SUBJECT_EXTERNAL_ID}" \
+        canonical_id="${OBO_USER_CANONICAL_ID}" \
+        issuer="${APP_ISS_URL}" \
+        external_id="${SUBJECT_EXTERNAL_ID}"
+    ```
+
+    Example output:
+
+    <CodeBlockConfig hideClipboard>
+
+    ```plaintext
+    Key             Value
+    ---             -----
+    canonical_id    1b75bc66-28e3-9126-5c18-c0ff33d83c5c
+    id              5d463c84-d185-90df-0caf-c0ff33d0e165
+    ```
+
+    </CodeBlockConfig>
+
+1. Create an entity alias for the agent entity with the issuer value included:
+
+    ```shell-session
+    $ vault write identity/entity-alias \
+        name="${ACTOR_EXTERNAL_ID}" \
+        canonical_id="${OBO_AGENT_CANONICAL_ID}" \
+        issuer="${APP_ISS_URL}" \
+        external_id="${ACTOR_EXTERNAL_ID}"
+    ```
+
+    Example output:
+
+    <CodeBlockConfig hideClipboard>
+
+    ```plaintext
+    Key             Value
+    ---             -----
+    canonical_id    0ca161e7-a74e-2827-f3a1-c0ff331f1599
+    id              a89e280e-f4b8-fe5d-3e79-c0ff33c7366c
+    ```
+
+    </CodeBlockConfig>
+
+<Warning>
+
+The `issuer` field is **required**. An alias created without `issuer=`
+validates successfully but later causes JWT authentication to fail
+server-side with `no alias found` / `error looking up entity`. This is
+the single most common configuration mistake.
+You must set `issuer` on every OAuth resource server alias.
+
+</Warning>
 
 </Tab>
 
@@ -464,6 +639,36 @@ id              22ca4375-ca9a-9ea4-f0ff-2bbbcaaa2a2b
 
 </Tab>
 
+<Tab heading="Auth0" group="auth0">
+
+```shell-session
+$ vault write agent-registry/register     \
+    display_name="obo-<human_user>-agent" \
+    entity_id="${OBO_AGENT_CANONICAL_ID}" \
+    ceiling_policies='["ceiling-all"]'
+```
+
+For example:
+
+<CodeBlockConfig hideClipboard>
+
+```shell-session
+$ vault write agent-registry/register \
+     display_name="pr-reviewer-agent" \
+     entity_id="${OBO_AGENT_CANONICAL_ID}" \
+     description="HashiCups PR review agent" \
+     ceiling_policies='["ceiling-all"]'
+
+Key             Value
+---             -----
+display_name    pr-reviewer-agent
+id              3487bf8a-62b9-db0a-2117-c0ff3370db84
+```
+
+</CodeBlockConfig>
+
+</Tab>
+
 </Tabs>
 
 
@@ -548,6 +753,128 @@ Use the new agent alias to mint and validate token creation in Vault.
    ttl                 52m22s
    type                ent
    ```
+
+</Tab>
+
+<Tab heading="Auth0" group="auth0">
+
+1. Create a helper script to push the authorization request to Auth0's PAR
+   endpoint with the RAR claim in `authorization_details`.
+
+   <CodeBlockConfig filename="rar-authorize-url.sh" lineNumbers>
+
+   ```bash
+   # !/usr/bin/env bash
+   # mint-token.sh: RAR token authorization automation script for convenience.
+
+    set -euo pipefail
+
+    : "${APP_CLIENT_ID:?Set APP_CLIENT_ID first.}"
+    : "${APP_CLIENT_SECRET:?Set APP_CLIENT_SECRET first.}"
+
+    if [ -z "${APP_DOMAIN:-}" ]; then
+        : "${APP_AUTH_URL:?Set APP_DOMAIN or APP_AUTH_URL first.}"
+        APP_DOMAIN="${APP_AUTH_URL#https://}"
+        APP_DOMAIN="${APP_DOMAIN%%/*}"
+    fi
+    APP_DOMAIN="${APP_DOMAIN#https://}"
+    APP_DOMAIN="${APP_DOMAIN%%/*}"
+
+    CODE_VERIFIER="$(openssl rand -base64 96 | tr -d '\n=+/' | cut -c1-64)"
+    CODE_CHALLENGE="$(printf '%s' "${CODE_VERIFIER}" | openssl dgst -binary -sha256 | openssl base64 | tr '+/' '-_' | tr -d '=\n')"
+    AUTHORIZATION_DETAILS="$(jq -cn \
+        --arg path "${RAR_PATH:-hashicups-kv/data/repo/github-token}" \
+        --arg action "${RAR_ACTION:-read}" \
+        '[{type:"vault:path_access",path_constraint:$path,action:$action}]')"
+
+    PAR_RESPONSE="$(curl -sS -X POST "https://${APP_DOMAIN}/oauth/par" \
+        -d "client_id=${APP_CLIENT_ID}" \
+        -d "client_secret=${APP_CLIENT_SECRET}" \
+        -d "response_type=code" \
+        -d "redirect_uri=http://localhost:9876/callback" \
+        -d "scope=openid profile email" \
+        -d "audience=${AUDIENCE_ADDR}" \
+        -d "code_challenge=${CODE_CHALLENGE}" \
+        -d "code_challenge_method=S256" \
+        --data-urlencode "authorization_details=${AUTHORIZATION_DETAILS}")"
+
+    REQUEST_URI="$(jq -er '.request_uri' <<<"${PAR_RESPONSE}" 2>/dev/null)" || {
+        printf 'Auth0 PAR request failed:\n%s\n' "${PAR_RESPONSE}" >&2
+        exit 1
+    }
+
+    {
+        printf 'export APP_DOMAIN=%q\n' "${APP_DOMAIN}"
+        printf 'export CODE_VERIFIER=%q\n' "${CODE_VERIFIER}"
+        printf 'export CODE_CHALLENGE=%q\n' "${CODE_CHALLENGE}"
+        printf 'export REQUEST_URI=%q\n' "${REQUEST_URI}"
+    } >.rar-pkce.env
+    chmod 600 .rar-pkce.env
+
+    jq -nr \
+        --arg domain "${APP_DOMAIN}" \
+        --arg client_id "${APP_CLIENT_ID}" \
+        --arg request_uri "${REQUEST_URI}" \
+        '"https://\($domain)/authorize?client_id=\($client_id|@uri)&request_uri=\($request_uri|@uri)"'
+   ```
+
+   </CodeBlockConfig>
+
+1. Execute the script.
+
+    ```shell-session
+    $ bash ./scripts/rar-authorize-url.sh
+    https://hashicups-dev.us.auth0.com/authorize?client_id=...&request_uri=urn%3Aietf%3Aparams%3Aoauth%3Arequest_uri%3Ac0ff33... 
+    ```
+
+    The `request_uri` is short-lived and single use, usually for 30 seconds. If
+    you wait too long, refresh the URL, or open it once with `curl` before using
+    the browser, Auth0 shows an `Oops!, something went wrong` page with
+    `invalid_request_uri: request_uri not found`. If this happens, run
+    `./scripts/rar-authorize-url.sh` again and open the new URL right away.
+
+1. Open the printed authorize URL in a browser to approve the pushed request.
+
+   Sign in as the agent user if necessary and click **Accept**.
+   Auth0 then redirects to `http://localhost:9876/callback?code=...`.
+   Because no server listens on that port, the browser shows a connection
+   error, but the address bar still holds the `code` value.
+
+1. Copy the `code` value from the address bar and save it as `AUTH_CODE`
+   environment variable.
+
+    ```shell-session
+    $ export AUTH_CODE="c0ff33..."
+    ```
+
+1. Source the `.rar-pkce.env` file to populate necessary Application, challenge,
+   and request URI values in the shell environment.
+
+    ```shell-session
+    $ source .rar-pkce.env
+    ```
+
+1. Use cURL to request an access token.
+
+    ```shell-session
+    $ export DELEGATION_TOKEN="$(curl -s -X POST "https://${APP_DOMAIN}/oauth/token" \
+        -d "grant_type=authorization_code" \
+        -d "client_id=${APP_CLIENT_ID}" \
+        -d "client_secret=${APP_CLIENT_SECRET}" \
+        -d "code=${AUTH_CODE}" \
+        -d "redirect_uri=http://localhost:9876/callback" \
+        -d "code_verifier=${CODE_VERIFIER}" | jq -r '.access_token')"
+    ```
+
+    The `$DELEGATION_TOKEN` variable now holds an access token that carries the RAR claim.
+
+1. Use the delegated token with vault token lookup to verify your configuration.
+   Vault validates the token against the OAuth resource server config profile,
+   resolves the entity alias, and returns the default policy:
+
+    ```shell-session  
+    $ VAULT_TOKEN=${DELEGATION_TOKEN} vault token lookup
+    ```
 
 </Tab>
 
