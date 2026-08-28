@@ -9,6 +9,7 @@ import path from 'node:path'
 import semver from 'semver'
 
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
+import { TFE_VERSION_IN_PATH_REGEX } from '#scriptUtils/version-regex.mjs'
 
 const acceptedReleaseStages = ['alpha', 'beta', 'rc']
 
@@ -151,6 +152,15 @@ export async function gatherVersionMetadata(contentDir) {
 				isLatest: idx === latestVersionIndex,
 			})
 		}
+
+		// If no version was marked as latest (e.g. all versions are non-stable),
+		// mark the first version as latest
+		const hasLatest = versionMetadata[product].some((v) => {
+			return v.isLatest
+		})
+		if (!hasLatest) {
+			versionMetadata[product][0].isLatest = true
+		}
 	}
 	// Return the version metadata
 	return versionMetadata
@@ -164,13 +174,11 @@ export async function gatherVersionMetadata(contentDir) {
  * @returns {string} The normalized version string
  */
 function normalizeVersion(version) {
-	const TFE_VERSION_IN_PATH_REGEXP = /v[0-9]{6}-\d+/i
-
 	const cleanVersion = version
 		.replace(/\s*\([^)]+\)/, '') // Remove any release stage in parentheses
 		.replace(/\.x$/, '.0') // Replace trailing `.x` with `.0`
 
-	if (TFE_VERSION_IN_PATH_REGEXP.test(cleanVersion)) {
+	if (TFE_VERSION_IN_PATH_REGEX.test(cleanVersion)) {
 		return cleanVersion
 	}
 

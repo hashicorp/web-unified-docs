@@ -4,13 +4,15 @@ description: >-
   Learn how to list a resource in the Terraform plugin framework.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2025-09-23T14:09:33-05:00
-last_modified: 2025-11-18T22:58:26-05:00
+last_modified: 2026-04-09T15:49:38.000Z
 # END AUTO GENERATED METADATA
 ---
 
 # Listing resources
 
 List is called when a `terraform query` is executed, the `ListResource` RPC is called which in turn calls the [`list.ListResource` interface `List` method](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/list#ListResource.List). The request contains the configuration supplied to Terraform by the list block and the response contains a stream of the list results.
+
+The [`list.ListRequest` type](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/list#ListRequest) also includes the `IncludeResource` field. Terraform can set this field when the practitioner enables the `include_resource` argument in HCL or when the query is run with the `-generate-config-out` flag. Check this field early in the `List` method so the provider can avoid unnecessary requests or response processing when Terraform only needs resource identity data.
 
 ## Define List Method
 
@@ -19,6 +21,7 @@ Implement the `List` method by:
 1. [Accessing the `Config` data](/terraform/plugin/framework/handling-data/accessing-values) from the [`list.ListRequest` type](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/list#ListRequest).
 1. Performing external calls and logic for the list operation.
 1. For each list result instantiate a new result object using the [`list.ListRequest.NewListResult`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/list#ListRequest.NewListResult) method.
+1. Checking [`list.ListRequest.IncludeResource`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/list#ListRequest) early and using it to decide whether full resource data should be fetched and whether [`list.ListResult.Resource`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/list#ListResult) should be populated.
 1. Return an iterator function that pushes list results into the response stream.
 
 If the logic needs to return [warning or error diagnostics](/terraform/plugin/framework/diagnostics), they can be added into the [`list.ListResult.Diagnostics`](https://pkg.go.dev/github.com/hashicorp/terraform-plugin-framework/list#ListResult.Diagnostics) field of an empty list result and pushed into the stream.
@@ -59,6 +62,18 @@ func (r *ThingListResource) List(ctx context.Context, req list.ListRequest, stre
 	// as input. For brevity, we assume the `things` slice below was returned by an
 	// API call here
 
+	// Check IncludeResource before making remote requests so the provider can
+	// avoid unnecessary work when Terraform only needs identity data.
+	var things []Thing
+
+	if req.IncludeResource {
+		// Fetch full resource data because Terraform requested it.
+		things = client.ListThingsWithResourceData(ctx, data.ResourceGroupName.ValueString())
+	} else {
+		// Fetch only the data needed to populate identities and display names.
+		things = client.ListThings(ctx, data.ResourceGroupName.ValueString())
+	}
+
 	// Define the function that will push results into the stream
 	stream.Results = func(push func(list.ListResult) bool) {
         for _, thing := range things {
@@ -71,8 +86,10 @@ func (r *ThingListResource) List(ctx context.Context, req list.ListRequest, stre
 		// Set resource identity data on the result
 		result.Diagnostics.Append(result.Identity.Set(ctx, thing.ID))
 
-		// Set the resource information on the result
-		result.Diagnostics.Append(result.Resource.Set(ctx, thing.Resource))
+		// Only set full resource data when Terraform requested it.
+		if req.IncludeResource {
+			result.Diagnostics.Append(result.Resource.Set(ctx, thing.Resource))
+		}
 
 		// Send the result to the stream.
 		if !push(result) {
@@ -85,4 +102,4 @@ func (r *ThingListResource) List(ctx context.Context, req list.ListRequest, stre
 ## Caveats
 
 * An error is returned if a list result in the stream contains a null identity unless it contains a warning in the diagnostics.
-* An error is returned if `include_resource` is set to `true` and a list result in the stream has a null resource.
+* An error is returned if `req.IncludeResource` is `true`, for example the practitioner set `include_resource = true` or Terraform is using `-generate-config-out`, and a list result in the stream has a null resource.
