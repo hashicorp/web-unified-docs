@@ -25,7 +25,6 @@ import {
 } from './rewrite-internal-redirects/rewrite-internal-redirects.mjs'
 
 import { transformExcludeContent } from './exclude-content/index.mjs'
-import { rewriteCdnUrlPlugin } from './rewrite-cdn-url/rewrite-cdn-url.mjs'
 
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
 
@@ -174,7 +173,6 @@ async function applyMdxTransforms(entry, versionMetadata = {}, targetDir) {
 				redirects,
 			})
 			.use(rewriteInternalLinksPlugin, { entry, versionMetadata })
-			.use(rewriteCdnUrlPlugin, { entry })
 			.process(content)
 
 		const transformedContent = String(remarkResults)
