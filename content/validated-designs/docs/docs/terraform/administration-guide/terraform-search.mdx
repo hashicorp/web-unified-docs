@@ -1,0 +1,336 @@
+---
+page_title: Terraform Search
+description: Discover resources outside Terraform management at scale and bring them under Terraform control using search-driven bulk import workflows.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-08-25T12:00:00.000Z
+last_modified: 2026-08-25T12:00:00.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Terraform Search
+
+Most organizations reach a point in their Terraform journey where the volume of resources not yet
+under management makes resource-by-resource onboarding impractical. Scripts, spreadsheets, and
+improvised tooling can carry a team through the early adoption phase, but they do not scale to
+hundreds or thousands of resources across multiple providers and accounts.
+
+Terraform Search addresses this by providing a structured, HCL-native workflow for discovering
+resources at scale and importing them into Terraform state in bulk. It standardizes
+what had been an informal, per-team activity into a repeatable, platform-owned process.
+
+<Note>
+Unless specifically mentioned, concepts that apply to HCP Terraform also apply to its self-hosted
+version, Terraform Enterprise.
+</Note>
+
+## When to use Terraform Search
+
+Use Terraform Search when your organization needs to:
+
+- **Onboard large estates of resources not yet in Terraform.** You have hundreds or thousands of cloud
+  resources — VMs, databases, networking constructs — created before teams adopted Terraform, and
+  you want to bring them under Terraform management systematically.
+- **Establish a system of record.** You want a complete, searchable inventory of your estate —
+  including resources not yet managed by Terraform — to assess coverage gaps and drive onboarding
+  priority.
+- **Replace informal import tooling.** Your teams are using custom scripts or third-party open source
+  utilities to enumerate resources and generate import blocks. Terraform Search provides a
+  supported, provider-aligned alternative that integrates directly with the Terraform workflow.
+- **Run platform-led onboarding campaigns.** Your platform team is coordinating periodic import
+  cycles — for example, sweeping an AWS account or GCP project for resources not yet in Terraform — and
+  needs a consistent, repeatable workflow to hand off to application teams.
+
+## When not to use Terraform Search
+
+- **Small, well-understood imports.** If you are importing a handful of known resources into a
+  specific workspace, use `import` blocks as described in the
+  [adoption import guide](https://developer.hashicorp.com/validated-designs/terraform-operating-guides-adoption/import-existing-resources).
+  Terraform Search adds overhead that is not justified for small batches.
+- **Providers without list support.** Terraform Search relies on provider-level `list` support for
+  each resource type. If your target provider or resource type does not yet implement the required
+  protocol, search does not find those resources. Verify support in the provider documentation
+  before building a workflow around it.
+- **Dynamic or ephemeral resources.** Resources that change frequently outside of Terraform — such
+  as auto-scaled instances, spot capacity, or short-lived testing infrastructure — are poor import
+  candidates regardless of discovery method. Importing them creates churn and drift without
+  adding management value.
+- **Resources owned by teams not ready for Terraform.** Importing a resource establishes a
+  day-two ownership obligation. Do not use Terraform Search to discover and import resources if
+  the owning team is not prepared to manage them through Terraform going forward.
+
+## Requirements
+
+| Requirement | Detail |
+| --- | --- |
+| Terraform CLI version | v1.12 or newer (resource identity-based search) |
+| HCP Terraform Search & Import UI | Workspace must use Terraform v1.14 or newer |
+| Provider support | The target resource type must implement the provider list protocol; verify in provider docs |
+| HCP Terraform agents | If using agent-based runs, the agent pool must have the `query` operation enabled |
+| Cloud credentials | The provider configuration used for queries needs read permissions on the target resource types |
+
+## Roles and responsibilities
+
+Terraform Search introduces a discovery phase that sits before the existing import workflow.
+Assign ownership so the platform team sets the standard and application teams
+execute within it.
+
+### Platform team
+
+- Define the standard query file templates for approved provider and resource type combinations.
+- Set scope constraints: which accounts, regions, projects, and resource types are in-scope for
+  bulk onboarding campaigns.
+- Configure the HCP Terraform workspace settings required for Search & Import, including Terraform
+  version and agent pool `query` operation enablement.
+- Review generated configuration before the team merges and applies it — for resources that
+  the team places in shared or high-criticality workspaces in particular.
+- Establish and communicate the post-import ownership contract: who is responsible for day-two
+  management of imported resources.
+- Own the cadence of import campaigns and track coverage metrics over time.
+
+### Application team
+
+- Identify which resources in their estate to prioritize for onboarding.
+- Provide provider and resource-type context so the platform team can build accurate queries
+  (for example, account IDs, region filters, tag conventions).
+- Review generated `resource` blocks for correctness before applying — in particular, verify that
+  attributes align with the expected real-world state.
+- Accept day-two ownership of any imported resource. Once imported, those resources require
+  management through Terraform only.
+
+## Workflow
+
+Terraform Search follows a five-step process. Steps 1 through 3 are preparation. Steps 4 and 5
+are execution and governance.
+
+### Step 1: Prepare your Terraform configuration
+
+Create or identify the Terraform workspace configuration that hosts the search. If the
+configuration does not already include a `required_providers` block, add it so that Terraform
+can install the provider plugins required for the query.
+
+If you are using HCP Terraform, configure the `cloud` block in your `.tf` configuration to
+connect to your workspace. This enables HCP Terraform to compare discovered resources against
+those already managed by other workspaces and surface the management status of each result.
+
+```hcl
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+
+  cloud {
+    organization = "my-org"
+    workspaces {
+      name = "search-and-import"
+    }
+  }
+}
+
+provider "aws" {
+  region = "us-east-2"
+}
+```
+
+### Step 2: Define your query file
+
+Create a file with a `.tfquery.hcl` extension. Add one or more `list` blocks to define the
+resources you want to discover. Each `list` block specifies the resource type and provider, and
+optionally includes provider-specific filters to narrow the results.
+
+```hcl
+# queries.tfquery.hcl
+
+list "aws_instance" "untagged_prod" {
+  provider = aws
+  limit    = 200
+
+  config {
+    region = "us-east-2"
+
+    filter {
+      name   = "tag:Environment"
+      values = ["prod"]
+    }
+
+    filter {
+      name   = "instance-state-name"
+      values = ["running"]
+    }
+  }
+}
+```
+
+Keep query files narrow and intentional. A query that returns thousands of resources without
+filtering creates review burden and increases the risk of importing resources not intended for
+Terraform management. Use `config` filters aggressively to scope queries to a
+meaningful, reviewable set.
+
+The `limit` argument defaults to 100 resources per `list` block. Increase it with purpose — a
+higher limit does not mean all results warrant import.
+
+<Tip>
+Set `include_resource = true` in a `list` block only when you need to inspect resource attributes
+during the review step. It retrieves all available attributes from the provider, which may affect
+query performance for large result sets.
+</Tip>
+
+### Step 3: Run queries
+
+**Terraform CLI workflow:**
+
+```shell-session
+terraform query -generate-config-out=generated.tf
+```
+
+This command executes the list blocks defined in your `.tfquery.hcl` file against the live
+infrastructure and writes `resource` and `import` blocks for the discovered resources to the
+specified output file.
+
+**HCP Terraform workflow:**
+
+1. Commit your `.tf` and `.tfquery.hcl` files to the VCS repository associated with your
+   workspace, or push them with the Terraform CLI-driven workflow.
+2. In HCP Terraform, navigate to your workspace and click **Search & Import** in the sidebar.
+3. Click **New Query** to trigger a query run. HCP Terraform streams results to the page as
+   the query progresses.
+
+### Step 4: Review results
+
+Whether you use the Terraform CLI or HCP Terraform, Terraform classifies resources by management status:
+
+| Status | Meaning |
+| --- | --- |
+| **Managed** | The resource has the same identity as a resource already applied by a similar provider version in another workspace. No action needed. |
+| **Unknown** | The resource identity matches something applied by an older Terraform or provider version. Review before importing — another workspace may already manage it. |
+| **Unmanaged** | No managed resource matches this identity. This is the primary import candidate. |
+
+Do not treat every **Unmanaged** result as an automatic import target. The review step is the
+most important governance control in the workflow. The platform team and application team must
+jointly assess each result against the criteria in the [When not to use Terraform Search](#when-not-to-use-terraform-search) section
+before selecting resources for import.
+
+In HCP Terraform, use the search field and filters on the Search & Import page to sort and examine
+results. Click a resource type to view provider-supplied details before selecting it.
+
+### Step 5: Generate and apply configuration
+
+**Terraform CLI:**
+
+The `generated.tf` file written by `terraform query` contains `resource` and `import` blocks.
+Review the generated blocks — the resource attributes reflect the live state at the
+time of the query and may need adjustment to match your configuration standards (for example,
+naming conventions, tagging policies, or module alignment).
+
+Copy the reviewed blocks to your main configuration and run:
+
+```shell-session
+terraform plan
+terraform apply
+```
+
+**HCP Terraform:**
+
+Select the resources you want to import in the Search & Import results view, then click
+**Generate configuration**. HCP Terraform produces `import` and `resource` blocks. Copy the
+generated code to your Terraform configuration, run `terraform fmt` to format it, and then
+commit and apply the configuration through the normal HCP Terraform run workflow.
+
+### Post-import hygiene
+
+After a successful apply, the imported resources are under Terraform management. Enforce these
+practices:
+
+- **Remove `import` blocks after apply.** Import blocks are one-time migration aids, not
+  permanent configuration. Preserve onboarding history in version control instead of leaving
+  import blocks in the active Terraform configuration.
+- **Enable drift detection.** Enable health assessments for workspaces that received
+  imported resources as soon as the apply completes. Resources that were outside Terraform
+  management are more likely to carry changes made outside of Terraform. Refer to the
+  [Health Assessment guide](https://developer.hashicorp.com/validated-designs/terraform-operating-guides-standardization/infrastructure-health-monitoring)
+  for configuration guidance.
+- **Confirm ownership.** Record the owning team for each imported resource. The import campaign
+  does not automatically transfer operational accountability — that must be explicit.
+- **Review generated configuration against standards.** Generated resource blocks reflect live
+  state, not necessarily your organization's configuration standards. Schedule a follow-up review
+  to refactor generated blocks into module-aligned configuration where applicable.
+
+## Operational guidance
+
+### Scope import campaigns with intention
+
+Terraform Search can surface large numbers of resources in a short time. This is an
+advantage, but it also creates a governance risk: importing resources without clear ownership or
+management intent generates technical debt rather than reducing it.
+
+HashiCorp recommends that platform teams structure import campaigns as bounded, time-boxed
+activities with defined scope:
+
+- Select a specific provider, account, and resource type for each campaign.
+- Agree on the maximum import batch size your review process can handle.
+- Do not proceed to apply until both the platform team and the application team have signed
+  off on the generated configuration.
+
+### Treat Terraform Search as a platform-owned capability
+
+Platform teams own the query file templates, the workspace configurations used for
+discovery, and the governance process for reviewing results. Application teams operate
+within that framework, providing scope and reviewing results for their own resources, but not
+building independent query workflows outside the platform framework.
+
+The standardization phase codifies, owns, and evolves repeatable workflows centrally.
+
+### Connect search results to module adoption
+
+When a bulk import surfaces repeated resource patterns — multiple S3 buckets with similar
+configurations, or a set of EC2 instances following the same tagging and sizing conventions — use
+the discovery as an input to the private registry module roadmap. Terraform Search gives the
+platform team visibility into which patterns are worth abstracting into shared modules.
+
+### Track coverage metrics
+
+Use the Managed versus Unmanaged breakdown from search results to track how much of your estate
+is under Terraform management over time. This metric is a direct indicator of system-of-record
+maturity and demonstrates progress to engineering leadership.
+
+<!-- HUMAN-INPUT-REQUIRED: Recommended cadence and tooling for tracking coverage metrics based on real-world enterprise patterns (e.g. how teams export and build dashboards for Managed/Unmanaged ratios over time) -->
+
+<Warning>
+
+**Draft recommendation** — human review required before merging.
+
+The coverage-tracking guidance in the preceding section reflects the logical intent of Terraform
+Search for system-of-record use cases. This guidance draws from available documentation and
+practitioners have not yet confirmed it against specific HCP Terraform reporting APIs, Explorer queries, or
+field-observed coverage reporting patterns in enterprise environments.
+A practitioner must confirm the recommended approach — including what data HCP Terraform Explorer
+exports and how teams have integrated coverage reporting into operational practice — before
+the team merges this section to main.
+
+</Warning>
+
+## Standardization checklist
+
+Use this checklist when rolling out Terraform Search as a platform-controlled capability:
+
+- [ ] Platform team has defined standard `.tfquery.hcl` templates for approved resource types.
+- [ ] Workspace Terraform version is v1.14 or newer (required for HCP Terraform Search & Import UI).
+- [ ] If using HCP Terraform agents, the agent pool has the `query` operation enabled.
+- [ ] Provider credentials used for queries have read-only scope where possible.
+- [ ] Import campaign scope (account, region, resource types) has team agreement before running queries.
+- [ ] Review process names who approves generated configuration before apply.
+- [ ] Team enables post-import drift detection for workspaces that receive imported resources.
+- [ ] Owning team acknowledges imported resources and accepts day-two management responsibility.
+- [ ] Team removes or archives generated `import` blocks after successful apply.
+- [ ] Team tracks coverage metrics to demonstrate system-of-record progress over time.
+
+## Related resources
+
+- [Import existing resources (Adoption guide)](https://developer.hashicorp.com/validated-designs/terraform-operating-guides-adoption/import-existing-resources) — foundational import block guidance for smaller-scale imports
+- [Health Assessment](https://developer.hashicorp.com/validated-designs/terraform-operating-guides-standardization/infrastructure-health-monitoring) — enabling drift detection after bulk import
+- [Private Registry](https://developer.hashicorp.com/validated-designs/terraform-operating-guides-standardization/private-registry) — turning repeated import patterns into shared modules
+- [Import resources in bulk](https://developer.hashicorp.com/terraform/language/import/bulk) — Terraform bulk import reference
+- [Query files reference](https://developer.hashicorp.com/terraform/language/files/tfquery) — `.tfquery.hcl` syntax and configuration options
+- [HCP Terraform Search & Import](https://developer.hashicorp.com/terraform/cloud-docs/workspaces/import) — HCP Terraform UI workflow documentation
