@@ -262,6 +262,10 @@ export function resolveCdnUrl(
 	productSlug: string,
 	version: string,
 ): string {
+	if (!markdownSource.includes('{{CDN_URL}}')) {
+		return markdownSource
+	}
+
 	const isVersioned = PRODUCT_CONFIG[productSlug].versionedDocs
 	const versionSegment = isVersioned ? `/${version}` : ''
 	const cdnUrl = `${SELF_URL}/assets/${productSlug}${versionSegment}`
