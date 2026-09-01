@@ -1,0 +1,223 @@
+---
+layout: docs
+page_title: Configure Microsoft Entra ID for agentic IAM
+description: >-
+   Use Microsoft Entra ID and Vault to secure agent permissions with App
+   registrations, OAuth resource server profiles, and entity aliases.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-08-25T12:48:50-05:00
+last_modified: 2026-09-01T02:31:15.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Configure Microsoft Entra ID for agentic IAM
+
+@include 'alerts/enterprise-and-hcp.mdx'
+
+Configure an Azure app registration in Microsoft Entra ID and a Vault OAuth
+resource server profile to use with Vault Enterprise agentic IAM.
+
+
+## Before you start
+
+- **You must have admin access** to your Azure tenant.
+- **You must have permission** to create an App registration in Azure.
+- **You must have [`curl`](https://curl.se/)** or some other tool to make API calls.
+- **You must have [`jq`](https://jqlang.org/) installed** to use the example
+  commands as written.
+
+
+## Step 1: Create an OIDC application in Azure
+
+Create a new **App Registration** that represents the authentication entry point
+for your agent.
+
+1. Select **App registrations**.
+
+   ![App registrations banner in Azure](/img/agentic-ai/screenshot-entra-app-registrations.png)
+
+1. Select **New Registration**.
+
+1. Name the app `vault-oidc`.
+
+1. Review the default values for the other fields. In most cases you do not need
+   to change them.
+
+1. Click **Register**.
+
+
+## Step 2: Create a client secret
+
+Create a client secret in your OIDC applicatopn. Your AI agent uses the client
+secret to authenticate with Microsoft Entra ID.
+
+1. Select the **Certificates & secrets** in the **Manage** section.
+
+1. Select **+ New client secret**.
+
+1. Enter a description and set an appropriate expiration.
+
+1. Click **Add**.
+
+1. Save the authentication secret name, value, and ID. You need the secret
+   details to integrate with Vault later.
+
+
+## Step 3: Expose an API endpoint for the OIDC application
+
+Generate an application ID URI by exposing an API for the OIDC application. The
+application ID URI identifies your resource server for scoped token requests.
+
+1. Select **Expose an API** in the navigation panel.
+
+1. Click **Add** (next to **Application ID URI**).
+
+1. Review the default values for the other fields. In most cases you do not need
+   to change them.
+
+1. Click **Save**.
+
+1. Save the generated **Application ID URI**. You need the URI to integrate with
+   Vault later.
+
+
+## Step 4: Update the application manifest
+
+Add a requested access token version number to the manifest of your OIDC
+application so Entra ID issues an access token that Vault can validate.
+
+1. Click **Manifest**.
+
+1. Add `"requestedAccessTokenVersion": 2` to the manifest in the `api` section:
+
+   <CodeBlockConfig hideClipboard highlight="5">
+
+   ```json
+      ...
+      "api": {
+         "acceptMappedClaims": null,
+         "knownClientApplications": [],
+         "requestedAccessTokenVersion": 2,
+         "oauth2PermissionScopes": [],
+         "preAuthorizedApplications": []
+      },
+      ... 
+   ```
+
+   </CodeBlockConfig>
+
+1. Click **Save**.
+
+
+## Step 5: Gather your OIDC metadata
+
+Vault needs the following OIDC metadata from your Azure application to configure
+a Vault OAuth resource server profile:
+
+- The URL that identifies your OIDC application (`issuer`).
+- The JSON web key set  (JWKS) URL where clients can download public keys (`jwks_uri`).
+- The token endpoint URL where clients can request OAuth tokens (`token_endpoint`).
+
+1. Select **Overview** in the left navigation panel.
+
+1. Select **Endpoints**.
+
+1. Find the OIDC discovery endpoint in the **OpenID Connect metadata document URL**
+   field and copy it. Entra discovery endpoints typically have the form:
+   `https://login.microsoftonline.com/{tenant_id}/v2.0/.well-known/openid-configuration`.
+
+1. Use the discovery endpoint to fetch the metadata document of your dd app :
+
+   ```shell-session
+   $ curl -s <your_open_id_metadata_document_url> | \
+     jq -r "{token_endpoint, jwks_uri, issuer}"
+   ```
+
+1. Note the `token_endpoint`, `jwks_uri`, and `issuer` values returned. For
+   example:
+
+   <CodeBlockConfig hideClipboard>
+   
+   ```json
+   {
+      "token_endpoint": "https://login.microsoftonline.com/0000000000000-0000-0000-000000000000/oauth2/v2.0/token",
+      "jwks_uri": "https://login.microsoftonline.com/0000000000000-0000-0000-000000000000/discovery/v2.0/keys",
+      "issuer": "https://login.microsoftonline.com/0000000000000-0000-0000-000000000000/v2.0",
+   }
+   ```
+  
+   </CodeBlockConfig>
+
+1. Close out the **Endpoints** page to return to the **Overview** page.
+
+1. Select your application name next to **Managed application in local directory**.
+
+   ![Name of the managed application in local directory](/img/agentic-ai/screenshot-entra-managed-application.png)
+
+1. Save the **Object ID** of your application. You need the object ID to
+   configure Vault later.
+
+   ![Find the Object ID](/img/agentic-ai/screenshot-entra-object-id.png)
+
+
+## Step 6: Save your provider information
+
+Confirm your app details from the OpenID Connect metadata document and setup
+process. To configure Vault agentic IAM, you must have the following information:
+
+Value                | Environmental variable  | Description
+-------------------- | ----------------------- | ------------
+Issuer URL           | ISSUER                  | URL identifying your OIDC application in Azure
+Azure ID             | EXTERNAL_ID             | Global Azure object GUID for your OIDC application
+Azure URI            | APP_ID                  | URI for the API exposed by your OIDC application
+Client secret name   | SECRET_NAME             | Client secret name created for your OIDC application
+Client secret ID     | SECRET_ID               | Azure object GUID for the generated client secret
+Client secret value  | SECRET_VALUE            | Client secret value created for your OIDC application
+Key endpoint         | JWKS_URI                | URL where clients can download public keys (JWKS)
+Token endpoint       | TOKEN_ENDPOINT          | OAuth endpoint URL for your OIDC application
+
+We recommend setting the following environment variables to make Vault
+configuration more convenient:
+
+```shell-session
+$ export                                 \
+    VAULT_ADDR="<your_vault_server_url>" \
+    VAULT_TOKEN="<token_string>"         \
+    EXTERNAL_ID="<global_obj_guid>"      \
+    APP_ID="<azure_app_uri>"             \
+    SECRET_NAME=<app_secret_name>        \
+    SECRET_ID=<app_secret_obj_guid>      \
+    SECRET_VALUE=<app_secret_string>     \
+    TOKEN_ENDPOINT="<token_endpoint>"    \
+    JWKS_URI="<jwks_uri>"                \
+    ISSUER="<issuer>"
+```
+
+For example:
+
+<CodeBlockConfig hideClipboard>
+
+```shell-session
+$ export                                                                                                      \
+    VAULT_ADDR="http://127.0.0.1:8200"                                                                        \
+    VAULT_TOKEN="hvs.000000000000000000000000"                                                                \
+    EXTERNAL_ID="0000000000000-0000-0000-000000000000"                                                        \
+    APP_ID="1111111111111-1111-1111-111111111111/2222222222222-2222-2222-222222222222"                        \
+    SECRET_NAME="vault-ai-iam"                                                                                \
+    SECRET_ID="3333333333333-3333-3333-333333333333"                                                          \
+    SECRET_VALUE="AAAAA~xX.XxxXXxx.XxxXxx_XXxxXXxxXXxxX"                                                      \
+    TOKEN_ENDPOINT="https://login.microsoftonline.com/0000000000000-0000-0000-000000000000/oauth2/v2.0/token" \
+    JWKS_URI="https://login.microsoftonline.com/0000000000000-0000-0000-000000000000/discovery/v2.0/keys"     \
+    ISSUER="https://login.microsoftonline.com/0000000000000-0000-0000-000000000000/v2.0"                      \
+```
+
+</CodeBlockConfig>
+
+
+## Next steps
+
+- Configure Vault to [secure agentic workflows](/vault/ai/iam/setup-agent)
+- Configure additonal identity provides and authentication servers:
+   - [Configure IBM Verify for agent IAM](/vault/ai/iam/providers/verify)
+   - [Configure Okta for agent IAM](/vault/docs/ai/iam/providers/okta)
+   - [Configure Auth0 for agent IAM](/vault/docs/ai/iam/providers/auth0)
