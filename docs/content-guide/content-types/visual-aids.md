@@ -27,10 +27,11 @@ following guidance is an adaptation of
   diagram. Instead, describe the behavior the diagram intends to show in prose
   that introduces the diagram. This improves maintainability, portability, and
   accessibility.
-- **Use the diagram toolkit**: The
-  [diagram toolkit](https://docs.google.com/presentation/d/1_dPrYbavWklZSQRqtMypAB0cJ7ZQ3wU_eN0F37YMhT8/edit?usp=sharing)
-  contains all of the artwork, product logos, third-party logos, approved
-  iconography, and other assets necessary for creating diagrams.
+- **Start from an existing diagram**: Before drawing anything, open a product's
+  [`diagram-sources`](#commit-the-diagram-sources) directory and look at how
+  comparable diagrams are built. Matching an existing diagram's shapes, spacing,
+  and labelling is faster than starting from scratch and keeps a topic area
+  visually consistent.
 - **Use Helios icons for components**: Draw system components from the
   [Helios icon library](https://helios.hashicorp.design/icons/). Helios is
   HashiCorp's open source design system, so its icons already match the visual
