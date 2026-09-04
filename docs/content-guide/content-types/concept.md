@@ -31,8 +31,8 @@ For examples of Concept (long) pages that implement these guidelines, refer to
 the following:
 
 - [HCP Consul cluster management](https://developer.hashicorp.com/hcp/docs/consul/concepts/cluster-management)
-- [Consul architecture: Catalog v1 API](https://developer.hashicorp.com/consul/docs/architecture/catalog/v1)
-- [Consul architecture: Catalog v2 API](https://developer.hashicorp.com/consul/docs/architecture/catalog/v2)
+- [Consul control plane architecture](https://developer.hashicorp.com/consul/docs/architecture/control-plane)
+- [Consul service mesh](https://developer.hashicorp.com/consul/docs/architecture/data-plane/connect)
 
 ## Concept versus overview
 
