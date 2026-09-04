@@ -1,11 +1,11 @@
 ---
 layout: docs
-page_title: Create multi-hop sessions for Boundary Enterprise
+page_title: Configure multi-hop sessions for Boundary Enterprise
 description: >-
-  Configure multi-hop sessions for Boundary Enterprise. Chain together two or more workers across multiple networks to reach a target without exposing private networks.
+  Configure ingress, intermediate, and egress workers for Boundary Enterprise. Chain workers across networks and route target traffic through the chain.
 # START AUTO GENERATED METADATA, DO NOT EDIT
-created_at: 2025-11-18T17:04:41-05:00
-last_modified: 2026-01-26T11:20:17-05:00
+created_at: 2026-05-11T10:18:43-04:00
+last_modified: 2026-08-10T22:18:17.000Z
 # END AUTO GENERATED METADATA
 ---
 
@@ -13,22 +13,253 @@ last_modified: 2026-01-26T11:20:17-05:00
 
 @include 'alerts/enterprise-only.mdx'
 
-For Boundary Enterprise, you can configure ingress, intermediary, and egress workers to take advantage of multi-hop worker capabilities.
+For Boundary Enterprise, you can configure ingress, intermediate, and egress workers to take advantage of multi-hop worker capabilities.
 
-Note that "ingress," "intermediary," and "egress" are general ways to describe how the respective worker interacts with resources.
+This page details a three-worker chain.
+The ingress worker connects to the controllers, the intermediate worker connects to the ingress worker, and the egress worker connects to the intermediate worker and reaches the target.
+
+Note that "ingress," "intermediate," and "egress" are general ways to describe how the respective worker interacts with resources.
 A worker can serve more than one of those roles at a time.
 Refer to [Multi-hop sessions](/boundary/docs/workers/multi-hop) for more information.
 
-Complete the steps below to configure ingress, intermediate, and egress workers for Boundary Enterprise.
+## Requirements
 
-## Ingress worker configuration
+Before you configure a multi-hop chain, you must have:
+
+- A running Boundary Enterprise control plane.
+- Three hosts with the Boundary binary installed, one in each network. Refer to [Install Boundary](/boundary/docs/deploy/self-managed/install).
+- The following network paths:
+   - The ingress worker reaches the controllers on port `9201`, and clients reach the ingress worker on port `9202`.
+   - The intermediate worker reaches the ingress worker on port `9202`.
+   - The egress worker reaches the intermediate worker on port `9202`, and reaches the target host.
+
+You do not need inbound network rules between the network boundaries.
+Each worker connects outbound to its upstream, and Boundary uses that connection in both directions.
+
+## Configure the workers
+
+Create a configuration file on each host.
+The files differ in three places: the `initial_upstreams` value, the tags, and the KMS key that encrypts the worker's credentials.
+
+The examples use the worker-led registration method.
+To use a different method, refer to [Register workers](/boundary/docs/workers/registration).
+
+### Ingress worker configuration
+
+The ingress worker points `initial_upstreams` at the controller load balancer address.
 
 @include '/workers/ingress-worker-config.mdx'
 
-## Intermediate worker configuration
+### Intermediate worker configuration
+
+The intermediate worker points `initial_upstreams` at the ingress worker on port `9202`.
 
 @include '/workers/intermediate-worker-config.mdx'
 
-## Egress worker configuration
+### Egress worker configuration
+
+The egress worker points `initial_upstreams` at the intermediate worker on port `9202`.
 
 @include '/workers/egress-worker-config.mdx'
+
+## Start and register the workers
+
+Start the workers in order from the top of the chain down.
+A downstream worker cannot connect until its upstream is running and authorized.
+
+Complete the following steps for each worker, beginning with the ingress worker:
+
+1. Start the worker on its host:
+
+   ```shell-session
+   $ boundary server -config=/etc/boundary.d/ingress-worker.hcl
+   ```
+
+   Refer to [Start and verify a worker](/boundary/docs/workers/start) to run the worker under systemd or in a container.
+
+1. Copy the **Worker Auth Registration Request** value from the startup output.
+You can also read it from the `auth_request_token` file in the worker's `auth_storage_path` directory.
+
+1. Register the worker with a controller:
+
+   ```shell-session
+   $ boundary workers create worker-led -worker-generated-auth-token=$WORKER_TOKEN
+   ```
+
+1. Repeat these steps for the intermediate worker, and then for the egress worker.
+
+Downstream workers register through their upstream worker.
+The intermediate and egress workers do not need network access to the control plane.
+
+## Verify the chain
+
+Use the `Directly Connected Downstream Workers` field to confirm the shape of the chain.
+
+Read the ingress worker:
+
+```shell-session
+$ boundary workers read -id w_UJ3Qq63Jx0
+```
+
+The output lists the intermediate worker as its downstream:
+
+<CodeBlockConfig hideClipboard highlight="15-16">
+
+```plaintext
+Worker information:
+  Active Connection Count:   0
+  Address:                   10.0.0.10:9202
+  ID:                        w_UJ3Qq63Jx0
+  Last Status Time:          2026-08-07 19:45:22.616245 +0000 UTC
+  Local Storage State:       not configured
+  Release Version:           Boundary v1.0.0+ent
+  Type:                      pki
+  Version:                   1
+
+  Tags:
+    Configuration:
+      type: ["worker1" "ingress"]
+
+  Directly Connected Downstream Workers:
+    w_GHBqIeHMyR
+```
+
+</CodeBlockConfig>
+
+Read the intermediate worker, and confirm that it lists the egress worker as its downstream.
+The egress worker sits at the end of the chain, so it has no downstream workers.
+
+## Route target traffic through the chain
+
+Worker filters control which workers Boundary uses for a session.
+Set an ingress filter to choose where the client connects, and an egress filter to choose which worker reaches the target.
+
+Boundary chooses the path between the ingress and egress workers automatically.
+You do not filter on intermediate workers.
+
+<Tabs>
+<Tab heading="UI" group="ui">
+
+1. Log in to Boundary.
+1. Select the org, and then select the project that contains the target.
+1. Select **Targets**, and then select the target.
+1. Select the **Workers** tab.
+1. Beside **Ingress workers**, click **Add Worker Filter**, and enter a filter that matches the ingress worker's tags:
+
+   ```plaintext
+   "ingress" in "/tags/type"
+   ```
+
+1. Click **Save**.
+1. Beside **Egress workers**, click **Add Worker Filter**, and enter a filter that matches the egress worker's tags:
+
+   ```plaintext
+   "egress" in "/tags/type"
+   ```
+
+1. Click **Save**.
+
+
+
+  The button reads **Add Worker Filter** when the target has no filter for that role, and **Edit Worker Filter** when a filter already exists.
+
+
+<Tip>
+
+  The filter editor includes a generator that formats the filter for you from a worker tag or a worker name.
+  Refer to [Generate a filter in the Admin UI](/boundary/docs/workers/filters#generate-a-filter-in-the-admin-ui).
+
+</Tip>
+
+</Tab>
+<Tab heading="CLI" group="cli">
+
+1. Set an ingress worker filter that matches the ingress worker's tags:
+
+   ```shell-session
+   $ boundary targets update tcp -id ttcp_uPVxp2NGiD \
+     -ingress-worker-filter='"ingress" in "/tags/type"'
+   ```
+
+1. Set an egress worker filter that matches the egress worker's tags:
+
+   ```shell-session
+   $ boundary targets update tcp -id ttcp_uPVxp2NGiD \
+     -egress-worker-filter='"egress" in "/tags/type"'
+   ```
+
+   Boundary returns the updated target with both filters applied:
+
+   <CodeBlockConfig hideClipboard highlight="4,7">
+
+   ```plaintext
+   Target information:
+     Address:                    10.10.10.50
+     Description:                Multi-hop target
+     Egress Worker Filter:       "egress" in "/tags/type"
+     ID:                         ttcp_uPVxp2NGiD
+     Ingress Worker Filter:      "ingress" in "/tags/type"
+     Name:                       private-web
+     Session Connection Limit:   -1
+     Session Max Seconds:        28800
+     Type:                       tcp
+     Version:                    3
+   ```
+
+   </CodeBlockConfig>
+
+</Tab>
+<Tab heading="Terraform" group="terraform">
+
+Apply the following Terraform configuration:
+
+```hcl
+resource "boundary_target" "private_web" {
+  type                  = "tcp"
+  name                  = "private-web"
+  description           = "Multi-hop target"
+  scope_id              = boundary_scope.project.id
+  default_port          = 443
+  ingress_worker_filter = "\"ingress\" in \"/tags/type\""
+  egress_worker_filter  = "\"egress\" in \"/tags/type\""
+}
+```
+
+</Tab>
+</Tabs>
+
+Refer to [Configure a worker filter](/boundary/docs/workers/filters) for more filter examples.
+
+## Test the connection
+
+Connect to the target to confirm that the session traverses the chain:
+
+```shell-session
+$ boundary connect -target-id ttcp_uPVxp2NGiD
+```
+
+Boundary returns the local proxy details:
+
+<CodeBlockConfig hideClipboard>
+
+```plaintext
+Proxy listening information:
+  Address:             127.0.0.1
+  Connection Limit:    -1
+  Expiration:          Fri, 07 Aug 2026 21:46:08 MDT
+  Port:                52234
+  Protocol:            tcp
+  Session ID:          s_phGLOoaB7v
+```
+
+</CodeBlockConfig>
+
+If the session fails because no workers match the filter, refer to [Troubleshoot workers](/boundary/docs/workers/troubleshoot#sessions-to-a-target-fail-with-no-available-workers).
+
+## Next steps
+
+After you configure the chain, you can:
+
+- [Authenticate downstream workers](/boundary/docs/workers/multi-hop/downstream-worker-auth) using a separate KMS trust domain.
+- [Verify SSH host identity](/boundary/docs/workers/ssh-host-key) on the egress worker.
+- [Manage workers](/boundary/docs/workers/manage) to reload configuration or drain sessions.
