@@ -41,12 +41,31 @@ user-facing experience.
 
 This is the general operating guide for the codebase, architecture, workflows,
 and operational behavior of `web-unified-docs`. When a task is specific to one
-product or content set under `content/`, first check that product area for its
-own `AGENTS.md`, style guidance, or templates and follow those local
-instructions first.
+product or content set under `content/`, check that product area for its own
+`AGENTS.md` and follow those local instructions first. Authoring conventions for
+a product live in `docs/content-guide/products/`, not under `content/`.
 
 Documentation-review guidance for changed Markdown/MDX under `content/` is
 path-specific and lives in `.github/instructions/*.instructions.md`.
+
+Authoring guidance for content under `content/` lives in `docs/`, and is the
+source of truth for both humans and agents:
+
+- [docs/content-guide/content-types.md](docs/content-guide/content-types.md) —
+  which content type to use, the page structure for each, and the templates in
+  `docs/content-guide/templates/`.
+- [docs/content-guide/products/](docs/content-guide/products/index.md) — how each
+  product implements those content types, and which template to use for it.
+  **Check this before choosing a type or copying a template.** A product page
+  takes precedence over the global guidance for the differences it records.
+- [docs/style-guide/index.md](docs/style-guide/index.md) — voice, word choice,
+  formatting, headings, links, and markdown rules. Start with
+  [top-12.md](docs/style-guide/top-12.md).
+- [docs/content-guide/indexing.md](docs/content-guide/indexing.md) — file,
+  folder, and navigation label naming.
+
+Read these rather than relying on recall. They change, and the guidance in this
+file can drift from them.
 
 ## Detailed guides
 
