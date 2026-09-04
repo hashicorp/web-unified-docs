@@ -13,6 +13,7 @@ If a software term isn't listed, or the company's GitHub repo are good resources
 - **24/7** not 24-7
 - **ACL, TLS, URL, ...** Capitalize every acronym and abbreviation, don't be lazy and write "url" unless it's in a code snippet or a code formatted word
 - **access control lists (ACLs)**
+- **Admin UI**
 - **agile development** avoid saying "Agile" since there's no definitive definition so it doesn't merit having proper noun status
 - **AI and artificial intelligence** either is OK, interchangeable
 - **America/American** Avoid using these US-based terms. Spell out United States in text on first reference when it's used as a noun and use US as an adjective
@@ -31,7 +32,11 @@ If a software term isn't listed, or the company's GitHub repo are good resources
 - **bandwidth** one word
 - **Bash**
 - **beta**
+- **Boundary Admin UI / Admin UI** (when referring to the Boundary Admin UI)
 - **Boundary Client Agent / Client Agent** (when referring to the Boundary Client Agent) because it's a separate download
+- **Boundary Desktop Client / Desktop Client** (when referring to the Boundary Desktop Client)
+- **Boundary Installer** (when referring to the Boundary Installer) because it's a separate download
+- **Boundary Session Recording / BSR** (when referring to the Boundary Session Recording)
 - **bring your own DNS** (no hyphens)
 
 ### C
