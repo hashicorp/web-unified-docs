@@ -22,7 +22,7 @@ If a software term isn't listed, or the company's GitHub repo are good resources
 - **AWS re:Invent** Amazon's cloud conference, note unusual capitalization and punctuation use whole thing on first reference
 - **AZ** availability zone, spell out on first reference
 - **add-on** (noun, adjective), add on (verb)
-- **auth method**
+- **auth method** (not auth backend) auth backend is old terminology
 - **autoscaling (general)** different from proper nouns such as Nomad Autoscaler, AWS Auto Scaling groups
 
 ### B
@@ -142,7 +142,7 @@ If a software term isn't listed, or the company's GitHub repo are good resources
 - **The Infrastructure Cloud, or just Infrastructure Cloud** capitalize the "The". The Infrastructure Cloud can be referred to as an approach, blueprint. From the announcement: "HashiCorp created The Infrastructure Cloud to provide a unified approach to managing the entire lifecycle of your cloud infrastructure and security resources"
 - **Infrastructure Lifecycle Management (ILM)**
 - **integrate**
-- **integrated storage** a Vault feature some old docs have capitalized. Just link on first mention and lower case to show that it's a feature and not the general words integrated or storage
+- **integrated storage** (not Raft) integrated storage implements the Raft consensus protocol, but the feature name is integrated storage. A Vault feature some old docs have capitalized. Just link on first mention and lower case to show that it's a feature and not the general words integrated or storage
 - **internet** (never capitalize unless it begins a sentence)
 - **internet of things**
 - **I/O** input/output, not IO. no need to spell out
@@ -213,6 +213,7 @@ If a software term isn't listed, or the company's GitHub repo are good resources
 ### P
 
 - **pentest** short for penetration test
+- **PGP key** (not GPG key) refer to the software as GnuPG, but the keys themselves are PGP keys regardless of what created them
 - **platform as a service (PaaS)**
 - **platform team/platform engineering** Platform engineering is an IT operations discipline that involves building, maintaining, and improving a centralized, self-service platform that developers and other IT workers can use to provision, secure, connect, and orchestrate application infrastructure
 - **plaintext / plain text** Use plaintext only to refer to non-encrypted or decrypted text in content about encryption. Use plain text to refer to text where no style information (bold, italics) is included, as opposed to formatted/rich text
@@ -245,6 +246,7 @@ If a software term isn't listed, or the company's GitHub repo are good resources
 - **REST, RESTful** (no need to spell out this abbreviation)
 - **ROI** (no need to spell out)
 - **rollout, rollback**
+- **root key** (not master key) master key was renamed to root key
 - **Ruby on Rails**, shorthand: Rails
 - **run tasks**
 
@@ -252,6 +254,7 @@ If a software term isn't listed, or the company's GitHub repo are good resources
 
 - **scalable**
 - **seasons** do not capitalize: spring, fall, winter, summer
+- **secret** (lowercase, not Secret)
 - **secret vs secrets in feature names** In general, there are only rare cases where "secrets" would be preferred. Unless you really are talking about a collection of secrets, there's no real reason to use the pluralization. For example, you wouldn't say 'resources rotation' you would say 'resource rotation'. The same logic applies to secrets. If it's being mistaken for the general adjective "secret" then consider reworking the sentence construction or context before
   - **secret auto-rotation**
   - **secret detection**
@@ -259,7 +262,7 @@ If a software term isn't listed, or the company's GitHub repo are good resources
   - **secret scanning**
   - **secret sprawl** (singular on the 'secret')
   - **secret transformation**
-- **secrets engine** a major named Vault component type
+- **secrets engine** (not secrets backend or Secrets Engine) a major named Vault component type
 - **secrets lifecycle management**
 - **secrets management/manager** A method for managing digital authentication credentials (secrets), including passwords, keys, APIs, and tokens for use in applications, services, privileged accounts, and other sensitive parts of an IT ecosystem. Sometimes called "credential management". Vault does this. Do not use: secret management (we always use "secrets" with an 's' in this context). Not "secret management"
 - **secrets sync** A major Vault feature
@@ -270,6 +273,7 @@ If a software term isn't listed, or the company's GitHub repo are good resources
 - **service principle**
 - **setup** n., adj.; set up v.
 - **shadow IT** (not capitalized)
+- **Shamir seal** (not Shamir Seal)
 - **signup** n., adj.; sign up v.
 - **siloed** (not silo'd or silo-ed)
 - **single sign-on (SSO)**
@@ -280,6 +284,7 @@ If a software term isn't listed, or the company's GitHub repo are good resources
 - **standby** when referring to Vault performance standby nodes. No space or hyphen
 - **start up** v., startup n./adj.
 - **state file**
+- **storage backend** integrated storage is one of several supported storage backends, and the only internal one
 - **sync**
 - **system integrators** (not "systems," though "systems integration" can be used). On second reference, can call them SIs (not SI's)
 
@@ -297,6 +302,7 @@ If a software term isn't listed, or the company's GitHub repo are good resources
 - **[Don't use a shorthand for Terraform or Terraform Enterprise unless it's a verbatim line of code. Good: Terraform, Terraform Enterprise, Terraform Cloud, Terraform Cloud Business Tier. Bad: TF, TFE, TFC, TFC4B]**
 - **Terraform Stacks / Stacks / Stack**
 - **Terraform Explorer, Explorer, Explorer tab**
+- **token** (lowercase, not Token)
 - **touchpoint** one word
 - **t-shirt**
 - **tweet, retweet**
@@ -305,6 +311,7 @@ If a software term isn't listed, or the company's GitHub repo are good resources
 
 - **UK** not U.K.
 - **Unix**
+- **unseal key** when Shamir's Secret Sharing is used, unseal keys are Shamir keys; with auto-unseal, the recovery keys are Shamir keys and the unseal key is an encryption key from the auto-unseal provider
 - **US** not U.S.
 - **use case** not use-case
 - **username**
@@ -312,8 +319,10 @@ If a software term isn't listed, or the company's GitHub repo are good resources
 ### V
 
 - **Vault Agent** this is somewhat of an exception to our "don't capitalize features" rule. Education team decided on capitalizing "Agent" in this instance
+- **Vault cluster** (not Vault Cluster)
 - **Vault Proxy** this is somewhat of an exception to our "don't capitalize features" rule. Education team decided on capitalizing "Proxy" in this instance
 - **Vault Radar agent**
+- **Vault token, client token** used interchangeably; CLI output usually says "client token"
 - **VMware**
 - **VPN** virtual private network, no need to spell out
 
