@@ -1,0 +1,379 @@
+---
+layout: docs
+page_title: Configure PingFederate for agent IAM
+description: >-
+  Configure PingFederate OAuth clients and Access Token Managers to integrate with Vault Enterprise agentic IAM and resource authorization for agents.
+---
+
+# Configure PingFederate for agent IAM
+
+@include 'alerts/enterprise-and-hcp.mdx'
+
+Configure users and OIDC applications in PingFederate to use with Vault Enterprise agentic IAM.
+
+## Before you start
+
+- **You must have an [PingFederate](https://www.pingidentity.com/en/product/pingfederate.html) client.**
+- **You must have [`curl`](https://curl.se/)** or some other tool to make API calls.
+- **You must have [`jq`](https://jqlang.org/) installed** to use the example commands as written.
+
+## Step 1: Create the default JWT Access Token Manager for RAR
+
+Create the default JWT Access Token Manager used for RAR-capable tokens.
+
+PingFederate issues OAuth access tokens as signed JWTs. Vault, as an OAuth resource server, validates these JWTs and maps their claims to a Vault identity.
+
+Configure the default Access Token Manager with Authorization Details Claim Name = `authorization_details` so PingFederate can emit a populated `authorization_details` claim for RAR requests.
+
+Do not use this Access Token Manager for autonomous or OBO output tokens. Those non-RAR flows use the separate Autonomous Access Token Manager so PingFederate omits `authorization_details` entirely.
+
+1. Open the PingFederate admin console.
+
+1. Navigate through the UI to **Applications**.
+
+1. Click on **OAuth**.
+
+1. Select **Access Token Management**.
+
+1. Select **Create New Instance**.
+
+1. Set the instance to have the following properties:
+   - **Instance Name**: Default
+   - **Instance ID**: default
+   - **Type**: JSON Web Tokens
+   - **Parent Instance**:  None
+
+1. Of the remaining fields should match:
+   - **Token Lifetime**: 120
+   - **Use Centralized Signing Key**: ✅ checked
+   - **JWS Algorithm**: RSA using SHA-256
+   - **Active Symmetric Key ID**: -- Select One -- (leave)
+   - **Active Signing Certificate Key ID**: -- Select One -- (leave)
+   - **JWE Algorithm**: -- Select One -- (leave)
+   - **JWE Content Encryption Algorithm**: -- Select One -- (leave)
+   - **Active Symmetric Encryption Key ID**: -- Select One -- (leave)
+   - **Asymmetric Encryption Key**: (blank)
+   - **Asymmetric Encryption JWKS URL**: (blank)
+   - **Enable Token Revocation**:  unchecked
+
+1. Click Show Advanced Fields and check the values match.
+   - **Include Key ID Header Parameter**: ✅ checked
+   - **Include X.509 Thumbprint Header Parameter**: unchecked
+   - **Default JWKS URL Cache Duration**: 720
+   - **Include JWE Key ID Header Parameter**: ✅ checked
+   - **Include JWE X.509 Thumbprint Header Parameter**: unchecked
+   - **Client ID Claim Name**: `client_id`
+   - **Scope Claim Name**: scope
+   - **Space Delimit Scope Values**: ✅ checked
+   - **Authorization Details Claim Name**: `authorization_details`
+   - **Issuer Claim Value**: (blank)
+   - **Audience Claim Value**: (blank)
+   - **Not Before Claim Offset**: (blank)
+   - **Include Issued At Claim**: ✅ checked
+   - **JWT ID Claim Length**: 22
+   - **Access Grant GUID Claim Name**: (blank)
+   - **Publish Keys to PingFederate JWKS Endpoint**: unchecked
+   - **JWKS Endpoint Path**: (blank)
+   - **JWKS Endpoint Cache Duration**: 720
+   - **Publish Key ID X.509 URL**: unchecked
+   - **Publish Thumbprint X.509 URL**: unchecked
+   - **Expand Scope Groups**: unchecked
+   - **Type Header Value**: (blank)
+
+1. On the **Session Validation** tab, leave all four options unchecked:
+
+   - Include Session Identifier in Access Token
+   - Check for Valid Authentication Session
+   - Check Session Revocation Status
+   - Update Authentication Session Activity
+
+   Vault is validating the JWT itself as an OAuth resource server. These tokens are not tying PingFederate to browser sessions, so session validation would add an unnecessary dependency. If authentications are globally disabled, PingFederate displays a warning on the page.
+
+### Define claims
+
+Define which claims PingFederate allowed to issue from the default JWT Access Token Manager. To use RAR tokens this contract includes `authorization_details`.
+
+1. Go back to **Applications**.
+
+1. Click **OAuth**.
+
+1. **Access Token Management**.
+
+1. Choose **Default**.
+
+1. Choose **Access Token Attribute Contract**.
+
+1. Configure the contract with these attributes:
+   - `authorization_details`
+   - `client_id`
+   - `iss`
+   - `sub`
+
+   ![Access token contact](/img/agentic-ai/screenshot-ping-access-token-contact.png)
+
+1. Save the Access Token Attribute Contract with `USER_KEY`  as the subject attribute and `authorization_details`, `client_id`, `iss`, and `sub` added to the contract.
+
+1. Leave the Token Endpoint Attribute Contract, Resource URIs, and Access Control tabs at their defaults and finish the JWT Access Token Manager setup.
+
+## Step 3: Configure the default client-credentials access-token mapping for RAR
+
+Configure the client-credentials access-token mapping for the default JWT Access Token Manager.
+
+The default Access Token Manager is the RAR-capable token manager. It includes the `authorization_details` contract attribute used by `vault-rar-client`.
+
+This mapping allows PingFederate to issue client-credentials JWTs that can include a populated `authorization_details` claim when the RAR client supplies one in the token request.
+
+Do not use this mapping for `vault-agent-autonomous`. The autonomous flow uses a separate client-credentials mapping for the Autonomous Access Token Manager so omits `authorization_details` entirely. 
+
+1. Go back to to **Applications**.
+
+1. Select **OAuth**.
+
+1. Select **Access Token Mappings**.
+
+   Create the mapping with these values:
+   - **Context**: Client Credentials
+   - **Access token manager**: Default
+   - **Attribute Sources & User Lookup**: Leave Data Sources empty
+
+   ![Access token mappings](/img/agentic-ai/screenshot-ping-token-mappings.png)
+
+1. In the **Contract Fulfillment** tab verify the following mappings.
+   - **`authorization_details`**: No Mapping
+   - **`client_id`**: Context - ClientId 
+   - **`iss`**: Text - https://localhost:9031 
+   - **`sub`**: Context - ClientId 
+
+   <Note>
+      
+      The `authorization_details` is intentionally left as No Mapping here. For RAR, PingFederate populates `authorization_details` from the client-supplied `authorization_details` request parameter after configuring the `vault:path_access` authorization detail type and processor.
+
+      For non-RAR client-credentials tokens, do not rely on No Mapping to suppress the claim. If the Access Token Manager has Authorization Details Claim Name set to `authorization_details`, PingFederate can still emit `authorization_details`: []. Non-RAR flows use the separate Autonomous Access Token Manager instead.
+   </Note>
+
+   ![Contract fulfillment](/img/agentic-ai/screenshot-ping-access-token-mappings-contract-fulfillment.png)
+
+1. Leave all issuance criteria fields empty.  Do not add a source, attribute, condition, value, or error result.
+
+1. Click **Next** to continue to the **Summary** tab.
+
+   Before saving, confirm the summary shows:
+   - Context: Client Credentials
+   - Access token manager: Default
+   - `authorization_details` set to No Mapping
+   - `client_id` mapped from Context to ClientId
+   - `iss` mapped from Text to https://localhost:9031
+   - `sub` mapped from Context to ClientId
+   - No issuance criteria
+
+   ![Summary](/img/agentic-ai/screenshot-ping-access-token-summary.png)
+
+1. After confirming the summary matches these values, click Save.
+
+After saving, the Default client-credentials mapping is ready for RAR-capable tokens issued to `vault-rar-client`.
+
+## Step 3: Create the autonomous JWT Access Token Manager for non-RAR tokens
+
+Create the JWT Access Token Manager used for non-RAR tokens.
+
+- `vault-agent-autonomous` uses this Access Token Manager for autonomous client-credentials tokens
+- `vault-obo-client` for exchanged OBO output tokens
+
+Unlike the default Access Token Manager, this manager must not emit `authorization_details`. Leave the Authorization Details Claim Name blank, and do not add the `authorization_details` to the Access Token Attribute Contract.
+
+1. Click on **Applications**. 
+
+1. Select **OAuth**.
+
+1. Select **Access Token Management**.
+
+1. Select **Create New Instance**.
+
+1. Create a second JWT Access Token Manager for the autonomous no-RAR flow.
+
+1. Verify that the **Type** tab uses the following fields have these values.
+   - **Instance Name**: Autonomous
+   - **Instance ID**: autonomous
+   - **Type**: JSON Web Tokens
+   - **Parent Instance**: None
+
+1. Use the same JWT configuration values as the default JWT Access Token Manager, except for the authorization details settings.
+   - **Authorization Details Claim Name**: blank
+
+1. For the **Access Token Attribute Contract** add these contract attributes:
+   - `client_id`
+   - `iss`
+   - `sub`
+
+   <Note title='Warning'>
+      Do not enter `authorization_details` for this Access Token Manager. If it is, PingFederate can emit `authorization_details`: [] for non-RAR tokens, which causes Vault to treat the request as RAR and reject it with `RAR_NO_MATCH`.
+   </Note>
+
+1. Before saving, confirm:
+   - Instance ID is autonomous
+   - Authorization Details Claim Name is blank
+   - The Access Token Attribute Contract contains `client_id`, `iss`, and sub
+   - The contract does not contain `authorization_details`
+
+Now the Autonomous Access Token Manager is ready to issue clean non-RAR JWTs for autonomous and OBO flows.
+
+<Note>
+   The autonomous test failed because the shared default JWT Access Token Manager had Authorization Details Claim Name set to `authorization_details`, which caused PingFederate to emit `authorization_details`: []. Vault then rejected the request with `RAR_NO_MATCH`. The dedicated autonomous Access Token Manager prevents this by omitting the claim entirely.
+</Note>
+
+![Token details no-RAR](/img/agentic-ai/screenshot-ping-access-token-no-RAR.png)
+
+## Step 4: Configure the autonomous client-credentials access-token mapping
+
+Configure the client-credentials access-token mapping for the Autonomous JWT Access Token Manager.
+
+The  `vault-agent-autonomous` uses this mapping to issue clean non-RAR client-credentials JWTs.
+
+The mapping fulfills the claims needed for Vault identity resolution:
+   - `client_id`
+   - `iss`
+   - `sub`
+
+It must not include `authorization_details`.
+
+1. Click to **Applications** 
+
+1. Select **OAuth** 
+
+1. Select **Access Token Mappings**.
+
+1. Click Add Mapping and configure the mapping with the following values:
+   - **Context**: Client Credentials
+   - **Access token manager**: Autonomous
+
+   Click **Select**.
+
+1. Leave Data Sources empty.  You do not need to do a user lookup because the mapping uses the OAuth client identity as the JWT subject.
+
+   Click **Next**.
+
+1. Configure the mappings as follows:
+   - **`client_id`**: Context - ClientId
+   - **`iss`**: Text - https://localhost:9031
+   - **`sub`**: Context - ClientId
+
+   The `authorization_details` attribute should not appear in this contract because it was not added to the Autonomous Access Token Manager.
+
+1. Leave all issuance criteria fields empty.
+
+   Do not add:
+   - a source
+   - an attribute
+   - a condition
+   - a comparison value
+   - an error result
+
+   Click *Next*.
+
+1. Verify the summary.
+
+   Confirm that the summary shows:
+
+   - Context: Client Credentials
+   - Access token manager: Autonomous
+   - No data sources
+   - `client_id` mapped from Context to `ClientId`
+   - `iss` mapped from Text to https://localhost:9031
+   - `sub` mapped from Context to `ClientId`
+   - No `authorization_details` mapping
+   - No issuance criteria
+
+   Click **Save**.
+
+   ![Verify summary](/img/agentic-ai/screenshot-ping-autonomous-client-credentials-access-token-mapping.png)
+
+After saving, the Autonomous Access Token Manager can issue client-credentials JWTs for `vault-agent-autonomous`  without emitting `authorization_details`.
+
+## Step 5: Create the OAuth clients and assign Access Token Managers
+
+Now create the three OAuth clients.
+
+1. Navigate back to **Applications**.
+
+1. Select **OAuth**.
+
+1. Select **Clients**.
+
+1. Select **Add Client**.
+
+1. You will create 3 clients. Assign each client should to the Access Token Manager that matches its flow:
+   - `vault-agent-autonomous` uses Autonomous because it must omit `authorization_details`.
+   - `vault-rar-client` uses Default because it must emit `authorization_details` for RAR.
+   - `vault-obo-client` uses Autonomous because the exchanged OBO token must omit `authorization_details`.
+
+   ![vault-agent-autonomous configuration](/img/agentic-ai/screenshot-ping-vault-agent-autonomous-config.png)
+
+   ![more configuration details](/img/agentic-ai/screenshot-ping-vault-agent-autonomous-oauth-allowed-grant-types.png)
+
+1. For `vault-agent-autonomous`:
+   - **Allowed grant types**: Client Credentials
+   - **Default Access Token Manager**: Autonomous 
+   - **Restrict to Default Access Token Manager**: Checked 
+   - **Authorization details**: Disabled / unchecked
+   - Set **Client Authentication** to **Client Secret**.
+   - Generate and store each client secret securely. 
+   - Leave unrelated OIDC, redirect, refresh token, and consent settings at their defaults unless the flow requires them.
+
+1. Save the **CLIENT ID** and **CLIENT SECRET** values for `vault-agent-autonomous`. You need the client values to validate the agent workflow later:
+
+   ```shell-session
+   $ export PING_CLIENT_ID="<your_client_ID>"
+       PING_CLIENT_SECRET="<your_client_secret>"
+   ```
+
+## Step 6: Save data for next steps
+
+Value                         | Environmental variable  | Description
+----------------------------- | ----------------------- | --------------------------------------------------
+Issuer URL                    | ISSUER                  | URL identifying your OIDC application
+Key endpoint                  | JWKS_URI                | URL where clients can download public keys (JWKS)
+Certificate authority EM file | CA_PEM                  | Local certificate authority file 
+Client ID for a OAuth client  | PING_CLIENT_ID          | ID for the OAuth client
+Secret for OAuth Client       | PING_CLIENT_SECRET      | Client secret value created for the OIDC application
+Token endpoint                | TOKEN_ENDPOINT          | OAuth endpoint URL for the OIDC application
+
+We recommend setting the following environment variables to make Vault configuration more convenient:
+
+```shell-session
+$ export                                            \
+    VAULT_ADDR="<your_vault_server_url>"            \
+    VAULT_TOKEN="<token_string>"                    \
+    JWKS_URI="https://localhost:9031/pf/JWKS"       \
+    CA_PEM="<local valid CA cert>"                  \
+    ISSUER="<issuer_url>"                           \
+    PING_CLIENT_ID="<client_id>".                   \
+    PING_CLIENT_SECRET="<client_secret>
+    TOKEN_ENDPOINT="<token_endpoint>"
+```
+
+For example:
+
+<CodeBlockConfig hideClipboard>
+
+```shell-session
+$ export                                                       \
+   VAULT_ADDR="http://127.0.0.1:8200"                          \
+   VAULT_TOKEN="root"                                          \
+   JWKS_URI="https://localhost:9031/pf/JWKS"                   \
+   CA_PEM=$(cat certs/pingfederate-localhost/pf-local-ca.crt)  \
+   ISSUER="https://localhost:9031"   
+   PING_CLIENT_ID="vault-agent-autonomous"                          \
+   PING_CLIENT_SECRET="00ZP/yBawx69XXXXxXXXqwY0XxXXXxXXxxM3mAGb501Ds/XSuqJInbaT4S6T2L"  \
+   TOKEN_ENDPOINT="https://localhost:9031/as/token.oauth2"
+```
+
+</CodeBlockConfig>
+
+## Next steps
+
+- Configure Vault to [secure agentic workflows](/vault/ai/iam/setup-agent)
+- Configure Vault to [secure OBO workflows](/vault/ai/iam/setup-obo)
+- Configure additional identity provides and authentication servers:
+   - [Configure Microsoft Entra ID for agent IAM](/vault/docs/ai/iam/providers/entraid)
+   - [Configure Okta for agent IAM](/vault/docs/ai/iam/providers/okta)
+   - [Configure Auth0 for agent IAM](/vault/docs/ai/iam/providers/auth0)
