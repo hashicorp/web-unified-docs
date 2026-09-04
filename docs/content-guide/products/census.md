@@ -8,10 +8,13 @@ superseded it for discovery.** Use it for volume and distribution. Do not use it
 to determine a page's content type — refer to the product pages for that.
 
 This page records the census scope, method, accuracy, and known failure modes.
-**Read it before quoting any figure.** The full per-page classification — 4,291
-rows — is attached to the pull request that introduced this directory rather than
-committed here, because it is generated output that would go stale in place. The
-classifier that produces it is `census.py`, alongside this file.
+**Read it before quoting any figure.**
+
+The full per-page classification — all 4,291 rows — is not committed, because it
+is generated output that would go stale in place. `census.py` regenerates it on
+demand, either as a CSV or as a reviewable document; refer to
+[Running it](#running-it). A copy is attached to the pull request that introduced
+this directory, for reviewers who want it without running anything.
 
 ## Coverage
 
@@ -305,9 +308,33 @@ argument for treating any individual row as a hypothesis:
 
 Four nav entries remain genuinely unresolved: three in Boundary and one in Nomad.
 
+## Running it
+
+`census.py` needs Python 3 and nothing else. It prints a summary and **writes
+nothing unless you ask**:
+
+```shell-session
+$ python3 docs/content-guide/products/census.py
+```
+
+To write the per-page data, the reviewable document, or both:
+
+```shell-session
+$ python3 docs/content-guide/products/census.py --csv /tmp/census.csv
+$ python3 docs/content-guide/products/census.py --matrix /tmp/census-matrix.md
+```
+
+`--csv` carries every page with every feature used in its classification, so a
+disputed row can be re-judged without re-running anything. `--matrix` renders the
+same data as a document: per-product sections, collapsible per-nav-file tables,
+and the disagreement breakdown, with a documented type shown in bold wherever it
+contradicts the inferred one.
+
+Neither output belongs in the repository. Write them somewhere outside it.
+
 ## Refreshing
 
-`census.py` takes no arguments and writes its output next to itself. Update the
-product and version table at the top of the script when a product ships a new
-version directory, then re-run it and re-stamp the counts on the product pages
-with the new date.
+When a product ships a new version directory, update the `PRODUCTS` table at the
+top of the script, re-run it, and re-stamp the counts on the product pages with
+the new date. Each count on those pages ships the command that produced it, so
+individual figures can be refreshed without a full re-run.
