@@ -49,5 +49,11 @@ Templates use two placeholder styles, and the difference is not cosmetic:
   destinations, where backticks are not available and a bare `<name>` would be
   parsed as JSX and break the page.
 
+A link destination that stands in for a real page uses `UPPERCASE_NAME` for the
+parts a writer replaces — `/vault/api-docs/secret/PLUGIN_NAME`, not
+`/vault/api-docs/secret/name`. A lowercase placeholder path is indistinguishable
+from a real link, so it survives into published pages. Where the whole
+destination is a placeholder, `(link)` is clearer than a fabricated path.
+
 Never write a bare `<name>` in prose, in an `@include` path, or in a link
 destination. Replace every placeholder of either style before publishing.
