@@ -22,7 +22,7 @@ To start drafting, copy
 
 - [Checks configuration reference](https://developer.hashicorp.com/consul/docs/services/configuration/checks-configuration-reference)
 - [Required ports](https://developer.hashicorp.com/consul/docs/install/ports)
-- [Key metrics](https://developer.hashicorp.com/consul/docs/agent/telemetry#key-metrics)
+- [Agent telemetry metrics](https://developer.hashicorp.com/consul/docs/reference/agent/telemetry)
 - [Metrics reference](https://developer.hashicorp.com/terraform/cloud-docs/users-teams-organizations/organizations/metrics#metrics-reference)
 - [Audit log reference](https://developer.hashicorp.com/hcp/docs/packer/reference/audit-log)
 
