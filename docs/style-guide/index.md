@@ -71,6 +71,5 @@ If you feel that you need to break any of these guidelines, you might be right. 
 This style guide is intended to be a complete resource, but you can take the following steps if you are unable to find appropriate guidance.   
 
 1. Ask your technical writer.
-1. Consult a dictionary, such as [Merriam-Webster](https://www.merriam-webster.com/), when missing guidance is related to spelling, capitalization, or grammar. 
-1. Consult the [corporate style guide](https://docs.google.com/document/d/1MRvGd6tS5JkIwl_GssbyExkMJqOXKeUE00kSEtFi8m8/edit?usp=sharing).
+1. Consult a dictionary, such as [Merriam-Webster](https://www.merriam-webster.com/), when missing guidance is related to spelling, capitalization, or grammar.
 1. Consult the [Google style guide](https://developers.google.com/style). 
