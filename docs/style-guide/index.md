@@ -32,6 +32,7 @@ This document provides writing style guidance for authors who create and maintai
    - [Fonts and formats](markdown/fonts-and-formats.md)
    - [Headings](markdown/headings.md)
    - [Links](markdown/links.md)
+- [Word list](word-list.md)
 - [Appendix: Extended guidance](appendix.md)
 
 ## Purpose
