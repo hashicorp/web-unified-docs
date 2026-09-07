@@ -154,15 +154,16 @@ This example uses the `Azure/azapi` provider to manage a resource group and the 
 
 The example requires a Terraform 1.17 build with suffix support. Create the state storage account and container before initializing this configuration. Grant the backend identity `Storage Blob Data Contributor` on that container. Add `Reader` on the storage account only when `lookup_blob_endpoint = true` requires management plane access. Grant the AzAPI identity permissions for the resources it manages in the provider subscription, not the state subscription.
 
-Configure a federated identity credential on each identity for the same GitHub repository and workflow ref, with the `api://AzureADTokenExchange` audience. Set these GitHub Actions repository variables to the corresponding identity values:
+Configure a federated identity credential on each identity for the same GitHub repository and workflow ref, with the `api://AzureADTokenExchange` audience. Set these GitHub Actions repository variables:
 
-| Repository variables | Identity |
+| Repository variables | Purpose |
 | --- | --- |
 | `AZAPI_TENANT_ID`, `AZAPI_SUBSCRIPTION_ID`, `AZAPI_CLIENT_ID` | AzAPI provider: resource tenant, subscription, and client |
 | `STATE_TENANT_ID`, `STATE_SUBSCRIPTION_ID`, `STATE_CLIENT_ID` | AzureRM backend: separate state tenant, subscription, and client |
+| `STATE_STORAGE_ACCOUNT_NAME`, `STATE_CONTAINER_NAME`, `STATE_KEY` | Existing state storage account, container, and state blob name |
 | `TERRAFORM_VERSION` | Terraform 1.17 version containing suffix support |
 
-The following `main.tf` persists the selector, disables backend CLI authentication, and creates a resource group in the AzAPI provider's subscription. Replace `<STATE_STORAGE_ACCOUNT_NAME>` with your existing state storage account name.
+The following `main.tf` declares an empty backend block for [partial configuration](/terraform/language/backend#partial-configuration) and an empty provider block. The workflow supplies backend settings at initialization and authentication through environment variables. The resource group uses the AzAPI provider's subscription.
 
 ```hcl
 terraform {
@@ -175,19 +176,10 @@ terraform {
     }
   }
 
-  backend "azurerm" {
-    environment_variable_suffix = "_BACKEND"
-    use_cli                     = false
-    storage_account_name        = "<STATE_STORAGE_ACCOUNT_NAME>"
-    container_name              = "tfstate"
-    key                         = "example.terraform.tfstate"
-  }
+  backend "azurerm" {}
 }
 
-provider "azapi" {
-  use_oidc = true
-  use_cli  = false
-}
+provider "azapi" {}
 
 data "azapi_client_config" "current" {}
 
@@ -200,7 +192,7 @@ resource "azapi_resource" "example" {
 }
 ```
 
-The following workflow initializes the backend and generates a plan. Unsuffixed `ARM_*` variables select the AzAPI identity. Suffixed `ARM_*_BACKEND` variables select the state identity. The PowerShell step copies GitHub's broker URL and bearer token into the backend namespace before running Terraform; it does not store them in backend configuration.
+The following workflow initializes the backend and generates a plan. It passes only non-secret backend settings through `-backend-config`, persisting the suffix selector for later commands. Unsuffixed `ARM_*` variables configure AzAPI authentication; suffixed `ARM_*_BACKEND` variables configure backend authentication. The PowerShell step copies GitHub's broker URL and bearer token into the backend namespace before running Terraform; it does not store them in backend configuration.
 
 ```yaml
 name: Plan with separate Azure identities
@@ -216,6 +208,9 @@ jobs:
   plan:
     runs-on: ubuntu-latest
     env:
+      STATE_STORAGE_ACCOUNT_NAME: ${{ vars.STATE_STORAGE_ACCOUNT_NAME }}
+      STATE_CONTAINER_NAME: ${{ vars.STATE_CONTAINER_NAME }}
+      STATE_KEY: ${{ vars.STATE_KEY }}
       ARM_TENANT_ID: ${{ vars.AZAPI_TENANT_ID }}
       ARM_SUBSCRIPTION_ID: ${{ vars.AZAPI_SUBSCRIPTION_ID }}
       ARM_CLIENT_ID: ${{ vars.AZAPI_CLIENT_ID }}
@@ -240,7 +235,11 @@ jobs:
           $PSNativeCommandUseErrorActionPreference = $true
           $env:ARM_OIDC_REQUEST_URL_BACKEND = $env:ACTIONS_ID_TOKEN_REQUEST_URL
           $env:ARM_OIDC_REQUEST_TOKEN_BACKEND = $env:ACTIONS_ID_TOKEN_REQUEST_TOKEN
-          terraform init -input=false
+          terraform init -input=false `
+            "-backend-config=environment_variable_suffix=_BACKEND" `
+            "-backend-config=storage_account_name=$env:STATE_STORAGE_ACCOUNT_NAME" `
+            "-backend-config=container_name=$env:STATE_CONTAINER_NAME" `
+            "-backend-config=key=$env:STATE_KEY"
           terraform plan -input=false -out=tfplan
 ```
 
@@ -253,14 +252,14 @@ In default, unsuffixed mode, the backend reads Azure DevOps token endpoint envir
 ```hcl
 terraform {
   backend "azurerm" {
-    use_oidc                           = true
-    ado_pipeline_service_connection_id = "<SERVICE_CONNECTION_ID>"
-    use_azuread_auth                   = true
-    tenant_id                          = "<TENANT_ID>"
-    client_id                          = "<CLIENT_ID>"
-    storage_account_name               = "<STORAGE_ACCOUNT_NAME>"
-    container_name                     = "tfstate"
-    key                                = "prod.terraform.tfstate"
+    use_oidc                         = true                                    # Can also be set via `ARM_USE_OIDC` environment variable.
+    ado_pipeline_service_connection_id = "00000000-0000-0000-0000-000000000000"  # Can also be set via `ARM_OIDC_AZURE_SERVICE_CONNECTION_ID` environment variable.
+    use_azuread_auth                 = true                                    # Can also be set via `ARM_USE_AZUREAD` environment variable.
+    tenant_id                        = "00000000-0000-0000-0000-000000000000"  # Can also be set via `ARM_TENANT_ID` environment variable.
+    client_id                        = "00000000-0000-0000-0000-000000000000"  # Can also be set via `ARM_CLIENT_ID` environment variable.
+    storage_account_name             = "abcd1234"                              # Can be passed via `-backend-config=`"storage_account_name=<storage account name>"` in the `init` command.
+    container_name                   = "tfstate"                               # Can be passed via `-backend-config=`"container_name=<container name>"` in the `init` command.
+    key                              = "prod.terraform.tfstate"                # Can be passed via `-backend-config=`"key=<blob key name>"` in the `init` command.
   }
 }
 ```
@@ -538,15 +537,15 @@ In default, unsuffixed mode, Azure DevOps token endpoint variables are automatic
 ```hcl
 terraform {
   backend "azurerm" {
-    use_oidc                           = true
-    ado_pipeline_service_connection_id = "<SERVICE_CONNECTION_ID>"
-    tenant_id                          = "<TENANT_ID>"
-    subscription_id                    = "<SUBSCRIPTION_ID>"
-    client_id                          = "<CLIENT_ID>"
-    resource_group_name                = "<STORAGE_RESOURCE_GROUP_NAME>"
-    storage_account_name               = "<STORAGE_ACCOUNT_NAME>"
-    container_name                     = "tfstate"
-    key                                = "prod.terraform.tfstate"
+    use_oidc                         = true                                    # Can also be set via `ARM_USE_OIDC` environment variable.
+    ado_pipeline_service_connection_id = "00000000-0000-0000-0000-000000000000"  # Can also be set via `ARM_OIDC_AZURE_SERVICE_CONNECTION_ID` environment variable.
+    tenant_id                        = "00000000-0000-0000-0000-000000000000"  # Can also be set via `ARM_TENANT_ID` environment variable.
+    subscription_id                  = "00000000-0000-0000-0000-000000000000"  # Can also be set via `ARM_SUBSCRIPTION_ID` environment variable.
+    client_id                        = "00000000-0000-0000-0000-000000000000"  # Can also be set via `ARM_CLIENT_ID` environment variable.
+    resource_group_name              = "StorageAccount-ResourceGroup"          # Can be passed via `-backend-config=`"resource_group_name=<resource group name>"` in the `init` command.
+    storage_account_name             = "abcd1234"                              # Can be passed via `-backend-config=`"storage_account_name=<storage account name>"` in the `init` command.
+    container_name                   = "tfstate"                               # Can be passed via `-backend-config=`"container_name=<container name>"` in the `init` command.
+    key                              = "prod.terraform.tfstate"                # Can be passed via `-backend-config=`"key=<blob key name>"` in the `init` command.
   }
 }
 ```
