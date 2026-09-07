@@ -48,7 +48,8 @@ Unless stated otherwise, environment variable names on this page describe the de
 
 Suffix mode also changes these authentication defaults:
 
-- Terraform ignores native continuous integration (CI) fallbacks such as `ACTIONS_ID_TOKEN_REQUEST_*`, `SYSTEM_OIDCREQUESTURI`, `SYSTEM_ACCESSTOKEN`, and `AZURESUBSCRIPTION_SERVICE_CONNECTION_ID`, including suffixed variants of those names. Explicitly map broker values into the selected `ARM_OIDC_REQUEST_URL` and `ARM_OIDC_REQUEST_TOKEN` variables.
+- Terraform ignores GitHub's native continuous integration (CI) variables `ACTIONS_ID_TOKEN_REQUEST_*`. Explicitly map those broker values into the selected `ARM_OIDC_REQUEST_URL` and `ARM_OIDC_REQUEST_TOKEN` variables.
+- Selecting an Azure DevOps service connection through explicit configuration or a suffixed `ARM_*` variable enables the native `SYSTEM_OIDCREQUESTURI` and `SYSTEM_ACCESSTOKEN` broker defaults. Explicit settings and selected suffixed `ARM_*` request variables take precedence. The backend does not use these native defaults without a selected service connection, and never uses `AZURESUBSCRIPTION_SERVICE_CONNECTION_ID` as a suffix-mode fallback. Native CI variable names are not suffixed.
 - Azure CLI authentication defaults to disabled. Enable it explicitly with `use_cli = true` or the selected `ARM_USE_CLI` variable. A missing backend credential does not fall back to an ambient CLI session.
 - Managed identity and Azure Kubernetes Service (AKS) workload identity remain disabled unless you enable their backend settings or selected `ARM_*` flags. Opting into AKS workload identity permits its native `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, and `AZURE_FEDERATED_TOKEN_FILE` inputs; these names are not suffixed.
 
@@ -215,13 +216,11 @@ jobs:
       ARM_SUBSCRIPTION_ID: ${{ vars.AZAPI_SUBSCRIPTION_ID }}
       ARM_CLIENT_ID: ${{ vars.AZAPI_CLIENT_ID }}
       ARM_USE_OIDC: "true"
-      ARM_USE_CLI: "false"
       ARM_TENANT_ID_BACKEND: ${{ vars.STATE_TENANT_ID }}
       ARM_SUBSCRIPTION_ID_BACKEND: ${{ vars.STATE_SUBSCRIPTION_ID }}
       ARM_CLIENT_ID_BACKEND: ${{ vars.STATE_CLIENT_ID }}
       ARM_USE_OIDC_BACKEND: "true"
       ARM_USE_AZUREAD_BACKEND: "true"
-      ARM_USE_CLI_BACKEND: "false"
     steps:
       - uses: actions/checkout@v5
       - uses: hashicorp/setup-terraform@v3
@@ -264,14 +263,9 @@ terraform {
 }
 ```
 
-For suffix mode with `_BACKEND`, persist `environment_variable_suffix = "_BACKEND"` in the backend configuration and supply the state identity through suffixed variables. Set `ARM_ADO_PIPELINE_SERVICE_CONNECTION_ID_BACKEND` or its lower-priority alias `ARM_OIDC_AZURE_SERVICE_CONNECTION_ID_BACKEND` to the state identity's service connection ID. Neither the provider's unsuffixed service connection nor `AZURESUBSCRIPTION_SERVICE_CONNECTION_ID` is a fallback.
+For suffix mode with `_BACKEND`, persist `environment_variable_suffix = "_BACKEND"` in the backend configuration and supply the state identity through suffixed variables. Set `ARM_OIDC_AZURE_SERVICE_CONNECTION_ID_BACKEND` to the state identity's service connection ID. The alternative `ARM_ADO_PIPELINE_SERVICE_CONNECTION_ID_BACKEND` takes precedence if you set both. Neither the provider's unsuffixed service connection nor `AZURESUBSCRIPTION_SERVICE_CONNECTION_ID` is a fallback.
 
-Make `System.AccessToken` available to the task as `SYSTEM_ACCESSTOKEN`. In the same PowerShell step that runs Terraform, map the pipeline broker values explicitly:
-
-```powershell
-$env:ARM_OIDC_REQUEST_URL_BACKEND = $env:SYSTEM_OIDCREQUESTURI
-$env:ARM_OIDC_REQUEST_TOKEN_BACKEND = $env:SYSTEM_ACCESSTOKEN
-```
+Make `System.AccessToken` available to the task as `SYSTEM_ACCESSTOKEN`. With the backend service connection selected, Terraform reads the pipeline's native OIDC request URL and token automatically. You do not need to copy them into `ARM_OIDC_REQUEST_*` variables. An authorized service connection referenced in an earlier task in the job remains usable by its ID.
 
 This service connection flow retains automatic OIDC refresh. Without a service connection for the backend, obtain a fresh pipeline OIDC assertion before each Terraform command and supply it through `ARM_OIDC_TOKEN_BACKEND` or a file referenced by `ARM_OIDC_TOKEN_FILE_PATH_BACKEND`. Supply the suffixed state identity variables and enable `ARM_USE_OIDC_BACKEND` and `ARM_USE_AZUREAD_BACKEND`. Do not set backend broker request or service connection variables with this assertion method. The provider can still use its own unsuffixed service connection.
 
@@ -290,7 +284,7 @@ Use the `main.tf` from [GitHub Actions with separate backend and provider identi
 | `STATE_STORAGE_ACCOUNT_NAME`, `STATE_CONTAINER_NAME`, `STATE_KEY` | Existing state storage account, container, and state blob name |
 | `TERRAFORM_VERSION` | Terraform 1.17 version containing suffix support |
 
-The Azure CLI tasks reference both service connections and expose their identity metadata. The first task passes only non-secret backend metadata to the next task. Terraform authenticates through OIDC broker requests, not the tasks' CLI sessions: both `ARM_USE_CLI` flags are `false`.
+The first Azure CLI task initializes the backend with the state service connection and passes its non-secret identity metadata to the next task. The second task runs the plan with the provider service connection, while the backend continues to use the state connection. Both tasks run in the same job and working directory, so the plan reuses the initialized partial backend configuration.
 
 ```yaml
 trigger: none
@@ -305,7 +299,7 @@ steps:
     inputs:
       terraformVersion: $(TERRAFORM_VERSION)
   - task: AzureCLI@2
-    displayName: "[Terraform] Read backend identity metadata"
+    displayName: "[Terraform] Initialize backend"
     inputs:
       azureSubscription: $(STATE_SERVICE_CONNECTION)
       scriptType: pscore
@@ -318,12 +312,28 @@ steps:
         $tenantId = $env:AZURESUBSCRIPTION_TENANT_ID
         $connectionId = $env:AZURESUBSCRIPTION_SERVICE_CONNECTION_ID
         $subscriptionId = az account show --query id --output tsv
+        $env:ARM_CLIENT_ID_BACKEND = $clientId
+        $env:ARM_TENANT_ID_BACKEND = $tenantId
+        $env:ARM_SUBSCRIPTION_ID_BACKEND = $subscriptionId
+        $env:ARM_OIDC_AZURE_SERVICE_CONNECTION_ID_BACKEND = $connectionId
+        terraform init -input=false `
+          "-backend-config=environment_variable_suffix=_BACKEND" `
+          "-backend-config=storage_account_name=$env:STATE_STORAGE_ACCOUNT_NAME" `
+          "-backend-config=container_name=$env:STATE_CONTAINER_NAME" `
+          "-backend-config=key=$env:STATE_KEY"
         Write-Host "##vso[task.setvariable variable=STATE_CLIENT_ID]$clientId"
         Write-Host "##vso[task.setvariable variable=STATE_TENANT_ID]$tenantId"
         Write-Host "##vso[task.setvariable variable=STATE_SUBSCRIPTION_ID]$subscriptionId"
         Write-Host "##vso[task.setvariable variable=STATE_SERVICE_CONNECTION_ID]$connectionId"
+    env:
+      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+      STATE_STORAGE_ACCOUNT_NAME: $(STATE_STORAGE_ACCOUNT_NAME)
+      STATE_CONTAINER_NAME: $(STATE_CONTAINER_NAME)
+      STATE_KEY: $(STATE_KEY)
+      ARM_USE_OIDC_BACKEND: "true"
+      ARM_USE_AZUREAD_BACKEND: "true"
   - task: AzureCLI@2
-    displayName: "[Terraform] Initialize and plan"
+    displayName: "[Terraform] Plan"
     inputs:
       azureSubscription: $(AZAPI_SERVICE_CONNECTION)
       scriptType: pscore
@@ -336,34 +346,19 @@ steps:
         $env:ARM_TENANT_ID = $env:AZURESUBSCRIPTION_TENANT_ID
         $env:ARM_SUBSCRIPTION_ID = az account show --query id --output tsv
         $env:ARM_OIDC_AZURE_SERVICE_CONNECTION_ID = $env:AZURESUBSCRIPTION_SERVICE_CONNECTION_ID
-        $env:ARM_OIDC_REQUEST_URL = $env:SYSTEM_OIDCREQUESTURI
-        $env:ARM_OIDC_REQUEST_TOKEN = $env:SYSTEM_ACCESSTOKEN
-        $env:ARM_OIDC_REQUEST_URL_BACKEND = $env:SYSTEM_OIDCREQUESTURI
-        $env:ARM_OIDC_REQUEST_TOKEN_BACKEND = $env:SYSTEM_ACCESSTOKEN
-        terraform init -input=false `
-          "-backend-config=environment_variable_suffix=_BACKEND" `
-          "-backend-config=storage_account_name=$env:STATE_STORAGE_ACCOUNT_NAME" `
-          "-backend-config=container_name=$env:STATE_CONTAINER_NAME" `
-          "-backend-config=key=$env:STATE_KEY"
         terraform plan -input=false -out=tfplan
     env:
-      SYSTEM_OIDCREQUESTURI: $(System.OidcRequestUri)
       SYSTEM_ACCESSTOKEN: $(System.AccessToken)
-      STATE_STORAGE_ACCOUNT_NAME: $(STATE_STORAGE_ACCOUNT_NAME)
-      STATE_CONTAINER_NAME: $(STATE_CONTAINER_NAME)
-      STATE_KEY: $(STATE_KEY)
       ARM_USE_OIDC: "true"
-      ARM_USE_CLI: "false"
       ARM_CLIENT_ID_BACKEND: $(STATE_CLIENT_ID)
       ARM_TENANT_ID_BACKEND: $(STATE_TENANT_ID)
       ARM_SUBSCRIPTION_ID_BACKEND: $(STATE_SUBSCRIPTION_ID)
-      ARM_ADO_PIPELINE_SERVICE_CONNECTION_ID_BACKEND: $(STATE_SERVICE_CONNECTION_ID)
+      ARM_OIDC_AZURE_SERVICE_CONNECTION_ID_BACKEND: $(STATE_SERVICE_CONNECTION_ID)
       ARM_USE_OIDC_BACKEND: "true"
       ARM_USE_AZUREAD_BACKEND: "true"
-      ARM_USE_CLI_BACKEND: "false"
 ```
 
-The provider and backend share the job's broker URL and bearer token but request assertions for their distinct service connection IDs. Both flows support token refresh. The backend does not use native `SYSTEM_*` or `AZURESUBSCRIPTION_SERVICE_CONNECTION_ID` fallbacks: the pipeline maps its broker inputs and service connection ID explicitly into suffixed `ARM_*` variables.
+The provider and backend use their distinct service connection IDs with the job's native OIDC request URL and `SYSTEM_ACCESSTOKEN`. Both flows support token refresh without manual broker mapping. The backend connection comes from the earlier task, not the provider task's `AZURESUBSCRIPTION_SERVICE_CONNECTION_ID`.
 
 An apply job must repeat the service connection setup and environment mappings with its own `System.AccessToken`. Keep credentials out of `-backend-config` and saved pipeline artifacts; only the non-secret backend settings belong in partial configuration.
 
@@ -622,7 +617,7 @@ terraform {
 
 #### Example Configuration for Azure DevOps
 
-In default, unsuffixed mode, Azure DevOps token endpoint variables are automatically found. Supply `ado_pipeline_service_connection_id` or one of its environment fallbacks. Refer to [Example Configuration for Azure DevOps](#example-configuration-for-azure-devops) for service connection precedence, explicit broker mapping in suffix mode, and direct assertions without a service connection.
+In default, unsuffixed mode, Azure DevOps token endpoint variables are automatically found. Supply `ado_pipeline_service_connection_id` or one of its environment fallbacks. Refer to [Example Configuration for Azure DevOps](#example-configuration-for-azure-devops) for service connection precedence, native broker defaults in suffix mode, and direct assertions without a service connection.
 
 ```hcl
 terraform {
@@ -797,9 +792,9 @@ The following configuration options are supported:
 
 * `ado_pipeline_service_connection_id` - (Optional) The Azure DevOps service connection ID for OIDC authentication. In unsuffixed mode, the backend uses the first non-empty value from `ARM_ADO_PIPELINE_SERVICE_CONNECTION_ID`, `ARM_OIDC_AZURE_SERVICE_CONNECTION_ID`, or `AZURESUBSCRIPTION_SERVICE_CONNECTION_ID`. Suffix mode uses only the two suffixed `ARM_*` aliases, in the same order.
 
-* `oidc_request_url` - (Optional) The URL of the OIDC broker from which to request an ID token. In unsuffixed mode, the backend uses the first non-empty value from `ARM_OIDC_REQUEST_URL`, `ACTIONS_ID_TOKEN_REQUEST_URL`, or `SYSTEM_OIDCREQUESTURI`. Suffix mode uses only the selected `ARM_OIDC_REQUEST_URL` variable; map the CI-native URL into it explicitly.
+* `oidc_request_url` - (Optional) The URL of the OIDC broker from which to request an ID token. In unsuffixed mode, the backend uses the first non-empty value from `ARM_OIDC_REQUEST_URL`, `ACTIONS_ID_TOKEN_REQUEST_URL`, or `SYSTEM_OIDCREQUESTURI`. Suffix mode uses the selected `ARM_OIDC_REQUEST_URL` variable, followed by `SYSTEM_OIDCREQUESTURI` only when you select a backend service connection. GitHub requires explicit mapping into the suffixed variable.
 
-* `oidc_request_token` - (Optional) The bearer token for the request to the OIDC broker. In unsuffixed mode, the backend uses the first non-empty value from `ARM_OIDC_REQUEST_TOKEN`, `ACTIONS_ID_TOKEN_REQUEST_TOKEN`, or `SYSTEM_ACCESSTOKEN`. Suffix mode uses only the selected `ARM_OIDC_REQUEST_TOKEN` variable; map the CI-native bearer token into it explicitly.
+* `oidc_request_token` - (Optional) The bearer token for the request to the OIDC broker. In unsuffixed mode, the backend uses the first non-empty value from `ARM_OIDC_REQUEST_TOKEN`, `ACTIONS_ID_TOKEN_REQUEST_TOKEN`, or `SYSTEM_ACCESSTOKEN`. Suffix mode uses the selected `ARM_OIDC_REQUEST_TOKEN` variable, followed by `SYSTEM_ACCESSTOKEN` only when you select a backend service connection. GitHub requires explicit mapping into the suffixed variable.
 
 * `oidc_token` - (Optional) The ID Token when authenticating using OpenID Connect. This is only required for advanced scenarios or third party integrations. This can also be sourced from the `ARM_OIDC_TOKEN` environment variable.
 
