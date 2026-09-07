@@ -148,7 +148,7 @@ terraform {
 }
 ```
 
-#### GitHub Actions with separate backend and AzAPI identities
+#### GitHub Actions with separate backend and provider identities
 
 This example uses the `Azure/azapi` provider to manage a resource group and the built-in `azurerm` backend to store state. Both authenticate with OIDC. The backend identity belongs to a different tenant and subscription from the AzAPI provider identity.
 
@@ -276,6 +276,96 @@ $env:ARM_OIDC_REQUEST_TOKEN_BACKEND = $env:SYSTEM_ACCESSTOKEN
 This service connection flow retains automatic OIDC refresh. Without a service connection for the backend, obtain a fresh pipeline OIDC assertion before each Terraform command and supply it through `ARM_OIDC_TOKEN_BACKEND` or a file referenced by `ARM_OIDC_TOKEN_FILE_PATH_BACKEND`. Supply the suffixed state identity variables and enable `ARM_USE_OIDC_BACKEND` and `ARM_USE_AZUREAD_BACKEND`. Do not set backend broker request or service connection variables with this assertion method. The provider can still use its own unsuffixed service connection.
 
 The backend does not request raw Azure DevOps assertions automatically without a service connection. It reads direct assertions and token files when configuring authentication, not continuously during a long-running command. Refresh those credentials before each command, including apply.
+
+#### Azure Pipelines with separate backend and provider identities
+
+This example uses two Azure Resource Manager service connections with workload identity federation: one for the AzAPI provider and one for the backend. The connections can target different tenants and subscriptions. Authorize both service connections for this pipeline, with a federated identity credential on each identity matching its service connection.
+
+Use the `main.tf` from [GitHub Actions with separate backend and provider identities](#github-actions-with-separate-backend-and-provider-identities), including its empty backend and provider blocks. The same Terraform 1.17 requirement and state-container permissions apply. Install the [Terraform extension from Microsoft DevLabs](https://marketplace.visualstudio.com/items?itemName=ms-devlabs.custom-terraform-tasks) to use `TerraformInstaller@1`, and define these pipeline variables:
+
+| Pipeline variables | Purpose |
+| --- | --- |
+| `AZAPI_SERVICE_CONNECTION` | Provider service connection name for the resource tenant and subscription |
+| `STATE_SERVICE_CONNECTION` | Backend service connection name for the separate state tenant and subscription |
+| `STATE_STORAGE_ACCOUNT_NAME`, `STATE_CONTAINER_NAME`, `STATE_KEY` | Existing state storage account, container, and state blob name |
+| `TERRAFORM_VERSION` | Terraform 1.17 version containing suffix support |
+
+The Azure CLI tasks reference both service connections and expose their identity metadata. The first task passes only non-secret backend metadata to the next task. Terraform authenticates through OIDC broker requests, not the tasks' CLI sessions: both `ARM_USE_CLI` flags are `false`.
+
+```yaml
+trigger: none
+
+pool:
+  vmImage: ubuntu-latest
+
+steps:
+  - checkout: self
+  - task: TerraformInstaller@1
+    displayName: "[Terraform] Install Terraform"
+    inputs:
+      terraformVersion: $(TERRAFORM_VERSION)
+  - task: AzureCLI@2
+    displayName: "[Terraform] Read backend identity metadata"
+    inputs:
+      azureSubscription: $(STATE_SERVICE_CONNECTION)
+      scriptType: pscore
+      scriptLocation: inlineScript
+      visibleAzLogin: false
+      inlineScript: |
+        $ErrorActionPreference = "Stop"
+        $PSNativeCommandUseErrorActionPreference = $true
+        $clientId = $env:AZURESUBSCRIPTION_CLIENT_ID
+        $tenantId = $env:AZURESUBSCRIPTION_TENANT_ID
+        $connectionId = $env:AZURESUBSCRIPTION_SERVICE_CONNECTION_ID
+        $subscriptionId = az account show --query id --output tsv
+        Write-Host "##vso[task.setvariable variable=STATE_CLIENT_ID]$clientId"
+        Write-Host "##vso[task.setvariable variable=STATE_TENANT_ID]$tenantId"
+        Write-Host "##vso[task.setvariable variable=STATE_SUBSCRIPTION_ID]$subscriptionId"
+        Write-Host "##vso[task.setvariable variable=STATE_SERVICE_CONNECTION_ID]$connectionId"
+  - task: AzureCLI@2
+    displayName: "[Terraform] Initialize and plan"
+    inputs:
+      azureSubscription: $(AZAPI_SERVICE_CONNECTION)
+      scriptType: pscore
+      scriptLocation: inlineScript
+      visibleAzLogin: false
+      inlineScript: |
+        $ErrorActionPreference = "Stop"
+        $PSNativeCommandUseErrorActionPreference = $true
+        $env:ARM_CLIENT_ID = $env:AZURESUBSCRIPTION_CLIENT_ID
+        $env:ARM_TENANT_ID = $env:AZURESUBSCRIPTION_TENANT_ID
+        $env:ARM_SUBSCRIPTION_ID = az account show --query id --output tsv
+        $env:ARM_OIDC_AZURE_SERVICE_CONNECTION_ID = $env:AZURESUBSCRIPTION_SERVICE_CONNECTION_ID
+        $env:ARM_OIDC_REQUEST_URL = $env:SYSTEM_OIDCREQUESTURI
+        $env:ARM_OIDC_REQUEST_TOKEN = $env:SYSTEM_ACCESSTOKEN
+        $env:ARM_OIDC_REQUEST_URL_BACKEND = $env:SYSTEM_OIDCREQUESTURI
+        $env:ARM_OIDC_REQUEST_TOKEN_BACKEND = $env:SYSTEM_ACCESSTOKEN
+        terraform init -input=false `
+          "-backend-config=environment_variable_suffix=_BACKEND" `
+          "-backend-config=storage_account_name=$env:STATE_STORAGE_ACCOUNT_NAME" `
+          "-backend-config=container_name=$env:STATE_CONTAINER_NAME" `
+          "-backend-config=key=$env:STATE_KEY"
+        terraform plan -input=false -out=tfplan
+    env:
+      SYSTEM_OIDCREQUESTURI: $(System.OidcRequestUri)
+      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+      STATE_STORAGE_ACCOUNT_NAME: $(STATE_STORAGE_ACCOUNT_NAME)
+      STATE_CONTAINER_NAME: $(STATE_CONTAINER_NAME)
+      STATE_KEY: $(STATE_KEY)
+      ARM_USE_OIDC: "true"
+      ARM_USE_CLI: "false"
+      ARM_CLIENT_ID_BACKEND: $(STATE_CLIENT_ID)
+      ARM_TENANT_ID_BACKEND: $(STATE_TENANT_ID)
+      ARM_SUBSCRIPTION_ID_BACKEND: $(STATE_SUBSCRIPTION_ID)
+      ARM_ADO_PIPELINE_SERVICE_CONNECTION_ID_BACKEND: $(STATE_SERVICE_CONNECTION_ID)
+      ARM_USE_OIDC_BACKEND: "true"
+      ARM_USE_AZUREAD_BACKEND: "true"
+      ARM_USE_CLI_BACKEND: "false"
+```
+
+The provider and backend share the job's broker URL and bearer token but request assertions for their distinct service connection IDs. Both flows support token refresh. The backend does not use native `SYSTEM_*` or `AZURESUBSCRIPTION_SERVICE_CONNECTION_ID` fallbacks: the pipeline maps its broker inputs and service connection ID explicitly into suffixed `ARM_*` variables.
+
+An apply job must repeat the service connection setup and environment mappings with its own `System.AccessToken`. Keep credentials out of `-backend-config` and saved pipeline artifacts; only the non-secret backend settings belong in partial configuration.
 
 ### Microsoft Entra ID with Compute Attached Managed Identity
 
@@ -513,7 +603,7 @@ The following additional configuration options are always required for this sub-
 
 #### Example Configuration for GitHub
 
-In default, unsuffixed mode, GitHub's ID token environment variables are automatically found. With suffix mode, explicitly map the broker variables as shown in [GitHub Actions with separate backend and AzAPI identities](#github-actions-with-separate-backend-and-azapi-identities).
+In default, unsuffixed mode, GitHub's ID token environment variables are automatically found. With suffix mode, explicitly map the broker variables as shown in [GitHub Actions with separate backend and provider identities](#github-actions-with-separate-backend-and-provider-identities).
 
 ```hcl
 terraform {
