@@ -36,7 +36,7 @@ If a software term isn't listed, or the company's GitHub repo are good resources
 - **Boundary Client Agent / Client Agent** (when referring to the Boundary Client Agent) because it's a separate download
 - **Boundary Desktop Client / Desktop Client** (when referring to the Boundary Desktop Client)
 - **Boundary installer**
-- **Boundary Session Recording / BSR** (when referring to the Boundary Session Recording)
+- **Boundary Session Recording / BSR** (when referring to the proprietary Boundary Session Recording file format). When referring to the session recording feature or session recording artifacts, it is lowercase **session recording**.
 - **bring your own DNS** (no hyphens)
 
 ### C
