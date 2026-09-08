@@ -9,7 +9,7 @@ last_modified: 2025-11-19T19:11:19Z
 
 # azurerm
 
-Stores the state as a Blob with the given Key within the Blob Container within [the Blob Storage Account](https://docs.microsoft.com/en-us/azure/storage/common/storage-introduction).
+Stores Terraform state in an [Azure Blob Storage](https://learn.microsoft.com/en-us/azure/storage/common/storage-introduction) container. The `key` setting names the blob that holds the state file.
 
 This backend supports state locking and consistency checking with Azure Blob Storage native capabilities.
 
@@ -17,9 +17,9 @@ This backend supports state locking and consistency checking with Azure Blob Sto
 
 !> **Warning:**  We recommend using environment variables to supply credentials and other sensitive data. If you use `-backend-config` or hardcode these values directly in your configuration, Terraform will include these values in both the `.terraform` subdirectory and in plan files. Refer to [Credentials and Sensitive Data](/terraform/language/backend#credentials-and-sensitive-data) for details.
 
-The `azurerm` backend needs to authenticate to the storage account data plane in order to manipulate the state file blob in the storage account container. In order to do that, it needs to authenticate and to know the data plane URI for the storage account.
+The `azurerm` backend needs permission to read and write the state file, and the storage account's blob endpoint address.
 
-The `azurerm` backend supports 5 methods to authenticate to the storage account data plane:
+Choose one of these authentication methods:
 
 - [Microsoft Entra ID](#microsoft-entra-id) **(Recommended)**
 - [SAS Token](#sas-token) *(Not recommended for new workloads)*
@@ -64,9 +64,9 @@ The following configuration options are always required for this method:
 
 ### Optional Inputs
 
-The following optional argument controls whether the backend can use provider environment variables:
+Use this optional argument to keep provider environment variables out of backend configuration:
 
-- `backend_environment_variable_strict_mode` - Set to `true` to use only backend-specific environment defaults instead of provider defaults. Defaults to `false`. You can also set it with `ARM_BACKEND_ENVIRONMENT_VARIABLE_STRICT_MODE`. Requires Terraform 1.17 with backend-specific environment variable support. This argument applies to all authentication methods.
+- `backend_environment_variable_strict_mode` - Set to `true` to ignore provider `ARM_*` defaults. Defaults to `false`. You can also set it with `ARM_BACKEND_ENVIRONMENT_VARIABLE_STRICT_MODE`. This applies to all authentication methods; see the version requirement and details that follow.
 
 The following options apply when [looking up the data plane URI](#data-plane-uri) from the management plane. They are not required when the data plane URI can be inferred from the `storage_account_name` and `container_name`.
 
@@ -78,44 +78,42 @@ The following options apply when [looking up the data plane URI](#data-plane-uri
 
 ~> **Version requirement:** Backend-specific `ARM_BACKEND_*` variables and `backend_environment_variable_strict_mode` require a Terraform 1.17 build that includes this feature. Terraform 1.16 does not support them.
 
-Use the supported `ARM_BACKEND_*` variables to configure the built-in `azurerm` backend independently from Azure providers. For example, `ARM_BACKEND_CLIENT_ID` selects the backend identity, while `ARM_CLIENT_ID` selects the provider identity. These are fixed variable names, listed in [Configuration Variables](#configuration-variables). Backend settings do not change provider authentication.
+The **backend** stores Terraform's record of your resources, called state. The **provider** creates and updates the resources. They do not have to use the same Azure identity or tenant (Microsoft Entra directory).
 
-By default, the backend selects each setting independently in this order:
+Use `ARM_BACKEND_*` variables when you want different credentials or settings for state access. For example, keep the state identity's permissions limited to the storage container, while the provider identity manages resources. The state account can also belong to a different subscription or tenant.
 
-1. Non-empty explicit backend configuration, including `-backend-config` values.
-1. The setting's `ARM_BACKEND_*` environment variables.
-1. The existing `ARM_*` environment variables.
-1. Supported native continuous integration (CI) environment variables, then the setting's default.
+`ARM_BACKEND_CLIENT_ID` selects the backend identity; `ARM_CLIENT_ID` selects the provider identity. The full set of supported names is in [Configuration Variables](#configuration-variables). These variables do not grant permissions or change provider authentication.
 
-Empty environment values are skipped. Explicit boolean `false` is respected, and a backend environment value of `"false"` takes precedence over a generic value of `"true"`. Use `"true"` or `"false"` for boolean environment variables. Within each group, the alias order in the configuration reference determines precedence; all backend aliases precede all generic aliases.
+#### Share settings by default
 
-This non-strict mode lets you override only the settings that differ. For direct Microsoft Entra ID storage access across tenants, you can share `ARM_USE_OIDC` and `ARM_USE_AZUREAD` while setting only `ARM_BACKEND_CLIENT_ID` and `ARM_BACKEND_TENANT_ID` for the state identity. Azure Pipelines also needs the backend's service connection ID when it differs from the provider's. A separate `ARM_BACKEND_SUBSCRIPTION_ID` is needed only when backend management-plane lookup requires a different subscription.
+In non-strict mode, override only what differs. Each backend setting uses the first available value:
 
-The backend resolves each argument independently. In non-strict mode, a backend-specific value for one argument does not prevent another argument from using a generic credential or file path. Use strict mode when you need to prevent provider settings from supplying backend defaults.
+1. Explicit backend configuration, including `-backend-config`.
+1. The setting's `ARM_BACKEND_*` variable.
+1. Its existing `ARM_*` variable.
+1. Supported job-level variables, then the setting's default.
 
-Set `backend_environment_variable_strict_mode = true` or `ARM_BACKEND_ENVIRONMENT_VARIABLE_STRICT_MODE = "true"` to enable strict mode. Explicit configuration wins, including `false` over a true or invalid control environment value. This control has no generic environment alias.
+Empty strings are skipped. Boolean `false` is a value, not an omission: `ARM_BACKEND_USE_OIDC="false"` overrides `ARM_USE_OIDC="true"`.
 
-Strict mode retains explicit configuration and supported `ARM_BACKEND_*` defaults, but does not fall back to generic `ARM_*` variables. These authentication rules also apply:
+For example, the non-strict workflows share OIDC settings and set only the backend client and tenant IDs. Azure Pipelines also sets a separate backend service connection ID.
 
-- Both modes can use GitHub's `ACTIONS_ID_TOKEN_REQUEST_URL` / `ACTIONS_ID_TOKEN_REQUEST_TOKEN` and Azure Pipelines' `SYSTEM_OIDCREQUESTURI` / `SYSTEM_ACCESSTOKEN` as job-level token request defaults. Explicit request settings and `ARM_BACKEND_OIDC_REQUEST_URL` / `ARM_BACKEND_OIDC_REQUEST_TOKEN` take precedence. You do not need to copy job inputs into backend variables.
-- Azure Pipelines still requires the backend service connection ID for automatic OIDC requests. In strict mode, supply it through explicit `ado_pipeline_service_connection_id` configuration or `ARM_BACKEND_OIDC_AZURE_SERVICE_CONNECTION_ID`. Allowing job token inputs does not permit fallback to the provider's `ARM_*` connection variables or `AZURESUBSCRIPTION_SERVICE_CONNECTION_ID`.
-- Azure CLI authentication defaults to disabled. Enable it explicitly with `use_cli = true` or `ARM_BACKEND_USE_CLI`. Missing backend credentials do not fall back to an existing Azure CLI login.
-- Managed identity and Azure Kubernetes Service (AKS) workload identity remain disabled unless you enable their backend settings or `ARM_BACKEND_*` flags. Opting into AKS workload identity permits its native `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, and `AZURE_FEDERATED_TOKEN_FILE` inputs. These native names are unchanged.
+#### Use strict mode to separate authentication settings
 
-The following arguments accept a direct value or a file:
+Strict mode is useful when the backend and provider use different authentication methods. For example, the provider might use a client secret while the backend uses OpenID Connect (OIDC). Without strict mode, the backend can read the provider's `ARM_CLIENT_SECRET` and try the wrong method.
 
-| Direct setting | File setting |
-| --- | --- |
-| `client_id` | `client_id_file_path` |
-| `client_secret` | `client_secret_file_path` |
-| `client_certificate` | `client_certificate_path` |
-| `oidc_token` | `oidc_token_file_path` |
+Set `ARM_BACKEND_ENVIRONMENT_VARIABLE_STRICT_MODE="true"` to ignore provider `ARM_*` variables. This cleanly separates the environment settings, but requires more inputs: supply every setting the backend needs with `ARM_BACKEND_*` variables or explicit backend configuration. For example, the strict OIDC examples set `ARM_BACKEND_USE_OIDC` and `ARM_BACKEND_USE_AZUREAD` instead of sharing the provider flags.
 
-In both modes, each argument follows its own explicit-configuration and environment precedence. Setting an explicit direct value does not suppress an environment-supplied file path. If you supply both a direct client ID, client secret, or OIDC token and its file alternative, their contents must match; mismatches fail the existing credential validation.
+You can also set `backend_environment_variable_strict_mode` in backend configuration. Explicit `true` or `false` overrides the control environment variable, even if that variable is invalid. There is no generic control alias.
 
-Strict mode changes where defaults come from, not the authentication method priority. Both modes use the existing authentication selection rules. For example, a configured direct OIDC assertion takes precedence over an Azure Pipelines or GitHub token request flow. The examples configure one method rather than relying on that priority to select among competing credentials.
+Strict mode still allows GitHub and Azure Pipelines job-level token request inputs, so neither platform needs manual token copying. Azure Pipelines still needs the backend service connection ID. An existing Azure CLI login is not a fallback unless you enable `use_cli` or `ARM_BACKEND_USE_CLI`.
 
-Terraform saves explicit backend configuration in `.terraform` and plan files, including explicit strict-mode settings and identity IDs. It does not persist environment-derived settings or credentials. Supply fresh credentials independently to each plan and apply job. If you enable strict mode only through `ARM_BACKEND_ENVIRONMENT_VARIABLE_STRICT_MODE`, supply it for every command, including init, plan, and apply; omitting it restores default fallback behavior.
+Managed identity and Azure Kubernetes Service (AKS) workload identity also require opt-in. Enabling AKS workload identity allows its standard `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, and `AZURE_FEDERATED_TOKEN_FILE` inputs.
+
+Strict mode controls environment defaults, not authentication priority or credential validation. Each argument is still resolved separately. A direct value does not disable a configured file path; direct client IDs, client secrets, and OIDC tokens must match their file contents when both are supplied.
+
+#### Supply settings for each job
+
+Terraform saves explicit backend configuration in `.terraform` and plan files, but not environment-derived settings or credentials. Supply fresh credentials for each job. If you enable strict mode through its environment variable, set it for every init, plan, and apply command; otherwise the backend returns to non-strict mode.
 
 ### Storage Account Required Role Assignments
 
@@ -129,9 +127,9 @@ The recommended management plane role assignments required for this method are:
 
 ### Microsoft Entra ID with OpenID Connect / Workload identity federation
 
-OpenID Connect (OIDC) lets your workflow request short-lived credentials instead of storing a client secret. The backend uses those credentials to read and write state. The provider uses its credentials to manage resources. The examples use the `Azure/azapi` provider and the built-in `azurerm` backend; you do not need the AzureRM provider to use this backend.
+OpenID Connect (OIDC) lets a workflow request short-lived credentials instead of storing a client secret. These examples use the `Azure/azapi` provider to manage a resource group and the built-in `azurerm` backend to store state. The AzureRM provider is not required.
 
-Choose one complete example for your CI platform and identity configuration. Each includes its own Terraform configuration and workflow or pipeline; you do not need to combine examples.
+Choose one example for your continuous integration (CI) platform. Non-strict mode shares settings and needs fewer inputs; strict mode keeps backend authentication settings separate. Each example is complete; do not combine them.
 
 #### Required Configuration Options
 
@@ -145,14 +143,14 @@ The following additional configuration options are always required for this sub-
 
 #### GitHub Actions with separate identities in non-strict mode
 
-This example uses separate identities in different tenants for the `azurerm` backend and the `Azure/azapi` provider. Both use OIDC. With strict mode left at its default of `false`, the backend overrides only the client and tenant IDs, and uses the shared authentication flags and GitHub token request inputs.
+This example uses OIDC for two identities in different tenants. Non-strict mode shares the authentication settings; only the backend client and tenant IDs differ.
 
 ##### Prepare your environment
 
 1. Use a Terraform 1.17 build with backend-specific environment variable support.
 1. Create the state storage account and container before running Terraform. Grant the backend identity `Storage Blob Data Contributor` on the container.
 1. Grant the provider identity permission to manage the example resource group in the provider subscription.
-1. Configure a federated identity credential on each identity for the same GitHub repository and workflow branch, with the `api://AzureADTokenExchange` audience.
+1. Configure a federated identity credential so each identity trusts this GitHub workflow. Match the workflow's actual token subject exactly, including any organization-specific format, and use the `api://AzureADTokenExchange` audience.
 
 ##### Configure workflow variables
 
@@ -170,11 +168,11 @@ Create the following GitHub Actions repository variables. `STATE_KEY` is the sta
 | `STATE_KEY` | State blob name |
 | `TERRAFORM_VERSION` | Terraform 1.17 version with backend-specific environment variable support |
 
-This example uses direct Microsoft Entra ID storage access without management-plane lookup. The state account can be in a different subscription without setting `ARM_BACKEND_SUBSCRIPTION_ID`. If you enable `lookup_blob_endpoint`, also supply the state subscription and resource group, and grant the backend identity `Reader` on the storage account.
+The backend accesses the state blob directly, so it does not need `ARM_BACKEND_SUBSCRIPTION_ID`, even for another subscription. If you enable `lookup_blob_endpoint` to look up the storage address, also supply the state subscription and resource group and grant `Reader` on the storage account.
 
 ##### Create the Terraform configuration
 
-Save the following as `main.tf` in the repository root. The empty backend block uses [partial configuration](/terraform/language/backend#partial-configuration): the workflow supplies the storage location during initialization. The empty provider block reads authentication settings from environment variables. The resource block defines a resource group in the provider's subscription.
+Save this as `main.tf` in the repository root. The empty backend block uses [partial configuration](/terraform/language/backend#partial-configuration): the workflow supplies the storage location at initialization. Authentication comes from environment variables. The resource block describes a resource group in the provider's subscription.
 
 ```hcl
 terraform {
@@ -205,7 +203,7 @@ resource "azapi_resource" "example" {
 
 ##### Run the workflow
 
-Save the following as `.github/workflows/terraform-plan.yml`. The first Terraform step initializes the backend and installs the provider. The second generates `tfplan`. Both automatically read GitHub's token request URL and token. Only `ARM_BACKEND_CLIENT_ID` and `ARM_BACKEND_TENANT_ID` differ from the shared environment; no backend copies of authentication flags or token request variables are needed.
+Save this as `.github/workflows/terraform-plan.yml`. `init` connects to state storage and installs the provider; `plan` saves proposed changes to `tfplan`. Both steps use GitHub's token request inputs automatically. Only the backend client and tenant IDs need separate values.
 
 ```yaml
 name: Plan with separate Azure identities
@@ -265,20 +263,20 @@ jobs:
           terraform plan -input=false -out=tfplan
 ```
 
-Commit `main.tf` and the workflow file, then run the workflow manually from GitHub Actions. The plan previews changes; it does not create the resource group. Both identities use automatic OIDC refresh in their respective tenants. A later apply job must supply the backend identity overrides, its own OIDC environment, and the same storage configuration. Treat saved plans as sensitive, and do not pass credentials through `-backend-config`.
+Commit both files and run the workflow manually in GitHub Actions. It creates a plan, not Azure resources. For an apply job, supply the same identity settings and storage location with fresh job credentials. Keep credentials out of `-backend-config`, and protect saved plans as sensitive data.
 
 <a id="github-actions-with-separate-backend-and-provider-identities"></a>
 
 #### GitHub Actions with separate identities in strict mode
 
-This example uses separate identities for the `azurerm` backend and the `Azure/azapi` provider. Both use OIDC. The backend identity belongs to a different tenant and subscription from the provider identity. Strict mode requires `ARM_BACKEND_*` defaults for the backend instead of falling back to the provider's `ARM_*` values.
+This example uses OIDC for two identities in different tenants and subscriptions. Strict mode keeps provider environment settings out of backend authentication, so the backend needs its own identity and authentication flags.
 
 ##### Prepare your environment
 
 1. Use a Terraform 1.17 build with backend-specific environment variable support.
-1. Create the state storage account and container before running Terraform. Grant the backend identity `Storage Blob Data Contributor` on the container. Add `Reader` on the storage account only when `lookup_blob_endpoint = true` requires management plane access.
+1. Create the state storage account and container before running Terraform. Grant the backend identity `Storage Blob Data Contributor` on the container. Add `Reader` on the storage account only if you enable `lookup_blob_endpoint` to look up its blob endpoint.
 1. Grant the provider identity permission to manage the example resource group in the provider subscription.
-1. Configure a federated identity credential on each identity for the same GitHub repository and workflow branch, with the `api://AzureADTokenExchange` audience.
+1. Configure a federated identity credential so each identity trusts this GitHub workflow. Match the workflow's actual token subject exactly, including any organization-specific format, and use the `api://AzureADTokenExchange` audience.
 
 ##### Configure workflow variables
 
@@ -299,7 +297,7 @@ Create the following GitHub Actions repository variables. `STATE_KEY` is the sta
 
 ##### Create the Terraform configuration
 
-Save the following as `main.tf` in the repository root. The empty backend block uses [partial configuration](/terraform/language/backend#partial-configuration): the workflow supplies the storage location during initialization. The empty provider block reads authentication settings from environment variables. The resource block defines a resource group in the provider's subscription.
+Save this as `main.tf` in the repository root. The empty backend block uses [partial configuration](/terraform/language/backend#partial-configuration): the workflow supplies the storage location at initialization. Authentication comes from environment variables. The resource block describes a resource group in the provider's subscription.
 
 ```hcl
 terraform {
@@ -330,7 +328,7 @@ resource "azapi_resource" "example" {
 
 ##### Run the workflow
 
-Save the following as `.github/workflows/terraform-plan.yml`. The first Terraform step initializes the backend and installs the provider. The second generates `tfplan`. The job enables strict mode for both steps with `ARM_BACKEND_ENVIRONMENT_VARIABLE_STRICT_MODE`. Both steps automatically use GitHub's job-level token request inputs; no manual mapping is needed.
+Save this as `.github/workflows/terraform-plan.yml`. `init` connects to state storage and installs the provider; `plan` saves proposed changes to `tfplan`. Both steps enable strict mode and use GitHub's token request inputs automatically.
 
 ```yaml
 name: Plan with separate Azure identities in strict mode
@@ -394,26 +392,26 @@ jobs:
           terraform plan -input=false -out=tfplan
 ```
 
-Commit `main.tf` and the workflow file, then run the workflow manually from GitHub Actions. The plan previews changes; it does not create the resource group. Both identities use automatic OIDC refresh in their respective tenants. A later apply job must enable strict mode again, supply the same storage configuration and its own identity environment variables, and grant `id-token: write` permission. Treat saved plans as sensitive, and do not pass credentials through `-backend-config`.
+Commit both files and run the workflow manually in GitHub Actions. It creates a plan, not Azure resources. For an apply job, enable strict mode again, supply the same identity settings and storage location, and grant `id-token: write`. Keep credentials out of `-backend-config`, and protect saved plans as sensitive data.
 
 <a id="example-configuration-for-azure-devops"></a>
 <a id="azure-pipelines-with-one-backend-and-provider-identity"></a>
 
 #### Azure Pipelines with separate identities in non-strict mode
 
-This example uses two Azure Resource Manager service connections with workload identity federation: one for the `azurerm` backend and one for the `Azure/azapi` provider. The connections target different tenants and subscriptions. With strict mode left at its default of `false`, only the backend client ID, tenant ID, and service connection ID need overrides. Authentication flags and the job's token request URL and access token are shared.
+This example uses two service connections, which let Azure Pipelines authenticate to Azure. Each uses workload identity federation instead of a stored secret. The connections target different tenants and subscriptions. Non-strict mode shares authentication flags and job token inputs; only the backend identity and connection IDs differ.
 
 ##### Prepare your environment
 
 1. Use a Terraform 1.17 build with backend-specific environment variable support.
 1. Create the state storage account and container before running Terraform. Grant the backend identity `Storage Blob Data Contributor` on the container.
 1. Grant the provider identity permission to manage the example resource group in the provider subscription.
-1. Configure both service connections with workload identity federation and authorize both for this pipeline. Each federated identity credential must match its service connection.
+1. Create two Azure Resource Manager service connections using workload identity federation. Authorize both for this pipeline and match each identity's federated credential to its connection.
 1. Install the [Terraform extension from Microsoft DevLabs](https://marketplace.visualstudio.com/items?itemName=ms-devlabs.custom-terraform-tasks) in your Azure DevOps organization to use `TerraformInstaller@1`.
 
 ##### Configure pipeline variables
 
-Create the following Azure Pipelines variables. Use each service connection's name for its task input; the tasks expose the IDs to Terraform. `STATE_KEY` is the state blob name, such as `example.terraform.tfstate`, not an access key.
+Create these Azure Pipelines variables. Enter service connection names; the tasks obtain their IDs. `STATE_KEY` is the state blob name, such as `example.terraform.tfstate`, not an access key.
 
 | Pipeline variable | Value |
 | --- | --- |
@@ -424,11 +422,11 @@ Create the following Azure Pipelines variables. Use each service connection's na
 | `STATE_KEY` | State blob name |
 | `TERRAFORM_VERSION` | Terraform 1.17 version with backend-specific environment variable support |
 
-This example uses direct Microsoft Entra ID storage access without management-plane lookup. The state account can be in a different subscription without setting `ARM_BACKEND_SUBSCRIPTION_ID`. If you enable `lookup_blob_endpoint`, also supply the state subscription and resource group, and grant the backend identity `Reader` on the storage account.
+The backend accesses the state blob directly, so it does not need `ARM_BACKEND_SUBSCRIPTION_ID`, even for another subscription. If you enable `lookup_blob_endpoint` to look up the storage address, also supply the state subscription and resource group and grant `Reader` on the storage account.
 
 ##### Create the Terraform configuration
 
-Save the following as `main.tf` in the repository root. The empty backend block uses [partial configuration](/terraform/language/backend#partial-configuration): the pipeline supplies the storage location during initialization. The empty provider block reads authentication settings from environment variables. The resource block defines a resource group in the provider's subscription.
+Save this as `main.tf` in the repository root. The empty backend block uses [partial configuration](/terraform/language/backend#partial-configuration): the pipeline supplies the storage location at initialization. Authentication comes from environment variables. The resource block describes a resource group in the provider's subscription.
 
 ```hcl
 terraform {
@@ -459,7 +457,7 @@ resource "azapi_resource" "example" {
 
 ##### Run the pipeline
 
-Save the following as `azure-pipelines.yml`. The first Terraform task initializes the backend with the state connection and passes its non-secret identity metadata to the next task. The second generates `tfplan` with the provider connection and three backend-specific overrides. Each task receives its own `System.AccessToken`; no backend copies of authentication flags or token request variables are needed.
+Save this as `azure-pipelines.yml`. `init` connects to state storage and installs the provider using the state connection. `plan` uses the provider connection and restores three backend identity settings from the first task. Shared flags and the job's `System.AccessToken` handle OIDC authentication.
 
 ```yaml
 trigger: none
@@ -541,27 +539,27 @@ steps:
       ARM_BACKEND_OIDC_AZURE_SERVICE_CONNECTION_ID: $(STATE_SERVICE_CONNECTION_ID)
 ```
 
-Commit `main.tf` and the pipeline file, create an Azure Pipeline from that YAML file, and run it manually. The plan previews changes; it does not create the resource group. A later apply job must repeat the service connection setup and backend overrides, supply its own `System.AccessToken` and provider identity environment, and use the same storage configuration. Treat saved plans as sensitive, and do not pass credentials through `-backend-config`.
+Commit both files, create an Azure Pipeline from the YAML file, and run it manually. It creates a plan, not Azure resources. For an apply job, repeat the connection setup and identity settings, with its own `System.AccessToken` and the same storage location. Keep credentials out of `-backend-config`, and protect saved plans as sensitive data.
 
-The backend's `ARM_BACKEND_OIDC_AZURE_SERVICE_CONNECTION_ID` overrides the provider's connection ID. Both identities use the current job's token request URL and access token for automatic OIDC refresh. Because non-strict mode resolves each setting independently, avoid adding unrelated generic assertion or credential variables to this environment.
+Both connections refresh OIDC tokens automatically. Avoid unrelated credential variables in this non-strict example: the backend can read generic `ARM_*` values.
 
 <a id="azure-pipelines-with-separate-backend-and-provider-identities"></a>
 
 #### Azure Pipelines with separate identities in strict mode
 
-This example uses two Azure Resource Manager service connections with workload identity federation: one for the `azurerm` backend and one for the `Azure/azapi` provider. The connections target different tenants and subscriptions. Strict mode requires `ARM_BACKEND_*` defaults for the backend instead of falling back to the provider's `ARM_*` values.
+This example uses two service connections, which let Azure Pipelines authenticate to Azure. Each uses workload identity federation instead of a stored secret. The connections target different tenants and subscriptions. Strict mode keeps provider environment settings out of backend authentication, so the backend needs its own identity and authentication flags.
 
 ##### Prepare your environment
 
 1. Use a Terraform 1.17 build with backend-specific environment variable support.
-1. Create the state storage account and container before running Terraform. Grant the backend identity `Storage Blob Data Contributor` on the container. Add `Reader` on the storage account only when `lookup_blob_endpoint = true` requires management plane access.
+1. Create the state storage account and container before running Terraform. Grant the backend identity `Storage Blob Data Contributor` on the container. Add `Reader` on the storage account only if you enable `lookup_blob_endpoint` to look up its blob endpoint.
 1. Grant the provider identity permission to manage the example resource group in the provider subscription.
-1. Configure both service connections with workload identity federation and authorize both for this pipeline. Each federated identity credential must match its service connection.
+1. Create two Azure Resource Manager service connections using workload identity federation. Authorize both for this pipeline and match each identity's federated credential to its connection.
 1. Install the [Terraform extension from Microsoft DevLabs](https://marketplace.visualstudio.com/items?itemName=ms-devlabs.custom-terraform-tasks) in your Azure DevOps organization to use `TerraformInstaller@1`.
 
 ##### Configure pipeline variables
 
-Create the following Azure Pipelines variables. Use each service connection's name for its task input; the tasks expose the IDs to Terraform. `STATE_KEY` is the state blob name, such as `example.terraform.tfstate`, not an access key.
+Create these Azure Pipelines variables. Enter service connection names; the tasks obtain their IDs. `STATE_KEY` is the state blob name, such as `example.terraform.tfstate`, not an access key.
 
 | Pipeline variable | Value |
 | --- | --- |
@@ -574,7 +572,7 @@ Create the following Azure Pipelines variables. Use each service connection's na
 
 ##### Create the Terraform configuration
 
-Save the following as `main.tf` in the repository root. The empty backend block uses [partial configuration](/terraform/language/backend#partial-configuration): the pipeline supplies the storage location during initialization. The empty provider block reads authentication settings from environment variables. The resource block defines a resource group in the provider's subscription.
+Save this as `main.tf` in the repository root. The empty backend block uses [partial configuration](/terraform/language/backend#partial-configuration): the pipeline supplies the storage location at initialization. Authentication comes from environment variables. The resource block describes a resource group in the provider's subscription.
 
 ```hcl
 terraform {
@@ -605,7 +603,7 @@ resource "azapi_resource" "example" {
 
 ##### Run the pipeline
 
-Save the following as `azure-pipelines.yml`. The first Terraform task initializes the backend and installs the provider using the state service connection. The second generates `tfplan` using the provider connection, while retaining the state identity for backend access. Both tasks run in the same job and working directory. Each task enables strict mode and supplies its own authentication environment.
+Save this as `azure-pipelines.yml`. `init` connects to state storage and installs the provider using the state connection. `plan` uses the provider connection while keeping the state identity for backend access. Both tasks run in the same job and directory, with strict mode enabled in each.
 
 ```yaml
 trigger: none
@@ -696,9 +694,9 @@ steps:
       ARM_BACKEND_USE_AZUREAD: "true"
 ```
 
-Commit `main.tf` and the pipeline file, create an Azure Pipeline from that YAML file, and run it manually. The plan previews changes; it does not create the resource group. Both identities use automatic OIDC refresh through their selected service connections. A later apply job must repeat the connection setup, storage configuration, and environment mappings, including strict mode, with its own `System.AccessToken`. Treat saved plans as sensitive, and do not pass credentials through `-backend-config`.
+Commit both files, create an Azure Pipeline from the YAML file, and run it manually. It creates a plan, not Azure resources. For an apply job, repeat the connection setup, identity settings, strict-mode control, and storage location, with its own `System.AccessToken`. Keep credentials out of `-backend-config`, and protect saved plans as sensitive data.
 
-The backend uses the current job's token request URL and access token without manual mapping. It still needs `ARM_BACKEND_OIDC_AZURE_SERVICE_CONNECTION_ID` to request an assertion for the correct connection. The connection can come from an earlier task in the same job. In strict mode, the backend does not fall back to generic connection IDs or the provider task's `AZURESUBSCRIPTION_SERVICE_CONNECTION_ID`.
+Both connections refresh OIDC tokens automatically. `ARM_BACKEND_OIDC_AZURE_SERVICE_CONNECTION_ID` keeps the backend on the state connection from the first task. Strict mode does not reuse the provider task's connection ID.
 
 ### Microsoft Entra ID with Compute Attached Managed Identity
 
