@@ -35,7 +35,7 @@ If a software term isn't listed, or the company's GitHub repo are good resources
 - **Boundary Admin UI / Admin UI** (when referring to the Boundary Admin UI)
 - **Boundary Client Agent / Client Agent** (when referring to the Boundary Client Agent) because it's a separate download
 - **Boundary Desktop Client / Desktop Client** (when referring to the Boundary Desktop Client)
-- **Boundary Installer** (when referring to the Boundary Installer) because it's a separate download
+- **Boundary installer**
 - **Boundary Session Recording / BSR** (when referring to the Boundary Session Recording)
 - **bring your own DNS** (no hyphens)
 
