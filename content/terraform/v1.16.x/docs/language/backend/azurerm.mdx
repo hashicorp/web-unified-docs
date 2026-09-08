@@ -97,8 +97,8 @@ Set `backend_environment_variable_strict_mode = true` or `ARM_BACKEND_ENVIRONMEN
 
 Strict mode retains explicit configuration and supported `ARM_BACKEND_*` defaults, but does not fall back to generic `ARM_*` variables. These authentication rules also apply:
 
-- Terraform ignores GitHub's native `ACTIONS_ID_TOKEN_REQUEST_*` variables. Explicitly map those values into `ARM_BACKEND_OIDC_REQUEST_URL` and `ARM_BACKEND_OIDC_REQUEST_TOKEN` so the backend can request tokens.
-- An Azure DevOps service connection selected through explicit configuration or an `ARM_BACKEND_*` variable lets the backend use the current job's token request URL (`SYSTEM_OIDCREQUESTURI`) and access token (`SYSTEM_ACCESSTOKEN`). Explicit request settings and `ARM_BACKEND_OIDC_REQUEST_URL` / `ARM_BACKEND_OIDC_REQUEST_TOKEN` take precedence. Without a selected backend connection, these job inputs are ignored. `AZURESUBSCRIPTION_SERVICE_CONNECTION_ID` cannot select the backend connection in strict mode.
+- Both modes can use GitHub's `ACTIONS_ID_TOKEN_REQUEST_URL` / `ACTIONS_ID_TOKEN_REQUEST_TOKEN` and Azure Pipelines' `SYSTEM_OIDCREQUESTURI` / `SYSTEM_ACCESSTOKEN` as job-level token request defaults. Explicit request settings and `ARM_BACKEND_OIDC_REQUEST_URL` / `ARM_BACKEND_OIDC_REQUEST_TOKEN` take precedence. You do not need to copy job inputs into backend variables.
+- Azure Pipelines still requires the backend service connection ID for automatic OIDC requests. In strict mode, supply it through explicit `ado_pipeline_service_connection_id` configuration or `ARM_BACKEND_OIDC_AZURE_SERVICE_CONNECTION_ID`. Allowing job token inputs does not permit fallback to the provider's `ARM_*` connection variables or `AZURESUBSCRIPTION_SERVICE_CONNECTION_ID`.
 - Azure CLI authentication defaults to disabled. Enable it explicitly with `use_cli = true` or `ARM_BACKEND_USE_CLI`. Missing backend credentials do not fall back to an existing Azure CLI login.
 - Managed identity and Azure Kubernetes Service (AKS) workload identity remain disabled unless you enable their backend settings or `ARM_BACKEND_*` flags. Opting into AKS workload identity permits its native `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, and `AZURE_FEDERATED_TOKEN_FILE` inputs. These native names are unchanged.
 
@@ -330,7 +330,7 @@ resource "azapi_resource" "example" {
 
 ##### Run the workflow
 
-Save the following as `.github/workflows/terraform-plan.yml`. The first Terraform step initializes the backend and installs the provider. The second generates `tfplan`. The job enables strict mode for both steps with `ARM_BACKEND_ENVIRONMENT_VARIABLE_STRICT_MODE`. Each step that accesses state maps GitHub's token request inputs into the backend variables.
+Save the following as `.github/workflows/terraform-plan.yml`. The first Terraform step initializes the backend and installs the provider. The second generates `tfplan`. The job enables strict mode for both steps with `ARM_BACKEND_ENVIRONMENT_VARIABLE_STRICT_MODE`. Both steps automatically use GitHub's job-level token request inputs; no manual mapping is needed.
 
 ```yaml
 name: Plan with separate Azure identities in strict mode
@@ -380,10 +380,6 @@ jobs:
           $ErrorActionPreference = "Stop"
           $PSNativeCommandUseErrorActionPreference = $true
 
-          # Strict mode requires explicit GitHub token request inputs.
-          $env:ARM_BACKEND_OIDC_REQUEST_URL = $env:ACTIONS_ID_TOKEN_REQUEST_URL
-          $env:ARM_BACKEND_OIDC_REQUEST_TOKEN = $env:ACTIONS_ID_TOKEN_REQUEST_TOKEN
-
           terraform init -input=false `
             "-backend-config=storage_account_name=$env:STATE_STORAGE_ACCOUNT_NAME" `
             "-backend-config=container_name=$env:STATE_CONTAINER_NAME" `
@@ -395,14 +391,10 @@ jobs:
           $ErrorActionPreference = "Stop"
           $PSNativeCommandUseErrorActionPreference = $true
 
-          # Each step has its own environment and token request inputs.
-          $env:ARM_BACKEND_OIDC_REQUEST_URL = $env:ACTIONS_ID_TOKEN_REQUEST_URL
-          $env:ARM_BACKEND_OIDC_REQUEST_TOKEN = $env:ACTIONS_ID_TOKEN_REQUEST_TOKEN
-
           terraform plan -input=false -out=tfplan
 ```
 
-Commit `main.tf` and the workflow file, then run the workflow manually from GitHub Actions. The plan previews changes; it does not create the resource group. Both identities use automatic OIDC refresh in their respective tenants. A later apply job must enable strict mode again and supply the same storage configuration, its own identity environment variables, and its own token request mappings. Treat saved plans as sensitive, and do not pass credentials through `-backend-config`.
+Commit `main.tf` and the workflow file, then run the workflow manually from GitHub Actions. The plan previews changes; it does not create the resource group. Both identities use automatic OIDC refresh in their respective tenants. A later apply job must enable strict mode again, supply the same storage configuration and its own identity environment variables, and grant `id-token: write` permission. Treat saved plans as sensitive, and do not pass credentials through `-backend-config`.
 
 <a id="example-configuration-for-azure-devops"></a>
 <a id="azure-pipelines-with-one-backend-and-provider-identity"></a>
@@ -706,7 +698,7 @@ steps:
 
 Commit `main.tf` and the pipeline file, create an Azure Pipeline from that YAML file, and run it manually. The plan previews changes; it does not create the resource group. Both identities use automatic OIDC refresh through their selected service connections. A later apply job must repeat the connection setup, storage configuration, and environment mappings, including strict mode, with its own `System.AccessToken`. Treat saved plans as sensitive, and do not pass credentials through `-backend-config`.
 
-Selecting `ARM_BACKEND_OIDC_AZURE_SERVICE_CONNECTION_ID` enables the backend to read the current job's token request URL and access token; no manual token request mapping is needed. The connection can come from an earlier task in the same job. In strict mode, the backend does not fall back to generic connection IDs or the provider task's `AZURESUBSCRIPTION_SERVICE_CONNECTION_ID`.
+The backend uses the current job's token request URL and access token without manual mapping. It still needs `ARM_BACKEND_OIDC_AZURE_SERVICE_CONNECTION_ID` to request an assertion for the correct connection. The connection can come from an earlier task in the same job. In strict mode, the backend does not fall back to generic connection IDs or the provider task's `AZURESUBSCRIPTION_SERVICE_CONNECTION_ID`.
 
 ### Microsoft Entra ID with Compute Attached Managed Identity
 
@@ -948,7 +940,7 @@ The following additional configuration options are always required for this sub-
 
 #### GitHub Actions with access key lookup
 
-In default, non-strict mode, GitHub's ID token environment variables are automatically found. In strict mode, explicitly map the token request variables as shown in [GitHub Actions with separate identities in strict mode](#github-actions-with-separate-identities-in-strict-mode).
+GitHub's job-level token request environment variables are automatically found in both modes. Refer to [GitHub Actions with separate identities in strict mode](#github-actions-with-separate-identities-in-strict-mode) for separate backend and provider authentication.
 
 ```hcl
 terraform {
@@ -969,7 +961,7 @@ terraform {
 
 #### Azure Pipelines with access key lookup
 
-In default, non-strict mode, Azure DevOps token endpoint variables are automatically found. Supply `ado_pipeline_service_connection_id` or one of its environment aliases. Refer to [Azure Pipelines with separate identities in non-strict mode](#azure-pipelines-with-separate-identities-in-non-strict-mode) for the service connection setup.
+Azure DevOps job-level token request variables are automatically found in both modes. Supply `ado_pipeline_service_connection_id` or one of its supported environment aliases; strict mode permits only the backend-specific alias. Refer to [Azure Pipelines with separate identities in non-strict mode](#azure-pipelines-with-separate-identities-in-non-strict-mode) for the service connection setup.
 
 ```hcl
 terraform {
@@ -1106,7 +1098,7 @@ data "terraform_remote_state" "foo" {
 
 For more information on when each of these configuration settings is required, refer to the previous sections of this page.
 
-The following configuration options are supported. Where multiple environment names are listed, the first non-empty value wins after explicit configuration. Backend-specific `ARM_BACKEND_*` alternatives require Terraform 1.17. Strict mode excludes generic `ARM_*` and native defaults except for the explicitly enabled authentication flows described in [Select backend environment variables](#select-backend-environment-variables).
+The following configuration options are supported. Where multiple environment names are listed, the first non-empty value wins after explicit configuration. Backend-specific `ARM_BACKEND_*` alternatives require Terraform 1.17. Strict mode excludes generic `ARM_*` defaults but retains GitHub and Azure Pipelines job-level token request inputs. Refer to [Select backend environment variables](#select-backend-environment-variables) for authentication requirements and other opt-in behavior.
 
 * `backend_environment_variable_strict_mode` - (Optional) Set to `true` to prevent fallback to provider environment defaults. Defaults to `false`. Can also be sourced from `ARM_BACKEND_ENVIRONMENT_VARIABLE_STRICT_MODE`; there is no generic control alias. Explicit configuration, including `false`, takes precedence. Requires Terraform 1.17 with backend-specific environment variable support. Refer to [Select backend environment variables](#select-backend-environment-variables) for authentication and persistence rules.
 
@@ -1144,9 +1136,9 @@ The following configuration options are supported. Where multiple environment na
 
 * `ado_pipeline_service_connection_id` - (Optional) The Azure DevOps service connection ID for OIDC authentication. Environment precedence is `ARM_BACKEND_OIDC_AZURE_SERVICE_CONNECTION_ID`, `ARM_ADO_PIPELINE_SERVICE_CONNECTION_ID`, `ARM_OIDC_AZURE_SERVICE_CONNECTION_ID`, then `AZURESUBSCRIPTION_SERVICE_CONNECTION_ID`. Strict mode uses only `ARM_BACKEND_OIDC_AZURE_SERVICE_CONNECTION_ID`. The generic legacy aliases remain available in non-strict mode.
 
-* `oidc_request_url` - (Optional) The URL from which to request an OIDC token. Environment precedence is `ARM_BACKEND_OIDC_REQUEST_URL`, `ARM_OIDC_REQUEST_URL`, `ACTIONS_ID_TOKEN_REQUEST_URL`, then `SYSTEM_OIDCREQUESTURI`. Strict mode uses `ARM_BACKEND_OIDC_REQUEST_URL`, followed by `SYSTEM_OIDCREQUESTURI` only when an explicit or backend-specific service connection is selected. GitHub requires explicit mapping into `ARM_BACKEND_OIDC_REQUEST_URL` in strict mode.
+* `oidc_request_url` - (Optional) The URL from which to request an OIDC token. Environment precedence is `ARM_BACKEND_OIDC_REQUEST_URL`, `ARM_OIDC_REQUEST_URL`, `ACTIONS_ID_TOKEN_REQUEST_URL`, then `SYSTEM_OIDCREQUESTURI`. Strict mode omits `ARM_OIDC_REQUEST_URL` but retains both platforms' job-level defaults, in the same order. Azure Pipelines authentication still requires a backend service connection ID.
 
-* `oidc_request_token` - (Optional) The bearer token for the OIDC token request. Environment precedence is `ARM_BACKEND_OIDC_REQUEST_TOKEN`, `ARM_OIDC_REQUEST_TOKEN`, `ACTIONS_ID_TOKEN_REQUEST_TOKEN`, then `SYSTEM_ACCESSTOKEN`. Strict mode uses `ARM_BACKEND_OIDC_REQUEST_TOKEN`, followed by `SYSTEM_ACCESSTOKEN` only when an explicit or backend-specific service connection is selected. GitHub requires explicit mapping into `ARM_BACKEND_OIDC_REQUEST_TOKEN` in strict mode.
+* `oidc_request_token` - (Optional) The bearer token for the OIDC token request. Environment precedence is `ARM_BACKEND_OIDC_REQUEST_TOKEN`, `ARM_OIDC_REQUEST_TOKEN`, `ACTIONS_ID_TOKEN_REQUEST_TOKEN`, then `SYSTEM_ACCESSTOKEN`. Strict mode omits `ARM_OIDC_REQUEST_TOKEN` but retains both platforms' job-level defaults, in the same order. Azure Pipelines authentication still requires a backend service connection ID.
 
 * `oidc_token` - (Optional) The ID token for OpenID Connect authentication, for advanced scenarios or third-party integrations. Can be sourced from `ARM_BACKEND_OIDC_TOKEN` or `ARM_OIDC_TOKEN`.
 
