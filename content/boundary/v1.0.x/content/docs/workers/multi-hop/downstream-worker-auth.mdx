@@ -1,0 +1,196 @@
+---
+layout: docs
+page_title: Authenticate downstream workers
+description: >-
+  Use the downstream-worker-auth KMS purpose to let an upstream worker authenticate downstream workers. Isolate networks using separate KMS trust domains.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-08-10T22:18:17.000Z
+last_modified: 2026-08-10T22:18:17.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Authenticate downstream workers with a KMS
+
+@include 'alerts/enterprise-only.mdx'
+
+In a multi-hop deployment, a downstream worker connects to an upstream worker instead of connecting directly to a controller.
+When downstream workers register through an [external KMS](/boundary/docs/workers/registration/kms), you can use the `downstream-worker-auth` KMS purpose to let the upstream worker authenticate them.
+
+This approach lets you delegate authentication of edge workers to a trusted upstream worker, without distributing the controller KMS key to those environments.
+
+## How the trust domains work
+
+Boundary distinguishes between upstream and downstream workers:
+
+- An upstream worker connects directly to controllers, or to another upstream worker.
+It authenticates using a KMS key with the `worker-auth` purpose.
+- A downstream worker connects to an upstream worker instead of connecting directly to controllers.
+It authenticates using the same KMS mechanism, but its trust anchor is the upstream worker rather than a controller.
+
+You configure the `downstream-worker-auth` purpose only on upstream workers.
+This configuration tells the upstream worker which KMS keys to trust when it validates the tokens that downstream workers present.
+
+Downstream workers use a `worker-auth` KMS block that references the same key material.
+The upstream worker uses a corresponding `downstream-worker-auth` block that points to that key.
+
+This model lets you:
+
+- Use one KMS key for controller-to-worker trust with `worker-auth`.
+- Use different KMS keys, or different KMS backends, to isolate downstream networks with `downstream-worker-auth`.
+- Delegate authentication of edge workers to trusted upstream workers without exposing controller KMS keys in those environments.
+
+## Example configuration
+
+The following example shows a controller, an ingress worker that connects to the controller, and an egress worker that connects only to the ingress worker.
+
+The controller uses `worker-auth` to authenticate the workers that connect to it directly:
+
+<CodeBlockConfig filename="/etc/boundary.d/controller.hcl">
+
+```hcl
+kms "awskms" {
+  purpose = "worker-auth"
+  key_id  = "arn:aws:kms:us-east-1:111111111111:key/controller-workers"
+  region  = "us-east-1"
+}
+
+controller {
+  # ...
+}
+```
+
+</CodeBlockConfig>
+
+The ingress worker configures both purposes.
+It uses `worker-auth` to authenticate itself to the controller, and `downstream-worker-auth` to authenticate the workers below it:
+
+<CodeBlockConfig filename="/etc/boundary.d/ingress-worker.hcl">
+
+```hcl
+worker {
+  name              = "ingress-1"
+  initial_upstreams = ["10.0.0.10:9201"]
+  public_addr       = "ingress-1.example.internal"
+}
+
+# Authenticates the ingress worker to the controllers
+kms "awskms" {
+  purpose = "worker-auth"
+  key_id  = "arn:aws:kms:us-east-1:111111111111:key/controller-workers"
+  region  = "us-east-1"
+}
+
+# Authenticates downstream workers to the ingress worker
+kms "awskms" {
+  purpose = "downstream-worker-auth"
+  key_id  = "arn:aws:kms:us-east-1:111111111111:key/edge-workers"
+  region  = "us-east-1"
+}
+```
+
+</CodeBlockConfig>
+
+The egress worker configures only `worker-auth`, using the edge key.
+Its `initial_upstreams` value points at the ingress worker, not at a controller:
+
+<CodeBlockConfig filename="/etc/boundary.d/egress-worker.hcl">
+
+```hcl
+worker {
+  name              = "egress-1"
+  initial_upstreams = ["ingress-1.example.internal:9202"]
+  public_addr       = "egress-1.example.internal"
+}
+
+# Authenticates the egress worker to its upstream, ingress-1
+kms "awskms" {
+  purpose = "worker-auth"
+  key_id  = "arn:aws:kms:us-east-1:111111111111:key/edge-workers"
+  region  = "us-east-1"
+}
+```
+
+</CodeBlockConfig>
+
+In this topology:
+
+- The controller and ingress worker share the `worker-auth` key `controller-workers`.
+- The ingress worker and egress worker share a different key, `edge-workers`.
+- The ingress worker configures both purposes, which lets it act as a client to the controllers and as an authenticating upstream for other workers.
+
+## Verify the trust chain
+
+Start the upstream worker first, then start the downstream worker.
+Use the following command to confirm that the upstream worker authenticated the downstream worker:
+
+```shell-session
+$ boundary workers read -id w_3f1IhyQfaj
+```
+
+The `Directly Connected Downstream Workers` field lists the workers that authenticated through this upstream:
+
+<CodeBlockConfig hideClipboard highlight="8-9">
+
+```plaintext
+Worker information:
+  Address:                   ingress-1.example.internal:9202
+  ID:                        w_3f1IhyQfaj
+  Name:                      ingress-1
+  Release Version:           Boundary v1.0.0+ent
+  Type:                      pki
+
+  Directly Connected Downstream Workers:
+    w_8WYmILuVvf
+```
+
+</CodeBlockConfig>
+
+If the downstream worker does not appear, check its logs for a TLS handshake error, which indicates that its `worker-auth` key does not match a `downstream-worker-auth` key on the upstream:
+
+<CodeBlockConfig hideClipboard>
+
+```plaintext
+(nodeenrollment.protocol.attemptFetch) error tls handshaking connection on client: remote error: tls: internal error
+```
+
+</CodeBlockConfig>
+
+## Configure multiple trust domains
+
+You can configure multiple `kms` blocks with the `downstream-worker-auth` purpose on a single upstream worker.
+Boundary adds each key to a pool and accepts a downstream worker that presents a token derived from any key in that pool.
+Each block represents a separate trust domain for downstream workers.
+
+The `downstream-worker-auth` purpose is the exception among KMS purposes.
+  Boundary accepts only one `kms` block for the `worker-auth` purpose, and it fails to start if you define more than one:
+
+  
+
+Consider using separate keys for the following cases:
+
+- **Different networks or environments** - Configure one key per data center or per cloud account.
+- **Different sensitivity levels** - Configure separate keys for production and non-production downstream workers.
+- **Gradual migration** - Bring new downstream workers online using a new key, while existing workers continue to use the old key, so that you can phase out the older key over time.
+
+A downstream worker must use a `worker-auth` block that references one of the keys you configured with the `downstream-worker-auth` purpose on its upstream.
+The upstream worker rejects any downstream worker that presents a token derived from an unknown key.
+
+## Operational considerations
+
+When you design multi-hop topologies that use `downstream-worker-auth`, keep the following considerations in mind:
+
+- **Key rotation** - Rotating a `downstream-worker-auth` key requires that you coordinate the change on both the upstream worker and all affected downstream workers.
+Staggered roll outs, in which you add a new key, migrate workers, and then remove the old key, minimize downtime.
+- **Affected scope** - Because a `downstream-worker-auth` key defines a trust domain, isolating different environments with distinct keys limits the impact of a compromised key.
+- **KMS backends** - Upstream workers can use different KMS backends for `worker-auth` and `downstream-worker-auth`.
+For example, controllers might use an on-premises KMS, while edge workers use a cloud KMS in the target region.
+- **Auditability** - Boundary records worker authentication events in the event log.
+You can correlate them with the `name` value and the KMS key the worker used to verify which trust domain a worker belonged to at a given point in time.
+
+## More information
+
+Refer to the following topics for more information:
+
+- [Register a worker using an external KMS](/boundary/docs/workers/registration/kms)
+- [Configure multi-hop sessions for Boundary Enterprise](/boundary/docs/workers/multi-hop/enterprise)
+- [Data encryption in Boundary](/boundary/docs/secure/encryption/data-encryption)
