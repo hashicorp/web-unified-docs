@@ -110,7 +110,7 @@ drift apart, readers see different diagrams depending on their theme.
 
 ## Screenshots
 
-In general, you should avoid using screenshots of the product UI because they are
+In general, you should avoid using screenshots of the product UI, including screenshots of third-party UIs your product integrates with, because they are
 difficult to maintain and to consistently implement. This guidance applies to
 UI-driven products, such as HCP and Terraform Cloud, unless the interface is
 stable and unlikely to change with the next cycle.

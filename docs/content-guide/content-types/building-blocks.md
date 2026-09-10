@@ -16,8 +16,7 @@ page needs and in what order, refer to the relevant page in
 There are several types of introductory blocks that you can place at the
 beginning of your topic. Introductory blocks provide contextual information so
 that readers can decide if the topic is applicable.
-
-There are several types of introductory blocks that you can place at the beginning of your topic. Introductory blocks provide contextual information so that readers can decide if the topic is applicable. Use one or more of the following introductory blocks:
+Use one or more of the following introductory blocks:
 
   * [Description](#description)
   * [Introduction](#introduction)
@@ -109,7 +108,7 @@ Refer to the [Discover Consul Nodes and Services Overview](/consul/docs/services
 for additional information.
 
 ```
-In the following example, the introduction is has "Background" as the heading text because it includes additional background information, such as why the prerequisite may be difficult to meet:
+In the following example, the introduction uses "Background" as the heading text because it includes additional background information, such as why the prerequisite may be difficult to meet:
 
 ```mdx
 ## Background
@@ -601,9 +600,8 @@ Add a **workflow** or **workflows** section to overview pages to summarize the a
 
 When creating an overview page in the well-architected framework (WAF), a workflow block may not be necessary or even feasible. This is because high-level procedures may not be linear in WAF as they are in product documentation.
 
-  * It may not always be possible, but describe workflows in three phases according to the [_Rule of three_ writing principle](https://github.com/hashicorp/consul/blob/main/website/content/docs/connect/config-entries/service-router.mdx) when possible. The rule of three principle is a known device for helping learners digest information.****
 
-  * Don’t reproduce details from the relevant usage topics. Instead, provide a reason for the task and link to the topic.
+Don’t reproduce details from the relevant usage topics. Instead, provide a reason for the task and link to the topic.
 
 #### Examples
 
@@ -631,13 +629,12 @@ To get started with HashiCorp-managed clusters, complete the following tasks in 
 ```
 ### General subtopic
 
-Place information about a concept, feature, or subject into general subtopics. General blocks glue pieces of the documentation together and provide space to describe how processes and concepts relate to other sections in the topic. You can embed visual elements and format content as lists, tables, tabs, or any other form so long as it is consistent with our writing styles and following principles:
+Place information about a concept, feature, or subject into general subtopics. General blocks glue pieces of the documentation together and provide space to describe how processes and concepts relate to other sections in the topic. You can embed visual elements and format content as lists, tables, tabs, or any other form so long as it is consistent with our writing styles and principles.
 
-  * **Content type** : Overview, concept
+Write subtopics so that they are comprehensible to practitioners that scan the page and practitioners that read the page from top to bottom. Each general block supports a single aspect of the main topic. 
+Arrange the blocks in a logical order on the page. Group and nest subtopics in a manner that is consistent with our style guidance.
 
-  * **Modular subtopics that tell a story:** Write subtopics so that they are comprehensible to practitioners that scan the page and practitioners that read the pate from top to bottom. Each general block supports a single aspect of the main topic. Arrange the blocks in a logical order on the page. Group and nest subtopics in a manner that is consistent with our style guidance.
-
-  * **Headings:** Use headings that clearly signal to readers what the subtopic is about.
+Use headings that clearly signal to readers what the subtopic is about.
 
 #### Examples
 

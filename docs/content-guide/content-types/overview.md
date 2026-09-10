@@ -144,11 +144,7 @@ When creating an overview page in the well-architected framework (WAF), a
 workflow block may not be necessary or even feasible. This is because high-level
 procedures may not be linear in WAF as they are in product documentation.
 
-- It may not always be possible, but describe workflows in three phases according
-  to the _Rule of three_ writing principle when possible. The rule of three
-  principle is a known device for helping learners digest information.
-- Don't reproduce details from the relevant usage topics. Instead, provide a
-  reason for the task and link to the topic.
+Don't reproduce details from the relevant usage topics. Instead, provide a reason for the task and link to the topic.
 
 Refer to [Workflow](building-blocks.md#workflow) for examples.
 
