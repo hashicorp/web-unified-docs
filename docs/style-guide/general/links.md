@@ -7,7 +7,7 @@ These guidelines are intended to help you properly use links.
 - **keywords**: links, linking, linked text
 - **content sets**: docs, tutorial, WAF, certifications
 
-Mid-prose links can distract readers from their task or confuse readers if the linked text targets a single word that seems randomly selected. Avoid linking single words or phrases mid-sentence unless they clearly match the title of the linked topic. Instead, write a second sentence that refers users to a related topic using the title as the linked text. 
+Mid-prose links can distract readers from their task or confuse readers if the linked text targets a single word that seems randomly selected. Avoid linking single words or phrases mid-sentence unless they clearly match the title of the linked topic. Instead, write a second sentence that refers users to a related topic using the title as the linked text.
 
 
 ### Examples
@@ -27,7 +27,7 @@ You should be familiar with AWS ECS. Refer to [What is Amazon Elastic Container 
 ```
 
 ```
-For additional information about the `kill` command, refer to 
+For additional information about the `kill` command, refer to
 [Kill Signals and Commands ](https://www.linux.org/threads/kill-signals-and-commands-revised.11625/) in the Linux documentation.
 ```
 
@@ -73,5 +73,36 @@ Refer to [Use linked text that explicitly tells readers about the destination co
 
 ### Example
 
-`Refer to [Some article in PDF format (PDF)](URL) for additionl information.`
+`Refer to [Some article in PDF format (PDF)](URL) for additional information.`
 
+## Use inline links sparingly
+
+- **keywords**: writing, linking, linked text, inline links, URLs
+- **content sets**: docs, tutorial, WAF, certifications
+
+When readers encounter hyperlinks embedded in sentences or paragraphs, they must make a decision whether to click for more information or keep reading. Multiple hyperlinks create additional cognitive load and can cause readers to lose focus. If a reader clicks the hyperlink, they might miss important context from the original page.
+
+Additionally, some screen readers pause and announce each link, making it difficult for users to follow the surrounding text.
+
+As a best practice, use inline links sparingly. Put links at the end of a section or the end of the page when possible.
+
+### Examples
+
+**Do:**
+
+```
+A session is a set of related connections between a user and a host. A session may include a set of credentials which define the permissions granted to the user on the host for the duration of the session.
+
+For more information about related resources, refer to the following domain model topics:
+
+- [credentials](/boundary/docs/domain-model/credentials)
+- [connections](/boundary/docs/domain-model/session-connections)
+- [host](/boundary/docs/domain-model/hosts)
+- [user](/boundary/docs/domain-model/users)
+```
+
+**Don't:**
+
+```
+A session is a set of related [connections](/boundary/docs/domain-model/session-connections) between a [user](/boundary/docs/domain-model/users) and a [host](/boundary/docs/domain-model/hosts). A session may include a set of [credentials](/boundary/docs/domain-model/credentials) which define the permissions granted to the [user](/boundary/docs/domain-model/users) on the [host](/boundary/docs/domain-model/hosts) for the duration of the session.
+```
