@@ -7,6 +7,7 @@ import {
 	findFileWithMetadata,
 	joinFilePath,
 	parseMarkdownFrontMatter,
+	resolveCdnUrl,
 } from '#utils/file'
 import { getProductVersionMetadata } from '#utils/contentVersions'
 import { errorResultToString } from '#utils/result'
@@ -24,9 +25,14 @@ export type GetParams = VersionedProduct & {
 	docsPath: string[]
 }
 
-export async function GET(request: Request, { params }: { params: GetParams }) {
+export async function GET(
+	request: Request,
+	{ params }: { params: Promise<GetParams> },
+) {
 	// Grab the parameters we need to fetch content
-	const { productSlug, version, docsPath } = params
+	const { productSlug, version, docsPath } = await params
+	const url = new URL(request.url)
+	const mdOnly = url.searchParams.get('mdOnly') === 'true'
 
 	if (!Object.keys(PRODUCT_CONFIG).includes(productSlug)) {
 		console.error(
@@ -130,8 +136,24 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 		return new Response('Not found', { status: 404 })
 	}
 
-	const { metadata, markdownSource } = markdownFrontMatterResult.value
+	const { metadata, markdownSource: rawMarkdownSource } =
+		markdownFrontMatterResult.value
 
+	const markdownSource = resolveCdnUrl(
+		rawMarkdownSource,
+		productSlug,
+		versionMetadata.version,
+	)
+
+	if (mdOnly) {
+		return new Response(markdownSource, {
+			headers: {
+				'content-type': 'text/markdown',
+				'served-from': servedFrom,
+				'X-Robots-Tag': 'noindex',
+			},
+		})
+	}
 	return new Response(
 		JSON.stringify({
 			meta: {

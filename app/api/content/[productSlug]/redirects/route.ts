@@ -13,8 +13,11 @@ import { PRODUCT_CONFIG } from '#productConfig.mjs'
  * Parameters expected by `GET` route handler
  */
 export type GetParams = ProductParam
-export async function GET(request: Request, { params }: { params: GetParams }) {
-	const { productSlug } = params
+export async function GET(
+	request: Request,
+	{ params }: { params: Promise<GetParams> },
+) {
+	const { productSlug } = await params
 
 	if (!Object.keys(PRODUCT_CONFIG).includes(productSlug)) {
 		console.error(
