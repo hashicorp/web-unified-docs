@@ -1,0 +1,117 @@
+### Azure secrets engine roles can target Vault's own service principal ((#azure-static-role-self-target))
+
+<!-- BEGIN: Vault:=v2.x -->
+
+| Change      | Status   | Vault edition | Affected version | Fixed version
+| ----------- | -------- | ------------- | ---------------- | -------------
+| Known issue | Open     | Enterprise    | 2.0.0            | No
+
+<!-- END: Vault:=v2.x -->
+
+<!-- BEGIN: Vault:=v1.21.x -->
+
+| Change      | Status   | Vault edition | Affected version | Fixed version
+| ----------- | -------- | ------------- | ---------------- | -------------
+| Known issue | Open     | Enterprise    | 1.21.0           | No
+
+<!-- END: Vault:=v1.21.x -->
+
+<!-- BEGIN: Vault:=v1.20.x -->
+
+| Change      | Status   | Vault edition | Affected version | Fixed version
+| ----------- | -------- | ------------- | ---------------- | -------------
+| Known issue | Open     | Enterprise    | 1.20.0           | No
+
+<!-- END: Vault:=v1.20.x -->
+
+<!-- BEGIN: Vault:=v1.19.x -->
+
+| Change      | Status   | Vault edition | Affected version | Fixed version
+| ----------- | -------- | ------------- | ---------------- | -------------
+| Known issue | Open     | Enterprise    | 1.19.0           | No
+
+<!-- END: Vault:=v1.19.x -->
+
+#### Issue
+
+The Azure secrets engine does not prevent a role from targeting the same Azure
+AD application that Vault uses as its service principal. The problem affects static
+and dynamic roles with an explicit `application_object_id
+
+#### Workaround
+
+**Step 1: Audit for poisoned roles**
+
+Before applying any code fixes, audit your Azure deployment for static roles that
+target the service principal used by Vault.
+
+On Vault Enterprise, repeat the following steps for every namespace with an
+Azure secrets engine mount:
+
+
+1. Fetch and save all the Azure mount paths under the current namespace:
+
+    ```shell-session
+    $ export MOUNT_PATHS=$(                                          \
+    vault secrets list -format=json |                            \
+    jq -r 'to_entries[] | select(.value.type == "azure") | .key' \
+    )
+    ```
+
+1. Compare the client ID (`client_id`) for each Azure mount path to the
+   application object ID (`application_object_id`) for the available static
+   roles:
+
+    ```shell-session
+    $ for mount in ${MOUNT_PATHS} ; do
+        CLIENTID=$(vault read -format=json ${mount}config | jq '.data.client_id')
+        echo "${mount} ($CLIENTID) static roles:"
+        vault list -format=json ${mount}static-roles | \
+        jq --arg client ${CLIENTID} -r 'to_entries[] | select(.value.application_object_id == "$client") | .key'
+    done
+    ```
+
+1. Compare the client ID (`client_id`) for each Azure mount path to the
+   application object ID (`application_object_id`) for the available dynamic
+   roles :
+
+    ```shell-session
+    $ for mount in ${MOUNT_PATHS} ; do
+        CLIENTID=$(vault read -format=json ${mount}config | jq '.data.client_id')
+        echo "${mount} ($CLIENTID) dynamic roles:"
+        vault list -format=json ${mount}roles | \
+        jq --arg client ${CLIENTID} -r 'to_entries[] | select(.value.application_object_id == "$client") | .key'
+    done
+    ```
+
+1. Delete any static role whose `application_object_id` matches the client ID
+   (Azure app ID) of the associated mount path:
+
+    ```shell-session
+    $ vault delete <mount>/static-roles/<name>
+    ```
+
+1. Revoke the corresponding credentials directly in Azure AD by removing the
+   associated application password (client secret) from the app registration.
+   You cannot rely on Vault lease revocation to remove access for the static role.
+
+1. Revoke active leases for the applicable dynamic roles so that Azure removes
+   any already-issued credentials from the app registration immediately rather
+   than waiting for lease expiry:
+
+    ```shell-session
+    $ vault lease revoke -prefix <mount>/creds/<name>
+    ```
+
+1. Delete any dynamic role whose `application_object_id` matches the client ID
+   (Azure app ID) of the associated mount path:
+
+    ```shell-session
+    $ vault delete <mount>/roles/<name>
+    ```
+
+
+**Step 2: Upgrade**
+
+Upgrade to a patched version of the Azure secrets engine plugin once we release
+it.
