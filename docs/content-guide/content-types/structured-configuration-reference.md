@@ -264,7 +264,7 @@ brackets only.
 
 #### Values
 
-Each description has a "Values" section, formatted with an H4 tag (`####`), that
+Depending on your product, each description may have a "Values" section, formatted with an H4 tag (`####`), that
 lists the following information:
 
 - Default value

@@ -45,7 +45,7 @@ configuration schema in mind does not transfer here.
 **Status: In use.**
 
 **What Terraform Enterprise does.** Every release gets a page under
-`enterprise/releases/<year>/`, titled with the version, using a fixed heading set
+`enterprise/releases/<version>.<release>.x>/`, titled with the version, using a fixed heading set
 in a consistent order:
 
 ```text
