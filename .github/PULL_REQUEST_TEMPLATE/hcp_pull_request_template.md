@@ -34,6 +34,7 @@ I have:
 - [ ] Verified that preview environment has successfully deployed
 - [ ] Verified appropriate `label` applied (`hcp` + `product name`)
 - [ ] Added all required reviewers (code owners and external)
+- [ ] Kept this PR to one docs set without combining moved or renamed pages with rewrites, or explained why in the description ([Keep changes reviewable](https://github.com/hashicorp/web-unified-docs/blob/main/CONTRIBUTING.md#keep-changes-reviewable))
 
 ## Content checklist (optional)
 

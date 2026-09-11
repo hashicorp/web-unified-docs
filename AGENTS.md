@@ -41,15 +41,17 @@ user-facing experience.
 
 This is the general operating guide for the codebase, architecture, workflows,
 and operational behavior of `web-unified-docs`. When a task is specific to one
-product or content set under `content/`, first check that product area for its
-own `AGENTS.md`, style guidance, or templates and follow those local
-instructions first.
+product or content set under `content/`, check that product area for its own
+`AGENTS.md` and follow those local instructions first.
 
 Documentation-review guidance for changed Markdown/MDX under `content/` is
 path-specific and lives in `.github/instructions/*.instructions.md`.
 
 ## Detailed guides
 
+- [Authoring content](agent-docs/authoring-content.md) — which content type to
+  use, how each product implements it, which template to copy, and the
+  mechanics that are easy to get wrong.
 - [Local development](agent-docs/local-development.md) — educator vs developer
   flows and runtime.
 - [Testing and TDD](agent-docs/testing-and-tdd.md) — required workflow,
