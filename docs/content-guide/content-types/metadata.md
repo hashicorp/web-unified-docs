@@ -30,3 +30,9 @@ description: |-
   can easily search.
 ---
 ```
+
+Those two are the only keys every page needs. Some products define others that
+change how a page is published — HCP Terraform uses `tfc_only: true` to keep a
+page out of the Terraform Enterprise copy, for example. Check the product's page
+in [products/](../products/) for the keys it uses and when to set them.
+
