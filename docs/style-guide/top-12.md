@@ -160,7 +160,7 @@ Avoid extra words and phrases.
 
 - Instead of "in order to", use "to"
 - Instead of "in the case that", use "when"
-- Avoid adding filler words, especially words that editorialize, such as "simply", "just", "very", and "actually". Refer to [Do not editorialize about the difficulty or comprehensibility of an action or concept](general/language#do-not-editorialize-about-the-difficulty-or-comprehensibility-of-an-action-or-concept)
+- Avoid adding filler words, especially words that editorialize, such as "simply", "just", "very", and "actually". Refer to [Do not editorialize about the difficulty or comprehensibility of an action or concept](general/language.md#do-not-editorialize-about-the-difficulty-or-comprehensibility-of-an-action-or-concept)
 
 **Do:** 
 
@@ -189,7 +189,7 @@ Always use the shortest word or phrase that conveys your intended meaning. Use d
 - **keywords**: writing, word choice  
 - **content sets**: docs, WAF, tutorials, certifications
 
-Use simple, concrete words so global audiences can understand our content more easily. Refer to [Spell out a phrase and place the acronym form in parentheses on first use](language#spell-out-a-phrase-and-place-the-acronym-form-in-parentheses-on-first-use) for related guidance.
+Use simple, concrete words so global audiences can understand our content more easily. Refer to [Spell out a phrase and place the acronym form in parentheses on first use](general/language.md#spell-out-a-phrase-and-place-the-acronym-form-in-parentheses-on-first-use) for related guidance.
 
 Avoid Latin loan words such as via, which are common in the English language.
 

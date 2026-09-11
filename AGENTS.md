@@ -48,6 +48,21 @@ instructions first.
 Documentation-review guidance for changed Markdown/MDX under `content/` is
 path-specific and lives in `.github/instructions/*.instructions.md`.
 
+Authoring guidance for content under `content/` lives in `docs/`, and is the
+source of truth for both humans and agents:
+
+- [docs/content-guide/content-types.md](docs/content-guide/content-types.md) —
+  which content type to use, the page structure for each, and the templates in
+  `docs/content-guide/templates/`.
+- [docs/style-guide/index.md](docs/style-guide/index.md) — voice, word choice,
+  formatting, headings, links, and markdown rules. Start with
+  [top-12.md](docs/style-guide/top-12.md).
+- [docs/content-guide/indexing.md](docs/content-guide/indexing.md) — file,
+  folder, and navigation label naming.
+
+Read these rather than relying on recall. They change, and the guidance in this
+file can drift from them.
+
 ## Detailed guides
 
 - [Local development](agent-docs/local-development.md) — educator vs developer
