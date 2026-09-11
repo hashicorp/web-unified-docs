@@ -63,6 +63,39 @@ checked against the other before it ships.
 [terraform-enterprise.md](terraform-enterprise.md) will believe a shared
 convention is Terraform Enterprise's own.
 
+## Keeping HCP Terraform content out of the Terraform Enterprise copy
+
+**Status: Adopted.**
+
+Because Terraform Enterprise documentation is an adapted copy rather than a
+separate work, content that describes something Terraform Enterprise does not
+have must opt out of the copy. Nothing infers this: a page with no marker is
+copied, and an HCP-Terraform-only feature then reads as a Terraform Enterprise
+feature.
+
+Two mechanisms, both read by the `copy-cloud-docs-for-tfe` action:
+
+| Scope | How | In use, 2026-09-11 |
+| --- | --- | --- |
+| A whole page | `tfc_only: true` in the frontmatter | 57 pages |
+| Part of a page | `<!-- BEGIN: TFC:only -->` … `<!-- END: TFC:only -->` around the lines | 114 pages |
+
+The action skips any file whose frontmatter sets `tfc_only: true`, and drops the
+lines between each marker pair. Refer to
+`.github/actions/copy-cloud-docs-for-tfe/README.md` for the mechanism and
+[publish-tfe-docs.md](../../workflows/infrastructure-group/publish-tfe-docs.md)
+for the workflow around it. The section markers work only in MDX v1.
+
+**Set it on every page of an HCP-Terraform-only feature, not only the overview.**
+It is frontmatter, so it is easy to leave off one page in a set, and the omission
+does not surface until that page appears in Terraform Enterprise. Neither the
+global templates nor this guide carried this convention until now, so pages
+written from a template alone have arrived without it.
+
+Where a feature exists in both products but differs, prefer the section markers
+over a second page: the parallel relationship above means two pages drift, while
+two marked sections stay adjacent.
+
 ## API reference
 
 **Status: Adopted.**
