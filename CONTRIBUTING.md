@@ -13,6 +13,7 @@ For more specific guidance about contributing to an individual product's docs, r
   - [Versioned content](#versioned-content)
   - [Upcoming releases](#upcoming-releases)
 - [Contributor workflows](#contributor-workflows)
+  - [Keep changes reviewable](#keep-changes-reviewable)
   - [Update existing documentation](#update-existing-documentation)
   - [Upcoming minor release](#upcoming-minor-release-documentation)
   - [Upcoming major release](#upcoming-major-release-documentation)
@@ -101,6 +102,34 @@ The workflow to follow depends on the product version of the content you want to
 
 If you want to preview your changes locally, install
 [Docker](https://www.docker.com/) and [Docker Compose](https://docs.docker.com/compose/).
+
+### Keep changes reviewable
+
+A small team reviews every documentation pull request. A large pull request
+waits in the queue, falls behind `main`, and is often abandoned before anyone
+can review it. Prefer a series of small pull requests that a reviewer can finish
+in one sitting over one large pull request.
+
+Split the work into more than one pull request if it would:
+
+- Change more than one product's documentation.
+- Create a new docs set, or restructure an existing docs set's navigation.
+- Move or rename pages and also rewrite them. Moves and renames go in one pull
+  request and content changes in the next, so reviewers see a diff of your
+  edits rather than a deleted file and a new one.
+- Need approval from more than one product's technical writers.
+
+To build a new docs set, open a first pull request with the navigation and one
+representative page. After reviewers agree on the structure, add the remaining
+pages in follow-up pull requests.
+
+When a large pull request cannot be split, organize it for review: make one
+commit per product or section, and use the description to tell each reviewer
+which commit to review.
+
+These guidelines apply whether you write the change yourself or use an AI
+assistant. An assistant produces as much as you ask it for, so scope the request
+before you start.
 
 ### Update existing documentation
 

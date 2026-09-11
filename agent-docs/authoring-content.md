@@ -29,6 +29,26 @@ its mapping table names the template to use. An absent override is not a claim
 that the product follows the global template — each product page says which of
 the two it means.
 
+## Scope the change before writing
+
+A small team reviews these pull requests, and a large one can go stale before
+anyone reaches it. The person you're working with may not know that, and you
+won't see the review queue, so treat it as a constraint on every task.
+
+**Stop and propose a breakdown before writing anything** if the change would
+change more than one product, create a docs set or restructure its navigation,
+move or rename pages and also rewrite them, or need approval from more than one
+product's writers. The full conditions and the reasoning are in
+[Keep changes reviewable](../CONTRIBUTING.md#keep-changes-reviewable).
+
+Explain why when you propose it. Offer the smallest first pull request that is
+useful on its own — for a new docs set, the navigation and one representative
+page.
+
+If the person still wants one pull request, write it, but organize it for
+review: one commit per product or section, and a description that tells each
+reviewer which commit is theirs.
+
 ## Mechanics that are easy to get wrong
 
 - **Do not write the date metadata block.** `created_at` and `last_modified` are
