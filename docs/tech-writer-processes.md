@@ -22,7 +22,7 @@
 - Broken link monitoring system  
   - [BROKEN_LINK_MONITORING.md](./BROKEN_LINK_MONITORING.md)  
 - How to use redirects  
-  - [redirects.md](./redirects.md)  
+  - [redirects.md](./content-guide/redirects.md)  
 - PR templates  
   - Jonathan Frappier created the PR template links.  
   - You may create product-based PR templates. Refer to the [PULL_REQUEST_TEMPLATE folder](https://github.com/hashicorp/web-unified-docs/tree/main/.github/PULL_REQUEST_TEMPLATE) for examples.
