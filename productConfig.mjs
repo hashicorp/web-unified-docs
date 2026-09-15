@@ -81,6 +81,7 @@ export const PRODUCT_CONFIG = {
 		semverCoerce: semver.coerce,
 		versionedDocs: true,
 		websiteDir: 'website',
+		supportsExclusionDirectives: true,
 	},
 	consul: {
 		/**
@@ -483,6 +484,15 @@ export const PRODUCT_CONFIG = {
 		versionedDocs: true,
 		websiteDir: 'website',
 		supportsExclusionDirectives: true,
+	},
+	'validated-designs': {
+		assetDir: 'img',
+		contentDir: 'docs',
+		dataDir: 'data',
+		productSlug: 'validated-designs',
+		semverCoerce: semver.coerce,
+		versionedDocs: false,
+		websiteDir: 'website',
 	},
 	'well-architected-framework': {
 		/**

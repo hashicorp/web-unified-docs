@@ -89,3 +89,42 @@ test('buildFileMdxTransforms copies internal-only docs for internal products', a
 		expect.stringMatching(/public\/assets$/),
 	)
 })
+
+test('buildFileMdxTransforms applies content exclusion using the file repoSlug', async () => {
+	vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({
+		'terraform-enterprise': {
+			versionedDocs: true,
+			contentDir: 'docs',
+			supportsExclusionDirectives: true,
+		},
+	})
+
+	const exclusionContent = `---
+page_title: Exclusion test
+---
+
+<!-- BEGIN: TFEnterprise:only -->
+Keep this content.
+<!-- END: TFEnterprise:only -->
+<!-- BEGIN: TFC:only -->
+Remove this content.
+<!-- END: TFC:only -->
+`
+
+	vol.fromJSON({
+		'content/terraform-enterprise/2.0.x/docs/test.mdx': exclusionContent,
+		'app/api/versionMetadata.json': JSON.stringify(versionMetadata),
+		'content/terraform-enterprise/2.0.x/docs/partials': {},
+	})
+
+	await buildFileMdxTransforms(
+		'content/terraform-enterprise/2.0.x/docs/test.mdx',
+	)
+
+	const output = fs.readFileSync(
+		'public/content/terraform-enterprise/2.0.x/docs/test.mdx',
+		'utf8',
+	)
+	expect(output).toContain('Keep this content.')
+	expect(output).not.toContain('Remove this content.')
+})
