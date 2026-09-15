@@ -13,13 +13,14 @@ For more specific guidance about contributing to an individual product's docs, r
   - [Versioned content](#versioned-content)
   - [Upcoming releases](#upcoming-releases)
 - [Contributor workflows](#contributor-workflows)
-  - [Update existing documentation](#update-published-documentation)
+  - [Keep changes reviewable](#keep-changes-reviewable)
+  - [Update existing documentation](#update-existing-documentation)
   - [Upcoming minor release](#upcoming-minor-release-documentation)
   - [Upcoming major release](#upcoming-major-release-documentation)
-- [Edit markdown content](#edit-markdown-content)
+- [Edit markdown content](#edit-content)
    - [Markdown enhancements](#markdown-enhancements)
-- [Edit navigation sidebars](#edit-navigation-sidebars)
-- [Run the site locally](#run-the-site-locally)
+- [Edit navigation sidebars](#navigation-sidebars)
+- [Run the site locally](#preview-the-site-locally)
 - [Redirects](#redirects)
 - [Troubleshooting](#troubleshooting)
   - [I cannot see my local changes](#i-cannot-see-my-local-changes)
@@ -86,7 +87,7 @@ your team's technical writer for guidance.
 
 The workflow to follow depends on the product version of the content you want to update.
 
-- [Current or previous product release](#update-published-documentation)
+- [Current or previous product release](#update-existing-documentation)
 - [Upcoming minor release](#upcoming-minor-release-documentation)
 - [Upcoming major release](#upcoming-major-release-documentation)
 
@@ -101,6 +102,34 @@ The workflow to follow depends on the product version of the content you want to
 
 If you want to preview your changes locally, install
 [Docker](https://www.docker.com/) and [Docker Compose](https://docs.docker.com/compose/).
+
+### Keep changes reviewable
+
+A small team reviews every documentation pull request. A large pull request
+waits in the queue, falls behind `main`, and is often abandoned before anyone
+can review it. Prefer a series of small pull requests that a reviewer can finish
+in one sitting over one large pull request.
+
+Split the work into more than one pull request if it would:
+
+- Change more than one product's documentation.
+- Create a new docs set, or restructure an existing docs set's navigation.
+- Move or rename pages and also rewrite them. Moves and renames go in one pull
+  request and content changes in the next, so reviewers see a diff of your
+  edits rather than a deleted file and a new one.
+- Need approval from more than one product's technical writers.
+
+To build a new docs set, open a first pull request with the navigation and one
+representative page. After reviewers agree on the structure, add the remaining
+pages in follow-up pull requests.
+
+When a large pull request cannot be split, organize it for review: make one
+commit per product or section, and use the description to tell each reviewer
+which commit to review.
+
+These guidelines apply whether you write the change yourself or use an AI
+assistant. An assistant produces as much as you ask it for, so scope the request
+before you start.
 
 ### Update existing documentation
 
@@ -124,7 +153,10 @@ Use this workflow when you want to update existing documentation that is already
    the current release folder. Update content in prior release folders as
    needed.
 
-   Content should adhere to the [Education style guide][edu-style-guide].
+   Content should adhere to the [Education style guide][edu-style-guide]
+   and the [content types guide][content-types-guide]. Check
+   [product conventions][product-conventions] for how your product implements
+   those content types before choosing a template.
 
    If you need to create a new page, refer to [How to create a new page][new-page-guide] for instructions.
 
@@ -195,7 +227,10 @@ Check with your team for the exact branch name.
 
 1. Make your changes in current release folder.
 
-   Content should adhere to the [Education style guide][edu-style-guide].
+   Content should adhere to the [Education style guide][edu-style-guide]
+   and the [content types guide][content-types-guide]. Check
+   [product conventions][product-conventions] for how your product implements
+   those content types before choosing a template.
 
    If you need to create a new page, refer to the [How to create a new page][new-page-guide] guide for instructions.
 
@@ -271,7 +306,10 @@ the name of the branch and folder.
 
 1. Make your changes in upcoming release folder.
 
-   Content should adhere to the [Education style guide][edu-style-guide].
+   Content should adhere to the [Education style guide][edu-style-guide]
+   and the [content types guide][content-types-guide]. Check
+   [product conventions][product-conventions] for how your product implements
+   those content types before choosing a template.
 
    If you need to create a new page, refer to the [How to create a new page][new-page-guide] guide for instructions.
 
@@ -324,7 +362,7 @@ We write documentation content in [Markdown](https://www.markdownguide.org/cheat
 
 To create a new page with Markdown, create a file ending in `.mdx` in the desired `./content/<product>/<subdirectory>`. The file path in the content directory becomes the content's URL route. For example, `content/docs/hello.mdx` will be served from the `/docs/hello` URL.
 
-> **Important**: Files and directories will only be rendered and published to the website if they are [included in sidebar data](#edit-navigation-sidebars). Any file not included in sidebar data will not be rendered or published.
+> **Important**: Files and directories will only be rendered and published to the website if they are [included in sidebar data](#navigation-sidebars). Any file not included in sidebar data will not be rendered or published.
 
 In order to render, pages require [YAML frontmatter](https://middlemanapp.com/basics/frontmatter/) that provide the content's title and description. Some frontmatter is autogenerated and should not be manually edited (`created_at` and `last_modified`). The pre-commit hook preserves `created_at` and updates `last_modified` when content changes.
 
@@ -448,5 +486,7 @@ local images and then rebuild with `make`.
   product's tech writing team.
 
 [edu-style-guide]: ./docs/style-guide/index.md
+[content-types-guide]: ./docs/content-guide/content-types.md
+[product-conventions]: ./docs/content-guide/products/index.md
 [new-page-guide]: ./docs/content-guide/create-new-page.md
 [redirects-guide]: ./docs/content-guide/redirects.md
