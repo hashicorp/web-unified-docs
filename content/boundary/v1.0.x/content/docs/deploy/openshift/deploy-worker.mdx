@@ -9,7 +9,7 @@ description: >-
 
 @include 'helm/worker-chart.mdx'
 
-Deploying the Boundary worker OpenShift Helm chart gives you a running data-plane worker that registers with a controller or HCP (HashiCorp Cloud Platform) Boundary and is ready to proxy session traffic to your targets. This page covers installing the worker chart only. To stand up the control plane first, refer to [Deploy controllers using an OpenShift Helm chart](/boundary/docs/deploy/openshift/deploy-controller).
+Deploying the Boundary worker Helm chart gives you a running data-plane worker that registers with a controller or HCP (HashiCorp Cloud Platform) Boundary and is ready to proxy session traffic to your targets. This page covers installing the worker chart only. To stand up the control plane first, refer to [Deploy controllers using an OpenShift Helm chart](/boundary/docs/deploy/openshift/deploy-controller).
 
 ## Prerequisites
 
@@ -30,8 +30,6 @@ Before installing the worker Helm chart on OpenShift, make sure the following ar
 
 Intermediate workers may also require a reachable endpoint for the proxy listener and cluster support for Routes.
 
-Set `openshift.enabled=true` in your values file so that the chart applies an OpenShift-compatible (SCC-compliant) security context, pulls the Red Hat UBI (Universal Base Image) build of the worker image from `registry.connect.redhat.com`, and publishes the proxy port through a `Route` instead of a `LoadBalancer` Service.
-
 Complete the following steps to deploy a worker using the Helm chart on OpenShift.
 
 ## Add the HashiCorp Helm repository
@@ -50,7 +48,7 @@ Example output:
 
 ```
 NAME                      CHART VERSION   APP VERSION   DESCRIPTION
-hashicorp/boundary-worker 0.1.1           1.0.1-ent     Official HashiCorp Boundary Worker Helm Chart
+hashicorp/boundary-worker 0.2.0-beta      1.0.2-ent     Official HashiCorp Boundary Worker Helm Chart
 
 ```
 
@@ -108,7 +106,7 @@ kms "aead" {
 events {
   audit_enabled       = true
   sysevents_enabled   = true
-  observations_enable = true
+  observations_enabled = true
   sink "stderr" {
     name        = "all-events"
     description = "All events sent to stderr"
@@ -138,7 +136,7 @@ $ helm search repo hashicorp/boundary-worker --versions
 
 ## Install a Boundary worker on OpenShift
 
-Create a values file that contains `worker.config` and the OpenShift overrides you need. Setting `openshift.enabled=true` applies an OpenShift-compatible security context and renders the proxy Route that exposes the worker outside the cluster:
+Create a values file that contains `worker.config` and the OpenShift overrides you need. Setting `openshift.enabled=true` applies an OpenShift-compatible security context and renders the proxy and ops Routes that expose the worker outside the cluster:
 
 ```yaml
 worker:
@@ -173,6 +171,9 @@ worker:
       key_id = "global_worker-auth"
     }
 
+  service:
+    proxy:
+      type: ClusterIP
   persistence:
     authStorage:
       storageClass: ""
@@ -186,19 +187,24 @@ openshift:
     proxy:
       enabled: true
       host: ""
+    ops:
+      enabled: true
+      host: ""
       tls:
-        termination: passthrough
+        termination: edge
+        insecureEdgeTerminationPolicy: Redirect
+        destinationCACertificate: ""
 ```
 
-The proxy port carries Boundary's own session TLS over raw TCP, not HTTP, so the proxy Route must use `passthrough` termination. Do not change this to `edge` or `reencrypt`, since the OpenShift router would then terminate TLS itself and break client-to-worker sessions. The ops Route is not created; the ops Service remains `ClusterIP` for internal health and metrics access only.
+The proxy port carries Boundary's own session TLS over raw TCP, not HTTP. The proxy Route's TLS termination is always `passthrough` and cannot be changed; there is no value that sets it to `edge` or `reencrypt`. The ops Route defaults to `edge` termination, as shown above, so the router terminates external TLS while the ops listener itself continues to serve plain HTTP (`tls.ops.disabled=true` in this example). Set `openshift.route.ops.enabled=false` if you do not want the ops Service reachable from outside the cluster.
 
-When the proxy Route is enabled, the chart automatically forces the proxy Service to `ClusterIP` because the Route publishes the port instead. If you need to keep the proxy Service type from `worker.service.proxy.type`, set `openshift.route.proxy.enabled=false`.
+The chart does not automatically change `worker.service.proxy.type` when the proxy Route is enabled. Set it to `ClusterIP`, as shown above, so the Route is the only path for external proxy traffic; otherwise the chart also provisions a `LoadBalancer` Service alongside the Route.
 
 Run the following command to install the release:
 
 ```shell-session
 $ helm install boundary-worker hashicorp/boundary-worker \
-  --version 0.1.1 \
+  --version 0.2.0-beta \
   --namespace boundary \
   --create-namespace \
   --values my-values.yaml \
@@ -211,7 +217,7 @@ Example output:
 
 ```
 NAME: boundary-worker
-LAST DEPLOYED: Tue Jul 22 00:00:00 2026
+LAST DEPLOYED: Tue Sep 15 18:50:15 2026
 NAMESPACE: boundary
 STATUS: deployed
 REVISION: 1
@@ -242,6 +248,7 @@ service/boundary-worker-ops     ClusterIP   10.0.0.21    9203/TCP   2m
 
 NAME                                                    HOST/PORT                                AGE   TERMINATION   WILDCARD
 route.route.openshift.io/boundary-worker-proxy-route    boundary-worker-proxy.apps.example.com   2m    passthrough   None
+route.route.openshift.io/boundary-worker-ops-route      boundary-worker-ops.apps.example.com     2m    edge          None
 
 NAME                                      STATUS   VOLUME     CAPACITY   ACCESS MODES   AGE
 persistentvolumeclaim/boundary-worker-pvc Bound     pvc-1234   1Gi        RWO            2m
@@ -254,9 +261,16 @@ Confirm that:
 - The pod becomes Ready.
 - Enabled PVCs are Bound.
 - The proxy Service is `ClusterIP` and the proxy Route is provisioned with `passthrough` termination.
-- The ops Service matches your intended internal exposure model.
-- Worker logs show successful registration or authentication.
-- The worker appears as active in Boundary and is eligible for session assignment.
+- The ops Service and ops Route match your intended internal exposure model. Set `openshift.route.ops.enabled=false` if you do not want the ops Service reachable from outside the cluster.
+- Worker logs show successful registration or authentication, for example a `rotate worker auth job finished successfully` system event.
+- The worker appears as active in Boundary and is eligible for session assignment. After authenticating with `boundary authenticate password` (see [Token from an OpenShift Secret](/boundary/docs/deploy/openshift/worker-examples#token-from-an-openshift-secret)), confirm this from the controller side using the Boundary CLI:
+
+  ```shell-session
+  $ boundary workers list \
+    -addr="https://<controller-api-route-host>"
+  ```
+
+  The command picks up your stored session token automatically; you do not need to pass a `-token` flag. Look for your worker's `ID` in the output with a recent `Last Status Time` — this confirms registration succeeded and the worker is actively heartbeating to the controller.
 
 ## Update `public_addr` for workers
 
@@ -270,7 +284,7 @@ If the worker HCL needs the final address, update the `public_addr` field in `wo
 
 ```shell-session
 $ helm upgrade boundary-worker hashicorp/boundary-worker \
-  --version 0.1.1 \
+  --version 0.2.0-beta \
   --namespace boundary \
   --values my-values.yaml \
   --rollback-on-failure \
@@ -293,7 +307,7 @@ If the worker does not appear as active in Boundary after installation, confirm 
 
 ### Client sessions fail through the proxy Route
 
-If clients cannot establish sessions through the proxy Route, confirm that `openshift.route.proxy.tls.termination` is set to `passthrough`. Because Boundary's proxy listener carries its own session TLS over raw TCP, `edge` or `reencrypt` termination causes the OpenShift router to terminate TLS itself, which breaks the client-to-worker session. Check the Route status with `oc describe route boundary-worker-proxy-route --namespace boundary`.
+If clients cannot establish sessions through the proxy Route, first confirm the worker pod is Ready and that `worker.service.proxy.targetPort` matches the proxy listener's port in `worker.config`. The proxy Route's TLS termination is always `passthrough` and cannot be changed; Boundary's proxy listener carries its own session TLS over raw TCP, so `edge` or `reencrypt` termination is never applied to this Route. Check the Route status with `oc describe route boundary-worker-proxy-route --namespace boundary`.
 
 ## More information
 
