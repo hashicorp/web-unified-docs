@@ -2,37 +2,61 @@
 layout: docs
 page_title: Instant updates with Vault Secrets Operator
 description: >-
-  Enable instant updates with Vault Secrets Operator.
+  Enable instant updates with Vault Secrets Operator for KV, database, LDAP, and dynamic lease-based secrets.
 # START AUTO GENERATED METADATA, DO NOT EDIT
-created_at: 2026-04-15T00:15:15.000Z
-last_modified: 2026-04-15T00:15:15.000Z
+created_at: 2026-04-14T17:13:42-07:00
+last_modified: 2026-08-31T08:41:42.000Z
 # END AUTO GENERATED METADATA
 ---
 
-# Instant updates for a VaultStaticSecret
+# Instant updates
 
-Vault Secrets Operator (VSO) supports instant updates for
-[VaultStaticSecrets][vss-spec] by subscribing to event notifications from Vault.
+Vault Secrets Operator (VSO) can instantly update corresponding Kubernetes Secrets when
+changes are made in Vault, by subscribing to [Vault Events][vault-events] via a
+persistent WebSocket connection. Setting a periodic refresh interval is still
+recommended since event message delivery is not guaranteed.
 
-## Before you start
+<Note title="Requires Vault Enterprise 1.16.3+">
+
+Instant updates require [Vault Enterprise](/vault/docs/enterprise) 1.16.3+ due
+to the use of [Vault Event Notifications][vault-events].
+
+</Note>
+
+Choose the guide for your secret type:
+
+- [KV v1 / v2 static secrets (VaultStaticSecret)](#kv-static-secrets)
+- [Auto-rotated static credentials (VaultDynamicSecret)](#auto-rotated-static-credentials)
+- [Dynamic lease-based credentials (VaultDynamicSecret)](#dynamic-lease-based-credentials)
+
+---
+
+## KV static secrets
+
+Enable instant updates for [VaultStaticSecret][vss-spec] resources backed by a
+KV v1 or KV v2 secrets engine. Vault fires a `kv` event on every write to the
+secret path and VSO reconciles immediately, using the `X-Vault-Index` header to
+avoid stale reads on Vault Performance Standbys.
+
+### Before you start
 
 - **You must have [Vault Secrets Operator](/vault/docs/platform/k8s/vso/sources/vault) installed**.
 - **You must use [Vault Enterprise](/vault/docs/enterprise) version 1.16.3 or later**.
 
-## Step 1: Set event permissions
+### Step 1: Set event permissions (KV)
 
 Grant these permissions in the policy associated with the VaultAuth role:
 
-  ```hcl
-  path "<kv mount>/<kv secret path>" {
-    capabilities = ["read", "list", "subscribe"]
-    subscribe_event_types = ["*"]
-  }
+```hcl
+path "<kv mount>/<kv secret path>" {
+  capabilities = ["read", "list", "subscribe"]
+  subscribe_event_types = ["*"]
+}
 
-  path "sys/events/subscribe/kv*" {
-    capabilities = ["read"]
-  }
-  ```
+path "sys/events/subscribe/kv*" {
+  capabilities = ["read"]
+}
+```
 
 <Tip>
 
@@ -41,9 +65,9 @@ Vault event notification permissions.
 
 </Tip>
 
-## Step 2: Enable instant updates on the VaultStaticSecret
+### Step 2: Enable instant updates on the VaultStaticSecret
 
-Set `syncConfig.instantUpdates=true` in the [VaultStaticSecret spec][vss-spec]:
+Set `syncConfig.instantUpdates: true` in the [VaultStaticSecret spec][vss-spec]:
 
 ```yaml
 ---
@@ -66,12 +90,205 @@ spec:
     instantUpdates: true
 ```
 
+---
+
+## Auto-rotated static credentials
+
+Enable instant updates for [VaultDynamicSecret][vds-spec] resources that sync
+credentials Vault rotates on a schedule, such as database or LDAP static roles.
+When a rotation event fires, VSO reads the fresh credentials immediately using
+the `X-Vault-Index` header to avoid stale reads on Vault Performance Standbys.
+
+VSO subscribes to a single engine WebSocket (resolved from `sys/mounts/<mount>`,
+e.g. `database`, `ldap`, or any other engine that emits rotation events). No
+lease WebSocket is needed because the rotation event itself is the trigger.
+
+### Before you start
+
+- **You must have [Vault Secrets Operator](/vault/docs/platform/k8s/vso/sources/vault) installed**.
+- **You must use [Vault Enterprise](/vault/docs/enterprise) version 1.16.3 or later**.
+- **The VaultAuth policy must grant `read` on `sys/mounts/*`** so VSO can
+  resolve the engine type at runtime.
+
+### Step 1: Set event permissions (database / LDAP / Azure static roles)
+
+Grant these permissions in the policy associated with the VaultAuth role:
+
+**Database static roles:**
+
+```hcl
+# Allow VSO to resolve the mount's engine type
+path "sys/mounts/*" {
+  capabilities = ["read"]
+}
+
+# Allow VSO to read credentials and subscribe to rotation events
+path "database/*" {
+  capabilities = ["read", "list", "subscribe"]
+  subscribe_event_types = ["database*"]
+}
+
+# Allow subscribing to database engine events
+path "sys/events/subscribe/database*" {
+  capabilities = ["read"]
+}
+```
+
+**LDAP static roles:**
+
+```hcl
+# Allow VSO to resolve the mount's engine type
+path "sys/mounts/*" {
+  capabilities = ["read"]
+}
+
+# Allow VSO to read credentials and subscribe to rotation events
+path "ldap/*" {
+  capabilities = ["read", "list", "subscribe"]
+  subscribe_event_types = ["ldap*"]
+}
+
+# Allow subscribing to LDAP engine events
+path "sys/events/subscribe/ldap*" {
+  capabilities = ["read"]
+}
+```
+
+**Azure static roles:**
+
+```hcl
+# Allow VSO to resolve the mount's engine type
+path "sys/mounts/*" {
+  capabilities = ["read"]
+}
+
+# Allow VSO to read static credentials and role definitions
+path "azure/static-creds/*" {
+  capabilities = ["read"]
+}
+
+path "azure/static-roles/*" {
+  capabilities = ["read", "list", "subscribe"]
+  subscribe_event_types = ["azure*"]
+}
+
+# Allow subscribing to Azure engine events
+path "sys/events/subscribe/azure*" {
+  capabilities = ["read"]
+}
+```
+
+### Step 2: Enable instant updates on the VaultDynamicSecret
+
+Set `spec.allowStaticCreds: true` and `syncConfig.instantUpdates: true` in the
+[VaultDynamicSecret spec][vds-spec]:
+
+```yaml
+---
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultDynamicSecret
+metadata:
+  namespace: vso-example
+  name: vault-dynamic-secret-db-static
+spec:
+  vaultAuthRef: vault-auth
+  mount: database
+  path: static-creds/my-static-role
+  allowStaticCreds: true
+  refreshAfter: 1h
+  destination:
+    create: true
+    name: db-static-secret
+  syncConfig:
+    instantUpdates: true
+```
+
+---
+
+## Dynamic lease-based credentials
+
+Enable instant updates for [VaultDynamicSecret][vds-spec] resources that issue
+new credentials on request (dynamic leases). VSO subscribes to two WebSockets:
+one for the engine type (e.g. `database`) and one for `lease` events so that
+credential revocations and expirations trigger an immediate re-issuance, using
+the `X-Vault-Index` header to avoid stale reads on Vault Performance Standbys.
+
+### Before you start
+
+- **You must have [Vault Secrets Operator](/vault/docs/platform/k8s/vso/sources/vault) installed**.
+- **You must use [Vault Enterprise](/vault/docs/enterprise) version 1.16.3 or later**.
+- **The VaultAuth policy must grant `read` on `sys/mounts/*`** so VSO can
+  resolve the engine type at runtime.
+
+### Step 1: Set event permissions (dynamic leases)
+
+Grant these permissions in the policy associated with the VaultAuth role:
+
+**Database dynamic credentials:**
+
+```hcl
+# Allow VSO to resolve the mount's engine type
+path "sys/mounts/*" {
+  capabilities = ["read"]
+}
+
+# Allow VSO to read and subscribe to credential events
+path "database/*" {
+  capabilities = ["read", "list", "subscribe"]
+  subscribe_event_types = ["database*"]
+}
+
+# Allow subscribing to database engine events
+path "sys/events/subscribe/database*" {
+  capabilities = ["read"]
+}
+
+# Allow subscribing to lease lifecycle events (revoke / expire)
+path "sys/events/subscribe/lease*" {
+  capabilities = ["read"]
+}
+```
+
+For other engines, replace the `database/*` paths with the equivalent paths for
+your engine:
+
+| Engine | Paths to substitute |
+|---|---|
+| LDAP | `ldap/*` |
+| Azure | `azure/creds/*`, `azure/roles/*` |
+| AWS | `aws/creds/*`, `aws/roles/*` |
+
+### Step 2: Enable instant updates on the VaultDynamicSecret
+
+Set `syncConfig.instantUpdates: true` in the [VaultDynamicSecret spec][vds-spec].
+Do **not** set `allowStaticCreds: true` for dynamic lease credentials:
+
+```yaml
+---
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultDynamicSecret
+metadata:
+  namespace: vso-example
+  name: vault-dynamic-secret-db
+spec:
+  vaultAuthRef: vault-auth
+  mount: database
+  path: creds/my-postgresql-role
+  destination:
+    create: true
+    name: dynamic-db-secret
+  syncConfig:
+    instantUpdates: true
+```
+
+---
+
 ## Debugging
 
-Check Kubernetes events on the VaultStaticSecret resource to see if VSO
-subscribed to Vault event notifications.
+Check Kubernetes events on the resource to see if VSO subscribed to Vault event
+notifications successfully.
 
-### Example: VSO is subscribed to Vault event notifications for the secret
+### Example: VSO is subscribed to Vault event notifications
 
 ```shell-session
 $ kubectl describe vaultstaticsecret vault-static-secret-v2 -n vso-example
@@ -84,6 +301,19 @@ Events:
   Normal  SecretRotated        2s               VaultStaticSecret  Secret synced
 ```
 
+For a `VaultDynamicSecret` with `instantUpdates: true`, the event message
+includes the engine type resolved at runtime:
+
+```shell-session
+$ kubectl describe vaultdynamicsecret vault-dynamic-secret-db -n vso-example
+...
+Events:
+  Type    Reason              Age   From                Message
+  ----    ------              ----  ----                -------
+  Normal  SecretSynced        5s    VaultDynamicSecret  Secret synced
+  Normal  EventWatcherStarted 5s    VaultDynamicSecret  Started watching database events
+```
+
 ### Example: The VaultAuth role policy lacks the required event permissions
 
 ```shell-session
@@ -93,14 +323,33 @@ Events:
   Type     Reason             Age   From               Message
   ----     ------             ----  ----               -------
   Normal   SecretSynced       2s    VaultStaticSecret  Secret synced
-  Warning  EventWatcherError  2s    VaultStaticSecret  Error while watching events: 
+  Warning  EventWatcherError  2s    VaultStaticSecret  Error while watching events:
    failed to connect to vault websocket: error returned when opening event stream
-   web socket to wss://vault.vault.svc.cluster.local:8200/v1/sys/events/subscribe/kv%2A?json=true, 
-   ensure VaultAuth role has correct permissions and Vault is Enterprise version 
+   web socket to wss://vault.vault.svc.cluster.local:8200/v1/sys/events/subscribe/kv%2A?json=true,
+   ensure VaultAuth role has correct permissions and Vault is Enterprise version
    1.16 or above: {"errors":["1 error occurred:\n\t* permission denied\n\n"]}
   Normal   SecretRotated      2s    VaultStaticSecret  Secret synced
 ```
 
+### Example: VSO cannot resolve the mount type for a VaultDynamicSecret
+
+If the VaultAuth policy is missing `sys/mounts/*` read permission, VSO emits:
+
+```shell-session
+$ kubectl describe vaultdynamicsecret vault-dynamic-secret-db -n vso-example
+...
+Events:
+  Type     Reason             Age   From                Message
+  ----     ------             ----  ----                -------
+  Warning  EventWatcherError  2s    VaultDynamicSecret  Cannot determine Vault mount type
+   for "database": permission denied. Ensure the VaultAuth policy grants read on
+   sys/mounts/*. Engine-event subscription skipped; will retry next reconcile.
+```
+
+Add `path "sys/mounts/*" { capabilities = ["read"] }` to the VaultAuth policy
+to resolve this.
+
 [vss-spec]: /vault/docs/platform/k8s/vso/api-reference#vaultstaticsecretspec
+[vds-spec]: /vault/docs/platform/k8s/vso/api-reference#vaultdynamicsecretspec
 [vault-events]: /vault/docs/concepts/events
 [events-policies]: /vault/docs/concepts/events#policies
