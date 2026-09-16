@@ -125,15 +125,16 @@ duplicating the most recent version folder and renaming it for the next version.
 HCP Terraform documentation has no versions. Unless the information is under
 embargo, make all changes in the public repository. Automation copies almost all
 HCP Terraform content to the next Terraform Enterprise release unless you
-exclude it with an exclusion tag.
+exclude it with [an exclusion tag](#exclusion-tags).
 
-If you're not sure whether a change is under embargo, check with your product manager.
+If you are not sure whether a change is under embargo, check with your product
+manager.
 
 ### Decide how to handle Enterprise sharing
 
 Because most HCP Terraform content flows into Terraform Enterprise, verify
 whether your change also applies to the next Enterprise release and whether the
-milestone called **app deadline** has already passed. App deadline is when the
+**app deadline** milestone has already passed. App deadline is when the
 release engineer runs the job that generates documentation artifacts for the
 upcoming Enterprise release. Refer to [The Terraform Enterprise release
 cycle](#the-terraform-enterprise-release-cycle) for more detail.
@@ -165,7 +166,10 @@ Use this workflow for changes that aren't tied to a specific release, such as
 documentation for the deployment or application administration areas that only
 apply to Terraform Enterprise.
 
-1. Verify that the content you're changing is Enterprise-only. If the front matter shows `source: terraform-docs-common`, the page is shared with HCP Terraform. Make the change in the source file under `terraform-docs-common` instead so the edit survives the next sync.
+1. Verify that the content you're changing is Enterprise-only. If the front
+   matter shows `source: terraform-docs-common`, the page is shared with HCP
+   Terraform. Make the change in the source file under `terraform-docs-common`
+   instead so the edit survives the next sync.
 1. Make the change in the public repository.
 1. Update any older Enterprise versions that the change applies to.
 1. Merge to `main`.
