@@ -6,6 +6,15 @@ under `content/`. These repository-wide instructions are intentionally small and
 apply to every pull request. They scope automated **documentation** review and
 do not redefine how non-documentation changes are reviewed.
 
+## Changing content
+
+When you are asked to change anything under `content/` — a page, an image or
+diagram, navigation data, or a redirect — read `AGENTS.md` and
+`agent-docs/authoring-content.md` before you start. They route you to the
+content guide and style guide for that kind of change. The person asking may not
+know these conventions, so follow them without waiting to be told. This section
+applies to making changes, not to reviewing pull requests.
+
 ## Automated documentation review
 
 Detailed documentation-review guidance is **path-specific** and lives in
