@@ -16,12 +16,20 @@ We only increment the documentation on VERSION and RELEASE changes. We represent
 
 ## Artifacts for next releases
 
-After releasing a milestone or major verson, the release engineer runs a job to create the following artifacts:
+After releasing a milestone or major verson, the release engineer runs the **Copy Cloud Docs For TFE** workflow to create the following artifacts:
 
 - A branch named `tfe-release/<version>.<release>.x` for assembling the release notes and documentation updates. This is the branch that you merge into `main` to publish the docs.
 - A branch named `HCPTF-diff/<version>.<release>.x` that contains a diff of all of the new content from HCP TF slated for the next Terraform Enterprise release. This branch will be updated with latest changes before next release.
-- A PR named `HCP TF changes for TFE release <version>.<release>.x` for merging content updates into the release notes into the assembly branch. Review this PR and merge into the assembly branch.
-- A PR named `TFE Release <version>.<release>.x` for merging the release notes into the assembly branch.
+- A draft PR named `TFE Release <version>.<release>.x`, from the `tfe-release/<version>.<release>.x` branch into `main`. This is the PR you merge on release day to publish the docs.
+- A draft PR named `HCP TF changes for TFE release <version>.<release>.x`, from the `HCPTF-diff/<version>.<release>.x` branch into the `tfe-release/<version>.<release>.x` branch. Review this PR and merge it into the assembly branch.
+
+Closer to the application code deadline, the release engineer runs the **Create TFE Release Notes** workflow, which adds a third artifact:
+
+- A draft PR also named `TFE Release <version>.<release>.x`, from a `docs-tfe-releases/<version>.<release>.x` branch into the `tfe-release/<version>.<release>.x` branch, for merging the generated release notes into the assembly branch.
+
+This third PR shares its title with the release-to-`main` PR created earlier. Distinguish the two by their base branch, not their title: the release-to-`main` PR targets `main`, and the release-notes PR targets `tfe-release/<version>.<release>.x`.
+
+Refer to [Copy cloud docs for TFE action](copy-cloud-docs-for-tfe-action.md) for the workflow automation and full step-by-step process behind these artifacts.
 
 ## Get the release date
 
