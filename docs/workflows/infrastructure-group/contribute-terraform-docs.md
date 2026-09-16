@@ -62,10 +62,10 @@ how they map to published URLs.
 If a change affects a page's URL path, such as moving or renaming a file or
 folder, add a redirect.
 
-- Terraform Enterprise: Add redirects to the `redirects.jsonc` fle in the latest
+- **Terraform Enterprise**: Add redirects to the `redirects.jsonc` fle in the latest
 version folder. Each Terraform Enterprise version folder has its own redirects
 file, but the platform only reads the file in the latest version.
-- Terraform CE and HCP Terraform: Add redirects to the `redirects.jsonc` fle in
+- **Terraform CE and HCP Terraform**: Add redirects to the `redirects.jsonc` fle in
 the `terraform-docs-common` folder, which is unversioned and contains a running
 list of redirects.
 
