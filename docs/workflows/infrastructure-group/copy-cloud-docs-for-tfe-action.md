@@ -37,10 +37,10 @@ function when run from that internal repository. Refer to [Workflows that use
 this action](#workflows-that-use-this-action) for the trigger and repository
 requirements of each.
 
-In every case where the action itself runs, it copies `.mdx` files, their
+**In every case where the action itself runs, it copies `.mdx` files, their
 images, and nav data from `content/terraform-docs-common/docs/cloud-docs` (the
 HCP Terraform source) into `content/terraform-enterprise/<version>/docs/enterprise`
-(the TFE target), rewriting frontmatter and links as it goes.
+(the TFE target), rewriting frontmatter and links as it goes.**
 
 ## Inputs
 
