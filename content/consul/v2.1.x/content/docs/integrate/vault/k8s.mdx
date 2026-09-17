@@ -1,0 +1,560 @@
+---
+layout: docs
+page_title: Use Vault for secrets management with Consul on Kubernetes
+description: >-
+  Secure Consul on Kubernetes using gossip encryption, TLS certificates, and service mesh certificates using Vault as secrets management.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-03-31T20:45:09.000Z
+last_modified: 2026-03-31T20:45:09.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Use Vault for secrets management with Consul on Kubernetes
+
+This page describes how to securely deploy Consul on Kubernetes using Vault as a secrets manager. Vault can securely store and centrally manage the secrets you will need to provide to your Consul agents. These secrets include, but are not limited to, gossip encryption keys, TLS certificates, service mesh certificates. 
+
+For more information about deploying Vault with Consul on Kubernetes, refer to [Vault as secrets backend](/consul/docs/deploy/server/k8s/vault).
+
+The following architecture diagram depicts the desired outcome.
+
+![Architectural diagram for Vault as Consul secrets manager](/img/kubernetes-diagram-vault-as-secrets-manager.png)
+
+
+## Workflow
+
+The following steps describe specific tasks for Vault secrets management for Consul on Kubernetes:
+
+- [Store enterprise license in Vault](#store-enterprise-license-in-vault)
+- [Store Consul gossip key in Vault](#store-consul-gossip-key-in-vault)
+- [Setup PKI secrets engine for TLS and service mesh CA](#setup-pki-secrets-engine-for-tls-and-service-mesh-ca)
+- [Configure Kubernetes authentication](#configure-kubernetes-authentication)
+- [Configure Consul Helm chart to use Vault as secrets manager](#configure-consul-helm-chart-to-use-vault-as-secrets-manager)
+
+<Note>
+
+ This article assumes that you are using Consul's default value for a datacenter name `dc1`, and the default domain `consul`. If you have deployed Consul with different datacenter and domain values, adjust the related values in the following example commands accordingly.
+
+</Note>
+
+## Vault prerequisites
+
+You will need a running Vault cluster in your network. If you do not have an existing Vault deployment, you can use a [Vault server in "dev" mode](/vault/tutorials/get-started/setup#set-up-the-lab). Note that a Vault server in "dev" mode is not suitable for production use.
+
+Make sure to configure your terminal to interact with the Vault cluster by setting `VAULT_ADDR`, `VAULT_CACERT`, and `VAULT_TOKEN` as environment variables.
+
+Next, enable a key/value v2 secrets engine at the `consul/` path.
+
+```shell-session
+$ vault secrets enable -path=consul kv-v2
+Success! Enabled the kv-v2 secrets engine at: consul/
+```
+
+## Store Enterprise license in Vault
+
+You can safely store a Consul Enterprise license in Vault and configure Consul agents to retrieve the license from Vault during initialization. 
+
+Using the `consul/` instance of the `kv` secrets engine, store the license from the `consul.hclic` local file in Vault.
+
+```shell-session
+$ vault kv put consul/secret/enterpriselicense key="$(cat ./consul.hclic)"
+Key                Value
+---                -----
+created_time       2022-03-22T16:25:14.073090874Z
+custom_metadata    <nil>
+deletion_time      n/a
+destroyed          false
+version            1
+```
+
+After you just stored the Consul license in the Vault `kv` secrets engine, define a policy that grants access to the path where you stored the license.
+
+```shell-session
+$ vault policy write enterpriselicense-policy - <<EOF
+path "consul/data/secret/enterpriselicense" {
+  capabilities = ["read"]
+}
+EOF
+```
+
+The command should return an output similar to the following.
+
+<CodeBlockConfig hideClipboard>
+
+```plaintext
+Success! Uploaded policy: enterpriselicense-policy
+```
+
+</CodeBlockConfig>
+
+Finally, edit the Consul Helm chart values file to reference the Vault path and key where the enterprise license is stored.
+
+```yaml
+global:
+##...
+  enterpriseLicense:
+    secretName: 'consul/data/secret/enterpriselicense'
+    secretKey: 'key'
+##...
+```
+
+## Store Consul gossip key in Vault
+
+First, generate and store the encryption key in Vault.
+
+```shell-session
+$ vault kv put consul/secret/gossip gossip="$(consul keygen)"
+Key              Value
+---              -----
+created_time     2022-03-16T18:18:52.389731147Z
+deletion_time    n/a
+destroyed        false
+version          1
+```
+
+Define a policy that grants access to the path where you stored the gossip encryption.
+
+```shell-session
+$ vault policy write gossip-policy - <<EOF
+path "consul/data/secret/gossip" {
+  capabilities = ["read"]
+}
+EOF
+```
+
+The command should return an output similar to the following.
+
+<CodeBlockConfig hideClipboard>
+
+```plaintext
+Success! Uploaded policy: gossip-policy
+```
+
+</CodeBlockConfig>
+
+
+Then, edit the Consul Helm chart values file to reference the Vault path and key where the gossip key is stored.
+
+```yaml
+global:
+  gossipEncryption:
+    secretName: consul/data/secret/gossip
+    secretKey: gossip
+```
+
+## Setup PKI secrets engine for TLS and service mesh CA
+
+Vault provides a `pki` secrets engine that you can use to generate TLS certificates. You can use these certificates to configure CAs for TLS encryption for servers, and service mesh leaf certificates for services.
+
+First, if the PKI secrets engine (`pki`) is not already enabled, enable it in Vault.
+
+```shell-session
+$ vault secrets enable -path=pki pki
+Success! Enabled the pki secrets engine at: pki/
+```
+
+Generate the root certificate for Consul CA. This command saves the certificate in a file named `consul_ca.crt`. You will use it to configure environment variables for Consul CLI when you need to interact with your Consul datacenter.
+
+```shell-session
+$ vault write -field=certificate pki/root/generate/internal common_name="dc1.consul" | tee consul_ca.crt
+```
+
+The command should return an output similar to the following.
+
+<CodeBlockConfig hideClipboard>
+
+```plaintext
+-----BEGIN CERTIFICATE-----
+MIIDMjCCAhqgAwIBAgIUGnHzuETSKLBqYz7CnW9iDdFbGVAwDQYJKoZIhvcNAQEL
+BQAwFTETMBEGA1UEAxMKZGMxLmNvbnN1bDAeFw0yMjAzMTcxMDQwNTlaFw0zMjAz
+MTQxMDQxMjlaMBUxEzARBgNVBAMTCmRjMS5jb25zdWwwggEiMA0GCSqGSIb3DQEB
+AQUAA4IBDwAwggEKAoIBAQDPUSYAR+iHHSQlc0qUmWvix3GZIrc+yMg9RZPbaSCH
+ttBd0p71weYXbMjNg8Ob0CY6umEdycXtCGOZBCkBBGPRisMrVoF9RIrWBII9XGbR
+36bggYaOTtw9FYfVqVCcO1ZilcnRUpBFrtVCDVd3TZXvEPWv7j0cQ0FwqbSur3Db
+VCNYPuCKt/lwill+6wlTo8yFOMRaxkBDKDGFnDKIV2gHw34xZ5vrqt2Vdeif5HSI3X3r
++zr6YAdWuwiJP+S4aTXohRinFLqHw1NMjrzbzqb8mRkuchyDfnjZBur5gxj1Z9Xs
+o7fpfmWzFIleOjYHREmHtcjMcu8tti2LuGjJUAVnVg5hAgMBAAGjejB4MA4GA1Ud
+DwEB/wQEAwIBBjAPBgNVHRMBAf8EBTADAQH/MB0GA1UdDgQWBBR8hhn7L3Lze5LN
+aYAWszT/oo4C6TAfBgNVHSMEGDAWgBR8hhn7L3Lze5LNaYAWszT/oo4C6TAVBgNV
+HREEDjAMggpkYzEuY29uc3VsMA0GCSqGSIb3DQEBCwUAA4IBAQAddNVes5f4vmO0
+zh03ShJPxH929IXFLs09uwEU3lnCQuiEhEY86x01kvSGqVnSxyBH+Xtn5va2bPCd
+PQsr+9dj6J2eCV1gee6YNtKIEly4NHmYU+3ReexoGLl79guKUvOh1PG1MfHLQQun
++Y74z3s5YW89rdniWK/KdORPr63p+XQvbiuhZLfveY8BLk55mVlojKMs9HV5YOPh
+znOLQNTJku04vdltNGQ4yRMDswPM2lTtUVdIgzI6S7j3DDK+gawDHLFa90zq87qY
+Qux7KBBlN1VEaRQas4FrvqeRR3FtqFTzn3p+QLpOHXw3te1/6fl5oe4Cch8ZROVB
+5U3wt2Em
+-----END CERTIFICATE-----
+```
+
+</CodeBlockConfig>
+
+Next, create a role that defines the configuration for the certificates. Make sure to adjust the `allowed_domains` parameter to match your Consul datacenter and domain configuration.
+
+```shell-session
+$ vault write pki/roles/consul-server \
+    allowed_domains="dc1.consul,consul-server,consul-server.consul,consul-server.consul.svc" \
+    allow_subdomains=true \
+    allow_bare_domains=true \
+    allow_localhost=true \
+    generate_lease=true \
+    max_ttl="720h"
+```
+
+The command should return an output similar to the following.
+
+<CodeBlockConfig hideClipboard>
+
+```plaintext
+Success! Data written to: pki/roles/consul-server
+```
+
+</CodeBlockConfig>
+
+Next, enable Vault's PKI secrets engine at the `connect-root` path to be used as root CA for Consul service mesh.
+
+```shell-session
+$ vault secrets enable -path connect-root pki
+Success! Enabled the pki secrets engine at: connect-root/
+```
+
+### Consul server policy
+
+Consul servers need to generate TLS certificates (`pki/issue/consul-server`) and be able to retrieve the CA certificate (`pki/cert/ca`). Create a Vault policy named `consul-server` that grants access to these paths.
+
+```shell-session
+$ vault policy write consul-server - <<EOF
+path "kv/data/consul-server"
+{
+  capabilities = ["read"]
+}
+path "pki/issue/consul-server"
+{
+  capabilities = ["read","update"]
+}
+path "pki/cert/ca"
+{
+  capabilities = ["read"]
+}
+EOF
+```
+
+The command should return an output similar to the following.
+
+<CodeBlockConfig hideClipboard>
+
+```plaintext
+Success! Uploaded policy: consul-server
+```
+
+</CodeBlockConfig>
+
+### Consul CA access policy
+
+The policy `ca-policy` grants access to the Consul root CA so that Consul agents and services can verify the certificates used in the service mesh are authentic.
+
+```shell-session
+$ vault policy write ca-policy - <<EOF
+path "pki/cert/ca" {
+  capabilities = ["read"]
+}
+EOF
+```
+
+The command should return an output similar to the following.
+
+<CodeBlockConfig hideClipboard>
+
+```plaintext
+Success! Uploaded policy: ca-policy
+```
+
+</CodeBlockConfig>
+
+### Consul service mesh CA policy
+
+The following Vault policy allows Consul to create and manage the root and intermediate PKI secrets engines for generating service mesh certificates. If you would prefer to control PKI secrets engine creation and configuration from Vault rather than delegating full control to Consul, refer to the [Vault CA provider documentation](/consul/docs/connect/ca/vault#vault-managed-pki-paths).
+
+In this deployment, the `RootPKIPath` is `connect-root` and the `IntermediatePKIPath` is `connect-intermediate-dc1`. Make sure to update these values to reflect your specific Vault environment.
+
+```shell-session
+$ vault policy write connect - <<EOF
+path "/sys/mounts/connect-root" {
+  capabilities = [ "create", "read", "update", "delete", "list" ]
+}
+
+path "/sys/mounts/connect-intermediate-dc1" {
+  capabilities = [ "create", "read", "update", "delete", "list" ]
+}
+
+path "/sys/mounts/connect-intermediate-dc1/tune" {
+  capabilities = [ "update" ]
+}
+
+path "/connect-root/*" {
+  capabilities = [ "create", "read", "update", "delete", "list" ]
+}
+
+path "/connect-intermediate-dc1/*" {
+  capabilities = [ "create", "read", "update", "delete", "list" ]
+}
+
+path "auth/token/renew-self" {
+  capabilities = [ "update" ]
+}
+
+path "auth/token/lookup-self" {
+  capabilities = [ "read" ]
+}
+EOF
+```
+
+The command should return an output similar to the following.
+
+<CodeBlockConfig hideClipboard>
+
+```plaintext
+Success! Uploaded policy: connect
+```
+
+</CodeBlockConfig>
+
+## Configure Kubernetes authentication
+
+Vault provides a [Kubernetes authentication method](/vault/docs/auth/kubernetes) that enables clients to authenticate with a Kubernetes Service Account Token. Using the Kubernetes authentication, Vault identifies your Consul agents using their service account and gives them access to the secrets they need to join your Consul datacenter.
+
+Enable the Kubernetes authentication method.
+
+```shell-session
+$ vault auth enable kubernetes
+Success! Enabled kubernetes auth method at: kubernetes/
+```
+
+Next, define the parameters for this Kubernetes auth method: a JSON web token (JWT) for the service account, a Kubernetes CA certificate, and a Kubernetes host URL. The Helm chart configures a Kubernetes service account named `vault` that you will use to enable Vault communication with Kubernetes. Retrieve the JSON Web Token (JWT) for the `vault` service account and set it to the `token_reviewer_jwt` environment variable.
+
+```shell-session
+$ export token_reviewer_jwt=$(kubectl get secret \
+  $(kubectl get serviceaccount vault -o jsonpath='{.secrets[0].name}') \
+  -o jsonpath='{ .data.token }' | base64 --decode)
+```
+
+Retrieve the Kubernetes certificate authority for the service account and set it to
+the `kubernetes_ca_cert` environment variable.
+
+```shell-session
+$ export kubernetes_ca_cert=$(kubectl get secret \
+  $(kubectl get serviceaccount vault -o jsonpath='{.secrets[0].name}') \
+  -o jsonpath='{ .data.ca\.crt }' | base64 --decode)
+```
+
+Retrieve the Kubernetes cluster endpoint and set it to the `kubernetes_host_url`
+environment variable.
+
+```shell-session
+$ export kubernetes_host_url=$(kubectl config view --raw --minify --flatten \
+  -o jsonpath='{.clusters[].cluster.server}')
+```
+
+Configure the Vault Kubernetes auth method to use the service account token.
+
+```shell-session
+$ vault write auth/kubernetes/config \
+  token_reviewer_jwt="${token_reviewer_jwt}" \
+  kubernetes_host="${kubernetes_host_url}" \
+  kubernetes_ca_cert="${kubernetes_ca_cert}"
+```
+
+The command should return an output similar to the following.
+
+<CodeBlockConfig hideClipboard>
+
+```plaintext
+Success! Data written to: auth/kubernetes/config
+```
+
+</CodeBlockConfig>
+
+Verify the configuration for the Kubernetes auth method changed in Vault.
+
+```shell-session
+$ vault read auth/kubernetes/config
+Key                       Value
+---                       -----
+disable_iss_validation    true
+disable_local_ca_jwt      false
+issuer                    n/a
+kubernetes_ca_cert        -----BEGIN CERTIFICATE-----
+##...
+-----END CERTIFICATE-----
+kubernetes_host           https://66606BBB5881313742471313182BBB90999.gr7.us-east-1.eks.amazonaws.com
+pem_keys                  []
+```
+
+You have configured the Kubernetes authentication method and defined the different policies to grant access to the resources. You can now define the associations between Kubernetes service accounts and Vault policies.
+
+You will create Vault roles to associate the necessary policies to Consul server agents, Consul client agents, and Consul CA certificate access.
+
+#### Configure Consul server role for Kubernetes authentication in Vault
+
+Create a Kubernetes authentication role in Vault named `consul-server` that connects the Kubernetes service account (`consul-server`) and namespace (`consul`) with the Vault policies: `gossip-policy`,`consul-server` and `connect`. The tokens returned after authentication are valid for 24 hours.
+
+<Tabs>
+
+<Tab heading="Consul OSS" group="oss">
+
+```shell-session
+$ vault write auth/kubernetes/role/consul-server \
+    bound_service_account_names=consul-server \
+    bound_service_account_namespaces=consul \
+    policies="gossip-policy,consul-server,connect" \
+    ttl=24h
+```
+
+The command should return an output similar to the following.
+
+<CodeBlockConfig hideClipboard>
+
+```plaintext
+Success! Data written to: auth/kubernetes/role/consul-server
+```
+
+</CodeBlockConfig>
+
+</Tab>
+
+<Tab heading="Consul Enterprise" group="enterprise">
+
+When using Consul Enterprise, you must also associate the role with the `enterpriselicense-policy`.
+
+```shell-session
+$ vault write auth/kubernetes/role/consul-server \
+    bound_service_account_names=consul-server \
+    bound_service_account_namespaces=consul \
+    policies="gossip-policy,consul-server,connect,enterpriselicense-policy" \
+    ttl=24h
+```
+
+The command should return an output similar to the following.
+
+<CodeBlockConfig hideClipboard>
+
+```plaintext
+Success! Data written to: auth/kubernetes/role/consul-server
+```
+
+</CodeBlockConfig>
+
+</Tab>
+
+</Tabs>
+
+#### Configure Consul client role for Kubernetes authentication in Vault
+
+Create a Kubernetes authentication role in Vault named `consul-client` that connects the Kubernetes service account (`consul-client`) and namespace (`consul`) with the Vault policies: `gossip-policy` and `ca-policy`. The tokens returned after authentication are valid for 24 hours.
+
+<Tabs>
+
+<Tab heading="Consul OSS" group="oss">
+
+```shell-session
+$ vault write auth/kubernetes/role/consul-client \
+    bound_service_account_names=consul-client \
+    bound_service_account_namespaces=consul \
+    policies="gossip-policy,ca-policy" \
+    ttl=24h
+```
+
+The command should return an output similar to the following.
+
+<CodeBlockConfig hideClipboard>
+
+```plaintext
+Success! Data written to: auth/kubernetes/role/consul-client
+```
+
+</CodeBlockConfig>
+
+</Tab>
+
+<Tab heading="Consul Enterprise" group="enterprise">
+
+When using Consul Enterprise, you must also associate the role with the `enterpriselicense-policy`.
+
+```shell-session
+$ vault write auth/kubernetes/role/consul-client \
+    bound_service_account_names=consul-client \
+    bound_service_account_namespaces=consul \
+    policies="gossip-policy,ca-policy,enterpriselicense-policy" \
+    ttl=24h
+```
+
+The command should return an output similar to the following.
+
+<CodeBlockConfig hideClipboard>
+
+```plaintext
+Success! Data written to: auth/kubernetes/role/consul-client
+```
+
+</CodeBlockConfig>
+
+</Tab>
+
+</Tabs>
+
+#### Configure Consul CA root certificate access in Vault
+
+Create a Kubernetes authentication role in Vault named `consul-ca` that connects all Kubernetes service account in namespace (`consul`) with the Vault policy `ca-policy`. The tokens returned after authentication are valid for 1 hour.
+
+```shell-session
+$ vault write auth/kubernetes/role/consul-ca \
+    bound_service_account_names="*" \
+    bound_service_account_namespaces=consul \
+    policies=ca-policy \
+    ttl=1h
+```
+
+The command should return an output similar to the following.
+
+<CodeBlockConfig hideClipboard>
+
+```plaintext
+Success! Data written to: auth/kubernetes/role/consul-ca
+```
+
+</CodeBlockConfig>
+
+The following diagram provides a summary of the configuration you created.
+
+![Permissions for Vault as Consul secrets manager](/img/kubernetes-diagram-permissions-vault-as-secrets-manager.png)
+
+## Configure Consul Helm chart to use Vault as secrets manager
+
+Finally, edit the Consul Helm chart values file to reference the Vault path and key where the PKI secrets engine is configured.
+
+<CodeBlockConfig filename="consul-values.yaml" hideClipboard>
+
+```yaml
+global:
+  ##...
+  secretsBackend:
+    vault:
+      enabled: true
+      consulServerRole: consul-server
+      consulClientRole: consul-client
+      consulCARole: consul-ca
+      connectCA:
+        address: $VAULT_PRIVATE_ADDR
+        rootPKIPath: connect-root/
+        intermediatePKIPath: connect-intermediate-dc1/
+        additionalConfig: "{\"connect\": [{ \"ca_config\": [{ \"namespace\": \"admin\"}]}]}"
+      agentAnnotations: |
+        "vault.hashicorp.com/namespace": "admin"
+##...
+```
+
+</CodeBlockConfig>
+
+## Next steps
+
+For more information about the Consul Helm Chart and its tunable values, refer to the [Helm Chart reference documentation](/consul/docs/reference/k8s/helm).
+
+To learn more on Vault Kubernetes authentication check [Vault Agent with Kubernetes](/vault/tutorials/kubernetes/agent-kubernetes) and [HCP Vault Dedicated with Amazon Elastic Kubernetes Service](/vault/tutorials/cloud-ops/vault-eks).
