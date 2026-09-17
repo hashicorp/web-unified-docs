@@ -14,42 +14,52 @@ vi.mock('#productConfig.mjs', () => {
 			terraform: {
 				basePaths: ['cli', 'internals', 'intro', 'language'],
 				versionedDocs: true,
+				productSlug: 'terraform',
 			},
 			'terraform-enterprise': {
 				basePaths: ['enterprise'],
 				versionedDocs: true,
+				productSlug: 'terraform',
 			},
 			'terraform-cdk': {
 				basePaths: ['cdktf'],
 				versionedDocs: true,
+				productSlug: 'terraform',
 			},
 			'terraform-docs-agents': {
 				basePaths: ['cloud-docs/agents'],
 				versionedDocs: true,
+				productSlug: 'terraform',
 			},
 			'terraform-plugin-framework': {
 				basePaths: ['plugin/framework'],
 				versionedDocs: true,
+				productSlug: 'terraform',
 			},
 			'terraform-plugin-log': {
 				basePaths: ['plugin/log'],
 				versionedDocs: true,
+				productSlug: 'terraform',
 			},
 			'terraform-plugin-mux': {
 				basePaths: ['plugin/mux'],
 				versionedDocs: true,
+				productSlug: 'terraform',
 			},
 			'terraform-plugin-sdk': {
 				basePaths: ['plugin/sdkv2'],
 				versionedDocs: true,
+				productSlug: 'terraform',
 			},
 			'terraform-plugin-testing': {
 				basePaths: ['plugin/testing'],
 				versionedDocs: true,
+				productSlug: 'terraform',
 			},
 			'terraform-docs-common': {
 				basePaths: [],
 				versionedDocs: false,
+				productSlug: 'terraform',
 			},
 		},
 	}
@@ -57,11 +67,11 @@ vi.mock('#productConfig.mjs', () => {
 
 describe('transformRewriteInternalLinks', () => {
 	it('should not rewrite internal links for paths other than the basePaths', async () => {
-		const content = `[Link to plugin/mux](/plugin/mux/some-page)`
+		const content = `[Link to plugin/mux](/terraform/plugin/mux/some-page)`
 		const entry = {
 			filePath: 'content/terraform/v1.8.x/docs/language/data-sources/index.mdx',
 		}
-		const expectedOutput = `[Link to plugin/mux](/plugin/mux/some-page)\n`
+		const expectedOutput = `[Link to plugin/mux](/terraform/plugin/mux/some-page)\n`
 
 		const result = await transformRewriteInternalLinks(
 			content,
@@ -120,12 +130,12 @@ describe('transformRewriteInternalLinks', () => {
 	})
 
 	it('should rewrite internal links for terraform-enterprise', async () => {
-		const content = `[Link to enterprise](/enterprise/some-page)`
+		const content = `[Link to enterprise](/terraform/enterprise/some-page)`
 		const entry = {
 			filePath: 'content/terraform-enterprise/v202201/docs/some-file.mdx',
 		}
 		const expectedOutput =
-			'[Link to enterprise](/enterprise/v202201/some-page)\n'
+			'[Link to enterprise](/terraform/enterprise/v202201/some-page)\n'
 		const result = await transformRewriteInternalLinks(
 			content,
 			entry,
@@ -135,11 +145,11 @@ describe('transformRewriteInternalLinks', () => {
 	})
 
 	it('should rewrite internal links for terraform-cdk', async () => {
-		const content = `[Link to cdktf](/cdktf/some-page)`
+		const content = `[Link to cdktf](/terraform/cdktf/some-page)`
 		const entry = {
 			filePath: 'content/terraform-cdk/v0.0.1/docs/some-file.mdx',
 		}
-		const expectedOutput = `[Link to cdktf](/cdktf/v0.0.1/some-page)\n`
+		const expectedOutput = `[Link to cdktf](/terraform/cdktf/v0.0.1/some-page)\n`
 		const result = await transformRewriteInternalLinks(
 			content,
 			entry,
@@ -165,7 +175,7 @@ describe('transformRewriteInternalLinks', () => {
 	})
 
 	it('should not rewrite internal links for a product with no basePaths array', async () => {
-		const content = `[Link to cloud-docs](/cloud-docs/some-page)`
+		const content = `[Link to cloud-docs](/terraform/cloud-docs/some-page)`
 		const entry = {
 			filePath: 'content/terraform-docs-common/docs/some-file.mdx',
 		}
@@ -179,13 +189,13 @@ describe('transformRewriteInternalLinks', () => {
 	})
 
 	it('should rewrite internal links for terraform-plugin-framework', async () => {
-		const content = `[Link to plugin/framework](/plugin/framework/some-page)`
+		const content = `[Link to plugin/framework](/terraform/plugin/framework/some-page)`
 		const entry = {
 			filePath:
 				'content/terraform-plugin-framework/v1.3.x/docs/plugin/framework/handling-data/attributes/bool.mdx',
 		}
 		const expectedOutput =
-			'[Link to plugin/framework](/plugin/framework/v1.3.x/some-page)\n'
+			'[Link to plugin/framework](/terraform/plugin/framework/v1.3.x/some-page)\n'
 		const result = await transformRewriteInternalLinks(
 			content,
 			entry,
@@ -195,13 +205,13 @@ describe('transformRewriteInternalLinks', () => {
 	})
 
 	it('should rewrite internal links for terraform-plugin-log', async () => {
-		const content = `[Link to plugin/log](/plugin/log/some-page)`
+		const content = `[Link to plugin/log](/terraform/plugin/log/some-page)`
 		const entry = {
 			filePath:
 				'content/terraform-plugin-log/v0.7.x/docs/plugin/log/managing.mdx',
 		}
 		const expectedOutput =
-			'[Link to plugin/log](/plugin/log/v0.7.x/some-page)\n'
+			'[Link to plugin/log](/terraform/plugin/log/v0.7.x/some-page)\n'
 		const result = await transformRewriteInternalLinks(
 			content,
 			entry,
@@ -211,12 +221,12 @@ describe('transformRewriteInternalLinks', () => {
 	})
 
 	it('should rewrite internal links for terraform-plugin-mux', async () => {
-		const content = `[Link to plugin/mux](/plugin/mux/some-page)`
+		const content = `[Link to plugin/mux](/terraform/plugin/mux/some-page)`
 		const entry = {
 			filePath:
 				'content/terraform-plugin-mux/v0.11.x/docs/plugin/mux/combining-protocol-version-6-providers.mdx',
 		}
-		const expectedOutput = `[Link to plugin/mux](/plugin/mux/v0.11.x/some-page)\n`
+		const expectedOutput = `[Link to plugin/mux](/terraform/plugin/mux/v0.11.x/some-page)\n`
 		const result = await transformRewriteInternalLinks(
 			content,
 			entry,
@@ -226,11 +236,11 @@ describe('transformRewriteInternalLinks', () => {
 	})
 
 	it('should rewrite internal links for terraform-plugin-sdk', async () => {
-		const content = `[Link to plugin/sdkv2](/plugin/sdkv2/some-page)`
+		const content = `[Link to plugin/sdkv2](/terraform/plugin/sdkv2/some-page)`
 		const entry = {
 			filePath: 'content/terraform-plugin-sdk/v2.31.x/docs/some-file.mdx',
 		}
-		const expectedOutput = `[Link to plugin/sdkv2](/plugin/sdkv2/v2.31.x/some-page)\n`
+		const expectedOutput = `[Link to plugin/sdkv2](/terraform/plugin/sdkv2/v2.31.x/some-page)\n`
 		const result = await transformRewriteInternalLinks(
 			content,
 			entry,
@@ -240,12 +250,12 @@ describe('transformRewriteInternalLinks', () => {
 	})
 
 	it('should rewrite internal links for terraform-plugin-testing', async () => {
-		const content = `[Link to plugin/testing](/plugin/testing/some-page)`
+		const content = `[Link to plugin/testing](/terraform/plugin/testing/some-page)`
 		const entry = {
 			filePath: 'content/terraform-plugin-testing/v1.5.x/docs/some-file.mdx',
 		}
 		const expectedOutput =
-			'[Link to plugin/testing](/plugin/testing/v1.5.x/some-page)\n'
+			'[Link to plugin/testing](/terraform/plugin/testing/v1.5.x/some-page)\n'
 		const result = await transformRewriteInternalLinks(
 			content,
 			entry,
@@ -255,13 +265,13 @@ describe('transformRewriteInternalLinks', () => {
 	})
 
 	it('should remove release stage in parentheses from version', async () => {
-		const content = `[Link to plugin/testing](/plugin/testing/some-page)`
+		const content = `[Link to plugin/testing](/terraform/plugin/testing/some-page)`
 		const entry = {
 			filePath:
 				'content/terraform-plugin-testing/v1.5.x (alpha)/docs/some-file.mdx',
 		}
 		const expectedOutput =
-			'[Link to plugin/testing](/plugin/testing/v1.5.x/some-page)\n'
+			'[Link to plugin/testing](/terraform/plugin/testing/v1.5.x/some-page)\n'
 		const result = await transformRewriteInternalLinks(
 			content,
 			entry,
@@ -271,12 +281,12 @@ describe('transformRewriteInternalLinks', () => {
 	})
 
 	it('should not modify version if there is no parentheses', async () => {
-		const content = `[Link to plugin/testing](/plugin/testing/some-page)`
+		const content = `[Link to plugin/testing](/terraform/plugin/testing/some-page)`
 		const entry = {
 			filePath: 'content/terraform-plugin-testing/v1.5.x/docs/some-file.mdx',
 		}
 		const expectedOutput =
-			'[Link to plugin/testing](/plugin/testing/v1.5.x/some-page)\n'
+			'[Link to plugin/testing](/terraform/plugin/testing/v1.5.x/some-page)\n'
 		const result = await transformRewriteInternalLinks(
 			content,
 			entry,
@@ -286,13 +296,13 @@ describe('transformRewriteInternalLinks', () => {
 	})
 
 	it('should remove multiple spaces before parentheses', async () => {
-		const content = `[Link to plugin/testing](/plugin/testing/some-page)`
+		const content = `[Link to plugin/testing](/terraform/plugin/testing/some-page)`
 		const entry = {
 			filePath:
 				'content/terraform-plugin-testing/v1.5.x    (alpha)/docs/some-file.mdx',
 		}
 		const expectedOutput =
-			'[Link to plugin/testing](/plugin/testing/v1.5.x/some-page)\n'
+			'[Link to plugin/testing](/terraform/plugin/testing/v1.5.x/some-page)\n'
 		const result = await transformRewriteInternalLinks(
 			content,
 			entry,
@@ -302,13 +312,13 @@ describe('transformRewriteInternalLinks', () => {
 	})
 
 	it('should handle version with parentheses but no space', async () => {
-		const content = `[Link to plugin/testing](/plugin/testing/some-page)`
+		const content = `[Link to plugin/testing](/terraform/plugin/testing/some-page)`
 		const entry = {
 			filePath:
 				'content/terraform-plugin-testing/v1.5.x(alpha)/docs/some-file.mdx',
 		}
 		const expectedOutput =
-			'[Link to plugin/testing](/plugin/testing/v1.5.x/some-page)\n'
+			'[Link to plugin/testing](/terraform/plugin/testing/v1.5.x/some-page)\n'
 		const result = await transformRewriteInternalLinks(
 			content,
 			entry,
@@ -385,6 +395,20 @@ describe('transformRewriteInternalLinks', () => {
 		}
 		const expectedOutput =
 			'[definition]: /terraform/language/v1.5.x/some-page\n'
+		const result = await transformRewriteInternalLinks(
+			content,
+			entry,
+			versionMetadata,
+		)
+		expect(result).toBe(expectedOutput)
+	})
+
+	it('should not rewrite internal links for the wrong product', async () => {
+		const content = `[Link to vault](/vault/some-page)`
+		const entry = {
+			filePath: 'content/terraform-cdk/v0.0.1/docs/some-file.mdx',
+		}
+		const expectedOutput = `[Link to vault](/vault/some-page)\n`
 		const result = await transformRewriteInternalLinks(
 			content,
 			entry,
