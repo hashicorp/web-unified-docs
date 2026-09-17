@@ -80,5 +80,6 @@ Pull request:
 Content:
 
 - [ ] I added redirects for any moved or removed pages
+- [ ] I kept this PR to one docs set and did not combine moved or renamed pages with rewrites, or I explained why in the description. Refer to [Keep changes reviewable](https://github.com/hashicorp/web-unified-docs/blob/main/CONTRIBUTING.md#keep-changes-reviewable).
 - [ ] I followed the [Education style guide](https://github.com/hashicorp/web-unified-docs/tree/main/docs/style-guide)
 - [ ] I looked at the local or Vercel build to make sure the content rendered correctly
