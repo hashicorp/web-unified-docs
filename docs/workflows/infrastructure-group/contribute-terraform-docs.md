@@ -231,8 +231,8 @@ flowchart TD
     Q1 -- "No" --> Q2{"Scope of changes?"}
     Q2 -- "One or two isolated pages" --> B["Draft in the existing version folder.\nMove the changes to the release branch\nafter app deadline. Minimal rework."]
     Q2 -- "Everything else" --> C["Work with your technical writer\non a docs plan"]
-    C --> D["Option: draft externally and copy\nthe content into a PR in the internal\nrepo after app deadline"]
-    C --> E["Option: draft in the existing version,\nport changes after app deadline, then\nrevert the drafts. Most rework."]
+    C --> D["Option: Draft externally and copy\nthe content into a PR in the internal\nrepo after app deadline"]
+    C --> E["Option: Draft in the existing version,\nport changes after app deadline, then\nrevert the drafts. Most rework."]
 ```
 
 None of the before-app-deadline options is ideal, since the artifacts that host
@@ -298,6 +298,26 @@ next run.
 - Refer to the [style guide](../../style-guide/index.md) and its [Top 12 guidelines](../../style-guide/top-12.md) for writing conventions.
 
 ## Appendix: Use exclusion tags
+
+The `tfc_only: true` frontmatter key and the `TFC:only` HTML comment tags both
+exclude content from TFE, but they differ in scope and in when the platform
+enforces them.
+
+| | `tfc_only: true` frontmatter | `TFC:only` comment tags |
+| --- | --- | --- |
+| Scope | Excludes the entire file | Excludes a section of content within a shared page |
+| Enforcement | Copy time. The `copy-cloud-docs-for-tfe` action's `filterFunc` skips the file, so it's never copied into the TFE version folder. | Render time. The file is copied into TFE as normal, and the platform strips the wrapped content for TFE readers when it renders the page. |
+| Where it lives | A frontmatter key on the file | An HTML comment pair inline in the MDX body |
+| Use case | The whole page is HCP Terraform-only, such as HCP Terraform Europe or tiered pricing, with nothing on it relevant to TFE. | A page is shared between HCP Terraform and TFE, but one paragraph, sentence, or component differs between the two. |
+
+During the TFE docs publishing process, the Copy Cloud docs for TFE workflow
+only evaluates the `tfc_only` frontmatter key. It never evaluates the `TFC:only`
+comment tags. If you wrap content in `TFC:only` tags without also setting
+`tfc_only: true` on a file you mean to exclude entirely, the file still gets
+copied to TFE in full, and you're relying entirely on the tags being honored
+downstream at render time to hide it. Refer to [File
+filtering](publish-tfe-docs.md#file-filtering) in the publishing guide for
+details on how the copy action applies these mechanisms.
 
 ### Exclude content on a page
 
@@ -367,3 +387,12 @@ tfc_only: true
 When you exclude an entire page from TFE with the `tfc_only: true` frontmatter
 key, the file is not copied to the TFE directory during the documentation
 release process.
+
+This exclusion only prevents future copies. It doesn't remove a copy that
+already exists in the TFE directory from before the flag was added. If you add
+`tfc_only: true` to a page that a prior release already copied into a TFE
+version folder, you must manually delete that existing copy. Otherwise it
+persists in every subsequent version folder, since each new version folder
+starts as a full clone of the previous one. Refer to [File
+filtering](publish-tfe-docs.md#file-filtering) for details on how the copy
+action applies this flag.

@@ -10,7 +10,7 @@ the engineering detail of the automation that does it:
 - The changelog scripts that generate release notes
 
 Guide content is for the release engineer who runs this automation and the
-release tech writers who reviews its output.
+release tech writer who reviews its output.
 
 For the general contributor workflow across Terraform CE, HCP Terraform, and
 TFE, not specific to the Enterprise release cycle, refer to
@@ -35,24 +35,24 @@ The documentation only increments on `VERSION` and `RELEASE` changes. Fixes are
 represented as `x`, and the current docs are updated in place to reflect any
 changes. This distinction matters for the automation. A `VERSION` or `RELEASE`
 change gets a new version folder and a full release cycle, which is covered in
-[the release workflows section](#the-release-workflows)). A a `FIXES` change is
+[the release workflows section](#the-release-workflows). A a `FIXES` change is
 published directly against `main` through [creating TFE patch release notes](#create-tfe-patch-release-notes),
 with no new version folder.
 
 ## The docs pipeline
 
 Most TFE documentation is sourced from `content/terraform-docs-common/docs/cloud-docs`,
-the same content HCP Terraform renders from. A composite action,
+the same content HCP Terraform renders from. A composite GitHub Action,
 `copy-cloud-docs-for-tfe`, copies that content into a versioned TFE folder,
 and four workflows coordinate when and how that action runs across a release
 cycle.
 
-| Workflow | File | Purpose | Run order |
-| --- | --- | --- | --- |
-| Copy Cloud Docs For TFE | [`copy-cloud-docs-for-tfe.yml`](../../../.github/workflows/copy-cloud-docs-for-tfe.yml) | Runs once per release to scaffold the version folder and open the release and diff branches and PRs. | 1. Runs once at the start of the release cycle. |
-| Sync Cloud Docs For TFE | [`sync-docs-for-tfe.yml`](../../../.github/workflows/sync-docs-for-tfe.yml) | Re-runs the copy against the existing diff branch to pull in the latest HCP Terraform changes before the app deadline. | 2. Runs as needed before the application code deadline. |
-| Create TFE Release Notes | [`create-tfe-release-notes.yml`](../../../.github/workflows/create-tfe-release-notes.yml) | Runs a final sync, then generates the release-notes changelog and opens the release-notes PR. | 3. Runs once, on the application code deadline. |
-| Create TFE Patch Release Notes | [`create-tfe-release-notes-patch.yml`](../../../.github/workflows/create-tfe-release-notes-patch.yml) | Generates a changelog PR directly against `main` for a patch (fix-only) release, without a new version folder. | Runs on its own for a patch release. It's not part of the standard release sequence. |
+| Run order | Workflow | File | Purpose | Run relation to app deadline |
+| --- | --- | --- | --- | --- |
+| 1 | Copy Cloud Docs For TFE | [`copy-cloud-docs-for-tfe.yml`](../../../.github/workflows/copy-cloud-docs-for-tfe.yml) | Runs once per release to scaffold the version folder and open the release and diff branches and PRs. | Before. Runs at the start of the cycle, well ahead of the app deadline. |
+| 2 | Sync Cloud Docs For TFE | [`sync-docs-for-tfe.yml`](../../../.github/workflows/sync-docs-for-tfe.yml) | Re-runs the copy against the existing diff branch to pull in the latest HCP Terraform changes. | Before. Runs repeatedly, as needed, until the app deadline. |
+| 3 | Create TFE Release Notes | [`create-tfe-release-notes.yml`](../../../.github/workflows/create-tfe-release-notes.yml) | Runs a final sync, then generates the release-notes changelog and opens the release-notes PR. | On. This is the workflow the release engineer runs to mark the app deadline. |
+| N/A | Create TFE Patch Release Notes | [`create-tfe-release-notes-patch.yml`](../../../.github/workflows/create-tfe-release-notes-patch.yml) | Generates a changelog PR directly against `main` for a patch (fix-only) release, without a new version folder. | Not applicable. Patch releases don't follow the milestone release cycle or have an app deadline. |
 
 All four workflow files, and the `copy-cloud-docs-for-tfe` action itself, are
 mirrored into `hashicorp/web-unified-docs-internal`. The two
@@ -142,7 +142,7 @@ applied in `main.ts`'s `filterFunc` and `IGNORE_LIST`.
 
 The GHA does not evaluate the
 `<!-- BEGIN: TFC:only -->` / `<!-- END:TFC:only -->` HTML comment tags
-described in [Exclusion tag syntax](#exclusion-tag-syntax).
+described in contributor guide's [Exclusion tag syntax](#exclusion-tag-syntax) section.
 Those tags exclude content at render time, not
 copy time, so an author who wants a whole file left out of TFE still needs the
 `tfc_only: true` frontmatter property, and an author who wants only part of a
