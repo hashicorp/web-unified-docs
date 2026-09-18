@@ -104,6 +104,7 @@ prNumber: 1234
 overrideJson: {"sourceVersionFolder":"v1.19.x","targetProduct":"vault","targetBranch":"vault-rc-branch","targetVersionFolder":"v1.20.x"}
 ```
 
+**The `targetProduct` value must exactly match the `content/` directory name — lowercase, hyphenated (e.g. `vault`, `terraform-enterprise`, `hcp-docs`)**. 
 ---
 
 ## What files get ported
