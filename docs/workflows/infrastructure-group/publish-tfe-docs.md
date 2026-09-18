@@ -121,8 +121,8 @@ flowchart TD
     E --> F{"File matches an ignore rule?<br/>(IGNORE_PATTERNS, cloud-docs/index.mdx,<br/>or tfc_only: true)"}
     F -->|Yes| G[Skip file]
     F -->|No| H["Read frontmatter and MDX content"]
-    H --> I["Rewrite frontmatter:<br/>inject source, replace<br/>'Terraform Cloud' / 'HCP Terraform'<br/>with 'Terraform Enterprise'"]
-    I --> J["Transform MDX body with remark:<br/>collect image references, rewrite<br/>cloud-docs links to enterprise links"]
+    H --> I["Rewrite frontmatter:<br/>Inject source, replace<br/>'Terraform Cloud' / 'HCP Terraform'<br/>with 'Terraform Enterprise'"]
+    I --> J["Transform MDX body with remark:<br/>Collect image references, rewrite<br/>cloud-docs links to enterprise links"]
     J --> K["Write transformed file to<br/>content/terraform-enterprise/&lt;version&gt;/docs/enterprise/..."]
     K --> E
     G --> E
@@ -319,9 +319,9 @@ flowchart TD
         D1{"Repository is<br/>hashicorp/web-unified-docs-internal?"}
         D1 -->|No| D2["Fail"]
         D1 -->|Yes| D3["Checkout tfe-release/&lt;version&gt;"]
-        D3 --> D4["clone-service-repos.sh:<br/>clone TFE microservice repos,<br/>checkout release-branch in each"]
-        D4 --> D5["execute-changelog-script.sh:<br/>build releases/&lt;version&gt;.md,<br/>commit to docs-tfe-releases/&lt;version&gt;"]
-        D5 --> D6["create-pull-request.sh:<br/>open PR 3: docs-tfe-releases/&lt;version&gt; → tfe-release/&lt;version&gt;<br/>('TFE Release &lt;version&gt;')"]
+        D3 --> D4["clone-service-repos.sh:<br/>Clone TFE microservice repos,<br/>checkout release-branch in each"]
+        D4 --> D5["execute-changelog-script.sh:<br/>Build releases/&lt;version&gt;.md,<br/>commit to docs-tfe-releases/&lt;version&gt;"]
+        D5 --> D6["create-pull-request.sh:<br/>Open PR 3: docs-tfe-releases/&lt;version&gt; → tfe-release/&lt;version&gt;<br/>('TFE Release &lt;version&gt;')"]
         D6 --> D7["Slack notification"]
         D7 --> D8["Update PR 1's body<br/>with links to PR 2 and PR 3"]
     end
@@ -354,9 +354,9 @@ flowchart TD
     P1{"Repository is<br/>hashicorp/web-unified-docs-internal?"}
     P1 -->|No| P2["Fail"]
     P1 -->|Yes| P3["Checkout main"]
-    P3 --> P4["clone-service-repos.sh:<br/>clone TFE microservice repos,<br/>checkout release-branch in each"]
-    P4 --> P5["execute-changelog-script.sh:<br/>build releases/&lt;version&gt;.md,<br/>commit to docs-tfe-releases/&lt;version&gt;<br/>(branched off main)"]
-    P5 --> P6["create-pull-request.sh:<br/>open PR: docs-tfe-releases/&lt;version&gt; → main<br/>('TFE Release &lt;version&gt;')"]
+    P3 --> P4["clone-service-repos.sh:<br/>Clone TFE microservice repos,<br/>checkout release-branch in each"]
+    P4 --> P5["execute-changelog-script.sh:<br/>Build releases/&lt;version&gt;.md,<br/>commit to docs-tfe-releases/&lt;version&gt;<br/>(branched off main)"]
+    P5 --> P6["create-pull-request.sh:<br/>Open PR: docs-tfe-releases/&lt;version&gt; → main<br/>('TFE Release &lt;version&gt;')"]
     P6 --> P7["Slack notification"]
 ```
 
@@ -504,13 +504,13 @@ flowchart TD
     S2 --> S3["Creates tfe-release/&lt;version&gt; and HCPTF-diff/&lt;version&gt;<br/>Opens PR 1 (→ main) and PR 2 (→ tfe-release)"]
     S3 --> S4["Authors add TFE-only content<br/>directly to tfe-release/&lt;version&gt;"]
     S3 --> S5["Run Sync Cloud Docs for TFE<br/>as needed before the deadline"]
-    S5 --> S6["Application code deadline:<br/>run Create TFE Release Notes"]
+    S5 --> S6["Application code deadline:<br/>Run Create TFE Release Notes"]
     S6 --> S7["Final sync of HCPTF-diff/&lt;version&gt;,<br/>generate changelog,<br/>open PR 3 (→ tfe-release)"]
     S4 --> S8["Review and merge PR 2<br/>into tfe-release/&lt;version&gt;"]
     S7 --> S8
     S8 --> S9["Review, edit, and merge PR 3<br/>into tfe-release/&lt;version&gt;"]
     S9 --> S10["Review and merge any other PRs<br/>against tfe-release/&lt;version&gt;"]
-    S10 --> S11["GA release publish:<br/>merge PR 1 into main"]
+    S10 --> S11["GA release publish:<br/>Merge PR 1 into main"]
     S11 --> S12["main syncs to<br/>web-unified-docs-internal;<br/>docs publish to production"]
     S12 --> S13["Verify the new version<br/>on the live site"]
 ```
