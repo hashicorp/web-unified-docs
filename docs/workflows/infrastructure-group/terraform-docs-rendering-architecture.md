@@ -379,7 +379,7 @@ the page exists.
 
 ### Terraform Enterprise: special versioning
 
-As of the 1.0.0 release in 2025, `terraform-enterprise` uses semantic version strings (`v1.2.x`, `v2.0.x`, and so on). Refer to [The complete guide to releasing TFE docs](./publish-tfe-docs.md#release-versioning) for the current `MILESTONE.MAJOR.PATCH` scheme and the release process.
+As of the 1.0.0 release in 2025, `terraform-enterprise` uses semantic version strings (`v1.2.x`, `v2.0.x`, and so on). Refer to [The complete guide to publishing TFE docs](./publish-tfe-docs.md#release-versioning) for the current `MILESTONE.MAJOR.PATCH` scheme and the release process.
 
 Before that switch, `terraform-enterprise` used calendar-date version strings (`v202507-1`, `v202504-2`, and so on). `productConfig.mjs` still carries a custom `semverCoerce` function that converts those legacy date-based versions to sortable semver, purely so older versions continue to sort correctly alongside current semver versions:
 
