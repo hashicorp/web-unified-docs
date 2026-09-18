@@ -201,7 +201,7 @@ flowchart TD
     D --> E["Open a release notes PR"]
 ```
 
-Refer to [The complete guide to releasing TFE docs](publish-tfe-docs.md) for the
+Refer to [The complete guide to publishing TFE docs](publish-tfe-docs.md) for the
 full release process, including exact branch and PR names.
 
 ### App deadline and content drift
