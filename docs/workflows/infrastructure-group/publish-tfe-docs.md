@@ -13,7 +13,7 @@ Guide content is for the release engineer who runs this automation and the
 release tech writers who reviews its output.
 
 For the general contributor workflow across Terraform CE, HCP Terraform, and
-Terraform Enterprise, not specific to the Enterprise release cycle, refer to
+TFE, not specific to the Enterprise release cycle, refer to
 [Contribute to Terraform documentation](contribute-terraform-docs.md).
 
 >[!TIP]
@@ -23,7 +23,7 @@ Terraform Enterprise, not specific to the Enterprise release cycle, refer to
 
 ## Release versioning
 
-Terraform Enterprise increments releases using a semantic-like scheme:
+TFE increments releases using a semantic-like scheme:
 
 `VERSION.RELEASE.FIXES`
 
@@ -380,7 +380,7 @@ from `terraform-docs-common`.
 ### Prepare for app deadline
 
 Merge any PRs against the `terraform-docs-common` folder that should be
-included in the upcoming Terraform Enterprise release.
+included in the upcoming TFE release.
 
 Apply any exclusion tags to prevent HCP Terraform-specific content from
 publishing to the enterprise docs, and vice versa. Refer to [Exclusion tag
@@ -412,12 +412,12 @@ deadline, but the following options are available for content authors:
 
 ### Exclusion tag syntax
 
-Most content in the Terraform Enterprise documentation is sourced from the
+Most content in the TFE documentation is sourced from the
 `terraform-docs-common` folder shared with HCP Terraform, but some features are specific to
 the SaaS offering. Sometimes there can be a lag between when a feature
-releases in HCP Terraform and lands in Terraform Enterprise. For this reason,
+releases in HCP Terraform and lands in TFE. For this reason,
 mark content in the `terraform-docs-common` folder as HCP Terraform-only to
-exclude it from the Terraform Enterprise documentation. Conversely, apply an
+exclude it from the TFE documentation. Conversely, apply an
 exclusion tag to prevent information that should only appear in Terraform
 Enterprise from rendering in HCP Terraform's docs.
 
@@ -429,7 +429,7 @@ Contribute to Terraform documentation guide.
 
 Review and merge PR 2 (`HCP TF changes for TFE release <version>.<release>.x`)
 into the `tfe-release/<version>.<release>.x` branch. During review, verify
-that all of the changes are appropriate for Terraform Enterprise. If you're
+that all of the changes are appropriate for TFE. If you're
 unsure about an item, ask in `#proj-tfe-releases`.
 
 If you need to update any existing documentation or apply exclusion tags, you
@@ -485,7 +485,7 @@ Verify that the new version and related changes appear on the website.
    (`docs-tfe-releases/<version>` → `tfe-release/<version>`), and links PR 2 and
    PR 3 from PR 1's body.
 1. Reviewers review and merge PR 2 into `tfe-release/<version>`, confirming
-   every change is appropriate for Terraform Enterprise.
+   every change is appropriate for TFE.
 1. The release engineer reviews and edits the generated release notes, then
    merges PR 3 into `tfe-release/<version>`.
 1. Reviewers review and merge any other PRs opened directly against
@@ -541,7 +541,7 @@ flowchart TD
 
 - [Contribute to Terraform documentation](contribute-terraform-docs.md): The
   general contributor workflow across Terraform CE, HCP Terraform, and
-  Terraform Enterprise.
+  TFE.
 - [Terraform docs directory to published location
   mapping](terraform-docs-mapping.md): How `content/terraform-enterprise/`
   and `content/terraform-docs-common/` map to published URLs.

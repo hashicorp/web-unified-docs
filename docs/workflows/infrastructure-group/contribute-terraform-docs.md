@@ -2,7 +2,7 @@
 
 This guide explains how to contribute to Terraform documentation on
 `developer.hashicorp.com`. It covers the repository structure, the workflow
-differences between Terraform CE, HCP Terraform, and Terraform Enterprise, and
+differences between Terraform CE, HCP Terraform, and Terraform Enterprise (TFE), and
 the decision points that determine which repository, branch, and folder you
 should use for a given change.
 
@@ -21,16 +21,16 @@ repository. There are two copies of this repository:
 
 - **`web-unified-docs`**: The public repository. This repository serves content
   to the website. Make changes here unless the content is embargoed or documents
-  an upcoming Terraform Enterprise release.
+  an upcoming TFE release.
 - **`web-unified-docs-internal`**: The internal repository. Use this repository
   only to document embargoed features or an upcoming version of Terraform
   Enterprise.
 
 A GitHub Action regularly syncs the `main` branches of both repositories. The
 sync is bidirectional, so a change merged to `main` in either repository can
-overwrite content in the other. This is why you should avoid opening PRs against
-`main` in the internal repository unless the content is under embargo or
-documents an upcoming Enterprise release.
+overwrite content in the other. This is why you should avoid opening PRs in the
+internal repository unless the content is under embargo or documents an upcoming
+Enterprise release.
 
 ```mermaid
 flowchart LR
@@ -63,7 +63,7 @@ If a change affects a page's URL path, such as moving or renaming a file or
 folder, add a redirect.
 
 - **Terraform Enterprise**: Add redirects to the `redirects.jsonc` fle in the latest
-version folder. Each Terraform Enterprise version folder has its own redirects
+version folder. Each TFE version folder has its own redirects
 file, but the platform only reads the file in the latest version.
 - **Terraform CE and HCP Terraform**: Add redirects to the `redirects.jsonc` fle in
 the `terraform-docs-common` folder, which is unversioned and contains a running
@@ -80,12 +80,12 @@ Terraform documentation spans three editions, and each has a different workflow.
 - **Terraform CE**: The open-source command-line product. Versioned content with
   no cross-edition sharing. Refer to [Terraform CE workflows](#terraform-ce-workflows).
 - **HCP Terraform**: The SaaS offering. Unversioned content, most of which is
-  also published to Terraform Enterprise. Refer to [HCP Terraform workflows](#hcp-terraform-workflows).
+  also published to TFE. Refer to [HCP Terraform workflows](#hcp-terraform-workflows).
 - **Terraform Enterprise**: The self-hosted offering. Versioned content, much of
   it shared with HCP Terraform through the `terraform-docs-common` folder. Refer
   to [Terraform Enterprise workflows](#terraform-enterprise-workflows).
 
-Because HCP Terraform and Terraform Enterprise share most of their content, a
+Because HCP Terraform and TFE share most of their content, a
 change to shared information usually needs to happen in two places to keep both
 editions in sync. The workflows in the following sections walk through each scenario.
 
@@ -124,7 +124,7 @@ duplicating the most recent version folder and renaming it for the next version.
 
 HCP Terraform documentation has no versions. Unless the information is under
 embargo, make all changes in the public repository. Automation copies almost all
-HCP Terraform content to the next Terraform Enterprise release unless you
+HCP Terraform content to the next TFE release unless you
 exclude it with [an exclusion tag](#exclusion-tags).
 
 If you are not sure whether a change is under embargo, check with your product
@@ -132,7 +132,7 @@ manager.
 
 ### Decide how to handle Enterprise sharing
 
-Because most HCP Terraform content flows into Terraform Enterprise, verify
+Because most HCP Terraform content flows into TFE, verify
 whether your change also applies to the next Enterprise release and whether the
 **app deadline** milestone has already passed. App deadline is when the
 release engineer runs the job that generates documentation artifacts for the
@@ -150,11 +150,14 @@ flowchart TD
 
 ### Exclusion tags
 
-Use exclusion tags to gate HCP Terraform-only or Terraform Enterprise-only
+Use exclusion tags to gate HCP Terraform-only or TFE-only
 content within a shared file, or the `tfc_only` frontmatter attribute to
-exclude an entire page from Terraform Enterprise. Use exclusion tags as much as
+exclude an entire page from TFE. Use exclusion tags as much as
 possible instead of stating that a difference is Enterprise-only, since inline
 exclusions produce a smoother reading experience for both audiences.
+
+Refer to the [Appendix: Use exclusion tags](#appendix-use-exclusion-tags) section for more
+information and examples.
 
 ## Terraform Enterprise workflows
 
@@ -172,7 +175,7 @@ version folder.
 
 Use this workflow for changes that aren't tied to a specific release, such as
 documentation for the deployment or application administration areas that only
-apply to Terraform Enterprise.
+apply to TFE.
 
 1. Verify that the content you're changing is Enterprise-only. If the front
    matter shows `source: terraform-docs-common`, the page is shared with HCP
@@ -206,14 +209,14 @@ full release process, including exact branch and PR names.
 App deadline is the point in the cycle when the release engineer's job copies a
 snapshot of `terraform-docs-common` into the new Enterprise version folder.
 Merging your HCP Terraform changes before app deadline ensures they land in the
-new Terraform Enterprise version folder automatically.
+new TFE version folder automatically.
 
 The copied content is a snapshot, not a live link. **If you update a page in the
-new Terraform Enterprise version folder after app deadline and its frontmatter
+new TFE version folder after app deadline and its frontmatter
 shows `source: terraform-docs-common`, you must also update the file in
 `terraform-docs-common`. Otherwise, the next sync overwrites your change.**
 
-Check the `#proj-tfe-releases` channel for the Terraform Enterprise upcoming
+Check the `#proj-tfe-releases` channel for the TFE upcoming
 release app deadline.
 
 ### Document features for an upcoming Enterprise-only release
@@ -239,7 +242,7 @@ plan around this constraint.
 ### Document features for an upcoming release shared with HCP Terraform
 
 Use this workflow for content that applies to both HCP Terraform and the next
-Terraform Enterprise release, such as most topics related to projects,
+TFE release, such as most topics related to projects,
 organizations, or workspaces.
 
 ```mermaid
@@ -299,12 +302,12 @@ next run.
 ### Exclude content on a page
 
 Use HTML comment tags with the `BEGIN: TFC:only` and `END: TFC:only`
-directives to exclude content from the Terraform Enterprise docs.
+directives to exclude content from the TFE docs.
 
 ```mdx
 <!-- BEGIN: TFC:only name:<feature-name> -->
 
-Content to exclude from Terraform Enterprise.
+Content to exclude from TFE.
 
 <!-- END:   TFC:only name:<feature-name>  -->
 ```
@@ -349,7 +352,7 @@ Project-level permissions apply to all workspaces<!-- BEGIN: TFC:only name:stack
 
 ### Exclude an entire MDX file
 
-To exclude an entire file from Terraform Enterprise, add `tfc_only: true` to
+To exclude an entire file from TFE, add `tfc_only: true` to
 the page's frontmatter.
 
 ```mdx
