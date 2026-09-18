@@ -83,7 +83,7 @@ Two mechanisms, both read by the `copy-cloud-docs-for-tfe` action:
 The action skips any file whose frontmatter sets `tfc_only: true`, and drops the
 lines between each marker pair. Refer to
 `.github/actions/copy-cloud-docs-for-tfe/README.md` for the mechanism and
-[contribute-terraform-docs.md](../../workflows/infrastructure-group/contribute-terraform-docs.md#appendix-use-exclusion-tags)
+[contribute-terraform-docs.md](../../workflows/infrastructure-group/contribute-terraform-docs.md)
 for the workflow around it. The section markers work only in MDX v1.
 
 **Set it on every page of an HCP-Terraform-only feature, not only the overview.**
