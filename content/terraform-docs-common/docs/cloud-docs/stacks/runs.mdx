@@ -14,7 +14,9 @@ HCP Terraform is the interface for keeping track of your Stack configuration ove
 
 ## Run environment
 
-HCP Terraform is designed as an execution platform for Terraform, and executes runs on its own disposable virtual machines. Terraform runs managed by HCP Terraform are called remote operations. HCP Terraform executes Stack deployment runs remotely, and you cannot execute Stack runs locally.
+HCP Terraform is designed as an execution platform for Terraform, and manages all execution for Stack deployment runs. There is no option for executing Stack runs in a local-only environment disconnected from HCP Terraform.
+
+Stack operations can be performed on either HCP Terraform's own disposable virtual machines, or on user-provided infrastructure using HCP Terraform agents. Terraform runs performed on HCP Terraform's own infrastructure are called remote operations.
 
 ### Protecting private environments
 
@@ -26,71 +28,175 @@ Your HCP Terraform agent must use v1.25.0 or above to execute Stack deployment r
 
 [HCP Terraform agents](/terraform/cloud-docs/agents/) let HCP Terraform communicate with isolated, private, or on-premises infrastructure. The agent polls HCP Terraform for any changes to your configuration and executes the changes locally, so you do not need to allow public ingress traffic to your resources. Agents let you control infrastructure in private environments without modifying your network perimeter. Note that [agent hooks](/terraform/cloud-docs/agents/hooks) do not support Stack workflows.
 
-## Configuration versions
+## Conceptual model
 
-A Stack configuration version is a snapshot of all of the pieces that make up your Stack. A Stack configuration version includes:
+A classic Terraform workspace manages a single instance of the infrastructure described by a Terraform configuration. This means a workspace has a linear series of runs that deploy that single instance of infrastructure. Because of the mostly one-to-one mapping of configuration versions to runs, workspaces treat runs as the top-level unit of deployment.
 
-- Your component configuration, in one or more `tfcomponent.hcl` files.
-- Your deployment configuration, in one or more `tfdeploy.hcl` files.
-- The modules that implement your individual Stack components
-- The input values that deployment block passes to your Stack components.
+However, a Stack manages many instances (deployments) of the infrastructure described by several Terraform root modules (components). This means the entire concept of "runs for this Stack" is more complicated; Stacks require a different hierarchy of models to represent their deployment history.
 
-HCP Terraform creates a new configuration version each time any of the following change:
+In outline, that hierarchy looks like this, with each level containing the levels nested below it:
 
-- Your configuration changes and VCS automatically fetches that change
-- Your configuration changes and you manually fetch that change in HCP Terraform
-- You manually upload a configuration
-- An [`upstream_input`](/terraform/language/stacks/deploy/pass-data#consume-the-output-from-an-upstream-stack) that your Stack depends on changes.
+- Stack configuration
+    - Stack deployment groups
+        - Stack deployment runs
+            - Stack deployment steps
 
-## Stack deployment runs
+### Stack configurations
 
-Each configuration version creates a deployment run for every deployment of your Stack to implement the changes in that version. A deployment run consists of the steps that Terraform can perform to update that deployment to match the associated configuration version. A single run can include many plan and apply cycles, and a successful run ends with an empty plan to reflect that deployments have executed all downstream changes.
+The _Stack configuration_ is the top-level unit of action for deploying infrastructure in a Stack.
 
-The goal of deployment runs is to apply a configuration version to every deployment in the Stack. When all deployments successfully match the same Stack configuration, the Stack achieves convergence.
+A Stack configuration fully describes some number of deployments and their desired state, and it represents the work necessary to achieve that desired state. In general, the goal of rolling out a configuration is for the Stack to _converge_ on that configuration -- in other words, for all deployments to match their desired states as described in the configuration.
 
-TODO: introduce groups and explain that they exist to configure runs for deployments that should be handled almost identically.
+When a new configuration is requested or triggered, HCP Terraform produces a complete Stack configuration by combining a snapshot of the actual configuration content with a snapshot of any requested dynamic input values. It then processes the Stack configuration to identify the deployments and create groups and runs.
 
-To learn more about interacting with your Stack's deployment runs, refer to [Review deployment runs](/terraform/cloud-docs/stacks/deploy/runs).
+### Stack deployment groups
 
-### Deployment run order
+A Stack's deployment configuration declares deployments, and can also assign those deployments to _deployment groups._ HCP Terraform uses those groups to manage the rollout of the Stack configuration.
 
-Each Stack in HCP Terraform maintains its own configuration versions, and each version has a collection of deployment runs. HCP Terraform starts applying deployment runs as they become approved, but the order is otherwise unspecified.
+All of the deployments in a group share some settings, including auto-approve rules and eager planning behavior. By grouping deployments, you indicate that those deployments should be treated identically.
 
-TODO: This whole section must be split into multiple sections.
-TODO: Explain eager_plan = "off" and how it allows you to wait to plan a large group until you've seen what a smaller canary group is doing. Such groups currently must be manually started via UI or API.
-TODO: Explain "overlapping groups" as they relate to locking and abandonment. (Overlapping groups are any past or future group containing any deployment from the group in question. This allows deployments to change groups while preserving lock integrity.)
-TODO: Explain the group-based lock, which allows all deployments in a group to finish rolling out one config before members of the group start rolling out another one. This helps keep a group's deployments almost identical. Explain that the lock gets released when the group succeeds or fails.
-TODO: explain that failure is a non-terminal state for groups and allows reruns, but it releases the lock, which must be re-acquired. (This might become impossible if a future config starts applying.)
-TODO: explain how failure_tolerance limits concurrency for safety purposes, further reduces concurrency on receiving failure signals, and automatically halts rollout when acceptable failures are exceeded. Explain pending_capacity run status at this point.
+Additionally, a group can declare a maximum failure tolerance, which can halt rollout once too many errors occur.
 
-When you approve a deployment plan, HCP Terraform automatically dismisses all pending plans for that deployment from other configuration versions.
+### Stack deployment runs
 
-For older configurations, HCP Terraform permanently abandons any runs, because you cannot revert your deployment to a previous configuration version.
+A _deployment run_ represents all of the actions necessary to make a given deployment match its desired state.
 
-Plans from newer configuration versions remain rerunnable. After the current deployment completes, you can rerun plans from newer configuration versions and approve them to update your deployment to that newer version.
+Sometimes, Stack deployments require multiple plan and apply cycles to reach their desired state; this happens when some resources cannot even be planned until other resources are fully created. All of the plans and applies necessary for a given deployment are considered part of the same deployment run.
 
-### Deployment runs and state
+#### Reruns
 
-TODO: Integrate this into the rearranged content around group-based locking.
+If a deployment run fails, you can attempt to run that deployment again. This creates a new deployment run. Therefore, a deployment group might contain multiple deployment runs for the same deployment. (Reruns can only be created when a deployment run is failed or abandoned, so there can never be multiple _active_ runs for the same deployment.)
 
-HCP Terraform lets multiple deployment runs exist simultaneously for different configuration versions, but only one run can modify a deployment's state at a time. Deployment runs lock state while they are applying to ensure a run can finish without interference.
+When a new run supersedes an older failed run, the UI prefers to show the new one. You can change the filter settings to display all runs.
 
-When you approve a deployment run, HCP Terraform locks the deployment's state before beginning execution. This lock remains in place throughout the entire run, because a run may require multiple plan-and-apply cycles to reach convergence. The lock prevents any other approved runs from starting their execution and potentially creating conflicts.
+#### Final empty applies
 
-Each step in a deployment run can acquire a state lock, but only steps that modify state actually require locking. Two step types modify state and require locks:
+To ensure that the run has converged on the deployment's desired state, Stack deployment runs always include a final plan and apply that is intended to be empty. The empty apply re-writes the state data without making changes to it.
 
-- Apply steps that create, update, or destroy infrastructure.
-- Import steps that move existing workspace resources under the management of a Stack.
+This part of the process is designed to both prove the convergence on the final state (since no changes are planned) and to reduce the chance of needing special upgrade procedures if some future Terraform upgrade alters the state format.
 
-While a deployment holds a state lock, other runs for that deployment must wait. These waiting runs queue in order and cannot begin execution until the current run:
+### Stack deployment steps
 
-- Successfully completes all its plan-and-apply cycles
-- Fails and stops execution
-- Gets manually canceled by an operator
+A _deployment step_ represents a single operation being performed as part of a deployment run. Usually this is a Terraform operation like a plan or an apply.
 
-After the running deployment releases its lock, the next approved run in the queue can acquire the lock and begin its execution. To learn more about state for deployments in a Stack, refer to [State for Stacks](/terraform/cloud-docs/stacks/state).
+A single Stack plan or apply operation operates on all of the Stack's components for the target deployment.
 
-### Deployment run modes
+
+## Eager planning
+
+By default, HCP Terraform runs the initial plans for every deployment when a new Stack configuration is created; the system does this to help inform your decision-making, and it can perform plans even when a different configuration is in the process of rolling out (and thus preventing applies from starting for other configurations). If another rollout is in progress, eagerly-planned deployment runs might end up getting abandoned when their assumptions about the state of the world become invalid; see [Abandonment of obsolete groups and runs](#abandonment-of-obsolete-groups-and-runs) below for more details.
+
+Optionally, you can modify eager planning behavior in the Stack's deployment configuration. Deployment groups support an `eager_plan` attribute, with two valid values:
+
+- `eager_plan = "on"` - **(default)** Runs plans as soon as the configuration is created.
+- `eager_plan = "off"` - Does not run plans automatically; a user must start the plans manually with the "start group" action, using either the UI or the API.
+
+This is basically a user-accessible performance optimization; the main expected use case for disabling eager planning is to reduce unnecessary operations (and avoid saturating available concurrency) for Stacks that receive a lot of configurations and have a large number of deployments. The canonical example is a Stack with a small canary deployment group and a very large production deployment group; if the Stack changes frequently, you might want to eagerly plan the canary group, but only start the large production group once it's clear that the plans will likely succeed and you know you want to roll out a particular configuration.
+
+<Note>
+
+In order to support potential future values, the `eager_plan` attribute is a string value (`"on"` or `"off"`), **not** a boolean (`true` or `false`).
+
+</Note>
+
+## Locking
+
+Much like with workspaces, Stacks ensure that Terraform's state data is exclusively locked while a run has permission to make changes. Stack locking semantics are more complex than with workspaces, for the following reasons:
+
+- A Stack deployment run can include multiple plan and apply steps. The state must stay locked for that entire sequence, to prevent some other run from making changes while we're still trying to finish the first run. (Workspaces release their lock after each apply finishes.)
+- A Stack deployment group contains deployments that should be treated identically. This means the same configuration should roll out to the whole group at once, unless the user deliberately cancels the rollout to skip to a newer config. (Workspaces do not consider other workspaces in their locking logic.)
+- Multiple Stack configurations can be viable for rollout at the same time; HCP Terraform creates groups and runs when a new configuration is created, but waits to abandon older configurations until a newer one has started applying. (By default, workspaces don't do anything with new configurations while older ones are still pending, though the saved plan run mode can behave differently.)
+
+To accommodate these complexities, Stacks use the following locking and abandonment behaviors:
+
+### State locks are held by deployment groups
+
+When a deployment group is cleared to begin applying changes, it takes state locks for _all of its deployments at once._
+
+This means that once a deployment group starts rolling out, no other _overlapping_ groups in older or newer configurations are allowed to start applying changes for _any_ of their deployments. We consider a deployment group to be overlapping if it contains at least one deployment that is also in the group that holds the lock.
+
+### Groups try to lock when runs are ready to apply, or when the group becomes unblocked
+
+When a deployment run's next step is a state-modifying step (likely a Terraform apply) and the previous step (likely a plan) has finished running and has been approved by a user or auto-approve rule, the associated deployment group attempts to take locks for its deployments.
+
+If it can't lock all of its deployments (due to locks held by another group), it doesn't lock any of them, and waits in a blocked state until the conflicting locks are released. It will automatically attempt to lock again at that time.
+
+Once the group has taken locks, any deployment runs waiting in the `acquiring_lock` state will try to start applying.
+
+### Groups keep their locks until all of their runs are finished
+
+A deployment group retains the locks for _all_ of its deployments until every run reaches one of the following final states:
+
+- `succeeded`
+- `failed`
+- `abandoned`
+
+(See below for more about run statuses.)
+
+This means that if some of its runs are left waiting for a plan to be approved, the group will hold its locks indefinitely. You can always force runs to finalize by rejecting their plans or canceling them; you can also cancel all of the outstanding runs in the group at once.
+
+## Halting rollout with a maximum failure tolerance
+
+With large numbers of deployments, it becomes impractical to closely examine every plan. Auto-approve rules can help reduce toil, but can't cover every eventuality.
+
+Since all of the deployments in a deployment group are expected to be treated the same, HCP Terraform allows you to approve all plans for an entire group in a single action. You can examine any number of sample deployments in the group to get an approximate idea of the total effect, then approve the mass once you are satisfied. However, even after inspecting a representative sample, mass actions can sometimes be dangerous.
+
+To reduce the risk of mass approvals, deployment groups support a `failure_tolerance` attribute, whose value can be either a positive number or `null`/absent.
+
+The value of `failure_tolerance` is the number of failed runs that the group will permit before halting rollout and waiting for human assistance. (`null` allows unlimited failures.) Once the group's current deployment runs contain _more_ failures than the specified tolerance, HCP Terraform will transition the group to the `failed` state and prevent any more runs from proceeding to `deploying`.
+
+### Concurrency limitation
+
+To avoid over-committing, deployment groups with explicit `failure_tolerance` values limit how many of their runs can be applying changes at any given time.
+
+The available concurrency for actively deploying runs is the failure tolerance value plus one. For example, a group with a failure tolerance of 1 can have 2 runs deploying at a time.
+
+A run does not release its concurrency slot until it has succeeded, finishing all of its plans and applies.
+
+If any runs are ready to start deploying but there is no available concurrency for them, they will wait in the `pending_capacity` state; runs in this state will be automatically released into deploying as other runs succeed.
+
+### Treatment of runs on group failure
+
+When a group fails due to exceeding its failure tolerance, it might have any number of unfinished runs that are either performing their initial plans, waiting for approval, or waiting for capacity. To avoid unnecessary work in cases where the group might be revived (see "Recovering from a halted rollout" below), these runs are not immediately canceled or abandoned. They are disposed of as follows:
+
+- Runs in `pre_deploying` (actively planning) are allowed to finish their current operation. The group will not actually transition to `failed` until all runs come to a rest, although it will block any other runs from crossing to `deploying`. Once the runs finish planning, they will land in either the `pre_deploying_pending_operator` or `pending_capacity` state.
+- Runs in `pre_deploying_pending_operator` are left in that state. You can even approve their plans while the group is failed, but they will transition to `acquiring_lock` and do nothing else unless the group is revived.
+- Runs in `pending_capacity` are reverted to the `acquiring_lock` state, and will wait there until the group is revived.
+
+If the failed group later becomes abandoned (due to a decision to roll out a newer configuration instead of continuing to try this one; see see [Abandonment of obsolete groups and runs](#abandonment-of-obsolete-groups-and-runs) below for more details), the remaining runs will also be abandoned.
+
+### Recovering from a halted rollout
+
+You can restart a failed group by re-running its unsuccessful runs. You must re-run enough runs to bring the group back under its failure tolerance. This will revert the group to `pre_deploying`, and it will need to re-acquire locks for its deployments; once it does, it can start moving any waiting runs to deploying.
+
+You can retry runs piecemeal, or retry all of the unsuccessful runs in the group at once.
+
+## Abandonment of obsolete runs and groups
+
+A Terraform plan is always performed against current Terraform state data, and the plan is only valid as long as that state _remains_ the current state. If the state changes before the plan can be applied, the plan becomes invalid.
+
+Stacks automatically clean up invalid plans. There are two kinds of automatic abandonment:
+
+- Run abandonment, which you can recover from by re-running the deployments.
+- Group abandonment, which is permanent.
+
+### Runs get abandoned when state is written
+
+HCP Terraform will automatically abandon deployment runs when their plans become invalid due to other runs applying changes. This affects runs in configurations that are _newer_ than the one currently applying, in cases where the newer configuration eagerly ran plans.
+
+You can re-run abandoned deployment runs against the newly written state.
+
+### Groups get abandoned when newer groups are approved
+
+When you (or an auto-approve rule) approve a deployment run to start applying, that means it is no longer valid to roll out an older configuration for that deployment. And since deployments in a group should be treated identically and take state locks as a unit, we consider that decision to apply to the entire group.
+
+Thus, when a step, run, or group gets approved, HCP Terraform will automatically abandon _overlapping_ deployment groups that belong to configurations older than the approved configuration.
+
+Groups that currently hold a state lock are never abandoned; HCP Terraform only abandons groups that haven't started rolling out or that have come to rest in a temporary failed state.
+
+Abandoned groups cannot be revived; HCP Terraform doesn't allow rolling out a Stack configuration that has been obsoleted by the approval of a newer configuration.
+
+## Deployment run modes
 
 Deployment runs have three possible run modes:
 
@@ -98,7 +204,7 @@ Deployment runs have three possible run modes:
 - The destroy run mode triggers when you delete a deployment from your configuration.
 - The import run mode triggers when HCP Terraform converts a workspace into a Stack. To learn more, refer to [Terraform migrate](#LINK).
 
-#### Destroy mode
+### Destroy mode
 
 You can trigger the destroy run mode for Stacks in three ways:
 
@@ -110,45 +216,44 @@ If you remove a deployment block from your configuration, HCP Terraform starts a
 
 The "tear down Stack" mode for creating a new configuration behaves the same as setting the `destroy` argument for every deployment, but does not require you to push an edited deployments configuration.
 
-### Steps in a deployment run
+## Statuses
 
-A deployment run consists of the steps that Terraform can perform to update that deployment to match the associated configuration version.
+Stack deployment groups, deployment runs, and deployment steps all move through different states in their lifecycles. These statuses can be observed in API payloads, as well as in the HCP Terraform UI.
 
-The number of steps is different for each plan, depending on what is necessary to get a deployment to match the change in that configuration version. A deployment run can include multiple plan-and-apply steps to ensure the downstream impacts of changes fully roll out to that deployment.
+### Deployment group statuses
 
-## States of a deployment run step
+- `pending` - The group has not yet started running plans. If the group is configured with `eager_plan = "off"`, it will wait in this state until it is started by a user or abandoned.
+- `pre_deploying` - The group has started running plans for its deployment runs, but has not taken state locks. Either no runs have been approved yet, or it is blocked by a conflicting lock.
+- `deploying` - The group has taken state locks and can perform applies for some or all of its deployment runs. Not every run needs to be approved for the group to move to deploying.
+- `succeeded` - All of the group's deployment runs have ended in the `succeeded` state. The configuration has been fully rolled out to the group. The group has released its state locks. **This status is final.**
+- `failed` - The group's deployment runs have all arrived in final states, but at least some of those runs are either `failed` or `abandoned`. The group has released its state locks. You can re-run any failed or abandoned deployment runs in a `failed` group, and the group will transition back to `pre_deploying`; it will need to grab a new set of locks for its deployments when the new runs are ready to apply.
+- `abandoned` - An overlapping group from a _newer_ Stack configuration has been approved to start applying, and the older group was automatically abandoned. The group doesn't hold any state locks. **This status is final.**
 
-ASK: Do we need to define pending capacity and acquiring lock?
+    Any groups left in the `failed` state will eventually transition to `abandoned` once newer configurations start rolling out.
 
-Each step in a deployment run matches a specific state as HCP Terraform executes a deployment run. A deployment run step exists in one of four primary states:
+### Deployment run statuses
 
-- [Pending](#pending)
-- [Running](#running)
-- [Waiting](#waiting)
-- [Complete](#complete)
+- `pending` - The run has not started running its initial plan.
+- `pre_deploying` - The run is currently running its initial plan.
+- `pre_deploying_pending_operator` - The run's initial plan has finished running, but the plan needs to be approved by a user. If an auto-approve rule approved the plan, the run will skip this state.
+- `acquiring_lock` - The run's initial plan is approved, but the run's deployment group has not yet acquired state locks for the deployment and its siblings. The run cannot proceed to applying until its group holds locks.
+- `pending_capacity` - The run's initial plan is approved and its deployment group holds locks, but it cannot proceed to applying until other runs in the same deployment group have succeeded.
 
-### Pending
+    This occurs when a deployment group specifies a `failure_tolerance` value; HCP Terraform will limit how many of the group's runs can proceed to `deploying` at the same time, to try and prevent excessive failures. If runs start failing, the available concurrency capacity for the group will shrink accordingly.
 
-Pending steps waits for previous steps to complete. Steps execute sequentially within a deployment run, so each step remains in the pending state until all preceding steps finish. For example, an apply step waits in the pending state while its associated plan step executes.
+    Whenever a run in the group succeeds, a run in `pending_capacity` will automatically proceed to `deploying`.
+- `deploying` - The run has started running applies, and is currently running an operation. The current operation might be a plan or an apply, but the `deploying` state indicates that at least one apply has started; the run will not revert back to `pre_deploying` for subsequent plans.
+- `deploying_pending_operator` - The run has finished at least one apply, and has finished an additional plan that requires approval from a user. If an auto-approve rule approves the plan, the run will skip this state.
+- `succeeded` - The run has finished running all of its operations. This usually concludes with an empty plan and apply, unless the Stack configuration is marked as speculative (and thus cannot apply). This status is final.
+- `failed` - The run ended unsuccessfully while running an operation. Either the operation errored, the operation was canceled by a user, or the operation was automatically canceled when the run was obsoleted and abandoned. This status is final. If the deployment group is not in a final state, an unsuccessful run can be re-run, which creates a new run for that deployment.
+- `abandoned` - The run ended unsuccessfully while in a resting state (either `pending`, `pre_deploying_pending_operator`, or `deploying_pending_operator`). Either a user chose to deny the plan, or the run was obsoleted and abandoned. This status is final. If the deployment group is not in a final state, an unsuccessful run can be re-run, which creates a new run for that deployment.
 
-### Running
+### Deployment step statuses
 
-Running steps are when HCP Terraform actively executes part of the deployment run. During a running step Terraform is doing one of the following:
-
-- Planning what changes a deployment needs to match the configuration version.
-- Applying approved changes.
-- Importing existing workspace resources under the management of a Stack.
-
-### Waiting
-
-Runs that produce changes pause in the waiting step state to wait for operator approval. HCP Terraform requires manual confirmation before proceeding with infrastructure changes, unless you configure [auto-approval rules for your deployments](/terraform/language/stacks/deploy/conditions).
-
-### Complete
-
-The step finishes execution and enters one of three final states:
-
-- Success
-- Failed
-- Cancelled
-
-Once a step reaches the complete state, you cannot restart the deployment run. If a step fails or gets canceled, you must create a new deployment run to retry the operation.
+- `blocked` - The step is not ready to start. Either the step is not the current step (like an apply waiting for a plan to complete), or the run has not yet begun (like when a deployment group is configured with `eager_plan = "off"`).
+- `queued` - The step is ready to start, and has queued a job to run its operation. The operation will start when the job is picked up by either a local `tfc-agent` instance, or HCP Terraform's own operation runner infrastructure.
+- `running` - The step's operation is currently running.
+- `pending_operator` - The step's operation completed successfully, but requires user approval before the step can finish successfully. If the step's operation was auto-approved, this state is skipped.
+- `completed` - The step has completed successfully, including approval if required.
+- `failed` - The step has completed unsuccessfully. Either the operation errored, the operation was canceled, or the run was abandoned.
+- `abandoned` - The step never started, and never will start. This occurs when a previous step fails and the run moves to a final state. (For example: when a plan errors, the apply will transition to `abandoned`.)
