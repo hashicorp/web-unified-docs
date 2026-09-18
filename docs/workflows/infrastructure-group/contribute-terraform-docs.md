@@ -305,12 +305,12 @@ enforces them.
 
 | | `tfc_only: true` frontmatter | `TFC:only` comment tags |
 | --- | --- | --- |
-| Scope | Excludes the entire file | Excludes a section of content within a shared page |
-| Enforcement | Copy time. The `copy-cloud-docs-for-tfe` action's `filterFunc` skips the file, so it's never copied into the TFE version folder. | Render time. The file is copied into TFE as normal, and the platform strips the wrapped content for TFE readers when it renders the page. |
-| Where it lives | A frontmatter key on the file | An HTML comment pair inline in the MDX body |
-| Use case | The whole page is HCP Terraform-only, such as HCP Terraform Europe or tiered pricing, with nothing on it relevant to TFE. | A page is shared between HCP Terraform and TFE, but one paragraph, sentence, or component differs between the two. |
+| **Scope** | Excludes the entire file | Excludes a section of content within a shared page |
+| **Enforcement** | Copy time. The `copy-cloud-docs-for-tfe` action's `filterFunc` skips the file, so it's never copied into the TFE version folder. | Render time. The file is copied into TFE as normal, and the platform strips the wrapped content for TFE readers when it renders the page. |
+| **Where it lives** | A frontmatter key on the file | An HTML comment pair inline in the MDX body |
+| **Use case** | The whole page is HCP Terraform-only, such as HCP Terraform Europe or tiered pricing, with nothing on it relevant to TFE. | A page is shared between HCP Terraform and TFE, but one paragraph, sentence, or component differs between the two. |
 
-During the TFE docs publishing process, the Copy Cloud docs for TFE workflow
+During the TFE docs publishing process, the Copy Cloud Docs for TFE workflow
 only evaluates the `tfc_only` frontmatter key. It never evaluates the `TFC:only`
 comment tags. If you wrap content in `TFC:only` tags without also setting
 `tfc_only: true` on a file you mean to exclude entirely, the file still gets
@@ -393,6 +393,6 @@ already exists in the TFE directory from before the flag was added. If you add
 `tfc_only: true` to a page that a prior release already copied into a TFE
 version folder, you must manually delete that existing copy. Otherwise it
 persists in every subsequent version folder, since each new version folder
-starts as a full clone of the previous one. Refer to [File
-filtering](publish-tfe-docs.md#file-filtering) for details on how the copy
+starts as a full clone of the previous one. Refer to the publishing guide's [File
+filtering](publish-tfe-docs.md#file-filtering) section for details on how the copy
 action applies this flag.

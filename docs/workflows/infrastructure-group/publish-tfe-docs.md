@@ -49,8 +49,8 @@ cycle.
 
 | Run order | Workflow | File | Purpose | Run relation to app deadline |
 | --- | --- | --- | --- | --- |
-| 1 | Copy Cloud Docs For TFE | [`copy-cloud-docs-for-tfe.yml`](../../../.github/workflows/copy-cloud-docs-for-tfe.yml) | Runs once per release to scaffold the version folder and open the release and diff branches and PRs. | Before. Runs at the start of the cycle, well ahead of the app deadline. |
-| 2 | Sync Cloud Docs For TFE | [`sync-docs-for-tfe.yml`](../../../.github/workflows/sync-docs-for-tfe.yml) | Re-runs the copy against the existing diff branch to pull in the latest HCP Terraform changes. | Before. Runs repeatedly, as needed, until the app deadline. |
+| 1 | Copy Cloud Docs for TFE | [`copy-cloud-docs-for-tfe.yml`](../../../.github/workflows/copy-cloud-docs-for-tfe.yml) | Runs once per release to scaffold the version folder and open the release and diff branches and PRs. | Before. Runs at the start of the cycle, well ahead of the app deadline. |
+| 2 | Sync Cloud Docs for TFE | [`sync-docs-for-tfe.yml`](../../../.github/workflows/sync-docs-for-tfe.yml) | Re-runs the copy against the existing diff branch to pull in the latest HCP Terraform changes. | Before. Runs repeatedly, as needed, until the app deadline. |
 | 3 | Create TFE Release Notes | [`create-tfe-release-notes.yml`](../../../.github/workflows/create-tfe-release-notes.yml) | Runs a final sync, then generates the release-notes changelog and opens the release-notes PR. | On. This is the workflow the release engineer runs to mark the app deadline. |
 | N/A | Create TFE Patch Release Notes | [`create-tfe-release-notes-patch.yml`](../../../.github/workflows/create-tfe-release-notes-patch.yml) | Generates a changelog PR directly against `main` for a patch (fix-only) release, without a new version folder. | Not applicable. Patch releases don't follow the milestone release cycle or have an app deadline. |
 
@@ -104,8 +104,8 @@ takes three inputs:
 
 Whether `new_TFE_version` is set determines the action's mode:
 
-- **NewVersion mode** (`new_TFE_version` set): Used by Copy Cloud Docs For TFE to scaffold a brand-new version folder.
-- **Diff mode** (`new_TFE_version` omitted): Used by Sync Cloud Docs For TFE, and by the sync step inside Create TFE Release Notes, to refresh content already inside an existing version folder.
+- **NewVersion mode** (`new_TFE_version` set): Used by Copy Cloud Docs for TFE to scaffold a brand-new version folder.
+- **Diff mode** (`new_TFE_version` omitted): Used by Sync Cloud Docs for TFE, and by the sync step inside Create TFE Release Notes, to refresh content already inside an existing version folder.
 
 For each `.mdx` file under `cloud-docs`, the action decides whether to copy
 the file. Then the GHA transforms the file's frontmatter and body before writing it to the
@@ -142,7 +142,7 @@ applied in `main.ts`'s `filterFunc` and `IGNORE_LIST`.
 
 The GHA does not evaluate the
 `<!-- BEGIN: TFC:only -->` / `<!-- END:TFC:only -->` HTML comment tags
-described in contributor guide's [Exclusion tag syntax](#exclusion-tag-syntax) section.
+described in the contributor guide's [Exclusion tag syntax](#exclusion-tag-syntax) section.
 Those tags exclude content at render time, not
 copy time, so an author who wants a whole file left out of TFE still needs the
 `tfc_only: true` frontmatter property, and an author who wants only part of a
@@ -191,9 +191,9 @@ Refer to [Workspaces](/terraform/enterprise/workspaces) for more information.
 
 ## The release workflows
 
-### Copy Cloud Docs For TFE
+### Copy Cloud Docs for TFE
 
-The Copy Cloud Docs For TFE ([`copy-cloud-docs-for-tfe.yml`](../../../.github/workflows/copy-cloud-docs-for-tfe.yml)) workflow
+The Copy Cloud Docs for TFE ([`copy-cloud-docs-for-tfe.yml`](../../../.github/workflows/copy-cloud-docs-for-tfe.yml)) workflow
 triggers on `workflow_dispatch`, which a release engineer manually runs, or
 `workflow_call`, which means another workflow invokes it as a reusable workflow.
 The code takes a single required `version` input.
@@ -222,7 +222,7 @@ Both new branch names fail the run if they already exist remotely, so this
 workflow is not safe to re-run for the same version once it has succeeded.
 This is also why the workflow should not run too early in the cycle. Content
 merged into `content/terraform-docs-common` on `main` after this run will not be
-copied into the version folder until the Sync Cloud Docs For TFE process runs again.
+copied into the version folder until the Sync Cloud Docs for TFE process runs again.
 Running it too late in the cycle, conversely, creates a bottleneck of content
 changes waiting to be included.
 
@@ -237,9 +237,9 @@ flowchart TD
     A7 --> A8["Update PR 1's body<br/>with a link to PR 2"]
 ```
 
-### Sync Cloud Docs For TFE
+### Sync Cloud Docs for TFE
 
-The Sync Cloud Docs For TFE ([`sync-docs-for-tfe.yml`](../../../.github/workflows/sync-docs-for-tfe.yml))
+The Sync Cloud Docs for TFE ([`sync-docs-for-tfe.yml`](../../../.github/workflows/sync-docs-for-tfe.yml))
 workflow shares the same triggers and `version` input as the Copy workflow, but is
 meant to be run repeatedly against branches the Copy workflow already
 created. Its single `sync-docs` job does the following:
@@ -260,7 +260,7 @@ created. Its single `sync-docs` job does the following:
 ```mermaid
 flowchart TD
     B1["Checkout main"] --> B2{"Do tfe-release/&lt;version&gt; and<br/>HCPTF-diff/&lt;version&gt; already exist?"}
-    B2 -->|No| B3["Fail:<br/>run Copy Cloud Docs For TFE first"]
+    B2 -->|No| B3["Fail:<br/>run Copy Cloud Docs for TFE first"]
     B2 -->|Yes| B4["Generate version metadata"]
     B4 --> B5["Checkout HCPTF-diff/&lt;version&gt;"]
     B5 --> B6["Run copy-cloud-docs-for-tfe<br/>(re-copy latest cloud-docs content)"]
@@ -313,7 +313,7 @@ The workflow has two jobs:
 ```mermaid
 flowchart TD
     subgraph job1["Job: sync-docs"]
-        C1["Call Sync Cloud Docs For TFE<br/>(web-unified-docs-internal, reusable workflow)"] --> C2["Confirm branches exist,<br/>refresh HCPTF-diff/&lt;version&gt;"]
+        C1["Call Sync Cloud Docs for TFE<br/>(web-unified-docs-internal, reusable workflow)"] --> C2["Confirm branches exist,<br/>refresh HCPTF-diff/&lt;version&gt;"]
     end
     subgraph job2["Job: release-notes (needs sync-docs)"]
         D1{"Repository is<br/>hashicorp/web-unified-docs-internal?"}
@@ -387,15 +387,15 @@ publishing to the enterprise docs, and vice versa. Refer to [Exclusion tag
 syntax](#exclusion-tag-syntax) for details.
 
 > [!IMPORTANT]
-> Copy Cloud Docs For TFE creates the new version folder so that authors
+> Copy Cloud Docs for TFE creates the new version folder so that authors
 > can implement new content in the correct place. The workflow also populates the new folder
 > with a copy of the HCP Terraform docs on `main` from the public repo.
 >
-> Do not run Copy Cloud Docs For TFE too early in the cycle. Content merged to `main`
-> after Copy Cloud Docs For TFE runs will not be copied to the upcoming Enterprise folder until Sync
+> Do not run Copy Cloud Docs for TFE too early in the cycle. Content merged to `main`
+> after Copy Cloud Docs for TFE runs will not be copied to the upcoming Enterprise folder until Sync
 > Cloud Docs For TFE runs again.
 >
-> Running Copy Cloud Docs For TFE too late in the cycle creates a bottleneck of content changes.
+> Running Copy Cloud Docs for TFE too late in the cycle creates a bottleneck of content changes.
 
 There is no optimal workflow for authoring Enterprise-only docs before app
 deadline, but the following options are available for content authors:
@@ -468,7 +468,7 @@ Verify that the new version and related changes appear on the website.
 
 1. The release engineer checks the `#proj-tfe-releases` Slack channel for the
    release date.
-1. The release engineer runs **Copy Cloud Docs For TFE** (`workflow_dispatch`,
+1. The release engineer runs **Copy Cloud Docs for TFE** (`workflow_dispatch`,
    `version` input). This creates the `tfe-release/<version>` and
    `HCPTF-diff/<version>` branches, opens PR 1 (`tfe-release/<version>` →
    `main`) and PR 2 (`HCPTF-diff/<version>` → `tfe-release/<version>`), and
@@ -500,10 +500,10 @@ Verify that the new version and related changes appear on the website.
 
 ```mermaid
 flowchart TD
-    S1["Check #proj-tfe-releases<br/>for the release date"] --> S2["Run Copy Cloud Docs For TFE"]
+    S1["Check #proj-tfe-releases<br/>for the release date"] --> S2["Run Copy Cloud Docs for TFE"]
     S2 --> S3["Creates tfe-release/&lt;version&gt; and HCPTF-diff/&lt;version&gt;<br/>Opens PR 1 (→ main) and PR 2 (→ tfe-release)"]
     S3 --> S4["Authors add TFE-only content<br/>directly to tfe-release/&lt;version&gt;"]
-    S3 --> S5["Run Sync Cloud Docs For TFE<br/>as needed before the deadline"]
+    S3 --> S5["Run Sync Cloud Docs for TFE<br/>as needed before the deadline"]
     S5 --> S6["Application code deadline:<br/>run Create TFE Release Notes"]
     S6 --> S7["Final sync of HCPTF-diff/&lt;version&gt;,<br/>generate changelog,<br/>open PR 3 (→ tfe-release)"]
     S4 --> S8["Review and merge PR 2<br/>into tfe-release/&lt;version&gt;"]
