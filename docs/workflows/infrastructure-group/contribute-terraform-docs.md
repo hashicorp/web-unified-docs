@@ -75,7 +75,7 @@ future reorganizations need fewer redirects. Refer to
 
 ## Decide which edition your change applies to
 
-Terraform documentation spans three editions, and each has a different workflow:
+Terraform documentation spans three editions, and each has a different workflow.
 
 - **Terraform CE**: The open-source command-line product. Versioned content with
   no cross-edition sharing. Refer to [Terraform CE workflows](#terraform-ce-workflows).
@@ -87,7 +87,7 @@ Terraform documentation spans three editions, and each has a different workflow:
 
 Because HCP Terraform and Terraform Enterprise share most of their content, a
 change to shared information usually needs to happen in two places to keep both
-editions in sync. The workflows below walk through each scenario.
+editions in sync. The workflows in the following sections walk through each scenario.
 
 ## Terraform CE workflows
 
@@ -151,81 +151,16 @@ flowchart TD
 ### Exclusion tags
 
 Use exclusion tags to gate HCP Terraform-only or Terraform Enterprise-only
-content within a shared file, or the `tfc_only` front matter attribute to
+content within a shared file, or the `tfc_only` frontmatter attribute to
 exclude an entire page from Terraform Enterprise. Use exclusion tags as much as
 possible instead of stating that a difference is Enterprise-only, since inline
 exclusions produce a smoother reading experience for both audiences.
-
-#### Exclude content on a page
-
-Use HTML comment tags with the `BEGIN: TFC:only` and `END: TFC:only`
-directives to exclude content from the Terraform Enterprise docs:
-
-```mdx
-<!-- BEGIN: TFC:only name:<feature-name> -->
-
-Content to exclude from Terraform Enterprise.
-
-<!-- END:   TFC:only name:<feature-name>  -->
-```
-
-Use `BEGIN: TFEnterprise:only` and `END: TFEnterprise:only` to exclude content
-from the HCP Terraform docs instead:
-
-```mdx
-<!-- BEGIN: TFEnterprise:only name:<feature-name> -->
-
-Content to exclude from HCP Terraform.
-
-<!-- END:   TFEnterprise:only name:<feature-name>  -->
-```
-
-Except for the `BEGIN:` and `END:` directives, the content of each tag must be
-identical, or the platform treats them as different directives and returns an
-error. The `name` attribute is optional, but it helps you stay organized on a
-page with several exclusions.
-
-You can exclude MDX components, such as callouts, as long as there's a line
-break between the component and the exclusion directives:
-
-```mdx
-<!-- BEGIN: TFC:only name:<feature-name> -->
-
-<Note>
-
-Message here.
-
-</Note>
-
-<!-- END: TFC:only name:<feature-name> -->
-```
-
-You can also exclude content mid-sentence. Pay close attention to spacing and
-punctuation:
-
-```mdx
-Project-level permissions apply to all workspaces<!-- BEGIN: TFC:only name:stacks-tfe --> and Stacks<!-- END: TFC:only name:stacks-tfe --> within a specific project.
-```
-
-#### Exclude an entire MDX file
-
-To exclude an entire file from Terraform Enterprise, add `tfc_only: true` to
-the page's front matter:
-
-```mdx
----
-page_title: HCP Terraform in Europe
-description: >-
-  HCP Terraform is available in HCP Europe, letting you manage Terraform resources in Europe with familiar workflows while adhering to additional data and privacy regulations
-tfc_only: true
----
-```
 
 ## Terraform Enterprise workflows
 
 ### Release versions
 
-Terraform Enterprise increments releases using a semantic-like scheme:
+Terraform Enterprise increments releases using a semantic-like scheme.
 
 `VERSION.RELEASE.FIXES`
 
@@ -263,9 +198,8 @@ flowchart TD
     D --> E["Open a release notes PR"]
 ```
 
-Refer to [The complete guide to releasing TFE
-docs](publish-tfe-docs.md) for the full release
-process, including exact branch and PR names.
+Refer to [The complete guide to releasing TFE docs](publish-tfe-docs.md) for the
+full release process, including exact branch and PR names.
 
 ### App deadline and content drift
 
@@ -275,7 +209,7 @@ Merging your HCP Terraform changes before app deadline ensures they land in the
 new Terraform Enterprise version folder automatically.
 
 The copied content is a snapshot, not a live link. **If you update a page in the
-new Terraform Enterprise version folder after app deadline and its front matter
+new Terraform Enterprise version folder after app deadline and its frontmatter
 shows `source: terraform-docs-common`, you must also update the file in
 `terraform-docs-common`. Otherwise, the next sync overwrites your change.**
 
@@ -299,7 +233,7 @@ flowchart TD
 ```
 
 None of the before-app-deadline options is ideal, since the artifacts that host
-the new content don't exist yet. Engage your technical writer early so you can
+the new content don't exist yet. Engage an Education team technical writer early so you can
 plan around this constraint.
 
 ### Document features for an upcoming release shared with HCP Terraform
@@ -329,7 +263,7 @@ the announcement and any strategic investment behind it.
 When a feature is under embargo, the Education team creates a rollup branch in
 `web-unified-docs-internal`.
 
-To document embargoed Terraform CE features:
+Follow these steps to document embargoed Terraform CE features:
 
 1. Use the rollup branch as your base branch.
 1. Make your changes in `terraform-docs-common` and apply any exclusion tags
@@ -359,3 +293,74 @@ next run.
 - File a ticket on the Education team's board as early as possible, and include a target date and release phase, such as GA, beta docs, or a private beta guide.
 - Refer to [Working with IPL Education](https://hashicorp.atlassian.net/wiki/spaces/ED/pages/2827124769/Working+with+IPL+Education) on Confluence for more background on how the education team supports docs work.
 - Refer to the [style guide](../../style-guide/index.md) and its [Top 12 guidelines](../../style-guide/top-12.md) for writing conventions.
+
+## Appendix: Use exclusion tags
+
+### Exclude content on a page
+
+Use HTML comment tags with the `BEGIN: TFC:only` and `END: TFC:only`
+directives to exclude content from the Terraform Enterprise docs.
+
+```mdx
+<!-- BEGIN: TFC:only name:<feature-name> -->
+
+Content to exclude from Terraform Enterprise.
+
+<!-- END:   TFC:only name:<feature-name>  -->
+```
+
+Use `BEGIN: TFEnterprise:only` and `END: TFEnterprise:only` to exclude content
+from the HCP Terraform docs instead:.
+
+```mdx
+<!-- BEGIN: TFEnterprise:only name:<feature-name> -->
+
+Content to exclude from HCP Terraform.
+
+<!-- END:   TFEnterprise:only name:<feature-name>  -->
+```
+
+Except for the `BEGIN:` and `END:` directives, the content of each tag must be
+identical, or the platform treats them as different directives and returns an
+error. The `name` attribute is optional, but it helps you stay organized on a
+page with several exclusions.
+
+You can exclude MDX components, such as callouts, as long as there's a line
+break between the component and the exclusion directives.
+
+```mdx
+<!-- BEGIN: TFC:only name:<feature-name> -->
+
+<Note>
+
+Message here.
+
+</Note>
+
+<!-- END: TFC:only name:<feature-name> -->
+```
+
+You can also exclude content mid-sentence. Pay close attention to spacing and
+punctuation.
+
+```mdx
+Project-level permissions apply to all workspaces<!-- BEGIN: TFC:only name:stacks-tfe --> and Stacks<!-- END: TFC:only name:stacks-tfe --> within a specific project.
+```
+
+### Exclude an entire MDX file
+
+To exclude an entire file from Terraform Enterprise, add `tfc_only: true` to
+the page's frontmatter.
+
+```mdx
+---
+page_title: HCP Terraform in Europe
+description: >-
+  HCP Terraform is available in HCP Europe, letting you manage Terraform resources in Europe with familiar workflows while adhering to additional data and privacy regulations
+tfc_only: true
+---
+```
+
+When you exclude an entire page from TFE with the `tfc_only: true` frontmatter
+key, the file is not copied to the TFE directory during the documentation
+release process.
