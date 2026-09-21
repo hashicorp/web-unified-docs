@@ -11,6 +11,7 @@ import { parse as jsoncParse } from 'jsonc-parser'
 import { ServedFrom } from '#api/types'
 import { Err, Ok, Result } from './result'
 import type { ProductVersionMetadata } from './contentVersions'
+import { PRODUCT_CONFIG } from '#productConfig.mjs'
 
 // Only exported for testing purposes
 export enum FileType {
@@ -254,4 +255,19 @@ export const joinFilePath = (path: string[] = []): string => {
 		.filter(Boolean)
 		.join('/')
 		.replace(/\/{2,}/g, '/')
+}
+
+export function resolveCdnUrl(
+	markdownSource: string,
+	productSlug: string,
+	version: string,
+): string {
+	if (!markdownSource.includes('{{CDN_URL}}')) {
+		return markdownSource
+	}
+
+	const isVersioned = PRODUCT_CONFIG[productSlug].versionedDocs
+	const versionSegment = isVersioned ? `/${version}` : ''
+	const cdnUrl = `${SELF_URL}/assets/${productSlug}${versionSegment}`
+	return markdownSource.replaceAll('{{CDN_URL}}', cdnUrl)
 }
