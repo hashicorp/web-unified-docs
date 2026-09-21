@@ -32,6 +32,8 @@ To use hold your own key, first ensure you meet the following requirements:
 - Configure healthy key management policies on your KMS to prevent data loss. Otherwise, if a key is deleted from a KMS while HCP Terraform is using it, you can experience state loss.
 - Configure your workspaces to use Terraform 1.3+.
 
+HYOK requires HCP Terraform agents on version `1.23.0` or later. Using a multi-region key with AWS KMS requires HCP Terraform agents on version `1.30.0` or later.
+
 ## Create key configuration
 
 To configure hold your own key, begin by letting your key management system accept the necessary OpenID Connect (OIDC) requests from HCP Terraform. Then, set up your keys and grant the necessary roles and permissions in your cloud provider.
@@ -168,6 +170,23 @@ symmetric encryption KMS key](https://docs.aws.amazon.com/kms/latest/developergu
 Add the IAM role you created in the previous step as a key user, so that the HCP
 Terraform agent can use it to perform cryptographic operations.
 
+#### Use a multi-region key
+
+If you run agents in more than one AWS region, you can configure HYOK to use an
+[AWS KMS multi-region key](https://docs.aws.amazon.com/kms/latest/developerguide/multi-region-keys-overview.html)
+so that each agent encrypts and decrypts data with a region-local replica of the
+same key. This supports disaster recovery when an AWS region is unavailable.
+
+To use a multi-region key with HYOK:
+
+1. Create a multi-region primary key.
+1. Replicate the primary key to every region where you run agents. 
+   Replica keys share the same key material and key ID suffix as the primary key. 
+   Refer to the [AWS documentation](https://docs.aws.amazon.com/kms/latest/developerguide/multi-region-keys-replicate.html) for instructions.   
+1. Add the IAM role you created in [Create an OIDC Identity Provider](#create-an-oidc-identity-provider) as a key user on the primary key and on every replica.
+
+Using a multi-region key requires HCP Terraform agents on version `1.30.0` or later.
+
 </Tab>
 
 <Tab heading="GCP" group="gcp">
@@ -182,7 +201,7 @@ To use GCP with HYOK, you will configure the following:
 
 ### Create a Key Ring and Key
 
-To begin, [Create a key ring](https://cloud.google.com/kms/docs/create-key-ring)
+To begin, [Create a key ring](https://docs.cloud.google.com/kms/docs/create-key-ring)
 and a [Create a symmetric encryption
 key](https://cloud.google.com/kms/docs/create-key#create-symmetric) in Google
 Cloud KMS.
@@ -193,7 +212,7 @@ later when you create your HYOK configuration in HCP Terraform.
 ### Create a Service Account
 
 Next, [create a service
-account](https://cloud.google.com/iam/docs/service-accounts-create) with
+account](https://docs.cloud.google.com/iam/docs/service-accounts-create) with
 permissions to encrypt and decrypt data with the key you created. The HCP
 Terraform Agent will assume the role of this service account in order to use
 this key to encrypt and decrypt your data encryption keys.
@@ -502,8 +521,20 @@ To configure your key in HCP Terraform, you need the full **Key URI** for the ke
 
 To configure your key in HCP Terraform, you need the following values from AWS:
 
-- The full **Key ARN** for the KMS key.
-- The **Region** that the key is located in.
+- The **Key identifier** for the KMS key. The accepted format depends on whether
+  you enable multi-region support:
+    - **Single-region key** (default): use the key's full **ARN** or an
+      **alias**.
+    - **Multi-region key**: use a native multi-region key ID (`mrk-<KEY_ID>`) or
+      an **alias**. HCP Terraform rejects a plain key ARN or an alias ARN in this
+      mode, because those identifiers are region-specific.
+- The **Region** that the key is located in. HCP Terraform always requires a
+  region for AWS keys. When you enable multi-region support, the agent can
+  override this region at runtime, and uses this value as a fallback. Refer to
+  [Region selection for AWS multi-region keys](#region-selection-for-aws-multi-region-keys).
+- **Multi-region key** support. Enable this option when your key identifier
+  refers to an AWS KMS [multi-region key](https://docs.aws.amazon.com/kms/latest/developerguide/multi-region-keys-overview.html)
+  that you have replicated into every region where you run agents. This option requires agents on version `1.30.0` or later.
 
 </Tab>
 <Tab heading="GCP" group="gcp">
@@ -538,6 +569,40 @@ failures are:
   **Agent Pool**.
 - Permissions have not been set correctly in your KMS.
 - The required resources are not fully provisioned in your KMS. In rare cases, it can take up to 15 minutes for keys to be accessible to HCP Terraform after creation, particularly for Azure and GCP.
+
+## Region selection for AWS multi-region keys
+
+When you enable multi-region key support on an AWS HYOK configuration, the
+agent selects the AWS region it uses for KMS operations at runtime instead of
+always using the region you configured. This lets an agent encrypt and decrypt
+data with the replica of your key that is local to the region where the agent
+runs.
+
+The agent selects the region according to the following configurations:
+
+- Single-region keys: When `multi_region` is disabled, the agent always uses the
+  region you set in the HYOK configuration.
+- Multi-region keys: When `multi_region` is enabled, the agent uses the AWS SDK's
+  default region resolution to determine the region and falls back to the
+  configured region only when the SDK cannot resolve a region.
+
+### How the agent resolves the region
+
+HCP Terraform agents use the [AWS SDK for Go v2](https://docs.aws.amazon.com/sdk-for-go/v2/developer-guide/configure-gosdk.html),
+which resolves the region from the agent's environment using the
+[standard AWS region setting](https://docs.aws.amazon.com/sdkref/latest/guide/feature-region.html).
+The SDK checks the following sources in order:
+
+1. `AWS_REGION` environment variable.
+1. `AWS_DEFAULT_REGION` environment variable.
+1. `region` setting in the shared AWS configuration file. By default, the configuration is stored in `~/.aws/config` for the active profile.
+1. Instance or container metadata service for agents running on Amazon EC2
+   or Amazon ECS.
+
+Set the region in the environment of each agent so that it matches the region of
+the key replica you want that agent to use. If the SDK cannot resolve a region
+from any of these sources, the agent falls back to the **Region** you set in the
+HYOK configuration.
 
 ## Use a key configuration to encrypt a workspace
 
