@@ -7,6 +7,7 @@ import {
 	findFileWithMetadata,
 	joinFilePath,
 	parseMarkdownFrontMatter,
+	resolveCdnUrl,
 } from '#utils/file'
 import { getProductVersionMetadata } from '#utils/contentVersions'
 import { errorResultToString } from '#utils/result'
@@ -24,9 +25,14 @@ export type GetParams = VersionedProduct & {
 	docsPath: string[]
 }
 
-export async function GET(request: Request, { params }: { params: GetParams }) {
+export async function GET(
+	request: Request,
+	{ params }: { params: Promise<GetParams> },
+) {
 	// Grab the parameters we need to fetch content
-	const { productSlug, version, docsPath } = params
+	const { productSlug, version, docsPath } = await params
+	const url = new URL(request.url)
+	const mdOnly = url.searchParams.get('mdOnly') === 'true'
 
 	if (!Object.keys(PRODUCT_CONFIG).includes(productSlug)) {
 		console.error(
@@ -83,12 +89,13 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 		],
 	]
 
-	let foundContent, githubFile, createdAt
+	let foundContent, servedFrom, githubFile, createdAt
 	for (const loc of possibleContentLocations) {
 		const readFileResult = await findFileWithMetadata(loc, versionMetadata)
 
 		if (readFileResult.ok) {
-			foundContent = readFileResult.value
+			foundContent = readFileResult.value.text
+			servedFrom = readFileResult.value.servedFrom
 			githubFile = loc.join('/')
 			const productDocsPaths =
 				docsPathsAllVersions[productSlug][versionMetadata.version]
@@ -129,25 +136,51 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 		return new Response('Not found', { status: 404 })
 	}
 
-	const { metadata, markdownSource } = markdownFrontMatterResult.value
+	const { metadata, markdownSource: rawMarkdownSource } =
+		markdownFrontMatterResult.value
 
-	return Response.json({
-		meta: {
-			status_code: 200,
-			status_text: 'OK',
+	const markdownSource = resolveCdnUrl(
+		rawMarkdownSource,
+		productSlug,
+		versionMetadata.version,
+	)
+
+	if (mdOnly) {
+		return new Response(markdownSource, {
+			headers: {
+				'content-type': 'text/markdown',
+				'served-from': servedFrom,
+				'X-Robots-Tag': 'noindex',
+			},
+		})
+	}
+	return new Response(
+		JSON.stringify({
+			meta: {
+				status_code: 200,
+				status_text: 'OK',
+			},
+			result: {
+				fullPath: parsedDocsPath,
+				product: productSlug,
+				version: PRODUCT_CONFIG[productSlug].versionedDocs
+					? versionMetadata.version
+					: 'v0.0.x',
+				metadata,
+				subpath: 'docs', // TODO: I guess we could grab the first part of the rawDocsPath? Is there something I am missing here?
+				markdownSource,
+				// check mdx frontmatter metadata first, if not then fallback to docsPathsAllVersions.json
+				created_at: metadata.created_at || createdAt,
+				last_modified: metadata.last_modified || null,
+				sha: '', // TODO: Do we really need this?
+				githubFile,
+			},
+		}),
+		{
+			headers: {
+				'content-type': 'application/json',
+				'served-from': servedFrom,
+			},
 		},
-		result: {
-			fullPath: parsedDocsPath,
-			product: productSlug,
-			version: PRODUCT_CONFIG[productSlug].versionedDocs
-				? versionMetadata.version
-				: 'v0.0.x',
-			metadata,
-			subpath: 'docs', // TODO: I guess we could grab the first part of the rawDocsPath? Is there something I am missing here?
-			markdownSource,
-			created_at: createdAt,
-			sha: '', // TODO: Do we really need this?
-			githubFile,
-		},
-	})
+	)
 }

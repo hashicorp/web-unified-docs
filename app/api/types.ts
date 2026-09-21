@@ -23,6 +23,11 @@ export type VersionParam = {
 	version: string
 }
 
+export enum ServedFrom {
+	CurrentBuild = 'current build',
+	Production = 'production',
+}
+
 /**
  * Utility type for the combination of `productSlug` and `version` together(since the
  * two are often expected together in our API handlers). For example, an API

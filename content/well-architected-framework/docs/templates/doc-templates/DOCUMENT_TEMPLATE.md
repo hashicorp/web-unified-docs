@@ -33,14 +33,17 @@ description: [150-160 characters. Include key concepts and value proposition. Us
 
 [Second paragraph: Explain how Terraform or HashiCorp tools address this challenge. Connect to broader workflow if applicable.]
 
-## Why [topic name]
+## Why [verb phrase that matches your topic]
 
-[Topic name] addresses the following challenges:
+[Topic name or approach] addresses the following [operational/security/strategic] challenges:
 
-- **[Action verb] [outcome]:** [Description of the challenge and consequence of not addressing it.]
-- **[Action verb] [outcome]:** [Description of the challenge and consequence of not addressing it.]
-- **[Action verb] [outcome]:** [Description of the challenge and consequence of not addressing it.]
-- **[Action verb] [outcome]:** [Description of the challenge and consequence of not addressing it.]
+**[Action verb] [outcome]:** [Description of the challenge - what goes wrong without this solution. Explain the consequence and impact. 2-4 sentences of prose that name specific technologies and explain what actually happens.]
+
+**[Action verb] [outcome]:** [Description of the challenge - what goes wrong without this solution. Explain the consequence and impact. 2-4 sentences of prose that name specific technologies and explain what actually happens.]
+
+**[Action verb] [outcome]:** [Description of the challenge - what goes wrong without this solution. Explain the consequence and impact. 2-4 sentences of prose that name specific technologies and explain what actually happens.]
+
+**[Action verb] [outcome]:** [Description of the challenge - what goes wrong without this solution. Explain the consequence and impact. 2-4 sentences of prose that name specific technologies and explain what actually happens.]
 
 ## How [topic] works
 
@@ -98,7 +101,7 @@ When [trigger event], complete the following steps:
 
 [1-2 sentences of prose connecting to next steps or related workflow. Link to related WAF documents when applicable.]
 
-HashiCorp resources:
+## HashiCorp resources
 
 - Learn Terraform with the [Terraform tutorials](/terraform/tutorials) and read the [Terraform documentation](/terraform/docs)
 - [Brief description of what user will learn] with [link to related WAF document](/well-architected-framework/path/to/doc)
@@ -106,7 +109,7 @@ HashiCorp resources:
 - Explore [terraform_resource_name](https://registry.terraform.io/providers/hashicorp/provider/latest/docs/resources/resource) for [specific configuration options]
 - Explore [terraform_resource_name](https://registry.terraform.io/providers/hashicorp/provider/latest/docs/resources/resource) for [specific configuration options]
 
-External resources:
+### External resources
 
 - [Resource title](https://external-url) covers [what the resource explains]
 - [Resource title](https://external-url) walks through [what the resource demonstrates]
@@ -153,6 +156,14 @@ Write 2-3 paragraphs using natural prose:
 
 ### Why section
 
+**Heading format:** Use `## Why [verb phrase]` that matches your topic:
+- "## Why implement GitOps" (not just "## Why")
+- "## Why create reusable modules"
+- "## Why deploy atomically"
+- "## Why integrate X with Y"
+
+**Challenge format:** Use paragraphs with bold titles, NOT bullet lists.
+
 Use action verbs for bold titles, not noun phrases:
 
 | Do | Don't |
@@ -162,9 +173,12 @@ Use action verbs for bold titles, not noun phrases:
 | **Detect problems early:** | **Delayed detection:** |
 
 Each challenge should:
-- Start with an action verb
-- Describe the operational/business challenge
-- Explain the consequence of not addressing it
+- Start with an action verb in the bold title
+- Be written as a paragraph (2-4 sentences of prose)
+- Describe what goes wrong without the solution
+- Explain the consequence and impact
+- Name specific technologies where relevant
+- Explain what actually happens (not generic statements)
 
 ### Prose vs. lists - Finding the balance
 
@@ -237,7 +251,7 @@ Always use `1.` for every item - Markdown auto-numbers:
 
 ### HashiCorp resources section
 
-**Not a heading** - use `HashiCorp resources:` (with colon, no ##)
+**IS a heading** - use `## HashiCorp resources` (H2 heading)
 
 **Organization:**
 1. Beginner links first (tutorials, introductions)
@@ -256,7 +270,7 @@ Always use `1.` for every item - Markdown auto-numbers:
 
 **Grouping resources (optional):**
 
-When a document covers multiple tools or has many links (8+), group them under descriptive subheadings for better readability. Use your judgment - if links are similar or mostly WAF links, a single `HashiCorp resources:` section is fine.
+When a document covers multiple tools or has many links (8+), group them under descriptive subheadings for better readability. Use your judgment - if links are similar or mostly WAF links, a single flat list is fine.
 
 **When to group:**
 - Document covers multiple HashiCorp products (Packer, Nomad, Kubernetes, Vault)
@@ -265,7 +279,7 @@ When a document covers multiple tools or has many links (8+), group them under d
 
 **Grouped format example:**
 ```markdown
-HashiCorp resources:
+## HashiCorp resources
 
 - Learn about [immutable infrastructure](/well-architected-framework/...) concepts
 - Create [immutable virtual machines](/well-architected-framework/...) with Packer
@@ -281,11 +295,11 @@ Nomad deployment resources:
 - Manage Nomad jobs with the [Nomad Terraform provider](https://registry.terraform.io/...)
 ```
 
-**Grouped subheading format:** Use descriptive names with colon, no `##` (e.g., `Packer for containers:`, `Nomad deployment resources:`)
+**Grouped subheading format:** Use descriptive names with colon, no `###` (e.g., `Packer for containers:`, `Nomad deployment resources:`)
 
 ### External resources section
 
-**Not a heading** - use `External resources:` (with colon, no ##)
+**IS a subheading** - use `### External resources` (H3 heading, nested under HashiCorp resources)
 
 **Link patterns:**
 - "[Title](url) covers [what it explains]"
@@ -367,8 +381,11 @@ If someone unfamiliar with HashiCorp tools reads this document, can they:
 
 | Mistake | Fix |
 |---------|-----|
+| Generic "## Why" heading | Use "## Why [verb phrase]": "## Why implement GitOps" |
+| Bullet list in Why section | Use paragraphs with bold titles, not bullet lists |
 | Noun phrases in Why section | Use action verbs: "Track spending" not "Lack of visibility" |
-| `## Resources` as heading | Use `HashiCorp resources:` (no heading) |
+| `HashiCorp resources:` as plain text | Use `## HashiCorp resources` (H2 heading) |
+| `External resources:` as plain text | Use `### External resources` (H3 subheading) |
 | Sequential list numbers (1, 2, 3) | Always use `1.` for every item |
 | Missing "the following" | Add before every list except resource sections |
 | Vague pronouns | "This configuration creates..." → "The Terraform configuration creates..." |
