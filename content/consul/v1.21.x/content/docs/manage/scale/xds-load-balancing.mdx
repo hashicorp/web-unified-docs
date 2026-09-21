@@ -1,0 +1,121 @@
+---
+layout: docs
+page_title: xDS load balancing
+description: >-
+  Learn how to configure and operate xDS load balancing in Consul so dataplane and proxy streams are distributed evenly across healthy servers.
+---
+
+⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️
+> [!IMPORTANT]
+> **Documentation Update:** Product documentation previously located in `/website` has moved to the [`hashicorp/web-unified-docs`](https://github.com/hashicorp/web-unified-docs) repository, where all product documentation is now centralized. Please make contributions directly to `web-unified-docs`, since changes to `/website` in this repository will not appear on developer.hashicorp.com.
+⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️
+
+# xDS load balancing in Consul
+
+This page explains how `enable_xds_load_balancing` distributes xDS streams across Consul servers, when to enable it, and when to leave it disabled.
+
+## Overview
+
+In a service mesh deployment, each sidecar Envoy (or Consul dataplane) maintains a long-lived xDS stream to the Consul control plane. In multi-server clusters, these streams should be spread across healthy servers so one server does not become a bottleneck.
+
+When `enable_xds_load_balancing` is enabled, each server enforces a stream limit based on cluster size and connected proxy count. If the server is above its limit, it rejects new streams so clients reconnect to another server.
+
+## Why this matters
+
+Without xDS load balancing, one server can receive a disproportionate number of streams. This can cause:
+
+- Uneven resource utilization across servers.
+- Higher update latency for impacted proxies.
+- Larger blast radius if the overloaded server fails.
+
+With xDS load balancing enabled, stream distribution remains closer to even during steady-state operations and cluster changes.
+
+## Configure `enable_xds_load_balancing`
+
+The default value is `false`. You must explicitly set it to `true` to enable this behavior.
+
+### VM and bare metal servers
+
+```hcl
+performance {
+  enable_xds_load_balancing = true
+}
+```
+
+To disable, either omit the field or set:
+
+```hcl
+performance {
+  enable_xds_load_balancing = false
+}
+```
+
+### Kubernetes (Helm)
+
+Set the value through `server.extraConfig`:
+
+```yaml
+server:
+  extraConfig: |
+    {
+      "performance": {
+        "enable_xds_load_balancing": true
+      }
+    }
+```
+
+## How balancing works
+
+Each server computes a maximum stream count from:
+
+- Total number of mesh proxies in the catalog.
+- Number of healthy Consul servers.
+- A 10% buffer to reduce churn during normal fluctuations.
+
+If a new xDS connection arrives when the server is over its limit, the server returns `RESOURCE_EXHAUSTED` and asks the client to try another server.
+
+The limit updates automatically when:
+
+- Proxy services are added or removed.
+- Servers join, leave, or become unhealthy.
+
+## Deployment guidance
+
+### Recommended: Consul dataplane with server discovery
+
+When dataplanes discover servers dynamically, they can retry another server when they receive a load balancing rejection. In this model, enable xDS load balancing.
+
+### External layer-4 load balancer in front of Consul servers
+
+If you front servers with an external load balancer (NLB, HAProxy, Envoy Gateway), keep `enable_xds_load_balancing = false` and let the load balancer distribute connections.
+
+### Single static server address (not recommended)
+
+If all dataplanes use a single server address and no load balancer, enabling xDS load balancing can prevent many dataplanes from establishing streams after the first server reaches its limit. Use discovery or provide multiple server addresses.
+
+## Verify the setting
+
+Use the agent self endpoint:
+
+```shell-session
+$ curl -s http://localhost:8500/v1/agent/self | jq '.DebugConfig.EnableXDSLoadBalancing'
+```
+
+## Monitor xDS balancing
+
+Track the following metrics:
+
+- `consul.xds.server.streams`: Active xDS streams on this server.
+- `consul.xds.server.idealStreamsMax`: Calculated stream limit for this server.
+- `consul.xds.server.streamDrained`: Streams gracefully drained for redistribution.
+
+```shell-session
+$ curl -s http://localhost:8500/v1/agent/metrics?format=prometheus | grep xds
+```
+
+## Related references
+
+- [General agent configuration (`performance`)](/consul/docs/reference/agent/configuration-file/general#_performance)
+- [Consul dataplane](/consul/docs/architecture/control-plane/dataplane)
+- [xDS server parameters](/consul/docs/reference/agent/configuration-file/xds#xds-server-parameters)
+

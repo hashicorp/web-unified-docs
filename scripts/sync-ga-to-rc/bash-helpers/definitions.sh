@@ -39,13 +39,13 @@ prBody="Draft PR created by \`sync-ga-to-rc.mjs\` to push recent GA updates to t
 
 
 # Helper function to convert an ISO time string to UTC
-#
 function getUTCDate {
 
   local dateString="${1}"
   local myShell="${SHELL}"
   local zBash="/bin/zsh"
   local uBash="/bin/bash"
+  local macBash="apple-"
   local unixTime
 
   # Bail if any of the command line parameters were omitted
@@ -54,9 +54,15 @@ function getUTCDate {
   # The date command in zbash (standard shell for MacOS) is wildly different
   # from standard bash, so we convert differently based on the shell
   if [[ "${myShell}" == "${zBash}" ]] ; then
+    # zbash
     unixTime=$(date -j -f '%Y-%m-%d %H:%M:%S %z' "${dateString}" +'%s')
     echo $(date -j -u -r ${unixTime} +'%Y-%m-%d %H:%M:%S')
-  else
+  elif [[ $(bash --version | grep -F "apple-") == "" ]] ; then
+    # linux bash
     echo $(date -u  +'%Y-%m-%d %H:%M:%S' -d "${dateString}")
+  else
+    # apple bash
+    unixTime=$(date -j -f '%Y-%m-%d %H:%M:%S %z' "${dateString}" +'%s')
+    echo $(date -j -u -r ${unixTime} +'%Y-%m-%d %H:%M:%S')
   fi
 }

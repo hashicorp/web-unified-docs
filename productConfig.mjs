@@ -54,13 +54,14 @@ import semver from 'semver'
  * basePaths: paths where content may exist on the website for the product, used for rewrite-internal-links script. Not required for all products
  * contentDir: directory where content lives in the product repo, used for migration script and all-docs-paths api route
  * dataDir: directory where nav data lives in the product repo, used for migration script
+ * internalProduct: boolean that indicates whether the product is internal-only, used to determine whether to include the product in the API routes
  * navDataPath: path used as a prefix for the nav data in the product repo, used for api compare tool
  * productSlug: product that is associated with the product repo, used for all-docs-paths api route
  * semverCoerce: a function that coerces a version string into a semver version object, used for migration scripts
  * versionedDocs: a boolean that indicates whether the product has versioned docs
  * websiteDir: directory where all docs content folders live in the product repo, used for migration script
  *
- * @type Record<string, { assetDir: string, basePaths?: string[], contentDir: string, dataDir: string, navDataPath: string, productSlug: string, semverCoerce: Function, versionedDocs: boolean, websiteDir: string }>
+ * @type Record<string, { assetDir: string, basePaths?: string[], contentDir: string, dataDir: string, internalProduct?: boolean, navDataPath: string, productSlug: string, semverCoerce: Function, versionedDocs: boolean, websiteDir: string }>
  */
 
 export const PRODUCT_CONFIG = {
@@ -80,6 +81,7 @@ export const PRODUCT_CONFIG = {
 		semverCoerce: semver.coerce,
 		versionedDocs: true,
 		websiteDir: 'website',
+		supportsExclusionDirectives: true,
 	},
 	consul: {
 		/**
@@ -286,6 +288,17 @@ export const PRODUCT_CONFIG = {
 		versionedDocs: true,
 		websiteDir: 'website',
 	},
+	'terraform-policy': {
+		assetDir: '',
+		basePaths: ['policy'],
+		contentDir: 'docs',
+		dataDir: 'data',
+		navDataPath: 'policy',
+		productSlug: 'terraform',
+		semverCoerce: semver.coerce,
+		versionedDocs: true,
+		websiteDir: 'website',
+	},
 	'terraform-docs-agents': {
 		/**
 		 * 🟢🟢🟡 Initial migration attempt: CONTENT NOT FOUND on older versions
@@ -471,6 +484,15 @@ export const PRODUCT_CONFIG = {
 		versionedDocs: true,
 		websiteDir: 'website',
 		supportsExclusionDirectives: true,
+	},
+	'validated-designs': {
+		assetDir: 'img',
+		contentDir: 'docs',
+		dataDir: 'data',
+		productSlug: 'validated-designs',
+		semverCoerce: semver.coerce,
+		versionedDocs: false,
+		websiteDir: 'website',
 	},
 	'well-architected-framework': {
 		/**
