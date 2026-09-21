@@ -18,12 +18,12 @@ Each product has up to three guides, organized by what you are trying to do:
 
 | Product | Validated Designs |
 |---|---|
-| Boundary Enterprise | [developer.hashicorp.com/validated-designs/boundary](https://developer.hashicorp.com/validated-designs/boundary) |
-| Consul Enterprise | [developer.hashicorp.com/validated-designs/consul](https://developer.hashicorp.com/validated-designs/consul) |
-| Nomad Enterprise | [developer.hashicorp.com/validated-designs/nomad](https://developer.hashicorp.com/validated-designs/nomad) |
-| Terraform Enterprise | [developer.hashicorp.com/validated-designs/terraform](https://developer.hashicorp.com/validated-designs/terraform) |
-| Vault Enterprise | [developer.hashicorp.com/validated-designs/vault](https://developer.hashicorp.com/validated-designs/vault) |
-| Vault Radar | [developer.hashicorp.com/validated-designs/vault-radar](https://developer.hashicorp.com/validated-designs/vault-radar) |
+| Boundary Enterprise | [developer.hashicorp.com/validated-designs#boundary-enterprise](https://developer.hashicorp.com/validated-designs#boundary-enterprise) |
+| Consul Enterprise | [developer.hashicorp.com/validated-designs#consul-enterprise](https://developer.hashicorp.com/validated-designs#consul-enterprise) |
+| Nomad Enterprise | [developer.hashicorp.com/validated-designs#nomad-enterprise](https://developer.hashicorp.com/validated-designs#nomad-enterprise) |
+| Terraform Enterprise | [developer.hashicorp.com/validated-designs#terraform-enterprise](https://developer.hashicorp.com/validated-designs#terraform-enterprise) |
+| Vault Enterprise | [developer.hashicorp.com/validated-designs#vault-enterprise](https://developer.hashicorp.com/validated-designs#vault-enterprise) |
+| Vault Radar | [developer.hashicorp.com/validated-designs#vault-radar](https://developer.hashicorp.com/validated-designs#vault-radar) |
 
 ## Validated Patterns
 
