@@ -3,8 +3,9 @@
 This repository supports many kinds of work: the Next.js application, build and
 content-tooling scripts, API routes, tests, and the Markdown/MDX documentation
 under `content/`. These repository-wide instructions are intentionally small and
-apply to every pull request. They scope automated **documentation** review and
-do not redefine how non-documentation changes are reviewed.
+apply to every pull request. They scope automated **documentation** review, and
+separately route agents making changes under `content/` to the right guidance - 
+they do not redefine how non-documentation changes are reviewed.
 
 ## Changing content
 

@@ -12,8 +12,7 @@ user-facing experience.
 applies to every content task, not only new pages: editing or rewriting a page,
 adding or rebuilding an image or diagram, updating navigation data, and moving
 or renaming a page. Content has conventions that the files themselves do not
-show — for example, a diagram's PNGs are exports of SVG sources that you commit
-alongside them. The person asking may not know these conventions, so do not wait
+show. The person asking may not know these conventions, so do not wait
 for them to point you to the guidance.
 
 ## Essentials
