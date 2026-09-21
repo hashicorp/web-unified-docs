@@ -21,6 +21,10 @@ const vaultConfig = {
 	supportsExclusionDirectives: true,
 }
 
+const boundaryConfig = {
+	supportsExclusionDirectives: true,
+}
+
 const terraformDocsCommonConfig = {
 	supportsExclusionDirectives: true,
 }
@@ -189,6 +193,27 @@ Final content.`)
 	})
 })
 
+describe('transformExcludeContent - Boundary Directives', () => {
+	const boundaryOptions = {
+		filePath: 'boundary/some-file.md',
+		version: '1.0.x',
+		repoSlug: 'boundary',
+		productConfig: boundaryConfig,
+	}
+
+	it('should remove content when Boundary version condition is not met', async () => {
+		const markdown = `
+<!-- BEGIN: Boundary:>=v1.1.x -->
+This content should be removed.
+<!-- END: Boundary:>=v1.1.x -->
+This content should stay.
+`
+		const result = await runTransform(markdown, boundaryOptions)
+
+		expect(result).toBe('This content should stay.\n')
+	})
+})
+
 describe('transformExcludeContent - Cross-Product Version Directives', () => {
 	it('should remove a Vault version directive when processed outside vault', async () => {
 		const options = {
@@ -327,7 +352,7 @@ This content should stay.
 
 ## 2025-05-1
 
--   Add \`agent-pool\` relationship to the [run task API](/terraform/enterprise/api-docs/run-tasks/run-tasks), which you can use to assign a run task to an agent pool.		
+-   Add \`agent-pool\` relationship to the [run task API](/terraform/enterprise/api-docs/run-tasks/run-tasks), which you can use to assign a run task to an agent pool.
 	<!-- BEGIN: TFEnterprise:only name:revoke -->
 -   You can now revoke, and revert the revocation of, module versions. Learn more about [Managing module versions](/terraform/enterprise/api-docs/private-registry/manage-module-versions).
 	<!-- END: TFEnterprise:only name:revoke -->
@@ -339,7 +364,7 @@ This content should stay.
 		const result = await runTransform(markdown, options)
 		expect(result.trim()).toBe(`## 2025-05-1
 
--   Add \`agent-pool\` relationship to the [run task API](/terraform/enterprise/api-docs/run-tasks/run-tasks), which you can use to assign a run task to an agent pool.		
+-   Add \`agent-pool\` relationship to the [run task API](/terraform/enterprise/api-docs/run-tasks/run-tasks), which you can use to assign a run task to an agent pool.
 -   You can now revoke, and revert the revocation of, module versions. Learn more about [Managing module versions](/terraform-docs-common/api-docs/private-registry/manage-module-versions).
 
 This content should stay.`)
