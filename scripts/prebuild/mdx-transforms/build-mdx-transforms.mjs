@@ -92,7 +92,7 @@ export async function buildMdxTransforms(
 		'MDX transforms',
 		mdxFileEntries,
 		(entry) => {
-			return applyMdxTransforms(entry, versionMetadata)
+			return applyMdxTransforms(entry, versionMetadata, targetDir)
 		},
 	)
 	// Log out any errors encountered
@@ -128,7 +128,7 @@ export async function buildMdxTransforms(
  * @param {string} entry.outPath
  * @return {object} { error: string | null }
  */
-async function applyMdxTransforms(entry, versionMetadata = {}) {
+async function applyMdxTransforms(entry, versionMetadata = {}, targetDir) {
 	try {
 		const { filePath, partialsDir, outPath, version, redirectsDir } = entry
 		const redirects = await loadRedirects(version, redirectsDir)
@@ -141,16 +141,24 @@ async function applyMdxTransforms(entry, versionMetadata = {}) {
 		// as they are version-agnostic and shared across all versions
 		const isGlobalPartial = filePath.includes('/global/partials/')
 
+		// Internal-only products keep their exclusion directives intact during
+		// their own transform pass. The directives are resolved later, against the
+		// consuming product's context, when the content is copied
+		// (see copyInternalOnlyProductDocs).
+		const isInternalProduct = Boolean(
+			PRODUCT_CONFIG[entry.repoSlug]?.internalProduct,
+		)
+
 		const processor = remark()
 			.use(remarkMdx)
 			// Process partials first, then content exclusion
 			// This ensures exclusion directives in global partials are properly evaluated
-			.use(remarkIncludePartialsPlugin, { partialsDir, filePath })
+			.use(remarkIncludePartialsPlugin, { partialsDir, targetDir, filePath })
 
 		// Make sure the content exclusion process skips looking through
 		// the global partial filepath (it should only be processed once the global
 		// partial is written to the file)
-		if (!isGlobalPartial) {
+		if (!isGlobalPartial && !isInternalProduct) {
 			processor.use(transformExcludeContent, {
 				filePath,
 				version,

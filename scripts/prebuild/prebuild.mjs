@@ -13,6 +13,7 @@ import { buildAlgoliaRecords } from '../algolia/build-algolia-records.mjs'
 import { copyNavDataFiles } from '#scriptUtils/copy-nav-data-files.mjs'
 import { copyRedirectFiles } from '#scriptUtils/copy-redirect-files.mjs'
 import { copyAssetFiles } from '#scriptUtils/copy-asset-files.mjs'
+import { copyInternalOnlyProductDocs } from './copy-internal-only-product-docs.mjs'
 import { getChangedContentFiles } from '#scriptUtils/get-changed-content-files.mjs'
 
 const NUM_OF_MICROSEC_IN_NANOSEC = BigInt('1000')
@@ -152,6 +153,14 @@ async function main() {
 		CONTENT_DIR,
 		CONTENT_DIR_OUT_ASSETS,
 		incBuild ? changedFiles : null,
+	)
+
+	// Copy internal-only product docs and assets to `public/content` and `public/assets` for their
+	// corresponding products based on version-config.json imports
+	await copyInternalOnlyProductDocs(
+		CONTENT_DIR,
+		CONTENT_DIR_OUT,
+		CONTENT_DIR_OUT_ASSETS,
 	)
 
 	if (skipTraceFile) {

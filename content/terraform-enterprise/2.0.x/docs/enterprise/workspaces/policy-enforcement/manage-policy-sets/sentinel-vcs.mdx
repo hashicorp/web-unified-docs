@@ -1,0 +1,143 @@
+---
+page_title: Configure a Sentinel policy set with a VCS repository
+description: >-
+  Use a VCS repository to configure a Sentinel policy set in Terraform
+  Enterprise.
+source: terraform-docs-common
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-02-02T17:54:50Z
+last_modified: 2026-02-02T17:54:50Z
+# END AUTO GENERATED METADATA
+---
+
+# Configure a Sentinel policy set with a VCS repository
+
+To enable policy enforcement, you must group Sentinel policies into policy sets. You can then apply those policy sets globally or to specific [projects](/terraform/enterprise/projects/manage) and workspaces.
+
+<!-- BEGIN: TFC:only name:pnp-callout -->
+
+@include 'tfc-package-callouts/policies.mdx'
+
+<!-- END: TFC:only name:pnp-callout -->
+
+One way to create policy sets is by connecting HCP Terraform to a version control repository. When you push changes to the repository, HCP Terraform automatically uses the updated policy set. Refer to [Managing Policy Sets](/terraform/enterprise/policy-enforcement/manage-policy-sets) for more details.
+
+A Sentinel policy set repository contains a Sentinel configuration file, policy files, and module files.
+
+## Configuration File
+
+Your repository must contain a configuration file named `sentinel.hcl` that defines the following features of the policy set:
+
+-   Each policy included in the set. The policy name must match the names of individual [policy code files](#policy-code-files) exactly. HCP Terraform ignores policy files in the repository that are not listed in the configuration file. For each policy, the configuration file must designate the policy’s [enforcement level](/terraform/enterprise/policy-enforcement/manage-policy-sets#policy-enforcement-levels) and [source](#policy-source).
+-   [Terraform modules](#modules) that policies in the set need to access.
+
+The following example shows a portion of a `sentinel.hcl` configuration file that defines a policy named `terraform-maintenance-windows`. The policy has a `hard-mandatory` enforcement level, meaning that it can block Terraform runs when it fails and users cannot override it.
+
+```hcl
+policy "terraform-maintenance-windows" {
+ source            = "./terraform-maintenance-windows.sentinel"
+ enforcement_level = "hard-mandatory"
+}
+```
+
+To configure a module, add a `module` entry to your `sentinel.hcl` file. The following example adds a module called `timezone`.
+
+```hcl
+module "timezone" {
+ source = "./modules/timezone.sentinel"
+}
+```
+
+The repositories for [policy libraries on the Terraform Registry](https://registry.terraform.io/browse/policies) contain more examples.
+
+## Policy Code Files
+
+Define each Sentinel policy in a separate file within your repository. All local policy files must reside in the same directory as the `sentinel.hcl` configuration file and end with the `.sentinel` suffix.
+
+### Policy Source
+
+A policy's `source` field can either reference a file within the policy repository, or it can reference a remote source. For example, the configuration could reference a policy from HashiCorp's [foundational policies library](https://github.com/hashicorp/terraform-foundational-policies-library). Sentinel only supports HTTP and HTTPS remote sources.
+
+To specify a local source, prefix the `source` with a `./`, or `../`. The following example shows how to reference a local source policy called `terraform-maintenance-windows.sentinel`.
+
+```hcl
+policy "terraform-maintenance-windows" {
+ source            = "./terraform-maintenance-windows.sentinel"
+ enforcement_level = "hard-mandatory"
+}
+```
+
+To specify a remote source, supply the URL as the `source`. The following example references a policy from HashiCorp's foundational policies library.
+
+```hcl
+policy "deny-public-ssh-nsg-rules" {
+  source = "https://registry.terraform.io/v2/policies/hashicorp/azure-networking-terraform/1.0.2/policy/deny-public-ssh-nsg-rules.sentinel?checksum=sha256:75c95bf1d6eb48153cb31f15c49c237bf7829549beebe20effa07bcdd3f3cb74"
+  enforcement_level = "advisory"
+}
+```
+
+For GitHub, you must use the URL of the raw policy content. Other URL types cause HCP Terraform to error when checking the policy. For example, do not use `https://github.com/hashicorp/policy-library-azure-networking-terraform/blob/main/policies/deny-public-ssh-nsg-rules/deny-public-ssh-nsg-rules.sentinel`.
+
+To access the raw URL, open the Sentinel file in your Github repository, right-click **Raw** on the top right of the page, and save the link address.
+
+### Example Policy
+
+The following example policy uses the `time` and `tfrun` imports and a custom `timezone` module to do the following tasks:
+
+1.  Load the time when the Terraform run occurred
+2.  Convert the loaded time with the correct offset using the [Timezone API](https://timezoneapi.io/)
+3.  Verify that the provisioning operation occurs only on a specific day
+
+The example policy also uses a [rule expression](/sentinel/docs/language/spec#rule-expressions) with the `when` predicate. If the value of `tfrun.workspace.auto_apply` is false, the rule is not evaluated and returns true.
+
+Finally, the example uses parameters to facilitate module reuse within Terraform. Refer to the [Sentinel parameter documentation](/sentinel/docs/language/parameters) for details.
+
+```hcl
+import "time"
+import "tfrun"
+import "timezone"
+
+param token default "WbNKULOBheqV"
+param maintenance_days default ["Friday", "Saturday", "Sunday"]
+param timezone_id default "America/Los_Angeles"
+
+tfrun_created_at = time.load(tfrun.created_at)
+
+supported_maintenance_day = rule when tfrun.workspace.auto_apply is true {
+  tfrun_created_at.add(time.hour * timezone.offset(timezone_id, token)).weekday_name in maintenance_days
+}
+
+main = rule {
+  supported_maintenance_day
+}
+```
+
+To expand the policy, you could use the [time.hour](/sentinel/docs/imports/time#time-hour) function to also restrict provisioning to specific times of day.
+
+## Modules
+
+HCP Terraform supports [Sentinel modules](/sentinel/docs/extending/modules). Modules let you write reusable policy code that you can import and use within several policies at once.
+
+You can store modules locally or retrieve them from a remote HTTP or HTTPS source.
+
+-> **Note:** We recommend reviewing [Sentinel runtime's modules documentation](/sentinel/docs/extending/modules) to learn how to use modules within Sentinel. However, the configuration examples in the runtime documentation are relevant to the Sentinel CLI and not HCP Terraform.
+
+The following example module loads the code at `./modules/timezone.sentinel` relative to the policy set working directory. Other modules can access this code with the statement `import "timezone"`.
+
+```hcl
+import "http"
+import "json"
+import "decimal"
+
+httpGet = func(id, token){
+  uri = "https://timezoneapi.io/api/timezone/?" + id + "&token=" + token
+  request = http.get(uri)
+  return json.unmarshal(request.body)
+}
+
+offset = func(id, token) {
+  tz = httpGet(id, token)
+  offset = decimal.new(tz.data.datetime.offset_hours).int
+  return offset
+}
+```

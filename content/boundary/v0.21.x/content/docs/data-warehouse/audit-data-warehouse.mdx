@@ -1,0 +1,505 @@
+---
+layout: docs
+page_title: Audit the data warehouse
+description: >-
+  Learn how to audit Boundary's built-in PostgreSQL data warehouse schema for compliance and session auditing purposes.
+---
+
+# Audit the data warehouse
+
+@include 'data-warehouse/overview.mdx'
+
+Refer to [Boundary data warehouse](/boundary/docs/data-warehouse) for more information about the data warehouse's architecture and tables.
+
+## Compliance use cases
+
+The following queries are verified against Boundary v0.21.0 and address common compliance requirements including SOC 2, SOX, PCI-DSS, and HIPAA access audit mandates.
+
+### C-001: Complete access audit trail
+
+This query generates a comprehensive audit trail showing who accessed what system, when, from where, with what credentials, and how much data moved. It satisfies the core requirement of every major compliance framework.
+
+```sql
+SELECT
+    s.session_id,
+    s.session_pending_time AS access_time,
+    s.session_terminated_time AS end_time,
+    CASE
+        WHEN s.session_terminated_time = 'infinity' THEN NULL
+        ELSE ROUND(EXTRACT(EPOCH FROM (s.session_terminated_time - s.session_pending_time))::numeric, 1)
+    END AS duration_seconds,
+    u.user_name,
+    u.auth_account_email,
+    u.auth_account_full_name,
+    u.auth_method_type,
+    u.user_organization_name,
+    h.target_name,
+    h.target_type,
+    h.target_description,
+    h.project_name,
+    h.organization_name,
+    h.host_name,
+    h.host_type,
+    c.client_tcp_address,
+    c.endpoint_tcp_address,
+    c.endpoint_tcp_port_number,
+    COALESCE(c.bytes_up, 0) / 1024.0 AS kb_uploaded,
+    COALESCE(c.bytes_down, 0) / 1024.0 AS kb_downloaded,
+    s.total_connection_count
+FROM wh_session_accumulating_fact s
+JOIN wh_user_dimension u ON s.user_key = u.key AND u.current_row_indicator = 'Current'
+JOIN wh_host_dimension h ON s.host_key = h.key AND h.current_row_indicator = 'Current'
+LEFT JOIN wh_session_connection_accumulating_fact c ON s.session_id = c.session_id
+WHERE s.session_pending_time BETWEEN :start_date AND :end_date
+ORDER BY s.session_pending_time DESC;
+```
+
+**Compliance frameworks addressed:** SOC 2 (CC6.1, CC6.7), SOX (Section 404), PCI-DSS (Requirement 10), HIPAA (164.312(b)).
+
+**Columns returned for each access event:**
+- Who - `user_name`, `auth_account_email`, `auth_account_full_name`
+- How authenticated - `auth_method_type`
+- What system - `target_name`, `target_type`, `host_name`
+- When - `access_time`, `end_time`, `duration_seconds`
+- From where - `client_tcp_address` (source IP), `endpoint_tcp_address` (destination)
+- Data transferred - `kb_uploaded`, `kb_downloaded`
+- Organizational context - `organization_name`, `project_name`
+
+### C-002: User access review (inactive and orphaned account detection)
+
+This query identifies users who have never accessed a target or whose last access exceeds a configurable threshold. It is a cornerstone of quarterly access certification reviews.
+
+```sql
+SELECT
+    u.user_name,
+    u.auth_account_email,
+    u.auth_method_type,
+    u.user_organization_name,
+    COUNT(DISTINCT s.session_id) AS total_sessions,
+    COUNT(DISTINCT h.target_id) AS unique_targets_accessed,
+    MAX(s.session_pending_time) AS last_activity,
+    CASE
+        WHEN MAX(s.session_pending_time) IS NULL THEN 'NEVER USED'
+        WHEN MAX(s.session_pending_time) < CURRENT_DATE - INTERVAL '90 days' THEN 'INACTIVE >90d'
+        WHEN MAX(s.session_pending_time) < CURRENT_DATE - INTERVAL '30 days' THEN 'INACTIVE >30d'
+        ELSE 'ACTIVE'
+    END AS activity_status,
+    array_agg(DISTINCT h.target_name ORDER BY h.target_name) FILTER (WHERE h.target_name IS NOT NULL) AS targets_accessed
+FROM wh_user_dimension u
+LEFT JOIN wh_session_accumulating_fact s ON u.key = s.user_key
+LEFT JOIN wh_host_dimension h ON s.host_key = h.key AND h.current_row_indicator = 'Current'
+WHERE u.current_row_indicator = 'Current'
+GROUP BY u.user_name, u.auth_account_email, u.auth_method_type, u.user_organization_name
+ORDER BY last_activity DESC NULLS LAST;
+```
+
+**Review actions:**
+- `NEVER USED` - Candidate for account deprovisioning
+- `INACTIVE >90d` - Flag for manager confirmation before next review cycle
+- `INACTIVE >30d` - Monitor; include in next review
+
+### C-003: Privileged access report
+
+This query surfaces all access to targets or credentials with administrative or production markings, supporting least-privilege audits and privileged access reviews.
+
+```sql
+SELECT
+    s.session_id,
+    s.session_pending_time,
+    u.user_name,
+    u.auth_method_type,
+    u.user_organization_name,
+    h.target_name,
+    h.target_type,
+    h.project_name,
+    CASE
+        WHEN h.target_name ILIKE '%admin%' OR h.target_name ILIKE '%root%' THEN 'ADMINISTRATIVE'
+        WHEN h.target_name ILIKE '%prod%' THEN 'PRODUCTION'
+        WHEN h.target_name ILIKE '%db%' OR h.target_name ILIKE '%database%' THEN 'DATABASE'
+        ELSE 'STANDARD'
+    END AS access_sensitivity,
+    s.total_connection_count,
+    CASE
+        WHEN s.session_terminated_time = 'infinity' THEN NULL
+        ELSE ROUND(EXTRACT(EPOCH FROM (s.session_terminated_time - s.session_pending_time))::numeric, 1)
+    END AS duration_seconds
+FROM wh_session_accumulating_fact s
+JOIN wh_user_dimension u ON s.user_key = u.key AND u.current_row_indicator = 'Current'
+JOIN wh_host_dimension h ON s.host_key = h.key AND h.current_row_indicator = 'Current'
+WHERE s.session_pending_time >= CURRENT_DATE - INTERVAL '30 days'
+  AND (h.target_name ILIKE '%admin%'
+       OR h.target_name ILIKE '%prod%'
+       OR h.target_name ILIKE '%db%')
+ORDER BY s.session_pending_time DESC;
+```
+
+<Note>
+
+Customize the `ILIKE` patterns in the `WHERE` clause and `CASE` expression to match your organization's target naming conventions.
+
+</Note>
+
+### C-004: Separation of duties verification
+
+This query detects users who access both development and production systems, a common separation-of-duties violation. It groups targets by environment based on naming conventions and flags users spanning multiple environments.
+
+```sql
+WITH user_environment_access AS (
+    SELECT
+        u.user_name,
+        u.user_organization_name,
+        CASE
+            WHEN h.target_name ILIKE '%prod%' THEN 'PRODUCTION'
+            WHEN h.target_name ILIKE '%dev%' THEN 'DEVELOPMENT'
+            WHEN h.target_name ILIKE '%test%' OR h.target_name ILIKE '%staging%' THEN 'NON-PROD'
+            ELSE 'OTHER'
+        END AS environment,
+        COUNT(*) AS access_count
+    FROM wh_session_accumulating_fact s
+    JOIN wh_user_dimension u ON s.user_key = u.key AND u.current_row_indicator = 'Current'
+    JOIN wh_host_dimension h ON s.host_key = h.key AND h.current_row_indicator = 'Current'
+    WHERE s.session_pending_time >= CURRENT_DATE - INTERVAL '90 days'
+    GROUP BY u.user_name, u.user_organization_name, environment
+)
+SELECT
+    user_name,
+    user_organization_name,
+    array_agg(DISTINCT environment ORDER BY environment) AS environments_accessed,
+    SUM(access_count) AS total_accesses
+FROM user_environment_access
+GROUP BY user_name, user_organization_name
+HAVING COUNT(DISTINCT environment) > 1
+   AND 'PRODUCTION' = ANY(array_agg(environment))
+   AND ('DEVELOPMENT' = ANY(array_agg(environment)) OR 'NON-PROD' = ANY(array_agg(environment)))
+ORDER BY user_name;
+```
+
+**Policy violation:** Any row returned by this query indicates a user with access spanning production and non-production environments — review whether this is authorized.
+
+## SecOps use cases
+
+The following queries are verified against Boundary v0.21.0 and support threat hunting, incident response, and security monitoring workflows.
+
+### S-001: Sessions without connections (authorization failures / abandoned access)
+
+This query surfaces sessions that were authorized, but never established a connection. These represent either abandoned access attempts, potential authorization failures, or reconnaissance activity.
+
+```sql
+SELECT
+    s.session_id,
+    u.user_name,
+    h.target_name,
+    h.target_type,
+    s.session_pending_time,
+    CASE
+        WHEN s.session_terminated_time = 'infinity' THEN 'STILL PENDING'
+        ELSE 'TERMINATED'
+    END AS session_status,
+    ROUND(EXTRACT(EPOCH FROM (
+        COALESCE(
+            NULLIF(s.session_terminated_time, 'infinity'),
+            NOW()
+        ) - s.session_pending_time
+    )))::int AS seconds_since_creation
+FROM wh_session_accumulating_fact s
+JOIN wh_user_dimension u ON s.user_key = u.key AND u.current_row_indicator = 'Current'
+JOIN wh_host_dimension h ON s.host_key = h.key AND h.current_row_indicator = 'Current'
+LEFT JOIN wh_session_connection_accumulating_fact c ON s.session_id = c.session_id
+WHERE s.session_pending_time >= CURRENT_DATE - INTERVAL '7 days'
+  AND c.connection_id IS NULL
+GROUP BY s.session_id, u.user_name, h.target_name, h.target_type,
+         s.session_pending_time, s.session_terminated_time
+ORDER BY s.session_pending_time DESC;
+```
+
+**Triage guidance:**
+- **Multiple pending sessions from one user against different targets** → Potential reconnaissance or lateral movement attempt
+- **Long-pending sessions with no connection** → Abandoned access; verify user intent
+- **Pattern of admin targeting sensitive targets without connecting** → Escalate to incident response
+
+### S-002: Multi-target access velocity (lateral movement indicator)
+
+This query detects users accessing an unusually high number of distinct targets in a short time window. This pattern is a strong indicator of lateral movement during an active compromise.
+
+```sql
+WITH rapid_access AS (
+    SELECT
+        u.user_name,
+        u.user_id,
+        COUNT(DISTINCT h.target_id) AS unique_targets,
+        MIN(s.session_pending_time) AS first_access,
+        MAX(s.session_pending_time) AS last_access,
+        ROUND(EXTRACT(EPOCH FROM (MAX(s.session_pending_time) - MIN(s.session_pending_time))) / 60)::int AS window_minutes,
+        array_agg(DISTINCT h.target_name ORDER BY h.target_name) AS targets_accessed
+    FROM wh_session_accumulating_fact s
+    JOIN wh_user_dimension u ON s.user_key = u.key AND u.current_row_indicator = 'Current'
+    JOIN wh_host_dimension h ON s.host_key = h.key AND h.current_row_indicator = 'Current'
+    WHERE s.session_pending_time >= CURRENT_DATE - INTERVAL '24 hours'
+    GROUP BY u.user_name, u.user_id
+)
+SELECT *
+FROM rapid_access
+WHERE unique_targets >= 3
+   OR window_minutes <= 30
+ORDER BY unique_targets DESC, window_minutes ASC;
+```
+
+<Tip>
+
+Adjust the thresholds (`unique_targets >= 3`, `window_minutes <= 30`) based on your environment's baseline. For high-churn environments, increase the target count threshold.
+
+</Tip>
+
+### S-003: Auth token anomaly detection (multi-IP usage)
+
+This query identifies authentication tokens used from multiple distinct client IP addresses — a potential indicator of token theft, session hijacking, or credential sharing.
+
+```sql
+SELECT
+    u.user_name,
+    a.auth_token_id,
+    a.auth_token_issued_time,
+    a.auth_token_approximate_last_access_time,
+    COUNT(DISTINCT s.session_id) AS sessions_created,
+    COUNT(DISTINCT c.client_tcp_address) AS unique_client_ips,
+    array_agg(DISTINCT c.client_tcp_address::text) FILTER (WHERE c.client_tcp_address IS NOT NULL) AS client_ips,
+    array_agg(DISTINCT h.target_name ORDER BY h.target_name) AS targets_accessed
+FROM wh_auth_token_accumulating_fact a
+JOIN wh_user_dimension u ON a.user_key = u.key AND u.current_row_indicator = 'Current'
+LEFT JOIN wh_session_accumulating_fact s ON a.auth_token_id = s.auth_token_id
+LEFT JOIN wh_session_connection_accumulating_fact c ON s.session_id = c.session_id
+LEFT JOIN wh_host_dimension h ON s.host_key = h.key AND h.current_row_indicator = 'Current'
+WHERE a.auth_token_issued_time >= CURRENT_DATE - INTERVAL '7 days'
+GROUP BY u.user_name, a.auth_token_id, a.auth_token_issued_time, a.auth_token_approximate_last_access_time
+HAVING COUNT(DISTINCT c.client_tcp_address) > 1
+ORDER BY unique_client_ips DESC;
+```
+
+**Response actions:**
+- `unique_client_ips > 3` → **Critical:** Investigate immediately. Token may be compromised.
+- `unique_client_ips = 2` and IPs are geographically distant → Escalate for impossible travel analysis.
+- `unique_client_ips = 2` and IPs are in same subnet → May be legitimate (VPN reconnection, roaming).
+
+### S-004: Data exfiltration indicators (volume anomaly detection)
+
+This query surfaces connections with byte volumes significantly above baseline, a potential indicator of data exfiltration. It uses a self-baselining approach comparing each user's recent connections against their own 30-day average.
+
+```sql
+WITH user_baseline AS (
+    SELECT
+        user_key,
+        AVG(bytes_down) AS avg_bytes_down,
+        STDDEV(bytes_down) AS stddev_bytes_down,
+        AVG(bytes_up) AS avg_bytes_up,
+        STDDEV(bytes_up) AS stddev_bytes_up
+    FROM wh_session_connection_accumulating_fact
+    WHERE connection_authorized_time >= CURRENT_DATE - INTERVAL '30 days'
+      AND bytes_down IS NOT NULL
+    GROUP BY user_key
+),
+recent_connections AS (
+    SELECT
+        c.connection_id,
+        c.session_id,
+        c.user_key,
+        u.user_name,
+        h.target_name,
+        h.target_type,
+        c.bytes_up,
+        c.bytes_down,
+        c.connection_authorized_time
+    FROM wh_session_connection_accumulating_fact c
+    JOIN wh_user_dimension u ON c.user_key = u.key AND u.current_row_indicator = 'Current'
+    JOIN wh_host_dimension h ON c.host_key = h.key AND h.current_row_indicator = 'Current'
+    WHERE c.connection_authorized_time >= CURRENT_DATE - INTERVAL '24 hours'
+      AND c.bytes_down IS NOT NULL
+)
+SELECT
+    r.user_name,
+    r.target_name,
+    r.target_type,
+    ROUND(r.bytes_down / 1024.0, 1) AS kb_downloaded,
+    ROUND(b.avg_bytes_down / 1024.0, 1) AS user_avg_kb,
+    ROUND((r.bytes_down - b.avg_bytes_down) / NULLIF(b.stddev_bytes_down, 0), 1) AS std_deviations_from_mean,
+    r.connection_authorized_time
+FROM recent_connections r
+JOIN user_baseline b ON r.user_key = b.user_key
+WHERE r.bytes_down > (b.avg_bytes_down + (3 * b.stddev_bytes_down))
+   OR r.bytes_up > (b.avg_bytes_up + (3 * b.stddev_bytes_up))
+ORDER BY std_deviations_from_mean DESC;
+```
+
+**Threshold interpretation:**
+- **3+ standard deviations above mean** → Unusual; investigate the specific target and data type
+- **5+ standard deviations** → Critical anomaly; escalate immediately
+- **Sustained high-volume connections over multiple sessions** → Potential staging activity
+
+### S-005: Incident timeline reconstruction
+
+This query reconstructs a complete chronological timeline of all access events for a specific user during an incident window. Use this to understand the full scope of a compromise.
+
+```sql
+-- First event type: session authorizations
+SELECT
+    s.session_pending_time AS event_time,
+    'SESSION_AUTHORIZED' AS event_type,
+    u.user_name,
+    h.target_name,
+    h.target_type,
+    h.project_name,
+    NULL AS client_ip,
+    NULL AS kb_transferred
+FROM wh_session_accumulating_fact s
+JOIN wh_user_dimension u ON s.user_key = u.key AND u.current_row_indicator = 'Current'
+JOIN wh_host_dimension h ON s.host_key = h.key AND h.current_row_indicator = 'Current'
+WHERE u.user_name = :incident_user
+  AND s.session_pending_time BETWEEN :incident_start AND :incident_end
+
+UNION ALL
+
+-- Second event type: connections established
+SELECT
+    c.connection_authorized_time,
+    'CONNECTION_ESTABLISHED',
+    u.user_name,
+    h.target_name,
+    h.target_type,
+    h.project_name,
+    c.client_tcp_address::text,
+    (COALESCE(c.bytes_up, 0) + COALESCE(c.bytes_down, 0)) / 1024.0
+FROM wh_session_connection_accumulating_fact c
+JOIN wh_user_dimension u ON c.user_key = u.key AND u.current_row_indicator = 'Current'
+JOIN wh_host_dimension h ON c.host_key = h.key AND h.current_row_indicator = 'Current'
+WHERE u.user_name = :incident_user
+  AND c.connection_authorized_time BETWEEN :incident_start AND :incident_end
+
+UNION ALL
+
+-- Third event type: session terminations
+SELECT
+    s.session_terminated_time,
+    'SESSION_TERMINATED',
+    u.user_name,
+    h.target_name,
+    h.target_type,
+    h.project_name,
+    NULL,
+    COALESCE(s.total_bytes_down, 0) / 1024.0
+FROM wh_session_accumulating_fact s
+JOIN wh_user_dimension u ON s.user_key = u.key AND u.current_row_indicator = 'Current'
+JOIN wh_host_dimension h ON s.host_key = h.key AND h.current_row_indicator = 'Current'
+WHERE u.user_name = :incident_user
+  AND s.session_terminated_time <> 'infinity'
+  AND s.session_terminated_time BETWEEN :incident_start AND :incident_end
+
+ORDER BY event_time;
+```
+
+**Usage:** Replace `:incident_user` with the user's name and `:incident_start`/`:incident_end` with the investigation window. The output is a chronologically ordered table of every access event — authorizations, connections, and terminations — that can be exported directly into an incident report.
+
+## Setting up a read-only BI user
+
+Use the following command to create read-only user role for business intelligence tools.
+
+```sql
+-- Create a read-only role for BI tools
+CREATE ROLE boundary_bi_readonly WITH LOGIN PASSWORD '<secure_password>';
+GRANT CONNECT ON DATABASE boundary TO boundary_bi_readonly;
+GRANT USAGE ON SCHEMA public TO boundary_bi_readonly;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO boundary_bi_readonly;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO boundary_bi_readonly;
+ALTER ROLE boundary_bi_readonly SET default_transaction_read_only = ON;
+
+-- Prevent runaway queries from impacting the production database
+ALTER ROLE boundary_bi_readonly SET statement_timeout = '60s';
+```
+
+<Warning>
+
+**Never grant write access to BI users.** The Boundary database is a production system. Use a read replica when possible.
+
+</Warning>
+
+## Key analytical queries
+
+Refer to the following sections for key analytical queries.
+
+### Session activity by target
+
+```sql
+SELECT
+    wh.target_name,
+    wh.project_name,
+    COUNT(*) AS session_count,
+    AVG(EXTRACT(EPOCH FROM (wsf.session_terminated_time - wsf.session_active_time))) AS avg_duration_seconds,
+    SUM(COALESCE(wsf.total_bytes_down, 0)) / (1024*1024) AS total_mb_downloaded
+FROM wh_session_accumulating_fact wsf
+JOIN wh_host_dimension wh ON wh.key = wsf.host_key
+    AND wh.current_row_indicator = 'Current'
+WHERE wsf.session_pending_time >= CURRENT_DATE - INTERVAL '30 days'
+GROUP BY wh.target_name, wh.project_name
+ORDER BY session_count DESC;
+```
+
+### User access roster (for access reviews)
+
+```sql
+SELECT
+    u.user_name,
+    u.auth_account_email,
+    u.auth_method_type,
+    u.user_organization_name,
+    COUNT(DISTINCT s.session_id) AS sessions_30d,
+    MAX(s.session_pending_time) AS last_activity
+FROM wh_user_dimension u
+LEFT JOIN wh_session_accumulating_fact s ON u.key = s.user_key
+WHERE u.current_row_indicator = 'Current'
+GROUP BY u.user_name, u.auth_account_email, u.auth_method_type, u.user_organization_name
+ORDER BY last_activity DESC NULLS LAST;
+```
+
+### Connection-level audit trail
+
+```sql
+SELECT
+    u.user_name,
+    h.target_name,
+    c.connection_authorized_time,
+    c.client_tcp_address,
+    c.endpoint_tcp_address,
+    c.bytes_up / 1024 AS kb_up,
+    c.bytes_down / 1024 AS kb_down
+FROM wh_session_connection_accumulating_fact c
+JOIN wh_user_dimension u ON c.user_key = u.key AND u.current_row_indicator = 'Current'
+JOIN wh_host_dimension h ON c.host_key = h.key AND h.current_row_indicator = 'Current'
+WHERE c.connection_authorized_time >= CURRENT_DATE - INTERVAL '7 days'
+ORDER BY c.connection_authorized_time DESC;
+```
+
+## Data retention and performance
+
+Note the following data retention best practices for optimal performance:
+
+- The warehouse has **no automatic purging**. Implement your own retention policy.
+- Fact tables are populated only as Boundary events occur — a fresh install starts with zero rows in fact tables and only default records in dimensions.
+- The `wh_date_dimension` and `wh_time_of_day_dimension` values are pre-populated reference tables.
+- For high-volume deployments, consider periodic aggregation into materialized views for dashboard performance.
+
+## Version compatibility
+
+This reference is validated against **Boundary v0.21.0**. The warehouse schema has evolved across versions. To verify your version's schema:
+
+```sql
+-- List all warehouse tables
+SELECT tablename FROM pg_tables WHERE tablename LIKE 'wh_%' ORDER BY tablename;
+
+-- List all warehouse functions
+SELECT proname FROM pg_proc WHERE proname LIKE 'wh_%' ORDER BY proname;
+
+-- Inspect a specific table's structure
+\d wh_session_accumulating_fact
+```
+
+## More information
+
+Refer to [Boundary data warehouse](/boundary/docs/data-warehouse) for more information about the data warehouse's architecture and tables.
