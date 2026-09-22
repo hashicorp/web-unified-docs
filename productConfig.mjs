@@ -118,6 +118,15 @@ export const PRODUCT_CONFIG = {
 		versionedDocs: false,
 		websiteDir: '.',
 	},
+	'boundary-hcp': {
+		assetDir: 'img',
+		contentDir: 'docs',
+		dataDir: 'data',
+		productSlug: 'boundary',
+		semverCoerce: semver.coerce,
+		versionedDocs: false,
+		websiteDir: 'website',
+	},
 	'vault-hcp': {
 		assetDir: 'img',
 		contentDir: 'docs',
