@@ -128,6 +128,117 @@ The Consul API gateway ships with Consul and is automatically installed when you
   </Tab>
   </Tabs>
 
+
+## Configure additional gateway classes for independent scaling
+
+By default, the Consul Helm chart creates one `GatewayClass` named `consul` and one `GatewayClassConfig` named `consul-api-gateway`. Every `Gateway` resource that does not explicitly override `spec.gatewayClassName` uses this default `consul` class, which means all gateways in the cluster share the same replica count, resource requests/limits, and other deployment settings.
+
+If you need different scaling or resource settings for different gateways, such as giving one application's gateway more CPU and replicas than another's, you can create additional `GatewayClass` and `GatewayClassConfig` pairs and assign them to specific `Gateway` resources.
+
+### How gateway classes and gateway class configs relate
+
+The following objects work together to determine how a gateway is deployed:
+
+| Object | Purpose |
+| --- | --- |
+| [`Gateway`](/consul/docs/reference/k8s/api-gateway/gateway) | Declares the gateway and its listeners. Its `spec.gatewayClassName` field selects which `GatewayClass` to use. |
+| [`GatewayClass`](/consul/docs/reference/k8s/api-gateway/gatewayclass) | A template for gateways. Its `spec.controllerName` field determines which Consul controller manages gateways created from this class, and its `spec.parametersRef` field points to a `GatewayClassConfig`. |
+| [`GatewayClassConfig`](/consul/docs/reference/k8s/api-gateway/gatewayclassconfig) | Specifies the actual deployment settings for gateways, such as replica counts, CPU/memory resources, and service type. |
+
+A `Gateway` references a `GatewayClass` by name, and that `GatewayClass` references a `GatewayClassConfig` by name through `parametersRef`. Because `GatewayClass` and `GatewayClassConfig` are both cluster-scoped resources, you can define as many pairs as you need and reuse them across `Gateway` resources in any namespace.
+
+### Create a custom gateway class and gateway class config
+
+1. Create a `GatewayClassConfig` that defines the deployment settings you want for this group of gateways.
+
+   <CodeBlockConfig filename="gatewayclassconfig-app1.yaml">
+
+   ```yaml
+   apiVersion: consul.hashicorp.com/v1alpha1
+   kind: GatewayClassConfig
+   metadata:
+     name: consul-api-gateway-app1
+   spec:
+     deployment:
+       defaultInstances: 2
+       minInstances: 1
+       maxInstances: 4
+       resources:
+         requests:
+           cpu: 200m
+           memory: 200Mi
+         limits:
+           cpu: 200m
+           memory: 200Mi
+     serviceType: LoadBalancer
+   ```
+
+   </CodeBlockConfig>
+
+   ~> **Note:** The `defaultInstances`, `minInstances`, and `maxInstances` fields under `deployment` are deprecated. To scale the number of replicas for a specific gateway, use annotations on the `Gateway` resource instead, such as `consul.hashicorp.com/default-replicas` for a static replica count or `consul.hashicorp.com/hpa-enabled`, `consul.hashicorp.com/hpa-minimum-replicas`, and `consul.hashicorp.com/hpa-maximum-replicas` for horizontal pod autoscaling. These annotations require Consul Enterprise and the per-gateway scaling feature, which you enable by setting `connectInject.apiGateway.managedGatewayClass.scaling.enabled` to `true`. The `resources` field remains the supported way to set CPU and memory requests and limits per gateway class.
+
+1. Create a `GatewayClass` that references the `GatewayClassConfig` you created. Set `spec.controllerName` to match the edition of API gateway you are running:
+
+   - Use `consul.hashicorp.com/gateway-controller` for the standard (stable) API gateway. This controller runs by default.
+   - Use `consul.hashicorp.com/gateway-controller-consul` for the Consul API gateway. This controller only runs when you install the Consul API gateway CRDs by setting `global.crds.consulapi.enabled` to `true` in your Helm values. If this controller is not running, any `GatewayClass` that references it is not reconciled and its gateways are never deployed.
+
+   <CodeBlockConfig filename="gatewayclass-app1.yaml">
+
+   ```yaml
+   apiVersion: gateway.networking.k8s.io/v1
+   kind: GatewayClass
+   metadata:
+     name: consul-app1
+   spec:
+     controllerName: consul.hashicorp.com/gateway-controller
+     parametersRef:
+       group: consul.hashicorp.com
+       kind: GatewayClassConfig
+       name: consul-api-gateway-app1
+   ```
+
+   </CodeBlockConfig>
+
+1. Apply both configurations to your cluster.
+
+   ```shell-session
+   $ kubectl apply -f gatewayclassconfig-app1.yaml
+   $ kubectl apply -f gatewayclass-app1.yaml
+   ```
+
+1. Reference the new `GatewayClass` from any `Gateway` resource by setting `spec.gatewayClassName`. Gateways that omit this field, or that set it to `consul`, continue to use the default class and share the chart's default settings.
+
+   <CodeBlockConfig filename="gateway-app1.yaml">
+
+   ```yaml
+   apiVersion: gateway.networking.k8s.io/v1beta1
+   kind: Gateway
+   metadata:
+     name: api-gateway-app1
+     namespace: app1
+     labels:
+       component: api-gateway
+   spec:
+     gatewayClassName: consul-app1
+     listeners:
+       - protocol: HTTP
+         port: 80
+         name: http
+         allowedRoutes:
+           namespaces:
+             from: All
+       - protocol: TCP
+         port: 8090
+         name: tcp-8090
+         allowedRoutes:
+           namespaces:
+             from: All
+   ```
+
+   </CodeBlockConfig>
+
+Repeat these steps to create additional `GatewayClass`/`GatewayClassConfig` pairs for other applications or teams. Each pair can define its own replica counts and resource requests independently of the default gateway class, so that individual gateways can be scaled or resourced according to their own workload requirements without affecting the shared default configuration.
+
 <!--
 ****** KEEP ALL PAGE CONTENT ABOVE THIS LINE *******
 Only Reference style links should be added below this comment
