@@ -1,7 +1,8 @@
 # Authoring content
 
-Guidance for writing and editing pages under `content/`. All of it lives in
-`docs/` and is the source of truth for humans and agents alike. **Read those
+Guidance for any change under `content/`: pages, images and diagrams,
+navigation data, and redirects. All of it lives in `docs/` and is the source of
+truth for humans and agents alike. **Read those
 files rather than relying on recall** — they change, and this page can drift
 from them.
 
@@ -14,6 +15,7 @@ from them.
 | What template do I copy? | [docs/content-guide/templates/](../docs/content-guide/templates/README.md) |
 | How do I name the file, folder, and nav label? | [docs/content-guide/indexing.md](../docs/content-guide/indexing.md) |
 | How do I word and format it? | [docs/style-guide/index.md](../docs/style-guide/index.md), starting with [top-12.md](../docs/style-guide/top-12.md) |
+| How do I add, update, or rebuild a diagram or screenshot? | [docs/content-guide/content-types/visual-aids.md](../docs/content-guide/content-types/visual-aids.md) |
 | How do I add the page and its sidebar entry? | [docs/content-guide/create-new-page.md](../docs/content-guide/create-new-page.md) |
 | I am moving or renaming a page | [docs/content-guide/redirects.md](../docs/content-guide/redirects.md) |
 
@@ -58,6 +60,12 @@ reviewer which commit is theirs.
   product's `*-nav-data.json`.
 - **Moving or renaming a page needs a redirect**, and some products need more
   than one.
+- **A diagram is more than its PNGs.** A diagram's `_light` and `_dark` PNGs in
+  the version's `img` directory are exports of SVG sources in the version's
+  `diagram-sources` directory. When you create, update, or rebuild a diagram,
+  edit the SVG sources — or create them if they do not exist yet — and commit
+  them with the PNGs, even if the request only names the PNGs. Refer to
+  [Commit the diagram sources](../docs/content-guide/content-types/visual-aids.md#commit-the-diagram-sources).
 
 ## Product-local instructions
 

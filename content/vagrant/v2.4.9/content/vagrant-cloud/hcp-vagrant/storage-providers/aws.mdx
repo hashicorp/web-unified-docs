@@ -1,0 +1,236 @@
+---
+layout: vagrant-cloud
+page_title: Migrate to Amazon S3
+description: "Migrate your Vagrant boxes from HCP Vagrant Registry to Amazon Simple Storage Service (Amazon S3)."
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-09-15T19:14:22.000Z
+last_modified: 2026-09-17T15:04:23.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Migrate to Amazon S3
+
+@include "@global/vagrant-eol.mdx"
+
+This guide describes the process of moving your Vagrant boxes from HCP Vagrant
+Registry to Amazon Simple Storage Service (Amazon S3) and referencing them from
+a Vagrantfile. You will learn to create a bucket using the Amazon Web Services
+(AWS) command line interface (CLI), upload your boxes to the bucket, and
+optionally serve your boxes publicly.
+
+## Overview
+
+Amazon S3 organizes data into buckets. A bucket is a container that lives in an
+AWS region and holds objects, such as your `vagrant.box` files. Each object has a
+key that acts as its unique path within the bucket. In this guide, you create one
+bucket and upload your boxes as objects.
+
+## Cost considerations
+
+Amazon S3 is a paid service. Review the
+[Amazon S3 pricing page](https://aws.amazon.com/s3/pricing/) to understand the
+charges you may incur. To estimate your costs, use the
+[AWS Pricing Calculator](https://calculator.aws/#/addService/S3).
+
+## Prerequisites
+
+To follow this guide, you need:
+
+- The [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) installed.
+- An [AWS account](https://aws.amazon.com/resources/create-account/).
+
+## Download your boxes
+
+You need each box's `vagrant.box` file on your local machine before you can move
+it to Amazon S3. A box stores a separate file for each version, provider, and
+architecture, so download each one you want to migrate.
+
+### Download from the registry UI
+
+You can download boxes from the HCP Vagrant Registry web UI. Public boxes are on
+the [Discover page](https://portal.cloud.hashicorp.com/vagrant/discover). Private
+boxes are in your registry in the
+[HCP portal](https://portal.cloud.hashicorp.com/services/vagrant).
+
+Open a box, then click the download button for each provider and architecture to
+save its `vagrant.box` file.
+
+### Download from the command line
+
+You can download boxes using the command line. The process is the same for public and private boxes, except that a private box
+requires an HCP access token.
+
+Request a box's download URL from the HCP Vagrant Registry API. Replace each path
+segment with your registry, box, version, provider, and architecture:
+
+```shell-session
+$ curl "https://api.cloud.hashicorp.com/vagrant/2022-09-30/registry/REGISTRY/box/BOX_NAME/version/VERSION/provider/PROVIDER/architecture/ARCHITECTURE/download"
+```
+
+For a private box, generate an HCP access token from a service principal's client
+ID and secret by following the steps in 
+[Generate an HCP access token](/vagrant/vagrant-cloud/hcp-vagrant/post-migration-guide#hcp-access-token),
+then pass it as a bearer token:
+
+```shell-session
+$ curl --header "Authorization: Bearer $(hcp auth print-access-token)" \
+    "https://api.cloud.hashicorp.com/vagrant/2022-09-30/registry/REGISTRY/box/BOX_NAME/version/VERSION/provider/PROVIDER/architecture/ARCHITECTURE/download"
+```
+
+The request returns a `url` field. Download the box from that URL:
+
+```shell-session
+$ curl -L -o vagrant.box "DOWNLOAD_URL"
+```
+
+## Configure credentials and a region
+
+The `aws configure` command prompts you for an access key ID, a secret access
+key, a default region, and a default output format. To create an access key,
+refer to
+[Manage access keys for IAM users](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html).
+
+Configure the CLI with your credentials and a default region:
+
+```shell-session
+$ aws configure
+```
+
+The AWS CLI supports many additional authentication methods, such as AWS IAM
+Identity Center and named profiles. Refer to the
+[AWS CLI configuration guide](https://docs.aws.amazon.com/cli/latest/userguide/cli-chap-configure.html)
+for the full list.
+
+## Create a bucket
+
+Create an S3 bucket to hold your boxes:
+
+```shell-session
+$ aws s3api create-bucket --bucket BUCKET_NAME --region REGION --create-bucket-configuration LocationConstraint=REGION
+```
+
+Bucket names must be globally unique across all AWS accounts. If you create the
+bucket in the `us-east-1` region, omit the `--create-bucket-configuration`
+option, because that region does not accept a location constraint.
+
+For more information, refer to
+[create-bucket](https://docs.aws.amazon.com/cli/latest/reference/s3api/create-bucket.html)
+in the AWS documentation.
+
+## Upload a box
+
+Upload a box to the bucket:
+
+```shell-session
+$ aws s3api put-object --bucket BUCKET_NAME --key PATH_WITHIN_BUCKET --body PATH_TO_BOX_ON_LOCAL_MACHINE --region BUCKET_REGION
+```
+
+We recommend using a `--key` that follows the format
+`BOX_NAME/VERSION/PROVIDER/ARCHITECTURE/vagrant.box` to keep your boxes organized
+by version, provider, and architecture.
+
+For more information, refer to
+[put-object](https://docs.aws.amazon.com/cli/latest/reference/s3api/put-object.html)
+in the AWS documentation.
+
+## Make the bucket public
+
+Buckets are private by default. To let Vagrant download boxes without
+authentication, you allow public access to the objects in the bucket.
+
+The following approach is one way to make the bucket public. It grants anonymous
+read-only access through a bucket policy while keeping access-control list (ACL)
+based public access blocked.
+
+Depending on your needs, you can choose other approaches and adjust the level of
+restriction. Refer to
+[Blocking public access to your Amazon S3 storage](https://docs.aws.amazon.com/AmazonS3/latest/userguide/access-control-block-public-access.html)
+and [Bucket policy examples](https://docs.aws.amazon.com/AmazonS3/latest/userguide/example-bucket-policies.html)
+for more information.
+
+Disable the settings that block public bucket policies, and disable public ACLs.
+This configuration ensures the only public access comes from the bucket policy
+you attach in the next step:
+
+```shell-session
+$ aws s3api put-public-access-block --bucket BUCKET_NAME --public-access-block-configuration BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=false,RestrictPublicBuckets=false --region REGION
+```
+
+Next, attach a bucket policy that grants public read access to the objects. The
+policy allows only the `s3:GetObject` action, so anyone can download boxes
+but cannot list, upload, overwrite, or delete them:
+
+```shell-session
+$ aws s3api put-bucket-policy --bucket BUCKET_NAME --region REGION --policy '{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "PublicReadGetObject",
+      "Effect": "Allow",
+      "Principal": "*",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::BUCKET_NAME/*"
+    }
+  ]
+}'
+```
+
+For more information, refer to
+[put-bucket-policy](https://docs.aws.amazon.com/cli/latest/reference/s3api/put-bucket-policy.html)
+in the AWS documentation.
+
+<Warning>
+
+A public bucket allows anyone to download its objects. Only make a bucket public
+if everything it contains is safe to distribute publicly. Every public download
+also incurs data transfer charges on your account, so a widely shared or
+high-traffic box can lead to unexpected costs.
+
+</Warning>
+
+## Reference a box from a public bucket
+
+For a public bucket, reference the object URL in your Vagrantfile with
+`config.vm.box_url`:
+
+```ruby
+Vagrant.configure("2") do |config|
+  config.vm.box = "BOX_NAME"
+  config.vm.box_url = "https://BUCKET_NAME.s3.REGION.amazonaws.com/KEY"
+end
+```
+
+## Reference a box from a private bucket
+
+Vagrant cannot download boxes from a private bucket. To use a box stored in a
+private bucket, download it, then add the locally stored box to Vagrant.
+
+Download the box object from the bucket, passing the object's `--key` and the
+local file name to save it as. Pass `--region` to target the region where you
+created the bucket:
+
+```shell-session
+$ aws s3api get-object --bucket BUCKET_NAME --key KEY LOCAL_FILE --region REGION
+```
+
+For more information, refer to
+[get-object](https://docs.aws.amazon.com/cli/latest/reference/s3api/get-object.html)
+in the AWS documentation.
+
+Add the downloaded box to Vagrant under a name of your choice:
+
+```shell-session
+$ vagrant box add BOX_NAME LOCATION
+```
+
+`LOCATION` is the path to the box file you downloaded. For
+more options, refer to
+[vagrant box add](/vagrant/docs/cli/box#box-add).
+
+After you add the box, reference it directly in your Vagrantfile by name:
+
+```ruby
+Vagrant.configure("2") do |config|
+  config.vm.box = "BOX_NAME"
+end
+```
