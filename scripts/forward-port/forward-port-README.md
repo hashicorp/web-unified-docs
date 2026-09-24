@@ -96,7 +96,7 @@ For example:
 
 1. Watch the `web-unified-docs-internal` repository for two new open PRs that have the title "Repo sync".
 1. Verify that the repo sync PRs have the same changes that you merged to `web-unified-docs` in PRs 1234 and 1235.
-1. For each merged PR (1234 and 1235), run the [manual
+1. For each repo sync PR, run the [manual
    process](#manual-dispatch-inputs) with the following JSON input:
 
    ```json
