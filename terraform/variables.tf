@@ -21,6 +21,11 @@ variable "slack_alerting_channel_id" {
   default     = "d921s4i0j8og0p7ogbeg"
 }
 
+variable "instana_dashboard_prefix" {
+  description = "Used as the prefix to all of our resources and dashboards in Instana to make it easier to find things that we own"
+  type = string
+}
+
 variable "instana_agent_key" {
   description = "Agent key used to submit metrics to Instana. Obtained from: https://prod-hashicorp.instana.io/#/instanaagent/installation"
   type        = string
@@ -28,7 +33,7 @@ variable "instana_agent_key" {
 }
 
 variable "instana_otlp_endpoint" {
-  description = "Instana OTLP endpoint for sending metrics to Instana."
+  description = "Instana OTLP endpoint for sending traces. Must include the full path, e.g. https://otlp-http-red-saas.instana.io:443/v1/traces"
   type        = string
 }
 
