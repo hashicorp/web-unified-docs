@@ -1,0 +1,460 @@
+---
+layout: docs
+page_title: TPM - Auth Methods
+description: >-
+  Authenticate to Vault using the TPM auth method with a software TPM
+  (swtpm), covering vTPM setup, TPM enrollment, role configuration, and
+  certificate-based login.
+---
+
+# Authenticate to Vault with the TPM auth method
+
+@include 'alerts/enterprise-only.mdx'
+
+You can authenticate to Vault using the TPM auth method with a software TPM
+(swtpm), which emulates TPM 2.0 hardware without a physical chip or nested
+virtualization.
+
+If you are not familiar with TPM auth, refer to the
+[TPM auth method overview](/vault/docs/auth/tpm) for how it works, and
+[Set up the TPM auth method](/vault/docs/auth/tpm/tpm) for configuration
+reference.
+
+This guide helps you set up a working proof-of-concept for the tpm auth method,
+and is not intended as production hardening and security documentation.
+
+Running these steps on production systems changes their configuration.
+
+## Requirements
+
+- An active Vault Enterprise license
+- [UTM](https://mac.getutm.app/) installed to run a Linux VM
+- [Vagrant](/vagrant/install) and the Vagrant SCP plugin installed
+- [Vault Enterprise 2.2](/vault/install/enterprise) installed on both the Linux
+  VM (to run `vault tpm attest` and `vault login`) and your host OS
+
+## Set up the lab
+
+You will set up Ubuntu 24.04 in a UTM VM and Vault on your host OS. This guide
+uses macOS Tahoe 26.6.2. 
+
+### Start Vault
+
+You will run Vault in dev mode with TLS and a custom subject alternative name to
+match the gateway address used by UTM.
+
+1. Open a terminal session to run Vault.
+
+1. Export your Vault Enterprise license as an environment variable.
+
+   ```shell-session
+   $ export VAULT_LICENSE=C10WMSH0W...snip...S3ASM3STR33T
+   ```
+
+   Vault uses the `VAULT_LICENSE` environment variable when starting.
+
+1. Start the Vault dev mode server.
+
+   ```shell-session
+   $ vault server \
+       -dev \
+       -dev-root-token-id=root \
+       -dev-tls \
+       -dev-listen-address=0.0.0.0:8200 \
+       -dev-tls-san=10.0.2.2
+   ```
+
+   The dev server runs completely in memory and listens on all addresses, on TCP port
+   8200 with TLS enabled. `10.0.2.2` is the default gateway address the Ubuntu
+   VM uses with UTM. At runtime, the dev server also automatically unseals
+   and prints the unseal key and initial root token values to stdout.
+
+   Leave this terminal open for the remainder of this guide.
+
+1. Copy the export for the Vault dev mode server's TLS certificate.
+
+   <Note>
+
+   Copy the full `VAULT_CACERT=...` from your dev mode server's output.
+
+   </Note>
+
+1. Start a new terminal session.
+
+1. Export the required Vault environment variables. Be sure to use the path from
+   your terminal.
+
+   ```shell-session
+   $ export VAULT_CACERT='/path/from/stdout' \
+      VAULT_ADDR=https://127.0.0.1:8200 \
+      VAULT_TOKEN=root
+   ```
+
+   You will run Vault configuration commands from this terminal.
+
+### Start Ubuntu
+
+Start an Ubuntu VM to replicate a working TPM using the swtpm package.
+
+1. Start a new terminal.
+
+1. Create a working directory for the Ubuntu VM.
+
+   ```shell-session
+   $ mkdir ~/learn-vault-tpm && cd ~/learn-vault-tpm
+   ```
+
+1. Create the Ubuntu 24.04 Vagrantfile.
+
+   ```shell-session
+   $ vagrant init utm/ubuntu-24.04
+   ```
+
+   Use the default settings in the Vagrantfile, including the network settings
+   to ensure the VM uses NAT.
+
+1. Start the Ubuntu VM.
+
+   ```shell-session
+   $ vagrant up --provider=utm
+   ```
+
+   You will replicate a TPM from a physical host on this VM using swtpm.
+
+### Set up the software vTPM
+
+Install swtpm on the Linux VM, independent of Vault.
+
+1. Connect to the Vagrant VM.
+
+   ```shell-session
+   $ vagrant ssh
+   ```
+
+1. Verify the routing configuration for the VM.
+
+   ```shell-session
+   $ ip route show
+   default via 10.0.2.2 dev enp0s2 proto dhcp src 10.0.2.15 metric 100
+   ...snip...
+   ```
+
+   Make sure there is a route to `10.0.2.2`. This ensures the Vault certificate
+   you install matches `VAULT_ADDR`.
+
+1. Write the swtpm set up script.
+
+   ```shell-session
+   $ tee swtpm-setup.sh <<'EOF'
+   #!/usr/bin/env bash
+   set -euo pipefail
+   
+   STATE_DIR="/var/lib/swtpm/tpm0"
+   
+   echo "== 1. Kernel support check =="
+   if ! lsmod | grep -q '^tpm_vtpm_proxy'; then
+       sudo modprobe tpm_vtpm_proxy || {
+           echo "ERROR: tpm_vtpm_proxy module not available/loadable on this kernel."
+           echo "Some cloud/minimal VM kernels strip this out or block module loading."
+           echo "If it won't load here, the fallback is swtpm in socket/TCTI mode"
+           echo "(no /dev/tpmN needed), IF the product supports pointing at a"
+           echo "TCTI/socket instead of a device file."
+           exit 1
+       }
+   fi
+   echo "tpm_vtpm_proxy module loaded."
+   
+   echo "== 2. Install packages =="
+   if command -v apt >/dev/null; then
+       sudo apt update
+       sudo apt install -y swtpm swtpm-tools tpm2-tools tpm-udev
+   elif command -v dnf >/dev/null; then
+       sudo dnf install -y swtpm swtpm-tools tpm2-tools
+       echo "NOTE: on RHEL/Rocky, confirm tpm udev rules exist under /usr/lib/udev/rules.d/"
+       echo "(look for a tpm*.rules file); if absent, permissions in step 7 below are"
+       echo "your safety net regardless."
+   else
+       echo "Unsupported package manager — install swtpm, swtpm-tools, tpm2-tools manually."
+       exit 1
+   fi
+   
+   echo "== 3. Ensure tss user/group exists =="
+   getent group tss >/dev/null || sudo groupadd -r tss
+   getent passwd tss >/dev/null || sudo useradd -r -g tss -d /var/lib/tpm -s /sbin/nologin tss
+   
+   echo "== 4. Add accounts that need device access to the tss group =="
+   echo "Adding current user ($(whoami)) now. Also add whatever account the OTHER"
+   echo "PRODUCT runs as, or it will get Permission Denied on the TPM device:"
+   echo "  sudo usermod -aG tss <product-service-account>"
+   sudo usermod -aG tss "$(whoami)"
+   
+   echo "== 5. Provision TPM state (EK + EK cert) BEFORE first launch =="
+   # This has to happen before swtpm ever starts, or the TPM comes up with nothing
+   # to authenticate with. NOTE: --tpmstate here takes a bare path — no "dir=" —
+   # that backend-selector syntax is only for the daemon invocation in step 6.
+   sudo mkdir -p "$STATE_DIR"
+   sudo swtpm_setup \
+       --tpm2 \
+       --tpmstate "$STATE_DIR" \
+       --create-ek-cert \
+       --create-platform-cert \
+       --overwrite
+   
+   echo "== 6. Launch swtpm (chardev interface, kernel vtpm-proxy) =="
+   sudo pkill -f "swtpm chardev --vtpm-proxy" 2>/dev/null || true
+   sleep 1
+   sudo swtpm chardev \
+       --vtpm-proxy \
+       --tpm2 \
+       --tpmstate dir="$STATE_DIR" \
+       --log level=1 &
+   sleep 2
+   
+   # vtpm-proxy assigns the device number dynamically, so detect what actually
+   # showed up rather than assuming /dev/tpm0.
+   DEV_PATH=$(ls -1 /dev/tpm[0-9]* 2>/dev/null | grep -v 'rm' | sort -V | head -1 || true)
+   RM_DEV_PATH=$(ls -1 /dev/tpmrm[0-9]* 2>/dev/null | sort -V | head -1 || true)
+   
+   if [ -z "$DEV_PATH" ]; then
+       echo "ERROR: no /dev/tpmN device appeared. Check swtpm output above."
+       exit 1
+   fi
+   echo "Device: ${DEV_PATH}"
+   echo "Resource-managed device: ${RM_DEV_PATH:-none found — proceeding on ${DEV_PATH} only}"
+   
+   echo "== 7. Fix device permissions =="
+   # Being a real kernel-registered chip, standard udev tpm rules should catch
+   # this automatically — but force it anyway rather than assume.
+   sudo chown tss:tss "$DEV_PATH"
+   sudo chmod 660 "$DEV_PATH"
+   if [ -n "$RM_DEV_PATH" ]; then
+       sudo chown tss:tss "$RM_DEV_PATH"
+       sudo chmod 660 "$RM_DEV_PATH"
+   fi
+   ls -l "$DEV_PATH" 2>/dev/null
+   [ -n "$RM_DEV_PATH" ] && ls -l "$RM_DEV_PATH"
+   
+   echo "== 8. Send TPM2_Startup =="
+   # A real kernel-registered chip may auto-send this on probe; harmless either
+   # way, so send it and don't let an "already started" response kill the script.
+   sudo tpm2_startup -c -T "device:${DEV_PATH}" || echo "(Already started, or non-fatal — continuing.)"
+   
+   echo "== 9. Baseline verification =="
+   # Prefer the resource-managed device if we got one — that's what the other
+   # product and any concurrent tooling should actually be pointed at.
+   VERIFY_DEV="${RM_DEV_PATH:-$DEV_PATH}"
+   echo "Verifying against: ${VERIFY_DEV}"
+   
+   echo "-- fixed properties --"
+   sudo tpm2_getcap properties-fixed -T "device:${VERIFY_DEV}"
+   
+   echo "-- PCR banks --"
+   sudo tpm2_pcrread -T "device:${VERIFY_DEV}"
+   
+   echo "-- Endorsement Key  --"
+   sudo tpm2_createek -T "device:${VERIFY_DEV}" -c /tmp/ek.ctx -u /tmp/ek.pub
+   sudo tpm2_readpublic -T "device:${VERIFY_DEV}" -c /tmp/ek.ctx
+   EOF
+   ```
+
+1. Change the permissions on the file.
+
+   ```shell-session
+   $ chmod +x swtpm-setup.sh
+   ```
+
+1. Run the script to install and configure swtpm.
+
+   ```shell-session
+   $ ./swtpm-setup.sh
+   ```
+
+   The swtpm package is ready, and replicates a physical TPM from a bare metal
+   server.
+
+1. Update your active group in the current shell session.
+
+   ```shell-session
+   $ newgrp tss
+   ```
+
+   You will run TPM configuration commands from this terminal.
+
+## Enroll the TPM and configure Vault
+
+Retrieve the relevant information from swtpm to configure Vault.
+
+1. From the terminal session of your Ubuntu VM, export the EK from the Linux VM.
+
+   ```shell-session
+   $ tpm2_readpublic -c 0x81010001 -f pem -o ek.pem -T device:/dev/tpmrm0 
+   ```
+
+   Vault identifies this TPM as `sha256-<hex>` of the DER-encoded EK public
+   key.
+
+1. Read the certificate.
+
+   ```shell-session
+   $ cat ek.pem
+   ```
+
+1. Copy the full PEM output, including the `BEGIN`/`END PUBLIC KEY` lines.
+
+1. Switch to the terminal session where you exported the `VAULT_ADDR` environment
+   variable.
+
+1. Export the certificate as an environment variable.
+   
+   ```shell-session
+   $ export EK_PEM='-----BEGIN PUBLIC KEY-----
+    MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvneMK6d4EH/UNgnMeVtV
+                .............example.............
+    6/faxJnLwWo2kD+nzPTJZcHnQiHUpu2oCcF0FdZvL89E+URUy8UVedK2VqyUG4Fo
+    3QIDAQAB
+    -----END PUBLIC KEY-----'
+   ```
+
+1. Write the certificate to the Vault identity plugin and save the output as an
+   environment variable.
+
+   ```shell-session
+   $ TPM_ID=$(vault write -field=id identity/tpm tpm_ek_public_key="$EK_PEM") && \
+      echo $TPM_ID
+   ```
+
+   You use the TPM ID to configure the TPM auth method role.
+
+1. Enable the TPM auth method.
+   
+   ```shell-session
+   $ vault auth enable tpm
+   ```
+
+1. Write the TPM auth method configuration.
+
+   ```shell-session
+   $ vault write auth/tpm/config \
+       ca_lifetime="8760h" \
+       ca_soft_expiry="720h" \
+       default_cert_ttl="168h"
+   ```
+
+1. Create a role for the TPM auth method.
+
+   ```shell-session
+   $ vault write auth/tpm/role/my-role \
+       tpm_ids="$TPM_ID" \
+       token_ttl="1h" \
+       token_policies="default"
+   ```
+
+   Use the `default` policy for simplicity to demonstrate authentication using
+   the TPM auth method. In a production environment, you would write a Vault
+   policy scoped using the principle of least privilege for the workload(s)
+   authenticating to Vault.
+
+## Authenticate to Vault with the TPM auth method
+
+Now that you have Vault configured for the TPM auth method, you will log in and
+get a Vault token.
+
+1. From the terminal session where you exported the `VAULT_ADDR` environment
+   variable, change to the directory with the Vagrantfile.
+
+   ```shell-session
+   $ cd ~/learn-vault-tpm
+   ```
+   
+1. Copy the Vault dev server's CA certificate to the Linux VM.
+
+   ```shell-session
+   $ vagrant scp $(echo $VAULT_CACERT) :~/
+   ```
+
+1. Switch to the terminal session of your Ubuntu VM.
+
+1. Export the Vault environment variables.
+
+   <Warning>
+   
+   `VAULT_SKIP_VERIFY=1` disables TLS verification and is only appropriate for
+   a local lab setup like this one, where `VAULT_CACERT` is already pointed at
+   the right certificate. Don't carry this setting into any shared or
+   production environment.
+   
+   </Warning>
+
+   ```shell-session
+   $ export VAULT_CACERT=/home/vagrant/vault-ca.pem \
+       VAULT_ADDR=https://10.0.2.2:8200 \
+       VAULT_SKIP_VERIFY=1
+   ```
+
+   `10.0.2.2` is the default gateway address for UTM NAT networks.
+
+1. Authenticate the workload to Vault.
+
+   ```shell-session
+   $ vault tpm attest -tpm-state-dir=./private -role-name=my-role
+   ```
+
+   A successful run prints a certificate expiry and writes `ak.blob`,
+   `app.blob`, `ca_chain.pem`, `client.crt`, and `client-key.json` into
+   `./private`:
+   
+   ```
+   Attestation successful. Certificate valid until: <timestamp>
+   ```
+
+1. Log in with the issued certificate.
+
+   ```shell-session
+   $ vault login -method=tpm -tpm-state-dir=./private role_name=my-role
+   ```
+
+   The Ubuntu VM authenticates to Vault using the swtpm device and Vault's TPM
+   auth method.
+
+   **Example output:**
+
+   <CodeBlockConfig hideClipboard>
+
+   ```plaintext
+   Success! You are now authenticated. The token information displayed below
+   is already stored in the token helper. You do NOT need to run "vault login"
+   again. Future Vault requests will automatically use this token.
+   
+   Key                            Value
+   ---                            -----
+   token                          hvs.CAESIGZFGMHXSl...EXAMPLE....m05TVo0bjE
+   token_accessor                 leEZXvkjYb76cPJPd5bHAWTE
+   token_duration                 1h
+   token_renewable                true
+   token_policies                 ["default"]
+   identity_policies              []
+   policies                       ["default"]
+   token_meta_tpm_id              sha256-f8de35485292c5a382cb033920a28607a434b8d3fa366ed75a39b4ec80bf7a6e
+   token_meta_authority_key_id    b5:9c:70:e9:a0:67:2c:8e:62:08:99:c7:ad:03:46:d5:3f:d3:6f:c0
+   token_meta_common_name         vagrant
+   token_meta_role_name           my-role
+   token_meta_serial_number       142903966480012384510302558029086613401474387319
+   token_meta_subject_key_id      bb:b9:b5:20:58:11:e4:d3:c0:02:c5:b9:e4:37:42:03:b8:d5:27:f7
+   ```
+
+   </CodeBlockConfig>
+
+   The `policies` attached to the token come from the TPM role you created
+   earlier in this guide, and the `token_duration` from the TPM auth method
+   configuration.
+
+## Summary
+
+In this guide, you installed a vTPM (swtpm) in a Linux VM to replicate a physical TPM.
+You then added the ID from the vTPM to Vault, configured the TPM auth method,
+and logged in using the vTPM.
+
+## Next steps
+
+- [Review TPM auth method concepts](/vault/docs/auth/tpm)
+- [Configure the TPM auth method](/vault/docs/auth/tpm/tpm)
