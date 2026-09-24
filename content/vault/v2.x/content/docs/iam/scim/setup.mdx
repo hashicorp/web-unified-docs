@@ -1,31 +1,64 @@
 ---
 layout: docs
-page_title: Set up SCIM in Vault
+page_title: Set up a Vault SCIM server
 description: >-
   Configure Vault Enterprise as a SCIM 2.0 server.
 ---
 
-# Set up SCIM in Vault
+# Set up a Vault SCIM server
 
 @include 'alerts/enterprise-only.mdx'
 
 You can configure Vault Enterprise to act as a System for Cross-domain Identity
-Management (SCIM) server.
+Management (SCIM) server that authenticates external identities.
 
-## Requirements
+## Before you start
 
-- You must have Vault Enterprise 2.x.x or later.
-- You must have permissions to enable auth methods and manage
-  identity resources.
-- You should know the auth method you want to use for the SCIM client.
+- **Deploy a Vault Enterprise or HCP Vault Dedicated server**. SCIM support
+  requires an Enterprise license.
 
-Any Vault auth method can work for SCIM if authentication resolves to the Vault
-entity configured as the access grant principal (`access_grant_principal`) for the SCIM client.
+- **Configure a supported identity or OAuth provider**. Vault authenticates
+  SCIM requests through the provider you configure:
 
-Some SCIM clients only support a static bearer token. In those cases, use the
-token auth method. You can create a token tied to an entity alias and pass that
-token directly to the connector.
+    - [Configure Microsoft Entra ID for SCIM with Vault](/vault/docs/iam/scim/idp/entraid)
+    - [Configure Okta for SCIM with Vault](/vault/docs/iam/scim/idp/okta)
+    - [Configure SailPoint for SCIM with Vault](/vault/docs/iam/scim/idp/sailpoint)
 
+- **Check your permissions**. You must have admin permissions on Vault.
+
+## Enable and configure OIDC auth method
+
+To use Vault as a SCIM server that supports external identities authenticated
+with an identity provider (IdP) OpenID Connect (OIDC) workflow, you must
+[enable the OIDC auth method](/vault/docs/auth/jwt#configuration)
+and create a named role on the Vault server.
+
+<Tip>
+
+The following example configures the OIDC auth method for Okta. Adjust the
+discovery URL and credential variables as needed for your IdP.
+
+</Tip>
+
+```shell-session
+$ vault write auth/oidc/config                                              \
+    oidc_discovery_url="https://${OKTA_DOMAIN}"                             \
+    oidc_client_id="$OKTA_CLIENT_ID"                                        \
+    oidc_client_secret="$OKTA_CLIENT_SECRET"                                \
+    default_role="vault-role-okta-default"
+```
+
+The following example creates the matching OIDC auth method role.
+
+```shell-session
+$ vault write auth/oidc/role/vault-role-okta-default                       \
+    bound_audiences="$OKTA_CLIENT_ID"                                      \
+    allowed_redirect_uris="$VAULT_ADDR/ui/vault/auth/oidc/oidc/callback"   \
+    allowed_redirect_uris="http://localhost:8250/oidc/callback"            \
+    user_claim="email"                                                     \
+    oidc_scopes="profile,email"                                            \
+    token_policies="default,scim-client-policy"
+```
 
 ## Configure a SCIM client
 
@@ -48,17 +81,24 @@ Vault enforces these limitations and rules:
 - `alias_mount_accessor`, when set, must refer to an existing non-local auth
   mount in the same namespace.
 - `alias_mount_accessor` is immutable after creation.
-- A SCIM client can only manage the users and groups it created.
 
 <Note>
 
-A SCIM client only knows about resources it created. Pre-existing entities
-remain invisible to the client unless you set [allow_user_adoption](#FIXME)
-to true or link the entities with the
-[link-entity](/vault/api-docs/secret/identity/scim/client/okta-scim-client-2c/link-entity) API.
+A SCIM client knows about only the resources it created. Pre-existing entities
+remain invisible to the client unless you set `allow_user_adoption` to
+`true` or link the entities with the `link-entity` endpoint of the
+[SCIM API](/vault/api-docs/secret/identity/scim).
 
 </Note>
 
+## Auth method and token caveats
+
+Any auth method can work for SCIM if authentication resolves to the Vault
+entity set as the SCIM client's `access_grant_principal`.
+
+Some SCIM clients support only a static bearer token. In those cases, use the
+[token auth method](/vault/docs/auth/token). You can create a token tied to an
+entity alias and pass that token directly to your SCIM client.
 
 ## Set up a bearer-token workflow
 
@@ -70,40 +110,40 @@ to the configured entity for the SCIM client.
    API endpoints. A later step assigns the policy to the token for the
    SCIM client.
 
-   ```shell-session
-   $ vault policy write scim-client - <<'EOF'
-   path "identity/scim/v2/*" {
-     capabilities = ["create", "read", "update", "delete", "list"]
-   }
-   EOF
-   ```
+    ```shell-session
+    $ vault policy write scim-client - <<'EOF'
+    path "identity/scim/v2/*" {
+      capabilities = ["create", "read", "update", "delete", "list"]
+    }
+    EOF
+    ```
 
 1. Create the Vault entity for the SCIM client.
 
-   ```shell-session
-   $ vault write -format=json identity/entity name="scim-client"
-   ```
+    ```shell-session
+    $ vault write -format=json identity/entity name="scim-client"
+    ```
 
-   Record the returned entity ID for the following step.
+    Record the returned entity ID for the following step.
 
 1. Create the SCIM client configuration.
 
-   ```shell-session
-   $ vault write identity/scim/client/example-client \
-       access_grant_principal="<entity_id>"
-   ```
+    ```shell-session
+    $ vault write identity/scim/client/example-client \
+        access_grant_principal="<entity_id>"
+    ```
 
     If you want Vault to create aliases for provisioned users as well, include
     the `alias_mount_accessor` parameter.
 
-1. To create an entity alias on the token auth mount, first list auth mounts
-   and record the accessor for `token/`.
+1. Create an alias on the `token/` mount for the SCIM client entity. List the
+   auth mounts to find the accessor for `token/`:
 
     ```shell-session
     $ vault auth list
     ```
 
-1. Create an alias on the `token/` mount for the SCIM client entity.
+    Create the alias with the accessor you recorded:
 
     ```shell-session
     $ vault write identity/entity-alias \
@@ -143,7 +183,6 @@ on your token auth mount.
 
 </Tip>
 
-
 ## Send SCIM requests
 
 The following example calls the `ServiceProviderConfig` endpoint with a Vault
@@ -162,11 +201,15 @@ When you delete a SCIM client, Vault starts an asynchronous cleanup workflow.
 
 - Vault blocks new SCIM requests for that client.
 - Vault removes the users and groups owned by that client.
-- Cleanup continues in the background until Vault finishes deleting the managed
-  resources and the SCIM client configuration.
+- Vault continues removing the managed resources and the SCIM client
+  configuration in the background.
 
 Review the resources owned by a SCIM client before you delete it.
 
 ## Related documentation
 
+- [Provision Vault identities with SCIM](/vault/docs/iam/scim)
 - [SCIM API](/vault/api-docs/secret/identity/scim)
+- [Configure Microsoft Entra ID for SCIM with Vault](/vault/docs/iam/scim/idp/entraid)
+- [Configure Okta for SCIM with Vault](/vault/docs/iam/scim/idp/okta)
+- [Configure SailPoint for SCIM with Vault](/vault/docs/iam/scim/idp/sailpoint)
