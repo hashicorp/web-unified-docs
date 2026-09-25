@@ -379,7 +379,7 @@ the page exists.
 
 ### Terraform Enterprise: special versioning
 
-As of the 1.0.0 release in 2025, `terraform-enterprise` uses semantic version strings (`v1.2.x`, `v2.0.x`, and so on). Refer to [Terraform Enterprise quarterly releases](./publish-tfe-docs.md) for the current `MILESTONE.MAJOR.PATCH` scheme and the release process.
+As of the 1.0.0 release in 2025, `terraform-enterprise` uses semantic version strings (`v1.2.x`, `v2.0.x`, and so on). Refer to [The complete guide to publishing TFE docs](./publish-tfe-docs.md#release-versioning) for the current `MILESTONE.MAJOR.PATCH` scheme and the release process.
 
 Before that switch, `terraform-enterprise` used calendar-date version strings (`v202507-1`, `v202504-2`, and so on). `productConfig.mjs` still carries a custom `semverCoerce` function that converts those legacy date-based versions to sortable semver, purely so older versions continue to sort correctly alongside current semver versions:
 
@@ -404,9 +404,10 @@ Terraform docs render from. Because of this, a change that should affect both
 editions has to be made in two places: `terraform-docs-common/cloud-docs` and
 the corresponding `terraform-enterprise/<version>` directory. Editing only one
 leaves the two editions out of sync until the next content synchronization
-overwrites the un-mirrored change. Refer to [Terraform Enterprise quarterly
-releases](./publish-tfe-docs.md) for the synchronization workflow and exclusion
-tag syntax used to keep HCP Terraform-only or Terraform Enterprise-only content
+overwrites the un-mirrored change. Refer to [Contribute to Terraform
+documentation](./contribute-terraform-docs.md) for the synchronization
+workflow and exclusion tag syntax used to keep HCP Terraform-only or
+Terraform Enterprise-only content
 from leaking into the other edition.
 
 ---
