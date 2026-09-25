@@ -1,0 +1,267 @@
+---
+layout: docs
+page_title: Queue batch jobs
+description: |-
+  Use a batch job queue to schedule batch jobs one at a time on a Nomad node pool. Enable a FIFO or dynamic priority queue and monitor the queued jobs.
+---
+
+# Queue batch jobs
+
+This page describes how to configure a batch job queue on a node pool so that
+Nomad schedules the pool's batch jobs one at a time, in the order that you
+choose. Enable a FIFO queue or a dynamic priority queue, submit jobs to the
+queue, and monitor the queue.
+
+## Background
+
+A batch job queue holds the batch jobs that you register in a node pool and sends
+them to the scheduler one at a time. A first in, first out, or FIFO, queue runs jobs in
+the order that you register them. A dynamic priority queue adjusts each job's priority so that
+tenants who used fewer resources recently run first. Refer to [Batch job
+queue](/nomad/docs/concepts/scheduling/batch-job-queue) for details about how
+the queue orders jobs and the tradeoffs of serialized scheduling.
+
+## Requirements
+
+- Nomad clients that belong to a node pool that you create. You cannot modify the
+  built-in `default` and `all` node pools, so you cannot configure a queue on
+  them. Set the [`node_pool`](/nomad/docs/configuration/client#node_pool)
+  parameter in the client configuration to assign clients to a node pool. Refer
+  to [Create and use node pools](/nomad/docs/govern/use-node-pools) for more
+  information.
+- When ACLs are enabled, the following permissions.
+  - A token with the `write` capability in a `node_pool` policy for the node
+    pool to create or update the node pool.
+  - A token with the `list-jobs` namespace capability to run `nomad queue jobs`.
+  - A token with `operator:read` permissions to run `nomad queue tenants`.
+
+## Enable a FIFO queue
+
+A FIFO queue sends batch jobs to the scheduler in the order that you register
+them. It has no configuration options.
+
+1. Create a node pool specification file named `batch.nomad.hcl` with a
+   `batch_queue` block that contains an empty `fifo` block. Replace `batch` with
+   the name of your node pool.
+
+   <CodeBlockConfig filename="batch.nomad.hcl">
+
+   ```hcl
+   node_pool "batch" {
+     batch_queue {
+       fifo {}
+     }
+   }
+   ```
+
+   </CodeBlockConfig>
+
+1. Apply the node pool specification with the [`nomad node pool
+   apply`](/nomad/commands/node-pool/apply) command.
+
+   ```shell-session
+   $ nomad node pool apply batch.nomad.hcl
+   Successfully applied node pool "batch"!
+   ```
+
+1. Verify that the queue is active with the [`nomad queue
+   jobs`](/nomad/commands/queue/jobs) command. An active FIFO queue with no jobs
+   returns an empty table.
+
+   ```shell-session
+   $ nomad queue jobs -node-pool batch
+   Batch Queue Workloads
+   JobID  Status  Position  CreatedAt
+   ```
+
+   When the command returns `No batch job queue configured for node pool:
+   batch`, the node pool does not have an active queue. Check the
+   `batch_queue` block in your node pool specification.
+
+{/* TODO(owner: Mike Smithhisler): At f041ed9027, the server accepts an invalid batch_queue block, stores it, and silently runs the pool without a queue. Confirm whether validation ships in 2.1 and update the verification guidance. */}
+
+## Enable a dynamic priority queue
+
+A dynamic priority queue calculates an adjusted priority for each job from its
+tenant's recent resource usage, the time the job waited, and the resources the
+job requests. Refer to [Adjusted
+priority](/nomad/docs/concepts/scheduling/batch-job-queue#adjusted-priority) for
+the calculation.
+
+{/* TODO: PR #28601 in hashicorp/nomad regroups the dynamic_priority parameters and renames usage to fairshare. If it ships in 2.1, update the example specification. */}
+
+1. Create a node pool specification file named `batch.nomad.hcl` with a
+   `batch_queue` block that contains a `dynamic_priority` block. This example
+   treats each namespace as a tenant.
+
+   <CodeBlockConfig filename="batch.nomad.hcl">
+
+   ```hcl
+   node_pool "batch" {
+     description = "Clients that run batch workloads"
+
+     batch_queue {
+       dynamic_priority {
+         tenant_type   = "namespace"
+         calc_interval = "10s"
+         half_life     = "1h"
+
+         usage_weight = 50
+
+         age_weight = 10
+         max_age    = "1h"
+
+         cpu_weight = 10
+         max_cpu    = 1000
+
+         memory_weight = 10
+         max_memory    = 1024
+       }
+     }
+   }
+   ```
+
+   </CodeBlockConfig>
+
+   The `tenant_type`, `calc_interval`, and `half_life` parameters are required.
+   Set each weight together with its maximum. For example, set `max_age` when
+   you set `age_weight`. Refer to the [`dynamic_priority`
+   parameters](/nomad/docs/other-specifications/node-pool#dynamic_priority-parameters)
+   for descriptions of each parameter.
+
+   {/* TODO(owner: Mike Smithhisler): Provide recommended starting values for calc_interval, half_life, the weights, and the maximums, and whether Nomad sets defaults for calc_interval and half_life in 2.1. The values in this example are for illustration only. */}
+
+   To group jobs by a job metadata value instead of by namespace, set
+   `tenant_type` to `metadata` and name the metadata key in `metadata_key`.
+
+   ```hcl
+   tenant_type  = "metadata"
+   metadata_key = "customer"
+   ```
+
+   With `metadata` tenants, jobs that do not set the metadata key skip the
+   queue, and Nomad schedules them as usual.
+
+1. Apply the node pool specification.
+
+   ```shell-session
+   $ nomad node pool apply batch.nomad.hcl
+   Successfully applied node pool "batch"!
+   ```
+
+1. Verify that the queue is active. An active dynamic priority queue with no jobs
+   returns an empty table.
+
+   ```shell-session
+   $ nomad queue jobs -node-pool batch
+   Batch Queue Workloads
+   JobID  Tenant  Status  Adjusted Priority  Base Priority  Position  Usage  Age  Cpu  Memory  CreatedAt
+   ```
+
+## Submit batch jobs to the queue
+
+The queue holds batch jobs that run in its node pool. Set the job's
+[`node_pool`](/nomad/docs/job-specification/job#node_pool) parameter to the node
+pool with the queue.
+
+```hcl
+job "team-a-job1" {
+  namespace = "team-a"
+  type      = "batch"
+  node_pool = "batch"
+
+  group "work" {
+    task "sleep" {
+      driver = "raw_exec"
+
+      config {
+        command = "/bin/sleep"
+        args    = ["20"]
+      }
+
+      resources {
+        cpu    = 600
+        memory = 256
+      }
+    }
+  }
+}
+```
+
+Register the job as usual with the [`nomad job run`](/nomad/commands/job/run)
+command. While a job waits in the queue, `nomad job status` reports its status as
+`pending`.
+
+```shell-session
+$ nomad job status -namespace team-b
+ID           Type   Priority  Status   Submit Date
+team-b-job1  batch  50        running  2026-09-25T10:45:40-05:00
+team-b-job2  batch  50        pending  2026-09-25T10:45:40-05:00
+team-b-job3  batch  50        pending  2026-09-25T10:45:41-05:00
+```
+
+## Monitor the queue
+
+Use the `nomad queue jobs` command to list the jobs in the queue. Add the `-p`
+flag to list jobs in queue order. Without `-p`, the command sorts jobs by job
+ID.
+
+```shell-session
+$ nomad queue jobs -node-pool batch -p
+Batch Queue Workloads
+JobID        Tenant  Status   Adjusted Priority  Base Priority  Position  Usage  Age  Cpu  Memory  CreatedAt
+team-a-job2  team-a  placing  61                 50             0         0      0    4    7       2026-09-25T10:45:40-05:00
+team-b-job1  team-b  queued   111                50             1         50     0    4    7       2026-09-25T10:45:40-05:00
+team-b-job2  team-b  queued   111                50             2         50     0    4    7       2026-09-25T10:45:40-05:00
+team-b-job3  team-b  queued   111                50             3         50     0    4    7       2026-09-25T10:45:41-05:00
+team-a-job3  team-a  queued   61                 50             4         0      0    4    7       2026-09-25T10:45:40-05:00
+```
+
+The job at position `0` is the job that the queue sent to the scheduler. The
+`Usage`, `Age`, `Cpu`, and `Memory` columns show the adjustments that make up
+each job's adjusted priority. In this example, `team-a` used resources recently
+and `team-b` did not, so the `team-b` jobs move ahead of `team-a-job3`.
+
+For a dynamic priority queue, use the [`nomad queue
+tenants`](/nomad/commands/queue/tenants) command to view each tenant's share of
+recent resource usage.
+
+```shell-session
+$ nomad queue tenants -node-pool batch
+Batch Queue Tenants
+Tenant  Resource  Usage / Total    Percentage
+team-a                             100
+        cpu       598.73 / 598.73
+        memory    255.46 / 255.46
+team-b                             0
+        cpu       0.00 / 598.73
+        memory    0.00 / 255.46
+```
+
+## Remove a job from the queue
+
+Stop a queued job with the [`nomad job stop`](/nomad/commands/job/stop) command.
+Nomad removes the job from the queue and cancels its registration evaluation.
+
+```shell-session
+$ nomad job stop -namespace team-a team-a-job3
+```
+
+A job that Nomad cannot place stays at the front of the queue and holds the jobs
+behind it. Stop the job to let the queue continue.
+
+## Change or remove the queue
+
+To change the queue type or its parameters, update the `batch_queue` block in the
+node pool specification and apply it again with `nomad node pool apply`. Nomad
+replaces the node pool's queue and restores the queued jobs into the new queue.
+
+To remove the queue, delete the `batch_queue` block from the node pool
+specification and apply it again. Nomad then sends the evaluations for new batch
+jobs in the node pool directly to the scheduler.
+
+{/* TODO(owner: Mike Smithhisler): At f041ed9027, removing batch_queue while jobs are queued leaves their job-register evaluations pending indefinitely. `nomad job eval <job>` recovers them. Also, switching tenant_type to metadata while the pool has queued or placed jobs without the metadata key causes a server panic in dynamic_priority/queue.go:147 and the new queue never starts. Confirm fixes for 2.1 or document the workaround here. */}
+
+## Next steps
+
+- [Create and use node pools](/nomad/docs/govern/use-node-pools)
