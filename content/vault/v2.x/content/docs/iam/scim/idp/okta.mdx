@@ -1,0 +1,263 @@
+---
+layout: docs
+page_title: Configure Okta for SCIM with Vault
+description: >-
+  Learn how to configure Okta as a SCIM client for Vault Enterprise: create the OIDC and SCIM applications, enable provisioning, and verify the result.
+---
+
+# Configure Okta for SCIM with Vault
+
+Okta uses two separate applications for this workflow. An OpenID Connect (OIDC)
+application authenticates your users to Vault, and a SCIM application
+provisions those users into Vault as
+[entities](/vault/docs/concepts/identity#entities-and-aliases).
+
+Follow the instructions to configure an example Okta application and user that
+act as a SCIM client to a Vault SCIM server.
+
+## Before you start
+
+- **Get an Okta tenant**. Use an existing Okta tenant or sign up for the
+  [Okta Integrator free plan](https://developer.okta.com/signup/).
+
+- **Install the Okta Verify mobile application**. Okta prompts you to enroll a
+  device when you sign in.
+
+- **[Set up a Vault SCIM server](/vault/docs/iam/scim/setup)**. The Okta SCIM
+  application authenticates with a static bearer token, so create the SCIM
+  client and its token before you configure provisioning.
+
+- **Check your permissions**. You must be able to:
+    - create groups and users in the Okta Admin Console
+    - create application integrations
+    - edit claims on the Okta authorization server
+    - configure provisioning for an application
+
+## Create Okta group and user
+
+1. Use the Okta Admin Console to [create a group](https://help.okta.com/oie/en-us/content/topics/users-groups-profiles/usgp-groups-create.htm), named for example: `scim-test-group`.
+
+1. While still in the Okta Admin Console, [manually add a user](https://help.okta.com/en-us/content/topics/users-groups-profiles/usgp-add-users.htm).
+   Specify a valid test email address, add the user to the group you created
+   in the previous step, and uncheck the **must change on first login**
+   password option.
+
+1. In a separate browser or tab, sign into Okta as the user you just created
+   once to complete Okta Verify setup if prompted.
+
+## Configure Okta authorization server claim
+
+You must add a groups claim to the Okta **default** authorization server before
+you can create the Okta application. Without this, group membership is not
+included in the ID token, and Vault cannot map groups to policies.
+
+Use the Okta Admin Console to [create the API access claim](https://help.okta.com/oie/en-us/content/topics/security/api-config-claims.htm)
+on the **default** API.
+
+Configure the claim with these settings, and be sure to replace any example
+values with your actual values.
+
+| Configuration setting | Value                                                |
+|-----------------------|------------------------------------------------------|
+| Name                  | `groups`                                             |
+| Include in token type | **ID Token / Always**                                |
+| Value type            | **Groups**                                           |
+| Filter                | **Starts with / scim-test-group**                    |
+| Include in            | **The following scopes** (Type in profile to select) |
+
+Save the groups claim.
+
+## Create Okta OIDC app
+
+From within the Okta Admin Console, follow the documented process to
+[Create an OpenID Connect app integration](https://help.okta.com/en-us/Content/Topics/Apps/Apps_App_Integration_Wizard_OIDC.htm).
+
+Configure the OIDC app with these settings. Be sure to replace any example
+values with your actual values, and leave all other settings at their default
+values.
+
+| Configuration setting | Value                                                |
+|-----------------------|------------------------------------------------------|
+| Application type      | **OIDC - OpenID Connect** and **Web Application**    |
+| App integration name  | Example: `hc-vault`                                  |
+| Grant type section    | **Authorization Code**: `checked`                    |
+| Grant type advanced   | **Implicit (hybrid)**: `checked`                     |
+| Sign-in redirect URI  | Example: `https://vault-cluster-public-url:8200`     |
+| Sign-in redirect URI  | Example: `http://localhost:8250/oidc/callback`       |
+| Assignments → Controlled access | **Limit access to selected groups** |
+| Groups                | Add your test user group, for example: `scim-test-group` |
+
+Save the OIDC app.
+
+## Get values and export environment variables
+
+You must capture some values from Okta, and export them as environment
+variables to use when you set up a Vault SCIM server.
+
+- Record the URL of your Okta Integrator tenant from your browser address bar.
+- Within the Okta Admin Console, [find your application credentials](https://developer.okta.com/docs/guides/find-your-app-credentials/main/).
+  - Record the **Client ID** value.
+  - Record the **Client Secret** value.
+
+Use the values you captured in the shell session where you plan to set up Vault
+for SCIM.
+
+```shell-session
+$ export OKTA_DOMAIN="integrator-XXXXXXX.okta.com" \
+    OKTA_CLIENT_ID="<client-id-value>" \
+    OKTA_CLIENT_SECRET="<client-secret-value>"
+```
+
+## Log in to Vault through Okta
+
+Users authenticate to Vault through the Okta OIDC browser flow. The Okta
+identity becomes a Vault entity, and you register that entity as the SCIM
+client. You repeat the OIDC browser flow each time you regenerate the SCIM
+token.
+
+[Configure the OIDC auth method](/vault/docs/iam/scim/setup) in Vault before
+you log in.
+
+<Note title="Match the discovery URL to your authorization server">
+
+Set `oidc_discovery_url` to the issuer of the authorization server that serves
+your groups claim. The default authorization server serves the claim you
+created in [Configure Okta authorization server claim](#configure-okta-authorization-server-claim)
+at the root Okta domain, `https://${OKTA_DOMAIN}`.
+
+</Note>
+
+Vault gives precedence to the `VAULT_TOKEN` environment variable over the token
+helper. Follow this flow to unset the variable before you log in and export it
+again afterward:
+
+1. Unset the environment variable.
+
+    ```shell-session
+    $ unset VAULT_TOKEN
+    ```
+
+1. Login to Vault.
+
+    ```shell-session
+    $ vault login -method=oidc role="vault-role-okta-default"
+    ```
+
+1. Export the environment variable with the new token as its value.
+
+    ```shell-session
+    $ export VAULT_TOKEN=$(vault print token)
+    ```
+
+Your browser opens automatically. Complete the Okta login in the browser to
+finish the flow.
+
+## Add the Okta SCIM application
+
+The OIDC application handles user authentication. Provisioning requires a
+second application.
+
+1. In the Okta Admin Console, go to **Applications and Resources → Applications
+   → Browse App Catalog**.
+
+1. Search for and select **SCIM 2.0 Test App (Header Auth)**, then click **Add
+   Integration**.
+
+1. Configure the application with these settings, and be sure to replace any
+   example values with your actual values.
+
+    | Configuration setting        | Value                                            |
+    |------------------------------|--------------------------------------------------|
+    | Application label            | Example: `Vault Okta SCIM`                       |
+    | Sign-On Options              | **Secure Web Authentication**                    |
+    | Credential details           | **Administrator sets username and password**     |
+    | Application username format  | **Email**                                        |
+
+    Okta sends the application username as the SCIM `userName`, so set the
+    application username format to **Email**.
+
+    The sign-on method is a required field on this application, but you never
+    use the application to sign in. Your OIDC application handles
+    authentication.
+
+1. Click **Done**.
+
+The application now has **Assignments** and **Provisioning** tabs.
+
+## Configure the SCIM connection
+
+1. Open the application and go to **Provisioning → Integration → Edit**.
+
+1. Configure the connection with these settings, and be sure to replace any
+   example values with your actual values.
+
+    | Configuration setting             | Value                                                    |
+    |-----------------------------------|----------------------------------------------------------|
+    | SCIM connector base URL           | Example: `https://vault-cluster-public-url:8200/v1/admin/identity/scim/v2` |
+    | Unique identifier field for users | `userName`                                               |
+    | Supported provisioning actions    | **Push New Users**, **Push Profile Updates**, **Push Groups** |
+    | Authentication Mode               | **HTTP Header**                                          |
+    | Authorization                     | The Vault token for your SCIM client                     |
+
+    The `admin` segment of the example base URL is a namespace, not a literal
+    path. Vault servers without namespaces use `/v1/identity/scim/v2`.
+
+<Warning title="Do not prefix the token with Bearer">
+
+Paste the token exactly as Vault returned it. Okta adds the `Bearer` prefix
+itself, so a token you prefix by hand reaches Vault as `Bearer Bearer` and
+Vault rejects the request with a 403 response.
+
+</Warning>
+
+Click **Test Connector Configuration** and confirm that the test succeeds, then
+click **Save**. The **To App** tab appears after the save succeeds.
+
+## Enable provisioning to Vault
+
+1. Go to **Provisioning → To App → Edit**.
+
+1. Select **Create Users**, **Update User Attributes**, and **Deactivate
+   Users**. Do not select **Sync Password**.
+
+1. Click **Save**.
+
+You must select **Create Users**. When you clear the selection, Okta only
+attempts to update users that already exist in Vault and fails with `Matching
+user not found` for every new user.
+
+## Verify provisioning
+
+Assign your test user to the SCIM application, then confirm that Vault created
+the corresponding entity:
+
+```shell-session
+$ vault list identity/entity/name
+
+$ vault read identity/entity/name/<user_email>
+```
+
+When you push groups, confirm the group as well:
+
+```shell-session
+$ vault list identity/group/name
+
+$ vault read identity/group/name/scim-test-group
+```
+
+## Troubleshooting
+
+| Symptom | Cause and resolution |
+|---------|----------------------|
+| `missing entity ID on request` | The Vault token does not resolve to an entity. Confirm that the token resolves to the entity you set as `access_grant_principal`. Refer to [Set up a Vault SCIM server](/vault/docs/iam/scim/setup). |
+| Okta returns a 403 response | Confirm that you did not prefix the **Authorization** value with `Bearer`. When the prefix is absent, confirm that your ACL policy grants access to the SCIM endpoints. |
+| `Matching user not found` | You did not select **Create Users** under **Provisioning → To App**. |
+| Vault returns an error checking the OIDC discovery URL | Confirm that `oidc_discovery_url` matches the issuer of the authorization server that serves your groups claim. |
+| Okta does not see an existing Vault user or group | A SCIM client only manages the resources it creates. Refer to [Set up a Vault SCIM server](/vault/docs/iam/scim/setup). |
+
+## Related documentation
+
+- [Configure Microsoft Entra ID for SCIM with Vault](/vault/docs/iam/scim/idp/entraid)
+- [Configure SailPoint for SCIM with Vault](/vault/docs/iam/scim/idp/sailpoint)
+- [Provision Vault identities with SCIM](/vault/docs/iam/scim)
+- [Set up a Vault SCIM server](/vault/docs/iam/scim/setup)
