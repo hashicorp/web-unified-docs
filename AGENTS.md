@@ -5,6 +5,16 @@ versioned product docs under `content/`, builds and serves them through the
 unified docs API, and feeds the `dev-portal` frontend that renders the
 user-facing experience.
 
+## Changing content
+
+**Before you change anything under `content/`, read
+[agent-docs/authoring-content.md](agent-docs/authoring-content.md).** This
+applies to every content task, not only new pages: editing or rewriting a page,
+adding or rebuilding an image or diagram, updating navigation data, and moving
+or renaming a page. Content has conventions that the files themselves do not
+show. The person asking may not know these conventions, so do not wait
+for them to point you to the guidance.
+
 ## Essentials
 
 - **Runtime:** Node `>=24` (Next.js). Package manager is `npm`.
@@ -22,9 +32,10 @@ user-facing experience.
 
 1. Verify before you claim. Read the relevant files before stating how the
    system works — this repo's guidance can drift from the source of truth.
-1. Default to a test-driven workflow (see
-   [testing-and-tdd.md](agent-docs/testing-and-tdd.md)) and make the smallest
-   change that solves the problem.
+1. For code changes, default to a test-driven workflow (see
+   [testing-and-tdd.md](agent-docs/testing-and-tdd.md)). For content changes,
+   follow [authoring-content.md](agent-docs/authoring-content.md). Either way,
+   make the smallest change that solves the problem.
 1. Keep changes local to the layer you are modifying.
 1. Treat generated artifacts and build outputs as derived from source unless the
    repo clearly requires direct edits.
@@ -49,9 +60,9 @@ path-specific and lives in `.github/instructions/*.instructions.md`.
 
 ## Detailed guides
 
-- [Authoring content](agent-docs/authoring-content.md) — which content type to
-  use, how each product implements it, which template to copy, and the
-  mechanics that are easy to get wrong.
+- [Authoring content](agent-docs/authoring-content.md) — required reading for
+  any change under `content/`: which guide covers pages, images and diagrams,
+  navigation, and redirects, and the mechanics that are easy to get wrong.
 - [Local development](agent-docs/local-development.md) — educator vs developer
   flows and runtime.
 - [Testing and TDD](agent-docs/testing-and-tdd.md) — required workflow,
