@@ -7,6 +7,7 @@ import {
 	findFileWithMetadata,
 	joinFilePath,
 	parseMarkdownFrontMatter,
+	resolveCdnUrl,
 } from '#utils/file'
 import { getProductVersionMetadata } from '#utils/contentVersions'
 import { errorResultToString } from '#utils/result'
@@ -135,7 +136,14 @@ export async function GET(
 		return new Response('Not found', { status: 404 })
 	}
 
-	const { metadata, markdownSource } = markdownFrontMatterResult.value
+	const { metadata, markdownSource: rawMarkdownSource } =
+		markdownFrontMatterResult.value
+
+	const markdownSource = resolveCdnUrl(
+		rawMarkdownSource,
+		productSlug,
+		versionMetadata.version,
+	)
 
 	if (mdOnly) {
 		return new Response(markdownSource, {
