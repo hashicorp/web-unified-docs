@@ -1,0 +1,252 @@
+---
+layout: docs
+page_title: Migrate to the current template syntax
+description: |-
+  Update a Nomad Pack from the original `.my` and `.nomad_pack` template syntax to the current `var` and `meta` template functions, including dependencies and
+  helpers.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-07-03T11:42:00+05:30
+last_modified: 2026-07-06T18:35:14.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Migrate to the current template syntax
+
+Use this guide to update a pack from the original [Nomad Pack][pack-repo]
+template syntax to the current syntax. The original syntax reads a pack's
+variables and metadata with dotted paths such as `[[ .my.name ]]`. Current
+templates call functions instead, such as `[[ var "name" . ]]`.
+
+Nomad Pack v0.1.0 and later use the current syntax by default. Earlier releases
+use the original syntax. When you run a pack that uses the original syntax on
+v0.1.0 or later, Nomad Pack reports an error unless you pass the `--parser-v1`
+flag.
+
+This guide shows you how to:
+
+- Access variables and metadata with the `var` and `meta` functions
+- Access a pack's dependencies
+- Update helper and output templates
+- Run a pack that still uses the original syntax
+
+For an overview of writing packs, including the available template functions,
+refer to [Create custom packs][create-packs].
+
+## Requirements
+
+- Nomad Pack v0.1.0 or later
+- A pack that uses the original `.my` and `.nomad_pack` template syntax
+
+## Steps
+
+To migrate a pack, update each place its templates read variables, metadata, and
+dependencies, then verify the result. Complete the following steps.
+
+1. **Update variable references.** The original syntax accesses pack variables
+   as fields on the template context, either through the `.my` alias or the
+   pack's name. Call the `var` function with the variable name and the context
+   to read it from instead. For example, a template that reads a variable named
+   `message` changes from `[[ .my.message ]]` to the following function call:
+
+   ```hcl
+   [[ var "message" . ]]
+   ```
+
+   The trailing `.` passes the current context to the function so it knows which
+   pack to read from. The original syntax reaches nested values with additional
+   dots, which become a single dotted key. For example,
+   `[[ .my.resources.cpu ]]` becomes `[[ var "resources.cpu" . ]]`. A dotted key
+   only works when the parent variable is an object. To read every variable for
+   a pack at once, use the `vars` function, as in `[[ vars . ]]`. When a
+   variable holds a collection, call `var` wherever the original template used
+   the field, including as the target of a `range`:
+
+   ```hcl
+   [[ range $k, $v := var "env" . ]][[ $k ]] = [[ $v | quote ]]
+   [[ end ]]
+   ```
+
+1. **Update metadata references.** The original syntax accesses pack metadata
+   through the `.nomad_pack` field. Call the `meta` function instead, which
+   works the same way as `var`. A reference to the pack name changes from
+   `[[ .nomad_pack.pack.name ]]` to the following function call:
+
+   ```hcl
+   [[ meta "pack.name" . ]]
+   ```
+
+   To read every metadata value for a pack at once, use the `metas` function, as
+   in `[[ metas . ]]`.
+
+1. **Update dependency references.** The original syntax puts every pack's
+   values on a single shared context, which makes aliased or nested
+   dependencies hard to trace. The current syntax gives each dependency its own
+   context. Each dependency is a field on the parent context that you pass to
+   `var` or `meta` in place of the current context:
+
+   ```hcl
+   [[ var "job_name" . ]]
+   [[ var "job_name" .child ]]
+   ```
+
+   The `.` reads the `job_name` variable from the current pack and `.child`
+   reads the `job_name` variable from a dependency named `child`. Dependencies
+   can nest, and the `deps` function returns a pack's direct dependencies so you
+   can loop over them:
+
+   ```hcl
+   [[ range $dep := deps . ]][[ var "job_name" $dep ]]
+   [[ end ]]
+   ```
+
+1. **Update helper and output templates.** The same rules apply everywhere a
+   pack renders templates, not only in jobspec files. Output templates
+   (`outputs.tpl`) and named helper templates defined with `define` share the
+   same context and functions. A helper that receives the pack context reads
+   variables and metadata like the main template. A helper that sets a job's
+   name changes from the original syntax:
+
+   ```hcl
+   [[ define "job_name" ]]
+   [[- if eq .my.job_name "" -]]
+   [[- .nomad_pack.pack.name | quote -]]
+   [[- else -]]
+   [[- .my.job_name | quote -]]
+   [[- end ]]
+   [[- end ]]
+   ```
+
+   to the current syntax:
+
+   ```hcl
+   [[ define "job_name" ]]
+   [[- if eq (var "job_name" .) "" -]]
+   [[- meta "pack.name" . | quote -]]
+   [[- else -]]
+   [[- var "job_name" . | quote -]]
+   [[- end ]]
+   [[- end ]]
+   ```
+
+   Invoke the helper with the pack context so the functions can resolve values,
+   as in `job [[ template "job_name" . ]] {`. A helper that receives a plain
+   value rather than the pack context does not change, because it reads the
+   fields of whatever value you pass in. Update only the invocation to source
+   that value with `var`, so `[[ template "resources" .my.resources ]]` becomes
+   `[[ template "resources" (var "resources" .) ]]`.
+
+1. **Verify the migrated pack.** The `var` and `meta` functions return an empty
+   string when a key is not found, so a misspelled name renders as empty instead
+   of reporting an error. While you migrate, use `must_var` and `must_meta`,
+   which stop rendering and report the missing key:
+
+   ```hcl
+   [[ must_var "message" . ]]
+   ```
+
+   Render the pack and confirm the output matches the original. If Nomad Pack
+   reports a field it cannot find, refer to [Troubleshoot](#troubleshoot).
+
+## Complete example
+
+The following jobspec template uses the original syntax.
+
+<CodeBlockConfig filename="example.nomad.tpl">
+
+```hcl
+job [[ coalesce .simple_raw_exec.job_name .nomad_pack.pack.name | quote ]] {
+  datacenters = [[ .simple_raw_exec.datacenters | toJson ]]
+  type        = "service"
+
+  group "app" {
+    count = [[ .simple_raw_exec.count ]]
+
+    task "server" {
+      driver = "raw_exec"
+
+      config {
+        command = "/bin/bash"
+        args    = ["-c", [[ .simple_raw_exec.command | quote ]]]
+      }
+
+      resources {
+        cpu    = [[ .simple_raw_exec.resources.cpu ]]
+        memory = [[ .simple_raw_exec.resources.memory ]]
+      }
+    }
+  }
+}
+```
+
+</CodeBlockConfig>
+
+The following template uses the current syntax.
+
+<CodeBlockConfig filename="example.nomad.tpl">
+
+```hcl
+job [[ coalesce (var "job_name" .) (meta "pack.name" .) | quote ]] {
+  datacenters = [[ var "datacenters" . | toJson ]]
+  type        = "service"
+
+  group "app" {
+    count = [[ var "count" . ]]
+
+    task "server" {
+      driver = "raw_exec"
+
+      config {
+        command = "/bin/bash"
+        args    = ["-c", [[ var "command" . | quote ]]]
+      }
+
+      resources {
+        cpu    = [[ var "resources.cpu" . ]]
+        memory = [[ var "resources.memory" . ]]
+      }
+    }
+  }
+}
+```
+
+</CodeBlockConfig>
+
+## Run legacy packs
+
+You can still run a pack you have not migrated yet by passing the `--parser-v1`
+flag, which parses it with the original syntax. The commands that parse pack
+templates accept the flag: `run`, `plan`, `render`, `info`, `stop`, and
+`destroy`.
+
+```shell-session
+$ nomad-pack run ./my-pack --parser-v1
+```
+
+<Note>
+
+Treat `--parser-v1` as a temporary measure while you update a pack. Write new
+packs with the current syntax.
+
+</Note>
+
+## Troubleshoot
+
+When you run a legacy pack without the `--parser-v1` flag, Nomad Pack reports
+the field it cannot find and suggests the equivalent function call.
+
+```plaintext
+The legacy ".my.message" syntax should be updated to use `var "message" .`. You can run legacy packs unmodified by using the `--parser-v1` flag
+```
+
+The opposite happens when you run a migrated pack with the `--parser-v1` flag.
+The template functions are unavailable, so Nomad Pack reports that the function
+is not implemented for the v1 syntax. Remove the `--parser-v1` flag to parse the
+pack with the current syntax.
+
+## Next steps
+
+To learn more about authoring packs, including the full list of template
+functions, refer to [Create custom packs][create-packs].
+
+[pack-repo]: https://github.com/hashicorp/nomad-pack
+[create-packs]: /nomad/tools/nomad-pack/create-packs
