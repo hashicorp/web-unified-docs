@@ -8,7 +8,12 @@ import { parseArgs } from 'node:util'
 import { pathToFileURL } from 'node:url'
 
 // --- Required fields for both config entries and /forward-port PR comments ---
-const REQUIRED_FIELDS = ['sourceVersionFolder', 'targetProduct', 'targetBranch', 'targetVersionFolder']
+const REQUIRED_FIELDS = [
+	'sourceVersionFolder',
+	'targetProduct',
+	'targetBranch',
+	'targetVersionFolder',
+]
 
 // --- Parse the YAML config ---
 // Keys are slugs that correspond to the part after "forward-port:" in PR labels.
@@ -38,7 +43,9 @@ function parseForwardPortConfig(text) {
 		// Indented key-value pair
 		if (currentSlug && /^\s+\w/.test(line)) {
 			const colonIdx = line.indexOf(':')
-			if (colonIdx === -1) { continue }
+			if (colonIdx === -1) {
+				continue
+			}
 			const key = line.slice(0, colonIdx).trim()
 			// Strip inline YAML comments (e.g. "v0.20.0 # grab latest")
 			const raw = line.slice(colonIdx + 1).trim()
@@ -64,7 +71,12 @@ function parseForwardPortConfig(text) {
 //
 // Returns { matched } on success or { error } on failure.
 function parseForwardPortComment(text, filePath, slug) {
-	const lines = text.split('\n').map((l) => l.trim()).filter(Boolean)
+	const lines = text
+		.split('\n')
+		.map((l) => {
+			return l.trim()
+		})
+		.filter(Boolean)
 	const expectedFirstLine = `/forward-port forward-port:${slug}`
 
 	if (lines[0] !== expectedFirstLine) {
@@ -79,10 +91,14 @@ function parseForwardPortComment(text, filePath, slug) {
 	const result = {}
 	for (const line of lines.slice(1)) {
 		const colonIdx = line.indexOf(':')
-		if (colonIdx === -1) { continue }
+		if (colonIdx === -1) {
+			continue
+		}
 		const key = line.slice(0, colonIdx).trim()
 		const value = line.slice(colonIdx + 1).trim()
-		if (key && value) { result[key] = value }
+		if (key && value) {
+			result[key] = value
+		}
 	}
 
 	for (const field of REQUIRED_FIELDS) {
@@ -135,7 +151,9 @@ export function resolveTarget({ configPath, labels, commentFile } = {}) {
 	try {
 		configText = fs.readFileSync(configPath, 'utf-8')
 	} catch (error) {
-		return { error: `Error reading config file at ${configPath}: ${error.message}` }
+		return {
+			error: `Error reading config file at ${configPath}: ${error.message}`,
+		}
 	}
 
 	const config = parseForwardPortConfig(configText)
@@ -143,7 +161,9 @@ export function resolveTarget({ configPath, labels, commentFile } = {}) {
 	// --- Extract the forward-port:* label ---
 	// Labels must follow the pattern "forward-port:<slug>". Exactly one such label
 	// must be present on the PR.
-	const fpLabels = labels.filter((l) => l.startsWith('forward-port:'))
+	const fpLabels = labels.filter((l) => {
+		return l.startsWith('forward-port:')
+	})
 
 	if (fpLabels.length === 0) {
 		return {
@@ -208,7 +228,9 @@ export function resolveTarget({ configPath, labels, commentFile } = {}) {
 		try {
 			commentText = fs.readFileSync(commentFile, 'utf-8')
 		} catch (error) {
-			return { error: `Error reading comment file at ${commentFile}: ${error.message}` }
+			return {
+				error: `Error reading comment file at ${commentFile}: ${error.message}`,
+			}
 		}
 
 		const parsed = parseForwardPortComment(commentText, commentFile, slug)
@@ -268,7 +290,9 @@ if (isRunFromCommandLine()) {
 	let cliLabels
 	try {
 		cliLabels = JSON.parse(values.labels)
-		if (!Array.isArray(cliLabels)) { throw new TypeError('labels must be a JSON array') }
+		if (!Array.isArray(cliLabels)) {
+			throw new TypeError('labels must be a JSON array')
+		}
 	} catch (error) {
 		console.error(`Error parsing --labels JSON: ${error.message}`)
 		process.exit(1)

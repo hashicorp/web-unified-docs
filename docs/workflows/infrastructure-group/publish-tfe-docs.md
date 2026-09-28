@@ -1,92 +1,71 @@
-# Terraform Enterprise quarterly releases
+# Terraform Enterprise releases
 
-This page describes the process for publishing Terraform Enterprise documentation. Terraform Enterprise adheres to the following semantic versioning scheme:
+This article describes the process for publishing Terraform Enterprise documentation. It is intended to provide important context for IBM technical writers and other internal contributors so that they understand how the Terraform Enterprise documentation is published to the public documentation website.  
 
-`MILESTONE.MAJOR.PATCH`
+This article does not establish IBM release policy or represent release commitments. If you are an external contributor, refer to [Contribute to HashiCorp documentation](../../../CONTRIBUTING.md) for information about getting started. 
 
-The team releases a milestone or major version once a quarter and releases patches as they become available.
+## Release versions
 
-## Artifacts for next major release
+Terraform Enterprise increments releases using a semantic-like scheme: 
 
-After the release of a major verson, the release engineer runs a GitHub [workflow]((https://github.com/hashicorp/web-unified-docs-internal/actions/workflows/copy-cloud-docs-for-tfe.yml)) in the `web-unified-docs-internal` repository that creates the following artifacts:
+`VERSION.RELEASE.FIXES`
 
-- A branch named `tfe-release/<milestone>.<major>.x` for assembling the release notes and documentation updates. This is the branch that you merge into `main` to publish the docs.
-- A branch named `HCPTF-diff/<milestone>.<major>.x` that contains a diff of all of the new content from HCP TF slated for the next Terraform Enterprise release. This branch will be updated with latest changes before next release.
-- A PR named `HCP TF changes for TFE release <milestone>.<major>.x` for merging content updates into the release notes into the assembly branch. Review this PR and merge into the assembly branch.
-- A PR named `TFE Release <milestone>.<major>.x` for merging the release notes into the assembly branch.
+Refer to [IBM Software product versioning explained](https://www.ibm.com/support/pages/ibm-software-product-versioning-explained) for more information.
 
-Refer to the [TFE Release 1.0.0](https://github.com/hashicorp/web-unified-docs-internal/pull/299) to see examples of the app deadline artifacts.
+We only increment the documentation on VERSION and RELEASE changes. We represent fixes as `x` and update the current docs to reflect any changes. 
+
+## Artifacts for next releases
+
+After releasing a milestone or major verson, the release engineer runs a job to create the following artifacts:
+
+- A branch named `tfe-release/<version>.<release>.x` for assembling the release notes and documentation updates. This is the branch that you merge into `main` to publish the docs.
+- A branch named `HCPTF-diff/<version>.<release>.x` that contains a diff of all of the new content from HCP TF slated for the next Terraform Enterprise release. This branch will be updated with latest changes before next release.
+- A PR named `HCP TF changes for TFE release <version>.<release>.x` for merging content updates into the release notes into the assembly branch. Review this PR and merge into the assembly branch.
+- A PR named `TFE Release <version>.<release>.x` for merging the release notes into the assembly branch.
 
 ## Get the release date
 
-Check the `#proj-tfe-releases` channel for a message from the team manager about important dates. For example:
+Check the `#proj-tfe-releases` channel for a message from the team manager about important dates. Release dates are fluid, so you should verify the release date closer to the standing date.
 
-```
-TFE v1.1.0 -Feature release is planned on the week of Nov 9th
-More details -
--> Application Code Deadline: October 20
--> Backport Deadline: October 25
--> GA Release Publish: week of November 9
-```
-
-Ask for the dates in the channel if it has been more than six weeks since the last milestone or major version and the manager hasn't posted the dates yet. You should also verify that the dates haven't changed closer to the standing date.
-
-**Application Code Deadline**: Also called **app deadline**, this is the Terraform Enterprise code freeze and occurs 1.5 to 2 weeks before the release date. App deadline is also when the release engineer runs a GitHub [workflow]((https://github.com/hashicorp/web-unified-docs-internal/actions/workflows/create-tfe-release-notes.yml)) in the `web-unified-docs-internal` repository. The workkflow creates the release notes and updates the `HCPTF-diff/<milestone>.<major>.x` branch with latest changes from terraform common docs.
-
-**Backport Deadline**: This is an engineering deadline and isn't actionable for IPG team members.
+**Application Code Deadline**: This milestone, also called **app deadline**, occurs a few weeks before the release date. It is when the release engineer runs the job that creates the release notes and updates the `HCPTF-diff/<milestone>.<major>.x` branch with latest changes from `terraform-common-docs`.
 
 **GA Release Publish**: On this date, merge the assembly branch into `main` to publish the documentation.
 
-## Before app deadline
+## Prepare for app deadline
 
 Make sure to merge any PRs against the `terraform-docs-common` folder that should be included in the upcoming Terraform Enterprise release.
 
-Apply any exclusion tags to prevent HCP Terraform-specifc content from publishing to the enterprise docs. Refer to [Exclusion tag syntax](#exclusion-tag-syntax) for details.
+Apply any exclusion tags to prevent HCP Terraform-specifc content from publishing to the enterprise docs and vice versa. Refer to [Exclusion tag syntax](#exclusion-tag-syntax) for details.
+
+The job that creates the documentation artifacts creates the new version folder so that authors can implement new content in the correct place. It also populates the new folder with a copy of the HCP Terraform docs on `main` from the public repo. For this reason, we do not run the action too early in the cycle. Otherwise, content merged to `main` on the public repo after the action runs won't be copied to the upcoming enterprise folder. Conversely, running the action too late in the cycle would create a bottleneck of content changes.
+
+There is no optimal workflow for authoring enterprise-only docs before app deadline, but the following options are available for content authors:
+
+1. Create an external docs plan: Draft changes in a Word doc to streamline the review and approval process. Copy the content to the appropriate files after app deadline.
+1. Manually create a folder and copy the nav file and any related files, including containing folders in their existing structure, and author changes.
+1. Author content under the current version folder. After app deadline, manually port changes to the folder for the upcoming version and rollback changes in the current folder. This approach works best when all or most content is confined to new .mdx files. 
 
 ## Before GA release
 
-Review and merge the `HCP TF changes for TFE release <milestone>.<major>.x` PR into the `tfe-release/<milestone>.<major>.x` branch. During your review, verify that all of the changes are appropriate for Terraform Enterprise. If you’re unsure about an item, you can also ask in `#proj-tfe-releases`.
+Review and merge the `HCP TF changes for TFE release <version>.<release>.x` PR into the `tfe-release/<version>.<release>.x` branch. During your review, verify that all of the changes are appropriate for Terraform Enterprise. If you’re unsure about an item, you can also ask in `#proj-tfe-releases`.
 
 If you need to update any existing documentation or apply exclusion tags, you must also apply the changes to the corresponding files in the `terraform-docs-common` so that the next synchronization doesn't overwrite your changes. It's rare, but if you edit a file in the `terraform-docs-common` folder as part of your review, someone may edit and merge the same file in the public repository, resulting in collisions when merging to `main`. You may need to track down the author or reach out to one of the development teams to resolve merge conflicts that emerge in this scenario.   
 
 Review and merge any other PRs opened against the release branch.
 
-Review the `TFE Release <milestone>.<major>.x` release notes PR. The release engineer is responsible for merging the PR. The release engineer also prepares the release notes section of the docs. Refer to [Release notes guidance](#release-notes-guidance) for assistance.
+Review the `TFE Release <version>.<release>.x` release notes PR. The release engineer is responsible for merging the PR. The release engineer also prepares the release notes section of the docs. Refer to [Release notes guidance](#release-notes-guidance) for assistance.
 
 ## On the day of the release
 
 The release engineer merges `tfe-release/<milestone>.<major>.x` release branch into `main`. The merge triggers an automation that synchronizes the `web-unified-docs` and `web-unified-docs-interal` repositories, which publishes the docs to production.
 
 Verify that the new version and related changes appear on the website. 
+
 ---
 
 ## Appendix
 
 This section contains supplementary information for publishing Terraform Enterprise docs.
-
-### Manually create docs artifacts for the release
-
-#### Create the artifacts for next release
-
-The [Copy Cloud Docs For TFE](https://github.com/hashicorp/web-unified-docs-internal/actions/workflows/copy-cloud-docs-for-tfe.yml) action creates the branches and PRs necessary for publishing a new version of the Terraform Enterprise documenation. Complete the following steps to manually run the actions:
-
-1. Log into GitHub and navigate to the `web-unified-docs-internal` repository.
-1. Click **Actions**, then choose **Copy Cloud Docs For TFE** from the **Actions** sidebar.
-1. Open the **Run workflow** dropdown and choose the branch to use to run the workflow. This is `main` in almost all cases.
-1. Specify the following values:
-   - Enter the upcoming version of the TFE release.
-
-#### Create the release notes PR
-
-The [Create TFE Release Notes](https://github.com/hashicorp/web-unified-docs-internal/actions/workflows/create-tfe-release-notes.yml) action creates the release notes PR. Complete the following steps to manually run the actions:
-
-1. Log into GitHub and navigate to the `web-unified-docs-internal` repository.
-1. Click **Actions**, then choose **Create TFE Release Notes** from the **Actions** sidebar.
-1. Open the **Run workflow** dropdown and choose the branch to use to run the workflow. This is `main` in almost all cases.
-1. Specify the following values:
-   - Enter the upcoming version of the TFE release.
-   - Enter the release branch for the upcoming release. Omit the suffix. You must specify an existing release branch.
-   - Enter the tag of the most recent TFE release. The workflow uses this version to generate the change log.
 
 ### Exclusion tag syntax
 
@@ -153,7 +132,7 @@ tfc_only: true
 
 ### Release notes guidance
 
-Releasen notes should help readers understand what has changed, why, and what actions they need to take as a result. It's rarely ever appropriate to include a changelog entry without any edits in the release notes. 
+Release notes should help readers understand what has changed, why, and what actions they need to take as a result. It's rarely ever appropriate to include a changelog entry without any edits in the release notes. 
 
 #### Include important and impactful updates
 
@@ -210,7 +189,7 @@ Added variable sets.
 **Better**: 
 
 ```
-You can now define sets of variables and reuse them across multiple workspaces. For example, you could define a set of variables that contain  provider credentials and automatically apply it to all of the workspaces that use the provider. Refer to [Variable sets](/terraform/cloud-docs/workspaces/variables) for more information. 
+You can now define sets of variables and reuse them across multiple workspaces. For example, you could define a set of variables that contain provider credentials and automatically apply it to all of the workspaces that use the provider. Refer to [Variable sets](/terraform/cloud-docs/workspaces/variables) for more information. 
 ```
 
 
