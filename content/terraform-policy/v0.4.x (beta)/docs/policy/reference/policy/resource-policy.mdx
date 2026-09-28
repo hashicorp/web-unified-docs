@@ -129,14 +129,32 @@ Defines values that are local to the policy. You can only define one `locals` bl
 
 ### `operations`
 
-Specifies the Terraform operation during which to enforce this policy. You can configure the policy to evaluate during more than one operation. You can specify `"create"`, `"update"`, or `"delete"`.
+Specifies the Terraform operation during which to enforce this policy. You can configure the policy to evaluate during more than one operation. You can specify `"create"`, `"update"`, `"delete"`, or `"no-op"`.
 
 - Data type: List of strings
-- Default: `["create", "update"]`
+- Default: `["create", "update", "no-op"]` for attrs-only policies (policies that do not reference `prior_attrs`), `["create", "update"]` for policies that reference `prior_attrs`
 
-When the policy references `prior_attrs`, you must set `operations` to `"update"`, `"delete"`, or both. You cannot include `"create"` because a create operation has no prior state.
+The `"no-op"` operation represents resources that already exist in state and are unchanged by the current run. This allows policies to evaluate pre-existing resources that are unchanged by the plan.
 
-Terraform policy will error if the list contains both `"delete"` and `"create"`. Plans to replace resources are evaluated as two seperate operations, so you must implement policies that target both delete and create operations as two seperate `resource_policy` blocks.
+#### Operation constraints
+
+When the policy references `prior_attrs`, you must set `operations` to `"update"`, `"delete"`, or both. You cannot include the `"create"` or `"no-op"` operations when referencing `prior_attrs` because these operations have no prior state.
+
+Terraform policy will error if the list contains both `"delete"` and `"no-op"`. A resource is either being removed or unchanged, so a policy that needs to evaluate both must be split into two separate `resource_policy` blocks.
+
+Terraform policy will error if the list contains both `"delete"` and `"create"`. Plans to replace resources are evaluated as two separate operations, so you must implement policies that target both delete and create operations as two separate `resource_policy` blocks.
+
+#### Default behavior for attrs-only policies
+
+For attrs-only policies (policies that do not reference `prior_attrs`), omitting the `operations` attribute defaults to evaluating `create`, `update`, and `no-op` operations.
+
+To opt out of full-state evaluation and only evaluate changed resources, explicitly list the operations you want to evaluate, for example `operations = ["create", "update"]`.
+
+An explicitly empty `operations = []` is unconstrained and evaluates all operations including `no-op` for attrs-only policies.
+
+#### Warning for incomplete coverage
+
+An attrs-only policy that calls `core::getresources` with an explicit `operations` list that omits `no-op` will load with a warning, since it only runs for changed resources and may miss pre-existing ones. Policies that reference `prior_attrs` are exempt from this warning because they are change-scoped by construction, and lists that contain `delete` are exempt because `no-op` cannot be added to them.
 
 ## Attributes
 
@@ -155,6 +173,7 @@ Depending on the operation being evaluated, the value of the `attrs` and `prior_
 | create    | Target State               | (unavailable/null)               |
 | update    | Target State               | Current State                    |
 | delete    | Target State (all resource attributes are null) | Current State |
+| no-op     | Current State              | (unavailable/null)               |
 
 Each Terraform provider defines the attributes available for each resource it supports. Refer to the provider documentation for a list of supported attributes.
 
@@ -165,7 +184,7 @@ The following meta-arguments are available in `resource_policy` blocks.
 | Name | Description | Type | Example |
 |------|-------------|------|---------|
 | `meta.module_path` | The module path the resource belongs to. | String | `"."`, `"my-module"` |
-| `meta.operation` | The operation being performed. | String | `"create"`, `"update"`, `"delete"` |
+| `meta.operation` | The operation being performed. | String | `"create"`, `"update"`, `"delete"`, `"no-op"` |
 | `meta.provider_type` | The type of the provider of the resource. | String | `"aws"`, `"azurerm"` |
 | `meta.tfe_stack.deployment_group` | The deployment group for Terraform Stacks. Empty string when evaluating workspaces. | String | `"us-east-1"`, `"global"` |
 | `meta.tfe_stack.deployment_name` | The deployment name for Terraform Stacks. Empty string when evaluating workspaces. | String | `"production"`, `"staging"` |
@@ -267,6 +286,25 @@ resource_policy "aws_s3_bucket" "security_requirements" {
   enforce {
     condition     = attrs.acl != "public-read" && attrs.acl != "public-read-write"
     error_message = "S3 bucket must not have public ACL."
+  }
+}
+```
+
+### Evaluate pre-existing resources with no-op
+
+In the following example, the `resource_policy` block uses the `no-op` operation to evaluate all existing CloudTrail resources in the workspace state, ensuring at least one trail has logging enabled.
+
+```hcl
+resource_policy "aws_cloudtrail" "keep_one_logging_trail" {
+  operations = ["no-op"]
+
+  locals {
+    logging_trails = core::getresources("aws_cloudtrail", { enable_logging = true })
+  }
+
+  enforce {
+    condition     = core::length(local.logging_trails) >= 1
+    error_message = "This workspace must keep at least one CloudTrail with logging enabled."
   }
 }
 ```
