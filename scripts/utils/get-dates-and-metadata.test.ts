@@ -398,17 +398,17 @@ last_modified: 2026-04-20T04:20:00Z
 			consoleWarnSpy.mockRestore()
 		})
 
-		it('should use default date when provided', () => {
+		it('should preserve created_at when a default date is provided', () => {
 			const filePath = '/path/to/file.mdx'
 			const createdDate = '2025-04-20T04:20:00Z'
 			const lastModifiedDate = '2026-04-20'
 			const oldMetadataBlock =
-				'# START AUTO GENERATED METADATA, DO NOT EDIT\ncreated_at: 2025-01-01T00:00:00Z\nlast_modified: 2025-01-02T00:00:00Z\n# END AUTO GENERATED METADATA\n'
+				'# START AUTO GENERATED METADATA, DO NOT EDIT\ncreated_at: 2023-01-01T00:00:00.000Z\nlast_modified: 2025-01-02T00:00:00Z\n# END AUTO GENERATED METADATA\n'
 			const frontmatterWithOldMetadata = `title: Test\n${oldMetadataBlock}`
 			const newMdxContent = `---title: Test
 
 # START AUTO GENERATED METADATA, DO NOT EDIT
-created_at: 2025-04-20T04:20:00Z
+created_at: 2023-01-01T00:00:00.000Z
 last_modified: 2026-04-20T00:00:00.000Z
 # END AUTO GENERATED METADATA
 ---

@@ -31,6 +31,9 @@ files.
 - the preview workflow also deploys a `dev-portal` preview configured to consume
   the preview API
 - preview behavior is defined in `.github/workflows/build-pr-preview.yml`
+- each preview deployment is aliased to a stable, per-PR URL (`vercel alias set`)
+  so the "Visit Preview" link in the PR comment doesn't change between pushes to
+  the same PR
 
 ### Production flow
 
