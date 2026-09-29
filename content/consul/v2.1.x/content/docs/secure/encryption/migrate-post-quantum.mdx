@@ -1,0 +1,167 @@
+---
+layout: docs
+page_title: Migrate to post-quantum TLS
+description: >-
+  Prepare Consul agents, service mesh proxies, and Kubernetes components for hybrid post-quantum TLS, then migrate without removing existing TLS protections.
+---
+
+# Migrate to post-quantum TLS
+
+This topic describes how to migrate a TLS-enabled Consul deployment to hybrid post-quantum key exchange. It covers service mesh and agent TLS as separate changes and retains classical fallback during adoption.
+
+## Introduction
+
+The migration configures the `X25519MLKEM768` hybrid group alongside classical `X25519`. Compatible peers can negotiate hybrid key exchange; connections that fall back to `X25519` remain classical. The procedure does not change your certificate authority (CA), certificate signatures, or mutual TLS (mTLS) authentication.
+
+Plan component upgrades before changing policy. A mesh configuration entry affects the relevant datacenter and admin partition, not an individual service. Test in an isolated environment or an appropriate supported Consul Enterprise partition before applying a broad policy change. Do not assume that a mesh entry provides a per-service canary.
+
+## Requirements
+
+Before you begin:
+
+- Review the component and access [requirements for post-quantum TLS](/consul/docs/secure/encryption/post-quantum#requirements).
+- Establish healthy agent TLS and service mesh mTLS. This guide does not migrate plaintext traffic to TLS.
+- Prepare authenticated CLI or controller access that remains usable throughout the change. Keep an approved recovery path to agent configuration if an interface becomes inaccessible.
+- Define acceptable connection error rates, latency, service health, and evidence of hybrid negotiation for each affected path.
+- Review [Roll back post-quantum TLS](/consul/docs/secure/encryption/rollback-post-quantum) and select a known-compatible classical group list.
+
+## Inventory the deployment
+
+Record the endpoints and configuration owners before making changes.
+
+1. Inventory servers, client agents where present, Consul Dataplane images, sidecars, and gateways. Include federated or peered dependencies and clients of the agent HTTPS and gRPC interfaces.
+1. Record the mesh incoming and outgoing TLS bounds and group lists. Identify external gateway TLS listeners separately; mesh group settings do not configure every gateway TLS connection.
+1. Record `tls.defaults` and every `internal_rpc`, `https`, and `grpc` override on agents, including explicit empty strings. Check whether all required peers support TLS 1.3 before raising the minimum.
+1. For Kubernetes, record chart, controller, CRD, and image versions. Identify the source of truth for `Mesh` manifests, Helm values, and any GitOps reconciliation.
+1. Identify the target datacenter and admin partition. Include relevant service namespaces and cross-partition dependencies in testing without treating the mesh policy as namespace-scoped.
+
+## Save configuration and a healthy baseline
+
+Preserve the state needed to make a configuration-only rollback.
+
+1. Save the complete authoritative mesh definition and agent configuration, including certificate verification, protocol overrides, and settings unrelated to TLS. For Kubernetes, save the source manifests, full Helm values, and pinned image and chart versions.
+1. Record service health, agent membership, server quorum and leader health, proxy configuration acceptance, and connection error and latency measurements.
+1. Record negotiated TLS versions and groups for representative fresh connections, using the [verification procedure](/consul/docs/secure/encryption/post-quantum#verify-negotiated-key-exchange).
+1. If you also need to upgrade Consul, take the backups required by the [general upgrade instructions](/consul/docs/upgrade/instructions/general). A snapshot is not the normal mechanism for reverting key-exchange policy.
+
+## Prepare compatible components
+
+Prepare all peers before enabling the hybrid group or raising their TLS floor.
+
+~> **Upgrade behavior:** On Consul 2.1, a mesh direction with minimum TLS 1.3 and no explicit groups automatically receives `X25519MLKEM768` and `X25519`. Agent protocols with effective minimum TLS 1.3 and no explicit or inherited groups also select this pair. Adoption can therefore begin during a Consul upgrade, before a separate configuration change.
+
+1. Check the supported [Envoy and Consul Dataplane combinations](/consul/docs/reference/proxy/envoy) and verify hybrid-group support in the exact builds you deploy. Classical fallback does not prevent configuration rejection by a proxy that does not recognize the hybrid group.
+1. Test the upgrade path in an isolated environment, including existing TLS 1.3 configurations that trigger automatic selection. Roll out compatible proxies before the Consul change that supplies hybrid settings, where the supported component matrix permits that sequence. If no compatible overlap exists, resolve the upgrade path before proceeding.
+1. Upgrade Consul using the [general upgrade procedure](/consul/docs/upgrade/instructions/general) or [Kubernetes upgrade procedure](/consul/docs/upgrade/k8s). Preserve TLS and certificate verification throughout. Do not write `ECDHCurves` or `tls_ecdh_curves` to releases that do not support them.
+1. On Kubernetes, install compatible chart, controller, and CRD versions through their documented upgrade workflow. Confirm both `ecdhCurves` fields exist in the installed schema and that the controller can reconcile them. A Consul server image upgrade alone is insufficient.
+1. Confirm that every endpoint affected by the planned TLS 1.3 minimum is ready. After each component rollout, compare health and connection behavior against your baseline.
+
+If you need to defer hybrid negotiation after upgrading a component, use an explicit approved classical group list on components that support the field. Do not clear fields and assume that the result is classical.
+
+## Enable mesh key exchange
+
+Set incoming and outgoing lists to `["X25519MLKEM768", "X25519"]`, with both minimum and maximum TLS versions explicitly set to `TLSv1_3`. Remove explicit TLS 1.2 cipher-suite lists from those directions. Refer to the [equivalent HCL, YAML, and JSON definitions](/consul/docs/secure/encryption/post-quantum#configure-mesh-tls).
+
+Use the workflow that owns your configuration.
+
+<Tabs>
+<Tab heading="CLI or API-managed configuration">
+
+1. Configure the Consul CLI for authenticated HTTPS access. Target the correct datacenter and, for Consul Enterprise, partition on every read and write.
+1. Read the current full entry and save its `ModifyIndex`:
+
+   ```shell-session
+   $ consul config read -kind mesh -name mesh > mesh-current.json
+   ```
+
+   If no entry exists, create a full definition with `Kind` and `Name` set to `mesh`, and use index `0` to create it only if it still does not exist. Distinguish a missing entry from authorization or connection failures.
+
+1. Create `mesh-updated.json` from the current definition. Change only the intended TLS fields. Preserve unrelated fields, including peering, transparent proxy, HTTP, and Enterprise partition settings.
+1. Write the complete updated entry using check-and-set (CAS). Replace `MODIFY_INDEX` with the index from the read:
+
+   ```shell-session
+   $ consul config write -cas -modify-index=MODIFY_INDEX mesh-updated.json
+   ```
+
+1. If CAS fails, read the entry again and reapply your changes to that version. Do not retry with a stale definition or omit CAS to bypass the conflict.
+1. Read the entry again and confirm that proxies accept the resulting configuration.
+
+A write replaces the entire configuration entry; CAS detects concurrent changes but does not merge omitted fields. Refer to [`consul config write`](/consul/commands/config/write) or the [configuration entries API](/consul/api-docs/config).
+
+</Tab>
+<Tab heading="Kubernetes-managed configuration">
+
+1. Edit the existing `Mesh` source manifest, preserving metadata, scope, and unrelated `spec` fields. Set both `spec.tls.incoming` and `spec.tls.outgoing` to the [hybrid configuration](/consul/docs/secure/encryption/post-quantum#configure-mesh-tls).
+1. Apply the complete manifest through the existing controller or GitOps workflow. For a directly managed manifest:
+
+   ```shell-session
+   $ kubectl apply --dry-run=server -f MESH_MANIFEST.yaml
+   $ kubectl apply -f MESH_MANIFEST.yaml
+   ```
+
+1. Inspect the resource's status and controller events, then the corresponding Consul mesh entry and active proxy configuration. Admission success alone does not prove successful reconciliation or Envoy acceptance.
+
+Do not update a Kubernetes-owned mesh entry directly with the Consul CLI or API. The controller can overwrite that change.
+
+</Tab>
+</Tabs>
+
+## Enable agent key exchange
+
+Migrate agent interfaces separately from mesh policy. Set `tls_ecdh_curves` to the string `"X25519MLKEM768,X25519"` and the intended minimum to `"TLSv1_3"`. Review every protocol override and remove incompatible explicit TLS 1.2 cipher-suite settings. Refer to the [agent configuration examples](/consul/docs/secure/encryption/post-quantum#configure-agent-tls).
+
+<Tabs>
+<Tab heading="Agent configuration files">
+
+1. Merge the TLS fields into the authoritative agent configuration without replacing CA, certificate, key, or verification settings.
+1. Validate the complete configuration directory:
+
+   ```shell-session
+   $ consul validate CONFIG_DIRECTORY
+   ```
+
+1. Deploy the configuration to a controlled set of agents whose required peers are compatible. Reload each affected local agent through authenticated CLI access:
+
+   ```shell-session
+   $ consul reload
+   ```
+
+1. Inspect reload errors and agent health before expanding the rollout. Follow your deployment's controlled restart procedure if a restart is needed; preserve server quorum.
+
+Reload updates the TLS configuration for new handshakes. It does not renegotiate established connections or guarantee that every connection pool reconnects immediately.
+
+</Tab>
+<Tab heading="Helm-managed agents">
+
+1. Merge the agent JSON into `server.extraConfig` in your full values file. Preserve existing extra configuration and protocol-specific overrides.
+1. If the deployment actually runs client agents, make the corresponding change in `client.extraConfig`. Consul Dataplane is not a client agent and does not use that setting.
+1. Apply the values through your Helm or GitOps workflow, pinning the installed chart and image versions for this configuration change:
+
+   ```shell-session
+   $ helm upgrade RELEASE_NAME hashicorp/consul \
+     --namespace NAMESPACE \
+     --version CHART_VERSION \
+     --values VALUES_FILE.yaml
+   ```
+
+1. Follow the [Kubernetes rolling update procedure](/consul/docs/upgrade/k8s), including server update-partition controls where configured. Confirm that each affected agent actually reloads or restarts with the changed configuration before advancing.
+
+</Tab>
+</Tabs>
+
+## Verify and expand the rollout
+
+Use observed negotiation and deployment health to decide whether to continue.
+
+1. Confirm the desired mesh configuration is active in the affected proxies, with no rejected updates.
+1. Establish fresh, full TLS handshakes on representative mesh and agent paths. Use [negotiated-group verification](/consul/docs/secure/encryption/post-quantum#verify-negotiated-key-exchange), not only successful requests or TLS 1.3.
+1. Confirm hybrid negotiation where required, and separately exercise the intended classical fallback. Do not report fallback connections as post-quantum protected.
+1. Compare errors, latency, service health, agent membership, and quorum against your acceptance criteria. Pause and [roll back the configuration](/consul/docs/secure/encryption/rollback-post-quantum) if the criteria fail.
+1. Expand to the next deployment scope only after the current scope meets those criteria. Account for long-lived connections and controlled draining; do not assume a zero-downtime transition.
+
+The migration retains `X25519` fallback. A hybrid-only list removes that fallback and requires every affected peer to support the hybrid group. Treat hybrid-only enforcement as a separate policy decision after compatibility testing, not a required migration step.
+
+## Next steps
+
+- Review the [`mesh` TLS fields](/consul/docs/reference/config-entry/mesh) and [agent TLS fields](/consul/docs/reference/agent/configuration-file/tls).
+- Keep the [configuration rollback procedure](/consul/docs/secure/encryption/rollback-post-quantum) with your deployment runbook.
