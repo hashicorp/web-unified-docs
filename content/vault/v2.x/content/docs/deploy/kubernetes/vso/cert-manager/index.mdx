@@ -1,0 +1,260 @@
+---
+layout: docs
+page_title: Issue certificates with cert-manager
+description: >-
+  Use the Vault Secrets Operator as a cert-manager external issuer to sign
+  Kubernetes certificate requests with the Vault PKI secrets engine.
+---
+
+# Issue certificates with cert-manager
+
+@include 'alerts/enterprise-only.mdx'
+
+The Vault Secrets Operator can act as an
+[external issuer](https://cert-manager.io/docs/configuration/external/) for
+[cert-manager](https://cert-manager.io/). Applications request certificates with
+standard cert-manager `Certificate` resources, and the Vault Secrets Operator
+signs each request with the Vault [PKI secrets engine](/vault/docs/secrets/pki).
+
+The Vault Secrets Operator authenticates to Vault with the same
+[`VaultConnection`](/vault/docs/deploy/kubernetes/vso/api-reference#vaultconnection)
+and [`VaultAuth`](/vault/docs/deploy/kubernetes/vso/api-reference#vaultauth)
+resources that it uses to sync secrets, so you manage Vault access for secrets
+and certificates in one place.
+
+To configure the integration, refer to
+[Set up the cert-manager issuer](/vault/docs/deploy/kubernetes/vso/cert-manager/setup).
+To move existing certificates from the Vault issuer built into cert-manager,
+refer to
+[Migrate from the cert-manager Vault issuer](/vault/docs/deploy/kubernetes/vso/cert-manager/migrate).
+
+<Note title="Requires Vault Enterprise">
+
+The cert-manager issuers require [Vault Enterprise](/vault/docs/enterprise).
+The Vault policy attached to the `VaultAuth` role must grant `read` on
+`sys/license/status` so that the Vault Secrets Operator can verify the Vault
+license. Otherwise, the issuer does not become ready.
+
+</Note>
+
+## Introduction
+
+cert-manager manages the certificate lifecycle in Kubernetes. It generates
+private keys, creates certificate signing requests (CSRs), stores the issued
+certificates in Kubernetes Secrets, and renews certificates before they expire.
+cert-manager delegates the signing step to an issuer.
+
+The Vault Secrets Operator provides two issuer resources in the
+`secrets.hashicorp.com` API group: `VaultIssuer` and `VaultClusterIssuer`. When
+a `Certificate` references one of these issuers, the Vault Secrets Operator
+sends the CSR to the `sign` endpoint of a Vault PKI role and returns the signed
+certificate to cert-manager.
+
+cert-manager generates the private key in the cluster. Vault only receives the
+CSR, so the private key never leaves Kubernetes.
+
+## Certificate issuance workflow
+
+The following sequence describes how a certificate moves from request to
+Kubernetes Secret:
+
+1. You create a cert-manager `Certificate` resource with an `issuerRef` that
+   names a `VaultIssuer` or `VaultClusterIssuer`.
+1. cert-manager generates a private key and creates a `CertificateRequest`
+   resource that contains the CSR.
+1. An approver approves or denies the `CertificateRequest`. The Vault Secrets
+   Operator does not sign a request until it is approved. Refer to
+   [Certificate request approval](#certificate-request-approval) for details.
+1. The Vault Secrets Operator confirms that the issuer is ready, authenticates
+   to Vault, and sends the CSR to the PKI `sign` endpoint.
+1. The Vault Secrets Operator writes the signed certificate and CA certificate
+   to the `CertificateRequest` status.
+1. cert-manager writes the private key, certificate, and CA certificate to the
+   Kubernetes Secret named in the `Certificate` resource.
+1. Before the certificate expires, cert-manager creates a new
+   `CertificateRequest` and the workflow repeats.
+
+The Vault Secrets Operator only processes `CertificateRequest` resources whose
+`spec.issuerRef.group` is `secrets.hashicorp.com`. It ignores requests for
+other issuers.
+
+## Issuer types
+
+The Vault Secrets Operator provides a namespaced issuer and a cluster-scoped
+issuer. Both issuers use the same `spec` fields.
+
+| | `VaultIssuer` | `VaultClusterIssuer` |
+| --- | --- | --- |
+| Scope | Namespaced | Cluster |
+| Certificate requests it serves | Requests in the same namespace as the issuer | Requests in any namespace that the referenced `VaultAuth` allows |
+| Default namespace for a `vaultAuthRef` without a namespace prefix | The issuer's namespace | The Vault Secrets Operator namespace |
+| Namespace of the Kubernetes service account used for Vault authentication | The issuer's namespace | The `VaultAuth` namespace |
+| Typical use | One team or application owns its own PKI role | A platform team shares a PKI role across namespaces |
+
+Each issuer has the following `spec` fields:
+
+- `mount` (required) - The path of the PKI secrets engine mount in Vault, for
+  example `pki`.
+- `role` (required) - The name of the PKI role that signs certificates.
+- `issuerRef` - The name or ID of a specific
+  [PKI issuer](/vault/api-docs/secret/pki#notice-about-new-multi-issuer-functionality)
+  in the mount, or `default` to target the mount's default issuer. When you omit
+  this field, Vault uses the default issuer.
+- `vaultAuthRef` - The `VaultAuth` resource to authenticate with, in the form
+  `name` or `namespace/name`. When you omit this field, the issuer uses the
+  `default` `VaultAuth` in the Vault Secrets Operator namespace.
+- `namespace` - The Vault Enterprise namespace of the PKI mount. When you omit
+  this field, the issuer uses the namespace from the `VaultAuth` resource.
+- `excludeCNFromSans` - When `true`, Vault does not add the certificate common
+  name to the subject alternative names (SANs). Defaults to `true`.
+
+The Vault Secrets Operator derives the Vault signing path from `mount`, `role`,
+and `issuerRef`:
+
+| `issuerRef` | Signing path |
+| --- | --- |
+| Not set | `<mount>/sign/<role>` |
+| Set | `<mount>/issuer/<issuerRef>/sign/<role>` |
+
+Refer to the [API reference](/vault/docs/deploy/kubernetes/vso/api-reference)
+for the complete resource schema.
+
+## Vault authentication and namespace access
+
+Each issuer authenticates to Vault with the `VaultAuth` resource that its
+`vaultAuthRef` field names. You can use any
+[authentication method](/vault/docs/deploy/kubernetes/vso/sources/vault/auth)
+that `VaultAuth` supports, and you can inherit settings from a
+`VaultAuthGlobal` resource.
+
+The `allowedNamespaces` field on the `VaultAuth` resource controls which
+namespaces can use it. A namespace can always use a `VaultAuth` in the same
+namespace, and any namespace can use the `default` `VaultAuth` in the Vault
+Secrets Operator namespace.
+
+The Vault Secrets Operator applies the `allowedNamespaces` check differently for
+each issuer type:
+
+- **`VaultIssuer`**: The `VaultAuth` must allow the issuer's namespace. If the
+  check fails, the issuer does not become ready.
+- **`VaultClusterIssuer`**: The issuer does not have a namespace, so the Vault
+  Secrets Operator checks the namespace of each `CertificateRequest` at signing
+  time. The `VaultAuth` must allow every namespace that requests certificates
+  from the issuer. Set `allowedNamespaces` to a list of namespaces, or to
+  `["*"]` to allow all namespaces. Requests from namespaces that the
+  `VaultAuth` does not allow stay pending.
+
+We recommend that you create a dedicated `VaultAuth` and Vault role for each
+PKI use case. When you share a `VaultAuth` with other Vault Secrets Operator
+resources, widening `allowedNamespaces` for certificates also widens access to
+those secrets.
+
+## Certificate request approval
+
+cert-manager requires every `CertificateRequest` to be approved before an issuer
+signs it. cert-manager's built-in approver only approves requests for external
+issuers when its service account has the `approve` verb on the issuer's signer
+resources. cert-manager does not grant this permission for the
+`secrets.hashicorp.com` API group.
+
+You can approve requests for the Vault Secrets Operator issuers in the following
+ways:
+
+- **Built-in approver**: Set `certManager.approverRBAC.enabled=true` in the
+  Vault Secrets Operator Helm chart. The chart grants the cert-manager
+  controller's service account `approve` on the
+  `vaultissuers.secrets.hashicorp.com/*` and
+  `vaultclusterissuers.secrets.hashicorp.com/*` signers. cert-manager then
+  approves every request for these issuers, and your Kubernetes RBAC rules for
+  `Certificate` resources and your Vault PKI role constraints are the only
+  limits on what cert-manager requests.
+- **Policy-based approval**: Install
+  [approver-policy](https://cert-manager.io/docs/policy/approval/approver-policy/)
+  and grant its service account `approve` on the same signers. Use
+  `CertificateRequestPolicy` resources to restrict which requests each
+  namespace can make.
+- **Manual approval**: Approve individual requests with the
+  [`cmctl approve`](https://cert-manager.io/docs/reference/cmctl/) command. Use
+  manual approval for testing only.
+
+When an approver denies a request, the Vault Secrets Operator marks the
+`CertificateRequest` as failed with the `Denied` reason and does not contact
+Vault.
+
+## Certificate parameters
+
+The Vault Secrets Operator sends the CSR and the following parameters to the
+Vault PKI `sign` endpoint. Refer to
+[Sign certificate](/vault/api-docs/secret/pki#sign-certificate) in the PKI API
+documentation for details about each parameter.
+
+| Vault parameter | Value |
+| --- | --- |
+| `csr` | The PEM-encoded CSR from the `CertificateRequest` |
+| `common_name` | The common name from the CSR |
+| `alt_names` | The DNS names from the CSR |
+| `ip_sans` | The IP addresses from the CSR |
+| `uri_sans` | The URIs from the CSR |
+| `exclude_cn_from_sans` | The issuer's `excludeCNFromSans` value |
+| `ttl` | The `Certificate` `spec.duration` value. Sent only when `spec.duration` is set |
+
+The Vault PKI role has the final say over the issued certificate. For example,
+the role's `allowed_domains`, `key_type`, and `max_ttl` settings can reject a
+request or shorten the certificate lifetime. When the `Certificate` does not
+set `spec.duration`, the role's `ttl` setting determines the lifetime.
+
+When `excludeCNFromSans` is `true` and the `Certificate` sets a common name
+without any SANs, the issued certificate has no SANs. Many TLS clients reject
+certificates without SANs. The Vault Secrets Operator records a
+`SANlessCertificate` warning event on the `CertificateRequest` when this
+happens. To avoid it, add the common name to `spec.dnsNames` in the
+`Certificate`, or set `excludeCNFromSans` to `false` on the issuer.
+
+The Vault Secrets Operator builds the certificate chain from the Vault response
+as follows:
+
+- The `tls.crt` key in the Kubernetes Secret contains the signed certificate
+  followed by any intermediate CA certificates. It does not contain the root CA
+  certificate.
+- The `ca.crt` key contains the top-most CA certificate in the chain that Vault
+  returns. This is the root CA certificate when Vault includes the root in the
+  chain.
+
+## Issuer status
+
+Each issuer reports `Ready` and `Healthy` conditions in its status. The
+`status.error` field contains a message that describes the most recent failure.
+The following table describes the condition reasons:
+
+| Reason | Description |
+| --- | --- |
+| `Accepted` | The issuer authenticated to Vault and is ready to sign certificates. |
+| `InvalidResourceRef` | The `vaultAuthRef` value is invalid or the `VaultAuth` does not exist. |
+| `VaultClientError` | The Vault Secrets Operator could not authenticate to Vault. |
+| `VaultEnterpriseRequired` | The Vault server is not Vault Enterprise. |
+| `VaultEnterpriseCheckForbidden` | The Vault policy does not grant `read` on `sys/license/status`. |
+
+The Vault Secrets Operator re-evaluates an issuer when the issuer, its
+`VaultAuth`, or its `VaultConnection` changes, and when its Vault token is
+renewed or replaced. A `CertificateRequest` that references an issuer that is
+not ready stays pending until the issuer becomes ready.
+
+## cert-manager installation order
+
+You can install cert-manager before or after the Vault Secrets Operator. When
+the cert-manager `CertificateRequest` API is not present, the Vault Secrets
+Operator waits for it and starts processing certificate requests after you
+install cert-manager. You do not need to restart the Vault Secrets Operator.
+
+## Telemetry
+
+The Vault Secrets Operator exposes the following Prometheus metrics for the
+issuers, in addition to the metrics described in
+[Vault Secrets Operator telemetry](/vault/docs/deploy/kubernetes/vso/telemetry):
+
+| Metric | Type | Labels | Description |
+| --- | --- | --- | --- |
+| `vso_vault_issuer_ready` | Gauge | `issuer_name`, `issuer_kind`, `issuer_namespace`, `reason` | Issuer readiness. `1` means ready and `0` means not ready. |
+| `vso_vault_issuer_certificate_signing_total` | Counter | `result`, `issuer_name`, `issuer_kind`, `issuer_namespace` | Signing operations. `result` is `issued`, `failed`, or `denied`. |
+| `vso_vault_issuer_certificate_signing_duration_seconds` | Histogram | `issuer_name`, `issuer_kind`, `issuer_namespace`, `pki_mount`, `pki_role` | Duration of each call to the Vault PKI `sign` endpoint. |
+| `vso_vault_issuer_certificaterequest_reconcile_duration_seconds` | Histogram | `issuer_kind`, `result` | Total time to process a `CertificateRequest`. |

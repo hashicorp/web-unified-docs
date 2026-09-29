@@ -1,0 +1,461 @@
+---
+layout: docs
+page_title: Set up the cert-manager issuer
+description: >-
+  Configure the Vault Secrets Operator as a cert-manager external issuer and
+  issue Kubernetes TLS certificates signed by the Vault PKI secrets engine.
+---
+
+# Set up the cert-manager issuer
+
+@include 'alerts/enterprise-only.mdx'
+
+Configure a `VaultIssuer` or `VaultClusterIssuer` resource so that cert-manager
+`Certificate` resources receive certificates signed by the Vault
+[PKI secrets engine](/vault/docs/secrets/pki). Refer to
+[Issue certificates with cert-manager](/vault/docs/deploy/kubernetes/vso/cert-manager)
+to learn how the issuers work.
+
+The examples on this page use the following names. Replace them with values
+that match your environment:
+
+- `app` - The Kubernetes namespace where your application requests certificates.
+- `vault-secrets-operator` - The Kubernetes namespace where the Vault Secrets
+  Operator runs.
+- `pki` - The Vault PKI secrets engine mount path.
+- `example-dot-com` - The Vault PKI role that signs certificates.
+
+## Before you start
+
+- **Use Vault Enterprise**. The issuers only work with a licensed Vault
+  Enterprise server.
+
+- **Configure the [PKI secrets engine](/vault/docs/secrets/pki)** with at least
+  one issuer. The examples on this page use a PKI mount at `pki`. To create a
+  certificate authority in Vault, refer to
+  [Quick start: root CA setup](/vault/docs/secrets/pki/quick-start-root-ca) and
+  [Quick start: intermediate CA setup](/vault/docs/secrets/pki/quick-start-intermediate-ca).
+
+- **Install [cert-manager](https://cert-manager.io/docs/installation/)** in your
+  Kubernetes cluster.
+
+- **Configure a Vault auth method for Kubernetes workloads**. The examples on
+  this page use the [Kubernetes auth method](/vault/docs/auth/kubernetes)
+  mounted at `kubernetes`. Refer to
+  [Vault authentication in detail](/vault/docs/deploy/kubernetes/vso/sources/vault/auth)
+  for the other methods that the Vault Secrets Operator supports.
+
+- **Check your permissions**. You must have permission to:
+  - Create Vault policies, auth roles, and PKI roles.
+  - Create namespaced and cluster-scoped resources in Kubernetes.
+
+- **Optional: install [`cmctl`](https://cert-manager.io/docs/reference/cmctl/)**.
+  The cert-manager CLI lets you approve certificate requests manually and
+  inspect certificate status.
+
+## Step 1: Create a PKI role
+
+Create a PKI role that defines which certificates Vault can sign for the issuer.
+The role controls which names Vault allows, the key types Vault accepts, and
+the certificate lifetime:
+
+```shell-session
+$ vault write pki/roles/example-dot-com \
+    allowed_domains=example.com \
+    allow_subdomains=true \
+    key_type=any \
+    ttl=24h \
+    max_ttl=72h
+```
+
+The Vault PKI role has the final say over each certificate. The role's `ttl`
+applies when a `Certificate` does not set `spec.duration`, and `max_ttl` limits
+the lifetime of every certificate. The `key_type=any` setting lets the role
+sign CSRs for any key algorithm that cert-manager generates. Refer to
+[Create/Update role](/vault/api-docs/secret/pki#create-update-role) for all role
+parameters.
+
+## Step 2: Create a Vault policy and auth role
+
+The Vault Secrets Operator authenticates to Vault as itself, not as
+cert-manager. Create a policy and an auth role for the Vault Secrets Operator to
+use when it signs certificates.
+
+1. Create a policy that grants access to the PKI `sign` endpoint and to the
+   Vault Enterprise license status endpoint:
+
+   ```shell-session
+   $ vault policy write pki-issuer - <<EOF
+   path "pki/sign/example-dot-com" {
+     capabilities = ["create", "update"]
+   }
+
+   path "sys/license/status" {
+     capabilities = ["read"]
+   }
+   EOF
+   ```
+
+   When you set `issuerRef` on the issuer, the Vault Secrets Operator uses the
+   `pki/issuer/<issuerRef>/sign/<role>` path instead. Grant the path that
+   matches your issuer configuration, for example
+   `pki/issuer/example-issuer/sign/example-dot-com`.
+
+1. Create a Kubernetes auth role that binds the policy to a service account.
+   The namespace of the service account depends on the issuer type:
+
+   <Tabs>
+
+   <Tab heading="VaultIssuer" group="vaultissuer">
+
+   A `VaultIssuer` authenticates with a service account in the issuer's
+   namespace:
+
+   ```shell-session
+   $ vault write auth/kubernetes/role/pki-issuer \
+       bound_service_account_names=default \
+       bound_service_account_namespaces=app \
+       token_policies=pki-issuer \
+       audience=vault \
+       token_ttl=1h
+   ```
+
+   </Tab>
+
+   <Tab heading="VaultClusterIssuer" group="vaultclusterissuer">
+
+   A `VaultClusterIssuer` authenticates with a service account in the namespace
+   of its `VaultAuth` resource. The examples on this page create that
+   `VaultAuth` in the Vault Secrets Operator namespace:
+
+   ```shell-session
+   $ vault write auth/kubernetes/role/pki-issuer \
+       bound_service_account_names=default \
+       bound_service_account_namespaces=vault-secrets-operator \
+       token_policies=pki-issuer \
+       audience=vault \
+       token_ttl=1h
+   ```
+
+   </Tab>
+
+   </Tabs>
+
+## Step 3: Install the Vault Secrets Operator with approval enabled
+
+cert-manager must approve each `CertificateRequest` before the Vault Secrets
+Operator signs it. Set `certManager.approverRBAC.enabled=true` to let the
+cert-manager built-in approver approve requests for the Vault Secrets Operator
+issuers:
+
+```shell-session
+$ helm install                                  \
+    --create-namespace                          \
+    --namespace vault-secrets-operator          \
+    --set certManager.approverRBAC.enabled=true \
+    vault-secrets-operator                      \
+    hashicorp/vault-secrets-operator
+```
+
+When you enable this setting, cert-manager approves every request for the
+Vault Secrets Operator issuers. Use
+[approver-policy](https://cert-manager.io/docs/policy/approval/approver-policy/)
+instead when you need to restrict which certificates each namespace can
+request. Refer to
+[Certificate request approval](/vault/docs/deploy/kubernetes/vso/cert-manager#certificate-request-approval)
+for the available approval options.
+
+If the cert-manager controller runs with a service account other than
+`cert-manager` in the `cert-manager` namespace, also set
+`certManager.approverRBAC.serviceAccountName` and
+`certManager.approverRBAC.serviceAccountNamespace`.
+
+<Tip>
+
+To enable the issuers on an existing installation, update the Vault Secrets
+Operator CRDs first. Then run `helm upgrade` with the same `--set` flag. Refer
+to [Updating CRDs when using Helm](/vault/docs/deploy/kubernetes/vso/installation#updating-crds-when-using-helm)
+and [Upgrading using Helm](/vault/docs/deploy/kubernetes/vso/installation#upgrading-using-helm).
+
+</Tip>
+
+## Step 4: Create the connection and auth resources
+
+Create a `VaultConnection` resource that points to your Vault server, and a
+`VaultAuth` resource that uses the auth role from
+[Step 2](#step-2-create-a-vault-policy-and-auth-role).
+
+<Tabs>
+
+<Tab heading="VaultIssuer" group="vaultissuer">
+
+Create the resources in the application namespace:
+
+```yaml
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultConnection
+metadata:
+  name: vault-connection
+  namespace: app
+spec:
+  address: https://vault.example.com:8200
+---
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultAuth
+metadata:
+  name: pki-issuer
+  namespace: app
+spec:
+  vaultConnectionRef: vault-connection
+  method: kubernetes
+  mount: kubernetes
+  kubernetes:
+    role: pki-issuer
+    serviceAccount: default
+    audiences:
+      - vault
+```
+
+</Tab>
+
+<Tab heading="VaultClusterIssuer" group="vaultclusterissuer">
+
+Create the resources in the Vault Secrets Operator namespace. Set
+`allowedNamespaces` to the namespaces that can request certificates from the
+cluster issuer, or to `["*"]` to allow all namespaces:
+
+```yaml
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultConnection
+metadata:
+  name: vault-connection
+  namespace: vault-secrets-operator
+spec:
+  address: https://vault.example.com:8200
+---
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultAuth
+metadata:
+  name: pki-issuer
+  namespace: vault-secrets-operator
+spec:
+  vaultConnectionRef: vault-connection
+  method: kubernetes
+  mount: kubernetes
+  allowedNamespaces:
+    - app
+  kubernetes:
+    role: pki-issuer
+    serviceAccount: default
+    audiences:
+      - vault
+```
+
+We recommend that you use a dedicated `VaultAuth` for the cluster issuer. When
+you share a `VaultAuth` with other Vault Secrets Operator resources, the
+`allowedNamespaces` list also grants those namespaces access to the other
+resources.
+
+</Tab>
+
+</Tabs>
+
+Save the resources to a file named `vault-auth.yaml`. Apply the file and
+confirm that the `READY` column shows `True` for the `VaultAuth`:
+
+```shell-session
+$ kubectl apply --filename vault-auth.yaml
+
+$ kubectl get vaultauth --all-namespaces
+```
+
+Refer to the
+[`VaultConnection`](/vault/docs/deploy/kubernetes/vso/api-reference#vaultconnection)
+and [`VaultAuth`](/vault/docs/deploy/kubernetes/vso/api-reference#vaultauth) API
+reference for TLS settings and other authentication methods.
+
+## Step 5: Create the issuer
+
+Create the issuer that references the `VaultAuth` resource and the PKI role.
+
+<Tabs>
+
+<Tab heading="VaultIssuer" group="vaultissuer">
+
+```yaml
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultIssuer
+metadata:
+  name: vault-issuer
+  namespace: app
+spec:
+  vaultAuthRef: pki-issuer
+  mount: pki
+  role: example-dot-com
+```
+
+</Tab>
+
+<Tab heading="VaultClusterIssuer" group="vaultclusterissuer">
+
+A `VaultClusterIssuer` resolves a `vaultAuthRef` without a namespace prefix in
+the Vault Secrets Operator namespace. Use the `namespace/name` form to make the
+reference explicit:
+
+```yaml
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultClusterIssuer
+metadata:
+  name: vault-cluster-issuer
+spec:
+  vaultAuthRef: vault-secrets-operator/pki-issuer
+  mount: pki
+  role: example-dot-com
+```
+
+</Tab>
+
+</Tabs>
+
+You can also set the following optional fields:
+
+- `issuerRef` - Signs certificates with a specific issuer in the PKI mount.
+- `namespace` - Sets the Vault Enterprise namespace of the PKI mount.
+- `excludeCNFromSans` - Set to `false` to let Vault add the common name to the
+  certificate SANs. Defaults to `true`.
+
+Save the issuer to a file named `vault-issuer.yaml`. Apply the file and wait
+until the `READY` column shows `True`:
+
+```shell-session
+$ kubectl apply --filename vault-issuer.yaml
+
+$ kubectl get vaultissuer --namespace app
+
+$ kubectl get vaultclusterissuer
+```
+
+When the issuer does not become ready, inspect the `status.error` field and the
+issuer events. Refer to
+[Troubleshoot the cert-manager issuer](/vault/docs/deploy/kubernetes/vso/cert-manager/troubleshoot)
+for common causes.
+
+## Step 6: Request a certificate
+
+Create a cert-manager `Certificate` resource in the application namespace. Set
+`issuerRef.group` to `secrets.hashicorp.com` and `issuerRef.kind` to the issuer
+type:
+
+<Tabs>
+
+<Tab heading="VaultIssuer" group="vaultissuer">
+
+```yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: web
+  namespace: app
+spec:
+  secretName: web-tls
+  commonName: web.example.com
+  dnsNames:
+    - web.example.com
+  duration: 24h
+  renewBefore: 8h
+  issuerRef:
+    group: secrets.hashicorp.com
+    kind: VaultIssuer
+    name: vault-issuer
+```
+
+</Tab>
+
+<Tab heading="VaultClusterIssuer" group="vaultclusterissuer">
+
+```yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: web
+  namespace: app
+spec:
+  secretName: web-tls
+  commonName: web.example.com
+  dnsNames:
+    - web.example.com
+  duration: 24h
+  renewBefore: 8h
+  issuerRef:
+    group: secrets.hashicorp.com
+    kind: VaultClusterIssuer
+    name: vault-cluster-issuer
+```
+
+</Tab>
+
+</Tabs>
+
+Include the common name in `dnsNames`. The issuers exclude the common name from
+the certificate SANs by default, and many TLS clients reject certificates
+without SANs.
+
+Save the certificate to a file named `certificate.yaml` and apply it:
+
+```shell-session
+$ kubectl apply --filename certificate.yaml
+```
+
+cert-manager creates a `CertificateRequest`, the approver approves it, and the
+Vault Secrets Operator signs it. When you do not use automatic approval, approve
+the request with `cmctl`:
+
+```shell-session
+$ cmctl approve --namespace app <CERTIFICATE_REQUEST_NAME>
+```
+
+## Step 7: Verify the certificate
+
+1. Confirm that the `CertificateRequest` is approved and ready. The `APPROVED`
+   and `READY` columns show `True`:
+
+   ```shell-session
+   $ kubectl get certificaterequest --namespace app
+   ```
+
+1. Confirm that the `Certificate` is ready:
+
+   ```shell-session
+   $ kubectl get certificate web --namespace app
+   ```
+
+1. Inspect the issued certificate in the Kubernetes Secret:
+
+   ```shell-session
+   $ kubectl get secret web-tls --namespace app \
+       --output jsonpath='{.data.tls\.crt}' \
+       | base64 --decode \
+       | openssl x509 -noout -subject -issuer -dates -ext subjectAltName
+   ```
+
+   The subject alternative names include `web.example.com`, and the validity
+   period matches the `spec.duration` value, up to the role's `max_ttl`.
+
+1. Confirm that the Vault Secrets Operator signed the certificate. The
+   `CertificateIssued` event has the message
+   `Certificate issued successfully`:
+
+   ```shell-session
+   $ kubectl get events --namespace app \
+       --field-selector involvedObject.kind=CertificateRequest
+   ```
+
+cert-manager renews the certificate before it expires and updates the
+`web-tls` Secret. Your application must reload the Secret to use the renewed
+certificate.
+
+## Next steps
+
+- [Migrate from the cert-manager Vault issuer](/vault/docs/deploy/kubernetes/vso/cert-manager/migrate)
+- [Troubleshoot the cert-manager issuer](/vault/docs/deploy/kubernetes/vso/cert-manager/troubleshoot)
+- [cert-manager `Certificate` resource documentation](https://cert-manager.io/docs/usage/certificate/)
