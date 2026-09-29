@@ -5,7 +5,7 @@ description: >-
   Configure Vault Enterprise as a SCIM 2.0 server so identity platforms can provision and manage users and groups in Vault.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2026-04-15T00:15:22.000Z
-last_modified: 2026-04-15T00:15:22.000Z
+last_modified: 2026-09-29T20:07:21.000Z
 # END AUTO GENERATED METADATA
 ---
 
@@ -27,9 +27,16 @@ Vault exposes SCIM through the identity secrets engine.
   mount-bound [entity aliases](/vault/docs/concepts/identity#mount-bound-aliases).
 - SCIM groups map to Vault
   [internal identity groups](/vault/docs/concepts/identity#external-vs-internal-groups).
-- A SCIM client can only see and manage the users and groups it created.
+- A SCIM client can manage the users and groups it created. It can read
+  unmanaged groups, but Vault filters their members to identities owned by the
+  client.
 - SCIM does not manage Vault policies.
 
+The SCIM interface is a thin wrapper over the standard Vault identity APIs. SCIM
+requests use the same request serialization and write to the same identity
+store as other identity requests. Configure rate limits for the SCIM client and
+its identity provider (IdP) so a provisioning burst cannot overload the
+identity store.
 
 ## Before you start
 
@@ -44,42 +51,9 @@ Some SCIM clients only support a static bearer token. In those cases, token
 auth usually gives you the simplest setup because you can mint a token tied to
 an entity alias and pass that token directly to the connector.
 
-## Activate SCIM
-
-Vault gates SCIM functionality behind an activation flag. Vault returns errors for SCIM
-configuration and protocol requests until you activate the feature.
-
-<Tabs>
-
-<Tab heading="CLI" group="cli">
-
-```shell-session
-$ vault write -f sys/activation-flags/enable-scim/activate
-```
-
-</Tab>
-
-<Tab heading="API" group="api">
-
-```shell-session
-$ curl \
-    --request PUT \
-    --header "X-Vault-Token: ..." \
-    http://127.0.0.1:8200/v1/sys/activation-flags/enable-scim/activate
-```
-
-</Tab>
-
-</Tabs>
-
-Activating the SCIM flag is a one-time action.
-
-Refer to the [activation flags API](/vault/api-docs/system/activation-flags)
-for details.
-
 ## SCIM endpoints and namespaces
 
-After activation, Vault exposes SCIM endpoints under the following endpoints:
+Vault exposes SCIM endpoints under the following endpoints:
 
 - `/v1/identity/scim/v2`: SCIM base path for `/Users`, `/Groups`, `/ServiceProviderConfig`, `/Schemas` and `/ResourceTypes`.
 - `/v1/identity/scim/client` (and `/clients`): management of Vault SCIM clients.
@@ -103,6 +77,16 @@ configuration consists of these fields:
   requests for that client.
 - `alias_mount_accessor`: Optional auth mount accessor. When set, Vault also
   creates a mount-bound entity alias for each SCIM user.
+- `default_schema_version`: Optional Vault extension schema version. New
+  clients default to `2.2`. Set this to `2.0` to keep using the original
+  extension for backward compatibility. Clients created before this option was
+  introduced continue to use `2.0`.
+- `allow_user_adoption` and `allow_group_adoption`: Optional flags that allow
+  the client to adopt eligible existing entities and groups. Both default to
+  `false`.
+- `max_active_tokens` and `max_token_ttl`: Limits for
+  [`scim` tokens](#scim-token-type). `max_active_tokens` defaults to `2`, and
+  `max_token_ttl` of `0` uses the cluster default.
 
 Vault enforces these rules:
 
@@ -114,6 +98,50 @@ Vault enforces these rules:
 - A SCIM client can only manage the users and groups it created.
 
 Vault limits `alias_mount_accessor` to non-local auth mounts.
+
+## Extension schemas and compatibility
+
+Vault supports the following Vault-specific SCIM extension schemas:
+
+| Resource | Schema | Attributes |
+| --- | --- | --- |
+| User | `urn:ietf:params:scim:schemas:extension:vault:2.2:User` | `entityName`, `aliases`, and `metadata` |
+| Group | `urn:ietf:params:scim:schemas:extension:vault:2.2:Group` | `metadata` |
+| User (deprecated) | `urn:ietf:params:scim:schemas:extension:vault:2.0:Metadata` | `items` metadata array |
+
+The 2.2 schemas evolve additively. Vault introduces another schema version only
+when it must make an incompatible change to an existing attribute.
+
+The deprecated 2.0 metadata schema remains supported so existing connectors
+that were built against it keep working. Do not include it with the 2.2 User
+extension in the same request. When a request includes either extension
+block, its schema URI must also be present in the request's `schemas` array.
+Vault rejects undeclared extension blocks and requests that include both User
+extensions.
+
+Each SCIM client determines its own extension schema version through
+`default_schema_version`, so different clients in the same namespace can use
+different versions. Vault uses that client's version for every request it makes,
+unless the request declares an extension schema itself.
+
+When you omit `default_schema_version`, newly created clients return 2.2
+extensions and clients created before this setting return 2.0 metadata for
+backward compatibility. Set the client default to `2.0` if a connector still
+depends on the original extension.
+
+The 2.2 User extension supports the following behavior:
+
+- `entityName` lets a client with `alias_mount_accessor` keep the entity name
+  separate from `userName`. Without a primary alias mount, Vault requires the
+  entity name to match `userName`.
+- `aliases` manages secondary entity aliases. Each entry includes
+  `mount_accessor` and `name`. An omitted array preserves managed secondary
+  aliases; an empty array removes them. Vault never removes unmanaged aliases.
+- `metadata` maps key/value pairs to entity metadata. An omitted value on
+  update preserves metadata; an empty array clears it.
+
+The 2.2 Group extension maps `metadata` to group metadata. An omitted
+metadata value preserves metadata and an empty array clears it.
 
 ## Authentication model
 
@@ -194,6 +222,8 @@ $ vault token create \
     -role=example-scim \
     -entity-alias=example-client \
     -policy=scim-client \
+    -type=scim \
+    -orphan \
     -no-default-policy
 ```
 
@@ -201,6 +231,24 @@ Use the returned token value as the bearer token for SCIM requests.
 
 We strongly recommend planning token renewal or rotation around the TTL configured on
 your token auth mount.
+
+### SCIM token type
+
+Use `token_type=scim` when you issue a static token for a SCIM client. A SCIM
+token is associated with the entity that represents the client and Vault limits
+it using that client's `max_active_tokens` and `max_token_ttl` settings.
+
+SCIM tokens must be non-renewable orphan tokens. Vault rejects an issuance
+request when the effective entity is not a SCIM client's
+`access_grant_principal`, the requested TTL exceeds `max_token_ttl`, or the
+client has reached its active-token limit. Revoke an existing token before you
+issue another token when the limit is reached.
+
+Vault restricts a SCIM token to a fixed set of paths: the SCIM protocol
+endpoints under `identity/scim/v2`, and its own
+`auth/token/lookup-self`, `auth/token/renew-self`, `auth/token/revoke-self`,
+and `sys/capabilities-self`. Vault rejects requests to any other path with
+that token, so you cannot use a SCIM token for general Vault API calls.
 
 ## Send SCIM requests
 
@@ -232,6 +280,34 @@ If the SCIM client sets `alias_mount_accessor`, Vault creates a mount-bound
 entity alias for each provisioned user and keeps the alias name aligned with
 the SCIM `userName`.
 
+## Adopt, link, and unlink resources
+
+Use adoption and linking only when you need to bring existing Vault identity
+resources under SCIM management.
+
+- To adopt an entity through `POST /Users`, set `allow_user_adoption=true` on
+  the client. Vault can adopt an unmanaged entity when `userName` matches an
+  existing login alias.
+- To adopt a group through SCIM, set `allow_group_adoption=true` and use a
+  `PUT` or `PATCH` request for an eligible unmanaged group. `POST` creates a
+  new group and does not adopt an existing group.
+- Use the administrative `link-entity` or `link-group` endpoints to associate
+  an existing unmanaged entity or group with a SCIM client. All members of a
+  linked group must already belong to that client.
+- Use `unlink-entity` or `unlink-group` to remove a client's ownership without
+  deleting the resource. Unlinking an entity clears its `externalId` and can
+  require confirmation to make secondary aliases unmanaged or remove group
+  memberships.
+
+SCIM clients can see unmanaged groups, but Vault filters each group's members to
+users owned by the requesting client. `allow_group_adoption` controls whether
+the client can adopt an eligible group with `PUT` or `PATCH`.
+
+After you link or adopt a resource, the owning SCIM client controls its
+SCIM-managed fields. You cannot move a managed resource to a different SCIM
+client. Vault also rejects identity-entity merge requests that involve
+SCIM-managed entities.
+
 ## Supported protocol surface
 
 Vault supports these SCIM areas:
@@ -260,25 +336,54 @@ Vault returns SCIM responses as `application/scim+json`.
   documented fields and operators.
 - Group members must use Vault user resource IDs, not `userName` or
   `externalId`.
-- `externalId` is optional when you create a user and you cannot update it
-  later. Multiple users may share the same `externalId` value.
+- `externalId` is optional when you create a user. If provided, you cannot
+  update it later through SCIM or normal identity API writes while the entity
+  is SCIM-managed. Multiple users may share the same `externalId` value.
 - User `groups` only shows direct memberships in groups managed by the same SCIM
   client.
-- `externalId` is required when you create a user and you cannot update it
-  later.
 - `alias_mount_accessor` is immutable after client creation and remains tied to
   the auth mount strategy you choose for that client.
 
 ## Deleting a SCIM client
 
-Deleting a SCIM client starts an asynchronous cleanup workflow.
+Deleting a SCIM client with managed resources requires an explicit cleanup
+strategy. This requirement is a breaking change from the initial beta
+behavior, which deleted linked resources automatically.
 
-- Vault blocks new SCIM requests for that client.
-- Vault removes the users and groups owned by that client.
-- Cleanup continues in the background until Vault finishes deleting the managed
-  resources and the SCIM client configuration.
+Use `delete-linked-resources=true` to delete the owned entities, aliases, and
+groups, or use `unlink-resources=true` to preserve them and remove their SCIM
+association. These options are mutually exclusive. Include the option as an
+explicit query string when you call the HTTP API:
 
-Review the resources owned by a SCIM client before you delete it.
+```shell-session
+$ curl \
+    --request DELETE \
+    --header "X-Vault-Token: ${VAULT_TOKEN}" \
+    "${VAULT_ADDR}/v1/identity/scim/client/example-client?unlink-resources=true"
+```
+
+Vault blocks new requests for the client and completes the selected cleanup in
+the background. Review the resources owned by a client before you choose a
+strategy.
+
+## Migrate from the initial beta
+
+When you upgrade an existing beta deployment:
+
+1. Update SCIM clients that use the deprecated metadata extension to declare
+   `urn:ietf:params:scim:schemas:extension:vault:2.0:Metadata` in every
+   request that includes its extension block. Migrate to the 2.2 User
+   extension when your IdP supports it.
+1. Do not send the 2.0 metadata and 2.2 User extension schemas together.
+1. Review every client-deletion automation. Add exactly one of
+   `delete-linked-resources=true` or `unlink-resources=true` when the client
+   owns resources.
+1. Review SCIM client names for case-only duplicates. Vault treats client names
+   as case-insensitive.
+1. Configure `default_schema_version` explicitly when a connector requires a
+   stable response schema.
+1. Stop using `identity/entity/merge` for SCIM-managed entities. Vault rejects
+   those requests to preserve SCIM ownership boundaries.
 
 
 ## Related documentation
