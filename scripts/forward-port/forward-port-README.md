@@ -83,29 +83,24 @@ This section is for the tech writers who need to set up and use the forward port
 Forward porting only works within a single repository. You cannot forward port
 a PR from `web-unified-docs` to `web-unified-docs-internal`.
 
-If your upcoming release content is solely created in
-`web-unified-docs-internal`, you should keep track of `web-unified-docs` current
-release PRs merged to `main` after the release branch has been created in the
-internal repo. You must manually forward port those PRs to the
-upcoming release folder after that release has merged to the public repository.
+You can, however, forward port the repo sync PR that keeps the two repositories in sync.
+When you merge a change to `main` in either repository, a bi-directional sync creates a new PR in the other repository with the title "Repo sync".
+HashiBot creates a repo sync PR for each PR you merge.
+It usually happens within 15 minutes.
 
 For example:
 
-- The TFE upcoming 2.1 release branch has already been created in
-`web-unified-docs-internal`.
+- The TFE upcoming 2.1 release branch (`TFE/2.1`) has already been created in `web-unified-docs-internal`.
 - `web-unified-docs` PR 1234 and PR 1235 target the TFE v2.0.x folder.
 - You merge PRs 1234 and 1235 to public `main`.
 
-After the 2.1 release docs merge internally and
-are synced to the public repo, you can follow the manual process to forward port
-each PR:
-
-1. Create a branch to merge to; for example, `aimeeu-tfe-forward`.
-1. For each merged PR (1234 and 1235), run the [manual
+1. Watch the `web-unified-docs-internal` repository for two new open PRs that have the title "Repo sync".
+1. Verify that the repo sync PRs have the same changes that you merged to `web-unified-docs` in PRs 1234 and 1235.
+1. For each repo sync PR, run the [manual
    process](#manual-dispatch-inputs) with the following JSON input:
 
    ```json
-   {"sourceVersionFolder":"v2.0.x","targetProduct":"terraform-enterprise","targetBranch":"aimeeu-tfe-forward","targetVersionFolder":"v2.1.x"} 
+   {"sourceVersionFolder":"v2.0.x","targetProduct":"terraform-enterprise","targetBranch":"TFE/2.1","targetVersionFolder":"v2.1.x"}
    ```
 
 ## Routing config (`forward-port-config.yml`)
@@ -219,7 +214,7 @@ Only files under `content/<targetProduct>/` are ported. Files from other product
 
 - **Added / modified** files are copied from the source version directory to the target version directory.
 - **Deleted** files are deleted from the target version directory.
-- Partial files are included- however we do not extend these changes to files that the partial will fan out to- that happens separately during the build process. That is useful during incremental builds, but not here. 
+- Partial files are included- however we do not extend these changes to files that the partial will fan out to- that happens separately during the build process. That is useful during incremental builds, but not here.
 
 If the PR touched no files under the target product's directory, the workflow posts a comment and fails — there is nothing to port, so no forward-port PR is opened.
 
