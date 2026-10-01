@@ -2,10 +2,8 @@
  * Copyright IBM Corp. 2024, 2026
  * SPDX-License-Identifier: BUSL-1.1
  */
-import { execFile } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
-import { promisify } from 'node:util'
 
 import grayMatter from 'gray-matter'
 import { parse as jsoncParse } from 'jsonc-parser'
@@ -23,7 +21,8 @@ export enum FileType {
 	Asset = 'asset',
 }
 
-const execFileAsync = promisify(execFile)
+const MDX_TRANSFORM_SCRIPT =
+	'../../scripts/prebuild/mdx-transforms/build-mdx-transforms.mjs'
 
 const SELF_URL = process.env.VERCEL_URL
 	? `https://${process.env.VERCEL_URL}`
@@ -39,6 +38,27 @@ const incBuild = process.env.INCREMENTAL_BUILD === 'true'
 const incBuildPRPreview = incBuild && process.env.VERCEL_ENV === 'preview'
 const incBuildLocalDev =
 	incBuild && process.env.NODE_ENV === 'development' && !incBuildPRPreview
+
+const mdxTransformsModule = incBuildLocalDev
+	? import(MDX_TRANSFORM_SCRIPT)
+	: undefined
+
+const versionMetadata = incBuildLocalDev
+	? readFile(
+			path.join(process.cwd(), 'app', 'api', 'versionMetadata.json'),
+			'utf-8',
+		).then((contents: string) => {
+			return JSON.parse(contents)
+		})
+	: undefined
+
+void mdxTransformsModule?.catch((error: unknown) => {
+	console.error('Failed to preload local MDX transforms:', error)
+})
+
+void versionMetadata?.catch((error: unknown) => {
+	console.error('Failed to preload local version metadata:', error)
+})
 
 const EXT_TO_CONTENT_TYPE: Record<string, string> = {
 	'.avif': 'image/avif',
@@ -150,25 +170,21 @@ export const fetchFile = async (
 		} else if (fileType === FileType.Markdown) {
 			// Apply MDX transforms, writing out transformed MDX files to `public`
 			const CWD = process.cwd()
-			const MDX_TRANSFORMS_FILE = path.join(
-				CWD,
-				'scripts',
-				'prebuild',
-				'mdx-transforms',
-				'build-mdx-transforms.mjs',
-			)
 
 			try {
 				// See if the file exist as MDX files can exist in the path of
 				// "doc.mdx" or "doc/index.mdx" and we often have to check for both
 				await readFile(localFilePath)
 
-				const absoluteFilePath = path.join(CWD, localFilePath)
-				await execFileAsync(
-					process.execPath,
-					[MDX_TRANSFORMS_FILE, absoluteFilePath],
-					{ cwd: CWD },
-				)
+				await mdxTransformsModule?.then(async (module: any) => {
+					await module.buildMdxTransforms(
+						path.join(CWD, 'content'),
+						path.join(CWD, 'public', 'content'),
+						await versionMetadata,
+						{ added: [path.join(CWD, localFilePath)], modified: [] },
+						{ exitOnError: false },
+					)
+				})
 			} catch (error) {
 				return Err(
 					`Failed to read local file at path: ${localFilePath}, error: ${error}`,

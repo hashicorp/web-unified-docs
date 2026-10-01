@@ -6,6 +6,9 @@
 /** @type {import("next").NextConfig} */
 const nextConfig = {
 	reactStrictMode: true,
+	outputFileTracingExcludes: {
+		'/*': ['./scripts/prebuild/mdx-transforms/**/*'],
+	},
 	experimental: {
 		useTypeScriptCli: false,
 	},

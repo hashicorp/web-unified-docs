@@ -46,6 +46,7 @@ export async function buildMdxTransforms(
 	outputDir,
 	versionMetadata,
 	changedFiles = null,
+	options = { exitOnError: true },
 ) {
 	const filesToCheck = changedFiles
 		? [...changedFiles.added, ...changedFiles.modified]
@@ -106,6 +107,15 @@ export async function buildMdxTransforms(
 			console.error(`❌ ${error} in file: ${file}`)
 		})
 		console.error('\n❗ Build failed due to errors in MDX transforms.')
+		if (!options.exitOnError) {
+			throw new Error(
+				errors
+					.map(({ error, file }) => {
+						return `${error} in file: ${file}`
+					})
+					.join('\n'),
+			)
+		}
 		process.exit(1)
 	}
 	// Log out that the script has complete

@@ -41,6 +41,9 @@ files.
 - production deploy uses Vercel to build and deploy this repo
 - production deploy triggers a `dev-portal` rebuild through a deploy hook
 - production behavior is defined in `.github/workflows/deploy-udr.yml`
+- `next.config.js` excludes `scripts/prebuild/mdx-transforms/**` from deployed
+  server file traces. The transform remains available during prebuild and is
+  imported at runtime only during local incremental development.
 
 ## Relationship to dev-portal
 
