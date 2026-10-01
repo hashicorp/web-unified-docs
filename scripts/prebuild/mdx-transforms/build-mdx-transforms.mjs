@@ -5,6 +5,8 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { parseArgs } from 'node:util'
 
 // Third-party
 import remark from 'remark'
@@ -183,4 +185,38 @@ async function applyMdxTransforms(entry, versionMetadata = {}, targetDir) {
 	} catch (e) {
 		return { error: String(e).split('\n')[0], file: entry.filePath }
 	}
+}
+
+if (
+	process.argv[1] &&
+	import.meta.url === pathToFileURL(process.argv[1]).href
+) {
+	const { positionals } = parseArgs({ allowPositionals: true, strict: true })
+	if (positionals.length === 0) {
+		throw new Error(
+			'Usage: node scripts/prebuild/mdx-transforms/build-mdx-transforms.mjs <filePath> [filePath...]',
+		)
+	}
+
+	const CWD = process.cwd()
+	const versionMetadata = JSON.parse(
+		fs.readFileSync(
+			path.join(CWD, 'app', 'api', 'versionMetadata.json'),
+			'utf-8',
+		),
+	)
+	void buildMdxTransforms(
+		path.join(CWD, 'content'),
+		path.join(CWD, 'public', 'content'),
+		versionMetadata,
+		{
+			added: positionals.map((filePath) => {
+				return path.resolve(CWD, filePath)
+			}),
+			modified: [],
+		},
+	).catch((error) => {
+		console.error(error)
+		process.exitCode = 1
+	})
 }

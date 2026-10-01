@@ -2,9 +2,10 @@
  * Copyright IBM Corp. 2024, 2026
  * SPDX-License-Identifier: BUSL-1.1
  */
+import { execFile } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { promisify } from 'node:util'
 
 import grayMatter from 'gray-matter'
 import { parse as jsoncParse } from 'jsonc-parser'
@@ -22,6 +23,8 @@ export enum FileType {
 	Asset = 'asset',
 }
 
+const execFileAsync = promisify(execFile)
+
 const SELF_URL = process.env.VERCEL_URL
 	? `https://${process.env.VERCEL_URL}`
 	: `http://localhost:${process.env.UNIFIED_DOCS_PORT}`
@@ -36,48 +39,6 @@ const incBuild = process.env.INCREMENTAL_BUILD === 'true'
 const incBuildPRPreview = incBuild && process.env.VERCEL_ENV === 'preview'
 const incBuildLocalDev =
 	incBuild && process.env.NODE_ENV === 'development' && !incBuildPRPreview
-
-let _buildMdxTransforms:
-	| ((
-			targetDir: string,
-			outputDir: string,
-			versionMetadata: unknown,
-			changedFiles: { added: string[]; modified: string[] } | null,
-	  ) => Promise<void>)
-	| null = null
-let _versionMetadataForTransforms: unknown = null
-
-async function getBuildMdxTransforms() {
-	if (_buildMdxTransforms && _versionMetadataForTransforms) {
-		return {
-			buildMdxTransforms: _buildMdxTransforms,
-			versionMetadata: _versionMetadataForTransforms,
-		}
-	}
-	const CWD = process.cwd()
-	const MDX_TRANSFORMS_FILE = path.join(
-		CWD,
-		'scripts',
-		'prebuild',
-		'mdx-transforms',
-		'build-mdx-transforms.mjs',
-	)
-	const { buildMdxTransforms } = await import(
-		/* webpackIgnore: true */ pathToFileURL(MDX_TRANSFORMS_FILE).href
-	)
-	const versionMetadataPath = path.join(
-		CWD,
-		'app',
-		'api',
-		'versionMetadata.json',
-	)
-	const versionMetadata = JSON.parse(
-		await readFile(versionMetadataPath, 'utf-8'),
-	)
-	_buildMdxTransforms = buildMdxTransforms
-	_versionMetadataForTransforms = versionMetadata
-	return { buildMdxTransforms, versionMetadata }
-}
 
 const EXT_TO_CONTENT_TYPE: Record<string, string> = {
 	'.avif': 'image/avif',
@@ -189,11 +150,13 @@ export const fetchFile = async (
 		} else if (fileType === FileType.Markdown) {
 			// Apply MDX transforms, writing out transformed MDX files to `public`
 			const CWD = process.cwd()
-			const CONTENT_DIR = path.join(CWD, 'content')
-			const CONTENT_DIR_OUT = path.join(CWD, 'public', 'content')
-
-			const { buildMdxTransforms, versionMetadata } =
-				await getBuildMdxTransforms()
+			const MDX_TRANSFORMS_FILE = path.join(
+				CWD,
+				'scripts',
+				'prebuild',
+				'mdx-transforms',
+				'build-mdx-transforms.mjs',
+			)
 
 			try {
 				// See if the file exist as MDX files can exist in the path of
@@ -201,11 +164,10 @@ export const fetchFile = async (
 				await readFile(localFilePath)
 
 				const absoluteFilePath = path.join(CWD, localFilePath)
-				await buildMdxTransforms(
-					CONTENT_DIR,
-					CONTENT_DIR_OUT,
-					versionMetadata,
-					{ added: [absoluteFilePath], modified: [] },
+				await execFileAsync(
+					process.execPath,
+					[MDX_TRANSFORMS_FILE, absoluteFilePath],
+					{ cwd: CWD },
 				)
 			} catch (error) {
 				return Err(
