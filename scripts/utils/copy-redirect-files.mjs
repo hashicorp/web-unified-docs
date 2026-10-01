@@ -8,12 +8,24 @@ import path from 'node:path'
 import { batchPromises } from './batch-promises.mjs'
 import { listFiles } from './list-files.mjs'
 
+import { PRODUCT_CONFIG } from '#productConfig.mjs'
+
 /**
  * Copy all redirects.jsonc files from the source to the destination directory.
  */
-export async function copyRedirectFiles(sourceDir, destDir) {
-	const redirectFiles = (await listFiles(sourceDir)).filter((f) => {
-		return f.endsWith('redirects.jsonc')
+export async function copyRedirectFiles(
+	sourceDir,
+	destDir,
+	changedFiles = null,
+) {
+	const filesToCheck = changedFiles
+		? [...changedFiles.added, ...changedFiles.modified]
+		: await listFiles(sourceDir)
+
+	const redirectFiles = filesToCheck.filter((filePath) => {
+		const relativePath = path.relative(sourceDir, filePath)
+		const repoSlug = relativePath.split('/')[0]
+		return filePath.endsWith('redirects.jsonc') && repoSlug in PRODUCT_CONFIG
 	})
 
 	console.log(`\nCopying Redirects from ${redirectFiles.length} files...`)

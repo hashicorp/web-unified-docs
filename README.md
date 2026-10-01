@@ -7,7 +7,7 @@
 
 ---
 
-The project in this repository, `hashicorp/web-unified-docs`, aims to implement [[DEVDOT-023] Unified Product Documentation Repository](https://docs.google.com/document/d/1p8kOqySttvWUVfn7qiC4wGBR73LMBGMelwLt69pM3FQ/edit). The RFC for this project was intentionally light on implementation details, in order to foster consensus on the broad direction.
+The project in this repository, `hashicorp/web-unified-docs`, aims to implement [DEVDOT-023: Unified Product Documentation Repository](https://hermes-sharepoint.hashicorp.services/document/01XOO7K4NGQTFCAWZCHJBY5ZPCZLO6Y2ZB). The RFC for this project was intentionally light on implementation details, in order to foster consensus on the broad direction.
 
 - **PR previews**: Show broken links in comments for awareness (informational only, don't block PRs)
 - **Production monitoring**: Weekly scans create GitHub issues and send critical alerts to Datadog when users are affected
@@ -21,8 +21,7 @@ The weekly [`broken-link-check-full`](https://github.com/hashicorp/web-unified-d
 - **Consider removing unreliable external links** (low priority)
 
 For detailed information about the monitoring system, see [Broken Link
-Monitoring Documentation](./.github/BROKEN_LINK_MONITORING.md). The [Unified Product Documentation
-Repository RFC](https://docs.google.com/document/d/1p8kOqySttvWUVfn7qiC4wGBR73LMBGMelwLt69pM3FQ/edit)
+Monitoring Documentation](./.github/BROKEN_LINK_MONITORING.md). The [EDU-053: Unified Education Style Guide](https://hermes-sharepoint.hashicorp.services/document/01XOO7K4KLLV22I7VTKBALQC55YEB6TXZN)
 for this project was intentionally light on implementation details, in order
 to foster consensus on the broad direction.
 
@@ -231,3 +230,4 @@ The diagram shows:
 - The content API — the existing system that sources product documentation content from product repositories
 - The unified docs API — the new system that sources product documentation from this repo's `/content` directory. The migrated repos will use a directory approach to versioning (rather than the historic branch and tag strategy)
 - The Dev Portal — the frontend that serves the main DevDot interface. Dev Portal sources its content from both the existing content API and unified docs API.
+

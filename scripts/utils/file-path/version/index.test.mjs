@@ -27,6 +27,12 @@ describe('getVersionFromFilePath', () => {
 		expect(version).toBe('v0.13.x')
 	})
 
+	test('should return the correct version for a two-part version in the file path', () => {
+		const filePath = 'content/vault/v2.x/docs/updates/change-tracker.mdx'
+		const version = getVersionFromFilePath(filePath)
+		expect(version).toBe('v2.x')
+	})
+
 	test('should return the correct version for a Terraform Enterprise version in the file path', () => {
 		const filePath =
 			'content/terraform-enterprise/v202410-1/docs/enterprise/some-doc.mdx'

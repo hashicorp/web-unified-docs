@@ -4,7 +4,7 @@ description: >-
   Version control system (VCS) connections integrate HCP Terraform into your workflow. Learn how to automate Terraform runs when you commit changes to your code.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2025-05-27T14:28:51-04:00
-last_modified: 2025-09-19T14:22:24-07:00
+last_modified: 2026-03-17T22:39:25.000Z
 # END AUTO GENERATED METADATA
 ---
 
@@ -13,9 +13,7 @@ last_modified: 2025-09-19T14:22:24-07:00
 HCP Terraform is more powerful when you integrate it with your version control system (VCS) provider. Although you can use many of HCP Terraform's features without one, a VCS connection provides additional features and improved workflows. In particular:
 
 - When workspaces are linked to a VCS repository, HCP Terraform can [automatically initiate Terraform runs](/terraform/cloud-docs/workspaces/run/ui) when changes are committed to the specified branch.
-<!-- BEGIN: TFC:only name:stacks-tfe -->
 - When Stacks are linked to a VCS repository, HCP Terraform can [automatically initiate deployment runs](/terraform/cloud-docs/stacks/runs) by fetching configuration changes when they are committed to the specified branch. Note that Stacks do not support mono-repos.
-<!-- END: TFC:only name:stacks-tfe -->
 - HCP Terraform makes code review easier by [automatically predicting](/terraform/cloud-docs/workspaces/run/ui#speculative-plans-on-pull-requests) how pull requests will affect infrastructure.
 - Publishing new versions of a [private Terraform module](/terraform/cloud-docs/registry/publish-modules) is as easy as pushing a tag to the module's repository.
 
@@ -45,9 +43,9 @@ You can connect to the following providers. To build custom integrations with ot
 
 ## How HCP Terraform uses VCS access
 
-Most workspace<!-- BEGIN: TFC:only name:stacks-tfe --> and Stacks<!-- END: TFC:only name:stacks-tfe --> in HCP Terraform are associated with a VCS repository, which provides configuration for creating infrastructure. To find out which repos are available, access their contents, and create webhooks, HCP Terraform needs access to your VCS provider.
+Most workspace and Stacks are associated with a VCS repository, which provides configuration for creating infrastructure. To find out which repositories are available, access their contents, and create webhooks, HCP Terraform <!-- BEGIN: TFEnterprise:only name:product-name -->or Terraform Enterprise <!-- END: TFEnterprise:only name:product-name -->needs access to your VCS provider.
 
-Although HCP Terraform's API lets you create workspaces<!-- BEGIN: TFC:only name:stacks-tfe --> and Stacks<!-- END: TFC:only name:stacks-tfe --> and push configurations to them without a VCS connection, the primary workflow expects every workspace<!-- BEGIN: TFC:only name:stacks-tfe --> and Stack<!-- END: TFC:only name:stacks-tfe --> to be backed by a repository.
+Although the API lets you create workspaces and Stacks and push configurations to them without a VCS connection, the primary workflow expects every workspace and Stack to be backed by a repository.
 
 To use configurations from VCS, HCP Terraform needs to do several things:
 
@@ -61,9 +59,9 @@ To use configurations from VCS, HCP Terraform needs to do several things:
 
 HCP Terraform uses webhooks to monitor new commits and pull requests.
 
-- When someone adds new commits to a branch, any workspaces <!-- BEGIN: TFC:only name:stacks-tfe --> or Stack<!-- END: TFC:only name:stacks-tfe --> based on that branch will begin a run. Usually a user must inspect the plan output and approve an apply, but you can also enable automatic applies.
+- When someone adds new commits to a branch, any workspaces or Stack based on that branch will begin a run. Usually a user must inspect the plan output and approve an apply, but you can also enable automatic applies.
   - You can prevent automatic runs for workspaces using locking. A run will only occur if the workspace has not previously processed a run for the commit SHA.
-- When someone submits a pull request/merge request to a branch, any HCP Terraform workspaces or<!-- BEGIN: TFC:only name:stacks-tfe --> or Stack<!-- END: TFC:only name:stacks-tfe -->  based on that branch will perform a [speculative plan](/terraform/cloud-docs/workspaces/run/remote-operations#speculative-plans) with the contents of the request and links to the results on the PR's page. This helps you avoid merging PRs that cause plan failures.
+- When someone submits a pull request or merge request to a branch, any workspaces or Stack based on that branch performs a [speculative plan](/terraform/cloud-docs/workspaces/run/remote-operations#speculative-plans) with the contents of the request and links to the results on the PR's page. This helps you avoid merging PRs that cause plan failures.
 
 ~> **Important:** In Terraform Enterprise, integration with a SaaS VCS provider (GitHub.com, GitLab.com, Bitbucket Cloud, or Azure DevOps Services) requires ingress from the public internet. This lets the inbound web hooks reach Terraform Enterprise. You should also configure appropriate security controls, such as a Web Application Firewall (WAF).
 
@@ -81,11 +79,11 @@ To add an SSH key to a VCS connection, finish configuring OAuth in the organizat
 
 ### Multiple VCS connections
 
-If your infrastructure code is spread across multiple VCS providers, you can configure multiple VCS connections. You can choose which VCS connection to use whenever you create a new workspace<!-- BEGIN: TFC:only name:stacks-tfe --> or Stack<!-- END: TFC:only name:stacks-tfe -->.
+If your infrastructure code is spread across multiple VCS providers, you can configure multiple VCS connections. You can choose which VCS connection to use whenever you create a new workspace or Stack.
 
 #### Scoping VCS Connections using projects
 
-You can configure which projects can use repositories from a VCS connection. By default each VCS connection is enabled for all workspaces<!-- BEGIN: TFC:only name:stacks-tfe --> and Stacks<!-- END: TFC:only name:stacks-tfe --> in the organization. If you need to limit which projects can use repositories from a given VCS connection, you can change this setting to enable the connection for only workspaces<!-- BEGIN: TFC:only name:stacks-tfe --> or Stacks<!-- END: TFC:only name:stacks-tfe --> in the selected projects.
+You can configure which projects can use repositories from a VCS connection. By default each VCS connection is enabled for all workspaces and Stacks in the organization. If you need to limit which projects can use repositories from a given VCS connection, you can change this setting to enable the connection for only workspaces or Stacks in the selected projects.
 
 ## Configuring VCS access
 

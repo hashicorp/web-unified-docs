@@ -306,8 +306,8 @@ Advanced module features:
 - ✅ Organized by learning level
 - ✅ Verbs outside brackets
 - ✅ Context in sentences
-- ✅ 8 links (target: 5-8+)
 - ✅ Specific, actionable descriptions
+- ✅ Links relevant to document topic
 
 ---
 
@@ -349,7 +349,7 @@ Before submitting your document, verify:
 - [ ] No sentences start with "This", "That", "It"
 - [ ] Code examples are complete (not empty templates)
 - [ ] Code examples have 1-2 sentence summaries
-- [ ] 5-8+ HashiCorp resource links
+- [ ] HashiCorp resource links are relevant and help users implement the topic
 - [ ] Verbs outside link brackets
 - [ ] WAF cross-references appear first in resources
 - [ ] Document ends with: Resources → Next steps
@@ -442,9 +442,9 @@ Before submitting your document, verify:
 
 ## ✅ Phase 3: Resources Section (5 minutes)
 
-### Link Count
-- [ ] 5-8+ HashiCorp resource links
-- [ ] Appropriate number for document type
+### Link Quality
+- [ ] Links are relevant to the document topic
+- [ ] Appropriate number for document scope — don't pad, don't omit useful resources
 
 ### Organization
 - [ ] WAF cross-references appear first
@@ -499,7 +499,7 @@ Before submitting your document, verify:
 
 ### Implementer Content (50-60%)
 - [ ] Code examples with explanations
-- [ ] 5-8+ resource links (tutorials, docs)
+- [ ] Resource links (tutorials, docs) relevant to implementers
 - [ ] How-to guidance or clear next steps
 - [ ] Integration patterns and tool usage
 
@@ -1074,8 +1074,7 @@ Remove dash, put context in sentence
 
 **What you see:**
 ```
-⚠️ Document has only 3 resource links
-Target: 5-8+ links for implementers
+⚠️ Document has only 3 resource links — check if more relevant links exist
 ```
 
 **What to do:**

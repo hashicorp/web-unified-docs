@@ -1,0 +1,202 @@
+---
+layout: docs
+page_title:  Enable transparent proxy mode on VMs
+description: >-
+  Learn how to enable transparent proxy mode, which enables Consul on Virtual Machines to direct inbound and outbound traffic through the service mesh and increase application security without configuring individual upstream services.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-03-31T16:16:27.000Z
+last_modified: 2026-03-31T16:16:27.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Enable transparent proxy mode on VMs
+
+This topic describes how to use transparent proxy mode in your service mesh. Transparent proxy allows applications to communicate through the service mesh without modifying their configurations. Transparent proxy also hardens application security by preventing direct inbound connections that bypass the mesh. Refer to [Transparent proxy overview](/consul/docs/connect/proxy/transparent-proxy) for additional information.
+
+## Requirements
+
+Your network must meet the following environment and software requirements to use transparent proxy.
+
+- A Consul datacenter with v1.11.1+ installed, running with at least two Linux client nodes.
+- [DNS forwarding](/consul/docs/manage/dns/forwarding) enabled on the Consul client nodes.
+- Envoy installed on the Consul client nodes. For more information about the Envoy versions your Consul installation supports, refer to the [Envoy proxy configuration reference](/consul/docs/reference/proxy/envoy#envoy-and-consul-client-agent).
+- A dedicated user to run Consul. Consul uses the user ID to exclude Consul-related traffic from transparent proxy. These instructions use the `consul` Linux user.
+- A dedicated user to run Envoy. Consul uses the user ID to exclude proxy-related traffic from transparent proxy. These instructions use the `envoy` Linux user.
+
+## Manual configuration
+
+To manually configure Consul service mesh to use transparent proxies follow these steps:
+
+1. [Register the service](#register-the-service)
+1. [Redirect traffic to proxies](#redirect-traffic-to-proxies)
+1. [Connect services](#connect-services)
+
+### Register the service
+
+Configure a service to use transparent proxy mode in the [`connect` block of a service definition](/consul/docs/reference/service#connect).
+
+<CodeBlockConfig highlight="3-9">
+
+```json
+{
+ "service": {
+   "connect": {
+     "sidecar_service": {
+       "proxy": {
+         "mode": "transparent"
+       }
+     }
+   },
+   "name": "${service_name}",
+   "port": "${service_port}"
+ }
+}
+```
+</CodeBlockConfig>
+
+Then, [register the service in Consul](/consul/docs/register/service/vm).
+
+For services with transparent proxy enabled, Consul assigns a virtual IP in the `240.0.0.0/4` range, allowing downstream services to connect to upstream services using a unique IP assigned by the service mesh. 
+
+### Redirect traffic to proxies
+
+Use the [`consul connect redirect-traffic` command](/consul/commands/connect/redirect-traffic) to enable transparent proxy on the VM for the named service.
+
+The command includes the user ID for `consul` and `envoy` in order for transparent proxy to exclude traffic from Consul and Envoy from redirection.
+
+<Warning>
+  The command adds iptables rules that will deny existing inbound traffic unless you have specified exclusions. As a result, any connection to the VM not related to Consul and Envoy will be disconnected, including SSH.
+</Warning>
+
+```shell-session
+$ consul connect redirect-traffic \
+   -proxy-id="${service_name}-sidecar-proxy" \
+   -proxy-uid="$(id --user envoy)" \
+   -exclude-uid="$(id --user consul)"
+```
+
+To exclude inbound or outbound traffic from specific ports or IP addresses, append additional arguments specifying exclusions. 
+
+For example, you may need to exclude inbound traffic to the SSH port for login:
+
+```shell-session
+$ consul connect redirect-traffic \
+   -proxy-id="${service_name}-sidecar-proxy" \
+   -proxy-uid="$(id --user envoy)" \
+   -exclude-uid="$(id --user consul)" \
+   -exclude-inbound-port=22
+```
+
+If you have a [mesh configuration entry defined with `TransparentProxy.MeshDestinationsOnly=true`](/consul/docs/reference/config-entry/mesh#mesh-destinations-only), the transparent proxy will deny all inbound and outbound requests to the VM after you redirect traffic. Because the transparent proxy denies requests to download packages, make sure you install your application and its dependencies before redirecting traffic.
+
+### Connect services
+
+If ACLs are enabled, Consul service mesh denies all traffic between services by default.
+
+Consul configures the proxies to route traffic to the appropriate upstream services based on [service intentions](/consul/docs/reference/config-entry/service-intentions).
+
+This example shows an intention that allows traffic between service `web` and service `api`.
+
+```hcl
+Kind = "service-intentions"
+Name = "api"
+Sources = [
+  {
+    Name   = "web"
+    Action = "allow"
+    Namespace  = "default"
+    Partition  = "default"  
+  }
+]
+```
+
+To verify that your service is correctly configured, resolve the `api` service from the `web` service client node using Consul DNS.
+
+Consul DNS resolves the in-mesh virtual IP of an upstream service using a DNS hostname in the format of `${service_name}.virtual.consul`
+
+<CodeBlockConfig hideClipboard>
+
+```shell-session
+$ nslookup api.virtual.consul
+Server:         127.0.0.53
+Address:        127.0.0.53#53
+ 
+Non-authoritative answer:
+Name:   api.virtual.consul
+Address: 240.0.0.2
+```
+
+</CodeBlockConfig>
+
+Verify you can reach the `api` service from the `web` service client node.
+
+<CodeBlockConfig hideClipboard>
+
+```shell-session
+$ curl --head http://api.virtual.consul
+HTTP/1.1 200 OK
+Date: Wed, 25 Mar 2026 13:37:36 GMT
+Content-Length: 234
+Content-Type: text/plain; charset=utf-8
+Connection: close
+```
+
+</CodeBlockConfig>
+
+## Automatic configuration
+
+The process to enable transparent proxy on VMs is standard for all services.
+
+After you test the process manually, we recommend that you configure your nodes to automatically setup the sidecar proxy when you start the service.
+
+Two methods to automate the transparent proxy configuration process are:
+
+- Setup up a systemd unit file
+- Use Terraform
+
+If you use systemd to start Consul service mesh's sidecar proxy, you can add two scripts to the unit file to:
+
+- Enable traffic redirection before you start the proxy
+- Clean up iptables rules after you stop the proxy
+
+You can add the scripts to the systemd unit file using the `ExecStartPre` and `ExecStopPost` parameters:
+
+<CodeBlockConfig highlight="14,16">
+
+```shell-session
+[Unit]
+Description=Consul Envoy
+After=syslog.target network.target consul.service
+Wants=consul.service
+
+ConditionFileIsExecutable=<script for redirecting traffic>
+ConditionFileIsExecutable=<script for cleaning up iptables>
+
+[Service]
+Type=simple
+User=envoy
+Group=envoy
+EnvironmentFile=/etc/consul.d/consul.env
+ExecStartPre=+<script for redirecting traffic> ${service_name}
+ExecStart=/usr/bin/consul connect envoy -sidecar-for=${service_name}
+ExecStopPost=+<script for cleaning up iptables>
+Restart=on-failure
+RestartSec=5
+WorkingDirectory=/etc/consul.d/
+
+[Install]
+WantedBy=multi-user.target
+```
+
+</CodeBlockConfig>
+
+You can use Terraform to deploy Consul client nodes with services installed and configured to operate in the Consul service mesh.
+
+Use the [Terraform module for Consul transparent proxy](https://github.com/hashicorp/terraform-template-consul-tproxy) as a template to create you own deployment.
+
+The module contains:
+
+- An [example systemd unit](https://github.com/hashicorp/terraform-template-consul-tproxy/blob/main/templates/scripts/setup.sh) file.
+- An [example script for redirecting the traffic](https://github.com/hashicorp/terraform-template-consul-tproxy/blob/main/templates/scripts/consul-tproxy-redirect.sh) before you start the sidecar proxy.
+- An [example script for cleaning up iptables rules](https://github.com/hashicorp/terraform-template-consul-tproxy/blob/main/templates/scripts/consul-tproxy-cleanup.sh) after you stop the proxy.
+

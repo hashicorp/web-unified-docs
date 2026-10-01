@@ -9,6 +9,8 @@ import { batchPromises } from './batch-promises.mjs'
 import { listFiles } from './list-files.mjs'
 import { addVersionToNavData } from '../prebuild/add-version-to-nav-data.mjs'
 
+import { PRODUCT_CONFIG } from '#productConfig.mjs'
+
 /**
  * Copy all *-nav-data.json files from the source to the destination directory.
  */
@@ -16,9 +18,16 @@ export async function copyNavDataFiles(
 	sourceDir,
 	destDir,
 	versionMetadata = {},
+	changedFiles = null,
 ) {
-	const navDataFiles = (await listFiles(sourceDir)).filter((f) => {
-		return f.endsWith('-nav-data.json')
+	const filesToCheck = changedFiles
+		? [...changedFiles.added, ...changedFiles.modified]
+		: await listFiles(sourceDir)
+
+	const navDataFiles = filesToCheck.filter((filePath) => {
+		const relativePath = path.relative(sourceDir, filePath)
+		const repoSlug = relativePath.split('/')[0]
+		return filePath.endsWith('-nav-data.json') && repoSlug in PRODUCT_CONFIG
 	})
 
 	console.log(`\nCopying NavData from ${navDataFiles.length} files...`)

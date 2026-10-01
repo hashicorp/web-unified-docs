@@ -1,10 +1,9 @@
 ---
 page_title: Create and review configuration versions
 description: Learn how to create and review configuration versions for your Stacks in HCP Terraform.
-tfc_only: true
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2025-05-27T14:28:51-04:00
-last_modified: 2025-09-19T14:16:47-07:00
+last_modified: 2026-03-16T23:13:26.000Z
 # END AUTO GENERATED METADATA
 ---
 

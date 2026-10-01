@@ -1,0 +1,568 @@
+---
+page_title: Secure Azure DevOps CI/CD secrets with HashiCorp Vault
+description: Learn how to secure Azure DevOps CI/CD secrets with HashiCorp Vault using Azure auth, workload identity federation, and self-hosted agent auth patterns.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-04-21T18:47:23-04:00
+last_modified: 2026-05-04T19:59:49.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Secure Azure DevOps CI/CD secrets with HashiCorp Vault
+
+Azure DevOps pipelines do not expose a single native pipeline JWT that Vault can
+validate directly the way other platforms do. Instead, Azure DevOps
+integrates with Vault by establishing Azure identity through an Azure
+Resource Manager service connection. Azure DevOps can then use that identity to
+authenticate to Vault's Azure auth method. This keeps static credentials out of
+Azure DevOps and moves authorization to Vault roles and policies.
+
+For most Azure-connected pipelines, workload identity federation on the Azure
+Resource Manager service connection is the strongest native option. For self-
+hosted agents, the best Vault auth method still depends on where the agent runs
+and what identity the job can already prove.
+
+<VideoEmbed url="https://www.youtube.com/watch?v=X-RfUsV81Po&t"/>
+
+## Architecture
+
+The pipeline-to-Vault authentication flow follows the same high-level pattern as
+the other CI/CD integrations in this section, but the verification step depends
+on the identity source available to the Azure DevOps pipeline. For Microsoft-hosted
+agents and most Azure-connected pipelines, the common pattern is Azure auth
+through a service connection:
+
+1. The pipeline authenticates to Azure using an authorized service connection
+1. Azure issues an access token scoped to the resource Vault expects
+1. The pipeline presents that token to Vault's Azure auth method
+1. Vault validates the token with Azure and maps the identity to a Vault role
+1. Vault issues a token scoped to that role's policies
+
+The pipeline can now retrieve secrets based on the policy for that role.
+
+![Diagram showing authentication workflow between workloads like Azure DevOps, to
+Vault, to the platform identity provider](/img/well-architected-framework/diagram-azure-devops-auth-flow-dark.png#dark-theme-only)
+![Diagram showing authentication workflow between workloads like Azure DevOps, to
+Vault, to the platform identity provider](/img/well-architected-framework/diagram-azure-devops-auth-flow.png#light-theme-only)
+
+### Agent hosting and auth method selection
+
+The right auth method depends on the following identity sources the pipeline job can prove:
+
+- **Azure service connection used for Vault login** — Use Azure auth. This
+  applies when the pipeline authenticates to Vault through an Azure Resource
+  Manager service connection, regardless of where the agent runs.
+- **Self-hosted agent on Kubernetes without a service connection** — Use
+  Kubernetes auth. The pod's service account token is a stronger identity
+  than a static credential.
+- **Self-hosted agent on AWS or GCP without a service connection** — Use the
+  corresponding cloud provider auth method. The instance or workload identity
+  is stronger than a static credential stored in Azure DevOps.
+- **No cloud identity available** — Use AppRole with response wrapping, or
+  TLS cert auth if mTLS is already part of your security posture.
+
+## Authentication options
+
+Use Azure auth for most Azure DevOps deployments that already rely on Azure
+Resource Manager service connections. Depending on your use case, there are
+additional auth methods that may be appropriate for self-hosted agents in your
+environment.
+
+The following table summarizes when each auth method fits best.
+
+| Auth method | Security posture | Credential lifecycle | Best suited for |
+|---|---|---|---|
+| Azure | High; federated Azure identity through a service connection | Short-lived Azure access token; no static secret required in the pipeline | Pipelines that authenticate to Vault through an Azure Resource Manager service connection |
+| Cloud provider auth methods | High; identity is the underlying compute platform | Managed by cloud provider; no rotation required | Self-hosted agents on AWS or GCP where no Azure service connection is used |
+| Kubernetes | Highest for in-cluster | Short-lived projected service account token on modern Kubernetes; legacy patterns vary | Self-hosted agents running as pods in Kubernetes where no Azure service connection is used |
+| TLS Certificate | High; mutual authentication | Certificate with defined expiry; requires rotation process | Long-lived self-hosted agents where mTLS is already part of the security posture |
+| AppRole | Moderate; requires secure secret ID delivery | Secret ID is single-use with response wrapping; RoleID is long-lived | Azure DevOps Server or isolated environments where no stronger platform identity is available |
+
+<Tabs>
+<Tab heading="Azure">
+
+Azure auth is the right choice when the pipeline authenticates to Vault through
+an Azure Resource Manager service connection. Microsoft supports the following
+three workload identity federation service connection patterns:
+
+- **App registration (automatic)** — Azure DevOps manages the app registration
+  and federated credential. Use this for new pipelines unless your organization
+  requires manual control over the app registration.
+- **Existing user-assigned managed identity** — Use this when a managed
+  identity already exists and you want to reuse it across multiple service
+  connections.
+- **App registration or managed identity (manual)** — Use this when your
+  organization requires explicit control over the federated credential
+  configuration.
+
+<Tip>
+
+Prefer workload identity federation over secret-based service connections for
+new deployments. WIF is Microsoft's recommended passwordless pattern and
+eliminates static credentials from the service connection entirely.
+
+</Tip>
+
+### Role configuration
+
+Azure DevOps pipelines commonly use a dedicated auth mount because the Azure
+token audience differs from the default audience used in other Azure auth flows.
+Bind the Vault role to the specific Entra ID object behind the service
+connection, and keep the token TTL short.
+
+<Info>
+
+The `client_secret` in the auth mount config is Vault's own credential for
+calling Azure APIs to validate pipeline tokens. It is separate from the service
+connection credential and does not affect the pipeline's passwordless auth flow.
+For Vault Enterprise, plugin WIF can eliminate this static secret from the Vault
+config as well.
+
+</Info>
+
+```shell
+# Enable a dedicated Azure auth path for Azure DevOps
+vault auth enable -path=ado azure
+
+# Configure Vault's Azure auth mount with its own Azure API credentials
+vault write auth/ado/config \
+  tenant_id="00000000-0000-0000-0000-000000000000" \
+  client_id="00000000-0000-0000-0000-000000000000" \
+  client_secret="<vault-azure-auth-client-secret>" \
+  resource="https://management.azure.com/"
+
+# Bind the Vault role to the Entra ID object behind the service connection
+vault write auth/ado/role/azure-devops-production \
+  token_policies="azure-devops-production-policy" \
+  token_ttl=15m \
+  token_type=batch \
+  bound_service_principal_ids="00000000-0000-0000-0000-000000000000"
+```
+
+The auth mount configuration lets Vault validate Azure-issued tokens for this
+integration path. The role binds Azure DevOps to a specific Entra ID object and
+limits the resulting Vault token to the attached policy set.
+
+For automatic WIF service connections, `bound_service_principal_ids` is the
+object ID of the enterprise application that Azure DevOps creates. For
+user-assigned managed identity service connections, use the managed identity's
+principal ID. Using `bound_service_principal_ids` means the pipeline does not
+need to pass subscription or resource group metadata at login.
+
+### Workflow configuration
+
+The example assumes the agent image includes the Vault CLI. The
+`AzureCLI@2` task authenticates to Azure through the service connection and
+retrieves an access token that Vault validates.
+
+```yaml
+steps:
+  - task: AzureCLI@2
+    displayName: Authenticate to Vault with Azure auth
+    env:
+      VAULT_ADDR: https://vault.example.com
+    inputs:
+      azureSubscription: 'AzureRM Service Connection for Vault'
+      scriptType: bash
+      scriptLocation: inlineScript
+      inlineScript: |
+        JWT="$(az account get-access-token \
+          --resource https://management.azure.com/ \
+          --query accessToken \
+          --output tsv)"
+
+        VAULT_TOKEN="$(vault write -field=token auth/ado/login \
+          role=azure-devops-production \
+          jwt="$JWT")"
+
+        echo "##vso[task.setvariable variable=VAULT_TOKEN;issecret=true]$VAULT_TOKEN"
+
+  - bash: |
+      export VAULT_ADDR=https://vault.example.com
+      export DATABASE_PASSWORD="$(vault kv get -field=password secret/ci/production/db)"
+      ./deploy.sh
+    displayName: Retrieve secret from Vault
+    env:
+      VAULT_TOKEN: $(VAULT_TOKEN)
+```
+
+The first step exchanges the Azure access token for a short-lived Vault token.
+The second step uses that Vault token only for the secret read needed by the
+deployment.
+
+<Warning>
+
+Authorize the service connection only for the pipelines that need it. Do not
+enable "Grant access permission to all pipelines" unless every pipeline in the
+project is intended to share that trust boundary.
+
+</Warning>
+
+</Tab>
+<Tab heading="Cloud provider auth methods">
+
+When self-hosted Azure DevOps agents run on AWS or GCP **without** an Azure
+service connection, the agent's native cloud identity is a stronger
+authentication path than routing through Azure.
+
+<Info>
+
+If your agents use an Azure Resource Manager service connection, use Azure auth
+instead. Cloud provider auth methods apply only when the Azure service connection
+is intentionally absent from the pipeline.
+
+</Info>
+
+<Tabs>
+<Tab heading="AWS">
+
+Use AWS auth when self-hosted agents run on EC2 or other AWS compute with an
+attached IAM role.
+
+### Role configuration
+
+```shell
+# Vault AWS role bound to the Azure DevOps agent IAM role
+vault write auth/aws/role/azure-devops-agent \
+  auth_type=iam \
+  bound_iam_principal_arn="arn:aws:iam::123456789012:role/azure-devops-agent-role" \
+  token_policies=azure-devops-build-policy \
+  ttl=1h
+```
+
+The role binds Vault authentication to the IAM role assigned to the self-hosted
+agent. Vault then issues a token limited to the build policy when the agent
+proves that AWS identity.
+
+### Workflow configuration
+
+```yaml
+steps:
+  - bash: |
+      export VAULT_ADDR=https://vault.example.com
+      export VAULT_TOKEN="$(vault login -method=aws -token-only role=azure-devops-agent)"
+      export REGISTRY_PASSWORD="$(vault kv get -field=password secret/ci/build/registry)"
+      ./build.sh
+    displayName: Retrieve build secret with AWS auth
+```
+
+The pipeline authenticates directly to Vault with the agent's AWS identity and
+reads only the secret needed for the build. This avoids routing the trust chain
+through an Azure service connection when the workload already runs on AWS.
+
+</Tab>
+<Tab heading="GCP">
+
+Use GCP auth when self-hosted agents run on Google Cloud with an attached
+service account.
+
+### Role configuration
+
+```shell
+# Vault GCP role bound to the Azure DevOps agent service account
+vault write auth/gcp/role/azure-devops-agent \
+  type=iam \
+  token_policies=azure-devops-build-policy \
+  bound_service_accounts="azure-devops-agent@my-project.iam.gserviceaccount.com" \
+  ttl=1h
+```
+
+The role binds Vault authentication to the Google Cloud service account assigned
+to the self-hosted agent. Vault issues a token only when the agent presents the
+expected GCP identity.
+
+### Workflow configuration
+
+```yaml
+steps:
+  - bash: |
+      export VAULT_ADDR=https://vault.example.com
+      export VAULT_TOKEN="$(vault login -method=gcp -token-only \
+        role=azure-devops-agent)"
+      export REGISTRY_PASSWORD="$(vault kv get -field=password secret/ci/build/registry)"
+      ./build.sh
+    displayName: Retrieve build secret with GCP auth
+```
+
+The pipeline logs in with the agent's Google Cloud identity instead of storing a
+bootstrap credential in Azure DevOps. The resulting Vault token is then used
+for the narrow secret read required by the build.
+
+</Tab>
+</Tabs>
+
+</Tab>
+<Tab heading="Kubernetes">
+
+Kubernetes auth is appropriate when self-hosted agents run as pods in
+Kubernetes **without** an Azure service connection. The agent pod's service
+account token is already present at a known path, and Vault verifies it
+directly against the Kubernetes API.
+
+<Info>
+
+If your agents use an Azure Resource Manager service connection, use Azure auth
+instead. Kubernetes auth applies only when the Azure service connection is
+intentionally absent from the pipeline.
+
+</Info>
+
+### Role configuration
+
+```shell
+# Vault role for Azure DevOps agent pods
+vault write auth/kubernetes/role/azure-devops-agent \
+  bound_service_account_names=azure-devops-agent-sa \
+  bound_service_account_namespaces=azure-devops \
+  token_policies=azure-devops-build-policy \
+  ttl=1h
+```
+
+The role ties Vault access to a specific service account and namespace. Vault
+accepts only pod identities from that Kubernetes workload boundary.
+
+### Workflow configuration
+
+```yaml
+steps:
+  - bash: |
+      export VAULT_ADDR=https://vault.example.com
+      export VAULT_TOKEN="$(vault write -field=token auth/kubernetes/login \
+        role=azure-devops-agent \
+        jwt=@/var/run/secrets/kubernetes.io/serviceaccount/token)"
+      export REGISTRY_PASSWORD="$(vault kv get -field=password secret/ci/build/registry)"
+      ./build.sh
+    displayName: Retrieve build secret with Kubernetes auth
+```
+
+The pipeline authenticates with the pod's projected service account token and
+retrieves only the secret required for the build. This keeps the trust boundary
+inside the Kubernetes cluster instead of relying on a separate bootstrap secret.
+
+</Tab>
+<Tab heading="TLS Certificate">
+
+TLS cert auth is appropriate when agents are long-lived, persistent systems and
+client certificates are already part of the infrastructure security posture.
+
+### Role configuration
+
+```shell
+# Vault TLS cert role for a named Azure DevOps agent fleet
+vault write auth/cert/certs/azure-devops-agent-fleet \
+  display_name=azure-devops-agent-fleet \
+  certificate=@/path/to/internal-ca.crt \
+  allowed_common_names="ado-agent-*.infra.example.com" \
+  token_policies=azure-devops-build-policy \
+  ttl=4h
+```
+
+The certificate role binds Vault access to clients that present certificates
+issued by the expected trust chain and matching the allowed names. Vault then
+applies the build policy to the resulting token.
+
+### Workflow configuration
+
+```yaml
+steps:
+  - bash: |
+      export VAULT_ADDR=https://vault.example.com
+      export VAULT_TOKEN="$(vault login -method=cert -token-only \
+        name=azure-devops-agent-fleet \
+        -client-cert=/etc/vault/tls/client.crt \
+        -client-key=/etc/vault/tls/client.key)"
+      export SIGNING_KEY="$(vault kv get -field=key secret/ci/build/signing)"
+      ./sign.sh
+    displayName: Retrieve signing secret with TLS cert auth
+```
+
+The pipeline authenticates with the agent certificate and reads only the secret
+needed for the signing workflow. This pattern fits persistent agents that
+already participate in an mTLS-based infrastructure model.
+
+<Warning>
+
+TLS cert auth requires a certificate rotation process. Ensure certificates are
+rotated before expiry and that your CA infrastructure is operationally mature
+enough to support it before choosing this method.
+
+</Warning>
+
+</Tab>
+<Tab heading="AppRole">
+
+AppRole is the fallback for Azure DevOps Server or isolated environments where
+no platform identity is available. Always use response wrapping so the
+`secret_id` is single-use and never stored in plaintext.
+
+### Role configuration
+
+```shell
+# AppRole with tight constraints on secret_id lifecycle
+vault write auth/approle/role/azure-devops-agent \
+  secret_id_ttl=10m \
+  secret_id_num_uses=1 \
+  token_ttl=1h \
+  token_max_ttl=2h \
+  token_policies=azure-devops-build-policy
+```
+
+The AppRole configuration constrains the `secret_id` to short-lived, single-use
+delivery and limits the Vault token lifetime for the job. These controls reduce
+the impact of bootstrap credential exposure.
+
+### Workflow configuration
+
+A privileged external process — such as a Vault-aware deployment controller,
+a secrets management sidecar, or a pre-job provisioning script with its own
+Vault token — generates a wrapped `secret_id` just before the job starts and
+injects it as a secret pipeline variable. The pipeline unwraps it once at
+job start and the token is immediately invalidated.
+
+<Warning>
+
+Do not store the wrapping token in a long-lived shared variable group. It must
+be generated per job and scoped to that job's lifetime only.
+
+</Warning>
+
+```yaml
+steps:
+  - bash: |
+      export VAULT_ADDR=https://vault.example.com
+      export SECRET_ID="$(VAULT_TOKEN="$VAULT_WRAP_TOKEN" vault unwrap -field=secret_id)"
+      export VAULT_TOKEN="$(vault write -field=token auth/approle/login \
+        role_id="$VAULT_ROLE_ID" \
+        secret_id="$SECRET_ID")"
+      export DATABASE_PASSWORD="$(vault kv get -field=password secret/ci/production/db)"
+      ./deploy.sh
+    displayName: Retrieve secret with AppRole
+    env:
+      VAULT_ROLE_ID: $(VAULT_ROLE_ID)
+      VAULT_WRAP_TOKEN: $(VAULT_WRAP_TOKEN)
+```
+
+The pipeline unwraps the single-use `secret_id` just before login and exchanges
+it for a short-lived Vault token. The job then uses that token for only the
+secret reads authorized by the AppRole policy.
+
+</Tab>
+</Tabs>
+
+## Policy
+
+The Vault policy for any Azure DevOps role should follow least privilege. A
+pipeline that deploys to production should not be able to read staging secrets,
+and a build pipeline should not inherit deployment credentials.
+
+```hcl
+# Vault policy: scope to exactly the paths this pipeline needs
+path "secret/data/ci/production/db" {
+  capabilities = ["read"]
+}
+
+path "secret/data/ci/production/api" {
+  capabilities = ["read"]
+}
+```
+
+The policy limits the pipeline to the exact production secret paths it needs.
+Separate policies for other environments help prevent broad service connection
+identities from reading unrelated secrets.
+
+Azure DevOps service connections are usually broader than repository- or
+branch-scoped identities from other CI/CD platforms. For that reason, use
+separate service connections, separate Vault roles, and separate policies for
+different environments or trust boundaries.
+
+## Security considerations
+
+The following Azure DevOps-specific security considerations align with your
+organizational risk tolerance and operational constraints:
+
+- **Service connections are a coarse trust boundary:** Azure Resource Manager
+  service connections are project-level resources. If one service connection is
+  shared across development, staging, and production pipelines, the Vault role
+  bound to that identity becomes correspondingly broad. Use separate service
+  connections per environment or privilege boundary.
+- **Authorize service connections per pipeline:** Do not grant a Vault-related
+  service connection to all pipelines unless every pipeline in the project should
+  share the same trust boundary. Pipeline authorization is one of the main
+  controls that prevents unrelated builds from using the same Azure identity.
+- **Prefer workload identity federation over service connection secrets:** Azure
+  Resource Manager service connections still support secret-based and other
+  legacy auth models for compatibility. For new integrations, prefer workload
+  identity federation to avoid storing long-lived service principal secrets in
+  Azure DevOps.
+- **Azure Key Vault integrations create a different trust boundary:** The
+  `AzureKeyVault@2` task and linked variable groups retrieve secrets into Azure
+  DevOps variables rather than having the pipeline authenticate directly to
+  Vault. Use those integrations when Azure Key Vault is the intended secret
+  store, but do not treat them as equivalent to direct Vault-based secret access.
+- **Use Microsoft-hosted agent networking carefully:** If Vault or related Azure
+  resources rely on IP allow lists, remember that Microsoft-hosted agent ranges
+  change over time. Validate network controls before depending on hosted agents
+  for production secret access.
+
+For a list of additional security considerations, refer to the [CI/CD security
+considerations](/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets/security-considerations)
+page.
+
+<VideoEmbed url="https://www.youtube.com/watch?v=DoWhZO7nbCY"/>
+
+## Integrate HCP Vault Radar
+
+Before migrating to Vault-based secrets management, Vault Radar can scan Azure
+Pipelines YAML, repository content, and shared scripts for credentials stored as
+hardcoded values. This is particularly useful in organizations that have years
+of copied pipeline templates, variable groups, and release automation spread
+across many projects.
+
+After migration, Vault Radar can monitor repositories continuously for new
+secret introductions — catching cases where developers add static credentials to
+pipeline YAML or helper scripts instead of retrieving them from Vault.
+
+Refer to the [HCP Vault Radar quick start
+tutorials](/hcp/tutorials/get-started-hcp-vault-radar) to learn about HCP Vault
+Radar.
+
+## HashiCorp resources
+
+### Vault
+
+- Read the [Azure auth method](/vault/docs/auth/azure) documentation to configure Vault to validate Azure-issued tokens.
+- Read the [Kubernetes auth method](/vault/docs/auth/kubernetes) documentation to authenticate pods using projected service account tokens.
+- Read the [AWS auth method](/vault/docs/auth/aws) documentation to authenticate self-hosted agents running on AWS compute.
+- Read the [GCP auth method](/vault/docs/auth/gcp) documentation to authenticate self-hosted agents running on Google Cloud.
+- Read the [AppRole auth method](/vault/docs/auth/approle) documentation to configure bootstrap credentials for isolated environments.
+- Read the [TLS certificate auth method](/vault/docs/auth/cert) documentation to configure mTLS-based authentication for persistent agents.
+- Read the [Response wrapping](/vault/docs/concepts/response-wrapping) documentation to learn how to deliver single-use secret IDs securely.
+- Follow the [Batch tokens](/vault/tutorials/auth-methods/token-types) tutorial to choose the right token type for CI/CD pipelines.
+- Follow the [Dynamic secrets: database credentials](/vault/tutorials/db-credentials/database-secrets) tutorial to generate short-lived database credentials from Vault.
+
+### HCP Vault Radar
+
+- Read [What is HCP Vault Radar](/hcp/docs/vault-radar) for an overview of how Vault Radar scans for exposed secrets.
+- Follow the [Get started with HCP Vault Radar](/hcp/tutorials/get-started-hcp-vault-radar) tutorial to enable continuous scanning for your repositories.
+
+### External resources
+
+- Read [Integrating Azure DevOps pipelines with HashiCorp Vault](https://www.hashicorp.com/en/blog/integrating-azure-devops-pipelines-with-hashicorp-vault) for an end-to-end walkthrough of the integration.
+- Read [Use an Azure Resource Manager service connection](https://learn.microsoft.com/en-us/azure/devops/pipelines/library/connect-to-azure?view=azure-devops) to configure workload identity federation in Azure DevOps.
+- Read the [Azure CLI v2 task](https://learn.microsoft.com/en-us/azure/devops/pipelines/tasks/reference/azure-cli-v2?view=azure-pipelines) reference for the full list of inputs and authentication options.
+- Read the [Azure Key Vault v2 task](https://learn.microsoft.com/en-us/azure/devops/pipelines/tasks/reference/azure-key-vault-v2?view=azure-pipelines) reference to retrieve Azure Key Vault secrets in pipelines.
+- Read [Link a variable group to secrets in Azure Key Vault](https://learn.microsoft.com/en-us/azure/devops/pipelines/library/link-variable-groups-to-key-vaults?view=azure-devops) to connect pipeline variable groups to Key Vault.
+- Read [Use Azure Key Vault secrets in Azure Pipelines](https://learn.microsoft.com/en-us/azure/devops/pipelines/release/azure-key-vault?view=azure-devops) to retrieve Key Vault secrets within release pipelines.
+- Read the [Azure DevOps provider for Terraform](https://registry.terraform.io/providers/microsoft/azuredevops/latest) documentation to manage DevOps pipelines and service connections as code.
+
+## Next steps
+
+In this section of [managing CI/CD
+secrets](/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets),
+you learned how to use Azure Resource Manager service connections and
+infrastructure-native identities to authenticate Azure DevOps pipelines to
+Vault. Secure Azure DevOps CI/CD secrets with HashiCorp Vault is part of the
+[Secure systems pillar](/well-architected-framework/secure-systems).
+
+If you are deciding when to use static secret synchronization versus direct
+runtime retrieval, review [CI/CD dynamic and static
+secrets](/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets/dynamic-and-static-secrets).
