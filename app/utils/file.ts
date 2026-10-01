@@ -180,18 +180,13 @@ export const fetchFile = async (
 			servedFrom: ServedFrom.Production,
 		})
 	} else if (incBuildLocalDev) {
-		const markdownFileExtensions = ['.md', '.mdx']
-		const isMarkdownFile = markdownFileExtensions.some((ext: string) => {
-			return filePath.toLowerCase().endsWith(ext)
-		})
-
 		let localFilePath = filePath
 		if (fileType === FileType.Asset) {
 			// Adjust the file path to match the paths in the content directory
 			const parts = filePath.split('/')
 			parts[0] = 'content'
 			localFilePath = parts.join('/')
-		} else if (isMarkdownFile) {
+		} else if (fileType === FileType.Markdown) {
 			// Apply MDX transforms, writing out transformed MDX files to `public`
 			const CWD = process.cwd()
 			const CONTENT_DIR = path.join(CWD, 'content')
