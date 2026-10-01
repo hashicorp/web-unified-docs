@@ -12,7 +12,7 @@ vi.hoisted(() => {
 	process.env.VERCEL_URL = 'local-vercel-CDN'
 })
 
-import { getAssetData, resolveCdnUrl } from './file'
+import { FileType, getAssetData, resolveCdnUrl } from './file'
 
 vi.mock('#productConfig.mjs', () => {
 	return {
@@ -71,37 +71,51 @@ afterEach(() => {
 	vi.resetAllMocks()
 })
 
+describe('FileType', () => {
+	test('distinguishes the three text formats from assets', () => {
+		expect(FileType).toEqual({
+			Markdown: 'markdown',
+			NavData: 'navData',
+			Redirects: 'redirects',
+			Asset: 'asset',
+		})
+	})
+})
+
 // ---------------------------------------------------------------------------
 // fetchFile
 // ---------------------------------------------------------------------------
 
 describe('fetchFile - INCREMENTAL_BUILD not set', () => {
-	test('fetches the file from LOCAL CDN', async () => {
-		const { fetchFile, FileType } = await loadFileModuleWithEnv({
-			VERCEL_URL: 'local-vercel-CDN',
-			INCREMENTAL_BUILD: undefined,
-			VERCEL_ENV: undefined,
-			UNIFIED_DOCS_PROD_URL: undefined,
-		})
+	test.each([FileType.Markdown, FileType.NavData, FileType.Redirects])(
+		'fetches %s files from LOCAL CDN',
+		async (fileType: FileType) => {
+			const { fetchFile } = await loadFileModuleWithEnv({
+				VERCEL_URL: 'local-vercel-CDN',
+				INCREMENTAL_BUILD: undefined,
+				VERCEL_ENV: undefined,
+				UNIFIED_DOCS_PROD_URL: undefined,
+			})
 
-		const mockResponse = new Response('body')
-		vi.mocked(fetch).mockResolvedValue(mockResponse)
+			const mockResponse = new Response('body')
+			vi.mocked(fetch).mockResolvedValue(mockResponse)
 
-		const result = await fetchFile(
-			'content/vault/v1.21.x/docs/index.mdx',
-			FileType.Content,
-		)
+			const result = await fetchFile(
+				'content/vault/v1.21.x/docs/index.mdx',
+				fileType,
+			)
 
-		expect(result).toEqual({
-			ok: true,
-			value: { response: mockResponse, servedFrom: ServedFrom.CurrentBuild },
-		})
-		expect(fetch).toHaveBeenCalledOnce()
-		expect(fetch).toHaveBeenCalledWith(
-			'https://local-vercel-CDN/content/vault/v1.21.x/docs/index.mdx',
-			expect.objectContaining({ cache: 'no-cache' }),
-		)
-	})
+			expect(result).toEqual({
+				ok: true,
+				value: { response: mockResponse, servedFrom: ServedFrom.CurrentBuild },
+			})
+			expect(fetch).toHaveBeenCalledOnce()
+			expect(fetch).toHaveBeenCalledWith(
+				'https://local-vercel-CDN/content/vault/v1.21.x/docs/index.mdx',
+				expect.objectContaining({ cache: 'no-cache' }),
+			)
+		},
+	)
 })
 
 describe('fetchFile - INCREMENTAL_BUILD=true', () => {
@@ -118,7 +132,7 @@ describe('fetchFile - INCREMENTAL_BUILD=true', () => {
 
 		const result = await fetchFile(
 			'content/vault/v1.21.x/docs/index.mdx',
-			FileType.Content,
+			FileType.Markdown,
 		)
 
 		expect(result).toEqual({
@@ -138,7 +152,7 @@ describe('fetchFile - INCREMENTAL_BUILD=true', () => {
 
 		const result = await fetchFile(
 			'content/vault/v1.21.x/docs/index.mdx',
-			FileType.Content,
+			FileType.Markdown,
 		)
 
 		expect(result).toEqual({
@@ -160,7 +174,7 @@ describe('fetchFile - INCREMENTAL_BUILD=true', () => {
 
 		const result = await fetchFile(
 			'content/vault/v1.21.x/docs/index.mdx',
-			FileType.Content,
+			FileType.Markdown,
 		)
 
 		expect(result).toEqual({
@@ -188,7 +202,7 @@ describe('fetchFile - INCREMENTAL_BUILD=true', () => {
 
 		const result = await fetchFile(
 			'content/vault/v1.21.x/docs/index.mdx',
-			FileType.Content,
+			FileType.Markdown,
 		)
 
 		expect(result).toEqual({
@@ -202,29 +216,32 @@ describe('fetchFile - INCREMENTAL_BUILD=true', () => {
 		)
 	})
 
-	test('fetches from PROD CDN for an unchanged file', async () => {
-		const { fetchFile, FileType } = await loadFileModuleWithEnv(incrementalEnv)
-		vi.mocked(readFile).mockResolvedValue(
-			JSON.stringify(makeChangedFiles()) as any,
-		)
-		const mockResponse = new Response('prod body')
-		vi.mocked(fetch).mockResolvedValue(mockResponse)
+	test.each([FileType.Markdown, FileType.NavData, FileType.Redirects])(
+		'fetches unchanged %s files from PROD CDN',
+		async (fileType: FileType) => {
+			const { fetchFile } = await loadFileModuleWithEnv(incrementalEnv)
+			vi.mocked(readFile).mockResolvedValue(
+				JSON.stringify(makeChangedFiles()) as any,
+			)
+			const mockResponse = new Response('prod body')
+			vi.mocked(fetch).mockResolvedValue(mockResponse)
 
-		const result = await fetchFile(
-			'content/vault/v1.21.x/docs/index.mdx',
-			FileType.Content,
-		)
+			const result = await fetchFile(
+				'content/vault/v1.21.x/docs/index.mdx',
+				fileType,
+			)
 
-		expect(result).toEqual({
-			ok: true,
-			value: { response: mockResponse, servedFrom: ServedFrom.Production },
-		})
-		expect(fetch).toHaveBeenCalledOnce()
-		expect(fetch).toHaveBeenCalledWith(
-			'https://prod-vercel-CDN/content/vault/v1.21.x/docs/index.mdx',
-			expect.objectContaining({ cache: 'no-cache' }),
-		)
-	})
+			expect(result).toEqual({
+				ok: true,
+				value: { response: mockResponse, servedFrom: ServedFrom.Production },
+			})
+			expect(fetch).toHaveBeenCalledOnce()
+			expect(fetch).toHaveBeenCalledWith(
+				'https://prod-vercel-CDN/content/vault/v1.21.x/docs/index.mdx',
+				expect.objectContaining({ cache: 'no-cache' }),
+			)
+		},
+	)
 
 	test('asset file: changed file has first segment replaced with "content" for changedContentFiles lookup', async () => {
 		// Asset paths come in as e.g. "asset/vault/v1.21.x/img/foo.png"
@@ -304,7 +321,7 @@ describe('getAssetData', () => {
 
 describe('findFileWithMetadata', () => {
 	test('removes empty segments from URL path', async () => {
-		const { findFileWithMetadata } = await loadFileModuleWithEnv({
+		const { findFileWithMetadata, FileType } = await loadFileModuleWithEnv({
 			VERCEL_URL: 'local-vercel-CDN',
 			INCREMENTAL_BUILD: undefined,
 			VERCEL_ENV: undefined,
@@ -327,10 +344,48 @@ describe('findFileWithMetadata', () => {
 		const mockResponse = new Response('body')
 		vi.mocked(fetch).mockResolvedValue(mockResponse)
 
-		await findFileWithMetadata(filePath, versionMetaData)
+		await findFileWithMetadata(filePath, versionMetaData, FileType.Markdown)
 
 		expect(fetch.mock.calls[0][0]).not.toContain('//docs')
 	})
+
+	test.each([
+		[FileType.Markdown, 'docs/index.mdx'],
+		[FileType.NavData, 'data/docs-nav-data.json'],
+		[FileType.Redirects, 'redirects.jsonc'],
+	])(
+		'loads %s content as text',
+		async (fileType: FileType, contentPath: string) => {
+			const { findFileWithMetadata } = await loadFileModuleWithEnv({
+				VERCEL_URL: 'local-vercel-CDN',
+				INCREMENTAL_BUILD: undefined,
+				VERCEL_ENV: undefined,
+				UNIFIED_DOCS_PROD_URL: undefined,
+			})
+			const filePath = ['content', 'vault', 'v1.21.x', contentPath]
+			const versionMetaData = {
+				releaseStage: 'stable',
+				version: 'v1.21.x',
+				isLatest: true,
+			}
+			vi.mocked(fetch).mockResolvedValue(new Response('file content'))
+
+			const result = await findFileWithMetadata(
+				filePath,
+				versionMetaData,
+				fileType,
+			)
+
+			expect(result).toEqual({
+				ok: true,
+				value: { text: 'file content', servedFrom: ServedFrom.CurrentBuild },
+			})
+			expect(fetch).toHaveBeenCalledWith(
+				`https://local-vercel-CDN/${filePath.join('/')}`,
+				expect.objectContaining({ cache: 'no-cache' }),
+			)
+		},
+	)
 })
 
 describe('resolveCdnUrl', () => {

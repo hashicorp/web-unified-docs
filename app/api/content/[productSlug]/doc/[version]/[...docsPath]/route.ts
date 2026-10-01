@@ -4,6 +4,7 @@
  */
 
 import {
+	FileType,
 	findFileWithMetadata,
 	joinFilePath,
 	parseMarkdownFrontMatter,
@@ -91,7 +92,11 @@ export async function GET(
 
 	let foundContent, servedFrom, githubFile, createdAt
 	for (const loc of possibleContentLocations) {
-		const readFileResult = await findFileWithMetadata(loc, versionMetadata)
+		const readFileResult = await findFileWithMetadata(
+			loc,
+			versionMetadata,
+			FileType.Markdown,
+		)
 
 		if (readFileResult.ok) {
 			foundContent = readFileResult.value.text

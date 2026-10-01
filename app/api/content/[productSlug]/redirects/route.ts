@@ -4,7 +4,7 @@
  */
 
 import { getProductVersionMetadata } from '#utils/contentVersions'
-import { findFileWithMetadata, parseJsonc } from '#utils/file'
+import { FileType, findFileWithMetadata, parseJsonc } from '#utils/file'
 import { errorResultToString } from '#utils/result'
 import { ProductParam } from '#api/types'
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
@@ -42,7 +42,11 @@ export async function GET(
 		'redirects.jsonc',
 	]
 
-	const readFileResult = await findFileWithMetadata(filePath, versionMetadata)
+	const readFileResult = await findFileWithMetadata(
+		filePath,
+		versionMetadata,
+		FileType.Redirects,
+	)
 	if (!readFileResult.ok) {
 		return new Response('Not found', { status: 404 })
 	}

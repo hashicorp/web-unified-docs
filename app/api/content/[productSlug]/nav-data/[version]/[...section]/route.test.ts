@@ -17,7 +17,7 @@ import { PRODUCT_CONFIG } from '#productConfig.mjs'
 import { ServedFrom } from '#api/types'
 import { Err, Ok } from '#utils/result'
 import { getProductVersionMetadata } from '#utils/contentVersions'
-import { findFileWithMetadata, parseJson } from '#utils/file'
+import { FileType, findFileWithMetadata, parseJson } from '#utils/file'
 import { mockRequest } from '#utils/mockRequest'
 
 vi.mock('#utils/contentVersions', async (importOriginal: any) => {
@@ -206,6 +206,11 @@ describe('GET /[productSlug]/[version]/[...section]', () => {
 		expect(response.status).toBe(200)
 		const { result } = await response.json()
 		expect(result).toEqual({ navData: sectionData })
+		expect(findFileWithMetadata).toHaveBeenCalledWith(
+			['content', productSlug, metadata.version, 'data', 'intro-nav-data.json'],
+			metadata,
+			FileType.NavData,
+		)
 		// A little fuzzy, but just make sure that our response (roughly)
 		// contains the data we're expecting to see - which in this case would
 		// be a heading for "Introduction to Terraform"

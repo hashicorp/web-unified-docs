@@ -16,7 +16,9 @@ import { PRODUCT_CONFIG } from '#productConfig.mjs'
 
 // Only exported for testing purposes
 export enum FileType {
-	Content = 'content',
+	Markdown = 'markdown',
+	NavData = 'navData',
+	Redirects = 'redirects',
 	Asset = 'asset',
 }
 
@@ -259,6 +261,7 @@ export const fetchFile = async (
 export const findFileWithMetadata = async (
 	filePath: string[],
 	versionMetaData: ProductVersionMetadata,
+	fileType: FileType,
 	options: {
 		loadFromContentDir?: boolean
 	} = { loadFromContentDir: false },
@@ -271,7 +274,7 @@ export const findFileWithMetadata = async (
 	const newFilePathJoined = joinFilePath(newFilePath)
 
 	try {
-		const fetchResult = await fetchFile(newFilePathJoined, FileType.Content)
+		const fetchResult = await fetchFile(newFilePathJoined, fileType)
 		if (!fetchResult.ok) {
 			// Rewrap the error string or else we expand the OK type downstream
 			return Err(fetchResult.value as string)

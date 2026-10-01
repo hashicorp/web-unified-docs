@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-import { findFileWithMetadata, parseJson } from '#utils/file'
+import { FileType, findFileWithMetadata, parseJson } from '#utils/file'
 import { getProductVersionMetadata } from '#utils/contentVersions'
 import { errorResultToString } from '#utils/result'
 import { VersionedProduct } from '#api/types'
@@ -42,6 +42,7 @@ export async function GET(
 			`${sectionPath}-nav-data.json`,
 		],
 		versionMetadata,
+		FileType.NavData,
 	)
 
 	if (!readFileResult.ok) {

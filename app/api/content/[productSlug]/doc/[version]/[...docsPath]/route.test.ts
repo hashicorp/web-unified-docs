@@ -17,7 +17,11 @@ import { ServedFrom } from '#api/types'
 import { Err, Ok } from '#utils/result'
 import { getProductVersionMetadata } from '#utils/contentVersions'
 import { PRODUCT_CONFIG } from '__fixtures__/productConfig.mjs'
-import { parseMarkdownFrontMatter, findFileWithMetadata } from '#utils/file'
+import {
+	FileType,
+	parseMarkdownFrontMatter,
+	findFileWithMetadata,
+} from '#utils/file'
 import { mockRequest } from '#utils/mockRequest'
 
 vi.mock('#utils/contentVersions', async (importOriginal: any) => {
@@ -226,6 +230,11 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 		expect(result.version).toBe(metadata.version)
 		expect(result.markdownSource).toBe(markdownSource)
 		expect(result.githubFile).toBe(expectedPath.join('/'))
+		expect(findFileWithMetadata).toHaveBeenCalledWith(
+			expectedPath,
+			metadata,
+			FileType.Markdown,
+		)
 	})
 
 	it('returns the ONLY the markdown source of the requested docs with the mdOnly=true flag', async () => {
