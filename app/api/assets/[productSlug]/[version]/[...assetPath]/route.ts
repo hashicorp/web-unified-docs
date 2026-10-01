@@ -5,6 +5,7 @@
 
 import { getAssetData, joinFilePath } from '#utils/file'
 import { getProductVersionMetadata } from '#utils/contentVersions'
+import { getMetadata } from '#utils/metadata'
 import { errorResultToString } from '#utils/result'
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
 import { VersionedProduct } from '#api/types'
@@ -30,7 +31,12 @@ export async function GET(
 		return new Response('Not found', { status: 404 })
 	}
 
-	const productVersionResult = getProductVersionMetadata(productSlug, version)
+	const { versionMetadata: productVersions } = await getMetadata()
+	const productVersionResult = getProductVersionMetadata(
+		productSlug,
+		version,
+		productVersions,
+	)
 	if (!productVersionResult.ok) {
 		console.error(errorResultToString('API', productVersionResult))
 		return new Response('Not found', { status: 404 })

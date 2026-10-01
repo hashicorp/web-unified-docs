@@ -4,6 +4,7 @@
  */
 
 import { getProductVersionMetadata } from '#utils/contentVersions'
+import { getMetadata } from '#utils/metadata'
 import { FileType, findFileWithMetadata, parseJsonc } from '#utils/file'
 import { errorResultToString } from '#utils/result'
 import { ProductParam } from '#api/types'
@@ -26,7 +27,12 @@ export async function GET(
 		return new Response('Not found', { status: 404 })
 	}
 
-	const productVersionResult = getProductVersionMetadata(productSlug, 'latest')
+	const { versionMetadata: productVersions } = await getMetadata()
+	const productVersionResult = getProductVersionMetadata(
+		productSlug,
+		'latest',
+		productVersions,
+	)
 
 	if (!productVersionResult.ok) {
 		console.error(errorResultToString('API', productVersionResult))

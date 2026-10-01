@@ -6,12 +6,15 @@
 import { Ok, Err, errorResultToString } from '#utils/result'
 import docsPathsAllVersions from '#api/docsPathsAllVersions.json'
 import { getProductVersionMetadata } from './contentVersions'
+import { getMetadata } from './metadata'
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
 
 export const getDocsPaths = async (
 	productSlugs: string[],
-	docsPathsData: typeof docsPathsAllVersions = docsPathsAllVersions,
+	docsPathsData?: typeof docsPathsAllVersions,
 ) => {
+	const metadata = await getMetadata()
+	const docsPaths = docsPathsData ?? metadata.docsPathsAllVersions
 	const paths = productSlugs
 		.map((productSlug: string) => {
 			// Internal products should not be included in the sitemap
@@ -22,6 +25,7 @@ export const getDocsPaths = async (
 			const latestProductMetadata = getProductVersionMetadata(
 				productSlug,
 				'latest',
+				metadata.versionMetadata,
 			)
 
 			if (!latestProductMetadata.ok) {
@@ -38,7 +42,7 @@ export const getDocsPaths = async (
 				parsedVersion = version
 			}
 
-			const docsPath = docsPathsData[productSlug]?.[parsedVersion]
+			const docsPath = docsPaths[productSlug]?.[parsedVersion]
 
 			if (!docsPath) {
 				console.error(

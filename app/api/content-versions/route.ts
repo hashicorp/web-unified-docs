@@ -4,6 +4,7 @@
  */
 
 import { findDocVersions } from '#utils/findDocVersions'
+import { getMetadata } from '#utils/metadata'
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
 
 export async function GET(request: Request) {
@@ -48,7 +49,8 @@ export async function GET(request: Request) {
 	if (fileNameQuery.startsWith('/')) {
 		fileNameQuery = fileNameQuery.slice(1)
 	}
-	const versions = findDocVersions(product, fileNameQuery)
+	const { docsPathsAllVersions } = await getMetadata()
+	const versions = findDocVersions(product, fileNameQuery, docsPathsAllVersions)
 	/**
 	 * return either A) versions array or B) an empty array (if no content matches the query params)
 	 * this matches the current Content API behaviour
