@@ -153,8 +153,12 @@ export async function gatherVersionMetadata(contentDir) {
 			})
 		}
 
-		// If only one version exists, it should always be the latest regardless of release stage
-		if (versionMetadata[product].length === 1) {
+		// If no version was marked as latest (e.g. all versions are non-stable),
+		// mark the first version as latest
+		const hasLatest = versionMetadata[product].some((v) => {
+			return v.isLatest
+		})
+		if (!hasLatest) {
 			versionMetadata[product][0].isLatest = true
 		}
 	}

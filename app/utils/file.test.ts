@@ -3,13 +3,24 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-import { expect, test, vi, beforeEach, afterEach, describe } from 'vitest'
+import { expect, test, vi, beforeEach, afterEach, describe, it } from 'vitest'
 import { ServedFrom } from '#api/types'
 
 // Must run before the module is evaluated so the module-level SELF_URL constant
 // picks up VERCEL_URL at load time.
 vi.hoisted(() => {
 	process.env.VERCEL_URL = 'local-vercel-CDN'
+})
+
+import { getAssetData, resolveCdnUrl } from './file'
+
+vi.mock('#productConfig.mjs', () => {
+	return {
+		PRODUCT_CONFIG: {
+			'validated-designs': { versionedDocs: false },
+			'terraform-plugin-log': { versionedDocs: true },
+		},
+	}
 })
 
 vi.mock('fs/promises', () => {
@@ -19,7 +30,6 @@ vi.mock('fs/promises', () => {
 })
 
 import { readFile } from 'node:fs/promises'
-import { getAssetData } from './file'
 
 const makeChangedFiles = (
 	overrides: Partial<{
@@ -320,5 +330,38 @@ describe('findFileWithMetadata', () => {
 		await findFileWithMetadata(filePath, versionMetaData)
 
 		expect(fetch.mock.calls[0][0]).not.toContain('//docs')
+	})
+})
+
+describe('resolveCdnUrl', () => {
+	it('replaces {{CDN_URL}} with versioned assets URL for versioned products', () => {
+		const result = resolveCdnUrl(
+			'[Guide]({{CDN_URL}}/img/diagram.png)',
+			'terraform-plugin-log',
+			'v0.4.x',
+		)
+		expect(result).toBe(
+			'[Guide](https://local-vercel-CDN/assets/terraform-plugin-log/v0.4.x/img/diagram.png)',
+		)
+	})
+
+	it('replaces {{CDN_URL}} without version segment for unversioned products', () => {
+		const result = resolveCdnUrl(
+			'[Guide]({{CDN_URL}}/pdf/Boundary-Administration-Guide.pdf)',
+			'validated-designs',
+			'v0.0.x',
+		)
+		expect(result).toBe(
+			'[Guide](https://local-vercel-CDN/assets/validated-designs/pdf/Boundary-Administration-Guide.pdf)',
+		)
+	})
+
+	it('does not modify markdown without {{CDN_URL}}', () => {
+		const result = resolveCdnUrl(
+			'[External](https://example.com/file.pdf)',
+			'validated-designs',
+			'v0.0.x',
+		)
+		expect(result).toBe('[External](https://example.com/file.pdf)')
 	})
 })
