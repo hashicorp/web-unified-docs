@@ -4,6 +4,7 @@
  */
 
 import { getProductMetadata } from '#utils/contentVersions'
+import { getMetadata } from '#utils/metadata'
 import { errorResultToString } from '#utils/result'
 import { ProductParam } from '#api/types'
 
@@ -18,7 +19,11 @@ export async function GET(
 ) {
 	const { productSlug } = await params
 
-	const productVersionMetadataResult = getProductMetadata(productSlug)
+	const { versionMetadata } = await getMetadata()
+	const productVersionMetadataResult = getProductMetadata(
+		productSlug,
+		versionMetadata,
+	)
 
 	if (!productVersionMetadataResult.ok) {
 		console.error(errorResultToString('API', productVersionMetadataResult))

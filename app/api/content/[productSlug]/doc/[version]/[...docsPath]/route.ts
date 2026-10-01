@@ -13,7 +13,7 @@ import {
 import { getProductVersionMetadata } from '#utils/contentVersions'
 import { errorResultToString } from '#utils/result'
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
-import docsPathsAllVersions from '#api/docsPathsAllVersions.json'
+import { getMetadata } from '#utils/metadata'
 import { VersionedProduct } from '#api/types'
 
 /**
@@ -44,7 +44,13 @@ export async function GET(
 
 	// Determine the content directory based on the "product" (actually repo) slug
 	const { contentDir } = PRODUCT_CONFIG[productSlug]
-	const productVersionResult = getProductVersionMetadata(productSlug, version)
+	const { versionMetadata: productVersions, docsPathsAllVersions } =
+		await getMetadata()
+	const productVersionResult = getProductVersionMetadata(
+		productSlug,
+		version,
+		productVersions,
+	)
 	if (!productVersionResult.ok) {
 		console.error(errorResultToString('API', productVersionResult))
 		return new Response('Not found', { status: 404 })

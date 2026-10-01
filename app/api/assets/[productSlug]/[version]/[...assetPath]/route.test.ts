@@ -21,7 +21,7 @@ vi.mock('#productConfig.mjs', () => {
 })
 
 vi.mock('#api/versionMetadata.json', () => {
-	return {}
+	return { default: {} }
 })
 
 test("Return 404 if `product` doesn't exist", async () => {

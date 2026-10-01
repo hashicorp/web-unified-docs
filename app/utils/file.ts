@@ -11,6 +11,7 @@ import { parse as jsoncParse } from 'jsonc-parser'
 import { ServedFrom } from '#api/types'
 import { Err, Ok, Result } from './result'
 import type { ProductVersionMetadata } from './contentVersions'
+import { getMetadata } from './metadata'
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
 
 // Only exported for testing purposes
@@ -43,21 +44,8 @@ const mdxTransformsModule = incBuildLocalDev
 	? import(MDX_TRANSFORM_SCRIPT)
 	: undefined
 
-const versionMetadata = incBuildLocalDev
-	? readFile(
-			path.join(process.cwd(), 'app', 'api', 'versionMetadata.json'),
-			'utf-8',
-		).then((contents: string) => {
-			return JSON.parse(contents)
-		})
-	: undefined
-
 void mdxTransformsModule?.catch((error: unknown) => {
 	console.error('Failed to preload local MDX transforms:', error)
-})
-
-void versionMetadata?.catch((error: unknown) => {
-	console.error('Failed to preload local version metadata:', error)
 })
 
 const EXT_TO_CONTENT_TYPE: Record<string, string> = {
@@ -177,10 +165,11 @@ export const fetchFile = async (
 				await readFile(localFilePath)
 
 				await mdxTransformsModule?.then(async (module: any) => {
+					const { versionMetadata } = await getMetadata()
 					await module.buildMdxTransforms(
 						path.join(CWD, 'content'),
 						path.join(CWD, 'public', 'content'),
-						await versionMetadata,
+						versionMetadata,
 						{ added: [path.join(CWD, localFilePath)], modified: [] },
 						{ exitOnError: false },
 					)

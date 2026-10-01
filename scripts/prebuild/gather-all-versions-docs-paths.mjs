@@ -17,9 +17,10 @@ const execAsync = promisify(exec)
 export async function gatherAllVersionsDocsPaths(
 	versionMetadata,
 	getRealFileChangedMetadata,
+	products = Object.keys(PRODUCT_CONFIG),
 ) {
 	const allDocsPaths = {}
-	const allProducts = Object.keys(PRODUCT_CONFIG)
+	const allProducts = products
 
 	// Iterate over each product directory, adding to `allDocsPaths`
 	console.log(

@@ -45,11 +45,21 @@ node scripts/prebuild/mdx-transforms/build-mdx-transforms.mjs <file-path> [file-
 
 It reads version metadata from `app/api/versionMetadata.json` and writes the
 requested files from `content/` to their corresponding paths in `public/content/`.
-Local incremental development starts the transform import and version metadata
-load once during module initialization. Markdown requests reuse these promises
-and call the transform directly, without starting a subprocess. Transform errors
-are returned without exiting the server.
+Local incremental development preloads the transform module and calls it directly
+for Markdown requests, without starting a subprocess. Transform errors are
+returned without exiting the server.
 Navigation data, redirects, and assets are read directly from `content/`.
+
+When `INCREMENTAL_BUILD=true`, `NODE_ENV=development`, and this is not a Vercel
+preview, metadata consumers lazily generate version metadata and all-version
+document paths in memory on the first request. They share one cache across API
+routes. File saves are ignored, including edits to existing files. Recursive
+`content/` watcher `rename` events schedule a directory path check on the next
+metadata request. Only file or directory additions, removals, and renames
+invalidate the cache and regenerate both datasets. Atomic saves that replace an
+existing file without changing the final paths are also ignored. No generated
+JSON files are rewritten. Preview and production continue
+to use `app/api/versionMetadata.json` and `app/api/docsPathsAllVersions.json`.
 
 The pre-commit hook updates date metadata for staged MDX files under
 `content/`. It preserves an existing `created_at` value and updates
