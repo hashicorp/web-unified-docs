@@ -22,6 +22,10 @@ npm run prebuild
 npm run dev
 ```
 
+`npm run dev` uses `concurrently` to start the content watcher and Next.js
+together. Both output streams are shown with `[watch]` and `[next]` prefixes.
+Press Ctrl+C to stop both; if either command exits, the other is also stopped.
+
 `npm run prebuild` populates the `public/` folder and only needs to run once
 (or when prebuild sources change — see `scripts/prebuild/**` or
 `productConfig.mjs`). It is a long-running process; run it manually when
