@@ -9,7 +9,7 @@ description: >-
 
 <EnterpriseAlert>
 
-Multi-port service registration on Kubernetes requires Consul Enterprise. On Consul Community Edition, Consul registers only the first port as a single-port service.
+Multi-port service registration on Kubernetes requires Consul Enterprise. On Consul Community Edition, `consul-k8s` falls back to registering a single-port service using the resolved default port, described in [Register the multi-port service](#register-the-multi-port-service). Every other named port is not registered.
 
 </EnterpriseAlert>
 
@@ -19,8 +19,24 @@ To add a Pod with multiple ports to the service mesh, create a single Kubernetes
 
 ## Requirements
 
-- Consul Enterprise
-- A Kubernetes Service that exposes each port on the workload with a unique name
+- Consul Enterprise 2.0.x or later.
+- Consul on Kubernetes (`consul-k8s` and the `consul` Helm chart) 2.0.x or later. Refer to [Consul Kubernetes compatibility](/consul/docs/upgrade/k8s/compatibility) for exact supported versions.
+- A Kubernetes Service that exposes each port on the workload with a unique name.
+- All named ports on the service share one L7 protocol declaration. If you plan to use L7 traffic management, such as HTTP-aware routing or intentions, that behavior is limited to the default port. Refer to [multiport feature support](/consul/docs/connect/proxy/multiport-feature-support) for the current status.
+- All named ports on the service share one health outcome. Consul doesn't evaluate health independently per named port.
+- Named ports on a multiport service share one service identity for intentions. Consul can't apply independent ACL or intention policies to individual named ports.
+
+## When to use a multiport service
+
+Use one multiport service when all ports on the workload share the same identity, authorization policy, and health outcome. For example, group an application's primary listener with a metrics endpoint that always starts and stops together with the application.
+
+Register ports as separate Consul services when they require independent authorization, health, or routing decisions. For example, register an administrative or debugging port as a separate service if it requires a different intention policy than the primary application port, or if it shouldn't affect the primary application's health status when it fails.
+
+<Warning>
+
+Do not group application, administrative, debugging, or metrics ports under one multiport service when they require different access policies. Register them as separate services instead.
+
+</Warning>
 
 ## Register the multi-port service
 
@@ -30,7 +46,7 @@ To register a Pod as a multi-port service, complete the following steps:
 1. Create a Kubernetes Service that exposes each port with a unique name.
 1. Create a Deployment that exposes the matching named container ports and enables injection with the `consul.hashicorp.com/connect-inject` annotation.
 
-When you do not set the `consul.hashicorp.com/connect-service-port` annotation, Consul registers all exposed container ports as named ports on a single multi-port service and uses the first port as the default port.
+When you do not set the `consul.hashicorp.com/connect-service-port` annotation, Consul registers all ports exposed by the Pod's first container as named ports on a single multi-port service, in the order the container declares them. Unless you set the `consul.hashicorp.com/connect-service-default-port` annotation, Consul marks the first declared port as the default port. Explicitly set the default-port annotation in production rather than relying on container port declaration order, because manifest generators and Helm templates can change that order. If the default-port annotation value doesn't match any registered port name or number, Consul silently falls back to the first declared port as the default instead of returning an error, so validate the annotation value carefully.
 
 The following manifest defines the `web` service account, Kubernetes Service, and Deployment. The `web` service exposes three named ports: `api-port` on `9090`, `metrics` on `9091`, and `admin-port` on `9092`. The Deployment runs a single container that serves all three ports. A `static-client` service then connects to each port through the service mesh.
 
@@ -83,13 +99,13 @@ spec:
   ports:
     - name: api-port
       port: 9090
-      targetPort: 9090
+      targetPort: api-port
     - name: metrics
       port: 9091
-      targetPort: 9091
+      targetPort: metrics
     - name: admin-port
       port: 9092
-      targetPort: 9092
+      targetPort: admin-port
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -106,6 +122,7 @@ spec:
     metadata:
       annotations:
         'consul.hashicorp.com/connect-inject': 'true'
+        'consul.hashicorp.com/connect-service-default-port': 'api-port'
       labels:
         app: web
     spec:
@@ -116,7 +133,7 @@ spec:
             name: web-config
       containers:
         - name: nginx
-          image: nginx:alpine
+          image: nginx:1.27-alpine
           volumeMounts:
             - name: config-volume
               mountPath: /etc/nginx/nginx.conf
@@ -179,7 +196,7 @@ spec:
     spec:
       containers:
         - name: static-client
-          image: curlimages/curl:latest
+          image: curlimages/curl:8.11.0
           # Spin and wait forever; connect with `kubectl exec` to demonstrate the upstreams.
           command: ['/bin/sh', '-c', '--']
           args: ['while true; do sleep 30; done;']
@@ -202,15 +219,7 @@ $ kubectl exec deploy/static-client -- curl --silent http://admin-port.web.virtu
 Response from admin port 9092: Hello again!
 ```
 
-By default, Consul uses the first registered port as the service's default port to maintain backward compatibility for clients that dial the upstream service without a port-name prefix. To override this behaviour and mark a specific port as the default, use the [`consul.hashicorp.com/connect-service-default-port`](/consul/docs/reference/k8s/annotation-label#consul-hashicorp-com-connect-service-default-port) annotation on the upstream `web` Pod. The following annotations mark `api-port` as the default port:
-
-```yaml
-annotations:
-  'consul.hashicorp.com/connect-inject': 'true'
-  'consul.hashicorp.com/connect-service-default-port': 'api-port'
-```
-
-Here is an example on how the service default port functions. If a service attempts to connect to `web.virtual.consul`, notably missing a port-name prefix in the hostname, it will be routed to the port defined in `connect-service-default-port`, which in this case is the `api-port`:
+The `web` manifest earlier on this page explicitly sets the `consul.hashicorp.com/connect-service-default-port` annotation to `api-port`, so Consul routes virtual address traffic that omits a port-name prefix to `api-port`. Explicitly setting this annotation, rather than relying on container port declaration order, keeps the default port stable in production if the manifest changes. The following example demonstrates the resulting default-port behavior: because the hostname `web.virtual.consul` doesn't include a named-port prefix, Consul routes the request to `api-port`, the configured default:
 
 ```shell-session
 $ kubectl exec deploy/static-client -- curl --silent http://web.virtual.consul:9090
@@ -221,7 +230,24 @@ For more details about the annotations and labels that Consul on Kubernetes supp
 
 ### Transparent proxy disabled
 
-When transparent proxy mode is disabled, you must define each upstream in the `consul.hashicorp.com/connect-service-upstreams` annotation and provide the `destination_port` parameter per upstream. Applications then reach the upstream service by connecting to `localhost` on the desired destination port. The following `static-client` manifest has transparent proxy disabled and defines the three upstreams.
+When transparent proxy mode is disabled, you must define each upstream in the `consul.hashicorp.com/connect-service-upstreams` annotation and provide the `destination_port` parameter per upstream. Applications connect to the sidecar on a local bind port, and the sidecar forwards that traffic to the named upstream port identified by `destination_port`. The local bind port and the upstream's registered application port are independent values and don't need to match. Every configured upstream listener in the Pod must use a unique local bind port.
+
+Each entry in the annotation uses the following syntax:
+
+```text
+<service-name>.svc.<namespace>.ns.<partition>.ap:<local-bind-port>:destination_port=<port-name>
+```
+
+- `<service-name>` is the destination service name.
+- `.svc` indicates a service reference.
+- `<namespace>` is the destination service's Consul Enterprise namespace, followed by the `.ns` keyword.
+- `<partition>` is the destination service's Consul Enterprise admin partition, followed by the `.ap` keyword.
+- `<local-bind-port>` is the port the local sidecar listens on. Applications on this Pod connect to `localhost:<local-bind-port>`.
+- `destination_port=<port-name>` selects the named upstream port on the destination service.
+
+For the full annotation syntax, including how to reference cluster peers and WAN-federated datacenters, refer to [`consul.hashicorp.com/connect-service-upstreams`](/consul/docs/reference/k8s/annotation-label#consul-hashicorp-com-connect-service-upstreams).
+
+The following `static-client` manifest has transparent proxy disabled and defines three upstreams. Each upstream uses a distinct local bind port (`19090`, `19091`, `19092`) that is independent of the destination application ports (`9090`, `9091`, `9092`) to demonstrate that these values don't need to match.
 
 <CodeBlockConfig filename="static-client.yaml" highlight="34">
 
@@ -259,11 +285,11 @@ spec:
       annotations:
         'consul.hashicorp.com/connect-inject': 'true'
         'consul.hashicorp.com/transparent-proxy': 'false'
-        'consul.hashicorp.com/connect-service-upstreams': 'web.svc.default.ns.default.ap:9090:destination_port=api-port,web.svc.default.ns.default.ap:9091:destination_port=metrics,web.svc.default.ns.default.ap:9092:destination_port=admin-port'
+        'consul.hashicorp.com/connect-service-upstreams': 'web.svc.default.ns.default.ap:19090:destination_port=api-port,web.svc.default.ns.default.ap:19091:destination_port=metrics,web.svc.default.ns.default.ap:19092:destination_port=admin-port'
     spec:
       containers:
         - name: static-client
-          image: curlimages/curl:latest
+          image: curlimages/curl:8.11.0
           # Spin and wait forever; connect with `kubectl exec` to demonstrate the upstreams.
           command: ['/bin/sh', '-c', '--']
           args: ['while true; do sleep 30; done;']
@@ -273,30 +299,107 @@ spec:
 
 </CodeBlockConfig>
 
-After you deploy `static-client`, connect to each upstream on its local port:
+After you deploy `static-client`, connect to each upstream on its local bind port:
 
 ```shell-session
-$ kubectl exec deploy/static-client -- curl --silent http://localhost:9090
+$ kubectl exec deploy/static-client -- curl --silent http://localhost:19090
 Response from api-port 9090: Hello there!
 
-$ kubectl exec deploy/static-client -- curl --silent http://localhost:9091
+$ kubectl exec deploy/static-client -- curl --silent http://localhost:19091
 Response from metrics port 9091: Hello again!
 
-$ kubectl exec deploy/static-client -- curl --silent http://localhost:9092
+$ kubectl exec deploy/static-client -- curl --silent http://localhost:19092
 Response from admin port 9092: Hello again!
 ```
+
+## Verify the multi-port service
+
+Verify each part of the registration and connectivity before you rely on the deployment:
+
+1. Confirm the Pods are running and ready:
+
+   ```shell-session
+   $ kubectl rollout status deployment/web
+   $ kubectl rollout status deployment/static-client
+   $ kubectl get pods -l app=web
+   ```
+
+1. Confirm the sidecar container is running in the `web` Pod. Consul on Kubernetes injects a sidecar container (`consul-dataplane` or `consul-connect-envoy-sidecar`, depending on your configuration) alongside your application container:
+
+   ```shell-session
+   $ kubectl get pod -l app=web -o jsonpath='{.items[0].spec.containers[*].name}'
+   ```
+
+1. Confirm Consul registered a single service with all three named ports:
+
+   ```shell-session
+   $ kubectl exec deploy/static-client -c consul-dataplane -- curl --silent http://localhost:8500/v1/catalog/service/web | jq '.[0].ServicePorts'
+   ```
+
+1. Confirm the configured default port. Requests to the base virtual address should reach the default port, as shown in [Transparent proxy enabled](#transparent-proxy-enabled).
+
+1. Confirm allowed traffic reaches each named port, using the commands shown in this guide's transparent proxy or non-transparent proxy sections, depending on your configuration.
+
+1. If ACLs are enabled with a default-deny policy, confirm that denied traffic is rejected. Remove or modify the intention created in [Prerequisites for secured clusters](#prerequisites-for-secured-clusters) and confirm that the same request now fails.
+
+## Troubleshooting
+
+| Symptom | Likely cause |
+| --- | --- |
+| Only one port is registered in Consul, and the rest are missing. | The cluster is running Consul Community Edition. Multi-port registration requires Consul Enterprise. |
+| Virtual DNS lookups such as `api-port.web.virtual.consul` fail to resolve. | Transparent proxy is disabled for the client Pod, or the named port doesn't exist on the destination service. Confirm `consul.hashicorp.com/transparent-proxy` is `'true'` and the port name matches the destination service's registration. |
+| The client Pod's connection is refused or times out. | The upstream annotation or virtual address uses the wrong local bind port or destination port name, or the destination Pod isn't ready. Confirm the values against the destination service's registration. |
+| The client Pod receives a permission-denied response. | ACLs are enabled with a default-deny policy and no intention allows the client to reach the destination service. Refer to [Prerequisites for secured clusters](#prerequisites-for-secured-clusters). |
+| No local listener exists for a configured upstream. | Transparent proxy is disabled and the `consul.hashicorp.com/connect-service-upstreams` annotation is missing, malformed, or exceeds the Kubernetes annotation size limit. |
+| The whole service is marked unhealthy after only one container's probe fails. | This is expected behavior. Consul doesn't maintain independent health per named port. Refer to [Health check coupling](#health-check-coupling). |
+| Cluster peering or a gateway topology involving the multi-port service doesn't behave as expected. | Refer to [Cluster peering](#cluster-peering) and the [multiport feature support](/consul/docs/connect/proxy/multiport-feature-support) matrix for unsupported topologies. |
 
 ## Caveats for multi-port services
 
 Consider the following caveats when you register a multi-port service:
 
-- Multi-port service registration requires Consul Enterprise. On Consul Community Edition, Consul registers only the first port as a single-port service. <EnterpriseAlert inline />
-- All ports of a multi-port service must use the same protocol. Consul does not support a combination of protocols for a single multi-port service.
-- When transparent proxy mode is disabled, the Kubernetes annotation character limit constrains the number of upstreams you can define for a service.
-- Consul performs health checks for each Pod. When a health check fails for any container in the Pod, Consul marks the entire multi-port service as unhealthy.
-- [Consul cluster peering](/consul/docs/east-west/cluster-peering) is not supported.
+- Multi-port service registration requires Consul Enterprise. On Consul Community Edition, `consul-k8s` falls back to registering a single-port service using the resolved default port. Other ports are not registered. <EnterpriseAlert inline />
+- Consul applies a single declared protocol to a multiport service as a whole. Named ports may carry different traffic on the wire, but Layer 7 (L7) traffic management, such as HTTP-aware routing and intentions, is available only for the default port. Refer to [multiport feature support](/consul/docs/connect/proxy/multiport-feature-support) for details.
+- When transparent proxy mode is disabled, the Kubernetes annotation value size limit (256KB) constrains the number of upstreams you can define for a service using the `consul.hashicorp.com/connect-service-upstreams` annotation. If you need more upstreams than fit within this limit, use transparent proxy mode instead, which doesn't require the upstreams annotation, or split the workload into multiple services.
+
+### Prerequisites for secured clusters
+
+If your cluster enforces ACLs with a default-deny policy, service mesh traffic is denied by default. Create an intention that allows `static-client` to connect to `web` before you test connectivity:
+
+```shell-session
+$ consul intention create static-client web
+```
+
+This decision applies to every named port registered under the `web` service identity. Consul doesn't support independent intentions per named port. If different named ports require different authorization policies, register them as separate Consul services.
+
+<Warning>
+
+Do not group application, administrative, debugging, or metrics ports under one multi-port service when they require different access policies. Register them as separate services instead.
+
+</Warning>
+
+### Health check coupling
+
+Consul doesn't maintain independent health per named port. `consul-k8s` derives a single Consul health check per Pod from the Pod's Kubernetes readiness state, which requires every container in the Pod to be ready. When any container in the Pod fails its readiness probe, Consul marks the entire multi-port service instance, and every named port registered under it, as unhealthy.
+
+Register ports as separate Consul services when they require independent health and routing decisions. For example, don't group a critical application port with a debugging or metrics port whose failure shouldn't remove the application port from service.
+
+### Cluster peering
+
+[Consul cluster peering](/consul/docs/east-west/cluster-peering) isn't supported for multi-port services in this release. Local traffic to a multi-port service within its originating cluster or admin partition remains unaffected. Do not export a multi-port service through cluster peering.
 
 For more information about multi-port service limitations and non-Kubernetes configuration options, refer to [multi-port services](/consul/docs/connect/proxy/multiport). For the current cross-version, cross-platform support status of specific multiport capabilities, refer to [multiport feature support](/consul/docs/connect/proxy/multiport-feature-support).
+
+## Clean up
+
+Remove the resources created in this guide:
+
+```shell-session
+$ kubectl delete deployment static-client web
+$ kubectl delete service static-client web
+$ kubectl delete serviceaccount static-client web
+$ kubectl delete configmap web-config
+```
 
 ## Next steps
 

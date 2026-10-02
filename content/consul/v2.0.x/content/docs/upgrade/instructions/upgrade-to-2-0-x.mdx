@@ -12,29 +12,38 @@ The page describes the process to update a Consul deployment to v2.0.x.
 
 ## Introduction
 
-This guide explains how to upgrade a Consul Enterprise datacenter to the latest v2.0.x
-release from Consul Enterprise 1.21.x (LTS). If you are on an earlier major version,
-you must first upgrade to Consul Enterprise 1.21.x before continuing with this guide.
-Review the [version-specific upgrade details](/consul/docs/upgrade/version-specific)
-for each major version between your current release and 1.21.x to plan an
+This guide explains how to upgrade a Consul Enterprise datacenter running Consul Enterprise
+1.21.7 or later in the 1.21.x LTS release stream to a currently supported Consul Enterprise
+2.0.x maintenance release. Review the release notes and changelog for your exact target
+release before you begin. If you are on an earlier major version, you must first upgrade to
+Consul Enterprise 1.21.7 or later before continuing with this guide. Review the
+[version-specific upgrade details](/consul/docs/upgrade/version-specific)
+for each major version between your current release and 1.21.7 to plan an
 intermediate upgrade path.
 
-If you have multiple Consul datacenters, upgrade them in the normal order and take
-the following instructions into account for each upgrade.
+If you have multiple Consul datacenters, upgrade the primary datacenter first, followed by
+secondary datacenters one at a time. Before starting, confirm that ACL replication, CA
+federation, and WAN federation are healthy between all datacenters. Consul supports a
+mixed-version cluster of the source and target releases only for the duration of the
+rolling upgrade itself; do not leave datacenters on different major versions for an
+extended period. Take a snapshot of each datacenter before upgrading it, as described in
+the Procedures section.
 
 For Consul Community Edition, follow the
-[General Upgrade Process](/consul/docs/upgrade/instructions/general). Community
-Edition is not affected by the Enterprise licensing prerequisite described below,
-but does not have access to Enterprise-only features introduced in 2.0.x, such as
+[General Upgrade Process](/consul/docs/upgrade/instructions/general) and its guidance on
+how many major versions you can jump in a single upgrade. Community Edition is not affected
+by the Enterprise licensing prerequisite described below, but does not have access to
+Enterprise-only features introduced in 2.0.x, such as
 [multi-port service mesh routing](/consul/docs/connect/proxy/multiport).
 
 ~> You can only upgrade to Consul Enterprise 2.0.x from Consul Enterprise 1.21.7
 or later, running an **IBM Consul Enterprise license**. If you still use a
 HashiCorp-issued license, you must first complete the
 [license migration process](/consul/docs/upgrade#upgrade-to-ibm-consul-enterprise-license)
-on Consul Enterprise 1.21.7 or later before upgrading to 2.0.x. Attempting to
-upgrade directly to 2.0.x with a HashiCorp-issued license, or from a version
-earlier than 1.21.7, can cause agents to fail to start.
+on Consul Enterprise 1.21.7 or later before upgrading to 2.0.x. An agent that fails to
+validate its license on startup logs an `error initializing license` message and exits;
+a HashiCorp-issued license that hasn't been migrated to an IBM-issued license fails
+license validation on a 2.0.x agent.
 
 ## Requirements
 
@@ -44,6 +53,13 @@ earlier than 1.21.7, can cause agents to fail to start.
   requirement is met.
 - Your Consul Enterprise cluster must already use an IBM Consul Enterprise license.
   Refer to [Upgrade to IBM Consul Enterprise license](/consul/docs/upgrade#upgrade-to-ibm-consul-enterprise-license).
+- The datacenter has no unresolved Raft, membership, Autopilot, ACL replication,
+  certificate, proxy connectivity, license, or storage errors. Resolve any existing
+  errors before you begin the upgrade; refer to [Pre-upgrade checks](#pre-upgrade-checks).
+- Envoy or Consul dataplane on your clients and gateways must be compatible with both your
+  current release and your target 2.0.x release for the duration of the rolling upgrade.
+  Refer to [Consul Kubernetes compatibility](/consul/docs/upgrade/k8s/compatibility) and
+  your target release's changelog for the exact supported Envoy version range.
 
 ## Assumptions
 
@@ -51,7 +67,14 @@ This guide makes the following assumptions:
 
 - You are familiar with the [General Upgrade Process](/consul/docs/upgrade/instructions/general).
 - You have the ability to run Consul CLI commands.
-- If ACLs are in use, then you possess a token with at least `operator:read` permissions.
+- If ACLs are in use, then you possess a token with the permissions required for each
+  command in this guide:
+  - `consul license get` requires `operator:read`.
+  - `consul snapshot save` and `consul snapshot restore` require `acl:write`.
+  - `consul operator raft list-peers` requires `operator:read`.
+  - `consul info` requires `agent:read` on each queried agent.
+  - `consul members` filters its output per node using the token's `node:read` access;
+    it doesn't require a single dedicated permission.
 - If you run Consul API Gateway on Kubernetes, you are prepared to migrate Gateway
   API resources as part of this upgrade.
 
@@ -73,16 +96,49 @@ upgrade process. Review the changes prior to upgrading, in particular:
   you must migrate `Gateway`, `HTTPRoute`, `TCPRoute`, and `ReferenceGrant` resources
   to the new `consul.hashicorp.com` resource types. Refer to
   [Upgrade Gateway resource types](/consul/docs/north-south/api-gateway/k8s/resource-upgrade)
-  for step-by-step instructions. Complete this migration as part of the same
-  upgrade window if you run API Gateway on OCP.
+  for step-by-step instructions, including traffic-availability and rollback guidance
+  for that migration. Complete this migration as part of the same upgrade window if you
+  run API Gateway on OCP.
 - **Opt-in telemetry reporting**: Consul 2.0.0 introduces telemetry reporting that
   is disabled by default. No action is required to preserve existing behavior.
+- **Default HTTP server timeouts increased**: `read_timeout` and `write_timeout` default
+  to 15 minutes as of 2.0.0, up from 30 seconds, to avoid breaking long-polling blocking
+  queries. This is a behavior change even though it doesn't require editing your
+  configuration file. Both values remain configurable in the `http_config` block.
+- **Terminating gateway upstream TLS uses SDS by default**: This allows dynamic
+  certificate updates without restarting the terminating gateway, and is also a
+  behavior change that doesn't require a configuration file edit.
+
+## Pre-upgrade checks
+
+Before you begin the maintenance window, confirm the following for every applicable
+datacenter:
+
+- You've identified your exact target 2.0.x release and reviewed its changelog.
+- Every server, client, and snapshot agent reports Consul Enterprise 1.21.7 or later.
+- Every agent reports an IBM-issued Consul Enterprise license.
+- The current leader is stable, and all Raft peers report as voters with no stale members.
+- Autopilot health is passing on every server.
+- ACL replication is current between primary and secondary datacenters, if applicable.
+- The Connect CA is healthy and not close to root or intermediate certificate expiration.
+- Proxies can reach their local agent or Consul dataplane, and existing mesh traffic is
+  healthy.
+- If you run Consul API Gateway, you've inventoried every `Gateway`, `HTTPRoute`,
+  `TCPRoute`, and `ReferenceGrant` resource that requires migration.
+- You have sufficient disk space for a snapshot, and a monitoring dashboard or alert
+  open to observe the cluster during the upgrade.
+- You've identified the smoke tests you'll run after each stage of the upgrade, and
+  reviewed the [Rollback and recovery](#rollback-and-recovery) section for this release.
+
+Don't begin the upgrade until every item on this list is resolved.
 
 You can also review the full
 [2.0.0](https://github.com/hashicorp/consul/releases/tag/v2.0.0),
 [2.0.1](https://github.com/hashicorp/consul/releases/tag/v2.0.1),
 [2.0.2](https://github.com/hashicorp/consul/releases/tag/v2.0.2), and
-[2.0.3](https://github.com/hashicorp/consul/releases/tag/v2.0.3) changelogs.
+[2.0.3](https://github.com/hashicorp/consul/releases/tag/v2.0.3) changelogs, and the
+[full 2.0.x changelog index](https://github.com/hashicorp/consul/blob/main/CHANGELOG.md)
+for any release published after this page was last updated.
 We strongly recommend reviewing the changes prior to upgrading.
 
 ## Procedures
@@ -101,7 +157,9 @@ the following command on a server to confirm the license type:
 consul license get
 ```
 
-**2.** Take a snapshot of the cluster by running the following command:
+Complete the items in [Pre-upgrade checks](#pre-upgrade-checks) before continuing.
+
+**2.** Take a snapshot of the datacenter by running the following command:
 
 ```shell
 consul snapshot save pre-2-0-upgrade.snap
@@ -113,8 +171,11 @@ request to the correct Consul API may be necessary if the command runs from anot
 location. Ensure that there is enough disk space in the current directory to store
 the snapshot.
 
-This snapshot should not be needed, but if something were to go wrong, having the
-snapshot would make it possible to restore the previous state.
+Do not begin the rolling upgrade without a verified snapshot stored outside the Consul
+cluster. Copy the snapshot file to external, secure storage, confirm the file is
+non-zero in size, and confirm that your recovery team has access to it and to a
+reviewed restore procedure. If you have multiple datacenters, take a snapshot of each
+datacenter you plan to upgrade.
 
 **3.** If you run Consul API Gateway on Kubernetes, back up your existing `Gateway`,
 `HTTPRoute`, `TCPRoute`, and `ReferenceGrant` resources before upgrading. Refer to
@@ -123,26 +184,107 @@ for the backup commands and the full migration procedure.
 
 **4.** Upgrade all server agents to Consul Enterprise 2.0.x, one server at a time,
 following the [basic server upgrade process](/consul/docs/upgrade/instructions/general).
-Wait for each server to rejoin the cluster and report healthy before continuing to
-the next.
+After each server, confirm the following before continuing to the next server:
+
+- The server reports as alive in `consul members`.
+- The server appears as a voter in `consul operator raft list-peers`, and the expected
+  number of voting peers and a stable leader are present.
+- Autopilot health is passing.
+- `consul info` on the server reports the new version with no repeating license, Raft,
+  ACL, CA, or storage errors in the logs.
 
 **5.** Upgrade all client agents to Consul Enterprise 2.0.x.
 
 **6.** Upgrade all [snapshot agents](/consul/commands/snapshot/agent) to Consul
 Enterprise 2.0.x.
 
-**7.** If you run Consul API Gateway on Kubernetes, complete the resource migration
-described in [Upgrade Gateway resource types](/consul/docs/north-south/api-gateway/k8s/resource-upgrade).
+**7.** Upgrade clients and associated proxies.
 
-**8.** Confirm the upgrade completed successfully by running the following command
-to verify that all members report the new version:
+Consul membership can be healthy while the data plane is disconnected, so validate
+proxies independently of the control plane:
 
-```shell
-consul members
-```
+- **Virtual machine deployments**: Upgrade Consul client agents and their associated
+  Envoy or Consul dataplane processes together, one host at a time. Confirm that
+  Envoy or Consul dataplane reconnects to xDS, that its certificates are current, and
+  that existing mesh traffic continues to flow before moving to the next host.
+- **Kubernetes deployments**: Upgrade the `consul-k8s` CLI or the `consul` Helm chart
+  release to 2.0.x, then follow [Upgrading Consul on Kubernetes components](/consul/docs/upgrade/k8s)
+  to upgrade servers and clients. Confirm the connect-inject controller has reconciled
+  and reinjected sidecars for existing workloads, or plan a rolling restart of affected
+  workloads if your configuration doesn't reinject automatically.
+- In both cases, confirm that allowed traffic between representative upstream and
+  downstream services still succeeds, and that traffic that should be denied by an
+  intention is still denied.
+
+**8.** If you run Consul API Gateway on Kubernetes, complete the resource migration
+described in [Upgrade Gateway resource types](/consul/docs/north-south/api-gateway/k8s/resource-upgrade),
+including the traffic-availability and rollback guidance on that page.
+
+**9.** Validate the upgrade.
+
+Membership alone does not represent customer workload health. Confirm the following
+across the datacenter:
+
+- Every server and client reports the target 2.0.x version in `consul members`.
+- `consul operator raft list-peers` reports the expected number of voters and a stable
+  leader.
+- ACL tokens and policies function as expected, and intentions still allow and deny
+  traffic as intended.
+- The Connect CA is healthy, and leaf certificates continue to renew.
+- Consul DNS resolves service records as expected.
+- Representative allowed and denied service-mesh traffic behaves as expected.
+- Envoy or Consul dataplane proxies report healthy xDS connections.
+- Gateways (API gateway, terminating gateway, mesh gateway) route traffic as expected,
+  if applicable.
+- Kubernetes-specific integrations, such as the connect-inject webhook and CRD
+  controllers, are healthy, if applicable.
+- Snapshot agents complete a successful snapshot on the new version.
+- WAN federation and cluster peering connections are healthy, if applicable.
+
+## Rollback and recovery
+
+Recovery options depend on the stage of the upgrade at which you stop.
+
+- **Before upgrading the first server**: No Consul Enterprise 2.0.x server has started.
+  Resolve the blocking issue and retry the upgrade, or stand down and reschedule the
+  maintenance window.
+- **During a mixed 1.21.x and 2.0.x server state**: Do not assume that replacing a
+  2.0.x server binary with a 1.21.x binary is a supported downgrade. Consul doesn't
+  publish a schema-version guard between these releases, so an older binary's behavior
+  when it encounters state written by a newer server, such as multi-port catalog data,
+  is not verified. If you must recover during this stage, restore the pre-upgrade
+  snapshot on a cluster running only 1.21.x servers rather than downgrading a
+  running 2.0.x server in place.
+- **After all servers complete the upgrade**: Follow the same guidance as the previous
+  stage. Restoring the pre-upgrade snapshot requires standing up a 1.21.x cluster and
+  accepting the loss of any changes made after the snapshot was taken.
+- **After clients and proxies complete the upgrade**: Recovery follows the same
+  binary-downgrade caution as the server stages. Additionally, confirm that Envoy or
+  Consul dataplane versions you'd revert to remain compatible with whichever server
+  version you recover to.
+- **After API Gateway resource migration**: Refer to the
+  [Rollback](/consul/docs/north-south/api-gateway/k8s/resource-upgrade#rollback)
+  section on the resource upgrade page for the supported rollback options for that
+  migration specifically.
+
+A snapshot restore is not a substitute for a tested rollback plan. Restoring a
+snapshot returns the datacenter to the state at the time the snapshot was taken;
+any changes made after that point are lost. Restoring a snapshot requires servers
+running a version of Consul compatible with the snapshot's format; consult your
+recovery team before attempting a restore during an incident.
 
 ## Post-Upgrade Configuration Changes
 
-No configuration changes are required for this upgrade, other than the API gateway
-Kubernetes resource type migration described above for clusters running Consul API
-Gateway on Kubernetes.
+No general Consul agent configuration file change is required for the baseline
+upgrade path described in this guide. Additional changes may be required depending on
+your environment, including:
+
+- Completing the IBM license migration, if you haven't already.
+- Migrating API Gateway Kubernetes resources, if you run API Gateway on Kubernetes.
+- Updating Envoy, Consul dataplane, Helm chart, or `consul-k8s` versions to a version
+  compatible with 2.0.x.
+- Reviewing default behavior changes listed in [Considerations](#considerations), such
+  as the increased default HTTP server timeouts, even though they don't require editing
+  a configuration file.
+- Opting in to product telemetry reporting, if desired. This is disabled by default and
+  requires no action to preserve existing behavior.
