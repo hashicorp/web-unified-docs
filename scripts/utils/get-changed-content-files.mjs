@@ -3,11 +3,12 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-import fs from 'fs'
-import path from 'path'
-import { execSync } from 'child_process'
+import { writeFileSync } from 'node:fs'
+import path from 'node:path'
+import { execSync } from 'node:child_process'
 import { parseArgs } from 'node:util'
 import { pathToFileURL } from 'node:url'
+
 import { getFilesUsingPartial } from './get-files-using-partial.mjs'
 
 const OUTPUT_FILE = './changedContentFiles.json'
@@ -119,24 +120,12 @@ function buildChangedContentFiles({ mergeBase, includePartials = true } = {}) {
 }
 
 /**
- * Returns true when this module is executed directly by Node, e.g.
- * `node scripts/utils/get-changed-content-files.mjs`.
- */
-function isRunFromCommandLine() {
-	if (!process.argv[1]) {
-		return false
-	}
-
-	return import.meta.url === pathToFileURL(process.argv[1]).href
-}
-
-/**
  * @param {object} [options]
  * @param {string} [options.mergeBase] - Explicit diff base SHA (forward-port mode).
  * @param {boolean} [options.includePartials=true] - Whether to fan out partial changes.
  * @param {string} [options.outputFile] - Override the output file path.
  */
-export async function getChangedContentFiles(options = {}) {
+export function getChangedContentFiles(options = {}) {
 	const { mergeBase, includePartials = true, outputFile } = options
 	try {
 		const changedFiles = buildChangedContentFiles({
@@ -145,13 +134,9 @@ export async function getChangedContentFiles(options = {}) {
 		})
 
 		const outputPath = outputFile ?? path.join(process.cwd(), OUTPUT_FILE)
-		await fs.promises.writeFile(
-			outputPath,
-			JSON.stringify(changedFiles, null, 2),
-			{
-				encoding: 'utf-8',
-			},
-		)
+		writeFileSync(outputPath, JSON.stringify(changedFiles, null, 2), {
+			encoding: 'utf-8',
+		})
 
 		console.log(`Changed content files written to ${outputPath}`)
 		console.log(
@@ -163,6 +148,18 @@ export async function getChangedContentFiles(options = {}) {
 		console.error('Error getting changed content files:', error)
 		process.exit(1)
 	}
+}
+
+/**
+ * Returns true when this module is executed directly by Node, e.g.
+ * `node scripts/utils/get-changed-content-files.mjs`.
+ */
+function isRunFromCommandLine() {
+	if (!process.argv[1]) {
+		return false
+	}
+
+	return import.meta.url === pathToFileURL(process.argv[1]).href
 }
 
 if (isRunFromCommandLine()) {

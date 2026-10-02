@@ -7,8 +7,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { vol } from 'memfs'
 import { getFilesUsingPartial } from './get-files-using-partial.mjs'
 
-vi.mock('fs')
-vi.mock('fs/promises')
+vi.mock('node:fs')
 
 const VAULT_V1_21_BASE = 'content/vault/v1.21.x/content'
 

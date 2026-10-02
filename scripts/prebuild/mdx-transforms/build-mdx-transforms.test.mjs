@@ -13,6 +13,7 @@ vi.mock('node:fs/promises')
 
 describe('applyMdxTransforms - Integration Tests', () => {
 	const mockVersionMetadata = {
+		terraform: [{ version: 'v1.14.x', releaseStage: 'stable', isLatest: true }],
 		vault: [
 			{ version: 'v1.19.x', releaseStage: 'stable', isLatest: false },
 			{ version: 'v1.20.x', releaseStage: 'stable', isLatest: false },
@@ -38,6 +39,41 @@ describe('applyMdxTransforms - Integration Tests', () => {
 	})
 
 	describe('Global Partials Processing', () => {
+		test('should resolve partials from latest/docs/partials for latest version folder', async () => {
+			vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({
+				terraform: {
+					versionedDocs: true,
+					basePaths: ['terraform'],
+					supportsExclusionDirectives: false,
+				},
+			})
+
+			const mainContent = `---
+page_title: Latest Page
+---
+
+# Latest Page
+
+@include 'from-latest.mdx'
+`
+
+			vol.fromJSON({
+				'/content/terraform/latest/docs/example.mdx': mainContent,
+				'/content/terraform/latest/docs/partials/from-latest.mdx':
+					'Content from latest partial.',
+			})
+
+			await buildMdxTransforms('/content', '/output', mockVersionMetadata)
+
+			const outputContent = fs.readFileSync(
+				'/output/terraform/latest/docs/example.mdx',
+				'utf8',
+			)
+
+			expect(outputContent).toContain('Content from latest partial.')
+			expect(outputContent).not.toContain('@include')
+		})
+
 		test('should process global partials and include content in output', async () => {
 			vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({
 				vault: {

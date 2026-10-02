@@ -6,7 +6,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { batchPromises } from './batch-promises.mjs'
-import { listFiles } from './list-files.mjs'
 
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
 
@@ -23,11 +22,7 @@ export function isAssetFile(file) {
 /**
  * Copy all asset files (images) from the source to the destination directory.
  */
-export async function copyAssetFiles(sourceDir, destDir, changedFiles = null) {
-	const filesToCheck = changedFiles
-		? [...changedFiles.added, ...changedFiles.modified]
-		: await listFiles(sourceDir)
-
+export async function copyAssetFiles(sourceDir, destDir, filesToCheck) {
 	const assetFiles = filesToCheck.filter((filePath) => {
 		const relativePath = path.relative(sourceDir, filePath)
 		const repoSlug = relativePath.split('/')[0]
