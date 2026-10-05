@@ -20,6 +20,15 @@ The migration adds resources without removing the existing issuer, so you can
 move one `Certificate` at a time and roll back by restoring its original
 `issuerRef`.
 
+The steps on this page cover two starting points:
+
+- **Existing installation**: You already run the Vault Secrets Operator to sync
+  secrets. You upgrade the release and reuse your Vault connection and
+  authentication settings.
+- **New installation**: You install the Vault Secrets Operator to issue
+  certificates. You move the Vault connection and authentication settings from
+  your existing issuer to the Helm chart.
+
 ## Before you start
 
 - **Read [Issue certificates with cert-manager](/vault/docs/deploy/kubernetes/vso/cert-manager)**
@@ -29,11 +38,11 @@ move one `Certificate` at a time and roll back by restoring its original
 - **Use Vault Enterprise**. The Vault Secrets Operator issuers require Vault
   Enterprise.
 
-- **Install the Vault Secrets Operator** with the issuer CRDs. Refer to
-  [Install and upgrade the Vault Secrets Operator](/vault/docs/deploy/kubernetes/vso/installation).
+- **Install [Helm](https://helm.sh/docs/intro/install/)** 3.7 or later.
 
 - **Check your permissions**. You must have permission to:
   - Update Vault policies and auth roles.
+  - Install or upgrade Helm releases in the Vault Secrets Operator namespace.
   - Create Vault Secrets Operator resources and update cert-manager
     `Certificate` resources.
 
@@ -55,10 +64,12 @@ configuration for each existing issuer:
 - **Certificate lifetime**: When a `Certificate` does not set `spec.duration`,
   the PKI role's `ttl` determines the certificate lifetime.
 - **Request approval**: An approver must have permission to approve requests
-  for the issuers. Refer to [Step 3](#step-3-enable-request-approval).
+  for the issuers. The Helm chart grants this permission to the cert-manager
+  built-in approver in
+  [Step 4](#step-4-set-up-the-vault-secrets-operator).
 - **Vault policy**: The Vault policy must grant the signing path and `read` on
   `sys/license/status`. Refer to
-  [Step 4](#step-4-update-the-vault-policy-and-auth-role).
+  [Step 3](#step-3-grant-access-to-vault).
 
 ## Step 2: Inventory the issuers and certificates
 
@@ -85,39 +96,10 @@ configuration for each existing issuer:
    ```
 
 1. Flag certificates that do not set `spec.duration`. The PKI role's `ttl`
-   determines their lifetime. Refer to
-   [Step 4](#step-4-update-the-vault-policy-and-auth-role) to set the `ttl`.
+   determines their lifetime. Refer to [Step 3](#step-3-grant-access-to-vault)
+   to set the `ttl`.
 
-## Step 3: Enable request approval
-
-cert-manager does not approve requests for the Vault Secrets Operator issuers
-until an approver has permission for the `secrets.hashicorp.com` signers.
-Without this permission, `CertificateRequest` resources for the Vault Secrets
-Operator issuers stay unapproved and unsigned.
-
-Choose one of the following options:
-
-- To let the cert-manager built-in approver approve every request, set
-  `certManager.approverRBAC.enabled=true` in the Vault Secrets Operator Helm
-  chart:
-
-  ```shell-session
-  $ helm upgrade                                   \
-      --namespace vault-secrets-operator           \
-      --set certManager.approverRBAC.enabled=true  \
-      vault-secrets-operator                       \
-      hashicorp/vault-secrets-operator
-  ```
-
-- If you use
-  [approver-policy](https://cert-manager.io/docs/policy/approval/approver-policy/),
-  grant its service account `approve` on the
-  `vaultissuers.secrets.hashicorp.com/*` and
-  `vaultclusterissuers.secrets.hashicorp.com/*` signers, and update your
-  `CertificateRequestPolicy` selectors to match the Vault Secrets Operator
-  issuers.
-
-## Step 4: Update the Vault policy and auth role
+## Step 3: Grant access to Vault
 
 The Vault Secrets Operator authenticates to Vault with the service account in
 its `VaultAuth` resource. Update Vault so the Vault Secrets Operator can sign
@@ -139,10 +121,22 @@ issuer uses yet. You need them to roll back.
    EOF
    ```
 
-1. Create an auth role that binds the policy to the service account that the
-   `VaultAuth` uses. For a `VaultIssuer`, the service account is in the issuer's
-   namespace. For a `VaultClusterIssuer`, the service account is in the
-   `VaultAuth` namespace:
+1. Attach the policy to a Vault auth role:
+
+   <Tabs>
+
+   <Tab heading="Existing installation" group="existing">
+
+   Create a dedicated auth role and `VaultAuth` for the issuers, or add the
+   `pki-issuer` policy to the `token_policies` of the role that an existing
+   `VaultAuth` already uses.
+
+   When you add the policy to an existing role, every Vault Secrets Operator
+   resource that uses the same `VaultAuth` can also call the signing path. We
+   recommend a dedicated role and `VaultAuth` for the issuers.
+
+   To create a dedicated role for the Kubernetes auth method, bind it to the
+   service account that the `VaultAuth` uses:
 
    ```shell-session
    $ vault write auth/kubernetes/role/pki-issuer \
@@ -153,80 +147,161 @@ issuer uses yet. You need them to roll back.
        token_ttl=1h
    ```
 
+   </Tab>
+
+   <Tab heading="New installation" group="new">
+
+   Create an auth role for the `default` `VaultAuth` that the Helm chart creates
+   in [Step 4](#step-4-set-up-the-vault-secrets-operator). For the Kubernetes
+   auth method, bind the role to the `default` service account:
+
+   ```shell-session
+   $ vault write auth/kubernetes/role/pki-issuer \
+       bound_service_account_names=default \
+       bound_service_account_namespaces=vault-secrets-operator \
+       token_policies=pki-issuer \
+       audience=vault \
+       token_ttl=1h
+   ```
+
+   </Tab>
+
+   </Tabs>
+
+   Set `bound_service_account_namespaces` to the namespace where the Vault
+   Secrets Operator looks up the service account:
+
+   - For a `VaultClusterIssuer`, the namespace of the `VaultAuth`. For the
+     `default` `VaultAuth`, this is the Vault Secrets Operator namespace.
+   - For a `VaultIssuer`, the namespace of the issuer, for example `app`.
+
 1. If any of your certificates do not set `spec.duration`, set the `ttl` on the
    PKI role to the lifetime you want:
 
    ```shell-session
-   $ vault write pki/roles/example-dot-com ttl=2160h
+   $ vault patch pki/roles/example-dot-com ttl=2160h
    ```
 
-   The `vault write` command replaces the role configuration. Include the other
-   role parameters that you use, such as `allowed_domains` and `max_ttl`, or use
-   `vault patch` to change only the `ttl`.
+## Step 4: Set up the Vault Secrets Operator
 
-## Step 5: Create the connection and auth resources
+Set up the Vault Secrets Operator with the issuer resources and approval
+permission for cert-manager.
 
-Map the connection and authentication settings from the existing issuer to a
-`VaultConnection` and a `VaultAuth` resource. Skip this step when you already
-have resources that you can use.
+<Tabs>
 
-The following table maps the connection settings:
+<Tab heading="Existing installation" group="existing">
 
-| cert-manager Vault issuer field | Vault Secrets Operator field | Notes |
-| --- | --- | --- |
-| `spec.vault.server` | `VaultConnection` `spec.address` | Use the same URL. |
-| `spec.vault.caBundleSecretRef` | `VaultConnection` `spec.caCertSecretRef` | The Secret must store the CA bundle in the `ca.crt` key. |
-| `spec.vault.caBundle` | `VaultConnection` `spec.caCertSecretRef` | Store the PEM-encoded CA bundle in a Secret with a `ca.crt` key. |
-| `spec.vault.serverName` | `VaultConnection` `spec.tlsServerName` | |
+Upgrade the release to a Vault Secrets Operator version that includes the
+issuers, and enable approval permission for cert-manager.
 
-The following table maps the authentication settings:
+1. Export the values of your current release:
 
-| cert-manager Vault issuer field | Vault Secrets Operator field | Notes |
-| --- | --- | --- |
-| `spec.vault.auth.kubernetes.mountPath` | `VaultAuth` `spec.mount` | Remove the `/v1/auth/` prefix. For example, `/v1/auth/kubernetes` becomes `kubernetes`. |
-| `spec.vault.auth.kubernetes.role` | `VaultAuth` `spec.kubernetes.role` | Use the auth role from [Step 4](#step-4-update-the-vault-policy-and-auth-role). |
-| `spec.vault.auth.kubernetes.serviceAccountRef.name` | `VaultAuth` `spec.kubernetes.serviceAccount` | The service account must exist in the namespace described in [Step 4](#step-4-update-the-vault-policy-and-auth-role). |
-| `spec.vault.auth.appRole` | `VaultAuth` `spec.method: appRole` and `spec.appRole` | |
-| `spec.vault.auth.aws` | `VaultAuth` `spec.method: aws` and `spec.aws` | |
+   ```shell-session
+   $ helm get values vault-secrets-operator \
+       --namespace vault-secrets-operator \
+       --output yaml > values.yaml
+   ```
 
-For other authentication settings, configure one of the auth methods that
-`VaultAuth` supports.
+1. Upgrade the release with your current values and the approval setting.
+   Replace `<TARGET_VSO_VERSION>` with the version you are upgrading to:
 
-For example, the following resources replace the connection and Kubernetes
-authentication settings of an `Issuer` in the `app` namespace:
+   ```shell-session
+   $ helm upgrade                                    \
+       --version <TARGET_VSO_VERSION>                \
+       --namespace vault-secrets-operator            \
+       --values values.yaml                          \
+       --set certManager.approverRBAC.enabled=true   \
+       vault-secrets-operator                        \
+       hashicorp/vault-secrets-operator
+   ```
 
-```yaml
-apiVersion: secrets.hashicorp.com/v1beta1
-kind: VaultConnection
-metadata:
-  name: vault-connection
-  namespace: app
-spec:
-  address: https://vault.example.com:8200
-  caCertSecretRef: vault-ca
----
-apiVersion: secrets.hashicorp.com/v1beta1
-kind: VaultAuth
-metadata:
-  name: pki-issuer
-  namespace: app
-spec:
-  vaultConnectionRef: vault-connection
-  method: kubernetes
-  mount: kubernetes
-  kubernetes:
-    role: pki-issuer
-    serviceAccount: default
-    audiences:
-      - vault
-```
+   The chart upgrades the Vault Secrets Operator CRDs, including the
+   `VaultIssuer` and `VaultClusterIssuer` CRDs.
 
-When you replace a `ClusterIssuer`, the `VaultAuth` must allow every namespace
-that requests certificates. Set `allowedNamespaces` on the `VaultAuth` to a list
-of namespaces, or to `["*"]`. Refer to
-[Vault authentication and namespace access](/vault/docs/deploy/kubernetes/vso/cert-manager#vault-authentication-and-namespace-access).
+   Always pass your current values with `--values`. When you run `helm upgrade`
+   with `--set` and without your values, Helm resets your other settings to the
+   chart defaults. Do not use `--reuse-values`. It keeps the chart defaults of
+   your current version, so the approval permission does not include the
+   cert-manager service account.
 
-## Step 6: Create the issuer
+1. Confirm that the issuer CRDs exist:
+
+   ```shell-session
+   $ kubectl get crd vaultissuers.secrets.hashicorp.com \
+       vaultclusterissuers.secrets.hashicorp.com
+   ```
+
+You can use the `VaultConnection` resources that you already have. When you
+created a dedicated auth role in [Step 3](#step-3-grant-access-to-vault),
+create a `VaultAuth` that uses it. Refer to
+[Set up the cert-manager issuer](/vault/docs/deploy/kubernetes/vso/cert-manager/setup#step-4-create-the-connection-and-auth-resources)
+for an example.
+
+</Tab>
+
+<Tab heading="New installation" group="new">
+
+Install the Vault Secrets Operator with a default Vault connection, a default
+auth method, and approval permission for cert-manager. The Helm chart creates
+a `VaultConnection` and a `VaultAuth`, both named `default`, in the Vault
+Secrets Operator namespace.
+
+1. Map the settings of your existing issuer to Helm chart values:
+
+   | cert-manager Vault issuer field | Helm chart value |
+   | --- | --- |
+   | `spec.vault.server` | `defaultVaultConnection.address` |
+   | `spec.vault.caBundleSecretRef` or `spec.vault.caBundle` | `defaultVaultConnection.caCertSecret`. The Secret must be in the Vault Secrets Operator namespace and store the CA bundle in the `ca.crt` key. |
+   | `spec.vault.serverName` | `defaultVaultConnection.tlsServerName` |
+   | `spec.vault.auth.kubernetes.mountPath` | `defaultAuthMethod.mount`. Remove the `/v1/auth/` prefix. For example, `/v1/auth/kubernetes` becomes `kubernetes`. |
+   | `spec.vault.auth.kubernetes.role` | `defaultAuthMethod.kubernetes.role`. Use the auth role from [Step 3](#step-3-grant-access-to-vault). |
+   | `spec.vault.namespace` | `defaultAuthMethod.namespace` |
+
+   To use the JWT, AppRole, AWS, or GCP auth method, set
+   `defaultAuthMethod.method` and the matching values. Refer to
+   [`defaultAuthMethod`](/vault/docs/deploy/kubernetes/vso/helm#h-defaultauthmethod)
+   in the Helm chart reference.
+
+1. Install the Vault Secrets Operator:
+
+   ```shell-session
+   $ helm install                                                   \
+       --create-namespace                                           \
+       --namespace vault-secrets-operator                           \
+       --set defaultVaultConnection.enabled=true                    \
+       --set defaultVaultConnection.address=https://vault.example.com:8200 \
+       --set defaultVaultConnection.caCertSecret=vault-ca           \
+       --set defaultAuthMethod.enabled=true                         \
+       --set defaultAuthMethod.kubernetes.role=pki-issuer           \
+       --set 'defaultAuthMethod.kubernetes.tokenAudiences={vault}'  \
+       --set certManager.approverRBAC.enabled=true                  \
+       vault-secrets-operator                                       \
+       hashicorp/vault-secrets-operator
+   ```
+
+   The Vault Secrets Operator does not sync any secrets until you create
+   secret resources, such as `VaultStaticSecret`.
+
+1. Confirm that the `default` `VaultConnection` and `VaultAuth` are ready:
+
+   ```shell-session
+   $ kubectl get vaultconnection,vaultauth --namespace vault-secrets-operator
+   ```
+
+</Tab>
+
+</Tabs>
+
+When you enable `certManager.approverRBAC.enabled`, cert-manager approves every
+request for the Vault Secrets Operator issuers. If you use
+[approver-policy](https://cert-manager.io/docs/policy/approval/approver-policy/)
+instead, leave the setting disabled. Grant the approver-policy service account
+`approve` on the `vaultissuers.secrets.hashicorp.com/*` and
+`vaultclusterissuers.secrets.hashicorp.com/*` signers, and update your
+`CertificateRequestPolicy` selectors to match the Vault Secrets Operator
+issuers.
+
+## Step 5: Create the issuer
 
 Map the issuer settings to a `VaultIssuer` or `VaultClusterIssuer`:
 
@@ -235,9 +310,11 @@ Map the issuer settings to a `VaultIssuer` or `VaultClusterIssuer`:
 | `spec.vault.path` | `spec.mount` and `spec.role` | For example, `pki/sign/example-dot-com` becomes `mount: pki` and `role: example-dot-com`. |
 | `spec.vault.path` with an issuer segment | `spec.mount`, `spec.role`, and `spec.issuerRef` | For example, `pki/issuer/example-issuer/sign/example-dot-com` adds `issuerRef: example-issuer`. |
 | `spec.vault.namespace` | `spec.namespace` | When you omit this field, the issuer uses the namespace from the `VaultAuth`. |
-| None | `spec.vaultAuthRef` | The `VaultAuth` from [Step 5](#step-5-create-the-connection-and-auth-resources). |
+| None | `spec.vaultAuthRef` | The `VaultAuth` to authenticate with. When you omit this field, the issuer uses the `default` `VaultAuth` in the Vault Secrets Operator namespace. |
 
-Create the issuer that replaces your existing issuer:
+Create the issuer that replaces your existing issuer. The following examples
+omit `vaultAuthRef` to use the `default` `VaultAuth`. To use another
+`VaultAuth`, set `vaultAuthRef` to its name or to `namespace/name`.
 
 <Tabs>
 
@@ -250,7 +327,6 @@ metadata:
   name: vso-issuer
   namespace: app
 spec:
-  vaultAuthRef: pki-issuer
   mount: pki
   role: example-dot-com
 ```
@@ -265,10 +341,14 @@ kind: VaultClusterIssuer
 metadata:
   name: vso-cluster-issuer
 spec:
-  vaultAuthRef: vault-secrets-operator/pki-issuer
   mount: pki
   role: example-dot-com
 ```
+
+Every namespace can use the `default` `VaultAuth`. When the issuer uses another
+`VaultAuth`, set `allowedNamespaces` on that `VaultAuth` to every namespace that
+requests certificates, or to `["*"]`. Refer to
+[Vault authentication and namespace access](/vault/docs/deploy/kubernetes/vso/cert-manager#vault-authentication-and-namespace-access).
 
 </Tab>
 
@@ -281,9 +361,11 @@ any `Certificate` until the issuer is ready:
 $ kubectl apply --filename vso-issuer.yaml
 
 $ kubectl get vaultissuer --namespace app
+
+$ kubectl get vaultclusterissuer
 ```
 
-## Step 7: Update one certificate
+## Step 6: Update one certificate
 
 Start with the `Certificate` that has the lowest risk. Change only its
 `issuerRef`:
@@ -315,7 +397,7 @@ Vault Secrets Operator issuer. Depending on the `spec.privateKey.rotationPolicy`
 of the `Certificate`, cert-manager also generates a new private key. The Secret
 keeps the existing certificate until cert-manager writes the new one.
 
-## Step 8: Verify the certificate
+## Step 7: Verify the certificate
 
 1. Confirm that the new `CertificateRequest` is approved and ready, and that
    the `Certificate` is ready:
@@ -346,7 +428,7 @@ keeps the existing certificate until cert-manager writes the new one.
    ```
 
 When the certificate is correct, repeat
-[Step 7](#step-7-update-one-certificate) and this step for each remaining
+[Step 6](#step-6-update-one-certificate) and this step for each remaining
 `Certificate`.
 
 When the certificate is not correct, restore the original `issuerRef` to roll
@@ -357,7 +439,7 @@ $ kubectl patch certificate web --namespace app --type merge \
     --patch '{"spec":{"issuerRef":{"group":"cert-manager.io","kind":"Issuer","name":"vault-issuer"}}}'
 ```
 
-## Step 9: Remove the cert-manager Vault issuer
+## Step 8: Remove the cert-manager Vault issuer
 
 After you migrate every `Certificate` that references an issuer, and each
 certificate completes at least one automatic renewal, remove the old issuer:
@@ -380,4 +462,5 @@ recreating it from `issuer-inventory.yaml`.
 
 - [Issue certificates with cert-manager](/vault/docs/deploy/kubernetes/vso/cert-manager)
 - [Troubleshoot the cert-manager issuer](/vault/docs/deploy/kubernetes/vso/cert-manager/troubleshoot)
+- [Install and upgrade the Vault Secrets Operator](/vault/docs/deploy/kubernetes/vso/installation)
 - [cert-manager Vault issuer documentation](https://cert-manager.io/docs/configuration/vault/)
