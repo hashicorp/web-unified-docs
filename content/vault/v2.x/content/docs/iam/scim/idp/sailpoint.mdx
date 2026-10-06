@@ -23,18 +23,9 @@ as entitlements.
   connector authenticates with a static bearer token, so create the SCIM client
   and its token before you configure SailPoint.
 
-- **Choose the connector token lifetime**. The connector holds one static token,
-  so provisioning stops when that token expires. Vault caps a token time to
-  live (TTL) at the lesser of `max_token_ttl` and the `max_lease_ttl` value on
-  the token mount, so raise the mount maximum before you mint a long-lived
-  token:
-
-    ```shell-session
-    $ vault auth tune -max-lease-ttl=17520h token
-    ```
-
-    Without the tune, Vault caps the token at the mount default rather than the
-    lifetime you request.
+- **Make Vault reachable from SailPoint**. SailPoint IdentityIQ calls the Vault
+  SCIM API directly, so the Vault address must be reachable from the SailPoint
+  environment, for example through a public cluster endpoint.
 
 - **Prepare the Vault groups you want SailPoint to govern**. SailPoint imports
   existing Vault groups as entitlements rather than creating them. Groups that
@@ -48,27 +39,82 @@ as entitlements.
     - edit the application account and group schemas
     - run aggregation tasks and request access for an identity
 
+## Create the connector token
+
+SailPoint authenticates with a static bearer token that must resolve to the
+entity set as the SCIM client's `access_grant_principal`. The connector accepts
+either token type:
+
+- a service token that begins with `hvs.`
+- a SCIM token that begins with `scm.`
+
+Both token types use the entity alias and token role from
+[Set up a bearer-token workflow](/vault/docs/iam/scim/setup#set-up-a-bearer-token-workflow).
+A SCIM token is non-renewable, always an orphan, and limited per SCIM client in
+both lifetime and number of active tokens.
+
+The connector holds one static token, so provisioning stops when that token
+expires. The following steps mint a long-lived SCIM token. The examples use a
+SCIM client named `sailpoint-iiq`, an entity alias named `sailpoint-iiq`, a
+token role named `sailpoint-iiq-scim`, and a policy named
+`sailpoint-scim-client`.
+
+1. Set the token limits on the SCIM client. The following example allows a
+   two-year token. A new SCIM client defaults to a `max_active_tokens` value of
+   `2` and a `max_token_ttl` value of `0`.
+
+    ```shell-session
+    $ vault write identity/scim/client/sailpoint-iiq \
+        access_grant_principal="<entity_id>" \
+        max_active_tokens=3 \
+        max_token_ttl="17520h"
+    ```
+
+1. Raise the maximum lease TTL on the token auth mount. Vault caps a SCIM token
+   time to live (TTL) at the lesser of `max_token_ttl` and the `max_lease_ttl`
+   value on the token mount. Without the tune, Vault caps the token at the mount
+   maximum rather than the lifetime you request.
+
+    ```shell-session
+    $ vault auth tune -max-lease-ttl=17520h token
+    ```
+
+1. Create the SCIM token through the token role with `renewable` set to
+   `false`. The token role makes tokens renewable by default, and Vault rejects
+   a renewable SCIM token with the error `SCIM tokens cannot be renewable`.
+
+    ```shell-session
+    $ curl \
+        --header "X-Vault-Token: ${VAULT_TOKEN}" \
+        --request POST \
+        --data '{"type":"scim","entity_alias":"sailpoint-iiq","policies":["sailpoint-scim-client"],"no_default_policy":true,"renewable":false,"ttl":"17520h"}' \
+        ${VAULT_ADDR}/v1/auth/token/create/sailpoint-iiq-scim
+    ```
+
+    The `auth.client_token` value in the response is the token you give
+    SailPoint.
+
 ## Create the SailPoint application
 
 In SailPoint IdentityIQ, create an application that uses the SCIM 2.0 connector
-and point it at your Vault SCIM server.
+and point it at your Vault SCIM server. Save each IdentityIQ screen before you
+leave it, or IdentityIQ discards your changes.
 
-| Configuration setting | Value                                          |
-|-----------------------|------------------------------------------------|
-| Connector type        | **SCIM 2.0**                                   |
-| API Token             | The Vault token for your SCIM client           |
+| Configuration setting | Value                                                  |
+|-----------------------|--------------------------------------------------------|
+| Application Type      | **SCIM 2.0**                                           |
+| Non-compliant Server  | Selected                                               |
+| Base URL              | Your Vault address followed by `/v1/admin/identity/scim/v2` |
+| Auth method           | **API Token**                                          |
+| API Token             | The connector token for your SCIM client               |
 
-{/* TODO: Document the SCIM base URL to enter in the SailPoint application.
-     The bug bash notes record that the connector was configured and that
-     Test Connection succeeded, but never states the URL form SailPoint is
-     given. Confirm whether SailPoint takes the endpoint base, such as the
-     `/v1/identity/scim/v2` prefix, or a full resource URL,
-     and whether the path or a header carries the namespace. */}
+The `admin` segment of the base URL is the namespace that holds the
+SCIM client. Keep the SCIM client, the connector entity, and the connector
+token in the same namespace.
 
-{/* TODO: Confirm which token type the connector should use. */}
-
-Test the connection from SailPoint before you continue. A successful test
-confirms that the token reaches Vault and resolves to the SCIM client.
+Select **Test Connection** before you continue. The test calls the `/Users`
+endpoint. A successful test confirms that the token reaches Vault and resolves
+to the SCIM client.
 
 ## Prune the account schema
 
@@ -76,22 +122,50 @@ SailPoint schema discovery returns the standard SCIM attribute set. It does not
 surface the Vault `vault:2.x` extension fields, so you must edit the account
 schema by hand after discovery.
 
+1. In the account object type, run **Discover Schema Attributes**.
+
 1. Remove the discovered attributes that Vault does not support. Refer to
    [How Vault maps SCIM resources](/vault/docs/iam/scim#how-vault-maps-scim-resources)
    for the attributes Vault stores on an entity.
 
-1. Create the account provisioning policy with the attributes Vault requires
-   for a SCIM user.
+1. Set the account schema identifiers.
 
-{/* TODO: List the attributes that survive pruning. The testing logbook says
-     only that its author pruned the schema to Vault-supported attributes,
-     without enumerating them, so this step cannot name the set to keep yet. */}
+    | Schema setting       | Value      |
+    |----------------------|------------|
+    | Native Object Type   | `User`     |
+    | Identity Attribute   | `id`       |
+    | Display Attribute    | `userName` |
 
-{/* TODO: Settle the `externalId` requirement. The bug bash notes record
-    `externalId` as optional on user create on build 2.2.0-beta1+ent, and
-    records the provisioning policy being built without it.
-    /vault/docs/iam/scim states that `externalId` is required.
-    Do we need to show it used or not? */}
+1. In the group object type, run **Discover Schema Attributes**.
+
+{/* TODO: List the attributes that survive pruning, and confirm that pruning is
+     still needed. The SailPoint setup guide for the GA build reports that
+     discovery returns `id`, `userName`, `externalId`, `active`, metadata,
+     `entityName`, and `aliases`, and does not mention pruning. This page
+     states that discovery does not surface the `vault:2.x` extension fields.
+     Confirm which behavior the current build has. */}
+
+## Create the provisioning policies
+
+In the application, open **Provisioning Policies** and create one policy for
+each operation on the account object type.
+
+| Operation | Fields                                                                            |
+|-----------|-----------------------------------------------------------------------------------|
+| Create    | `externalId` and `userName`                                                       |
+| Update    | `externalId` and `userName`                                                       |
+| Delete    | None                                                                              |
+| Enable    | `active` with the value `true`, plus `externalId` and `userName`                  |
+| Disable   | `active` with the value `false`, plus `externalId` and `userName`                 |
+
+Set `externalId` and `userName` as required fields, and populate each from an
+identity attribute with a rule. For example, set `externalId` from the
+`employeeId` attribute and `userName` from the `email` attribute. When the SCIM
+client has no `alias_mount_accessor` value, Vault uses `userName` as the entity
+name.
+
+To request Vault accounts directly, add the application to **Applications that
+support account only requests** in the Lifecycle Manager configuration.
 
 ## Configure the group entitlement schema
 
