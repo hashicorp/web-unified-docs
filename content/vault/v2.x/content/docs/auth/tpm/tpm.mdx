@@ -1,0 +1,179 @@
+---
+layout: docs
+page_title: TPM - Auth Methods
+description: >-
+  Configure the Vault Enterprise TPM auth method: enroll a TPM, configure the
+  internal CA, create roles, and understand the certificate enrollment
+  protocol, renewal behavior, and TLS listener requirements.
+---
+
+# TPM auth method
+
+@include 'alerts/enterprise-only.mdx'
+
+Each TPM auth method instance manages its own internal CA and a set of roles
+that map enrolled TPMs (or TPM groups) to Vault token parameters. This page
+covers what to configure on the Vault listener, how the internal CA rotates,
+how roles authorize TPMs, and the commands to enable and configure the
+mount. For how the certificate enrollment protocol, login, and renewal work,
+refer to the [TPM auth method overview](/vault/docs/auth/tpm).
+
+## TLS requirements
+
+The `tpm` auth method requires mutual TLS. In the Vault listener
+configuration:
+
+- `tls_disable` and `tls_disable_client_certs` must both be `false`.
+- `tls_require_and_verify_client_cert` must be `false`. Setting it `true`
+  would require the client to already present a certificate Vault trusts
+  before the attestation workflow runs — but the purpose of that workflow is
+  to obtain such a certificate in the first place.
+
+The client certificate presented to Vault at login must be the certificate
+obtained from the `gentpmcert` workflow, not a separately managed
+certificate.
+
+If Vault sits behind a reverse proxy or load balancer that terminates TLS,
+the proxy must forward the validated client certificate in a header, and the
+Vault listener must be
+[configured to accept it](/vault/docs/configuration/listener/tcp#tcp-listener-parameters).
+
+We strongly recommend securing the connection between the proxy and Vault
+with mutual TLS.
+
+## Internal CA management
+
+Vault initializes the TPM auth method's internal CA the first time you write
+`/auth/tpm/config`, then rotates it automatically based on the configured
+parameters.
+
+The backend maintains a ring of CA materials with three states:
+
+| State        | Purpose                                                        |
+| :----------- | :--------------------------------------------------------------- |
+| **Active**   | Signs new client certificates                                    |
+| **Next**     | Pre-generated; promoted when the Active CA nears soft expiry     |
+| **Retired**  | Previously active; still trusted for login until its hard expiry |
+
+The *soft expiry* window (`ca_soft_expiry`) defines how far before its hard
+expiry the Active CA stops signing new certificates. When the Active CA's
+remaining lifetime falls below `ca_soft_expiry`, Vault promotes the Next CA
+to Active and generates a new Next CA. Clients with certificates issued just
+before a rotation keep authenticating through the retired CA until it
+reaches hard expiry.
+
+`ca_lifetime` must be at least twice `ca_soft_expiry`. For example, with a
+1-year `ca_lifetime` and a 30-day `ca_soft_expiry`, the Active CA signs
+certificates for roughly 11 months before gracefully retiring.
+
+## Roles and authorization
+
+A role maps one or more TPM devices to a set of Vault token parameters. A
+TPM may be authorized via:
+
+- `tpm_ids`: an explicit list of TPM IDs (EK hashes). Use TPM IDs for
+  individual-device authorization.
+- `tpmgroup_ids`: a list of TPM group IDs.
+
+At least one of the two must be set. If you set both, Vault authorizes a TPM
+to use the role if either its ID is present in `tpm_ids`, or its ID is a
+member of one or more of `tpmgroup_ids`.
+
+The `cert_ttl` field controls how long issued client certificates are valid.
+Vault resolves the TTL in this order:
+
+1. `cert_ttl` on the role, if non-zero
+1. `default_cert_ttl` on the config, if non-zero
+1. `ca_soft_expiry` from the config, as a fallback
+
+The actual certificate lifetime is always capped at the signing CA's
+remaining validity, so a certificate never outlives the CA that signed it.
+
+Roles also carry the standard Vault token parameters (`token_ttl`,
+`token_max_ttl`, `token_policies`, `token_bound_cidrs`).
+
+## Configure the TPM auth method
+
+These steps are typically performed by an operator or configuration
+management tool.
+
+1. Enroll the TPM in identity. Run this on the client machine that has the
+   TPM, using `tpm2_createek` from `tpm2-tools` to fetch the EK.
+
+   ```shell-session
+   $ vault write identity/tpm tpm_ek_public_key="$(sudo tpm2_createek -G rsa -u /dev/stdout -c ./ek.ctx -f pem)"
+   ```
+
+   Note the returned TPM ID — you'll use it to authorize roles.
+
+1. Enable the TPM auth method.
+
+   ```shell-session
+   $ vault auth enable tpm
+   ```
+
+1. Configure the internal CA. The defaults (1-year lifetime, 30-day soft
+   expiry) suit most deployments.
+
+   ```shell-session
+   $ vault write auth/tpm/config \
+       ca_lifetime="8760h" \
+       ca_soft_expiry="720h" \
+       default_cert_ttl="168h"
+   ```
+
+1. Create a role that authorizes one or more TPMs. Authorize a specific TPM
+   by ID.
+
+   ```shell-session
+   $ vault write auth/tpm/role/my-role \
+       tpm_ids="sha256-a3f2c1d8..." \
+       token_ttl="1h" \
+       token_policies="default,my-policy"
+   ```
+
+   Or authorize every member of a TPM group.
+
+   ```shell-session
+   $ vault write auth/tpm/role/fleet-role \
+       tpmgroup_ids="group-id-abc123" \
+       token_ttl="1h" \
+       token_policies="default,fleet-policy"
+   ```
+
+1. On the client machine, run the attestation command to obtain a
+   certificate.
+
+   ```shell-session
+   $ vault tpm attest -tpm-state-dir=/private -role-name=my-role
+   ```
+
+1. On the client machine, authenticate using the issued certificate.
+
+   ```shell-session
+   $ vault login -method=tpm -tpm-state-dir=/private role_name=my-role
+   ```
+
+## API
+
+The TPM auth method has a full HTTP API. Refer to the
+[TPM auth API documentation](/vault/api-docs/auth/tpm) for endpoint details
+and request parameters.
+
+## Terraform
+
+You can manage TPM auth resources programmatically with the Vault Terraform
+provider. Attestation is not supported using Terraform. Refer to the Terraform
+Registry documentation for more details: 
+
+- [Vault auth resource backend](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/auth_backend)
+- [TPM auth method backend config resource](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/tpm_auth_backend_config)
+- [TPM auth method backend role resource](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/tpm_auth_backend_role)
+- [Identity TPM resource](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/identity_tpm)
+- [Identity TPM group resource](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/identity_tpm_group)
+
+## Next steps
+
+Refer to
+[Authenticate to Vault using the TPM auth method with swtpm](/vault/docs/auth/tpm/swtpm-auth-vault)
+for a complete working example.
