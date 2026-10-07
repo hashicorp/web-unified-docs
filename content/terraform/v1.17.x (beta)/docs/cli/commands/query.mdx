@@ -1,7 +1,7 @@
 ---
-page_title: locals block reference for `.tfquery.hcl` files
+page_title: terraform query command reference
 description: |-
- Add the `locals` block to your `.tfquery.hcl` files define values to reuse within the local Terraform module. 
+ Query existing infrastructure, evaluate policies against discovered resources, and generate configuration for importing resources with Terraform.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2025-11-19T19:11:19Z
 last_modified: 2025-11-19T19:11:19Z
@@ -22,15 +22,25 @@ $ terraform query [flags] [options]
 
 When you run the `terraform query` command, Terraform checks the current configuration directory for files with a `.tfquery.hcl` extension. Then, Terraform queries remote infrastructure for resources that match the `list` blocks defined in the query file and prints the results to the terminal. You can also add the `-generate-config-out` flag to generate configuration that you can use to import the resources. Refer to [Import resources in bulk](/terraform/language/import/bulk) for more information.
 
+-> Policy evaluation with `terraform query` requires Terraform v1.17.0 or later. Terraform v1.17.0-beta2 and later v1.17.0 prereleases also support policy evaluation.
+
+Policy evaluation is supported only for remote queries in HCP Terraform. Policies evaluate configuration generated from discovered resource data. Set `include_resource = true` in your `list` blocks to supply policy input without writing a `.tf` file. Alternatively, use `-generate-config-out` to request full resource data and write generated `resource` and `import` blocks to your workstation. The additional resource reads can increase query duration.
+
+The `-policies` flag alone does not request resource data or enable configuration generation. Resource identities alone are insufficient policy input. Refer to [Evaluate policies](#evaluate-policies) for setup and examples.
+
 ## Flags
+
+- `-policies=<PATH>`: Selects an existing policy-set directory in the uploaded configuration for remote evaluation against discovered resources. Repeat this flag to include multiple directories. `--policies=<PATH>` is an equivalent spelling. Automatic HCP Terraform workspace policy evaluation does not require this flag.
+    - Data type: Path
+    - Example: [Evaluate policies](#evaluate-policies)
 
 - `-var '<INPUT-VARIABLE>=<VALUE>'`: Specifies a key-value pair that sets an input variable defined in the `tfquery.hcl` configuration. You can use this flag more than once to set additional input variables.   
     - Data type: String. 
-    - Example: [Set input variables](#set-input-variabls)
+    - Example: [Set input variables](#set-input-variables)
 
 - `-var-file=<FILENAME>`: Specifies a file containing input variable values, in addition to the default `terraform.tfvars` and `*.auto.tfvars` files.  
     - Data type: Filename 
-    - Example: [Set input variables](#set-input-variabls)
+    - Example: [Set input variables](#set-input-variables)
 
 ## Options
 
@@ -80,11 +90,121 @@ $ terraform query -var-file=my-vars.tfvars
 The following command generates `import` and `resource` blocks for the query results to a file in the `to-import` directory:
 
 ```shell-session
-$ terraform query -generate-config=to-import/file.tf
+$ terraform query -generate-config-out=to-import/file.tf
 ```
 
 The following command prints `import` and `resource` blocks for the query results as JSON:
 
 ```shell-session
-$ terraform query -generate-config=file.tf -json
+$ terraform query -generate-config-out=file.tf -json
 ```
+
+### Evaluate policies
+
+Before you run a query with policies:
+
+1. Install a supported Terraform version as described in [Description](#description), and select a supported version for your HCP Terraform workspace.
+1. Set the workspace's [execution mode](/terraform/cloud-docs/workspaces/settings#execution-mode) to **Remote** or **Agent**. For agent execution, enable the `query` operation as described in [HCP Terraform agents](/terraform/cloud-docs/workspaces/import#hcp-terraform-agents).
+1. Use an organization with Terraform Policy and Search policy evaluation enabled, including access to policy enforcement and versioned policy sets. Refer to [Search policy requirements](/terraform/cloud-docs/workspaces/import#requirements).
+1. [Provide HCP Terraform credentials](/terraform/cli/cloud/settings#provide-credentials) with read and write permissions for the workspace. Configure provider credentials in the workspace with permission to read the resources you query.
+
+For example, add the following `cloud` block and provider requirement to `main.tf`. Replace `ORGANIZATION_NAME` and `WORKSPACE_NAME` with your organization and workspace names:
+
+```hcl
+terraform {
+  cloud {
+    organization = "ORGANIZATION_NAME"
+
+    workspaces {
+      name = "WORKSPACE_NAME"
+    }
+  }
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = ">= 6.0.0"
+    }
+  }
+}
+```
+
+Use an AWS provider version that supports listing `aws_instance` resources. Add the following query to `instances.tfquery.hcl`:
+
+```hcl
+provider "aws" {
+  region = "us-east-2"
+}
+
+list "aws_instance" "example" {
+  provider         = aws
+  include_resource = true
+}
+```
+
+After you [initialize the working directory](/terraform/cli/cloud/settings#initialize-the-working-directory), run the remote query:
+
+```shell-session
+$ terraform query
+```
+
+Applicable plan-time Terraform Policy sets evaluate automatically, including inherited and organization-wide assignments. Automatic evaluation excludes Sentinel, OPA, and sets targeted only at other evaluation stages. You do not need `-policies` to select automatic workspace sets.
+
+To supply an explicit policy source, create a `policies` directory in your configuration directory and add this policy to `policies/instance-type.policy.hcl`. Refer to [Write policies](/terraform/policy/write/policies) for policy syntax and inputs.
+
+```hcl
+policy {
+  required_providers {
+    aws = {
+      source = "hashicorp/aws"
+    }
+  }
+}
+
+resource_policy "aws_instance" "instance_type" {
+  enforcement_level = "advisory"
+
+  enforce {
+    condition     = attrs.instance_type == "t3.micro"
+    error_message = "Use t3.micro instances."
+  }
+}
+```
+
+Run the remote query with the explicit policy directory. The `include_resource = true` setting supplies policy input without writing a `.tf` file:
+
+```shell-session
+$ terraform query -policies=./policies
+```
+
+To evaluate policies and write importable configuration, use an output file that does not exist:
+
+```shell-session
+$ terraform query -policies=./policies -generate-config-out=generated.tf
+```
+
+The `-generate-config-out` option requests full resource data even when you omit `include_resource`.
+
+To evaluate policies from multiple existing directories, repeat the flag. For example:
+
+```shell-session
+$ terraform query -policies=./policies/security -policies=./policies/tagging
+```
+
+Explicit policy directories must exist in your working directory, be included in the configuration upload, and satisfy the [Queries API path restrictions](/terraform/cloud-docs/api-docs/queries#explicit-policy-paths). These sources are independent of automatic workspace policy assignments. Refer to [Search and import resources in HCP Terraform](/terraform/cloud-docs/workspaces/import#build-a-query-in-the-ui) for the UI workflow and automatic-policy opt-out control.
+
+### Inspect policy results
+
+When the remote query log includes policy summaries, the terminal output shows the evaluated-policy count and groups resource outcomes under `Policy results for` each list block:
+
+| Result | Meaning |
+|--------|---------|
+| `Passed` | The resource's generated configuration satisfies the evaluated policies. |
+| `Failed` | At least one policy rejects the resource's generated configuration. Review the policy diagnostics printed with the result. |
+| `Unknown` | Terraform cannot determine the outcome, for example because required attributes or relationship data are unavailable. |
+| `Error` | Policy evaluation encounters an error. Review the diagnostics to identify the policy or runtime problem. |
+| `N/A` | No policy matches the resource. This is not a passing result. |
+
+For detailed policy results and diagnostics, inspect the **Policy evaluation** details in the HCP Terraform UI or retrieve the query log using `log-read-url` from the [Queries API](/terraform/cloud-docs/api-docs/queries#policy-results-in-list-completions).
+
+Query-time policy results are informational, including failures of mandatory policies. They do not block import or replace plan-time enforcement. Missing resource data can produce a `Policy evaluation skipped` diagnostic, and generated input can omit relationships or attributes that policies need. A query with no applicable policies does not establish that all resources pass. Review the results and generated configuration before continuing with the import workflow.
