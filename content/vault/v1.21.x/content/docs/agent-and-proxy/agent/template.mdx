@@ -6,7 +6,7 @@ description: >-
   Template markup.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2025-07-22T12:58:23-07:00
-last_modified: 2026-02-10T14:40:33-06:00
+last_modified: 2026-09-15T00:14:51.000Z
 # END AUTO GENERATED METADATA
 ---
 
@@ -96,6 +96,85 @@ To fetch only the issuing CA for this mount, use:
 ```
 
 Alternatively, `pki/cert/ca_chain` can be used to fetch the full CA chain.
+
+## KV secrets engine version discovery
+
+Before Vault Agent fetches a KV secret for the first time, the Consul Template
+engine performs a preflight request to determine whether the target mount is
+running KV version 1 or KV version 2. The discovery step lets Vault Agent
+handle both KV versions transparently, without requiring you to specify the
+version in your template.
+
+### How the discovery works
+
+When the `secret` template function references a KV path, Consul Template calls:
+
+```
+GET /v1/sys/internal/ui/mounts/<path>
+```
+
+For example, a template referencing `kv1/my-secret` triggers:
+
+```
+GET /v1/sys/internal/ui/mounts/kv1/my-secret
+```
+
+Vault returns mount metadata for the path, including the `options.version` field
+that identifies the KV engine version:
+
+- If `options.version` is `"2"` and the mount type is `kv`, the engine is KVv2.
+- If `options.version` is `"1"`, absent, or the response indicates an older Vault
+  server (HTTP 404), the engine defaults to KVv1.
+
+The result is cached on the template runner. Subsequent fetches of the same
+secret path within one runner lifetime skip the preflight request. When Vault
+Agent receives a new token from auto-auth, it stops the current runner and
+starts a fresh one, so the preflight request runs again for each secret path on
+the first fetch after the token changes.
+
+### Automatic path rewriting for KVv2
+
+When the discovery identifies a KVv2 mount, Consul Template automatically inserts
+`/data/` into the request path before reading the secret. For example:
+
+| Template path | Actual read path |
+| :------------ | :--------------- |
+| `kv1/my-secret` | `kv1/data/my-secret` |
+| `secret/app/config` | `secret/data/app/config` |
+
+If your template path already contains `/data/` or `/metadata/`,
+Consul Template leaves the path unchanged.
+
+### Access requirements
+
+Vault Agent requires no additional policy rules to allow the preflight request. Vault
+checks the token's capabilities against the **mount path itself**
+(for example, `secret/`), not against the `sys/internal/ui/mounts/` path. Any
+policy that grants at least one capability on the mount is sufficient. For
+example, a policy that allows reading KVv2 secrets already satisfies the
+preflight check:
+
+```hcl
+# This policy is enough — no extra sys/internal/ui/mounts rule is needed
+path "secret/data/*" {
+  capabilities = ["read"]
+}
+```
+
+If the preflight request fails, Consul Template behaves as follows:
+
+- A `403` response causes Consul Template to log a warning and treat the path as
+  KVv1. If the mount is actually KVv2, the subsequent secret read fails.
+- A `404` response (returned by older Vault servers that do not implement this
+  endpoint) causes Consul Template to default to KVv1.
+
+<Note>
+
+Reads against `sys/internal/ui/mounts/<path>` in your audit log or firewall
+rules may originate from Vault Agent's KV version discovery, the `vault kv`
+CLI, or the Vault UI — all three use the same endpoint.
+
+</Note>
 
 ## Global configurations
 
