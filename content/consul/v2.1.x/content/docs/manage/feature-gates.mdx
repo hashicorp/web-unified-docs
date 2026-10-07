@@ -1,0 +1,208 @@
+---
+layout: docs
+page_title: Feature gates
+description: >-
+  Feature gates let you turn experimental Consul functionality on or off for an
+  entire datacenter without restarting agents. Learn how feature gates resolve,
+  how to enable them, and how to upgrade and roll back safely.
+---
+
+# Feature gates
+
+This topic describes how to use feature gates to enable experimental Consul
+functionality for a datacenter.
+
+## Introduction
+
+A feature gate is a datacenter-wide switch for a feature that is still
+maturing. Consul ships each gated feature in the binary but leaves it disabled
+until you turn it on. You can change a gate while the datacenter is running. You
+do not have to edit agent configuration files or restart agents.
+
+Feature gates provide the following benefits:
+
+- **Safe defaults.** Every feature gate is disabled by default. Upgrading Consul
+  does not change the behavior of your datacenter until you enable a gate.
+- **Consistent behavior.** Consul stores gate settings in the Raft log, so all
+  servers and agents in the datacenter agree on whether a feature is on.
+- **Protection during upgrades.** A gate cannot take effect until every server
+  in the datacenter runs a version that supports the feature.
+
+Feature gates apply to a single datacenter. If you operate multiple datacenters
+or cluster peers, enable the gate in each datacenter that needs the feature.
+
+## Available feature gates
+
+Consul 2.1.0 registers the following feature gates. All of them are
+`experimental`, are disabled by default, and require Consul 2.1.0 or later.
+
+| Name | Description |
+| :--- | :---------- |
+| `api-gateway-upstream-routing` | Composes API gateway `HTTPRoute` matches with service router and resolver configuration for upstream routing. This gate applies to agentless API gateways. Agent-based gateways always compose upstream routing. |
+| `consul-ai` | Enables Consul AI features. |
+| `localized-dns` | Adds an inline virtual DNS listener and an egress recursor DNS listener to service mesh sidecar proxies. |
+| `peering-multiport-upstreams` <EnterpriseAlert inline /> | Enables routing to named ports on multiport services that you export to cluster peers. Refer to [Multiport services across cluster peers](/consul/docs/connect/proxy/multiport#multiport-services-across-cluster-peers). |
+
+Run the [`consul operator feature list`](/consul/commands/operator/feature#list)
+command to display the gates that your servers register.
+
+## Feature gate states
+
+Consul tracks three values for each feature gate:
+
+- **Desired** is the state that you or the configuration requested. If no one
+  requested a state, the desired state is the gate's default, which is
+  `disabled` for every current gate.
+- **Eligible** indicates whether every server in the datacenter runs at least
+  the gate's minimum version.
+- **Effective** is the state that Consul applies. A gate is effective only when
+  it is desired and eligible.
+
+The `Source` and `Reason` fields explain how Consul reached the effective state.
+
+| Source | Description |
+| :----- | :---------- |
+| `registry-default` | No one set the gate. Consul uses the gate's default. |
+| `bootstrap` | The gate came from the `feature_gates.bootstrap` server configuration when the datacenter was created. |
+| `operator` | An operator set the gate with the CLI or the HTTP API. |
+
+| Reason | Description |
+| :----- | :---------- |
+| `default-enabled`, `default-disabled` | The gate has its default value. |
+| `bootstrap-enabled`, `bootstrap-disabled` | The bootstrap configuration set the gate. |
+| `operator-enabled`, `operator-disabled` | An operator set the gate. |
+| `below-minimum-version` | At least one server runs a version earlier than the gate's minimum version. The effective state is `disabled`. |
+| `no-server-version-data` | Consul cannot determine the servers' versions. The effective state is `disabled`. |
+| `unknown-feature` | The stored setting names a gate that the running Consul version does not register. The effective state is `disabled`. |
+
+Operator settings replace bootstrap settings, and both replace the gate's
+default.
+
+The Consul leader reevaluates every gate every 10 seconds and when an operator
+changes a setting. When you upgrade the last server in a datacenter, the
+affected gates become eligible without any action from you.
+
+## Enable or disable a feature gate
+
+You can manage feature gates with the CLI or the HTTP API.
+
+### Required permissions
+
+Reading feature gates requires `operator:read` permissions on your ACL token.
+Changing a feature gate requires `operator:write` permissions. For more
+information, refer to [operator rules](/consul/docs/secure/acl/acl-rules#operator-rules).
+
+Client agents that do not run a server watch the gate state so that they can
+configure proxies consistently. The ACL token for these agents must include
+`operator:read` permissions.
+
+### View feature gates
+
+Run the `consul operator feature list` command to view all feature gates.
+
+```shell-session
+$ consul operator feature list
+```
+
+To view a single gate, run the `consul operator feature get` command and specify
+the gate's name.
+
+```shell-session
+$ consul operator feature get peering-multiport-upstreams
+```
+
+The corresponding HTTP API endpoints are
+[`/v1/operator/features`](/consul/api-docs/operator/feature#list-feature-gates)
+and [`/v1/operator/feature/:name`](/consul/api-docs/operator/feature#read-a-feature-gate).
+
+### Enable a feature gate
+
+Run the `consul operator feature set` command to enable a gate.
+
+```shell-session
+$ consul operator feature set peering-multiport-upstreams enabled
+```
+
+After the command returns, check the `Effective` column in the output. If it
+shows `false`, check the `Reason` column. A reason of `below-minimum-version`
+means that at least one server still runs a version earlier than the gate's
+minimum version. Upgrade the remaining servers. The gate then takes effect
+without further action.
+
+You can also use the
+[`PUT /v1/operator/feature/:name`](/consul/api-docs/operator/feature#update-a-feature-gate)
+HTTP API endpoint.
+
+### Disable a feature gate
+
+Run the `consul operator feature set` command with the `disabled` value.
+
+```shell-session
+$ consul operator feature set peering-multiport-upstreams disabled
+```
+
+Consul withdraws the feature's configuration from the proxies in the datacenter.
+Refer to the documentation for the feature to learn about the effect on traffic.
+
+### Coordinate changes from multiple operators
+
+If several operators or automation tools can change feature gates, use the
+`-cas` option so that an update applies only when no one else has changed the
+policy since you read it. For more information, refer to
+[Prevent conflicting updates](/consul/commands/operator/feature#prevent-conflicting-updates).
+
+## Enable a feature gate when you create a datacenter
+
+You can set the initial state of feature gates in the server agent
+configuration file. Use the `feature_gates` block when you bootstrap a new
+datacenter.
+
+<CodeBlockConfig filename="server.hcl">
+
+```hcl
+feature_gates {
+  bootstrap = {
+    "peering-multiport-upstreams" = true
+  }
+}
+```
+
+</CodeBlockConfig>
+
+Consul uses this block only once, when the leader creates the first feature gate
+policy for the datacenter. After that, the stored policy is authoritative and
+Consul ignores changes to the block. If the block differs from the stored
+policy, Consul logs a warning. To change a gate in a running datacenter, use the
+CLI or the HTTP API.
+
+The block is valid only on server agents. Consul does not start if the block
+appears on a client agent or names a gate that does not exist. For more
+information, refer to the [`feature_gates` parameter](/consul/docs/reference/agent/configuration-file/general#feature_gates).
+
+## Upgrade considerations
+
+Follow these guidelines when you upgrade a datacenter that uses feature gates:
+
+1. Upgrade all of the servers in the datacenter before you enable a gate. Consul
+   keeps a gate disabled until every server meets its minimum version.
+2. Upgrade client agents, mesh gateways, and proxies to the same version as the
+   servers before you enable a gate that changes proxy behavior. Agents on
+   earlier versions do not recognize the gate. Refer to the documentation for
+   the feature for additional requirements.
+3. Enable the gate in each datacenter that needs it.
+
+After every server in the datacenter runs a version that supports feature gates,
+the leader creates the feature gate policy. Until then, `consul operator feature
+list` returns no gates and the HTTP API returns an empty list with the
+`X-Consul-Feature-Gates-Uninitialized` header. A request for a single gate
+returns a `503` status code. Retry the request after the leader finishes its
+first reconciliation.
+
+## Next steps
+
+- Refer to [`consul operator feature`](/consul/commands/operator/feature) for
+  the CLI reference.
+- Refer to the [feature gate HTTP API](/consul/api-docs/operator/feature) for
+  the API reference.
+- Refer to [Multiport services across cluster peers](/consul/docs/connect/proxy/multiport#multiport-services-across-cluster-peers)
+  for an example of a feature that uses a gate.

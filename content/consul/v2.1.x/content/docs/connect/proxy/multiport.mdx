@@ -201,6 +201,384 @@ service-port combination. For example, if you have a service named `api` with
 two ports named `http` and `grpc`, the virtual DNS entries would be
 `http.api.virtual.consul` and `grpc.api.virtual.consul`.
 
+## Multiport services across cluster peers
+
+Consul 2.1.0 and later let you route traffic to a specific named port on a
+multiport service that you export to a cluster peer. This capability is
+available in both direct and transparent proxy modes.
+
+<Note>
+
+Peered multiport routing is an experimental feature. It is controlled by the
+`peering-multiport-upstreams` feature gate, which is disabled by default.
+Multiport services within a single cluster, and peered services that use only
+their default port, do not depend on this feature gate.
+
+</Note>
+
+### Requirements
+
+Before you enable peered multiport routing, verify that your environment meets
+the following requirements:
+
+- Every Consul server in both peered clusters runs Consul Enterprise v2.1.0 or
+  later. The feature gate stays disabled until all servers in the cluster meet
+  this minimum version.
+- The mesh gateways, client agents, and sidecar proxies that serve the exporting
+  and consuming services also run Consul Enterprise v2.1.0 or later. Refer to
+  [Upgrade considerations](#upgrade-considerations).
+- The clusters are [peered](/consul/docs/east-west/cluster-peering) and each
+  cluster has a [mesh gateway](/consul/docs/east-west/mesh-gateway/cluster-peer).
+  When the exporting service is in an admin partition, register the mesh
+  gateway in the same partition.
+- The exporting service is registered as a multiport service and has a sidecar
+  proxy.
+
+### Enable the feature gate
+
+Enable the `peering-multiport-upstreams` feature gate in both the exporting
+cluster and the consuming cluster. For more information about feature gates,
+refer to [Feature gates](/consul/docs/manage/feature-gates). Run the following
+command on each cluster:
+
+```shell-session
+$ consul operator feature set peering-multiport-upstreams enabled
+```
+
+To verify the state of the feature gate, run the `consul operator feature get`
+command. The output shows both the state you requested and the state that is in
+effect.
+
+```shell-session
+$ consul operator feature get peering-multiport-upstreams
+```
+
+You can also enable the feature gate when you bootstrap a new cluster by adding
+the following configuration to the server agent configuration file:
+
+<CodeBlockConfig filename="server.hcl">
+
+```hcl
+feature_gates {
+  bootstrap = {
+    "peering-multiport-upstreams" = true
+  }
+}
+```
+
+</CodeBlockConfig>
+
+To list all feature gates and their current state, run the [`consul operator
+feature list`](/consul/commands/operator/feature#list) command. You can also use
+the [`/v1/operator/features`](/consul/api-docs/operator/feature) and
+`/v1/operator/feature/:name` HTTP API endpoints. Reading a feature gate requires
+`operator:read` permissions and changing one requires `operator:write`
+permissions. Client agents that do not run alongside a server watch the feature
+gate, so their agent tokens require `operator:read` permissions.
+
+### Export the service and create an intention
+
+Export the multiport service from the exporting cluster with an
+[`exported-services` configuration entry](/consul/docs/reference/config-entry/exported-services).
+You export the service as a whole. You do not specify individual ports.
+
+<CodeTabs tabs={[ "HCL", "JSON" ]}>
+
+<CodeBlockConfig filename="exported-services.hcl">
+
+```hcl
+Kind = "exported-services"
+Name = "default"
+
+Services = [
+  {
+    Name = "api"
+    Consumers = [
+      {
+        Peer = "dc1-peer"
+      }
+    ]
+  }
+]
+```
+
+</CodeBlockConfig>
+
+<CodeBlockConfig filename="exported-services.json">
+
+```json
+{
+  "Kind": "exported-services",
+  "Name": "default",
+  "Services": [
+    {
+      "Name": "api",
+      "Consumers": [
+        {
+          "Peer": "dc1-peer"
+        }
+      ]
+    }
+  ]
+}
+```
+
+</CodeBlockConfig>
+
+</CodeTabs>
+
+When you export from an admin partition, the `Name` field must match the name
+of the partition.
+
+Then, create a [service intention](/consul/docs/secure-mesh/intention) in the
+exporting cluster that allows the downstream service in the peer to connect.
+
+<CodeTabs tabs={[ "HCL", "JSON" ]}>
+
+<CodeBlockConfig filename="api-intentions.hcl">
+
+```hcl
+Kind = "service-intentions"
+Name = "api"
+
+Sources = [
+  {
+    Name   = "web"
+    Peer   = "dc1-peer"
+    Action = "allow"
+  }
+]
+```
+
+</CodeBlockConfig>
+
+<CodeBlockConfig filename="api-intentions.json">
+
+```json
+{
+  "Kind": "service-intentions",
+  "Name": "api",
+  "Sources": [
+    {
+      "Name": "web",
+      "Peer": "dc1-peer",
+      "Action": "allow"
+    }
+  ]
+}
+```
+
+</CodeBlockConfig>
+
+</CodeTabs>
+
+Intentions apply to the service and not to individual ports. An intention that
+allows a source to connect to a multiport service allows that source to connect
+to every named port on the service.
+
+### Address peered multiport services
+
+#### Non-transparent proxy
+
+In non-transparent proxy mode, configure an upstream for each port. Specify the
+peer with the `destination_peer` parameter and the port with the
+`destination_port` parameter. If you omit `destination_port`, the upstream
+routes traffic to the service's default port.
+
+This example configuration illustrates the following:
+
+1. The `web` service connecting to `localhost:9192` is routed to the `http`
+   port of the `api` service in the `dc2-peer` peer.
+2. The `web` service connecting to `localhost:9193` is routed to the `grpc`
+   port of the `api` service in the `dc2-peer` peer.
+3. The `web` service connecting to `localhost:9194` is routed to the default
+   port of the `api` service in the `dc2-peer` peer.
+
+<CodeTabs tabs={[ "HCL", "JSON" ]}>
+
+<CodeBlockConfig language="hcl" highlight="7-24">
+
+```hcl
+service {
+  name = "web"
+  port = 8080
+  connect {
+    sidecar_service {
+      proxy {
+        upstreams = [
+          {
+            destination_name = "api"
+            destination_peer = "dc2-peer"
+            destination_port = "http"
+            local_bind_port  = 9192
+          },
+          {
+            destination_name = "api"
+            destination_peer = "dc2-peer"
+            destination_port = "grpc"
+            local_bind_port  = 9193
+          },
+          {
+            destination_name = "api"
+            destination_peer = "dc2-peer"
+            local_bind_port  = 9194
+          }
+        ]
+      }
+    }
+  }
+}
+```
+
+</CodeBlockConfig>
+
+<CodeBlockConfig language="json" highlight="6-23">
+
+```json
+{
+  "name": "web",
+  "port": 8080,
+  "connect": {
+    "sidecar_service": {
+      "proxy": {
+        "upstreams": [
+          {
+            "destination_name": "api",
+            "destination_peer": "dc2-peer",
+            "destination_port": "http",
+            "local_bind_port": 9192
+          },
+          {
+            "destination_name": "api",
+            "destination_peer": "dc2-peer",
+            "destination_port": "grpc",
+            "local_bind_port": 9193
+          },
+          {
+            "destination_name": "api",
+            "destination_peer": "dc2-peer",
+            "local_bind_port": 9194
+          }
+        ]
+      }
+    }
+  }
+}
+```
+
+</CodeBlockConfig>
+
+</CodeTabs>
+
+#### Transparent proxy
+
+In transparent proxy mode, applications address each port of a peered service
+with a virtual DNS name that includes the peer name. Consul assigns each named
+port its own virtual IP address.
+
+```text
+[<port-name>.]<service>.virtual.<peer>.peer.<domain>
+```
+
+For example, if the `api` service is exported from the `dc2-peer` peer, the
+virtual DNS entries are as follows:
+
+| Port | Virtual DNS name |
+| :--- | :--------------- |
+| Default port | `api.virtual.dc2-peer.peer.consul` |
+| `http` | `http.api.virtual.dc2-peer.peer.consul` |
+| `grpc` | `grpc.api.virtual.dc2-peer.peer.consul` |
+
+If the service is in a non-default admin partition or namespace of the
+consuming cluster, add the partition and namespace labels. For example,
+`grpc.api.virtual.ns1.ns.ap1.ap.dc2-peer.peer.consul`. For more information
+about the virtual DNS format, refer to [Service virtual IP
+lookups](/consul/docs/discover/service/static#service-virtual-ip-lookups).
+
+Consul assigns the virtual IP addresses for named ports after it imports the
+exported service. Peered resources can take a couple of minutes to converge, so
+a lookup that you make immediately after you export the service may not resolve.
+Retry the lookup before you troubleshoot.
+
+A virtual DNS name for a port that does not exist on a multiport service returns
+an `NXDOMAIN` response.
+
+### Considerations
+
+Consider the following limitations when you use multiport services across
+cluster peers:
+
+- **Service-level discovery chains apply to the default port only.** If you
+  configure a [service resolver](/consul/docs/reference/config-entry/service-resolver),
+  [service router](/consul/docs/reference/config-entry/service-router),
+  [service splitter](/consul/docs/reference/config-entry/service-splitter),
+  failover policy, or sameness group for the exported service, the configuration
+  applies to the default port. For TCP services, requests to named ports still
+  reach the correct port.
+- **HTTP services can route named ports to the default port.** When the
+  exported service's protocol is `http` and the service has a discovery chain
+  that is not the default, requests to a named port can reach the default port
+  and return a successful response instead of an error. Consul logs a warning
+  that names the service, the affected ports, and the protocol. If you see this
+  warning, remove the discovery chain configuration or set the service protocol
+  to `tcp`.
+- **All ports share one protocol.** You set the protocol for the whole service
+  in its [`service-defaults` configuration entry](/consul/docs/reference/config-entry/service-defaults).
+  You cannot set a protocol for each port.
+- **Intentions do not apply per port.** Refer to
+  [Export the service and create an intention](#export-the-service-and-create-an-intention).
+- **Removing a named port requires updating consumers.** If you remove a port
+  from a service registration, an upstream in the consuming cluster that still
+  names the removed port can continue to reach the default port instead of
+  failing. Update or remove the upstreams and DNS references for the port before
+  you remove it.
+- **Port names cannot contain `.`, `:`, `/`, or whitespace.** Consul rejects
+  service registrations that use these characters in a port name.
+- **Multiport services in WAN-federated datacenters are not supported.**
+
+### Upgrade considerations
+
+Upgrade every component in both peered clusters to Consul Enterprise v2.1.0 or
+later before you enable the feature gate. Complete the upgrade in the following
+order:
+
+1. Upgrade the Consul servers.
+2. Upgrade the client agents, mesh gateways, and sidecar proxies.
+3. Enable the `peering-multiport-upstreams` feature gate in the exporting and
+   consuming clusters.
+4. Add or update the upstreams that name a port.
+
+<Warning>
+
+Do not run exporting-side Consul agents on a version earlier than v2.1.0 while
+you route traffic to named ports. Agents that run v2.0.x do not recognize the
+feature gate and can break peered traffic to the exported service until you
+upgrade or roll them back. This applies to the agent that serves the
+exporting cluster's mesh gateway and to the agent that serves the exported
+application.
+
+</Warning>
+
+Enable the feature gate in both clusters. If you disable it in the consuming
+cluster, Consul removes that cluster's per-port listeners and clusters and
+requests to named ports fail. If you disable it in the exporting cluster,
+Consul removes the mesh gateway's per-port routing.
+
+### Roll back
+
+To stop routing to peered named ports, disable the feature gate in both
+clusters:
+
+```shell-session
+$ consul operator feature set peering-multiport-upstreams disabled
+```
+
+Consul removes the per-port resources and requests to named ports fail instead
+of reaching another port. Peered traffic to the default port and services that
+use a single port keep working. When you enable the feature gate again, Consul
+restores the per-port resources. Expect a short period of failed requests while
+the proxies update.
+
 ## Multiport functionality in Consul services
 
 The following functionality has partial support for Consul Multiport:
