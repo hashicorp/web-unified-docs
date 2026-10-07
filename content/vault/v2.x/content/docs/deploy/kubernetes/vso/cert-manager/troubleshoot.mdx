@@ -1,0 +1,220 @@
+---
+layout: docs
+page_title: Troubleshoot the cert-manager issuer
+description: >-
+  Diagnose and fix common problems with the Vault Secrets Operator VaultIssuer
+  and VaultClusterIssuer when cert-manager requests certificates from Vault.
+---
+
+# Troubleshoot the cert-manager issuer
+
+@include 'alerts/enterprise-only.mdx'
+
+Use the following information to diagnose problems with the Vault Secrets
+Operator `VaultIssuer` and `VaultClusterIssuer` resources. Refer to
+[Issue certificates with cert-manager](/vault/docs/deploy/kubernetes/vso/cert-manager)
+to learn how the issuers work.
+
+## Collect diagnostic information
+
+Most problems appear in the status of the issuer or the `CertificateRequest`.
+Start with the following commands:
+
+- Show the issuer status, conditions, and events:
+
+  ```shell-session
+  $ kubectl describe vaultissuer <ISSUER_NAME> --namespace <NAMESPACE>
+
+  $ kubectl describe vaultclusterissuer <ISSUER_NAME>
+  ```
+
+- Show the status and events of the certificate request:
+
+  ```shell-session
+  $ kubectl describe certificaterequest <REQUEST_NAME> --namespace <NAMESPACE>
+  ```
+
+- Show the Vault Secrets Operator logs:
+
+  ```shell-session
+  $ kubectl logs deployment/vault-secrets-operator-controller-manager \
+      --namespace vault-secrets-operator \
+      --container manager
+  ```
+
+## Issuer is not ready
+
+The `READY` column of the issuer shows `False`. The `reason` of the `Ready`
+condition and the `status.error` field describe the cause.
+
+### `VaultEnterpriseRequired`
+
+The Vault server is not Vault Enterprise. Confirm that the `VaultConnection`
+address points to a Vault Enterprise server.
+
+### `VaultEnterpriseCheckForbidden`
+
+The Vault policy attached to the `VaultAuth` role does not grant `read` on
+`sys/license/status`. Add the following rule to the policy:
+
+```hcl
+path "sys/license/status" {
+  capabilities = ["read"]
+}
+```
+
+The issuer becomes ready after you update the policy.
+
+### `InvalidResourceRef`
+
+The `vaultAuthRef` value has an invalid format, or the `VaultAuth` resource does
+not exist.
+
+Check that `vaultAuthRef` uses the `name` or `namespace/name` form and that the
+`VaultAuth` exists. A `VaultClusterIssuer` resolves a name without a namespace
+prefix in the Vault Secrets Operator namespace, not in the namespace where you
+created the `VaultAuth`.
+
+### `VaultClientError`
+
+The Vault Secrets Operator could not authenticate to Vault. Check the
+`status.error` field for the specific cause.
+
+When the error contains `ServiceAccount "<name>" not found`, the service
+account in the `VaultAuth` does not exist in the expected namespace. A
+`VaultIssuer` looks up the service account in the issuer's namespace. A
+`VaultClusterIssuer` looks up the service account in the `VaultAuth` namespace.
+Create the service account, or update `spec.kubernetes.serviceAccount` in the
+`VaultAuth`. Make sure that the Vault auth role lists the same namespace in
+`bound_service_account_namespaces`.
+
+When the error contains `is not allowed by kind=VaultAuth`, the `VaultAuth`
+does not allow the issuer's namespace. Add the namespace to
+`allowedNamespaces` on the `VaultAuth`, or create a `VaultAuth` in the issuer's
+namespace.
+
+For other errors, confirm that the `VaultAuth` and `VaultConnection` resources
+are valid and that the Vault Secrets Operator can reach Vault:
+
+```shell-session
+$ kubectl describe vaultauth,vaultconnection --namespace <NAMESPACE>
+```
+
+## Certificate request is not approved
+
+The `APPROVED` column of the `CertificateRequest` stays empty, and the Vault
+Secrets Operator does not sign it.
+
+cert-manager does not have permission to approve requests for the Vault Secrets
+Operator issuers. The cert-manager controller logs contain an error similar to
+the following:
+
+<CodeBlockConfig hideClipboard>
+
+```plaintext
+admission webhook "webhook.cert-manager.io" denied the request: status.conditions: Forbidden: user "system:serviceaccount:cert-manager:cert-manager" does not have permissions to set approved/denied conditions for issuer {vault-issuer VaultIssuer secrets.hashicorp.com}
+```
+
+</CodeBlockConfig>
+
+To fix the problem, do one of the following:
+
+- Set `certManager.approverRBAC.enabled=true` in the Vault Secrets Operator Helm
+  chart. If cert-manager runs with a different service account, also set
+  `certManager.approverRBAC.serviceAccountName` and
+  `certManager.approverRBAC.serviceAccountNamespace`.
+- Grant your approver, such as approver-policy, `approve` on the
+  `vaultissuers.secrets.hashicorp.com/*` and
+  `vaultclusterissuers.secrets.hashicorp.com/*` signers.
+- Approve the request manually with `cmctl approve`.
+
+The `kubectl auth can-i` command does not report permissions for the cert-manager
+`signers` resource correctly. To confirm the fix, check that a new
+`CertificateRequest` shows `True` in the `APPROVED` column.
+
+cert-manager retries failed requests with exponential backoff. To create a new
+request immediately after you fix the permissions, delete the stuck request:
+
+```shell-session
+$ kubectl delete certificaterequest <REQUEST_NAME> --namespace <NAMESPACE>
+```
+
+## Certificate request is pending
+
+The `CertificateRequest` is approved, but the `Ready` condition has the
+`Pending` reason. The Vault Secrets Operator retries pending requests with
+backoff. The condition message describes the cause:
+
+| Message | Cause | Resolution |
+| --- | --- | --- |
+| `Issuer <kind>/<name> not found` | The issuer does not exist. A `VaultIssuer` must be in the same namespace as the `CertificateRequest`. | Create the issuer, or correct `issuerRef` in the `Certificate`. |
+| `Issuer is not ready` | The issuer is not ready. | Refer to [Issuer is not ready](#issuer-is-not-ready). |
+| `Failed to get Vault client: ... is not allowed by kind=VaultAuth` | The `VaultAuth` of a `VaultClusterIssuer` does not allow the namespace of the `CertificateRequest`. | Add the namespace to `allowedNamespaces` on the `VaultAuth`, or set `allowedNamespaces` to `["*"]`. |
+| `Failed to get Vault client: ...` | The Vault Secrets Operator could not authenticate to Vault. | Check the `VaultAuth` and `VaultConnection` resources. |
+| `Vault signing failed (transient): ...` | Vault was unreachable or returned a server error. | Check Vault availability. The Vault Secrets Operator retries the request. |
+
+## Certificate request failed
+
+The `Ready` condition of the `CertificateRequest` has the `Failed` reason. The
+Vault Secrets Operator does not retry a failed request. After you fix the cause,
+cert-manager creates a new request based on its backoff schedule. To request a
+new certificate immediately, run `cmctl renew`:
+
+```shell-session
+$ cmctl renew <CERTIFICATE_NAME> --namespace <NAMESPACE>
+```
+
+The condition message describes the cause:
+
+| Message | Cause | Resolution |
+| --- | --- | --- |
+| `Vault signing failed: ... Code: 403` | The Vault policy does not grant the signing path. | Grant `create` and `update` on the exact signing path. When the issuer sets `issuerRef`, the path is `<mount>/issuer/<issuerRef>/sign/<role>`. |
+| `Vault signing failed: ... Code: 400` | The PKI role rejected the request. | Compare the names and private key algorithm in the `Certificate` with the role's `allowed_domains` and `key_type` settings. |
+| `Vault signing failed: ... Code: 404` | The PKI mount, role, or issuer does not exist. | Check the `mount`, `role`, and `issuerRef` fields on the issuer. |
+| `Vault Enterprise is required for the VaultIssuer feature` | The Vault server is not Vault Enterprise. | Connect the issuer to a Vault Enterprise server. |
+| `Failed to decode CSR PEM` | The request does not contain a valid CSR. | Recreate the `Certificate`. |
+
+## Vault Secrets Operator ignores certificate requests
+
+The `CertificateRequest` has no conditions or events from the Vault Secrets
+Operator.
+
+Confirm that the `issuerRef.group` in the `Certificate` is
+`secrets.hashicorp.com`. The Vault Secrets Operator ignores requests for other
+groups.
+
+Check the Vault Secrets Operator logs for the following message:
+
+<CodeBlockConfig hideClipboard>
+
+```plaintext
+cert-manager CertificateRequest API is not installed; waiting for it to become available
+```
+
+</CodeBlockConfig>
+
+The message means that cert-manager is not installed, or that its CRDs are not
+available. The Vault Secrets Operator starts processing requests after you
+install cert-manager. The log contains `CertificateRequest controller
+registered` when processing starts.
+
+## Certificate has no subject alternative names
+
+The `CertificateRequest` has a `SANlessCertificate` warning event, and TLS
+clients reject the certificate because it does not contain any SANs.
+
+The `Certificate` sets `commonName` without `dnsNames`, `ipAddresses`, `uris`,
+or `emailAddresses`, and the issuer excludes the common name from the SANs. To
+fix the problem, add the common name to `spec.dnsNames` in the `Certificate`, or
+set `excludeCNFromSans` to `false` on the issuer.
+
+## Certificate lifetime is different than expected
+
+The certificate validity period does not match `spec.duration` in the
+`Certificate`.
+
+The Vault PKI role limits the certificate lifetime. Vault does not issue a
+certificate with a lifetime longer than the role's `max_ttl`. When the
+`Certificate` does not set `spec.duration`, Vault uses the role's `ttl`. Update
+the PKI role, or set `spec.duration` in the `Certificate` to a value within the
+role limits.
