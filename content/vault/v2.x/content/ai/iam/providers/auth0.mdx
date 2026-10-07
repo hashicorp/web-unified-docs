@@ -14,24 +14,35 @@ last_modified: 2026-09-01T02:31:12.000Z
 
 @include 'alerts/enterprise-and-hcp.mdx'
 
-Configure users and OIDC applications in Auth0 to use with Vault Enterprise
-agentic IAM.
+Configure users, applications, and Actions in Auth0 so Auth0 can issue
+on-behalf-of (OBO) access tokens with Rich Authorization Request (RAR) claims
+for Vault Enterprise agentic IAM. Auth0 issues the delegated token through
+[Custom Token Exchange](https://auth0.com/docs/authenticate/custom-token-exchange/configure-custom-token-exchange)
+(RFC 8693).
 
 
 ## Before you start
 
 - **You must have an Auth0 tenant with
-  an [Auth0 Enterprise](https://auth0.com/pricing) plan (or better)** to enable
-  and remove Rich Authorization Request (RAR) and Pushed Authorization Requests
-  (PAR).
+  an [Auth0 Enterprise](https://auth0.com/pricing) license**. Custom Token
+  Exchange requires a paid Enterprise license. Ask your Auth0 Enterprise
+  administrator for access to an Enterprise tenant, and note the tenant name and
+  region. The tenant name appears in the top left of the Auth0 dashboard and on
+  the **Settings** > **General** page.
 
 - **You must have sufficient permission for your Auth0 tenant**. You must have
-  permissoion to create resources (applications, APIs, users) and configure
-  RAR/PAR features.
+  permission to create applications, APIs, users, and Actions, and to use the
+  Auth0 Management API.
+
+- **You must run Vault 2.2.0 or later**. Auth0 reserves the
+  `authorization_details` claim, so the RAR arrives in a custom claim. Vault
+  2.2.0 adds the `authorization_details_claim` profile parameter to read it.
 
 - **You must have the [`oauth2c`](https://github.com/SecureAuthCorp/oauth2c) CLI**
   installed and in your system `PATH` to interact with OAuth 2.0 authorization
   servers.
+
+- **You must have `curl` and `jq`** installed to call the Auth0 Management API.
 
 <Highlight title="Try the tutorial">
 
@@ -42,20 +53,15 @@ containers, we also offer an in-depth tutorial on
 </Highlight>
 
 
-## Step 1: Enable pushed authorization requests
+## Step 1: Create a custom API
 
-Enable Pushed Authorization Requests (PAR) tenant-wide. You need PAR support
-([RFC 9126](https://datatracker.ietf.org/doc/html/rfc9126)) to attach RAR claims.
-Standard authorization requests cannot carry complex JSON structures.
+The API represents the audience that validates the JWT Auth0 issues.
 
-1. Log in to your Auth0 dashboard.
+1. Save your Auth0 tenant domain as an environment variable:
 
-1. Navigate to **Settings** > **Advanced**.
-
-1. Toggle the **Allow Pushed Authorization Requests (PAR)** setting to **ON**.
-
-
-## Step 2: Create a custom API
+    ```shell-session
+    $ export APP_DOMAIN="<your_tenant>.us.auth0.com"
+    ```
 
 1. Navigate to **Applications** > **APIs**.
 
@@ -80,30 +86,93 @@ Standard authorization requests cannot carry complex JSON structures.
 
 1. Click **Save**.
 
+1. Save the API identifier as `AUDIENCE_ADDR` so you can request the correct
+   audience in access tokens:
 
-## Step 3: Create an Auth0 application
+    ```shell-session
+    $ export AUDIENCE_ADDR=${VAULT_ADDR}/v1
+    ```
+
+
+## Step 2: Create a user
+
+Create a user to represent the human subject who delegates authority to the
+agent.
+
+1. Navigate to **User Management** > **Users**.
+
+1. Click **Create User**.
+
+1. Select **Create via UI**.
+
+1. Enter an **Email** and a **Password** with at least one number and one
+   special character.
+
+1. Click **Create**.
+
+1. On the user page, click **Edit** next to **Email**, and mark the email as
+   verified.
+
+1. Copy the **user_id** value from the user page and save it as an environment
+   variable. The value contains a pipe character, so wrap the string in single
+   quotes:
+
+    ```shell-session
+    $ export SUBJECT_ID='auth0|<user_id>'
+    ```
+
+
+## Step 3: Create an agent application
+
+The agent authenticates to Auth0 as a machine-to-machine application.
+
+1. Navigate to **Applications** > **Applications**, then click
+   **Create Application**.
+
+1. In the **Name** field, enter a name for the agent (for example, `ai-agent`).
+
+1. Select **Machine to Machine Applications**.
+
+1. Click **Create**.
+
+1. Select the API you created and click **Authorize**.
+
+1. Open the **Settings** page and save the **Client ID** and **Client Secret**
+   as environment variables:
+
+    ```shell-session
+    $ export                                     \
+        AGENT_ID="<agent_client_id>"             \
+        AGENT_SECRET="<agent_client_secret>"
+    ```
+
+1. Click **Advanced Settings**.
+
+1. Open the **Grant Types** tab and check only **Client Credentials**.
+
+1. Click **Save**.
+
+
+## Step 4: Create an Auth0 application
+
+The application requests tokens for the user and performs the token exchange.
 
 1. Navigate to **Applications** > **Applications**, then click
    **Create Application**.
 
 1. Enter a custom name for the **Name** field.
 
-1. Select an appropriate application type.
+1. Select **Regular Web Application**.
 
 1. Click **Create**.
 
-1. Open the **Settings** page and note the **Client ID**, **Domain**, and
-   **Client Secret** for your application.
+1. Open the **Settings** page and note the **Client ID** and **Client Secret**
+   for your application.
 
 1. Scroll to **Application URIs** section.
 
-1. Add the default callback for `oauth2` to the **Allowed Callback URLs** list,
-   `http://localhost:9876/callback` so you can test the token exchange later.
-
-1. Scroll to the **Authorization Requests** section.
-
-1. Toggle  **Require Pushed Authorization Requests (PAR)** to **ON** to make PAR
-   mandatory for your application.
+1. Add the default callback for `oauth2c` to the **Allowed Callback URLs** list,
+   `http://localhost:9876/callback`, so you can request user tokens later.
 
 1. Click **Advanced Settings**.
 
@@ -119,30 +188,22 @@ Standard authorization requests cannot carry complex JSON structures.
 
 1. Click **Save**.
 
+1. Save the application values as environment variables:
 
-## Step 4: Register the RAR authorization details type
-
-Rich Authorization Requests (RAR) require Auth0 to recognize the custom
-authorization details `type` that Vault expects (`vault:path_access`). With PAR
-enabled, register an authorization details type named `vault:path_access` for
-your tenant.
-
-1. Navigate to **Auth0 Dashboard** > **Applications** > **APIs**.
-
-1. Select the API you created.
-
-1. Click **Permissions**.
-
-1. Under **Add an Authorization Details type** in the **Type** field, enter
-   `vault:path_access`.
-
-1. Click **+ Add** to automatically save the authorization details type settings.
+    ```shell-session
+    $ export                                                      \
+        APP_AUTH_URL="https://${APP_DOMAIN}/authorize"            \
+        APP_ID="<application_client_id>"                         \
+        SECRET_VALUE="<application_client_secret>"               \
+        JWKS_URI="https://${APP_DOMAIN}/.well-known/jwks.json"    \
+        ISSUER="https://${APP_DOMAIN}/"
+    ```
 
 
 ## Step 5: Grant application access
 
-With the API and application both created, you need to grant client access from
-the API to the application.
+With the API and both applications created, grant client access from the API
+to each application.
 
 1. Navigate to **Auth0 Dashboard** > **Applications** > **APIs**.
 
@@ -158,182 +219,265 @@ the API to the application.
 
 1. Click **Save**.
 
-
-## Step 6: Allow the application to request the RAR type
-
-The **Always grant all permissions** checkbox does not configure whether
-applications can request the `vault:path_access` authorization details (RAR) type.
-
-Auth0 controls whether an application may request a registered
-`authorization_details` type through the User-Delegated Access policy associated
-with the API.
-
-Type                      | Key                    | Config location      | Description 
-------------------------- | ---------------------- | -------------------- | -----------
-**All apps allowed**      | `allow_all`            | Dashboard            | Applications can request any type registered on the API.
-**Per-app authorization** | `require_client_grant` | Auth0 Management API | Applications can request types configured in their client grant.
-
-<Tabs>
-<Tab heading="All apps allowed">
-
-To set the policy to **All apps allowed**:
-
-1. Navigate to **Applications** > **APIs** and click **vault-api**.
-
-1. Click the **Settings** tab and scroll to **Application Access Policy**.
-
-1. Set **User-Delegated Access** to **All apps allowed**.
-
-1. Click **Save**.
-
-</Tab>
-<Tab heading="Per-app authorization">
-
-If you prefer to keep **Per-app authorization** (least privilege), leave the
-policy unchanged and use the Management API to add explicit RAR types to the
-client grant.
-
-1. Use the `/api/v2/client-grants` endpoint to find the grant ID for your new
-   application:
-
-   ```shell-session
-   $ curl -X GET "/api/v2/client-grants?client_id=${APP_ID}" \
-      -H "Authorization: Bearer ${MGMT_TOKEN}"                      \
-      -H "Content-Type: application/json"                           \
-      -d '{"authorization_details_types":["vault:path_access"]}'
-   ```
-
-1. Update the client grant with the retured grant ID:
-
-   ```shell-session
-   $ curl -X PATCH "https://${APP_DOMAIN}/api/v2/client-grants/<grant_id>" \
-      -H "Authorization: Bearer ${MGMT_TOKEN}"                             \
-      -H "Content-Type: application/json"                                  \
-      -d '{"authorization_details_types":["vault:path_access"]}'
-   ```
-
-The `authorization_details_types` field applies only to user-delegated access
-flows.
-
-</Tab>
-</Tabs>
+1. Repeat the process for the agent application.
 
 
-## Step 7: Create an agent user
+## Step 6: Get a Management API access token
 
-1. Navigate to **User Management** > **Users**.
+You need a Management API access token to enable Custom Token Exchange and
+create a token exchange profile. The Auth0 dashboard does not expose these
+settings.
 
-1. Click **Create User**.
+1. Navigate to **Applications** > **APIs**.
 
-1. Select **Create via UI** or **Create via JSON**.
+1. Click **Auth0 Management API**.
 
-1. Enter the appropriate information for **Email** and **Password**.
+1. Click the **Advanced** tab.
+
+   {/* TODO: Confirm whether Create & Authorize Test Application is on the Advanced tab or the API Explorer tab. */}
+
+1. Click **Create & Authorize Test Application**.
+
+1. Open the **API Explorer** tab, copy the token, and save it as an environment
+   variable:
+
+    ```shell-session
+    $ export MGMT_TOKEN="<management_api_token>"
+    ```
+
+The token is valid for one day (86400 seconds). Generate a new token from the
+**API Explorer** tab if you continue beyond a day.
+
+
+## Step 7: Enable Custom Token Exchange
+
+Use the Management API to allow your application to use custom token exchange
+profiles:
+
+```shell-session
+$ curl --request PATCH                                          \
+    --url "https://${APP_DOMAIN}/api/v2/clients/${APP_ID}"      \
+    --header "Authorization: Bearer ${MGMT_TOKEN}"              \
+    --header 'Content-Type: application/json'                   \
+    --data '{"token_exchange": {"allow_any_profile_of_type": ["custom_authentication"]}}'
+```
+
+Confirm that `is_first_party` and `oidc_conformant` are both `true` in the
+response. Token exchange fails if either value is `false`.
+
+
+## Step 8: Create a Custom Token Exchange Action
+
+The Custom Token Exchange Action verifies the subject (human) and actor (agent)
+tokens, sets the token subject, adds the RFC 8693 `act` claim, and passes any
+requested `authorization_details` to the Post Login Action. Review the Auth0
+coding guidelines for Actions before you adapt the code.
+
+1. Navigate to **Actions** > **Library**.
+
+1. Click **Create Action** and select **Create Custom Action**.
+
+1. In the **Name** field, enter `process_obo_rar_token_cte`.
+
+1. For **Trigger**, select **Custom Token Exchange**.
+
+1. For **Runtime**, keep **Node 22**.
 
 1. Click **Create**.
 
-1. On the user page, click **Edit** next to **Email**, and mark the email as
-   verified.
+   {/* TODO: Confirm whether the jose module must be added under the Action's Dependencies before deploying. */}
 
+1. Replace the editor contents with the following code. Replace
+   `<your_tenant>.us.auth0.com` with your `APP_DOMAIN` value and
+   `<application_client_id>` with your `APP_ID` value:
 
-## Step 8: Capture a baseline token
+    ```javascript
+    const { createRemoteJWKSet, jwtVerify } = require('jose');
 
-Export the Auth0 values you recorded, then run `oauth2c` to confirm the trust
-and to capture the `iss` and `sub` claims you need for the Vault profile and
-entity aliases.
+    const AUTH0_DOMAIN = '<your_tenant>.us.auth0.com';
+    const EXPECTED_ISSUER = `https://${AUTH0_DOMAIN}/`;
+    const JWKS = createRemoteJWKSet(new URL(`https://${AUTH0_DOMAIN}/.well-known/jwks.json`));
 
-1. Save the Auth0 configuration values as environment variables. Replace the
-   placeholders with your actual values from the Auth0 application settings:
+    // Applications allowed to perform the token exchange
+    const ALLOWED_CLIENT_IDS = new Set(['<application_client_id>']);
 
-    ```shell-session
-    $ export \
-        APP_AUTH_URL="https://<your_tenant>.us.auth0.com/authorize" \
-        APP_DOMAIN="<application_domain>"                           \
-        APP_ID="<application_client_id>"                            \
-        SECRET_VALUE="<application_client_secret>"                  \
-        JWKS_URI="https://<your_tenant>.us.auth0.com/.well-known/jwks.json"
-    ```
-
-1. Save the Vault server address as `AUDIENCE_ADDR` so you can easily request
-   the correct audience in the access token:
-
-    ```shell-session
-    $ export AUDIENCE_ADDR=${VAULT_ADDR}/v1
-    ```
-
-1. Request an access token using the OAuth 2.0 authorization code flow with PKCE
-   and PAR:
-
-    ```shell-session
-    $ oauth2c "${APP_AUTH_URL}"           \
-        --pkce                            \
-        --par                             \
-        --client-id "${APP_ID}"           \
-        --client-secret "${SECRET_VALUE}" \
-        --response-types code             \
-        --response-mode query             \
-        --grant-type authorization_code   \
-        --audience ${AUDIENCE_ADDR}       \
-        --auth-method client_secret_basic
-    ```
-
-    <Note>
-
-    You must request the audience (`--audience https://<vault_addr>:8200/v1`) to
-    receive a signed JWT. Without it, Auth0 returns an opaque token that Vault
-    cannot validate.
-
-    </Note>
-
-1. When `oauth2c` opens a browser, sign in with the email address and password
-   you set for the agent user. After a successful sign-in, the terminal prints a
-   success message along with a JSON object with the decoded access token. For
-   example:
-
-    <CodeBlockConfig hideClipboard>
-
-    ```json
-    {
-      "aud": "https://localhost:8200/v1",
-      "client_id": "EBYeLHzuLqSeyUYLY7EC3hqRgvaiS9Dv",
-      "exp": 1782402664,
-      "iat": 1782316264,
-      "iss": "https://hashicups-dev.us.auth0.com/",
-      "jti": "baFC3mowpruhSr1JdDRhbJ",
-      "permissions": [],
-      "sub": "auth0|c0ff33a2dc1f8e9de0dd95d7"
+    async function verifyTenantJwt(token) {
+      const { payload } = await jwtVerify(token, JWKS, {
+        issuer: EXPECTED_ISSUER,
+        algorithms: ['RS256'],
+        clockTolerance: '10s'
+      });
+      return payload;
     }
+
+    exports.onExecuteCustomTokenExchange = async (event, api) => {
+      if (!ALLOWED_CLIENT_IDS.has(event.client.client_id)) {
+        return api.access.deny('invalid_client', 'Client is not authorized for token exchange.');
+      }
+
+      const subjectToken = event.transaction?.subject_token;
+      const actorToken = event.transaction?.actor_token || event.request.body?.actor_token;
+
+      if (!subjectToken) {
+        return api.access.rejectInvalidSubjectToken('Missing required subject_token.');
+      }
+
+      // Verify the subject token and set the subject user
+      let subjectPayload;
+      try {
+        subjectPayload = await verifyTenantJwt(subjectToken);
+      } catch (err) {
+        return api.access.rejectInvalidSubjectToken(`Subject token verification failed: ${err.message}`);
+      }
+      if (!subjectPayload.sub) {
+        return api.access.rejectInvalidSubjectToken('Subject token does not contain a "sub" claim.');
+      }
+      api.authentication.setUserById(subjectPayload.sub);
+
+      // Verify the actor token and add the act claim
+      if (actorToken) {
+        let actorPayload;
+        try {
+          actorPayload = await verifyTenantJwt(actorToken);
+        } catch (err) {
+          return api.access.deny('invalid_request', `Actor token verification failed: ${err.message}`);
+        }
+        if (actorPayload.sub) {
+          api.authentication.setActor({ sub: actorPayload.sub });
+        }
+      }
+
+      // Pass the requested RAR to the Post Login Action
+      const rawRar = event.request.body?.authorization_details;
+      if (rawRar) {
+        let parsedRar = rawRar;
+        if (typeof rawRar === 'string') {
+          try {
+            parsedRar = JSON.parse(rawRar);
+          } catch {
+            return api.access.deny('invalid_request', 'Invalid JSON in authorization_details.');
+          }
+        }
+        api.user.setAppMetadata('transient_rar_details', parsedRar);
+      }
+    };
     ```
 
-    </CodeBlockConfig>
+1. Click **Deploy**.
 
-1. Save the `iss` and `sub` values to environment variables. The `sub` value
-   contains a pipe character, so make sure wrap to wrap the string in quotes:
+1. Copy the Action ID from the end of the browser address bar
+   (`.../actions/library/details/<action_id>`) and save it as an environment
+   variable:
 
     ```shell-session
-    $ export                                         \
-        ISSUER="https://hashicups-dev.us.auth0.com/" \
-        EXTERNAL_ID='auth0|c0ff33a2dc1f8e9de0dd95d7'
+    $ export CTE_ACTION_ID="<action_id>"
     ```
 
 
-## Step 9: Save your provider information
+## Step 9: Create a token exchange profile
+
+A token exchange profile links a custom subject token type to the Action that
+handles it. Use the Management API to link the
+`urn:vault:params:oauth:token-type:access_token` subject token type to the
+Custom Token Exchange Action:
+
+```shell-session
+$ curl --request POST                                                 \
+    --url "https://${APP_DOMAIN}/api/v2/token-exchange-profiles"      \
+    --header "Authorization: Bearer ${MGMT_TOKEN}"                    \
+    --header 'Content-Type: application/json'                         \
+    --data '{
+      "name": "vault-obo-rar",
+      "subject_token_type": "urn:vault:params:oauth:token-type:access_token",
+      "action_id": "'"${CTE_ACTION_ID}"'",
+      "type": "custom_authentication"
+    }'
+```
+
+Refer to the Auth0
+[custom token exchange profile](https://auth0.com/docs/authenticate/custom-token-exchange/configure-custom-token-exchange#create-custom-token-exchange-profile)
+documentation for more information.
+
+
+## Step 10: Create a Post Login Action
+
+The Post Login Action copies the requested RAR into the access token. Auth0
+reserves the `authorization_details` claim, so the Action writes the RAR to a
+namespaced custom claim, such as
+`https://vault.example.com/authorization_details`.
+
+1. Navigate to **Actions** > **Library**.
+
+1. Click **Create Action** and select **Create Custom Action**.
+
+1. In the **Name** field, enter `inject_rar_claims_post_login`.
+
+1. For **Trigger**, select **Login / Post Login**.
+
+1. For **Runtime**, keep **Node 22**.
+
+1. Click **Create**.
+
+1. Replace the editor contents with the following code:
+
+    ```javascript
+    exports.onExecutePostLogin = async (event, api) => {
+      const rarDetails = event.user.app_metadata?.transient_rar_details;
+      const rarClaimNamespace = 'https://vault.example.com';
+
+      if (rarDetails) {
+        api.accessToken.setCustomClaim(`${rarClaimNamespace}/authorization_details`, rarDetails);
+        api.user.setAppMetadata('transient_rar_details', null);
+      }
+    };
+    ```
+
+1. Click **Deploy**.
+
+1. Navigate to **Actions** > **Triggers** and click **post-login**.
+
+1. Drag `inject_rar_claims_post_login` from the **Add Action** pane to a
+   position between **Start** and **Complete**.
+
+1. Click **Apply**.
+
+1. Save the custom claim name as an environment variable. Set the
+   `authorization_details_claim` parameter of your OAuth resource server profile
+   to this value:
+
+    ```shell-session
+    $ export RAR_CLAIM="https://vault.example.com/authorization_details"
+    ```
+
+
+## Step 11: Save your provider information
 
 Confirm your subject and actor details from Auth0. To configure agentic IAM,
 you must have the following information:
 
-Value               | Environmental variable | Description
-------------------- | ---------------------- | -----------
-Authorization URL   | `APP_AUTH_URL`         | Authorization URL of the application
-Domain address      | `APP_DOMAIN`           | Domain of the application you registered in Auth0
-Auth0 client ID     | `APP_ID`               | Client ID of the application you registered in Auth0
-Issuer URL          | `ISSUER`               | `iss` URL for your application
-JWT subject ID      | `EXTERNAL_ID`          | JWT claim for the agent user  from your application (`sub`)
-Key endpoint        | `JWKS_URI`             | URL where clients can download public keys (JWKS) from your application
-Client secret value | `SECRET_VALUE`         | Client secret associated with your application
-Audience address    | `AUDIENCE_ADDR`        | Vault cluster address including the API version, `/v1`
+Value                | Environmental variable | Description
+-------------------- | ---------------------- | -----------
+Authorization URL    | `APP_AUTH_URL`         | Authorization URL of the application
+Domain address       | `APP_DOMAIN`           | Domain of your Auth0 tenant
+Auth0 client ID      | `APP_ID`               | Client ID of the application you registered in Auth0
+Client secret value  | `SECRET_VALUE`         | Client secret associated with your application
+Agent client ID      | `AGENT_ID`             | Client ID of the agent application
+Agent client secret  | `AGENT_SECRET`         | Client secret associated with the agent application
+Issuer URL           | `ISSUER`               | `iss` URL for your tenant
+Subject ID           | `SUBJECT_ID`           | `sub` claim for the human user (the Auth0 user ID)
+Agent subject ID     | `EXTERNAL_ID`          | `sub` claim for the agent, the agent client ID followed by `@clients`
+Key endpoint         | `JWKS_URI`             | URL where clients can download public keys (JWKS) from your tenant
+Audience address     | `AUDIENCE_ADDR`        | Vault cluster address including the API version, `/v1`
+RAR claim name       | `RAR_CLAIM`            | Custom claim that carries the RAR
 
-If you have not already, we recommend setting the following environment variables
-to make Vault configuration more convenient:
+Save the agent subject ID:
+
+```shell-session
+$ export EXTERNAL_ID="${AGENT_ID}@clients"
+```
+
+If you have not already, we recommend setting the following environment
+variables to make Vault configuration more convenient:
 
 ```shell-session
 $ export                                \
@@ -341,31 +485,20 @@ $ export                                \
    APP_AUTH_URL="<app_auth_url>"        \
    APP_DOMAIN="<app_domain>"            \
    APP_ID="<app_client_id>"             \
-   ISSUER="<app_iss_url>"               \
-   EXTERNAL_ID="<app_jwt_sub>"          \
-   JWKS_URI="<app_jwks_url>"            \
    SECRET_VALUE="<app_client_secret>"   \
-   AUDIENCE_ADDR="<aud_address>"
+   AGENT_ID="<agent_client_id>"         \
+   AGENT_SECRET="<agent_client_secret>" \
+   ISSUER="<app_iss_url>"               \
+   SUBJECT_ID="<subject_user_id>"       \
+   EXTERNAL_ID="<agent_client_id>@clients" \
+   JWKS_URI="<app_jwks_url>"            \
+   AUDIENCE_ADDR="<aud_address>"        \
+   RAR_CLAIM="<rar_claim_name>"
 ```
 
-For example:
-
-<CodeBlockConfig hideClipboard>
-
-```shell-session
-$ export                                                              \
-   VAULT_ADDR="https://127.0.0.1:8200"                                \
-   APP_AUTH_URL="https://abc-123if67e.us.auth0.com/authorize"         \
-   APP_DOMAIN="abc-123if67e.auth0.com"                                \
-   APP_ID="ABCD...abc"                                                \
-   ISSUER="https://hashicups-dev.us.auth0.com/"                       \
-   EXTERNAL_ID="auth0|c0ff33a2dc1f8e9de0dd95d7"                       \
-   JWKS_URI="https://abc-123if67e.us.auth0.com/.well-known/jwks.json" \
-   SECRET_VALUE="000000...000000"                                     \
-   AUDIENCE_ADDR="https://127.0.0.1:8200/v1"
-```
-
-</CodeBlockConfig>
+To debug a failed token issuance or exchange, navigate to **Monitoring** >
+**Logs** in the Auth0 dashboard. Output from `console.log` statements in an
+Action appears in the Action logs.
 
 
 ## Next steps
@@ -374,6 +507,5 @@ $ export                                                              \
 - Configure Vault to [secure OBO workflows](/vault/ai/iam/setup-obo)
 - Configure additional identity providers and authentication servers:
    - [Configure IBM Verify for agent IAM](/vault/ai/iam/providers/verify)
-   - [Configure Microsoft Entra ID for agent IAM](/vault/ai/iam/providers/entraid)
+   - [Configure Microsoft Entra ID for agent IAM](/vault/docs/ai/iam/providers/entraid)
    - [Configure Okta for agent IAM](/vault/docs/ai/iam/providers/okta)
-   - [Configure PingFederate for agent IAM](/vault/ai/iam/providers/ping)
