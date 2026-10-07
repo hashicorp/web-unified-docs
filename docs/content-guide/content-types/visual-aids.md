@@ -33,12 +33,20 @@ following guidance is an adaptation of
   and labelling is faster than starting from scratch and keeps a topic area
   visually consistent.
 - **Use Helios icons for components**: Draw system components from the
-  [Helios icon library](https://helios.hashicorp.design/icons/). Helios is
+  [Helios icon library](https://helios.hashicorp.design/icons/library). Helios is
   HashiCorp's open source design system, so its icons already match the visual
   language of our products and the website the diagram renders on. Reach for a
   Helios icon before drawing a custom shape or pulling one from a third-party
   set, and use the same icon for the same component across every diagram in a
   topic area.
+- **Use Helios colors with accessible contrast**: Pick fills, strokes, and text
+  colors from the [Helios color palette](https://helios.hashicorp.design/foundations/colors)
+  rather than choosing arbitrary values. Text and lines must meet WCAG 2.2 Level
+  AA contrast against their background: 4.5:1 for normal text and 3:1 for large
+  text. Helios semantic color pairings meet these ratios out of the box, but
+  check any other combination with a contrast checker. For the dark variant, use
+  the `-on-dark` versions of product brand colors, and check contrast again
+  against the dark background.
 
 ### Provide light and dark variants
 
@@ -101,7 +109,7 @@ stored for maintenance.
 Keep the source editable. Export SVG with icons and labels as vector shapes and
 live text rather than flattening them to a single image, so that the next author
 can restyle a component or fix a label without rebuilding the diagram. Because
-the [Helios icon library](https://helios.hashicorp.design/icons/) ships its icons
+the [Helios icon library](https://helios.hashicorp.design/icons/library) ships its icons
 as SVG, icons you place from it stay editable in the committed source.
 
 Build the light and dark variants from the same source file so that the two stay
