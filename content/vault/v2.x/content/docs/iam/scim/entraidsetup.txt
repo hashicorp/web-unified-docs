@@ -1,0 +1,699 @@
+Note: This document was split from SCIM Bugbash.docx 
+
+Shared Prerequisites 
+
+Create HVD Cluster (from SCIM Bugbash.docx) 
+
+ 
+
+Section 0 – Environment Variables 
+
+Set these before running any command. Substitute your real values. 
+
+export VAULT_ADDR="https://<cluster-public-url>:8200" 
+
+ 
+
+export VAULT_NAMESPACE="admin" 
+
+ 
+
+vault login 
+
+ 
+
+export VAULT_ADMIN_TOKEN=$(vault print token) 
+
+ 
+
+Section 1 – Vault SCIM Bootstrap (run once per cluster) 
+
+Write the SCIM ACL Policy 
+
+Grants the SCIM client token permission to call every SCIM v2 endpoint and manage its own client config. Without this policy, Entra's HTTP calls return 403. 
+
+  
+
+vault policy write scim-client-policy - <<'EOF' 
+
+path "identity/scim/v2/Users" { capabilities = ["create","read","update","patch","delete","list"] } 
+
+path "identity/scim/v2/Users/*" { capabilities = ["create","read","update","patch","delete","list"] } 
+
+path "identity/scim/v2/Groups" { capabilities = ["create","read","update","patch","delete","list"] } 
+
+path "identity/scim/v2/Groups/*" { capabilities = ["create","read","update","patch","delete","list"] } 
+
+path "identity/scim/v2/ResourceTypes" { capabilities = ["read"] } 
+
+path "identity/scim/v2/ResourceTypes/*" { capabilities = ["read"] } 
+
+path "identity/scim/v2/Schemas" { capabilities = ["read"] } 
+
+path "identity/scim/v2/Schemas/*" { capabilities = ["read"] } 
+
+path "identity/scim/v2/ServiceProviderConfig" { capabilities = ["read"] } 
+
+path "identity/scim/client" { capabilities = ["create","read","update","delete","list","patch"] } 
+
+path "identity/scim/client/*" { capabilities = ["create","read","update","delete","list","patch"] } 
+
+path "auth/token/create/scim-issuer-role" { capabilities = ["create","update","sudo"] } 
+
+EOF 
+
+ 
+
+Enable Userpass Auth & Capture the Accessor 
+
+vault auth enable userpass 
+
+ 
+
+USERPASS_ACCESSOR=$(vault auth list -format=json | jq -r '.["userpass/"].accessor') 
+
+ 
+
+echo "Userpass accessor: $USERPASS_ACCESSOR" 
+
+  
+
+Create Entity  
+
+CLIENT_ENTITY_ID=$(vault write -format=json identity/entity name="entra-scim-client" policies="scim-client-policy" | jq -r '.data.id') 
+
+ 
+
+echo "Client entity ID: $CLIENT_ENTITY_ID" 
+
+ 
+
+Create a Userpass Alias 
+
+vault write identity/entity-alias name="entra-scim-user" canonical_id="$CLIENT_ENTITY_ID" mount_accessor="$USERPASS_ACCESSOR" 
+
+  
+
+Create the Userpass Credential (use a strong password in production) 
+
+vault write auth/userpass/users/entra-scim-user password="changeme" policies="scim-client-policy" 
+
+ 
+
+Create Entity Alias on Token Mount 
+
+TOKEN_ACCESSOR=$(vault auth list -format=json | jq -r '."token/".accessor') 
+
+ 
+
+echo "Token accessor: $TOKEN_ACCESSOR" 
+
+ 
+
+vault write identity/entity-alias name="entra-scim-alias" canonical_id="$CLIENT_ENTITY_ID" mount_accessor="$TOKEN_ACCESSOR" 
+
+ 
+
+Create Token Role for SCIM Token Issuance 
+
+vault write auth/token/roles/scim-issuer-role allowed_entity_aliases="entra-scim-alias" orphan=true renewable=false 
+
+ 
+
+Verify SCIM Endpoint 
+
+SCIM_LOGIN_TOKEN=$(vault write -format=json auth/userpass/login/entra-scim-user password="changeme" | jq -r '.auth.client_token') 
+
+ 
+
+curl -s -w "\nStatus: %{http_code}\n" -H "Authorization: Bearer $SCIM_LOGIN_TOKEN" "${VAULT_ADDR}/v1/admin/identity/scim/v2/ServiceProviderConfig" 
+
+ 
+
+echo "Entra Tenant URL: ${VAULT_ADDR}/v1/admin/identity/scim/v2" 
+
+ 
+
+Expected: Status 200. If not, stop and recheck policy and entity setup. 
+
+ 
+
+Section 2: Test Scenarios Setup 
+
+1-App SAML + SCIM 
+
+One Entra Enterprise Application handles both SAML login and SCIM provisioning. Assigning a user grants both login access and provisioning. 
+
+ 
+
+Create the Enterprise Application 
+
+Azure Portal → Microsoft Entra ID → Enterprise applications → + New application → + Create your own application 
+
+Name: "Vault EntraID SCIM Testing" (might already exist so use a different name) 
+
+Select "Integrate any other application you don't find in the gallery" → Create 
+
+From Properties, note the Object ID 
+
+From Azure Portal → Microsoft Entra ID → Overview, note the Tenant ID 
+
+ 
+
+Configure SAML SSO on the app 
+
+Enterprise apps → Vault EntraID SCIM Testing → Single sign-on → SAML 
+
+Basic SAML Configuration → Edit: 
+
+Identifier (Entity ID): https://<vault-addr>:8200 
+
+Reply URL (ACS URL): https://<vault-addr>:8200/v1/admin/auth/saml/callback 
+
+Sign on URL: leave blank → Save 
+
+Under SAML Signing Certificate, copy the App Federation Metadata URL 
+
+Attributes & Claims: confirm the name claim emits user.userprincipalname (the UPN) — this must match the SCIM userName Entra sends 
+
+ 
+
+Enable SAML auth in Vault and capture the accessor 
+
+vault auth enable saml 
+
+ 
+
+vault write auth/saml/config idp_metadata_url="<App Federation Metadata URL>" entity_id="https://<vault-addr>:8200" acs_urls="https://<vault-addr>:8200/v1/admin/auth/saml/callback" default_role="entra-saml-role" 
+
+ 
+
+vault write auth/saml/role/entra-saml-role bound_subjects="*" bound_subjects_type="glob" user_attribute="http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name" token_policies="default" token_ttl="1h" 
+
+ 
+
+SSO_ACCESSOR=$(vault auth list -format=json | jq -r '."saml/".accessor') 
+
+ 
+
+echo "SAML accessor: $SSO_ACCESSOR" 
+
+ 
+
+Register SCIM Client with SAML Accessor 
+
+vault write identity/scim/client/entra-iga-client access_grant_principal="$CLIENT_ENTITY_ID" alias_mount_accessor="$SSO_ACCESSOR" allow_user_adoption=true allow_group_adoption=true max_active_tokens=5 max_token_ttl="720h" default_schema_version="2.1" 
+
+ 
+
+vault read identity/scim/client/entra-iga-client 
+
+ 
+
+export SCIM_CLIENT_NAME="entra-iga-client" 
+
+ 
+
+Confirm alias_mount_accessor equals $SSO_ACCESSOR -- if blank, stop. 
+
+ 
+
+Issue SCIM Token 
+
+SCIM_TOKEN=$(curl -s -X POST -H "X-Vault-Token: $VAULT_ADMIN_TOKEN" -H "X-Vault-Namespace: admin" -H "Content-Type: application/json" "$VAULT_ADDR/v1/auth/token/create/scim-issuer-role" -d '{"type":"scim","ttl":"720h","policies":["scim-client-policy"],"renewable":false,"no_default_policy":true,"entity_alias":"entra-scim-alias"}' | jq -r '.auth.client_token') 
+
+ 
+
+export SCIM_TOKEN 
+
+ 
+
+echo $SCIM_TOKEN 
+
+ 
+
+Verify Token 
+
+echo "$SCIM_TOKEN" | grep -q "^scm\." && echo "OK: scm. prefix correct" || echo "ERROR: wrong prefix" 
+
+ 
+
+vault token lookup -format=json $SCIM_TOKEN | jq '{type:.data.type, orphan:.data.orphan, renewable:.data.renewable, entity_id:.data.entity_id}' 
+
+ 
+
+entity_id must be non-empty. If it's empty, stop and recheck the entity alias on the token mount. 
+
+ 
+
+Verify Token Reaches Vault 
+
+curl -s -w "\nStatus: %{http_code}\n" -H "Authorization: Bearer $SCIM_TOKEN" "${VAULT_ADDR}/v1/admin/identity/scim/v2/ServiceProviderConfig" 
+
+ 
+
+Configure Provisioning in Entra 
+
+Enterprise apps → your app → Overview → create a new provisioning configuration 
+
+Tenant URL: https://<vault-addr>:8200/v1/admin/identity/scim/v2?aadOptscim062020 
+
+KNOWN ISSUE: Vault Rejects active as String Boolean 
+
+Thread discussing the fix. Feature Flag that needs to be enabled so that EntraID is SCIM compliant. 
+
+Go to Enterprise Application → Provisioning 
+
+Under "Admin Credentials" → add ?aadOptscim062020 to the Tenant URL 
+
+Secret Token: paste $SCIM_TOKEN 
+
+Click Test Connection -- must succeed → Save 
+
+Always use /v1/admin/identity/scim/v2, never /v1/identity/scim/v2. Entra doesn't send X-Vault-Namespace: admin, so without the namespace in the URL Vault returns 401. 
+
+ 
+
+1-App OIDC + SCIM (Not Possible) 
+
+One Entra Enterprise Application handles both OIDC login and SCIM provisioning is not possible. 
+
+ 
+
+1-App SAML: one Enterprise Application handles both SSO and SCIM provisioning 
+
+1-App OIDC: requires two apps -- an App Registration for OIDC SSO and a separate non-gallery Enterprise Application for SCIM provisioning 
+
+ 
+
+See Entra SCIM bugbash setup.docx 
+
+ 
+
+ 
+
+2-App: SCIM App + SAML SSO App 
+
+Two separate Entra Enterprise Applications. App 1 handles SAML login only. App 2 handles SCIM provisioning only. 
+
+Do not log in via SAML before completing the SCIM client setup -- logging in early creates an unmanaged entity the SCIM client cannot claim. 
+
+ 
+
+Create App 1 -- SAML SSO app (no provisioning) in Entra: 
+
+Azure Portal → Microsoft Entra ID → Enterprise applications → + New application → + Create your own application 
+
+Name: "SCIM Vault EntraID SAML SSO Testing" → Select "Integrate any other application you don't find in the gallery" → Create 
+
+Single sign-on → SAML → Basic SAML Configuration → Edit:  
+
+Identifier (Entity ID): https://<vault-addr>:8200 
+
+Reply URL (ACS URL): https://<vault-addr>:8200/v1/admin/auth/saml/callback 
+
+Sign on URL: leave blank → Save 
+
+Copy the App Federation Metadata URL from SAML Signing Certificate section 
+
+Attributes & Claims: confirm name claim emits user.userprincipalname 
+
+Provisioning → confirm Provisioning Status is Off -- this app must never provision 
+
+Create App 2 -- SCIM provisioning app (no SSO) in Entra: 
+
+Azure Portal → Microsoft Entra ID → Enterprise applications → + New application → + Create your own application 
+
+Name: "SCIM Vault EntraID SAML SSO Testing 2" → Select "Integrate any other application you don't find in the gallery" → Create 
+
+Do NOT configure Single sign-on -- leave SSO as "None" 
+
+Provisioning will be configured in Section 3 
+
+ 
+
+Enable SAML auth in Vault: 
+
+vault auth enable saml 
+ 
+
+vault write auth/saml/config idp_metadata_url="<App Federation Metadata URL from App 1>" entity_id="https://<vault-addr>:8200" acs_urls="https://<vault-addr>:8200/v1/admin/auth/saml/callback" default_role="entra-saml-role" 
+ 
+
+vault write auth/saml/role/entra-saml-role bound_subjects="*" bound_subjects_type="glob" user_attribute="http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name" token_policies="default" token_ttl="1h" 
+ 
+
+SSO_ACCESSOR=$(vault auth list -format=json | jq -r '."saml/".accessor') 
+ 
+
+echo "SAML accessor: $SSO_ACCESSOR" 
+
+ 
+
+Create dedicated SCIM client entity and register the SCIM client: 
+
+# Create the dedicated non-human SCIM client entity 
+SCIM_ENTITY_ID=$(vault write -format=json identity/entity name="entra-scim-client-entity-2c" policies="scim-client-policy" | jq -r '.data.id') 
+ 
+
+echo "SCIM entity: $SCIM_ENTITY_ID" 
+ 
+# Create entity alias on token mount -- required for entity_id to populate on SCIM token 
+TOKEN_ACCESSOR=$(vault auth list -format=json | jq -r '."token/".accessor') 
+ 
+
+echo "Token accessor: $TOKEN_ACCESSOR" 
+ 
+
+vault write identity/entity-alias name="entra-scim-alias-2c" canonical_id="$SCIM_ENTITY_ID" mount_accessor="$TOKEN_ACCESSOR" 
+ 
+# Create token role for SCIM token issuance 
+vault write auth/token/roles/scim-issuer-role allowed_entity_aliases="entra-scim-alias-2c" orphan=true renewable=false 
+ 
+# Register the SCIM client bound to the SAML mount 
+vault write identity/scim/client/entra-scim-2c access_grant_principal="$SCIM_ENTITY_ID" alias_mount_accessor="$SSO_ACCESSOR" allow_user_adoption=true allow_group_adoption=true max_active_tokens=5 max_token_ttl="720h" default_schema_version="2.1" 
+ 
+
+vault read identity/scim/client/entra-scim-2c 
+ 
+
+export SCIM_CLIENT_NAME="entra-scim-2c" 
+
+Confirm alias_mount_accessor equals $SSO_ACCESSOR -- if blank, stop. 
+
+ 
+
+Issue SCIM token: 
+
+SCIM_TOKEN=$(curl -s -X POST -H "X-Vault-Token: $VAULT_ADMIN_TOKEN" -H "X-Vault-Namespace: admin" -H "Content-Type: application/json" "$VAULT_ADDR/v1/auth/token/create/scim-issuer-role" -d '{"type":"scim","ttl":"720h","policies":["scim-client-policy"],"renewable":false,"no_default_policy":true,"entity_alias":"entra-scim-alias-2c"}' | jq -r '.auth.client_token') 
+ 
+
+export SCIM_TOKEN 
+ 
+
+echo $SCIM_TOKEN 
+
+Verify token: 
+
+echo "$SCIM_TOKEN" | grep -q "^scm\." && echo "OK: scm. prefix correct" || echo "ERROR: wrong prefix" 
+ 
+
+vault token lookup -format=json $SCIM_TOKEN | jq '{type:.data.type, orphan:.data.orphan, renewable:.data.renewable, entity_id:.data.entity_id}' 
+
+entity_id must be non-empty -- if empty, stop and recheck the entity alias on the token mount. 
+
+Verify token reaches Vault: 
+
+curl -s -w "\nStatus: %{http_code}\n" -H "Authorization: Bearer $SCIM_TOKEN" "${VAULT_ADDR}/v1/admin/identity/scim/v2/ServiceProviderConfig" 
+
+Expected: Status 200. 
+
+ 
+
+Configure provisioning on App 2 in Entra: 
+
+Enterprise apps → App 2 ("SCIM Vault EntraID SAML SSO Testing 2") → Overview → create a new provisioning configuration 
+
+Tenant URL: https://<vault-addr>:8200/v1/admin/identity/scim/v2?aadOptscim062020 
+
+Secret Token: paste $SCIM_TOKEN 
+
+Click Test Connection -- must succeed → Save 
+
+Always use /v1/admin/identity/scim/v2, never /v1/identity/scim/v2. The ?aadOptscim062020 flag is required -- without it Entra sends active as a string boolean which Vault rejects. 
+
+ 
+
+Enable group provisioning on App 2: 
+
+Provisioning → Mappings → Provision Microsoft Entra ID Groups → set Enabled: Yes → Save 
+
+Attribute mappings -- delete all except: 
+
+Users: userName, active, externalId 
+
+Groups: displayName, members 
+
+ 
+
+Test user assignment strategy: 
+
+Test User A: assign to App 1 (SSO) AND App 2 (SCIM) -- happy path, can log in and is SCIM-provisioned 
+
+Test User B: assign to App 1 (SSO) only -- JIT entity created on first login, no SCIM sync 
+
+Test User C: assign to App 2 (SCIM) only -- provisioned in Vault but cannot log in via SSO 
+
+ 
+
+2-App: SCIM App + OIDC SSO App 
+
+Two separate Entra apps. App 1 (App Registration) handles OIDC login only. App 2 (non-gallery Enterprise Application) handles SCIM provisioning only. 
+
+ 
+
+Note: Do not log in via OIDC before completing the SCIM client setup -- logging in early creates an unmanaged entity the SCIM client cannot claim. 
+
+ 
+
+Create App 1 -- OIDC SSO App (no provisioning) 
+
+Azure Portal → Microsoft Entra ID → App Registrations → + New registration 
+
+Name: "SCIM Vault EntraID SAML SSO Testing" → Supported account types: Single tenant only" → Register 
+
+Authentication → Redirect URI configuration → Web 
+
+Redirect URI: https://<vault-addr>:8200/v1/admin/auth/oidc/callback → Configure 
+
+Redirect URI: https://<vault-addr>:8200/ui/vault/auth/oidc/oidc/callback→ Configure 
+
+Redirect URI: http://localhost:8250/oidc/callback → Configure 
+
+All three redirect URIs are required -- the first is for CLI login, the second for Vault UI login, and the third for local browser callback during CLI OIDC flow. Missing any of them causes "Missing auth_url" errors. 
+
+Certificates & secrets → + New client secret → copy the Value immediately (shown once only) 
+
+Overview → copy Application (client) ID and Directory (tenant) ID 
+
+Token configuration → + Add optional claim → Token type: ID → select email → Add → when prompted about OpenID Connect scopes click Add 
+
+API permissions → + Add a permission → Microsoft Graph → Delegated permissions → add openid, email, profile → Add permissions → Grant admin consent → Yes 
+
+Azure Portal → Microsoft Entra ID → Enterprise applications → find "SCIM Vault EntraID SAML SSO Testing" (auto-created) → Provisioning → confirm Provisioning Status is Off -- this app must never provision 
+
+ 
+
+Create App 2 -- SCIM Provisioning App (no SSO) 
+
+Azure Portal → Microsoft Entra ID → Enterprise applications → + New application → + Create your own application 
+
+Name: "SCIM Vault EntraID OIDC SSO Testing Provisioning" → Select "Integrate any other application you don't find in the gallery" → Create 
+
+Do NOT configure Single sign-on -- leave SSO as "None" 
+
+ 
+
+Provisioning will be configured in Section 3 
+
+ 
+
+Note: unlike SAML where one Enterprise Application can handle both SSO and SCIM, OIDC always requires two separate apps in Entra. The App Registration handles OIDC login; a separate non-gallery Enterprise Application handles SCIM provisioning. 
+
+ 
+
+Enable OIDC Auth in Vault 
+
+vault auth enable oidc 
+
+ 
+vault write auth/oidc/config oidc_discovery_url="https://login.microsoftonline.com/<tenant-id>/v2.0" oidc_client_id="<App 1 client ID>" oidc_client_secret="<App 1 client secret>" default_role="entra-oidc-role" 
+
+ 
+
+ 
+
+vault write auth/oidc/role/entra-oidc-role user_claim="email" allowed_redirect_uris="https://<vault-addr>:8200/v1/admin/auth/oidc/callback,https://<vault-addr>:8200/ui/vault/auth/oidc/oidc/callback,http://localhost:8250/oidc/callback" token_policies="default" token_ttl="1h" 
+
+ 
+SSO_ACCESSOR=$(vault auth list -format=json | jq -r '."oidc/".accessor') 
+
+ 
+echo "OIDC accessor: $SSO_ACCESSOR" 
+
+ 
+
+Create Dedicated SCIM Client Entity and Register the SCIM Client 
+
+# Create the dedicated non-human SCIM client entity 
+SCIM_ENTITY_ID=$(vault write -format=json identity/entity name="entra-scim-client-entity-2d" policies="scim-client-policy" | jq -r '.data.id') 
+ 
+
+echo "SCIM entity: $SCIM_ENTITY_ID" 
+ 
+# Create entity alias on token mount - required for entity_id to populate on SCIM token 
+
+TOKEN_ACCESSOR=$(vault auth list -format=json | jq -r '."token/".accessor') 
+echo "Token accessor: $TOKEN_ACCESSOR" 
+ 
+
+vault write identity/entity-alias name="entra-scim-alias-2d" canonical_id="$SCIM_ENTITY_ID" mount_accessor="$TOKEN_ACCESSOR" 
+ 
+# Create token role for SCIM token issuance 
+vault write auth/token/roles/scim-issuer-role allowed_entity_aliases="entra-scim-alias,entra-scim-alias-2d" orphan=true renewable=false 
+ 
+# Register the SCIM client bound to the OIDC mount 
+vault write identity/scim/client/entra-scim-2d access_grant_principal="$SCIM_ENTITY_ID" alias_mount_accessor="$SSO_ACCESSOR" allow_user_adoption=true allow_group_adoption=true max_active_tokens=5 max_token_ttl="720h" default_schema_version="2.1" 
+
+ 
+vault read identity/scim/client/entra-scim-2d 
+
+ 
+export SCIM_CLIENT_NAME="entra-scim-2d" 
+
+ 
+
+Confirm alias_mount_accessor equals $SSO_ACCESSOR -- if blank, stop. 
+
+ 
+
+OIDC alias matching: with user_claim="email" the alias name Vault stores is the email address. Verify under App 2's Provisioning → Attribute Mappings that userName maps to userPrincipalName or mail, whichever matches the email the OIDC token carries. A mismatch causes 409 Conflict during adoption even with allow_user_adoption=true. 
+
+ 
+
+Issue SCIM Token 
+
+SCIM_TOKEN=$(curl -s -X POST -H "X-Vault-Token: $VAULT_ADMIN_TOKEN" -H "X-Vault-Namespace: admin" -H "Content-Type: application/json" "$VAULT_ADDR/v1/auth/token/create/scim-issuer-role" -d '{"type":"scim","ttl":"720h","policies":["scim-client-policy"],"renewable":false,"no_default_policy":true,"entity_alias":"entra-scim-alias-2d"}' | jq -r '.auth.client_token') 
+ 
+
+export SCIM_TOKEN 
+ 
+
+echo $SCIM_TOKEN 
+
+ 
+
+Verify Token 
+
+echo "$SCIM_TOKEN" | grep -q "^scm\." && echo "OK: scm. prefix correct" || echo "ERROR: wrong prefix" 
+
+ 
+vault token lookup -format=json $SCIM_TOKEN | jq '{type:.data.type, orphan:.data.orphan, renewable:.data.renewable, entity_id:.data.entity_id}' 
+
+ 
+
+entity_id must be non-empty -- if empty, stop and recheck the entity alias on the token mount. 
+
+ 
+
+Verify Token Reaches Vault 
+
+curl -s -w "\nStatus: %{http_code}\n" -H "Authorization: Bearer $SCIM_TOKEN" "${VAULT_ADDR}/v1/admin/identity/scim/v2/ServiceProviderConfig" 
+
+ 
+
+Expected: Status 200. 
+
+ 
+
+Configure Provisioning on App 2 in Entra 
+
+Enterprise apps → App 2 ("SCIM Vault EntraID OIDC SSO Testing Provisioning") → Overview → create a new provisioning configuration 
+
+Tenant URL: https://<vault-addr>:8200/v1/admin/identity/scim/v2?aadOptscim062020 
+
+Secret Token: paste $SCIM_TOKEN 
+
+Click Test Connection -- must succeed → Save 
+
+ 
+
+Always use /v1/admin/identity/scim/v2, never /v1/identity/scim/v2. The ?aadOptscim062020 flag is required -- without it Entra sends active as a string boolean which Vault rejects. 
+
+ 
+
+Enable Group Provisioning on App 2: 
+
+Provisioning → Mappings → Provision Microsoft Entra ID Groups → set Enabled: Yes → Save 
+
+ 
+
+Attribute Mappings -- delete all except: 
+
+Users: userName, active, externalId 
+
+Groups: displayName, members 
+
+ 
+
+Test User Assignment Strategy: 
+
+Test User A: assign to App 1 (SSO) AND App 2 (SCIM) -- happy path, can log in and is SCIM-provisioned 
+
+Test User B: assign to App 1 (SSO) only -- JIT entity created on first login, no SCIM sync 
+
+Test User C: assign to App 2 (SCIM) only -- provisioned in Vault but cannot log in via SSO 
+
+ 
+
+ 
+
+Section 3 – Turn On Provisioning & Assign Test Users 
+
+Enable Provisioning 
+
+Enterprise apps → your provisioning app → Provisioning → Provisioning Status → toggle On → Save 
+
+Wait ~5 minutes for Users and groups, Attribute mappings, and Provisioning logs to unlock 
+
+KNOWN ISSUE: Fix Entra attribute mapping to be SCIM compliant  
+
+Go to Attribute mapping 
+
+Under users: 
+
+Delete ALL attributes EXCEPT: userName, active, externalId 
+
+Under groups: 
+
+Delete ALL attributes EXCEPT: displayName and members 
+
+Assign Test Users 
+
+Go to Azure Portal → Microsoft Entra ID → Users 
+
+Click "+ New user" → "Create new user" 
+
+Fill in: 
+
+User principal name: i.e. scim-test-user@terraformhashicorp.onmicrosoft.com 
+
+Display name: SCIM Test User 
+
+Password: Auto-generate or set one (save it!) 
+
+Leave everything else as default 
+
+Click "Create" 
+
+Enterprise apps → your app → Users and groups → + Add user/group → assign Test User A 
+
+Use Provision on demand for immediate sync: Provisioning → Provision on demand → select a user → Provision 
+
+ 
+
+Monitor Sync 
+
+ 
+vault list identity/entity/name 
+ 
+# poll every 5 seconds 
+watch -n 5 'vault list identity/entity/name' 
+ 
+# Verify a specific user was created and is SCIM-managed 
+ENTITY_ID=$(vault read -format=json identity/entity/name/<entity-name> | jq -r '.data.id') 
+vault read identity/entity/id/$ENTITY_ID | grep -E "scim_client_id|name|external_id" 
+
+ 
+
+ 
