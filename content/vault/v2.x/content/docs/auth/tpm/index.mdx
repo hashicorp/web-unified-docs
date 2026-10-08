@@ -1,0 +1,199 @@
+---
+layout: docs
+page_title: TPM - Auth Methods
+description: >-
+  Use the Vault Enterprise TPM auth method to authenticate machines using TLS
+  client certificates cryptographically bound to Trusted Platform Module
+  (TPM) hardware, and understand the certificate enrollment protocol, login,
+  and renewal behavior.
+---
+
+# TPM auth method
+
+@include 'alerts/enterprise-only.mdx'
+
+The `tpm` auth method lets machines authenticate to Vault using TLS client
+certificates that are cryptographically bound to a
+[Trusted Platform Module (TPM)](https://trustedcomputinggroup.org/resource/tpm-library-specification/)
+chip. Unlike a certificate imported from elsewhere, the auth method issues
+each certificate itself through a hardware-attested enrollment protocol, so
+Vault can confirm the private key was generated inside — and never left — a
+specific TPM.
+
+## When to use TPM auth with Vault
+
+Use TPM auth with Vault when:
+
+- You need machine identity tied to physical hardware rather than a credential
+  that someone can copy off the host like a shared secret, or a static
+  certificate.
+- Your workloads run on bare metal or virtual machines (VMs) with a TPM 2.0 chip
+  (physical or virtual) and you want Vault itself to issue and validate the
+  certificate, without standing up a separate PKI or external attestation
+  service.
+- You want certificate issuance gated on proof that the requesting key pair was
+  generated on, and never left, the enrolled TPM, not just proof of possession
+  of a certificate.
+- You want to replace secret zero provisioning workflows needed for app role
+  authentication.
+
+For workload identity based on an external SPIFFE/SPIRE deployment instead of
+TPM hardware, refer to the [SPIFFE auth method](/vault/docs/auth/spiffe).
+
+## How TPM auth works
+
+Authentication with the `tpm` auth method requires two preliminary,
+one-time setup steps before a machine can call `login`:
+
+1. **Enroll the TPM.** An operator uses the
+   [`identity/tpm`](/vault/api-docs/secret/identity/tpm#create-a-tpm) endpoint
+   to register the TPM device with the Vault identity store. Vault derives a
+   stable TPM ID from the TPM's endorsement key (EK).
+1. **Configure the auth method and create a role.** An operator writes
+   `/auth/tpm/config` to set up the mount, then creates at least one role
+   that authorizes the enrolled TPM — either by its ID or by group
+   membership.
+
+Once those steps are done, the machine itself performs two more steps at
+runtime, without an operator involved:
+
+1. **Enroll a certificate.** The machine runs a two-phase, TPM-backed
+   enrollment protocol (`gentpmcert/begin` → `gentpmcert/finish`) to obtain a
+   TLS client certificate scoped to a specific role.
+1. **Log in.** The machine presents that certificate to
+   `/auth/tpm/login` to receive a Vault token.
+
+```
+[ Operator ] ──1. Enroll TPM (EK)──────> [ Vault identity store ]
+     │
+     └──2. Configure auth method + role─> [ Vault: auth/tpm ]
+
+[ Machine ] ──3. gentpmcert (begin/finish, TPM-attested)──> [ Vault: auth/tpm ]
+     │                                                            │
+     └──4. Present issued cert to /auth/tpm/login─────────────────┘
+                                                                  │
+                                                          [ Vault token ]
+```
+
+### What Vault does and doesn't verify about the EK
+
+Vault does not validate the EK against a TPM manufacturer's certificate
+chain (Infineon, STMicro, or another vendor root). Enrollment only hashes
+the EK public key you provide to derive the TPM ID, and the attestation
+protocol only proves the enrolling machine possesses the private half of
+that same EK through `TPM2_ActivateCredential` — it does not prove the EK
+itself was issued by a genuine hardware TPM manufacturer.
+
+In practice, this means the strength of the identity guarantee depends on
+how you provision TPM IDs into Vault, not on the TPM hardware alone. A
+software-emulated TPM (such as `swtpm`, which self-signs its own EK cert
+with a local CA) enrolls and attests successfully, exactly like physical
+hardware would. If you need assurance that an enrolled TPM is genuine
+hardware, that check has to happen out-of-band, during enrollment.
+
+### TPM ID
+
+Vault identifies a TPM by the SHA-256 hash of the DER-encoded bytes of its
+endorsement key (EK) public key, formatted as `sha256-<hex>`. For example:
+
+<CodeBlockConfig hideClipboard>
+
+```
+sha256-a3f2c1d8e4b5678901234567890abcdef01234567890abcdef01234567890abcdef
+```
+
+</CodeBlockConfig>
+
+The TPM ID is stable for the lifetime of the TPM. Vault embeds it in every
+client certificate the auth method issues, and uses it as the login token's
+alias name.
+
+## Certificate enrollment protocol
+
+The `gentpmcert` endpoints implement a remote attestation protocol based on
+[TPM 2.0 credential activation](https://trustedcomputinggroup.org/resource/tpm-library-specification/).
+The protocol proves two things without ever transmitting a private key:
+
+- The EK — and therefore the machine's identity — belongs to a genuine TPM
+  chip.
+- The application key in the certificate signing request (CSR) is resident on
+  the same TPM as the EK.
+
+### Phase 1 — begin
+
+The client calls `POST /auth/tpm/role/:role_name/gentpmcert/begin` with:
+
+- Its **EK public key** (PEM). Vault derives the TPM ID from the provided key
+  and verifies the TPM is enrolled and authorized for the role.
+- **AK parameters** (base64-encoded JSON). The Attestation Key (AK) is a
+  signing key created inside the TPM. Vault requires the public AK
+  parameters to construct the activation challenge.
+
+Vault responds with a TPM 2.0 `EncryptedCredential` structure as an
+`encrypted_credentials` blob that only the TPM holding the EK can decrypt.
+The blob also contains a random secret that Vault checks in phase 2.
+
+The challenge expires after **5 minutes**. Each TPM is limited to one
+outstanding challenge at a time, and new requests from the same EK are
+rate-limited to one every 10 seconds.
+
+### Phase 2 — finish
+
+The client passes the `encrypted_credentials` blob to its TPM using the
+`TPM2_ActivateCredential` command, which returns the decrypted secret if and
+only if the EK matches. The client then calls
+`POST /auth/tpm/role/:role_name/gentpmcert/finish` with:
+
+- The decrypted **challenge response** (base64-encoded).
+- A **CSR** (PEM) for the application key — the key pair used for TLS client
+  authentication going forward.
+- **Key certification parameters** (base64-encoded JSON) — a TPM attestation
+  structure signed by the AK, proving the application key was created on the
+  same TPM.
+
+Vault verifies the challenge response and validates the AK-signed key
+certification against the CSR public key. If every check passes, Vault signs
+and returns a client certificate.
+
+### Issued certificate
+
+The signed certificate contains two
+[OtherName SAN](https://datatracker.ietf.org/doc/html/rfc5280#section-4.2.1.6)
+extensions that Vault uses to bind the certificate to a specific TPM and
+role:
+
+| Extension     | Content                            |
+| :------------ | :---------------------------------- |
+| TPM ID OID    | `sha256-<hex>` of the EK public key |
+| Role name OID | Name of the role used at enrollment |
+
+Vault verifies both values during `login`. A certificate issued for one role
+cannot authenticate against a different role.
+
+## Login token
+
+On a successful `login` call, Vault returns a token with:
+
+- **Display name** set to the role's `display_name`. If the role has no
+  display name, Vault uses the role name instead.
+- **Metadata** including `role_name`, `common_name`, `serial_number`,
+  `subject_key_id`, `authority_key_id`, and `tpm_id`.
+
+The alias name is the TPM ID (`sha256-<hex>`).
+
+## Renewal
+
+Token renewal re-validates the TLS client certificate presented on the
+connection. Vault denies the renewal if:
+
+- The certificate's `SubjectKeyId` or `AuthorityKeyId` differ from the
+  values recorded at login time.
+- Token policies for the role have changed since the token was issued.
+
+If Vault denies the renewal, the machine must issue a new login request to
+receive a new token.
+
+## Next steps
+
+- [Set up the TPM auth method](/vault/docs/auth/tpm/tpm)
+- [Authenticate to Vault using the TPM auth method with swtpm](/vault/docs/auth/tpm/swtpm-auth-vault)
