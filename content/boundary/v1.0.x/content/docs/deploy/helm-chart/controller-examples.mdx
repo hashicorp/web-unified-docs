@@ -8,80 +8,23 @@ description: >-
 
 # Controller Helm chart examples
 
-Use these controller configuration variations — TLS setup, database migration, bootstrap admin creation, and cluster service exposure — to adapt the baseline controller installation in [Deploy controllers](/boundary/docs/deploy/helm-chart/deploy-controller) to your environment. They assume PostgreSQL and KMS (key management system) access already exist.
+Use these controller configuration variations — TLS setup, database migration, bootstrap admin creation, and cluster service exposure — to adapt the baseline installation in [Deploy controllers](/boundary/docs/deploy/helm-chart/deploy-controller) to your environment. Start with the baseline workflow and apply only the variations you need while preparing your values file. The examples assume PostgreSQL and KMS (key management system) access already exist.
 
 ## Create the controller Secret
 
-Create a Kubernetes Secret containing the values the chart reads at install time. At a minimum, include the database URL and Boundary Enterprise license. Include bootstrap admin credentials when `bootstrapAdmin.enabled=true`, and a migration URL when `migration_url` is referenced via `env://BOUNDARY_PG_MIGRATION_URL` in your HCL.
-
-```shell-session
-$ kubectl create secret generic boundary-controller-secrets \
-  --namespace boundary \
-  --from-literal=database-url="postgres://<user>:<password>@<host>:5432/<dbname>?sslmode=require" \
-  --from-literal=migration-url="postgres://<migration-user>:<password>@<host>:5432/<dbname>?sslmode=require" \
-  --from-literal=license="<your-license-here>" \
-  --from-literal=admin-username="<admin-username>" \
-  --from-literal=admin-password="<admin-password>"
-```
-
-The key names (`database-url`, `migration-url`, `license`, `admin-username`, `admin-password`) must match the values set in `secretRefs.keys.*` in your Helm values file. These commands are provided as examples — use any Secret management method that fits your workflow.
-
-<Note>
-
-When `secretRefs.secretName` is set, the chart validates that `controller.config` uses the correct `env://` variable names for any secret-backed fields. Using a different variable name causes the chart to fail during rendering before installation completes. The required names are:
-
-- `env://BOUNDARY_PG_URL` for `database { url }`
-- `env://BOUNDARY_PG_MIGRATION_URL` for `database { migration_url }`
-- `env://BOUNDARY_LICENSE` for `controller { license }`
-
-If you use a different variable name and it is not declared in `extraEnv`, the chart fails during rendering with an error message that identifies the field and the expected variable name.
-
-</Note>
+Create the baseline Secret by following [Create the controller Secret](/boundary/docs/deploy/helm-chart/deploy-controller#create-the-controller-secret). Add the `migration-url` key only when `controller.config` references `env://BOUNDARY_PG_MIGRATION_URL`. The key name must match `secretRefs.keys.migrationUrl`.
 
 ## Create the TLS Secret
 
-If `tls.disabled=false` (the default), create a Kubernetes TLS Secret before installing the chart. The Secret must use the standard `kubernetes.io/tls` type with `tls.crt` and `tls.key` data keys.
-
-```shell-session
-$ kubectl create secret tls boundary-controller-tls \
-  --namespace boundary \
-  --cert=tls.crt \
-  --key=tls.key
-```
-
-The Secret name must match `tls.secretName` (default: `boundary-controller-tls`). These commands are provided as examples — use any Secret management method that fits your workflow.
+Follow [Create the TLS Secret when TLS is enabled](/boundary/docs/deploy/helm-chart/deploy-controller#create-the-tls-secret-when-tls-is-enabled). The same Secret supports the TLS variations below.
 
 ## Enable database initialization
 
-Enable the pre-install database initialization Job on first install to let the chart create the Boundary schema.
-
-Example values:
-
-```yaml
-database:
-  init:
-    enabled: true
-```
-
-Use this pattern when:
-
-- You are installing the chart for the first time against an empty PostgreSQL database.
-- You want Helm to manage the initial schema creation.
-
-With `database.init.enabled=true`, Helm runs a `pre-install` Job that initializes the Boundary schema before creating the ConfigMap, Services, Deployment, and any other enabled resources. Disable this Job on subsequent installs or when reinitializing against an existing Boundary database.
+`database.init.enabled` defaults to `true`. Keep the default for the first installation against an empty PostgreSQL database. Set it to `false` when another workflow initializes the schema or the database is already initialized.
 
 ## Enable bootstrap admin creation
 
-Enable the post-install bootstrap Job on first install to let the chart create a global password auth method, user, account, and role.
-
-Example values:
-
-```yaml
-bootstrapAdmin:
-  enabled: true
-```
-
-Use this pattern when you want Helm to create the initial Boundary admin credentials. Disable this Job after the first install or if you manage Boundary auth methods and admin principals through another workflow.
+`bootstrapAdmin.enabled` defaults to `true` and creates the initial global password auth method, user, account, and role. Set it to `false` if another workflow manages the initial administrator resources.
 
 ## Controller with TLS enabled
 
@@ -169,22 +112,17 @@ controller:
       type: ClusterIP
 ```
 
-Matching HCL:
+Set the advertised cluster address in the existing `controller` stanza:
 
 ```hcl
 controller {
-  name = "boundary-controller"
   public_cluster_addr = "boundary-controller-cluster.boundary.svc.cluster.local:9201"
-  license = "env://BOUNDARY_LICENSE"
-
-  database {
-    url = "env://BOUNDARY_PG_URL"
-  }
 }
 ```
 
 ## Externally accessible cluster service
-When workers run in a different namespace or outside the cluster, the default `ClusterIP` cluster service may not be reachable. Configure the cluster service as a `LoadBalancer` so workers can connect to `public_cluster_addr` from outside the namespace.
+
+When workers run outside the cluster, the default `ClusterIP` cluster service is not reachable. Workers in another namespace can use the Service's fully qualified cluster DNS name when network policy permits it. Configure the cluster service as a `LoadBalancer` only when workers need to connect from outside the cluster.
 
 Example values:
 
@@ -197,17 +135,11 @@ controller:
       targetPort: 9201
 ```
 
-Matching HCL — update `public_cluster_addr` after the load balancer is provisioned:
+Update the advertised address in the existing `controller` stanza after the load balancer is provisioned:
 
 ```hcl
 controller {
-  name = "boundary-controller"
   public_cluster_addr = "<LOAD_BALANCER_ADDRESS>:9201"
-  license = "env://BOUNDARY_LICENSE"
-
-  database {
-    url = "env://BOUNDARY_PG_URL"
-  }
 }
 ```
 
@@ -230,13 +162,12 @@ Update `public_cluster_addr` in `controller.config` with the assigned address, t
 ```shell-session
 $ helm upgrade boundary-controller hashicorp/boundary-controller \
   --namespace boundary \
-  --values my-values.yaml \
+  --values controller-values.yaml \
   --rollback-on-failure \
   --wait
 ```
 
-
-Use this pattern when worker registration and controller clustering do not need internet-facing endpoints.
+Use this pattern when workers require an endpoint reachable from outside the Kubernetes cluster. Restrict access to trusted worker networks.
 
 ## Controller with a pre-configured DNS address
 
@@ -244,13 +175,7 @@ If you already control the DNS name for the controller's cluster listener, set `
 
 ```hcl
 controller {
-  name = "boundary-controller"
   public_cluster_addr = "boundary-controller.example.com:9201"
-  license = "env://BOUNDARY_LICENSE"
-
-  database {
-    url = "env://BOUNDARY_PG_URL"
-  }
 }
 ```
 
@@ -258,7 +183,7 @@ After the cluster Service receives an external address, point the DNS record to 
 
 ## Configure migration URL
 
-If you use a different PostgreSQL connection string for schema migrations, set `migration_url` directly in the controller HCL as a plain text value.
+If you use a different PostgreSQL connection string for schema migrations, store it in the controller Secret and reference it from `controller.config`.
 
 Matching HCL:
 
@@ -275,7 +200,7 @@ controller {
 }
 ```
 
-If the migration URL contains credentials that must not be stored in plaintext, you can instead reference it as `env://BOUNDARY_PG_MIGRATION_URL` and store the value in the same Kubernetes Secret as `databaseUrl`, using `secretRefs.keys.migrationUrl` to point to the correct key.
+Store the value under the Secret key configured by `secretRefs.keys.migrationUrl`, which defaults to `migration-url`. The chart injects it as `BOUNDARY_PG_MIGRATION_URL` when the rendered HCL references the environment variable shown above.
 
 ## Migrate the database during an upgrade
 
@@ -292,7 +217,7 @@ Scale controllers to zero:
 ```shell-session
 $ helm upgrade boundary-controller hashicorp/boundary-controller \
   --namespace boundary \
-  --values my-values.yaml \
+  --values controller-values.yaml \
   --set controller.replicas=0 \
   --rollback-on-failure \
   --wait
@@ -303,7 +228,7 @@ Back up PostgreSQL after the controllers stop. Then run the migration as a one-t
 ```shell-session
 $ helm upgrade boundary-controller hashicorp/boundary-controller \
   --namespace boundary \
-  --values my-values.yaml \
+  --values controller-values.yaml \
   --set controller.replicas=0 \
   --set database.migrate.enabled=true \
   --rollback-on-failure \
@@ -315,7 +240,7 @@ Run a repair only when Boundary migration output directs you to a specific versi
 ```shell-session
 $ helm upgrade boundary-controller hashicorp/boundary-controller \
   --namespace boundary \
-  --values my-values.yaml \
+  --values controller-values.yaml \
   --set controller.replicas=0 \
   --set database.migrate.enabled=true \
   --set database.repair.version=<version_id> \
@@ -328,14 +253,14 @@ After the migration completes, reset all migration flags and restore the control
 
 <Note>
 
-Set `controller.replicas` to the count you need for your deployment and following example uses `2`
+Set `controller.replicas` to the count required by your deployment. The following example restores the default value of `2`.
 
 </Note>
 
 ```shell-session
 $ helm upgrade boundary-controller hashicorp/boundary-controller \
   --namespace boundary \
-  --values my-values.yaml \
+  --values controller-values.yaml \
   --set database.migrate.enabled=false \
   --set database.repair.version="" \
   --set controller.replicas=2 \
