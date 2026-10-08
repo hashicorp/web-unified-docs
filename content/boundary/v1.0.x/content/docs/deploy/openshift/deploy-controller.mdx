@@ -9,7 +9,7 @@ description: >-
 
 # Deploy controllers on OpenShift Helm chart
 
-The controller chart is intended for operator-managed Boundary control planes on OpenShift. It can run multiple controller replicas and uses Helm hook Jobs for database initialization. It can also optionally use hook Jobs for database migration, database repair, and admin bootstrap.
+The controller chart is intended for operator-managed Boundary control planes on OpenShift. It can run multiple controller replicas and uses Helm hook Jobs for database initialization and administrator bootstrap by default. It can also run optional database migration and repair Jobs during upgrades.
 
 You must provide any required external dependencies such as PostgreSQL, KMS access, Boundary Enterprise license data, and TLS material, if necessary.
 
@@ -22,16 +22,16 @@ Before installing the controller Helm chart on OpenShift, make sure the followin
 - A [Boundary Enterprise license](/boundary/docs/enterprise/licensing).
 - A Red Hat OpenShift cluster running version 4.19 or later.
 - Helm 3 or later configured with access to the target OpenShift cluster.
-- Permissions to create Deployments, Services, Routes, ConfigMaps, Secrets, and Jobs in the target namespace.
+- Permissions to create Deployments, Services, Routes, ConfigMaps, Jobs, and PodDisruptionBudgets in the target namespace.
 - A reachable PostgreSQL database that meets the [PostgreSQL support policy](/boundary/docs/enterprise/supported-versions#postgresql-support-policy) for Boundary controller state.
 - A valid Boundary controller HCL configuration.
 - Access to the default controller image registry. When `openshift.enabled=true` and `image.repository` is not set, the chart defaults to the Red Hat registry image (`registry.connect.redhat.com/hashicorp/boundary-enterprise`), which requires a Red Hat account and registry credentials with access to that image (create an account and obtain credentials at [Red Hat Ecosystem Catalog](https://catalog.redhat.com/)).
-- KMS (key management system) configuration for the `root`, `recovery`, `worker-auth`, and `bsr` purposes. The `bsr` key is required for session recording.
-- An existing Secret containing `admin-username` and `admin-password` when `bootstrapAdmin.enabled=true`.
+- KMS (key management system) configuration for the `root`, `recovery`, and `worker-auth` purposes. Add a `bsr` key when you enable session recording.
+- An existing Secret containing the database URL, Boundary Enterprise license, and `admin-username` and `admin-password` when `bootstrapAdmin.enabled=true`.
 - A TLS Secret containing `tls.crt` and `tls.key` when `tls.api.disabled=false` or `tls.ops.disabled=false` (the default for both).
-- A ServiceAccount that the controller deployment and hook Jobs can use.
+- An existing ServiceAccount only when you set `serviceAccount.name`. When the value is empty, OpenShift assigns the project's default ServiceAccount. The chart does not create a ServiceAccount.
 
-The controller chart deploys a stateless Boundary control plane. PostgreSQL stores the persistent controller state, not the controller pods. Set `openshift.enabled=true` in your values file so that the chart applies an OpenShift-compatible security context and renders `Route` resources instead of relying on `LoadBalancer` Services.
+The controller chart deploys a stateless Boundary control plane. PostgreSQL stores the persistent controller state, not the controller pods. Set `openshift.enabled=true` in your values file so that the chart applies an OpenShift-compatible security context and renders `Route` resources. Routes do not change Service types, so set the API Service to `ClusterIP` when you want the Route to be the only external API path.
 
 Complete the following steps to deploy a controller using the Helm chart on OpenShift.
 
@@ -40,21 +40,12 @@ Complete the following steps to deploy a controller using the Helm chart on Open
 Add the Helm repository and confirm the chart is visible:
 
 ```shell-session
-$ helm repo add hashicorp https://helm.releases.hashicorp.com; \
-  helm repo update; \
-  helm search repo hashicorp/boundary-controller
+$ helm repo add hashicorp https://helm.releases.hashicorp.com
+$ helm repo update
+$ helm search repo hashicorp/boundary-controller
 ```
 
-Example output:
-
-<CodeBlockConfig hideClipboard>
-
-```
-NAME                          CHART VERSION   APP VERSION   DESCRIPTION
-hashicorp/boundary-controller 0.2.0-beta      1.0.2-ent     Official HashiCorp Boundary Controller Helm Chart
-```
-
-</CodeBlockConfig>
+OpenShift support is available starting with Boundary controller Helm chart `0.2.0`. Refer to Artifact Hub for the [official controller chart releases](https://artifacthub.io/packages/helm/hashicorp/boundary-controller/) and [default values](https://artifacthub.io/packages/helm/hashicorp/boundary-controller/?modal=values).
 
 ## Create the controller Secret
 
@@ -66,17 +57,7 @@ Set `secretRefs.keys.*` to match the key names you used in your Secret. If your 
 
 ## Create the TLS Secret when TLS is enabled
 
-If `tls.api.disabled=false` or `tls.ops.disabled=false` (the default for both), create a TLS Secret before installation. Refer to the [Secrets documentation](https://kubernetes.io/docs/concepts/configuration/secret/) for instructions. The Secret must contain `tls.crt` and `tls.key` entries, and its name must match `tls.secretName` (default: `boundary-controller-tls`).
-
-<Note>
-
-When `bootstrapAdmin.enabled=true`, the bootstrap admin Job connects to the controller API Service and verifies the TLS certificate. The certificate must include the following SAN (Subject Alternative Name) (adjust if `nameOverride` or `fullnameOverride` is set):
-
-- `DNS:<fullname>-api` (for example, `boundary-controller-api`)
-
-The Job will time out if this SAN is missing.
-
-</Note>
+If `tls.api.disabled=false` or `tls.ops.disabled=false` (the default for both), create a TLS Secret before installation. Refer to the [Secrets documentation](https://kubernetes.io/docs/concepts/configuration/secret/) for instructions. The Secret must contain a certificate in `tls.crt` and its matching private key in `tls.key`. A CA entry is optional. The Secret name must match `tls.secretName` (default: `boundary-controller-tls`).
 
 Keep TLS enabled when you expose the API and ops listeners through Routes that use `reencrypt` termination. The listeners must serve HTTPS so that the OpenShift router can re-encrypt traffic to the pods.
 
@@ -189,11 +170,7 @@ We do not recommend changing `disable_mlock = true` from the chart default. The 
 
 ## List available chart versions
 
-Use the following command to see any available published versions of the controller chart:
-
-```shell-session
-$ helm search repo hashicorp/boundary-controller --versions
-```
+Use the [official releases page](https://releases.hashicorp.com/boundary-controller/) to see the available published versions of the controller chart.
 
 ## Install a Boundary controller on OpenShift
 
@@ -216,7 +193,7 @@ controller:
     listener "tcp" {
       address       = "0.0.0.0:9200"
       purpose       = "api"
-      tls_disable   = false
+      tls_disable   = "{{ .Values.tls.api.disabled }}"
       tls_cert_file = "/etc/boundary/tls/tls.crt"
       tls_key_file  = "/etc/boundary/tls/tls.key"
     }
@@ -229,7 +206,7 @@ controller:
     listener "tcp" {
       address       = "0.0.0.0:9203"
       purpose       = "ops"
-      tls_disable   = false
+      tls_disable   = "{{ .Values.tls.ops.disabled }}"
       tls_cert_file = "/etc/boundary/tls/tls.crt"
       tls_key_file  = "/etc/boundary/tls/tls.key"
     }
@@ -299,35 +276,50 @@ openshift:
   enabled: true
   route:
     api:
+      enabled: true
+      host: ""
       tls:
         termination: reencrypt
         insecureEdgeTerminationPolicy: Redirect
+        key: ""
+        certificate: ""
+        caCertificate: ""
         destinationCACertificate: |
           -----BEGIN CERTIFICATE-----
           <CA certificate that issued the controller TLS certificate>
           -----END CERTIFICATE-----
+    cluster:
+      enabled: false
     ops:
+      enabled: true
+      host: ""
       tls:
         termination: reencrypt
         insecureEdgeTerminationPolicy: Redirect
+        key: ""
+        certificate: ""
+        caCertificate: ""
         destinationCACertificate: |
           -----BEGIN CERTIFICATE-----
           <CA certificate that issued the controller TLS certificate>
           -----END CERTIFICATE-----
 ```
 
-The API and ops Routes use `reencrypt` termination, so the OpenShift router terminates external TLS and re-encrypts traffic to the pods. Set `destinationCACertificate` for those Routes to the CA certificate that issued the controller TLS certificate so that the router can verify the backend connection. The cluster Route uses `passthrough` termination because the cluster listener carries Boundary's own mTLS.
+The API and ops Routes use `reencrypt` termination, so the OpenShift router terminates external TLS and re-encrypts traffic to the pods. When `host: ""`, OpenShift generates a hostname under the cluster ingress domain. Leave `key`, `certificate`, and `caCertificate` empty to use the ingress controller's default certificate for that generated hostname.
+
+For a custom `host`, the client-facing certificate must cover that hostname. You can continue to use the ingress controller's default certificate when it covers the custom hostname. Otherwise, set `certificate` to the client-facing certificate and `key` to its matching private key. Set the optional `caCertificate` when clients need the certificate chain. These fields default to `""` for `edge` and `reencrypt` Routes, as shown above.
+
+Set `destinationCACertificate` only for `reencrypt` to the CA certificate that issued the controller listener certificate so that the router can verify the TLS-enabled backend. It is independent of `host` and the client-facing certificate fields.
+
+Passthrough Routes omit `key`, `certificate`, `caCertificate`, and `destinationCACertificate` because the router does not terminate or re-encrypt TLS. Edge Routes can use the three client-facing certificate fields, but omit `destinationCACertificate` because traffic from the router to the listener is not TLS-encrypted. This example disables the cluster Route because `public_cluster_addr` uses the internal cluster Service. Enable the passthrough cluster Route and advertise its hostname on port `443` when workers connect from outside the cluster.
 
 Run the following command to install the release, initialize the database schema, and create the bootstrap admin:
 
 ```shell-session
 $ helm install boundary-controller hashicorp/boundary-controller \
-  --version 0.2.0-beta \
   --namespace boundary \
   --create-namespace \
   --values my-values.yaml \
-  --set database.init.enabled=true \
-  --set bootstrapAdmin.enabled=true \
   --wait
 ```
 
@@ -349,10 +341,11 @@ Or, to install without database initialization and bootstrap admin creation:
 
 ```shell-session
 $ helm install boundary-controller hashicorp/boundary-controller \
-  --version 0.2.0-beta \
   --namespace boundary \
   --create-namespace \
   --values my-values.yaml \
+  --set database.init.enabled=false \
+  --set bootstrapAdmin.enabled=false \
   --wait
 ```
 
@@ -361,8 +354,8 @@ $ helm install boundary-controller hashicorp/boundary-controller \
 Check the rendered resources after installation:
 
 ```shell-session
-$ oc get deployment,pods,svc,routes,jobs --namespace boundary; \
-  oc logs --namespace boundary deployment/boundary-controller
+$ oc get deployment,pods,svc,routes,jobs --namespace boundary
+$ oc logs --namespace boundary deployment/boundary-controller
 ```
 
 Example output:
@@ -370,10 +363,14 @@ Example output:
 <CodeBlockConfig hideClipboard>
 
 ```
-NAME                                    READY   STATUS      RESTARTS   AGE
-pod/boundary-controller-0               1/1     Running     0          2m
-pod/boundary-controller-1               1/1     Running     0          2m
-pod/boundary-controller-db-init-abcde   0/1     Completed   0          2m
+NAME                                    READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/boundary-controller     2/2     2            2           2m
+
+NAME                                                     READY   STATUS      RESTARTS   AGE
+pod/boundary-controller-7b8f7d6f9d-abcde                 1/1     Running     0          2m
+pod/boundary-controller-7b8f7d6f9d-fghij                 1/1     Running     0          2m
+pod/boundary-controller-init-db-klmno                     0/1     Completed   0          2m
+pod/boundary-controller-bootstrap-admin-pqrst             0/1     Completed   0          1m
 
 NAME                                     TYPE        CLUSTER-IP     PORT(S)    AGE
 service/boundary-controller-api          ClusterIP   10.0.0.10      9200/TCP   2m
@@ -382,6 +379,11 @@ service/boundary-controller-ops          ClusterIP   10.0.0.12      9203/TCP   2
 
 NAME                                                HOST/PORT                                        PATH   SERVICES                      PORT   TERMINATION   WILDCARD
 route.route.openshift.io/boundary-controller-api-route   boundary-controller-api.apps.example.com          boundary-controller-api       api    reencrypt     None
+route.route.openshift.io/boundary-controller-ops-route   boundary-controller-ops.apps.example.com          boundary-controller-ops       ops    reencrypt     None
+
+NAME                                            STATUS     COMPLETIONS   DURATION   AGE
+job.batch/boundary-controller-init-db           Complete   1/1           20s        2m
+job.batch/boundary-controller-bootstrap-admin   Complete   1/1           10s        1m
 ```
 
 </CodeBlockConfig>
@@ -401,14 +403,12 @@ To upgrade the controller deployment, run:
 
 ```shell-session
 $ helm upgrade boundary-controller hashicorp/boundary-controller \
-  --version 0.2.0-beta \
   --namespace boundary \
   --values my-values.yaml \
-  --rollback-on-failure \
   --wait
 ```
 
-For database migration scenarios, refer to [Controller OpenShift Helm chart examples](/boundary/docs/deploy/openshift/controller-examples#version-upgrade-with-database-migration).
+For database migration scenarios, refer to [Migrate the database during an upgrade](/boundary/docs/deploy/openshift/controller-examples#migrate-the-database-during-an-upgrade).
 
 ## Uninstall the controller
 
@@ -422,11 +422,11 @@ $ helm uninstall boundary-controller --namespace boundary
 
 ### Bootstrap admin Job times out
 
-If the bootstrap admin Job times out while connecting to the controller API Service, confirm that the TLS certificate in the TLS Secret includes the required SAN (`DNS:<fullname>-api`, for example `boundary-controller-api`), as described in [Create the TLS Secret when TLS is enabled](#create-the-tls-secret-when-tls-is-enabled). A missing or mismatched SAN causes the Job to fail certificate verification and time out.
+If the bootstrap administrator Job times out, confirm that the controller pods are Ready, the API Service is reachable from the Job, and the API listener TLS setting agrees with `tls.api.disabled`. Increase `bootstrapAdmin.waitTimeoutSeconds` when controller startup requires more than the default wait period.
 
 ### Route does not serve traffic
 
-If the API or ops Route returns a TLS error after installation, the `destinationCACertificate` may be missing from the Route. Confirm that `openshift.route.api.tls.destinationCACertificate` and `openshift.route.ops.tls.destinationCACertificate` are set in your values file, and check the Route status using `oc describe route boundary-controller-api-route --namespace boundary`.
+If a reencrypt API or ops Route returns a TLS error after installation, the `destinationCACertificate` may be missing or may not trust the controller listener certificate. Confirm that the listener TLS is enabled and that `openshift.route.api.tls.destinationCACertificate` or `openshift.route.ops.tls.destinationCACertificate` contains the CA that issued the corresponding backend certificate. Check the Route status using `oc describe route boundary-controller-api-route --namespace boundary`.
 
 ## Next steps
 
@@ -434,5 +434,5 @@ To deploy workers on OpenShift, refer to [Deploy workers on OpenShift using a He
 
 ## More information
 
-- To view supported Helm values so that you can configure or update controllers, refer to [Controller values](/boundary/docs/deploy/openshift/controller-values).
+- To view all shared and OpenShift-specific Helm values, refer to [Controller OpenShift values](/boundary/docs/deploy/helm-chart/controller-values#openshift-values).
 - To view example configurations, refer to [Controller OpenShift Helm chart examples](/boundary/docs/deploy/openshift/controller-examples).

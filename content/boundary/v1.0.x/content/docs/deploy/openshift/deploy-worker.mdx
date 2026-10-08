@@ -17,9 +17,10 @@ Before installing the worker Helm chart on OpenShift, make sure the following ar
 
 - A Red Hat OpenShift cluster running version 4.19 or later.
 - Helm 3 or later configured with access to the target OpenShift cluster.
-- The `oc` CLI configured with permissions to create Deployments, Services, Routes, ConfigMaps, and ServiceAccounts in the target namespace.
+- The `oc` CLI configured with permissions to create Deployments, Services, Routes, ConfigMaps, and Secrets in the target namespace, and PersistentVolumeClaims if you enable persistence. The chart does not create a ServiceAccount. If you set `serviceAccount.name`, create that ServiceAccount separately.
 - Network connectivity from the worker pod to the HCP (HashiCorp Cloud Platform) Boundary cluster or self-managed Boundary upstream workers.
 - A valid Boundary worker HCL configuration.
+- An existing TLS Secret named `boundary-worker-tls` that contains `tls.crt` and `tls.key`. Operations listener TLS and HTTPS health probes are enabled by default. If you explicitly set `tls.ops.disabled=true`, you do not need this Secret, but you must use `edge` termination for the operations Route or disable that Route.
 - Access to the default worker image registry. When `openshift.enabled=true` and `image.repository` is not set, the chart defaults to the Red Hat registry image (`registry.connect.redhat.com/hashicorp/boundary-enterprise`), which requires a Red Hat account and registry credentials with access to that image (create an account and obtain credentials at [Red Hat Ecosystem Catalog](https://catalog.redhat.com/)).
 - Upstream controllers already running a compatible Boundary version. Refer to [Control plane and worker compatibility](/boundary/docs/enterprise/supported-versions#control-plane-and-worker-compatibility) before upgrading or installing workers. A worker pointed at an incompatible, older controller version reports as `Ready` but never registers, and logs a TLS internal error with no further indication of the cause.
 - A registration model selected before installation:
@@ -44,17 +45,7 @@ $ helm repo add hashicorp https://helm.releases.hashicorp.com; \
   helm search repo hashicorp/boundary-worker
 ```
 
-Example output:
-
-<CodeBlockConfig hideClipboard>
-
-```
-NAME                      CHART VERSION   APP VERSION   DESCRIPTION
-hashicorp/boundary-worker 0.2.0-beta      1.0.2-ent     Official HashiCorp Boundary Worker Helm Chart
-
-```
-
-</CodeBlockConfig>
+OpenShift support starts with Boundary worker Helm chart `0.2.0`. Refer to Artifact Hub for the [official worker chart releases](https://artifacthub.io/packages/helm/hashicorp/boundary-worker/) and [default values](https://artifacthub.io/packages/helm/hashicorp/boundary-worker/?modal=values).
 
 ## Prepare the worker configuration
 
@@ -72,7 +63,7 @@ A usable worker configuration includes:
 - A `recording_storage_path` when session recording persistence is enabled
 - A `public_addr` when other clients or workers must connect to this worker
 
-Refer to the following example HCP Boundary worker configuration:
+The following example configures a self-managed worker with KMS-backed authentication:
 
 ```hcl
 disable_mlock = true
@@ -83,9 +74,11 @@ listener "tcp" {
 }
 
 listener "tcp" {
-  address     = "0.0.0.0:9203"
-  purpose     = "ops"
-  tls_disable = true
+  address       = "0.0.0.0:9203"
+  purpose       = "ops"
+  tls_disable   = "{{ .Values.tls.ops.disabled }}"
+  tls_cert_file = "{{ .Values.tls.mountPath }}/tls.crt"
+  tls_key_file  = "{{ .Values.tls.mountPath }}/tls.key"
 }
 
 worker {
@@ -128,17 +121,21 @@ events {
 
 If you use controller-led registration, create a Secret containing the activation token before installation and reference it with `secretRefs.secretName` and `secretRefs.keys.controllerGeneratedActivationToken`. Set `controller_generated_activation_token = "env://BOUNDARY_WORKER_CONTROLLER_GENERATED_ACTIVATION_TOKEN"` in `worker.config` so the chart injects the token from the Secret instead of storing it in plaintext. Refer to the [Secrets documentation](https://kubernetes.io/docs/concepts/configuration/secret/) for instructions on creating Secrets.
 
-## List available chart versions
-
-Use the following command to see any available published versions of the worker chart:
+Create the default operations TLS Secret before installation:
 
 ```shell-session
-$ helm search repo hashicorp/boundary-worker --versions
+$ oc create namespace boundary
+$ oc create secret tls boundary-worker-tls \
+  --namespace boundary \
+  --cert=worker-ops.crt \
+  --key=worker-ops.key
 ```
+
+The operations Route uses `reencrypt` termination by default, which creates two TLS legs. For the client-to-router leg, set `openshift.route.ops.tls.key` and `certificate` together to configure a custom certificate for a non-passthrough Route; `caCertificate` is optional. Leave all three empty to use the OpenShift ingress controller's default certificate. For the separate router-to-worker leg, set `destinationCACertificate` to the certificate authority (CA) certificate that issued `worker-ops.crt`; the router uses it to verify the worker backend only when the Route termination is `reencrypt` and `tls.ops.disabled=false`.
 
 ## Install a Boundary worker on OpenShift
 
-Create a values file that contains `worker.config` and the OpenShift overrides you need. Setting `openshift.enabled=true` applies an OpenShift-compatible security context and renders the proxy and ops Routes that expose the worker outside the cluster:
+Create a values file that contains `worker.config` and the OpenShift overrides you need. Setting `openshift.enabled=true` applies an OpenShift-compatible security context and renders each Route whose `enabled` value is `true`:
 
 ```yaml
 worker:
@@ -151,15 +148,18 @@ worker:
     }
 
     listener "tcp" {
-      address     = "0.0.0.0:9203"
-      purpose     = "ops"
-      tls_disable = true
+      address       = "0.0.0.0:9203"
+      purpose       = "ops"
+      tls_disable   = "{{ .Values.tls.ops.disabled }}"
+      tls_cert_file = "{{ .Values.tls.mountPath }}/tls.crt"
+      tls_key_file  = "{{ .Values.tls.mountPath }}/tls.key"
     }
 
     worker {
       name = "boundary-worker"
       public_addr = ""
       initial_upstreams = ["boundary-controller-cluster:9201"]
+      recording_storage_path = "/boundary/recording"
 
       tags {
         type = ["worker", "kled", "tests"]
@@ -193,12 +193,26 @@ openshift:
       enabled: true
       host: ""
       tls:
-        termination: edge
+        termination: reencrypt
         insecureEdgeTerminationPolicy: Redirect
-        destinationCACertificate: ""
+        key: ""
+        certificate: ""
+        caCertificate: ""
+        destinationCACertificate: |
+          -----BEGIN CERTIFICATE-----
+          <CA certificate that issued worker-ops.crt>
+          -----END CERTIFICATE-----
 ```
 
-The proxy port carries Boundary's own session TLS over raw TCP, not HTTP. The proxy Route's TLS termination is always `passthrough` and cannot be changed; there is no value that sets it to `edge` or `reencrypt`. The ops Route defaults to `edge` termination, as shown above, so the router terminates external TLS while the ops listener itself continues to serve plain HTTP (`tls.ops.disabled=true` in this example). Set `openshift.route.ops.enabled=false` if you do not want the ops Service reachable from outside the cluster.
+The proxy port carries Boundary's own session TLS over raw TCP, not HTTP. The proxy Route's TLS termination is always `passthrough` and cannot be changed; there is no proxy certificate value group, and the operations Route certificate fields do not apply to it.
+
+The operations Route defaults to `reencrypt`. When `host: ""`, OpenShift generates a hostname under the cluster ingress domain. Leave `key`, `certificate`, and `caCertificate` empty to use the ingress controller's default certificate for that generated hostname.
+
+For a custom operations Route `host`, the client-facing certificate must cover that hostname. Continue using the ingress controller's default certificate when it covers the custom hostname. Otherwise, set both `key` and `certificate` to configure a custom certificate; set `caCertificate` only when the certificate requires an additional CA chain. Leave all three fields empty to use the ingress controller's default certificate.
+
+The router creates a separate TLS connection to the default TLS-enabled operations listener. Set `destinationCACertificate` to the CA that issued the worker operations certificate so the router can verify that backend connection. It is independent of `host` and the client-facing certificate fields. Set `openshift.route.ops.enabled=false` if you do not want the ops Service reachable from outside the cluster.
+
+Match the operations Route to the listener TLS setting: use `reencrypt` or `passthrough` only with `tls.ops.disabled=false`, use `edge` only with `tls.ops.disabled=true`, or disable the operations Route. `destinationCACertificate` applies only to `reencrypt`; `edge` uses HTTP to the worker, while `passthrough` sends client TLS directly to the worker.
 
 The chart does not automatically change `worker.service.proxy.type` when the proxy Route is enabled. Set it to `ClusterIP`, as shown above, so the Route is the only path for external proxy traffic; otherwise the chart also provisions a `LoadBalancer` Service alongside the Route.
 
@@ -206,7 +220,6 @@ Run the following command to install the release:
 
 ```shell-session
 $ helm install boundary-worker hashicorp/boundary-worker \
-  --version 0.2.0-beta \
   --namespace boundary \
   --create-namespace \
   --values my-values.yaml \
@@ -250,10 +263,10 @@ service/boundary-worker-ops     ClusterIP   10.0.0.21    9203/TCP   2m
 
 NAME                                                    HOST/PORT                                AGE   TERMINATION   WILDCARD
 route.route.openshift.io/boundary-worker-proxy-route    boundary-worker-proxy.apps.example.com   2m    passthrough   None
-route.route.openshift.io/boundary-worker-ops-route      boundary-worker-ops.apps.example.com     2m    edge          None
+route.route.openshift.io/boundary-worker-ops-route      boundary-worker-ops.apps.example.com     2m    reencrypt     None
 
 NAME                                      STATUS   VOLUME     CAPACITY   ACCESS MODES   AGE
-persistentvolumeclaim/boundary-worker-pvc Bound     pvc-1234   1Gi        RWO            2m
+persistentvolumeclaim/boundary-worker-recording-storage Bound     pvc-1234   10Gi       RWO            2m
 ```
 
 </CodeBlockConfig>
@@ -282,14 +295,12 @@ On OpenShift, the router assigns the external hostname for the proxy Route after
 $ oc get route boundary-worker-proxy-route --namespace boundary -o jsonpath='{.spec.host}'
 ```
 
-If the worker HCL needs the final address, update the `public_addr` field in `worker.config` or in the HCL file with the Route hostname, then upgrade the release:
+If the worker HCL needs the final address, update the `public_addr` field in `worker.config` or in the HCL file to the proxy Route hostname with port `443`, for example `public_addr = "boundary-worker-proxy.apps.example.com:443"`, then upgrade the release:
 
 ```shell-session
 $ helm upgrade boundary-worker hashicorp/boundary-worker \
-  --version 0.2.0-beta \
   --namespace boundary \
   --values my-values.yaml \
-  --rollback-on-failure \
   --wait
 ```
 
@@ -313,5 +324,5 @@ If clients cannot establish sessions through the proxy Route, first confirm the 
 
 ## More information
 
-- To view supported Helm values so that you can configure or update workers, refer to [Worker values](/boundary/docs/deploy/openshift/worker-values).
+- To view all shared and OpenShift-specific Helm values, refer to [Worker OpenShift values](/boundary/docs/deploy/helm-chart/worker-values#openshift-values).
 - To view example configurations, refer to [Worker OpenShift Helm chart examples](/boundary/docs/deploy/openshift/worker-examples).

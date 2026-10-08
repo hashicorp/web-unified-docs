@@ -85,23 +85,16 @@ Use this pattern when you want Helm to create the initial Boundary admin credent
 
 ## Controller with TLS enabled
 
-Enable TLS when you want encrypted API and ops traffic from the controller listeners. Provide a Kubernetes TLS Secret and keep the probe schemes aligned with HTTPS.
-
-<Note>
-
-The TLS certificate must include the following SAN (Subject Alternative Name) (adjust if `nameOverride` or `fullnameOverride` is set):
-
-- `DNS:<fullname>-api` (for example, `boundary-controller-api`)
-
-The bootstrap admin Job verifies the certificate against this name — the Job will time out if it is missing.
-
-</Note>
+Enable TLS when you want encrypted API and ops traffic from the controller listeners. Provide a Kubernetes TLS Secret. The chart derives HTTPS probes from `tls.ops.disabled=false`.
 
 Example values:
 
 ```yaml
 tls:
-  disabled: false
+  api:
+    disabled: false
+  ops:
+    disabled: false
   secretName: boundary-controller-tls
   mountPath: /etc/boundary/tls
 ```
@@ -112,17 +105,17 @@ Matching HCL — set `tls_disable = false` and add `tls_cert_file` and `tls_key_
 listener "tcp" {
   address       = "0.0.0.0:9200"
   purpose       = "api"
-  tls_disable   = false
-  tls_cert_file = "/etc/boundary/tls/tls.crt"
-  tls_key_file  = "/etc/boundary/tls/tls.key"
+  tls_disable   = "{{ .Values.tls.api.disabled }}"
+  tls_cert_file = "{{ .Values.tls.mountPath }}/tls.crt"
+  tls_key_file  = "{{ .Values.tls.mountPath }}/tls.key"
 }
 
 listener "tcp" {
   address       = "0.0.0.0:9203"
   purpose       = "ops"
-  tls_disable   = false
-  tls_cert_file = "/etc/boundary/tls/tls.crt"
-  tls_key_file  = "/etc/boundary/tls/tls.key"
+  tls_disable   = "{{ .Values.tls.ops.disabled }}"
+  tls_cert_file = "{{ .Values.tls.mountPath }}/tls.crt"
+  tls_key_file  = "{{ .Values.tls.mountPath }}/tls.key"
 }
 ```
 
@@ -135,7 +128,10 @@ Example values:
 
 ```yaml
 tls:
-  disabled: true
+  api:
+    disabled: true
+  ops:
+    disabled: true
 ```
 
 Matching HCL — set `tls_disable = true` on each listener that had TLS enabled and remove the `tls_cert_file` and `tls_key_file` settings:
@@ -154,7 +150,7 @@ listener "tcp" {
 }
 ```
 
-When `tls.disabled=true`, the chart does not mount the TLS Secret and probe schemes default to `HTTP`.
+The chart always renders the probes. Their default scheme derives only from `tls.ops.disabled`, so this configuration uses `HTTP`. The chart omits the TLS Secret mount only when both listener values are `true`.
 
 ## Internal-only cluster service
 
@@ -233,7 +229,6 @@ Update `public_cluster_addr` in `controller.config` with the assigned address, t
 
 ```shell-session
 $ helm upgrade boundary-controller hashicorp/boundary-controller \
-  --version 0.1.0 \
   --namespace boundary \
   --values my-values.yaml \
   --rollback-on-failure \
@@ -271,22 +266,22 @@ Matching HCL:
 controller {
   name = "boundary-controller"
   public_cluster_addr = "boundary-controller-cluster.boundary.svc.cluster.local:9201"
-  license = "<your-license-here>"
+  license = "env://BOUNDARY_LICENSE"
 
   database {
-    url = "postgres://<user>:<password>@<host>:5432/<dbname>?sslmode=require"
-    migration_url = "postgres://<migration-user>:<password>@<host>:5432/<dbname>?sslmode=require"
+    url = "env://BOUNDARY_PG_URL"
+    migration_url = "env://BOUNDARY_PG_MIGRATION_URL"
   }
 }
 ```
 
 If the migration URL contains credentials that must not be stored in plaintext, you can instead reference it as `env://BOUNDARY_PG_MIGRATION_URL` and store the value in the same Kubernetes Secret as `databaseUrl`, using `secretRefs.keys.migrationUrl` to point to the correct key.
 
-## Version upgrade with database migration
+## Migrate the database during an upgrade
 
 <Warning>
 
-  Take a PostgreSQL backup before running migrations or repairs.
+Take a PostgreSQL backup before running migrations or repairs. Helm rollback does not reverse database schema changes.
 
 </Warning>
 
@@ -296,7 +291,6 @@ Scale controllers to zero:
 
 ```shell-session
 $ helm upgrade boundary-controller hashicorp/boundary-controller \
-  --version 0.1.0 \
   --namespace boundary \
   --values my-values.yaml \
   --set controller.replicas=0 \
@@ -304,11 +298,10 @@ $ helm upgrade boundary-controller hashicorp/boundary-controller \
   --wait
 ```
 
-Run the migration:
+Back up PostgreSQL after the controllers stop. Then run the migration as a one-time command-line override instead of adding it to the values file:
 
 ```shell-session
 $ helm upgrade boundary-controller hashicorp/boundary-controller \
-  --version 0.1.0 \
   --namespace boundary \
   --values my-values.yaml \
   --set controller.replicas=0 \
@@ -317,11 +310,10 @@ $ helm upgrade boundary-controller hashicorp/boundary-controller \
   --wait
 ```
 
-Or, to also run a repair migration for a specific version:
+Run a repair only when Boundary migration output directs you to a specific version:
 
 ```shell-session
 $ helm upgrade boundary-controller hashicorp/boundary-controller \
-  --version 0.1.0 \
   --namespace boundary \
   --values my-values.yaml \
   --set controller.replicas=0 \
@@ -336,13 +328,12 @@ After the migration completes, reset all migration flags and restore the control
 
 <Note>
 
-Set `controller.replicas` to the count you need for your deployment. The following example uses `2` because it is the chart default.
+Set `controller.replicas` to the count you need for your deployment and following example uses `2`
 
 </Note>
 
 ```shell-session
 $ helm upgrade boundary-controller hashicorp/boundary-controller \
-  --version 0.1.0 \
   --namespace boundary \
   --values my-values.yaml \
   --set database.migrate.enabled=false \
@@ -354,11 +345,9 @@ $ helm upgrade boundary-controller hashicorp/boundary-controller \
 
 <Note>
 
-Using the `--reset-values` flag also resets `database.migrate.enabled`, but it resets all Helm values to chart defaults, discarding any overrides previously applied with `--set` or `--set-file`. Use `--set database.migrate.enabled=false` to disable only the migration flag without affecting other release values.
+The `--reset-values` flag resets all Helm values, including overrides applied with `--set` or `--set-file`. Clear the migration values explicitly to avoid unrelated configuration changes.
 
 </Note>
-
-
 
 ## Change service ports
 

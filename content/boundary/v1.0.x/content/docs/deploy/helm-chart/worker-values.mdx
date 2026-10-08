@@ -2,14 +2,14 @@
 layout: docs
 page_title: Boundary worker Helm chart values
 description: >-
- Configure the Boundary worker Helm chart using this reference for runtime
- configuration, persistence, proxy and ops services, security, and
- scheduling.
+ Configure all Kubernetes and OpenShift values for the Boundary worker Helm
+ chart, including runtime configuration, persistence, services, Routes,
+ security, and scheduling.
 ---
 
 # Worker values
 
-You configure the Boundary worker Helm chart with Helm values and a Boundary HCL configuration. The chart is the source of truth for supported values.
+You configure the Boundary worker Helm chart with Helm values and a Boundary HCL configuration. This page documents all Kubernetes and Red Hat OpenShift values. The chart is the source of truth for supported values.
 
 ## Boundary runtime configuration
 
@@ -19,7 +19,7 @@ The chart renders `worker.config` with Helm's `tpl` function. Helm template expr
 
 At container startup, the chart replaces `${POD_NAME_LOWER}` with the pod name converted to lowercase and starts Boundary with the processed configuration file.
 
-The chart does not validate Boundary HCL semantics. You are responsible for configuring valid listeners, registration settings, upstreams, storage paths, and worker tags.
+The chart does not fully validate Boundary HCL semantics. It performs targeted checks for the controller-generated activation token reference and operations listener TLS alignment. You are responsible for configuring valid listeners, registration settings, upstreams, storage paths, and worker tags.
 
 ## Kubernetes infrastructure configuration
 
@@ -35,10 +35,22 @@ The following sections describe all available Helm values, grouped by function. 
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `image.repository` | `hashicorp/boundary-enterprise` | Worker container image repository |
-| `image.tag` | `""` | Worker image tag. When empty, the chart uses `Chart.appVersion`, currently `1.0.0-ent`. |
+| `image.repository` | `""` | Worker image repository. On Kubernetes, an empty value resolves to `hashicorp/boundary-enterprise`. |
+| `image.tag` | `""` | Worker image tag. An empty value resolves to the chart application version, currently `1.0.2-ent`. |
 | `image.pullPolicy` | `IfNotPresent` | Kubernetes image pull policy |
 | `imagePullSecrets` | `[]` | Optional image pull secrets for private registries |
+
+With both image values empty, the effective Kubernetes image is `hashicorp/boundary-enterprise:1.0.2-ent`.
+
+## Naming and namespace values
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `nameOverride` | `""` | Overrides the `app.kubernetes.io/name` label. It does not change resource-name prefixes. |
+| `fullnameOverride` | `""` | Overrides the release-name prefix used for resource names. |
+| `namespace` | `""` | Namespace written to namespaced resources. Empty uses the Helm release namespace. Prefer setting the namespace with Helm's `--namespace` option. |
+
+By default, resource names use the Helm release name. A release named `boundary-worker` creates `boundary-worker-deployment`, `boundary-worker-config`, `boundary-worker-proxy`, and `boundary-worker-ops`.
 
 ## Worker runtime values
 
@@ -51,16 +63,14 @@ The default `worker.config` includes `disable_mlock = true`. The chart's default
 
 ## Probe values
 
-The chart adds liveness and readiness probes against the `/health` endpoint on the ops listener.
+The chart adds liveness and readiness probes against `/health` on the ops listener. The probe scheme is derived from `tls.ops.disabled`: `HTTP` when true and `HTTPS` when false.
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `worker.livenessProbe.scheme` | `HTTP` | Probe scheme for `/health` on the ops listener |
 | `worker.livenessProbe.initialDelaySeconds` | `10` | Initial liveness probe delay |
 | `worker.livenessProbe.periodSeconds` | `10` | Liveness probe period |
 | `worker.livenessProbe.failureThreshold` | `3` | Liveness probe failure threshold |
 | `worker.livenessProbe.timeoutSeconds` | `5` | Liveness probe timeout |
-| `worker.readinessProbe.scheme` | `HTTP` | Probe scheme for `/health` on the ops listener |
 | `worker.readinessProbe.initialDelaySeconds` | `10` | Initial readiness probe delay |
 | `worker.readinessProbe.periodSeconds` | `10` | Readiness probe period |
 | `worker.readinessProbe.failureThreshold` | `3` | Readiness probe failure threshold |
@@ -68,11 +78,10 @@ The chart adds liveness and readiness probes against the `/health` endpoint on t
 
 ## Proxy Service values
 
-The proxy Service exposes the worker's session traffic listener.
+The chart always renders the proxy Service. It exposes the worker's session traffic listener.
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `worker.service.proxy.enabled` | `true` | Creates the proxy Service when enabled |
 | `worker.service.proxy.type` | `LoadBalancer` | Kubernetes Service type for proxy traffic |
 | `worker.service.proxy.port` | `9202` | Service port for proxy traffic |
 | `worker.service.proxy.targetPort` | `9202` | Container port targeted by the proxy Service. Must match the proxy listener in `worker.config`. |
@@ -80,17 +89,28 @@ The proxy Service exposes the worker's session traffic listener.
 
 ## Operations Service values
 
-The operations Service exposes the worker operations listener for health and metrics.
+The chart always renders the operations Service. It exposes the worker operations listener for health and metrics.
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `worker.service.ops.enabled` | `true` | Creates the operations Service when enabled |
 | `worker.service.ops.type` | `ClusterIP` | Kubernetes Service type for operations traffic |
 | `worker.service.ops.port` | `9203` | Service port for the operations endpoint |
 | `worker.service.ops.targetPort` | `9203` | Container port targeted by the operations Service. Must match the ops listener in `worker.config`. |
 | `worker.service.ops.annotations` | `{}` | Annotations added to the operations Service |
 
 Keep the operations Service internal unless a trusted monitoring path requires a different exposure model.
+
+The Deployment declares fixed container ports `9202` and `9203`, and its probes use the named ops port at `9203`. Keep the ops HCL listener and `worker.service.ops.targetPort` at `9203`. You can change `worker.service.ops.port`, which is the Service-facing port. A numeric proxy `targetPort` can route to a different proxy listener, but update both values together.
+
+## Operations TLS values
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `tls.ops.disabled` | `false` | Controls operations listener TLS. The default mounts the TLS Secret and makes health probes use HTTPS. Set to `true` to use HTTP and omit the TLS volume. |
+| `tls.secretName` | `boundary-worker-tls` | Existing Kubernetes Secret mounted when ops TLS is enabled. The Secret must contain `tls.crt` and `tls.key`. |
+| `tls.mountPath` | `/etc/boundary/tls` | Directory where the TLS Secret is mounted. The ops listener certificate paths must be `<mountPath>/tls.crt` and `<mountPath>/tls.key`. |
+
+The chart validates the rendered ops listener against `tls.ops.disabled`. With TLS disabled, the listener must contain `tls_disable=true`. With TLS enabled, it must not disable TLS and its certificate and key paths must exactly match `tls.mountPath`. Create the configured Secret before installation. The chart does not verify that the TLS Secret exists or contains the expected keys before Kubernetes creates the pod, and the pod cannot start when the default Secret is absent.
 
 ## Resource values
 
@@ -112,11 +132,13 @@ Auth storage stores worker identity and authentication material for registration
 | `worker.persistence.authStorage.enabled` | `false` | Creates and mounts an auth storage PVC when enabled. When disabled, the chart mounts an `emptyDir` at the auth storage path. |
 | `worker.persistence.authStorage.size` | `1Gi` | Size of the auth storage PVC |
 | `worker.persistence.authStorage.accessMode` | `ReadWriteOnce` | Access mode for the auth storage PVC |
-| `worker.persistence.authStorage.storageClass` | `""` | StorageClass for the auth storage PVC. Empty uses the cluster default. |
+| `worker.persistence.authStorage.storageClass` | `""` | StorageClass name for the auth storage PVC. Empty omits `storageClassName`, allowing Kubernetes to use its default StorageClass behavior. |
 | `worker.persistence.authStorage.path` | `/var/lib/boundary` | Mount path for auth storage. Must match `auth_storage_path` in `worker.config`. |
 | `worker.persistence.authStorage.retainOnUninstall` | `true` | Preserves the auth storage PVC after `helm uninstall`. Set to `false` to delete the PVC on uninstall. |
 
 Disable auth storage only when your worker authentication model does not require persistent local auth material, such as KMS-backed worker authentication.
+
+When enabled, the claim is named `<fullname>-auth-storage`. The chart always mounts the configured path; when persistence is disabled, the backing volume is `emptyDir`.
 
 ## Recording storage values
 
@@ -127,11 +149,15 @@ Recording storage stores session recordings when recording is configured in Boun
 | `worker.persistence.recording.enabled` | `false` | Creates and mounts a recording PVC when enabled |
 | `worker.persistence.recording.size` | `10Gi` | Size of the recording PVC |
 | `worker.persistence.recording.accessMode` | `ReadWriteOnce` | Access mode for the recording PVC |
-| `worker.persistence.recording.storageClass` | `""` | StorageClass for the recording PVC. Empty uses the cluster default. |
+| `worker.persistence.recording.storageClass` | `""` | StorageClass name for the recording PVC. Empty omits `storageClassName`, allowing Kubernetes to use its default StorageClass behavior. |
 | `worker.persistence.recording.path` | `/boundary/recording` | Mount path for recording storage. Must match `recording_storage_path` in `worker.config` when recording is enabled. |
 | `worker.persistence.recording.retainOnUninstall` | `true` | Preserves the recording PVC after `helm uninstall`. Set to `false` to delete the PVC on uninstall. |
 
 If you disable recording storage, remove `recording_storage_path` from the HCL or ensure recording data does not need to persist.
+
+When enabled, the claim is named `<fullname>-recording-storage`. The chart requests storage using the configured Kubernetes quantity, access mode, and optional StorageClass; it does not expose PVC selectors or `volumeName` for explicitly binding a particular pre-provisioned volume. When persistence is disabled, the configured recording path is backed by `emptyDir`.
+
+For either claim, `retainOnUninstall=true` adds `helm.sh/resource-policy: keep`; `false` omits that annotation. Retention controls Helm deletion during uninstall, not the StorageClass reclaim policy or the underlying PersistentVolume lifecycle.
 
 ## Secret reference values
 
@@ -139,11 +165,13 @@ The chart injects values from an existing Kubernetes Secret as environment varia
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `secretRefs.secretName` | `""` | Name of an existing Kubernetes Secret to inject into the worker container. When empty, no Secret is mounted. |
-| `secretRefs.validateExisting` | `false` | When true, Helm fails early if the referenced Secret does not exist or is missing the required key. |
+| `secretRefs.secretName` | `""` | Name of an existing Kubernetes Secret. The chart injects its token key only when rendered `worker.config` uses the required `env://` reference. The Secret is not mounted as a volume. |
+| `secretRefs.validateExisting` | `false` | When true, Helm uses a cluster lookup to require the referenced Secret and token key, provided the rendered configuration uses the supported token reference. |
 | `secretRefs.keys.controllerGeneratedActivationToken` | `worker-controller-generated-activation-token` | Key in the Secret used for `BOUNDARY_WORKER_CONTROLLER_GENERATED_ACTIVATION_TOKEN`. Must match the key name in the Kubernetes Secret. |
 
 To use a Secret for controller-led registration, set `controller_generated_activation_token = "env://BOUNDARY_WORKER_CONTROLLER_GENERATED_ACTIVATION_TOKEN"` in `worker.config` and point `secretRefs.secretName` at the Secret that contains the token key.
+
+When `secretRefs.secretName` is set, a different `env://` name or a hardcoded `controller_generated_activation_token` fails chart rendering. If the field is absent, the chart neither injects nor validates the Secret. Because `validateExisting` uses Helm's `lookup` in the Helm release namespace, use it during an install or upgrade connected to the target cluster and keep `namespace` aligned with `--namespace`; client-only rendering cannot confirm the Secret.
 
 ## Extra environment variables
 
@@ -174,6 +202,43 @@ extraEnv:
 
 Use `extraEnv` as an alternative to `secretRefs` when you need finer control over how Secret keys are mapped to environment variable names, or when injecting variables unrelated to activation tokens.
 
+## Extra volumes and manifests
+
+Use the passthrough values to mount additional Kubernetes volumes or render resources with the Helm release.
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `extraVolumes` | `[]` | Additional entries appended to the pod's `volumes` list. |
+| `extraVolumeMounts` | `[]` | Additional entries appended to the worker container's `volumeMounts` list. Each mount must reference an available volume. |
+| `extraManifests` | `[]` | Additional Kubernetes manifests rendered as separate documents. Accepts a list or map of YAML objects or template strings and evaluates each entry with `tpl`. |
+
+For example, you can mount an existing ConfigMap and render a NetworkPolicy:
+
+```yaml
+extraVolumes:
+  - name: worker-extra-config
+    configMap:
+      name: worker-extra-config
+
+extraVolumeMounts:
+  - name: worker-extra-config
+    mountPath: /etc/boundary/extra
+    readOnly: true
+
+extraManifests:
+  - apiVersion: networking.k8s.io/v1
+    kind: NetworkPolicy
+    metadata:
+      name: '{{ .Release.Name }}-worker'
+    spec:
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/instance: '{{ .Release.Name }}'
+          app.kubernetes.io/component: worker
+      policyTypes:
+        - Ingress
+```
+
 ## Security context values
 
 The default security settings run the worker without elevated privileges.
@@ -200,10 +265,10 @@ The Deployment also sets `SKIP_SETCAP=1`, which prevents the container startup p
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `serviceAccount.create` | `false` | Creates a ServiceAccount for the worker Deployment and PVC Jobs when true. When false, the chart uses the ServiceAccount named by `serviceAccount.name`. |
-| `serviceAccount.name` | `""` | Name of the ServiceAccount to use or create. When empty and `serviceAccount.create=true`, the chart uses the release fullname. |
-| `serviceAccount.annotations` | `{}` | Annotations added to the ServiceAccount. Use to attach IRSA (IAM Roles for Service Accounts, `eks.amazonaws.com/role-arn`) or Workload Identity (`iam.gke.io/gcp-service-account`) annotations for cloud-provider KMS (key management system) access. |
+| `serviceAccount.name` | `""` | Existing ServiceAccount assigned to the worker pod. Empty omits `serviceAccountName`, so Kubernetes uses the namespace's default ServiceAccount. The chart does not create a ServiceAccount. |
 | `serviceAccount.automountServiceAccountToken` | `false` | Controls whether the pod service account token is mounted. Set to `true` when using IRSA or Workload Identity. |
+
+Create and annotate any required ServiceAccount separately before installing the chart.
 
 ## Scheduling values
 
@@ -214,12 +279,128 @@ The Deployment also sets `SKIP_SETCAP=1`, which prevents the container startup p
 | `tolerations` | `[]` | Pod tolerations |
 | `affinity` | `{}` | Pod affinity rules |
 
+## OpenShift values
+
+Set `openshift.enabled=true` to render OpenShift Routes, use security contexts that let a security context constraint (SCC) assign user and group IDs, and select the Red Hat certified image defaults. OpenShift mode does not change the configured Service types. Refer to the [OpenShift worker examples](/boundary/docs/deploy/openshift/worker-examples) for complete configurations.
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `openshift.enabled` | `false` | Enables OpenShift Routes, SCC-compatible security contexts, and Red Hat image resolution. |
+
+### OpenShift image resolution
+
+OpenShift mode changes the resolved image only when you leave the corresponding image value empty.
+
+| Key | Default | OpenShift behavior |
+| --- | --- | --- |
+| `image.repository` | `""` | Resolves to `registry.connect.redhat.com/hashicorp/boundary-enterprise` when `openshift.enabled=true`. An explicit value takes precedence. |
+| `image.tag` | `""` | Resolves to `Chart.appVersion` plus `-ubi`, which is `1.0.2-ent-ubi` in chart `0.2.0`. An explicit value takes precedence. |
+| `image.pullPolicy` | `IfNotPresent` | Uses the shared Kubernetes behavior. |
+| `imagePullSecrets` | `[]` | Supplies credentials for the Red Hat registry when set. |
+
+The Red Hat registry requires authentication. Reference a pull Secret in `imagePullSecrets`, or link one to the ServiceAccount used by the worker.
+
+### OpenShift security context values
+
+When `openshift.enabled=true`, these values replace the shared `podSecurityContext` and `containerSecurityContext` on the worker Deployment.
+
+| Key | Default |
+| --- | --- |
+| `openshift.podSecurityContext.runAsNonRoot` | `true` |
+| `openshift.podSecurityContext.seccompProfile.type` | `RuntimeDefault` |
+| `openshift.containerSecurityContext.runAsNonRoot` | `true` |
+| `openshift.containerSecurityContext.allowPrivilegeEscalation` | `false` |
+| `openshift.containerSecurityContext.readOnlyRootFilesystem` | `true` |
+| `openshift.containerSecurityContext.capabilities.drop` | `ALL` |
+| `openshift.containerSecurityContext.seccompProfile.type` | `RuntimeDefault` |
+
+The values omit `runAsUser`, `runAsGroup`, and `fsGroup` so that the project's SCC can assign IDs from its allowed range. The defaults are compatible with the `restricted-v2` SCC and do not require elevated privileges. Do not pin an ID unless the ServiceAccount uses an SCC that permits it.
+
+### Proxy Route values
+
+The proxy Route exposes Boundary session traffic through the OpenShift router.
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `openshift.route.proxy.enabled` | `true` | Creates a Route to the proxy Service. It does not change `worker.service.proxy.type`. |
+| `openshift.route.proxy.host` | `""` | Sets the Route hostname. OpenShift generates one when empty. |
+| `openshift.route.proxy.annotations` | `{}` | Adds annotations to the Route. |
+| `openshift.route.proxy.labels` | `{}` | Adds labels to the Route. |
+
+The chart fixes proxy Route termination to `passthrough` because the proxy listener carries Boundary session TLS over TCP. Clients connect to the router on port `443`, not the Service port `9202`. Set `public_addr` in `worker.config` to `<PROXY_ROUTE_HOST>:443`.
+
+### Operations Route values
+
+The operations Route exposes the worker health and metrics endpoint through the OpenShift router.
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `openshift.route.ops.enabled` | `true` | Creates a Route to the operations Service. |
+| `openshift.route.ops.host` | `""` | Sets the Route hostname. OpenShift generates one when empty. |
+| `openshift.route.ops.tls.termination` | `reencrypt` | Sets `edge`, `reencrypt`, or `passthrough` termination. |
+| `openshift.route.ops.tls.insecureEdgeTerminationPolicy` | `Redirect` | Sets `Allow`, `Redirect`, or `None` handling for HTTP requests. |
+| `openshift.route.ops.tls.key` | `""` | Sets the PEM-encoded private key for a custom client-facing Route certificate. Omitted for `passthrough`. |
+| `openshift.route.ops.tls.certificate` | `""` | Sets the PEM-encoded client-facing Route certificate. Omitted for `passthrough`. |
+| `openshift.route.ops.tls.caCertificate` | `""` | Sets the PEM-encoded CA certificate chain for the client-facing Route certificate. Omitted for `passthrough`. |
+| `openshift.route.ops.tls.destinationCACertificate` | `""` | Sets the CA certificate used to verify the backend when termination is `reencrypt` and listener TLS is enabled. |
+| `openshift.route.ops.annotations` | `{}` | Adds annotations to the Route. |
+| `openshift.route.ops.labels` | `{}` | Adds labels to the Route. |
+
+The default pairing is `reencrypt` termination with `tls.ops.disabled=false`. The router serves client-facing TLS and creates a separate TLS connection to the worker. Create the `boundary-worker-tls` Secret with `tls.crt` and `tls.key`, keep the operations listener certificate paths aligned with `/etc/boundary/tls`, and set `destinationCACertificate` to the CA that issued the backend certificate.
+
+The destination CA verifies the router-to-worker connection. The `key`, `certificate`, and `caCertificate` fields customize the separate client-facing certificate. Avoid exposing health and metrics endpoints unless a trusted monitoring path requires the Route.
+
+For `edge` termination, set `tls.ops.disabled=true` so the router forwards HTTP to the worker. For `passthrough`, keep operations TLS enabled because the worker terminates the client TLS connection. The chart only renders `destinationCACertificate` for `reencrypt` when operations TLS is enabled. Probes connect directly to the pod and derive HTTP or HTTPS behavior from `tls.ops.disabled`; they do not pass through the Route.
+
+### Service type caveat
+
+Routes add ingress paths to Services; they do not replace Services or change their types. The proxy Service remains `LoadBalancer` by default even when the proxy Route is enabled. Set `worker.service.proxy.type=ClusterIP` when you want the Route to be the only external proxy path. Otherwise, the chart creates both the Route and the configured external Service. The operations Service defaults to `ClusterIP`.
+
+### OpenShift configuration checklist
+
+Before you install or upgrade the worker on OpenShift, confirm the following settings:
+
+- Set `openshift.enabled=true`.
+- Decide whether each Route is required, and set exposed Services to `ClusterIP` unless you also want their configured external Service path.
+- Match proxy and operations listener ports in `worker.config` to the corresponding Service `targetPort` values.
+- Use `<PROXY_ROUTE_HOST>:443` as `public_addr` when clients connect through the proxy Route.
+- Keep the proxy Route on its fixed `passthrough` termination.
+- Align `tls.ops.disabled`, operations listener TLS, and the operations Route termination mode; provide a destination CA certificate for `reencrypt`.
+- Match HCL auth and recording storage paths to their mounted paths when you enable persistent storage, and confirm that the project's storage classes and SCC permit the volumes.
+- Replace activation token, cluster ID, and upstream placeholders, and confirm that referenced Secrets contain the required keys.
+- Confirm that the ServiceAccount can pull the Red Hat image and that its SCC admits the OpenShift security contexts.
+- Check project `ResourceQuota` and `LimitRange` policies for the worker Deployment and persistent volume claims.
+
+### OpenShift troubleshooting
+
+The following issues can indicate an OpenShift-specific image, Route, SCC, or storage configuration problem.
+
+#### Worker pods fail admission
+
+An `unable to validate against any security context constraint` error means the pod requests settings that no SCC allows. Confirm that `openshift.enabled=true`, remove pinned `runAsUser`, `runAsGroup`, and `fsGroup` values, and verify the SCC assigned to the worker ServiceAccount.
+
+#### Worker image pulls fail
+
+Confirm that the pull Secret contains credentials for `registry.connect.redhat.com` and is present in `imagePullSecrets` or linked to the worker ServiceAccount. An explicit `image.repository` or `image.tag` overrides the Red Hat defaults.
+
+#### Clients cannot reach the proxy Route
+
+Confirm that `public_addr` uses the proxy Route hostname and port `443`, not port `9202`. Verify that the Route uses its fixed `passthrough` termination and inspect it with `oc describe route ROUTE_NAME --namespace PROJECT_NAME`.
+
+#### Operations Route returns TLS errors
+
+For the default `reencrypt` mode, confirm that the worker operations listener serves HTTPS with `tls.ops.disabled=false` and provide the backend certificate's issuing CA in `openshift.route.ops.tls.destinationCACertificate`. If you use `edge`, set `tls.ops.disabled=true` so the backend serves HTTP.
+
+#### Worker fails after enabling storage
+
+Confirm that `auth_storage_path` and `recording_storage_path` in `worker.config` match the chart mount paths. Check persistent volume claim events for storage class, quota, and SCC errors.
+
 ## Configuration alignment checklist
 
 Before installing or upgrading, confirm that:
 
 - The proxy listener port in `worker.config` matches `worker.service.proxy.targetPort`.
-- The ops listener port in `worker.config` matches `worker.service.ops.targetPort`.
+- The ops listener and `worker.service.ops.targetPort` remain `9203`, and `tls.ops.disabled` agrees with the listener TLS configuration.
 - The `auth_storage_path` matches `worker.persistence.authStorage.path` when auth storage is enabled.
 - The `recording_storage_path` matches `worker.persistence.recording.path` when recording storage is enabled.
 - The `public_addr` matches the endpoint other Boundary clients or workers can actually reach.
@@ -236,3 +417,5 @@ If the worker pod crash-loops after you enable auth storage, confirm that `auth_
 To view example worker configurations, refer to [Worker Helm chart examples](/boundary/docs/deploy/helm-chart/worker-examples).
 
 To install a worker using these values, refer to [Deploy workers using a Helm chart](/boundary/docs/deploy/helm-chart/deploy-worker).
+
+For OpenShift configurations and installation steps, refer to the [OpenShift worker examples](/boundary/docs/deploy/openshift/worker-examples) and [OpenShift worker deployment instructions](/boundary/docs/deploy/openshift/deploy-worker).
