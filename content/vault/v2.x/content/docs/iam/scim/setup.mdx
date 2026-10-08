@@ -2,7 +2,7 @@
 layout: docs
 page_title: Set up a Vault SCIM server
 description: >-
-  Configure Vault Enterprise as a SCIM 2.0 server.
+  Configure Vault Enterprise as a SCIM 2.0 server: enable OIDC or SAML login, create a SCIM client bound to an auth mount, and issue a SCIM bearer token.
 ---
 
 # Set up a Vault SCIM server
@@ -69,6 +69,56 @@ $ vault write auth/oidc/role/vault-role-provider-default                       \
     token_policies="default,scim-client-policy"
 ```
 
+## Enable and configure SAML auth method
+
+You can authenticate users with SAML instead of OIDC. Some IdPs, such as Okta,
+can provide both SAML login and SCIM provisioning from a single application.
+To use the SAML workflow, [enable the SAML auth method](/vault/docs/auth/saml)
+and create a named role on the Vault server.
+
+```shell-session
+$ vault auth enable saml
+```
+
+<Tip>
+
+The following example configures the SAML auth method for an Okta SAML
+application. `OKTA_SAML_APP_ID` is the Okta application ID, which begins with
+`0oa`. The `admin` segment of the ACS URL is a namespace. Vault servers without
+namespaces use `$VAULT_ADDR/v1/auth/saml/callback`.
+
+</Tip>
+
+```shell-session
+$ vault write auth/saml/config                                                                    \
+    idp_metadata_url="https://${OKTA_DOMAIN}/app/${OKTA_SAML_APP_ID}/sso/saml/metadata"           \
+    acs_urls="$VAULT_ADDR/v1/admin/auth/saml/callback"                                            \
+    entity_id="$VAULT_ADDR/ui/vault/auth/saml"                                                    \
+    default_role="vault-role-okta-saml"
+```
+
+The `entity_id` value must match the audience URI (SP entity ID) of the IdP
+application, and `acs_urls` must include its single sign-on URL.
+
+The following example creates the matching SAML auth method role.
+
+```shell-session
+$ vault write auth/saml/role/vault-role-okta-saml                          \
+    groups_attribute="groups"                                              \
+    bound_subjects="*"                                                     \
+    bound_subjects_type="glob"                                             \
+    token_policies="default"                                               \
+    token_ttl="1h"
+```
+
+Set `bound_subjects_type` to `glob` when `bound_subjects` contains `*`. With
+`string` matching, Vault compares `*` literally and no subject matches.
+
+Vault names the entity alias for a SAML login after the assertion subject. For
+SCIM-provisioned users to log in to their provisioned entity, bind the SCIM
+client to the SAML mount with `alias_mount_accessor`, as described in
+[Bind a SCIM client to an auth mount](#bind-a-scim-client-to-an-auth-mount).
+
 ## Configure a SCIM client
 
 You must create a SCIM client before you send SCIM protocol requests to Vault.
@@ -99,6 +149,36 @@ remain invisible to the client unless you set `allow_user_adoption` to
 [SCIM API](/vault/api-docs/secret/identity/scim).
 
 </Note>
+
+### Bind a SCIM client to an auth mount
+
+Without `alias_mount_accessor`, Vault creates no auth mount alias for
+provisioned users. A user who later logs in through an auth method such as SAML
+gets a separate entity instead of the provisioned one.
+
+To link provisioned users to SAML logins, look up the accessor of the SAML
+mount and pass it when you create the SCIM client:
+
+```shell-session
+$ SAML_ACCESSOR=$(vault auth list -format=json | jq -r '."saml/".accessor')
+
+$ vault write identity/scim/client/example-client \
+    access_grant_principal="<entity_id>" \
+    alias_mount_accessor="$SAML_ACCESSOR"
+```
+
+Read the client back and confirm that `alias_mount_accessor` matches the
+accessor. You cannot change the value after creation, so a client created
+without it, or for a different mount, must be replaced with a new client.
+
+<Warning title="Create the client before users log in">
+
+Create the SCIM client and provision users before anyone logs in through the
+bound auth mount. A login before provisioning creates an entity that the SCIM
+client does not own, and the client cannot claim it without a link or user
+adoption.
+
+</Warning>
 
 ## Auth method and token caveats
 
@@ -161,7 +241,8 @@ to the configured entity for the SCIM client.
     ```
 
     If you want Vault to create aliases for provisioned users as well, include
-    the `alias_mount_accessor` parameter.
+    the `alias_mount_accessor` parameter. Refer to
+    [Bind a SCIM client to an auth mount](#bind-a-scim-client-to-an-auth-mount).
 
 1. Create an alias on the `token/` mount for the SCIM client entity. List the
    auth mounts to find the accessor for `token/`:
