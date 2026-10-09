@@ -103,11 +103,14 @@ operations on Vault.
 <Tab heading="Auth0" group="auth0">
 
 Create an OAuth resource server profile using JWKS mode to fetch the signing
-keys from Auth0. 
+keys from Auth0. Auth0 reserves the `authorization_details` claim, so the RAR
+arrives in the custom claim you configured in the Auth0 Post Login Action. Use
+the `authorization_details_claim` parameter, available in Vault 2.2.0 and later,
+to read the RAR from that claim.
 
 1. Create an OAuth resource server configuration file called `auth0-oauth.json`
-   using the previously stored environment variables and both `ES256` and
-   `PS256` algorithms recommended by Auth0:
+   using the previously stored environment variables and the `RS256` and
+   `PS256` algorithms:
 
     ```shell-session
     $ cat > auth0-oauth.json <<EOF
@@ -116,8 +119,9 @@ keys from Auth0.
       "use_jwks": true,
       "audiences": ["${AUDIENCE_ADDR}"],
       "user_claim": "sub",
-      "supported_algorithms": ["ES256", "PS256"],
-      "jwks_uri": "${JWKS_URI}"
+      "supported_algorithms": ["RS256", "PS256"],
+      "jwks_uri": "${JWKS_URI}",
+      "authorization_details_claim": "${RAR_CLAIM}"
     }
     EOF
     ```
@@ -144,7 +148,7 @@ keys from Auth0.
     no_default_policy                 false
     optional_authorization_details    false
     profile_name                      auth0
-    supported_algorithms              [ES256 PS256]
+    supported_algorithms              [RS256 PS256]
     unique_id_claim                   jti
     use_jwks                          true
     user_claim                        sub
@@ -152,6 +156,8 @@ keys from Auth0.
 
     Run `vault read sys/config/oauth-resource-server/auth0` to read the profile
     again later.
+
+    {/* TODO: Replace with real vault write output that shows authorization_details_claim (Vault 2.2.0). */}
 
     <Note title="Vault trims trailing slash from issuer URL">
 
@@ -250,12 +256,13 @@ Map your external agent and human users to Vault entities.
     ```
 
 1. Save the external IDs for the human and agent identities. Use the
-   `${EXTERNAL_ID}` value provided by Auth0 for the agent, and a unique identity
-   for the human user. For example:
+   `${SUBJECT_ID}` value (the Auth0 user ID) for the human user and the
+   `${EXTERNAL_ID}` value (the agent client ID followed by `@clients`) for the
+   agent:
 
     ```shell-session
-    $ export                                         \
-      HUMAN_USER_EXTERNAL_ID='auth0|obo-<name>-0001' \
+    $ export                                    \
+      HUMAN_USER_EXTERNAL_ID="${SUBJECT_ID}"    \
       AGENT_EXTERNAL_ID="${EXTERNAL_ID}"
     ```
 
@@ -365,7 +372,7 @@ for the rules that apply when you name the profile instead.
     ```shell-session
     $ vault write identity/entity-alias         \
         name="jwt-binding-subject"              \
-        canonical_id="${OBO_USER_CANONICAL_ID}" \
+        canonical_id="${OBO_HUMAN_CANONICAL_ID}" \
         issuer="${ISSUER}"                      \
      external_id="${HUMAN_USER_EXTERNAL_ID}"
 
@@ -721,60 +728,73 @@ policies assigned to the human user, and RAR constraints to evaluate agent acces
 
 <Tab heading="Auth0" group="auth0">
 
-Create a helper script that uses two environment variables (`RAR_PATH` and
-`RAR_ACTION`) along with `oauth2` to push authorization requests to the PAR
-endpoint of your Auth0 tenant with the RAR claim in `authorization_details`.
+Request a token for the agent and a token for the human user, then use Auth0
+Custom Token Exchange to exchange both for a delegation token. The delegation
+token carries the human user as `sub`, the agent as `act.sub`, and the RAR you
+request in the `authorization_details` parameter.
 
-The request URI returned by the script is short-lived (30 seconds) and single
-use. If you wait too long, refresh the URL, or open it once with `curl` before
-using the browser, Auth0 shows an `Oops!, something went wrong` page with
-`invalid_request_uri: request_uri not found`.
-
-
-1. Create `get-rar-auth-token-url.sh` with the following example code:
-
-  @include 'ai-iam/get-rar-auth-token-url.md'
-
-1. Make the script executable:
+1. Request a token for the agent with the client credentials grant:
 
     ```shell-session
-    $ chmod +x rar-authorize-url.sh
+    $ oauth2c "${APP_AUTH_URL}"                \
+        --pkce                                 \
+        --client-id "${AGENT_ID}"              \
+        --client-secret "${AGENT_SECRET}"      \
+        --audience "${AUDIENCE_ADDR}"          \
+        --grant-type client_credentials        \
+        --auth-method client_secret_basic
     ```
 
-1. Use the script to get a request URI with `vault.read` and `vault.create`
-   scope for the `secret-v2/data/shared-secret/*` path:
+1. Copy the `access_token` value from the **Response** section of the output and
+   save it as an environment variable:
 
     ```shell-session
-    $ RAR_PATH="secret-v2/data/shared-secret" \
-      RAR_ACTION="create, read"               \
-      ./rar-authorize-url.sh
+    $ export AGENT_TOKEN="<agent_access_token>"
     ```
 
-1. Open the printed authorize URL in a browser to approve the pushed request by 
-   signing in as the agent user if necessary and clicking **Accept**.
-
-1. Auth0 redirects you to `http://localhost:9876/callback?code=...` but the
-   browser shows a connection error because no server listens on that port. The
-   `code` value displayed in the browser address bar is the newly minted token.
-
-1. Copy the `code` value from the address bar and save as an environment
-   variable:
+1. Request a token for the human user with the authorization code grant:
 
     ```shell-session
-    $ export AUTH_CODE="c0ff33..."
+    $ oauth2c "${APP_AUTH_URL}"                \
+        --pkce                                 \
+        --client-id "${APP_ID}"                \
+        --client-secret "${SECRET_VALUE}"      \
+        --response-types code                  \
+        --response-mode query                  \
+        --audience "${AUDIENCE_ADDR}"          \
+        --grant-type authorization_code        \
+        --auth-method client_secret_basic      \
+        --no-browser
     ```
 
-1. Use cURL to request a delegation token from your Auth0 application and save
-   it to an environment variable:
+1. Copy the URL under **Go to the following URL** and open it in a private or
+   incognito browser window. Sign in as the human user, then close the window
+   after authentication succeeds.
+
+1. Copy the `access_token` value from the **Response** section of the output and
+   save it as an environment variable:
 
     ```shell-session
-    $ export DELEGATION_TOKEN="$(curl -s -X POST "https://${APP_DOMAIN}/oauth/token" \
-        -d "grant_type=authorization_code"                                      \
-        -d "client_id=${APP_ID}"                                                \
-        -d "client_secret=${SECRET_VALUE}"                                      \
-        -d "code=${AUTH_CODE}"                                                  \
-        -d "redirect_uri=http://localhost:9876/callback"                        \
-        -d "code_verifier=${CODE_VERIFIER}" | jq -r '.access_token')"
+    $ export SUBJECT_TOKEN="<subject_access_token>"
+    ```
+
+1. Exchange the subject and actor tokens for a delegation token with `create`
+   and `read` capabilities for the `secret-v2/data/shared-secret/foo` path:
+
+    ```shell-session
+    $ export DELEGATION_TOKEN="$(curl -s --request POST                                           \
+        --url "https://${APP_DOMAIN}/oauth/token"                                                 \
+        --header 'content-type: application/x-www-form-urlencoded'                                \
+        --data-urlencode 'grant_type=urn:ietf:params:oauth:grant-type:token-exchange'             \
+        --data-urlencode "client_id=${APP_ID}"                                                    \
+        --data-urlencode "client_secret=${SECRET_VALUE}"                                          \
+        --data-urlencode "audience=${AUDIENCE_ADDR}"                                              \
+        --data-urlencode "subject_token=${SUBJECT_TOKEN}"                                         \
+        --data-urlencode 'subject_token_type=urn:vault:params:oauth:token-type:access_token'      \
+        --data-urlencode "actor_token=${AGENT_TOKEN}"                                             \
+        --data-urlencode 'actor_token_type=urn:vault:params:oauth:token-type:access_token'        \
+        --data-urlencode 'authorization_details=[{"type":"vault:path_access","path":"secret-v2/data/shared-secret/foo","capabilities":["create","read"]}]' \
+        | jq -r '.access_token')"
     ```
 
 1. Use the delegation token from the token exchange to write a new secret:
@@ -809,36 +829,23 @@ using the browser, Auth0 shows an `Oops!, something went wrong` page with
    Vault prohibits the update because the current RAR policy only allows `create`
    and `read`
 
-1. Request an updated RAR token that includes `update` permission:
-
-1. Use the script to get a new request URI that includes the `update` scope:
-
-    ```shell-session
-    $ RAR_PATH="secret-v2/data/shared-secret"   \
-      RAR_ACTION="create, read, update, delete" \
-      ./rar-authorize-url.sh
-    ```
-
-1. Walk through the OAUth flow in the browser to get a new authentication code.
-
-1. Copy the `code` value from the address bar and save as an environment
-   variable:
+1. Exchange the same subject and actor tokens for a new delegation token that
+   includes the `update` and `delete` capabilities:
 
     ```shell-session
-    $ export AUTH_CODE="c0ff33..."
-    ```
-
-1. Use cURL to request a new delegation token from your Auth0 application and
-   save it to an environment variable:
-
-    ```shell-session
-    $ export DELEGATION_TOKEN="$(curl -s -X POST "https://${APP_DOMAIN}/oauth/token" \
-        -d "grant_type=authorization_code"                                      \
-        -d "client_id=${APP_ID}"                                                \
-        -d "client_secret=${SECRET_VALUE}"                                      \
-        -d "code=${AUTH_CODE}"                                                  \
-        -d "redirect_uri=http://localhost:9876/callback"                        \
-        -d "code_verifier=${CODE_VERIFIER}" | jq -r '.access_token')"
+    $ export DELEGATION_TOKEN="$(curl -s --request POST                                           \
+        --url "https://${APP_DOMAIN}/oauth/token"                                                 \
+        --header 'content-type: application/x-www-form-urlencoded'                                \
+        --data-urlencode 'grant_type=urn:ietf:params:oauth:grant-type:token-exchange'             \
+        --data-urlencode "client_id=${APP_ID}"                                                    \
+        --data-urlencode "client_secret=${SECRET_VALUE}"                                          \
+        --data-urlencode "audience=${AUDIENCE_ADDR}"                                              \
+        --data-urlencode "subject_token=${SUBJECT_TOKEN}"                                         \
+        --data-urlencode 'subject_token_type=urn:vault:params:oauth:token-type:access_token'      \
+        --data-urlencode "actor_token=${AGENT_TOKEN}"                                             \
+        --data-urlencode 'actor_token_type=urn:vault:params:oauth:token-type:access_token'        \
+        --data-urlencode 'authorization_details=[{"type":"vault:path_access","path":"secret-v2/data/shared-secret/foo","capabilities":["create","read","update","delete"]}]' \
+        | jq -r '.access_token')"
     ```
 
 1. Update the existing secret:
