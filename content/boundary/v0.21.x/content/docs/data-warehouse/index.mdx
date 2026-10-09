@@ -1,0 +1,181 @@
+---
+layout: docs
+page_title: Boundary data warehouse
+description: >-
+  Learn about how to use Boundary's built-in PostgreSQL data warehouse schema for access analytics, session auditing, and BI integration.
+---
+
+# Boundary data warehouse
+
+@include 'data-warehouse/overview.mdx'
+
+<Note>
+
+The data warehouse schema is present in Boundary Community Edition, HCP Boundary, and Boundary Enterprise. Table and column names may differ between versions. This reference is validated against **Boundary v0.21.0**.
+
+</Note>
+
+Refer to [Audit the data warehouse](/boundary/docs/data-warehouse/audit-data-warehouse) for examples of queries that you can run against the data warehouse.
+
+## Architecture overview
+
+The warehouse implements a **star schema** dimensional model:
+
+| Component | Count | Pattern |
+|-----------|-------|---------|
+| Fact tables | 3 | Accumulating snapshot facts |
+| Dimension tables | 5 | Slowly Changing Dimension Type 2 |
+| Date/time dimensions | 2 | Pre-populated conformed dimensions |
+| Group/membership tables | 3 | Junk dimensions for many-to-many |
+| ETL source views | 7 | `whx_*` views for dimension loading |
+| Warehouse functions | 25 | Trigger-based ETL procedures |
+
+Triggers on operational tables (11 total across 6 tables) fire on INSERT and UPDATE, ensuring near-real-time data flow from session creation through termination and connection rollup.
+
+## Fact tables
+
+### `wh_session_accumulating_fact`
+
+This table tracks the complete lifecycle of user sessions from pending to termination. Uses the **accumulating snapshot** pattern where a single row is inserted on session creation and updated as the session progresses through state transitions.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `session_id` | `wt_public_id` | Primary key, references operational `session` table |
+| `user_key` | `wh_dim_key` | FK to `wh_user_dimension` |
+| `host_key` | `wh_dim_key` | FK to `wh_host_dimension` |
+| `credential_group_key` | `wh_dim_text` | FK to `wh_credential_group` |
+| `session_pending_time` | `wh_timestamp` | When the session was authorized |
+| `session_active_time` | `wh_timestamp` | When the session became active (`infinity` if not yet active) |
+| `session_canceling_time` | `wh_timestamp` | When cancellation began, if applicable |
+| `session_terminated_time` | `wh_timestamp` | When the session ended (`infinity` if active) |
+| `total_connection_count` | `integer` | Number of connections established (populated on termination) |
+| `total_bytes_up` | `wh_bytes_transmitted` | Total bytes from client to target |
+| `total_bytes_down` | `wh_bytes_transmitted` | Total bytes from target to client |
+
+<Note>
+
+The `total_bytes_up` and `total_bytes_down` columns are populated by a rollup trigger (`wh_session_rollup`) that fires on session termination. These fields will be NULL for in-progress sessions.
+
+</Note>
+
+### `wh_session_connection_accumulating_fact`
+
+This table tracks individual connections within sessions, providing per-connection network metrics.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `connection_id` | `wt_public_id` | Primary key |
+| `session_id` | `wt_public_id` | FK to `wh_session_accumulating_fact` |
+| `user_key` | `wh_dim_key` | FK to `wh_user_dimension` |
+| `host_key` | `wh_dim_key` | FK to `wh_host_dimension` |
+| `client_tcp_address` | `inet` | Client IP address |
+| `client_tcp_port_number` | `wh_inet_port` | Client source port |
+| `endpoint_tcp_address` | `inet` | Target endpoint IP |
+| `endpoint_tcp_port_number` | `wh_inet_port` | Target endpoint port |
+| `bytes_up` | `wh_bytes_transmitted` | Bytes client → target |
+| `bytes_down` | `wh_bytes_transmitted` | Bytes target → client |
+| `connection_authorized_time` | `wh_timestamp` | When the connection was authorized |
+
+### `wh_auth_token_accumulating_fact`
+
+This table tracks authentication token lifecycle: issuance, access, and deletion.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `auth_token_id` | `wt_public_id` | Primary key |
+| `user_key` | `wh_dim_key` | FK to `wh_user_dimension` |
+| `auth_token_issued_time` | `wh_timestamp` | Token creation time |
+| `auth_token_approximate_last_access_time` | `wh_timestamp` | Last known use |
+| `auth_token_deleted_time` | `wh_timestamp` | Deletion time (`infinity` if active) |
+| `auth_token_valid_time_range` | `tstzrange` | Issued → deleted |
+| `auth_token_approximate_active_time_range` | `tstzrange` | Issued → last access |
+
+## Dimension tables
+
+All dimension tables use **Slowly Changing Dimension Type 2** with `current_row_indicator`, `row_effective_time`, and `row_expiration_time` columns for historical tracking. Filter on `current_row_indicator = 'Current'` for the latest version of each entity.
+
+### `wh_user_dimension`
+
+This table stores user identity with auth method, account, and organizational context.
+
+Key attributes: `user_id`, `user_name`, `auth_account_id`, `auth_account_type` (`password auth account` / `oidc auth account` / `ldap auth account`), `auth_account_email`, `auth_account_full_name`, `auth_method_type` (`password auth method` / `oidc auth method` / `ldap auth method`), `user_organization_id`, `user_organization_name`.
+
+### `wh_host_dimension`
+
+This table is a denormalized host dimension capturing the full target hierarchy.
+
+Key attributes: `host_id`, `host_type` (`static host` / `plugin host` / `direct address` / `Not Applicable`), `host_name`, `host_set_id`, `host_catalog_id`, `target_id`, `target_name`, `target_type` (`tcp target` / `ssh target` / `rdp target`), `target_default_port_number`, `project_id`, `project_name`, `organization_id`, `organization_name`.
+
+### `wh_credential_dimension`
+
+This table tracks credential libraries and stores with Vault integration metadata.
+
+Key attributes: `credential_purpose`, `credential_library_id`, `credential_library_type`, `credential_library_vault_path`, `credential_store_id`, `credential_store_type`, `credential_store_vault_address`.
+
+### `wh_network_address_dimension`
+
+This table classifies network addresses by type and address family.
+
+Key attributes: `address` (PK, text), `address_type` (`DNS Name` / `IP Address` / `Unknown`), `ip_address_family` (`IPv4` / `IPv6` / `Not Applicable`), `private_ip_address_indicator` (`Private IP address` / `Public IP address` / `Not Applicable`).
+
+### `wh_date_dimension` and `wh_time_of_day_dimension`
+
+This table features pre-populated conformed dimensions for time-series analysis from 2019-10-09 through a fixed future date. `wh_time_of_day_dimension` contains one row per second per day. These tables enable efficient date/time grouping without runtime calculations.
+
+Use `wh_date_dimension.key` = `wsf.session_pending_date_key` to join and filter by `date_actual`, `day_of_week`, `weekday_indicator`, or `calendar_month`.
+
+## ETL architecture
+
+Data flows from operational tables into the warehouse through an 11-trigger pipeline:
+
+```
+Operational Event          Trigger / Function             Warehouse Table(s)
+─────────────────         ────────────────────           ──────────────────
+session INSERT            wh_insert_session              wh_session_accumulating_fact
+session_state INSERT      wh_insert_session_state        wh_session_accumulating_fact (state transitions)
+session_connection INSERT wh_insert_session_connection   wh_session_connection_accumulating_fact
+session_connection UPDATE wh_update_session_connection   wh_session_connection_accumulating_fact (bytes)
+session_connection_state  wh_insert_session_connection_state  wh_session_connection_accumulating_fact
+session_credential_dynamic INSERT  wh_insert_session_credential_dynamic  credential group mapping
+                         + wh_upsert_credential_group    wh_credential_group + wh_credential_group_membership
+session_host_set_host    wh_upsert_host                  wh_host_dimension (host resolution)
+session_target_address   wh_upsert_host_direct_network_address  wh_host_dimension (direct address targets)
+auth_token INSERT/UPDATE wh_insert_auth_token            wh_auth_token_accumulating_fact
+session termination      wh_session_rollup               wh_session_accumulating_fact (connection count + bytes rollup)
+```
+
+<Note>
+
+**Important:** The `wh_session_connection_accumulating_fact` connections are deleted via `ON DELETE CASCADE` when the parent session is removed. The session accumulation fact retains rolled-up totals.
+
+</Note>
+
+## ETL source views
+
+Seven `whx_*` views provide the foundation for upserting dimension records:
+
+- **`whx_user_dimension_source`** - Joins `iam_user`, `auth_account`, `auth_password_account`/`auth_oidc_account`/`auth_ldap_account`, `auth_method`, `iam_scope`
+- **`whx_host_dimension_source`** - UNION of two CTEs: host-source targets (joins `host`, `host_catalog`, `host_set`, `target`) and direct-address targets (targets without host catalogs)
+- **`whx_credential_dimension_source`** - Sources from `credential_library`, `credential_store`, `credential_vault_library`, `target`
+- **`whx_network_address_dimension_source`** - Sources from `static_host` and `host_plugin_host` addresses
+
+## Related operational tables
+
+The warehouse draws from these key operational tables not directly in the `wh_*` schema:
+
+| Table | Purpose |
+|-------|---------|
+| `session` | Active and historical sessions |
+| `session_connection` | Individual connections with bytes_up/down |
+| `session_state` | State transitions (`pending` → `active` → `canceling` → `terminated`) |
+| `session_credential_dynamic` | Resolved credential IDs per session |
+| `session_host_set_host` | Resolved host set → host mappings per session |
+| `session_target_address` | Resolved direct target addresses per session |
+| `auth_token` | Authentication tokens with status and access times |
+| `iam_user`, `iam_scope` | User identities and scope hierarchy |
+| `auth_account`, `auth_method` | Auth method accounts (password, OIDC, LDAP) |
+| `credential_library`, `credential_store` | Credential brokering configuration |
+
+## More information
+
+Refer to [Audit the data warehouse](/boundary/docs/data-warehouse/audit-data-warehouse) for examples of queries that you can run against the data warehouse.
