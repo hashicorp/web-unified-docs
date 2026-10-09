@@ -66,7 +66,7 @@ Properties without a default value are required.
 | Key path                                          | Type    | Default          | Description                                                                                                 |
 |---------------------------------------------------|---------|------------------|-------------------------------------------------------------------------------------------------------------|
 | `data.type`                                       | string  |                  | Must be `"queries"`.                                                                                        |
-| `data.attributes.source`                          | string  |                  | The source of the query such as query content or reference.                                                |
+| `data.attributes.source`                          | string  |                  | The source of the query. Use `"tfe-api"` for API requests. Query definitions come from the configuration version. |
 | `data.attributes.generate-config-out`             | boolean | `true`           | Specifies whether the Terraform CLI execution passes the `-generate-config-out` flag during the query run. |
 | `data.attributes.variables`                       | array[{key, value}] | (empty array) | Specifies an optional list of run-specific variable values. Refer to run-specific variables for details.   |
 | `data.relationships.workspace.data.type`          | string  |                  | Must be `"workspaces"`.                                                                                     |
@@ -74,14 +74,49 @@ Properties without a default value are required.
 | `data.relationships.configuration-version.data.type` | string |               | Must be `"configuration-versions"`.                                                                         |
 | `data.relationships.configuration-version.data.id`   | string |               | The ID of the configuration version to use for the query.                                                  |
 
+<!-- BEGIN: TFC:only -->
+For policy evaluation in HCP Terraform, the request also supports the following optional attributes:
+
+| Key path | Type | Default | Description |
+|----------|------|---------|-------------|
+| `data.attributes.policy-evaluation-opt-in` | boolean | `true` | Controls automatic workspace policy evaluation. Omission defaults to `true` for every query source. Despite the name, explicit opt-in is not required. Set `false` to suppress automatic workspace policies when query policy opt-out is enabled. |
+| `data.attributes.policy-paths` | array of strings | (empty array) | Explicit policy source paths in the uploaded configuration. These paths are independent of the automatic workspace policy preference. Refer to [Explicit policy paths](#explicit-policy-paths). |
+
+### Policy evaluation
+
+Policy evaluation requires a workspace that uses Terraform v1.17.0 or later with remote or agent execution. Terraform v1.17.0-beta2 and later v1.17.0 prereleases also support policy evaluation. Resource discovery alone requires Terraform v1.14.0 or later. Your organization must have Terraform Policy and Search policy evaluation enabled, including access to policy enforcement and versioned policy sets. The execution environment must have a compatible Terraform Policy runtime. Refer to [Search policy requirements](/terraform/cloud-docs/workspaces/import#requirements).
+
+Automatic evaluation uses only applicable Terraform Policy (`tfpolicy`) policy sets targeted for plan-time evaluation, including inherited and organization-wide assignments where applicable. Sentinel, OPA, and sets targeted only at other stages do not participate. Refer to [Policy set configuration](/terraform/cloud-docs/policy-enforcement/manage-policy-sets/vcs/terraform-policy-vcs#policy-set-configuration-in-hcp-terraform) and [Evaluation stages](/terraform/policy#evaluation-stages).
+
+For API queries, policy evaluation requires `generate-config-out` to be `true`. Terraform evaluates configuration generated from full resource data; identities alone are insufficient. Setting `include_resource = true` in a query definition does not replace the API's generated-configuration requirement. Additional resource reads can increase query duration.
+
+Leave `policy-evaluation-opt-in` omitted to use default evaluation. To query without generated configuration, set both `generate-config-out` and `policy-evaluation-opt-in` to `false`. Explicit opt-out suppresses automatic workspace policies; it does not suppress policies supplied through `policy-paths`.
+
+If no applicable plan-time Terraform Policy sets exist and you provide no explicit policy paths, no policy evaluation occurs. An absent evaluation is not a passing result. Query-time results are informational and do not block import or replace plan-time enforcement.
+
+### Explicit policy paths
+
+Use `policy-paths` to select policy-set directories included in the configuration uploaded for remote execution, for example `["policies/security", "policies/tagging"]`. These are server-side relative paths, not paths to files on your workstation. Each path must:
+
+- Contain between 1 and 255 characters.
+- Use only letters, numbers, periods, underscores, dashes, and forward slashes.
+- Not start or end with a forward slash or contain `..`.
+
+Explicit paths select policy sources separately from automatic workspace assignments. API policy evaluation still requires generated configuration.
+<!-- END: TFC:only -->
+
 ### Sample Payload
+
+<!-- BEGIN: TFC:only -->
+This request omits `policy-evaluation-opt-in`, so HCP Terraform evaluates applicable plan-time Terraform Policy sets by default when the policy prerequisites are met.
+<!-- END: TFC:only -->
 
 ```json
 {
   "data": {
     "type": "queries",
     "attributes": {
-      "source": "example-query-content",
+      "source": "tfe-api",
       "generate-config-out": true,
       "variables": [
         { "key": "replicas", "value": "2" }
@@ -116,7 +151,54 @@ $ curl\
   https://app.terraform.io/api/v2/queries
 ```
 
+<!-- BEGIN: TFC:only -->
+### Sample Payload with policy opt-out
+
+Submit this payload to the same `POST /api/v2/queries` endpoint to generate configuration without evaluating automatic workspace policies:
+
+```json
+{
+  "data": {
+    "type": "queries",
+    "attributes": {
+      "source": "tfe-api",
+      "generate-config-out": true,
+      "policy-evaluation-opt-in": false
+    },
+    "relationships": {
+      "workspace": {
+        "data": { "type": "workspaces", "id": "ws-ABC123" }
+      },
+      "configuration-version": {
+        "data": { "type": "configuration-versions", "id": "cv-XYZ789" }
+      }
+    }
+  }
+}
+```
+
+### Policy validation errors
+
+When query policy opt-out is enabled, `policy-evaluation-opt-in` must be a Boolean. For example, supplying the string `"false"` instead of the Boolean `false` returns HTTP `422`:
+
+```json
+{
+  "errors": [
+    {
+      "status": "422",
+      "title": "invalid attributes",
+      "detail": "Policy evaluation opt in must be a boolean"
+    }
+  ]
+}
+```
+
+A policy preference of `true` with `generate-config-out: false` also fails validation for API queries because policy evaluation requires generated configuration. Omission uses the default preference of `true`.
+<!-- END: TFC:only -->
+
 ### Sample Response
+
+The following example shows common response fields. Refer to [Query run attributes](#query-run-attributes) for additional attributes.
 
 ```json
 {
@@ -124,28 +206,18 @@ $ curl\
     "id": "query-ABC123",
     "type": "queries",
     "attributes": {
-      "actions": {
-        "is-cancelable": true,
-        "is-force-cancelable": false
-      },
-      "canceled-at": null,
-      "updated-at": "2025-01-15T10:30:00.000Z",
       "created-at": "2025-01-15T10:30:00.000Z",
-      "source": "example-query-content",
+      "source": "tfe-api",
       "generate-config-out": true,
+      "resources-discovered": 0,
       "variables": [
         { "key": "replicas", "value": "2" }
       ],
       "status-timestamps": {
-        "pending-at": "2025-01-15T10:30:00.000Z",
-        "queued-at": null,
-        "errored-at": null,
-        "canceled-at": null,
-        "running-at": null,
-        "finished-at": null
+        "pending-at": "2025-01-15T10:30:00.000Z"
       },
       "status": "pending",
-      "log-read-url": "https://archivist.terraform.io/v1/object/...",
+      "log-read-url": "https://archivist.terraform.io/v1/object/..."
     },
     "relationships": {
       "workspace": {
@@ -165,9 +237,6 @@ $ curl\
           "type": "users",
           "id": "user-123"
         }
-      },
-      "canceled-by": {
-        "data": null
       }
     },
     "links": {
@@ -212,6 +281,8 @@ $ curl\
 
 ### Sample Response
 
+The following example shows common response fields. Refer to [Query run attributes](#query-run-attributes) for additional attributes.
+
 ```json
 {
   "data": [
@@ -219,19 +290,16 @@ $ curl\
       "id": "query-ABC123",
       "type": "queries",
       "attributes": {
-        "canceled-at": null,
-        "updated-at": "2025-01-15T10:35:00.000Z",
         "created-at": "2025-01-15T10:30:00.000Z",
-        "source": "example-query-content",
+        "source": "tfe-api",
         "generate-config-out": true,
+        "resources-discovered": 5,
         "variables": [
           { "key": "replicas", "value": "2" }
         ],
         "status-timestamps": {
           "pending-at": "2025-01-15T10:30:00.000Z",
           "queued-at": "2025-01-15T10:30:05.000Z",
-          "errored-at": null,
-          "canceled-at": null,
           "running-at": "2025-01-15T10:30:10.000Z",
           "finished-at": "2025-01-15T10:35:00.000Z"
         },
@@ -256,9 +324,6 @@ $ curl\
             "type": "users",
             "id": "user-123"
           }
-        },
-        "canceled-by": {
-          "data": null
         }
       },
       "links": {
@@ -312,34 +377,36 @@ $ curl\
 
 ### Sample Response
 
+The following example shows common response fields. Refer to [Query run attributes](#query-run-attributes) for additional attributes.
+
 ```json
 {
   "data": {
     "id": "query-ABC123",
     "type": "queries",
     "attributes": {
-      "actions": {
-        "is-cancelable": true,
-        "is-force-cancelable": false
-      },
-      "canceled-at": null,
-      "updated-at": "2025-01-15T10:30:15.000Z",
       "created-at": "2025-01-15T10:30:00.000Z",
-      "source": "example-query-content",
+      "source": "tfe-api",
       "generate-config-out": true,
+      "resources-discovered": 5,
+      "list-completions": [
+        {
+          "address": "list.aws_instance.example",
+          "resource-type": "aws_instance",
+          "total": 5
+        }
+      ],
       "variables": [
         { "key": "replicas", "value": "2" }
       ],
       "status-timestamps": {
         "pending-at": "2025-01-15T10:30:00.000Z",
         "queued-at": "2025-01-15T10:30:05.000Z",
-        "errored-at": null,
-        "canceled-at": null,
         "running-at": "2025-01-15T10:30:10.000Z",
-        "finished-at": null
+        "finished-at": "2025-01-15T10:35:00.000Z"
       },
-      "status": "running",
-      "log-read-url": "https://archivist.terraform.io/v1/object/...",
+      "status": "finished",
+      "log-read-url": "https://archivist.terraform.io/v1/object/..."
     },
     "relationships": {
       "workspace": {
@@ -359,9 +426,6 @@ $ curl\
           "type": "users",
           "id": "user-123"
         }
-      },
-      "canceled-by": {
-        "data": null
       }
     },
     "links": {
@@ -399,6 +463,52 @@ $ curl\
 ## Query run attributes
 
 Query runs have the following attributes:
+
+<!-- BEGIN: TFC:only -->
+### Policy attributes
+
+Create, list, and show responses include the persisted `policy-evaluation-opt-in` preference. When Search policy evaluation is enabled for your organization, responses also include `policy-paths`, which is `null` when you provide no explicit paths. These attributes describe the preference and explicit sources, not whether evaluation completes or resources pass.
+
+For the default-evaluation request, the response's `attributes` object includes these additional fields:
+
+```json
+{
+  "policy-evaluation-opt-in": true,
+  "policy-paths": null
+}
+```
+
+For the opt-out request, the persisted preference is `false`:
+
+```json
+{
+  "policy-evaluation-opt-in": false,
+  "policy-paths": null
+}
+```
+
+### Policy results in list completions
+
+The show endpoint includes `list-completions` for completed list blocks. When Search policy evaluation is enabled, each entry also includes `policies-passed` and `policies-failed`:
+
+```json
+{
+  "list-completions": [
+    {
+      "address": "list.aws_instance.example",
+      "resource-type": "aws_instance",
+      "total": 5,
+      "policies-passed": 3,
+      "policies-failed": 1
+    }
+  ]
+}
+```
+
+These counts describe resource-row outcomes, not individual policies. They do not need to add up to `total`: a resource can have an unknown result, an evaluation error, or no matching policy. The create and list endpoints do not include `list-completions`.
+
+For detailed policy results and diagnostics, retrieve the existing query log using `log-read-url`. Query results can be incomplete when generated configuration lacks attributes or relationship data that a policy requires. They do not provide a complete compliance assessment or replace plan-time enforcement.
+<!-- END: TFC:only -->
 
 ### Status
 
