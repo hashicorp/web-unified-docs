@@ -1,0 +1,181 @@
+---
+page_title: Protect your keys
+description: Protect the keys that HCP Terraform uses for hold your own key (HYOK) encryption from accidental or permanent deletion in AWS KMS, Azure Key Vault, Google Cloud KMS, or Vault.
+tfc_only: true
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-09-19T05:29:02.000Z
+last_modified: 2026-09-19T05:29:02.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Protect your keys
+
+HCP Terraform's hold your own key (HYOK) encryption depends on the availability of your key encryption key (KEK). If your key management service permanently destroys the KEK, HCP Terraform might not be able to decrypt data encryption keys (DEKs) and existing state and plan files might become inaccessible.
+
+Configure deletion safeguards before you enable HYOK. Use the maximum recovery period that your key management service provides, or a shorter period that meets your security and compliance requirements. The following sections describe controls for each supported key management service and link to the service's documentation. For information about configuring HYOK, refer to [Configure and manage keys](/terraform/cloud-docs/hold-your-own-key/configure).
+
+@include 'tfc-package-callouts/hyok.mdx'
+
+## AWS Key Management Service
+
+### Prevent accidental deletion
+
+Use a customer-managed symmetric AWS Key Management Service (AWS KMS) key. Set the key deletion waiting period to 30 days, which is the maximum AWS KMS waiting period.
+
+Separate key administration from key use. Limit the following permissions to a break-glass security role:
+
+- `kms:ScheduleKeyDeletion`
+- `kms:DisableKey`
+- `kms:PutKeyPolicy`
+
+Grant the HCP Terraform OIDC role only the cryptographic operations and metadata reads that HYOK requires. Refer to the AWS KMS [permissions reference](https://docs.aws.amazon.com/kms/latest/developerguide/kms-api-permissions-reference.html) for the complete permission list and to [Default key policy](https://docs.aws.amazon.com/kms/latest/developerguide/key-policy-default.html) for information about key administrators and key users.
+
+When you manage the key with the AWS provider for Terraform, set `deletion_window_in_days` to `30`:
+
+```hcl
+resource "aws_kms_key" "hyok" {
+  description             = "HCP Terraform HYOK key"
+  customer_master_key_spec = "SYMMETRIC_DEFAULT"
+  key_usage               = "ENCRYPT_DECRYPT"
+  deletion_window_in_days = 30
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+```
+
+The `prevent_destroy` meta-argument blocks Terraform from destroying the resource while it remains in your configuration. It does not replace provider deletion safeguards or protect against deletion outside Terraform. Configure the key policy and IAM permissions separately so that only the break-glass role can schedule deletion, disable the key, or change the key policy. Refer to the [AWS KMS key resource](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/kms_key) for the provider arguments.
+
+### Monitor for accidental deletion
+
+Use AWS CloudTrail to alert on the following events:
+
+- `ScheduleKeyDeletion`
+- `DisableKey`
+- `PutKeyPolicy`
+- Changes to the OIDC trust policy for the HCP Terraform role, including `UpdateAssumeRolePolicy` events
+
+Refer to [Logging AWS KMS API calls with AWS CloudTrail](https://docs.aws.amazon.com/kms/latest/developerguide/logging-using-cloudtrail.html) for the events that AWS KMS records. Refer to [Logging IAM and AWS STS API calls with AWS CloudTrail](https://docs.aws.amazon.com/IAM/latest/UserGuide/cloudtrail-integration.html) for trust policy changes.
+
+When deletion is scheduled, cancel it before the 30-day waiting period expires. Re-enable the key after you cancel deletion. After AWS KMS deletes a single-Region key or multi-Region primary, you cannot recover it. AWS KMS can recreate a deleted multi-Region replica if its primary still exists by replicating the primary in the same Region. Refer to [Deleting AWS KMS keys](https://docs.aws.amazon.com/kms/latest/developerguide/deleting-keys.html) for the deletion lifecycle.
+
+## Azure Key Vault
+
+### Prevent accidental deletion
+
+Create the Key Vault with 90-day soft-delete retention and enable purge protection. Soft delete makes a deleted vault or key recoverable during the retention period. Purge protection prevents permanent deletion until the retention period expires.
+
+Restrict the following operations to a break-glass security role:
+
+- Deleting a key or vault
+- Purging a deleted key or vault
+- Changing role-based access control (RBAC) or access policies
+- Changing the Microsoft Entra federated identity configuration used by HCP Terraform
+
+Grant the HCP Terraform identity only the key operations that HYOK requires. Refer to the [Azure Key Vault soft-delete overview](https://learn.microsoft.com/en-us/azure/key-vault/general/soft-delete-overview) and [Azure Key Vault recovery overview](https://learn.microsoft.com/en-us/azure/key-vault/general/key-vault-recovery) for retention, purge protection, and recovery behavior.
+
+When you manage the vault with the AzureRM provider for Terraform, set the retention period to 90 days and enable purge protection:
+
+```hcl
+resource "azurerm_key_vault" "hyok" {
+  name                       = "KEY_VAULT_NAME"
+  location                   = "LOCATION"
+  resource_group_name        = "RESOURCE_GROUP_NAME"
+  tenant_id                  = "TENANT_ID"
+  sku_name                   = "standard"
+  rbac_authorization_enabled = true
+  soft_delete_retention_days = 90
+  purge_protection_enabled   = true
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+```
+
+With RBAC enabled, assign the HCP Terraform identity the **Key Vault Crypto User** role scoped to the key. Keep roles that can delete or purge the vault, or change role assignments, with break-glass administrators. Refer to the [Azure RBAC guide](https://learn.microsoft.com/en-us/azure/key-vault/general/rbac-guide) and the [Azure Key Vault resource](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/key_vault) for role assignments and provider arguments.
+
+### Monitor for accidental deletion
+
+Alert on the following events:
+
+- Key Vault or key deletion
+- Key Vault or key purge
+- Recovery operations
+- Changes to role assignments or access policies
+- Changes to the Microsoft Entra federated identity configuration
+
+Recover a deleted key or vault before the 90-day retention period expires. After the retention period expires, Azure Key Vault purges the deleted resource and you cannot recover it.
+
+## Google Cloud Key Management Service
+
+### Prevent accidental deletion
+
+Set the key-version destruction period to 120 days. Enforce this minimum with the `constraints/cloudkms.minimumDestroyScheduledDuration` organization policy constraint. Also enforce `constraints/cloudkms.disableBeforeDestroy` so that a key version must be disabled before you schedule its destruction.
+
+Restrict key-version destruction, disablement, and Identity and Access Management (IAM) changes to authorized security administrators. Use separate administrators for disabling a key version and scheduling its destruction when your approval process requires multiple people.
+
+When you manage the key with the Google Cloud provider for Terraform, set the scheduled destruction period to 120 days:
+
+```hcl
+resource "google_kms_crypto_key" "hyok" {
+  name                       = "hyok"
+  key_ring                   = google_kms_key_ring.hyok.id
+  purpose                    = "ENCRYPT_DECRYPT"
+  destroy_scheduled_duration = "10368000s"
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+```
+
+The key resource sets the duration for new key versions. Use organization policies to enforce the minimum duration and the disabled-before-destruction requirement across your organization. Refer to the [Google Cloud KMS crypto key resource](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/kms_crypto_key) and [Control key version destruction](https://docs.cloud.google.com/kms/docs/control-key-destruction) for the provider argument and organization policy constraints.
+
+### Monitor for accidental deletion
+
+Use Cloud Audit Logs to alert on the following operations and configuration changes:
+
+- Scheduling key-version destruction
+- Restoring a key version
+- Disabling or re-enabling a key version
+- Changing the primary key version
+- Changing IAM or organization policies
+
+Restore a key version while it is scheduled for destruction. After the key material is destroyed, you generally cannot recover it. Refer to [Destroy and restore key versions](https://docs.cloud.google.com/kms/docs/destroy-restore) for the key-version lifecycle.
+
+## Vault Transit secrets engine
+
+### Prevent accidental deletion
+
+Keep the Transit `deletion_allowed` setting set to `false`. This is the default. Restrict access to the key configuration endpoint and the Transit key deletion endpoint to a break-glass security role.
+
+Grant the HCP Terraform identity only the Transit operations that HYOK requires. Vault Enterprise customers can use [Control Groups](https://developer.hashicorp.com/vault/docs/enterprise/control-groups) to require additional approval for sensitive Transit administration operations.
+
+When you manage the key with the Vault provider for Terraform, set `deletion_allowed` to `false`:
+
+```hcl
+resource "vault_transit_secret_backend_key" "hyok" {
+  backend          = "transit"
+  name             = "hyok"
+  deletion_allowed = false
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+```
+
+Refer to the [Vault Transit key resource](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/transit_secret_backend_key) and [Transit secrets engine API](https://developer.hashicorp.com/vault/api-docs/secret/transit) for the provider arguments and key-management endpoints.
+
+### Monitor for accidental deletion
+
+Configure [Vault audit devices](https://developer.hashicorp.com/vault/docs/audit) and alert on the following events:
+
+- Transit key deletion
+- Changes to `deletion_allowed`
+- Changes to Transit ACL policies
+- Changes to identities authorized to administer the key
+
+Vault Transit does not provide a deletion waiting period. Prevention and monitoring are the primary safeguards.
