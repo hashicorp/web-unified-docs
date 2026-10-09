@@ -1,0 +1,249 @@
+---
+layout: docs
+page_title: Install and set up Consul Operations Hub
+description: >-
+  Install Consul Operations Hub on Kubernetes, attach Consul datacenters with global registry configuration, and explore the dashboard, services, topology, and security tabs.
+---
+
+# Install and set up Consul Operations Hub
+
+This page describes how to install Consul Operations Hub, attach an existing Consul cluster, and explore its data in the web UI.
+
+## Introduction
+
+Consul Operations Hub provides a centralized view of your Consul datacenters, services, gateways, and service mesh. Consul servers publish snapshots and incremental updates to its global registry. Operations Hub stores the data in a Neo4j graph database and exposes it through an API and web UI.
+
+Operations Hub runs separately from your Consul server agents. Installing Operations Hub does not attach your clusters automatically. Register each datacenter in the UI, then configure its Consul servers to publish data with the generated cluster ID and ingestion token.
+
+## Requirements
+
+Before you begin, prepare the following:
+
+- An existing Kubernetes cluster with `kubectl` access and Helm installed.
+- Consul installed in the Kubernetes cluster, with the service mesh injector and Consul API Gateway controller enabled. Refer to [Deploy Consul with Helm](/consul/docs/deploy/server/k8s/helm).
+- The `consul-ops-hub` Helm chart and an Operations Hub container image for your release. The examples use a local chart directory and explicit image placeholders.
+- A running Neo4j database reachable from the Operations Hub pods. The installation example uses an external database rather than the bundled Neo4j subchart.
+- An OpenID Connect (OIDC) identity provider, an OIDC client, and permission to create Kubernetes Secrets. Register `https://HUB_HOST/oauth2/callback` as the client's redirect URI.
+- A DNS hostname for Operations Hub and a TLS certificate for that hostname. Browsers and the Consul servers you attach must be able to reach the gateway at this address.
+- Consul 2.1.x server agents for each cluster you attach, with access to their configuration files.
+
+The installation example uses an external identity provider, a trusted gateway certificate, and Secrets for database and OIDC credentials. Do not use the chart's development credentials in production.
+
+## Install Operations Hub
+
+Use the following steps to deploy Operations Hub into the Kubernetes namespace that contains your Consul installation.
+
+1. Set the namespace and path to your local chart directory. Replace the placeholders with your values.
+
+   ```shell-session
+   $ export HUB_NAMESPACE="CONSUL_KUBERNETES_NAMESPACE"
+   $ export HUB_CHART="/PATH/TO/consul-ops-hub"
+   ```
+
+1. Create the Secrets for the external Neo4j database, OIDC client, and gateway certificate. Use files from your approved secret-management workflow rather than placing credentials in your Helm values.
+
+   ```shell-session
+   $ kubectl create secret generic operations-hub-neo4j \
+       --namespace "$HUB_NAMESPACE" \
+       --from-file=neo4j-password=/PATH/TO/neo4j-password
+   $ kubectl create secret generic operations-hub-oidc \
+       --namespace "$HUB_NAMESPACE" \
+       --from-file=client-secret=/PATH/TO/oidc-client-secret \
+       --from-file=cookie-secret=/PATH/TO/cookie-secret
+   $ kubectl create secret tls operations-hub-tls \
+       --namespace "$HUB_NAMESPACE" \
+       --cert=/PATH/TO/tls.crt \
+       --key=/PATH/TO/tls.key
+   ```
+
+   The cookie secret must contain exactly 16, 24, or 32 ASCII characters. Create credential files without a trailing newline. Include the certificate chain in `tls.crt` when your certificate authority requires it.
+
+1. Create `operations-hub-values.yaml` with the following configuration. Replace the image, hostname, database, identity provider, client ID, and allowed email domain placeholders.
+
+   ```yaml
+   image:
+     repository: "OPERATIONS_HUB_IMAGE_REPOSITORY"
+     tag: "OPERATIONS_HUB_IMAGE_TAG"
+
+   neo4j:
+     install:
+       enabled: false
+     uri: "bolt://NEO4J_HOST:7687"
+     database: "NEO4J_DATABASE"
+     username: "NEO4J_USERNAME"
+     existingSecret: "operations-hub-neo4j"
+
+   connectInject:
+     enabled: true
+     datacenter: "CONSUL_DATACENTER"
+     namespace: "CONSUL_NAMESPACE"
+     partition: "CONSUL_PARTITION"
+
+   consulGateway:
+     enabled: true
+     gateway:
+       listeners:
+         - name: https
+           protocol: HTTPS
+           port: 443
+           tls:
+             mode: Terminate
+             certificateRefs:
+               - group: ""
+                 kind: Secret
+                 name: operations-hub-tls
+     httpRoute:
+       hostnames:
+         - "HUB_HOST"
+       listenerName: "https"
+       ingestTimeout: "300s"
+
+   proxyDefaults:
+     enabled: false
+
+   auth:
+     enabled: true
+     publicUrl: "https://HUB_HOST"
+     keycloak:
+       enabled: false
+     oauth2proxy:
+       enabled: true
+       clientId: "OIDC_CLIENT_ID"
+       existingSecret: "operations-hub-oidc"
+       oidc:
+         issuerUrl: "https://OIDC_ISSUER"
+       cookieSecure: true
+       whitelistDomain: "HUB_HOST"
+       allowedEmailDomains:
+         - "ALLOWED_EMAIL_DOMAIN"
+   ```
+
+   Set `connectInject.namespace` and `connectInject.partition` to `default` when you do not use Consul namespaces or admin partitions. These values refer to Consul scopes, not the Kubernetes namespace. Configure the Neo4j URI's scheme to match your database's TLS settings.
+
+   Restrict sign-in to the email domains or identity-provider groups that should access Operations Hub. Every admitted identity has the same access; these restrictions control who can use the UI.
+
+   This example disables creation of the mesh-wide `global` proxy defaults entry to avoid replacing configuration you already manage. Set `local_request_timeout_ms` to at least `300000` in your existing proxy defaults so full snapshots can complete within the gateway's 300-second ingestion timeout. If you do not manage a `global` entry, you can set `proxyDefaults.enabled` to `true` to let the chart create one. The entry applies to all mesh services in the partition.
+
+1. Install the chart.
+
+   ```shell-session
+   $ helm install operations-hub "$HUB_CHART" \
+       --namespace "$HUB_NAMESPACE" \
+       --values operations-hub-values.yaml \
+       --wait \
+       --timeout 10m
+   ```
+
+1. Verify that the deployment is available and inspect the gateway and route status.
+
+   ```shell-session
+   $ kubectl rollout status deployment/operations-hub-consul-ops-hub \
+       --namespace "$HUB_NAMESPACE" \
+       --timeout=10m
+   $ kubectl get gateway operations-hub-consul-ops-hub-gateway \
+       --namespace "$HUB_NAMESPACE"
+   $ kubectl describe httproute operations-hub-consul-ops-hub-route \
+       --namespace "$HUB_NAMESPACE"
+   ```
+
+   The resource names assume the release name `operations-hub` and no chart name overrides. Confirm that the gateway has an address and that the route is accepted with resolved backend references. Configure DNS for `HUB_HOST` to reach the gateway, then open `https://HUB_HOST` in your browser and sign in with your identity provider.
+
+   If pods do not become ready, inspect their events and logs for database connectivity, image pull, or service mesh injection errors. If sign-in fails, verify the OIDC issuer, client credentials, and callback URI.
+
+## Attach a Consul cluster
+
+Use the **Datacenters** section to register the cluster and obtain its global registry credentials. Registration creates an Operations Hub record; data appears only after the Consul servers begin publishing.
+
+1. Open **Datacenters**, then click **Add datacenter**.
+1. In **Identity**, enter a **Datacenter name** and select an **Environment**, then click **Next**. Use a name that identifies the datacenter within your Operations Hub.
+1. In **Platform & Ownership**, optionally enter **Region**, **Availability zone**, **Platform / Runtime**, and **Ownership- team/ business unit**, then click **Next**.
+1. In **Configure**, click **Generate token**. Copy the token and the cluster ID from the generated HCL configuration. Store the token securely before clicking **Close**.
+
+   <Warning>
+
+   Operations Hub displays the ingestion token only once. You cannot recover it after you leave the result screen. The token authenticates registry ingestion; it is not a Consul access control list (ACL) token or your UI sign-in credential.
+
+   </Warning>
+
+1. Store the token in a file readable by the Consul process on each server agent. Restrict access to the file to the account that runs Consul.
+1. Add the `global_registry` block to each server agent's configuration. Use the cluster ID generated in **Configure**, not a separately generated UUID. Use the Operations Hub gateway's base URL as `address`, without `/api/v1/registry/ingest`.
+
+   <CodeTabs>
+
+   ```hcl
+   global_registry {
+     enabled    = true
+     address    = "https://HUB_HOST"
+     cluster_id = "GENERATED_CLUSTER_UUID"
+     token_file = "/PATH/TO/operations-hub-token.txt"
+   }
+   ```
+
+   ```json
+   {
+     "global_registry": {
+       "enabled": true,
+       "address": "https://HUB_HOST",
+       "cluster_id": "GENERATED_CLUSTER_UUID",
+       "token_file": "/PATH/TO/operations-hub-token.txt"
+     }
+   }
+   ```
+
+   </CodeTabs>
+
+   Refer to the [global registry configuration reference](/consul/docs/reference/agent/configuration-file/global-registry) for all fields, token source precedence, and TLS settings. When the gateway certificate uses a private certificate authority, configure `ca_file` on each server. Leave `tls_skip_verify` set to `false`.
+
+1. Run [`consul reload`](/consul/commands/reload) for each server agent to load the configuration without restarting it. The leader publishes data, and configuring every server allows publishing to continue after a leadership change.
+1. Return to **Datacenters** and open the registered datacenter. Verify that **Last sync** updates and that the **Services** and **Nodes** tabs contain the expected cluster data.
+
+   If the datacenter does not synchronize, check the leader's logs, connectivity to the gateway, and certificate trust. Verify that `cluster_id` and the token belong to the same registration. Also check for environment variables or inline tokens that override your `token_file`.
+
+Repeat this procedure for each cluster you attach. Use the credentials from that cluster's registration rather than reusing another cluster's ID and token.
+
+## Explore the UI sections and tabs
+
+The sidebar provides the following sections. Operations Hub displays data received through the global registry, so check the last synchronization time when assessing the data.
+
+| Section | Purpose |
+| --- | --- |
+| **Operation Hub Dashboard** | View datacenter health, service and gateway counts, and warnings about stale data. |
+| **Datacenters** | View registered datacenters, health, inventory counts, version, and last synchronization time. Use **Add datacenter** to [attach a cluster](#attach-a-consul-cluster) and configure its [global registry connection](/consul/docs/reference/agent/configuration-file/global-registry). |
+| **Services** | Browse services across datacenters and inspect service health, mesh status, partition, namespace, and source. |
+| **Gateways** | Browse gateways and inspect their type, health, metadata, and connections. |
+| **Topology** | Explore connectivity and dependencies in the global view or a selected datacenter. |
+| **Security** | Inspect service mesh, ACL, and certificate posture across datacenters. |
+
+### Datacenter detail tabs
+
+Select a datacenter from **Datacenters** to inspect its inventory.
+
+| Tab | Purpose |
+| --- | --- |
+| **Peers** | View peers, connection status, and imported and exported service counts. |
+| **Gateways** | View gateways associated with the datacenter. |
+| **Services** | View the datacenter's registered services. |
+| **Nodes** | View the datacenter's registered nodes and addresses. |
+
+The **Peers** and **Gateways** tabs appear for datacenters classified as federated. Standalone datacenters show **Services** and **Nodes**.
+
+### Service detail tabs
+
+Select a service from **Services** to inspect its instances and relationships.
+
+| Tab | Purpose |
+| --- | --- |
+| **Instances** | View service instances, addresses, health, and service mesh status. |
+| **Intentions** | View the source, destination, permissions, and type of service intentions. |
+| **Tags** | View tags associated with the service. |
+| **Topology** | View the service's upstream and downstream relationships. |
+
+### Security tabs
+
+Open **Security** to compare security posture across datacenters.
+
+| Tab | Purpose |
+| --- | --- |
+| **Mesh Overview** | View mesh health, mutual TLS (mTLS) status, mesh service counts, and sidecar proxy counts. |
+| **ACL Posture** | View whether ACLs are enabled and counts of authentication methods, policies, tokens, and roles. |
+| **Certificates & mTLS** | View mTLS status, certificate authority provider, certificate expiry, root rotation, and trust domain. |
