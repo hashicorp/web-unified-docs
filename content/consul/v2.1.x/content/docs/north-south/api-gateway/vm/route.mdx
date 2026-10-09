@@ -4,7 +4,7 @@ page_title: Define API gateway routes on virtual machines
 description: Learn how to define and attach HTTP and TCP routes to Consul API gateway listeners so that requests from external clients can reach services in the mesh.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2026-03-31T20:45:27.000Z
-last_modified: 2026-03-31T20:45:27.000Z
+last_modified: 2026-10-09T09:19:58.000Z
 # END AUTO GENERATED METADATA
 ---
 
@@ -278,6 +278,265 @@ Certificate selection precedence is:
 1. Route service `TLS.SDS`
 1. Listener `TLS.SDS`
 1. Gateway top-level `TLS.SDS`
+
+## Configure passive health checks for routed services
+
+Passive health checks configure Envoy outlier detection on the API gateway. When an instance of a routed service returns consecutive errors, the gateway removes the instance from its load balancing pool for a period of time and sends requests to the remaining healthy instances.
+
+Passive health checks require Consul v2.1 or later. You can configure passive health checks in the following locations:
+
+- Gateway-wide default: [`Defaults.PassiveHealthCheck`](/consul/docs/reference/config-entry/api-gateway#defaults-passivehealthcheck) in the `api-gateway` configuration entry. The default applies to every service that routes attached to the gateway target.
+- Service-level override: `Limits.PassiveHealthCheck` on a destination service in an [`http-route`](/consul/docs/reference/config-entry/http-route#rules-services-limits-passivehealthcheck) or [`tcp-route`](/consul/docs/reference/config-entry/tcp-route#services-limits-passivehealthcheck) configuration entry.
+
+When you configure both, the service-level passive health check replaces the gateway default for that service. Consul does not merge individual fields. When multiple routes on the same gateway target the same service, configure the same passive health check on each route because Consul applies only one of them to the service.
+
+### Define a gateway-wide default
+
+The following example configures a default passive health check on the `api-gateway` gateway:
+
+```hcl
+Kind = "api-gateway"
+Name = "api-gateway"
+
+Listeners = [
+  {
+    Name     = "listener-one"
+    Port     = 9999
+    Protocol = "http"
+  }
+]
+
+Defaults = {
+  PassiveHealthCheck = {
+    Interval                = "10s"
+    MaxFailures             = 3
+    EnforcingConsecutive5xx = 80
+    MaxEjectionPercent      = 25
+    BaseEjectionTime        = "30s"
+  }
+}
+```
+
+### Override the default for a service
+
+The following example routes `/s1` requests to the `s1` service, which inherits the gateway default, and routes `/s2` requests to the `s2` service, which uses its own passive health check:
+
+```hcl
+Kind = "http-route"
+Name = "api-gateway-route"
+
+Parents = [
+  {
+    Kind        = "api-gateway"
+    Name        = "api-gateway"
+    SectionName = "listener-one"
+  }
+]
+
+Rules = [
+  {
+    Matches = [
+      {
+        Path = {
+          Match = "prefix"
+          Value = "/s1"
+        }
+      }
+    ]
+    Services = [
+      {
+        Name = "s1"
+      }
+    ]
+  },
+  {
+    Matches = [
+      {
+        Path = {
+          Match = "prefix"
+          Value = "/s2"
+        }
+      }
+    ]
+    Services = [
+      {
+        Name = "s2"
+        Limits = {
+          PassiveHealthCheck = {
+            Interval                = "20s"
+            MaxFailures             = 5
+            EnforcingConsecutive5xx = 60
+            MaxEjectionPercent      = 50
+            BaseEjectionTime        = "60s"
+          }
+        }
+      }
+    ]
+  }
+]
+```
+
+You can configure upstream circuit-breaker limits, such as `MaxConnections`, in the same `Defaults` and `Limits` blocks. Unlike passive health checks, Consul applies service-level circuit-breaker limits field by field, and inherits any unset limit from the gateway default.
+
+### Verify the passive health check
+
+Complete the following steps to verify that the gateway applies the passive health check:
+
+1. Read the configuration entries to confirm that Consul stored the passive health check settings:
+
+   ```shell-session
+   $ consul config read -kind api-gateway -name api-gateway
+   $ consul config read -kind http-route -name api-gateway-route
+   ```
+
+1. On the machine that runs the API gateway, query the Envoy admin interface for the outlier detection configuration of the `s2` cluster. By default, the Envoy admin interface listens on `localhost:19000`.
+
+   ```shell-session
+   $ curl --silent localhost:19000/config_dump \
+       | jq '.configs[]
+         | select(."@type" | contains("ClustersConfigDump"))
+         | .dynamic_active_clusters[]
+         | select(.cluster.name | startswith("s2."))
+         | .cluster.outlier_detection'
+   ```
+
+   The output contains the values from the route's passive health check:
+
+   ```json
+   {
+     "consecutive_5xx": 5,
+     "interval": "20s",
+     "base_ejection_time": "60s",
+     "max_ejection_percent": 50,
+     "enforcing_consecutive_5xx": 60
+   }
+   ```
+
+   Run the same command for the `s1` cluster to verify that it uses the gateway default values.
+
+## Route requests with inverted header matches
+
+Set `Invert` to `true` on a header match in an `http-route` to negate the condition. Inverted header matches let you route requests when a header is absent or when a header value does not equal a specific value. For example, you can send requests without a canary header to a stable service and requests with the header to a canary service.
+
+Inverted header matches require Consul v2.1 or later. Refer to [`Rules[].Matches[].Headers[].Invert`](/consul/docs/reference/config-entry/http-route#rules-matches-headers-invert) in the HTTP route configuration reference for how `Invert` affects each match type.
+
+The following example routes requests that do not include the `x-canary` header to the `s2` service, and routes requests that include the header to the `s1` service:
+
+```hcl
+Kind = "http-route"
+Name = "canary-route"
+
+Parents = [
+  {
+    Kind        = "api-gateway"
+    Name        = "api-gateway"
+    SectionName = "listener-one"
+  }
+]
+
+Rules = [
+  {
+    Matches = [
+      {
+        Headers = [
+          {
+            Name   = "x-canary"
+            Match  = "present"
+            Invert = true
+          }
+        ]
+      }
+    ]
+    Services = [
+      {
+        Name = "s2"
+      }
+    ]
+  },
+  {
+    Matches = [
+      {
+        Headers = [
+          {
+            Name  = "x-canary"
+            Match = "present"
+          }
+        ]
+      }
+    ]
+    Services = [
+      {
+        Name = "s1"
+      }
+    ]
+  }
+]
+```
+
+The following example routes requests to the `service-v2` service when the `x-version` header is present and its value is not `v1`:
+
+```hcl
+Kind = "http-route"
+Name = "version-route"
+
+Parents = [
+  {
+    Kind        = "api-gateway"
+    Name        = "api-gateway"
+    SectionName = "listener-one"
+  }
+]
+
+Rules = [
+  {
+    Matches = [
+      {
+        Headers = [
+          {
+            Name   = "x-version"
+            Match  = "exact"
+            Value  = "v1"
+            Invert = true
+          }
+        ]
+      }
+    ]
+    Services = [
+      {
+        Name = "service-v2"
+      }
+    ]
+  }
+]
+```
+
+For `exact`, `prefix`, `suffix`, and `regex` matches, an inverted condition does not match requests that do not include the header. To match requests that do not include a header, use the `present` match type with `Invert = true`.
+
+### Verify inverted header matches
+
+Complete the following steps to verify that the gateway applies the inverted header match:
+
+1. Read the route configuration entry and confirm that the header match includes `"Invert": true`. Confirm that the route status shows that the route is bound to the gateway.
+
+   ```shell-session
+   $ consul config read -kind http-route -name canary-route
+   ```
+
+1. On the machine that runs the API gateway, query the Envoy admin interface for the route configuration. By default, the Envoy admin interface listens on `localhost:19000`. The header matcher for the inverted condition includes `"invert_match": true`.
+
+   ```shell-session
+   $ curl --silent localhost:19000/config_dump \
+       | jq '.configs[]
+         | select(."@type" | contains("RoutesConfigDump"))
+         | .dynamic_route_configs[].route_config.virtual_hosts[].routes[].match.headers'
+   ```
+
+1. Send requests with and without the header. Replace `GATEWAY_ADDRESS` with the address of the API gateway listener. The first request routes to the `s2` service, and the second request routes to the `s1` service.
+
+   ```shell-session
+   $ curl http://GATEWAY_ADDRESS:9999/
+   $ curl --header "x-canary: true" http://GATEWAY_ADDRESS:9999/
+   ```
 
 ## Deploy the route configuration
 
