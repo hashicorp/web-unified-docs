@@ -70,9 +70,13 @@ export const rewriteInternalLinksPlugin = ({ entry, versionMetadata }) => {
 				isLinkToRewritePattern.test(node.url)
 			) {
 				const splitUrl = node.url.split('/')
+				const nodeProduct = splitUrl[1]
 				const hasVersionInPath = splitUrl.find(isVersionPathSegment)
 				// Replace the matched part of the URL with the versioned path if no version is present
-				if (!hasVersionInPath) {
+				if (
+					!hasVersionInPath &&
+					nodeProduct === PRODUCT_CONFIG[product].productSlug
+				) {
 					node.url = node.url.replace(replacePattern, `/$1/${cleanVersion}$2`)
 				}
 			}
