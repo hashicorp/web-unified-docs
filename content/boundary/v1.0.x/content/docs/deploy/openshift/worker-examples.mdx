@@ -1,6 +1,6 @@
 ---
 layout: docs
-page_title: Boundary worker Red Hat OpenShift Helm chart examples
+page_title: Boundary worker OpenShift Helm chart examples
 description: >-
  Configure common Boundary worker deployment scenarios with the Helm chart, including ingress, intermediate, and egress topologies, Route hostnames, and registration.
 ---
@@ -15,15 +15,9 @@ Use these worker configuration variations (ingress, intermediate, and egress top
 | Intermediate | Upstream and downstream workers | OpenShift `Route` (`passthrough` TLS) | Yes |
 | Egress | Upstream or intermediate workers; connects to targets | `ClusterIP` Service with the proxy Route disabled | No |
 
-Every example assumes `openshift.enabled=true` and Helm chart `0.2.0` or later, where OpenShift support begins. Refer to Artifact Hub for the [official worker chart releases](https://artifacthub.io/packages/helm/hashicorp/boundary-worker/) and [default values](https://artifacthub.io/packages/helm/hashicorp/boundary-worker/?modal=values). When `openshift.enabled=false`, the chart ignores every value under `openshift` and behaves exactly as it does on Kubernetes.
+Every example assumes `openshift.enabled=true` and chart `0.2.0` or later. Merge only the required overlay into `openshift-worker-values.yaml` from [Deploy workers on OpenShift](/boundary/docs/deploy/openshift/deploy-worker#install-a-boundary-worker-on-openshift). The snippets are not standalone values files.
 
-The `oc` commands in these examples assume the `boundary` namespace exists. If it does not, create it once before running any Secret command:
-
-```shell-session
-$ oc create namespace boundary
-```
-
-The shared worker configurations use the default TLS-enabled operations listener. Create the `boundary-worker-tls` Secret with `tls.crt` and `tls.key` in the release namespace. The operations Route is enabled by default with `reencrypt` termination, which uses separate client-to-router and router-to-worker TLS connections. For a custom client-facing certificate on a non-passthrough operations Route, set `openshift.route.ops.tls.key` and `certificate` together; `caCertificate` is optional and supplies an additional client-facing CA chain. Leave all three empty to use the ingress controller's default certificate. For the backend connection, set `destinationCACertificate` to the CA certificate that issued the worker's `tls.crt`; this separate value verifies the router-to-worker connection only when termination is `reencrypt` and `tls.ops.disabled=false`.
+The baseline deployment creates the operations TLS Secret and configures a `reencrypt` operations Route. Use the following overlay only when the Route needs a custom client-facing certificate. The `destinationCACertificate` separately verifies the worker's backend certificate.
 
 Match the operations Route to the listener TLS setting: use `reencrypt` or `passthrough` only with `tls.ops.disabled=false`, use `edge` only with `tls.ops.disabled=true`, or disable the operations Route. `destinationCACertificate` applies only to `reencrypt`. Disable the operations Route when you do not need external access to health and metrics.
 
@@ -57,9 +51,7 @@ openshift:
           -----END CERTIFICATE-----
 ```
 
-The proxy Route is different: it has fixed `passthrough` termination so Boundary's session TLS runs directly between the client and worker. It has no certificate value group, and none of the operations Route TLS certificate fields apply to it.
-
-The custom certificate in the example must cover `boundary-worker-ops.example.com`. Omit `key`, `certificate`, and `caCertificate` only when the ingress controller's default certificate covers the operations Route hostname.
+The custom certificate must cover `boundary-worker-ops.example.com`. Omit `key`, `certificate`, and `caCertificate` when the ingress controller's default certificate covers the hostname. The proxy Route is separate and always uses passthrough termination.
 
 ## Worker with ingress capabilities
 
@@ -96,25 +88,11 @@ openshift:
 
 <Note>
 
-The proxy Route's TLS termination is always `passthrough`; there is no value to change it.
-
-</Note>
-
-<Note>
-
 When `openshift.route.proxy.enabled=true` (the default once `openshift.enabled=true`), the Route publishes the proxy port externally. The chart does not change `worker.service.proxy.type` for you, so set it to `ClusterIP` as shown above; otherwise the chart also provisions a `LoadBalancer` Service alongside the Route.
 
 </Note>
 
-Install the worker Helm chart:
-
-```shell-session
-$ helm install boundary-worker hashicorp/boundary-worker \
-  --namespace boundary \
-  --create-namespace \
-  --values ingress-values.yaml \
-  --wait
-```
+Install by following [Install a Boundary worker on OpenShift](/boundary/docs/deploy/openshift/deploy-worker#install-a-boundary-worker-on-openshift) with the combined `openshift-worker-values.yaml`.
 
 If you do not already control a DNS name for the worker, wait for OpenShift to admit the Route and generate its default hostname:
 
@@ -133,12 +111,13 @@ boundary-worker-proxy-route    boundary-worker-proxy-boundary.apps.example.com  
 
 </CodeBlockConfig>
 
-Update `public_addr` in `worker.config` inside `ingress-values.yaml` with the Route hostname and port `443`, and then upgrade:
+Update `public_addr` in `worker.config` with the Route hostname and port `443`, and then upgrade:
 
 ```shell-session
 $ helm upgrade boundary-worker hashicorp/boundary-worker \
   --namespace boundary \
-  --values ingress-values.yaml \
+  --values openshift-worker-values.yaml \
+  --rollback-on-failure \
   --wait
 ```
 
@@ -150,48 +129,7 @@ Use the topology HCL in [Worker with intermediate capabilities](/boundary/docs/d
 
 Adjust the upstream port to match how that worker is exposed: `443` if it is reachable through an OpenShift Route, or its configured proxy port (for example `9202`) if it is reachable through a plain Kubernetes Service instead.
 
-Example values for a worker with intermediate capabilities exposed through a Route:
-
-```yaml
-worker:
-  service:
-    proxy:
-      type: ClusterIP
-
-openshift:
-  enabled: true
-  route:
-    proxy:
-      enabled: true
-      host: ""
-    ops:
-      enabled: false
-```
-
-Install the worker Helm chart:
-
-```shell-session
-$ helm install boundary-worker hashicorp/boundary-worker \
-  --namespace boundary \
-  --create-namespace \
-  --values intermediate-values.yaml \
-  --wait
-```
-
-If you do not know the `public_addr` until the Route is admitted, wait for its hostname (refer to the example output shown in [Worker with ingress capabilities](#worker-with-ingress-capabilities)):
-
-```shell-session
-$ oc get route boundary-worker-proxy-route --namespace boundary --watch
-```
-
-Update `public_addr` in `worker.config` inside `intermediate-values.yaml` with the Route hostname and port `443`, then upgrade:
-
-```shell-session
-$ helm upgrade boundary-worker hashicorp/boundary-worker \
-  --namespace boundary \
-  --values intermediate-values.yaml \
-  --wait
-```
+Use the same Service and Route overlay, installation command, and hostname update workflow as [Worker with ingress capabilities](#worker-with-ingress-capabilities). Only the topology's `worker` stanza and `initial_upstreams` differ.
 
 ## Worker with egress capabilities
 
@@ -223,15 +161,7 @@ The chart always renders the proxy and operations Services; there are no values 
 
 </Note>
 
-Install the worker with a values file that includes the worker configuration:
-
-```shell-session
-$ helm install boundary-worker hashicorp/boundary-worker \
-  --namespace boundary \
-  --create-namespace \
-  --values egress-values.yaml \
-  --wait
-```
+Install by following [Install a Boundary worker on OpenShift](/boundary/docs/deploy/openshift/deploy-worker#install-a-boundary-worker-on-openshift) with the combined `openshift-worker-values.yaml`.
 
 ## Worker with a pre-configured Route hostname
 
@@ -271,7 +201,7 @@ openshift:
       enabled: false
 ```
 
-On OpenShift, view the registration information in the worker logs with `oc`:
+On OpenShift, view the registration information in the worker logs with `oc`, then submit the token as described in the shared registration workflow:
 
 ```shell-session
 $ oc logs --namespace boundary deployment/boundary-worker-deployment
@@ -283,15 +213,15 @@ Follow [Controller-led registration](/boundary/docs/deploy/helm-chart/worker-exa
 
 ### Plaintext token
 
-Embedding a plaintext token in `worker.config` stores it in the Helm release and ConfigMap. Use the Secret-backed method in [Controller-led registration](/boundary/docs/deploy/helm-chart/worker-examples#controller-led-registration) instead.
+Embedding a plaintext token in `worker.config` stores it in the Helm release and ConfigMap. Use [Token from an OpenShift Secret](#token-from-an-openshift-secret) instead.
 
 ### Token via extraEnv
 
-Values supplied directly through `extraEnv` are stored in the Helm release. Use the Secret-backed method in [Controller-led registration](/boundary/docs/deploy/helm-chart/worker-examples#controller-led-registration), or use `extraEnv.valueFrom.secretKeyRef` when you need a custom environment variable mapping.
+Values supplied directly through `extraEnv` are stored in the Helm release. Use [Token from an OpenShift Secret](#token-from-an-openshift-secret), or use `extraEnv.valueFrom.secretKeyRef` when you need a custom environment variable mapping.
 
 ### Token from an OpenShift Secret
 
-Follow [Controller-led registration](/boundary/docs/deploy/helm-chart/worker-examples#controller-led-registration) for the HCL, `secretRefs` values, validation behavior, and installation command. On OpenShift, create the Secret with `oc` instead of `kubectl`.
+Follow [Controller-led registration](/boundary/docs/deploy/helm-chart/worker-examples#controller-led-registration) for the HCL, persistence, and `secretRefs` values. Create the activation token and OpenShift Secret before installation:
 
 Generate the activation token as an admin, using the Boundary CLI against the controller:
 
@@ -320,30 +250,7 @@ The key name (`worker-controller-generated-activation-token`) must match `secret
 
 ## Pull the worker image from the Red Hat registry
 
-When `openshift.enabled=true` and `image.repository` is empty, the chart resolves the image from `registry.connect.redhat.com/hashicorp/boundary-enterprise` using the `<version>-ubi` tag convention (for example, `1.0.2-ent-ubi`). That registry requires authentication, so create a pull Secret and reference it in `imagePullSecrets`.
-
-```shell-session
-$ oc create secret docker-registry redhat-registry \
-  --namespace boundary \
-  --docker-server=registry.connect.redhat.com \
-  --docker-username="<registry-service-account-username>" \
-  --docker-password="<registry-service-account-token>"
-```
-
-Example values:
-
-```yaml
-imagePullSecrets:
-  - name: redhat-registry
-```
-
-Alternatively, link the pull Secret to the ServiceAccount that runs the worker Deployment. The chart does not create a ServiceAccount; the worker uses the ServiceAccount named by `serviceAccount.name`, or the namespace's `default` ServiceAccount when `serviceAccount.name` is empty:
-
-```shell-session
-$ oc secrets link default redhat-registry --for=pull --namespace boundary
-```
-
-Set `image.repository` and `image.tag` explicitly if you mirror the image into an internal registry or an OpenShift ImageStream. An explicit value always takes precedence over the chart's OpenShift default.
+Follow [Configure Red Hat registry access](/boundary/docs/deploy/openshift/deploy-worker#configure-red-hat-registry-access). Set `image.repository` and `image.tag` explicitly only when you mirror the image into another registry or an OpenShift ImageStream.
 
 ## KMS (key management system)-backed worker authentication
 
@@ -355,9 +262,7 @@ Follow [Enable session recording storage](/boundary/docs/deploy/helm-chart/worke
 
 <Note>
 
-To create RDP (Remote Desktop Protocol) session recording exports, the worker must have an FFmpeg binary at version `5.1.0` or later installed. The `libsvtav1` codec must also be present. If your selected worker image does not include FFmpeg and that codec, build a custom image that adds them, then reference it in your values file.
-
-Build the custom image from the Red Hat UBI (Universal Base Image) base so the SCC-compatible security context in `openshift.containerSecurityContext` continues to apply, and push it to a registry the cluster can reach, for example an internal mirror or an OpenShift ImageStream. Pass the custom image in your values file:
+For RDP (Remote Desktop Protocol) recording exports, follow the shared FFmpeg requirements. Build any custom image from the Red Hat UBI (Universal Base Image) base so the SCC-compatible security context continues to apply:
 
 ```yaml
 image:
@@ -365,7 +270,7 @@ image:
   tag: "1.0.2-ent-ffmpeg-ubi"
 ```
 
-Add a pull Secret if the registry requires authentication, as described in [Pull the worker image from the Red Hat registry](#pull-the-worker-image-from-the-red-hat-registry).
+Add a pull Secret if the registry requires authentication.
 
 </Note>
 
@@ -374,8 +279,6 @@ Add a pull Secret if the registry requires authentication, as described in [Pull
 OpenShift clusters commonly provide a default `StorageClass` for the recording PVC, for example `gp3-csi` on ROSA (Red Hat OpenShift Service on AWS), or an OpenShift Data Foundation class such as `ocs-storagecluster-ceph-rbd`. Leave `worker.persistence.recording.storageClass` empty to use the cluster default, or set it explicitly if your cluster requires one.
 
 </Note>
-
-Set `openshift.enabled=true` in addition to the shared values.
 
 ## Change service ports
 
@@ -387,7 +290,7 @@ The Route targets the Service by its named port (`proxy`), so you do not need to
 
 ### Session recordings fail to export
 
-If session recording exports fail, confirm that the selected worker image includes an FFmpeg binary at version `5.1.0` or later and the `libsvtav1` codec, as described in [Enable session recording storage](#enable-session-recording-storage). If it does not, build and reference a custom image that adds the binary and codec.
+Follow the shared [session recording troubleshooting](/boundary/docs/deploy/helm-chart/worker-examples#session-recordings-fail-to-export), then confirm that any custom image uses an OpenShift-compatible UBI base.
 
 ### TCP connections through the proxy Route fail or time out
 

@@ -7,7 +7,7 @@ description: >-
  uninstall steps.
 ---
 
-# Deploy controllers on OpenShift Helm chart
+# Deploy controllers on OpenShift using a Helm chart
 
 The controller chart is intended for operator-managed Boundary control planes on OpenShift. It can run multiple controller replicas and uses Helm hook Jobs for database initialization and administrator bootstrap by default. It can also run optional database migration and repair Jobs during upgrades.
 
@@ -19,16 +19,15 @@ Deploying the Boundary controller Helm chart on OpenShift gives you a running Bo
 
 Before installing the controller Helm chart on OpenShift, make sure the following are available:
 
-- A [Boundary Enterprise license](/boundary/docs/enterprise/licensing).
 - A Red Hat OpenShift cluster running version 4.19 or later.
 - Helm 3 or later configured with access to the target OpenShift cluster.
-- Permissions to create Deployments, Services, Routes, ConfigMaps, Jobs, and PodDisruptionBudgets in the target namespace.
+- The `oc` CLI configured with permission to create projects, Secrets, Deployments, Services, Routes, ConfigMaps, Jobs, and PodDisruptionBudgets.
 - A reachable PostgreSQL database that meets the [PostgreSQL support policy](/boundary/docs/enterprise/supported-versions#postgresql-support-policy) for Boundary controller state.
 - A valid Boundary controller HCL configuration.
 - Access to the default controller image registry. When `openshift.enabled=true` and `image.repository` is not set, the chart defaults to the Red Hat registry image (`registry.connect.redhat.com/hashicorp/boundary-enterprise`), which requires a Red Hat account and registry credentials with access to that image (create an account and obtain credentials at [Red Hat Ecosystem Catalog](https://catalog.redhat.com/)).
 - KMS (key management system) configuration for the `root`, `recovery`, and `worker-auth` purposes. Add a `bsr` key when you enable session recording.
-- An existing Secret containing the database URL, Boundary Enterprise license, and `admin-username` and `admin-password` when `bootstrapAdmin.enabled=true`.
-- A TLS Secret containing `tls.crt` and `tls.key` when `tls.api.disabled=false` or `tls.ops.disabled=false` (the default for both).
+- The database URL, [Boundary Enterprise license](/boundary/docs/enterprise/licensing), and bootstrap administrator credentials used to create the controller Secret.
+- A TLS certificate and private key used to create a TLS Secret when `tls.api.disabled=false` or `tls.ops.disabled=false` (the default for both).
 - An existing ServiceAccount only when you set `serviceAccount.name`. When the value is empty, OpenShift assigns the project's default ServiceAccount. The chart does not create a ServiceAccount.
 
 The controller chart deploys a stateless Boundary control plane. PostgreSQL stores the persistent controller state, not the controller pods. Set `openshift.enabled=true` in your values file so that the chart applies an OpenShift-compatible security context and renders `Route` resources. Routes do not change Service types, so set the API Service to `ClusterIP` when you want the Route to be the only external API path.
@@ -37,25 +36,78 @@ Complete the following steps to deploy a controller using the Helm chart on Open
 
 ## Add the HashiCorp Helm repository
 
-Add the Helm repository and confirm the chart is visible:
+Add the Helm repository, update its index, and list the available chart versions:
 
 ```shell-session
 $ helm repo add hashicorp https://helm.releases.hashicorp.com
 $ helm repo update
-$ helm search repo hashicorp/boundary-controller
+$ helm search repo hashicorp/boundary-controller --versions
 ```
+
+OpenShift support starts with Boundary controller Helm chart `0.2.0`. Refer to Artifact Hub for the [official controller chart releases](https://artifacthub.io/packages/helm/hashicorp/boundary-controller/) and [default values](https://artifacthub.io/packages/helm/hashicorp/boundary-controller/?modal=values). To pin a release, add `--version <chart-version>` to the `helm install` and `helm upgrade` commands.
+
+## Create the project
+
+Create the OpenShift project before creating Secrets:
+
+```shell-session
+$ oc new-project boundary
+```
+
+If the project already exists, select it with `oc project boundary`.
+
+## Configure Red Hat registry access
+
+When `openshift.enabled=true` and `image.repository` is empty, the chart pulls `registry.connect.redhat.com/hashicorp/boundary-enterprise`. Create a pull Secret with your Red Hat registry service account credentials:
+
+```shell-session
+$ oc create secret docker-registry redhat-registry \
+  --namespace boundary \
+  --docker-server=registry.connect.redhat.com \
+  --docker-username='<registry-service-account-username>' \
+  --docker-password='<registry-service-account-token>'
+```
+
+Add the Secret to `openshift-controller-values.yaml`:
+
+```yaml
+imagePullSecrets:
+  - name: redhat-registry
+```
+
+Alternatively, link it to the ServiceAccount used by the controller Deployment and hook Jobs. The default is the project's `default` ServiceAccount:
+
+```shell-session
+$ oc secrets link default redhat-registry --for=pull --namespace boundary
+```
+
+When you link the Secret to the ServiceAccount instead, omit `imagePullSecrets` from `openshift-controller-values.yaml`.
 
 ## Create the controller Secret
 
-The chart reads sensitive values from an existing Secret referenced by `secretRefs.secretName`. At a minimum, create a Secret with the database URL and Boundary Enterprise license. Include the bootstrap admin credentials when `bootstrapAdmin.enabled=true`.
+The chart reads sensitive values from the Secret referenced by `secretRefs.secretName`. Create the default Secret before installation:
 
-Refer to the [Secrets documentation](https://kubernetes.io/docs/concepts/configuration/secret/) for instructions on creating Secrets.
+```shell-session
+$ oc create secret generic boundary-controller-secrets \
+  --namespace boundary \
+  --from-literal=database-url='postgres://<user>:<password>@<host>:5432/<database>?sslmode=require' \
+  --from-literal=license='<boundary-enterprise-license>' \
+  --from-literal=admin-username='<admin-username>' \
+  --from-literal=admin-password='<admin-password>'
+```
 
 Set `secretRefs.keys.*` to match the key names you used in your Secret. If your `controller.config` uses `migration_url = "env://BOUNDARY_PG_MIGRATION_URL"`, also include the migration URL key referenced by `secretRefs.keys.migrationUrl`.
 
 ## Create the TLS Secret when TLS is enabled
 
-If `tls.api.disabled=false` or `tls.ops.disabled=false` (the default for both), create a TLS Secret before installation. Refer to the [Secrets documentation](https://kubernetes.io/docs/concepts/configuration/secret/) for instructions. The Secret must contain a certificate in `tls.crt` and its matching private key in `tls.key`. A CA entry is optional. The Secret name must match `tls.secretName` (default: `boundary-controller-tls`).
+If `tls.api.disabled=false` or `tls.ops.disabled=false` (the default for both), create the default TLS Secret before installation:
+
+```shell-session
+$ oc create secret tls boundary-controller-tls \
+  --namespace boundary \
+  --cert=tls.crt \
+  --key=tls.key
+```
 
 Keep TLS enabled when you expose the API and ops listeners through Routes that use `reencrypt` termination. The listeners must serve HTTPS so that the OpenShift router can re-encrypt traffic to the pods.
 
@@ -74,85 +126,7 @@ A usable controller configuration on OpenShift includes:
 - A `public_cluster_addr` so workers can reach the cluster listener
 - KMS stanzas for `root`, `recovery`, and `worker-auth`. Add a `bsr` stanza when you enable session recording.
 
-Refer to the following example controller configuration:
-
-```hcl
-disable_mlock = true
-
-listener "tcp" {
-  address       = "0.0.0.0:9200"
-  purpose       = "api"
-  tls_disable   = false
-  tls_cert_file = "/etc/boundary/tls/tls.crt"
-  tls_key_file  = "/etc/boundary/tls/tls.key"
-}
-
-listener "tcp" {
-  address = "0.0.0.0:9201"
-  purpose = "cluster"
-}
-
-listener "tcp" {
-  address       = "0.0.0.0:9203"
-  purpose       = "ops"
-  tls_disable   = false
-  tls_cert_file = "/etc/boundary/tls/tls.crt"
-  tls_key_file  = "/etc/boundary/tls/tls.key"
-}
-
-controller {
-  name                = "boundary-controller"
-  description         = "Boundary controller running on OpenShift"
-  public_cluster_addr = "boundary-controller-cluster.boundary.svc.cluster.local:9201"
-  license             = "env://BOUNDARY_LICENSE"
-
-  database {
-    url = "env://BOUNDARY_PG_URL"
-  }
-
-  graceful_shutdown_wait_duration = "10s"
-}
-
-kms "aead" {
-  purpose   = "root"
-  aead_type = "aes-gcm"
-  key       = "sP1fnF5Xz85RrXyELHFeZg9Ad2qt4Z4bgNHVGtD6sFo="
-  key_id    = "global_root"
-}
-
-kms "aead" {
-  purpose   = "bsr"
-  aead_type = "aes-gcm"
-  key       = "sP1fnF5Xz85RrXyELHFeZg9Ad2qt4Z4bgNHVGtD6sFo="
-  key_id    = "global_bsr"
-}
-
-kms "aead" {
-  purpose   = "recovery"
-  aead_type = "aes-gcm"
-  key       = "8fZBjCUfN0TzjEGLQldGY4+iE9AkOvCfjh7+p0GtRBQ="
-  key_id    = "global_recovery"
-}
-
-kms "aead" {
-  purpose   = "worker-auth"
-  aead_type = "aes-gcm"
-  key       = "ATTK2pMjMTEJGlAkUJAePnFMlNLQaXBnhSqJHVlJeKQ="
-  key_id    = "global_worker-auth"
-}
-
-events {
-  audit_enabled        = true
-  sysevents_enabled    = true
-  observations_enabled = true
-  sink "stderr" {
-    name        = "all-events"
-    description = "All events sent to stderr"
-    event_types = ["*"]
-    format      = "hclog-text"
-  }
-}
-```
+The complete controller HCL appears once in `openshift-controller-values.yaml` below. It uses the internal cluster Service for `public_cluster_addr`; use a cluster Route instead when workers connect from outside the cluster.
 
 <Note>
 
@@ -166,21 +140,14 @@ We do not recommend changing `disable_mlock = true` from the chart default. The 
 
 </Note>
 
-## List available chart versions
-
-Use the following command to see the available published versions of the controller chart:
-
-```shell-session
-$ helm search repo hashicorp/boundary-controller --versions
-```
-
-OpenShift support starts with Boundary controller Helm chart `0.2.0`. Refer to Artifact Hub for the [official controller chart releases](https://artifacthub.io/packages/helm/hashicorp/boundary-controller/) and [default values](https://artifacthub.io/packages/helm/hashicorp/boundary-controller/?modal=values).
-
 ## Install a Boundary controller on OpenShift
 
-Create a values file that contains `controller.config` and the OpenShift overrides you need. Setting `openshift.enabled=true` applies an OpenShift-compatible security context and renders the Routes that expose the controller outside the cluster:
+Create `openshift-controller-values.yaml`. Setting `openshift.enabled=true` applies an OpenShift-compatible security context and renders the enabled Routes:
 
 ```yaml
+imagePullSecrets:
+  - name: redhat-registry
+
 secretRefs:
   secretName: boundary-controller-secrets
 
@@ -322,8 +289,7 @@ Run the following command to install the release, initialize the database schema
 ```shell-session
 $ helm install boundary-controller hashicorp/boundary-controller \
   --namespace boundary \
-  --create-namespace \
-  --values my-values.yaml \
+  --values openshift-controller-values.yaml \
   --wait
 ```
 
@@ -341,17 +307,7 @@ REVISION: 1
 
 </CodeBlockConfig>
 
-Or, to install without database initialization and bootstrap admin creation:
-
-```shell-session
-$ helm install boundary-controller hashicorp/boundary-controller \
-  --namespace boundary \
-  --create-namespace \
-  --values my-values.yaml \
-  --set database.init.enabled=false \
-  --set bootstrapAdmin.enabled=false \
-  --wait
-```
+If another workflow manages database initialization or administrator resources, set `database.init.enabled=false` or `bootstrapAdmin.enabled=false` in `openshift-controller-values.yaml` before running the same install command.
 
 ## Verify the deployment
 
@@ -408,7 +364,8 @@ To upgrade the controller deployment, run:
 ```shell-session
 $ helm upgrade boundary-controller hashicorp/boundary-controller \
   --namespace boundary \
-  --values my-values.yaml \
+  --values openshift-controller-values.yaml \
+  --rollback-on-failure \
   --wait
 ```
 
