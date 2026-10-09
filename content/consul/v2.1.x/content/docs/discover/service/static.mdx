@@ -5,7 +5,7 @@ description: >-
   Learn how to use standard Consul DNS lookup formats to enable service discovery for services and nodes.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2026-03-31T20:44:54.000Z
-last_modified: 2026-03-31T20:44:54.000Z
+last_modified: 2026-10-09T09:19:56.000Z
 # END AUTO GENERATED METADATA
 ---
 
@@ -34,6 +34,7 @@ The following table describes the available DNS lookups and required policies wh
 | ---    | ---  | ---         | ---           |
 | `*.node.consul` | Node | Allows Consul to resolve DNS requests for the target node. Example: `<target>.node.consul` | `node:read` |
 | `*.service.consul`<br/> `*.connect.consul` <br/> `*.ingress.consul` <br/>`*.virtual.consul` |Service: standard | Allows Consul to resolve DNS requests for target service instances running on ACL-authorized nodes. Example: `<target>.service.consul` | `service:read`<br/> `node:read` |
+| `*.api-gateway.consul` | Service: API gateway | Allows Consul to resolve DNS requests for the API gateway instances that expose the target service. Example: `<target>.api-gateway.consul` | `service:read`<br/> `node:read` |
 
 ## Node lookups
 
@@ -429,6 +430,112 @@ Add the `.ingress` subdomain to your DNS FQDN to find ingress-enabled services:
 This finds all ingress gateway endpoints for the service.
 
 This endpoint finds services within the same datacenter and does not support tags. Refer to the [`catalog` API endpoint](/consul/api-docs/catalog) for more complex behaviors.
+
+### API gateway service lookups
+
+Add the `.api-gateway` subdomain to your DNS FQDN to find the API gateway instances that expose a service:
+
+```text
+<service>.api-gateway[.<datacenter>].<domain>
+```
+
+Consul automatically registers a service under the `api-gateway` subdomain when an [HTTP route](/consul/docs/reference/config-entry/http-route) or [TCP route](/consul/docs/reference/config-entry/tcp-route) that targets the service binds to an [API gateway](/consul/docs/reference/config-entry/api-gateway) listener. You do not need to register any additional DNS records. Refer to [API gateway service mapping](#api-gateway-service-mapping) for more information.
+
+The lookup returns the addresses of the healthy API gateway instances that front the service. SRV lookups return the port of each gateway listener that the service binds to.
+
+The following example lookup returns the API gateway instances that expose the `web` service:
+
+```shell-session
+$ dig @127.0.0.1 -p 8600 web.api-gateway.consul
+```
+
+The API gateway lookup does not support tags or cluster peers. The ACL token that you use for the lookup requires `service:read` permission on the target service.
+
+When you enable [Consul-managed TLS on the API gateway](/consul/docs/north-south/api-gateway/secure-traffic/encrypt#terminate-tls-with-consul-managed-certificates), the gateway's certificate is valid for `*.api-gateway.<domain>` hostnames. Clients can use the `<service>.api-gateway.<domain>` name to connect to the service over HTTPS and verify the gateway certificate against the Consul service mesh certificate authority (CA).
+
+#### API gateway service mapping
+
+Consul resolves API gateway lookups from the same gateway-services catalog mapping that it uses for [ingress service lookups](#ingress-service-lookups). For ingress gateways, Consul builds the mapping from the services in the `ingress-gateway` configuration entry. For API gateways, Consul builds the mapping from the routes that bind to the gateway.
+
+When a route binds to an API gateway listener, Consul writes a `bound-api-gateway` configuration entry for the gateway. Consul then updates the gateway-services mapping as follows:
+
+1. For each listener on the gateway, Consul reads every HTTP route and TCP route bound to the listener.
+1. For each service that a route targets, Consul records a mapping between the gateway and the service. The mapping has the `api-gateway` gateway kind and contains the listener port and protocol.
+1. When an HTTP route defines `Hostnames`, Consul records the hostnames in the mapping. Otherwise, Consul records the listener `Hostname`, when set.
+1. When multiple routes target the same service on the same listener port, Consul merges the hostnames into a single mapping.
+
+Consul recalculates the mapping each time it updates the `bound-api-gateway` configuration entry, such as when a route binds to or unbinds from the gateway, and removes mappings that no longer apply. When you delete the `api-gateway` configuration entry, Consul removes all mappings for the gateway.
+
+When Consul receives a `<service>.api-gateway.<domain>` query, it looks up the gateways mapped to the service, returns the healthy instances of those gateways, and sets the SRV port to the port of the listener that the service binds to.
+
+The gateway name in the mapping is the name of the `api-gateway` configuration entry. Register the API gateway service with the same name as the configuration entry so that Consul can find the gateway instances.
+
+To view the mapping for a gateway, use the [`/catalog/gateway-services/:gateway`](/consul/api-docs/catalog#list-services-for-gateway) HTTP API endpoint. The following example returns the services mapped to the `my-gateway` API gateway:
+
+```shell-session
+$ curl --silent http://127.0.0.1:8500/v1/catalog/gateway-services/my-gateway
+```
+
+```json
+[
+  {
+    "Gateway": {
+      "Name": "my-gateway"
+    },
+    "Service": {
+      "Name": "web"
+    },
+    "GatewayKind": "api-gateway",
+    "Port": 8443,
+    "Protocol": "http",
+    "Hosts": ["web.example.com"],
+    "CreateIndex": 32,
+    "ModifyIndex": 32
+  }
+]
+```
+
+#### Verify API gateway DNS resolution
+
+Complete the following steps to verify that Consul resolves a service through an API gateway:
+
+1. Confirm that the route is bound to the gateway and that the gateway-services mapping contains the service. The following example checks the `my-gateway` API gateway:
+
+   ```shell-session
+   $ curl --silent http://127.0.0.1:8500/v1/catalog/gateway-services/my-gateway \
+       | jq '[.[] | {Service: .Service.Name, GatewayKind, Port}]'
+   ```
+
+   The output includes an entry for the service with `"GatewayKind": "api-gateway"`:
+
+   ```json
+   [
+     {
+       "Service": "web",
+       "GatewayKind": "api-gateway",
+       "Port": 8443
+     }
+   ]
+   ```
+
+1. Query the A record for the service. The answer section contains the address of each healthy API gateway instance that fronts the service.
+
+   ```shell-session
+   $ dig @127.0.0.1 -p 8600 web.api-gateway.consul A +short
+   ```
+
+1. Query the SRV record for the service. Each record contains the port of a gateway listener that the service binds to, such as `8443`.
+
+   ```shell-session
+   $ dig @127.0.0.1 -p 8600 web.api-gateway.consul SRV +short
+   ```
+
+When the lookup does not return any records, verify the following:
+
+- The route status shows that the route is accepted and bound to the gateway listener.
+- The `api-gateway` configuration entry name matches the registered API gateway service name.
+- The API gateway service instances are registered and pass their health checks.
+- The ACL token that resolves DNS queries has `service:read` permission on the service and `node:read` permission on the gateway nodes.
 
 ### UDP-based DNS queries
 

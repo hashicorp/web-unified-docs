@@ -4,7 +4,7 @@ page_title: Deploy API gateway listeners to virtual machines
 description: Learn how to configure and Consul API gateways and gateway listeners on virtual machines so that you can enable ingress requests to services in your service mesh in VM environments.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2026-03-31T20:45:26.000Z
-last_modified: 2026-03-31T20:45:26.000Z
+last_modified: 2026-10-09T09:19:58.000Z
 # END AUTO GENERATED METADATA
 ---
 
@@ -40,9 +40,17 @@ When route service overrides are configured (`http-route` or `tcp-route` service
 
 Refer to [Encrypt API gateway traffic on virtual machines](/consul/docs/north-south/api-gateway/secure-traffic/encrypt) for additional information.
 
+To terminate TLS without providing a certificate, set `api-gateway.TLS.Enabled` to `true` and do not reference a certificate on the listener. The gateway uses its Consul service mesh leaf certificate, which Consul issues and rotates automatically. Refer to [Terminate TLS with Consul-managed certificates](/consul/docs/north-south/api-gateway/secure-traffic/encrypt#terminate-tls-with-consul-managed-certificates) for additional information.
+
 ### Routes
 
 After deploying the gateway, attach [HTTP](/consul/docs/reference/config-entry/http-route) routes and [TCP](/consul/docs/reference/config-entry/tcp-route) routes to listeners defined in the gateway to control how requests route to services in the network. Refer to [Define API gateway routes on VMs](/consul/docs/north-south/api-gateway/vm/route) for additional information.
+
+### DNS
+
+When a route binds to a gateway listener, Consul automatically registers each service that the route targets in Consul DNS at `<service>.api-gateway.<domain>`. Clients can use this name to reach the service through the gateway. Refer to [API gateway service lookups](/consul/docs/discover/service/static#api-gateway-service-lookups) for additional information.
+
+Consul resolves these names from the gateway-services catalog mapping, which is the same mapping that ingress gateways use. Refer to [API gateway service mapping](/consul/docs/discover/service/static#api-gateway-service-mapping) for details about how Consul builds the mapping, and to [Verify API gateway DNS resolution](/consul/docs/discover/service/static#verify-api-gateway-dns-resolution) for verification steps.
 
 ## Requirements
 
@@ -76,7 +84,7 @@ in the mesh.
 	- `Listeners`: Specify a list of listener configurations. Each listener is map containing the following fields:
     	- `Port`: Specifies the port that the listener receives traffic on.
 		- `Name`: Specifies a unique name for the listener.
-		- `Protocol`: You can set either `tcp` or `http`
+		- `Protocol`: You can set `tcp`, `http`, `http2`, or `grpc`. Refer to [HTTP/2 and gRPC listeners](#http-2-and-grpc-listeners) for additional information.
 		- `TLS`: Defines TLS encryption configurations for the listener.
 
 	Refer to the [API gateway configuration entry reference](/consul/docs/reference/config-entry/api-gateway) for details on how to define fields in the `Listeners` block.
@@ -133,6 +141,25 @@ Listeners = [
   }
 ]
 ```
+
+The following example enables Consul-managed TLS. The listener does not reference a certificate, so the gateway terminates HTTPS with its Consul service mesh leaf certificate:
+
+```hcl
+Kind = "api-gateway"
+Name = "my-gateway"
+
+TLS = {
+  Enabled = true
+}
+Listeners = [
+  {
+    Port = 8443
+    Name = "my-https-listener"
+    Protocol = "http"
+  }
+]
+```
+
 Refer to [API Gateway Configuration Reference](/consul/docs/reference/config-entry/api-gateway) for
 information about all configuration fields.
 
@@ -156,6 +183,114 @@ $ consul connect envoy -gateway api -register -service my-api-gateway
 ```
 
 Gateways and routes are eventually-consistent objects that expose status conditions. Verify that listeners and routes are accepted and bound after deployment.
+
+## HTTP/2 and gRPC listeners
+
+Set the listener `Protocol` to `http2` or `grpc` to serve HTTP/2 or gRPC traffic. The gateway accepts HTTP/2 connections from clients and uses HTTP/2 for the connection to the routed service, so streaming RPCs and other HTTP/2 features work from the client to the service. When you use the `http` protocol, the gateway uses HTTP/1.1 for the connection to the service.
+
+HTTP/2 and gRPC listeners require Consul v2.1 or later.
+
+Complete the following steps to route gRPC and HTTP/2 traffic through an API gateway:
+
+1. Set the protocol of each backend service in a service defaults configuration entry. The following example sets the `grpc-service` protocol to `grpc`:
+
+   ```hcl
+   Kind     = "service-defaults"
+   Name     = "grpc-service"
+   Protocol = "grpc"
+   ```
+
+   For an HTTP/2 service, set `Protocol` to `http2`.
+
+1. Define the API gateway with `grpc` and `http2` listeners:
+
+   ```hcl
+   Kind = "api-gateway"
+   Name = "my-gateway"
+
+   Listeners = [
+     {
+       Name     = "grpc-listener"
+       Port     = 9999
+       Protocol = "grpc"
+     },
+     {
+       Name     = "http2-listener"
+       Port     = 9998
+       Protocol = "http2"
+     }
+   ]
+   ```
+
+1. Bind an `http-route` to each listener. An `http-route` can bind to `http`, `http2`, and `grpc` listeners. The following example routes traffic from the `grpc-listener` listener to the `grpc-service` service:
+
+   ```hcl
+   Kind = "http-route"
+   Name = "grpc-route"
+
+   Parents = [
+     {
+       Kind        = "api-gateway"
+       Name        = "my-gateway"
+       SectionName = "grpc-listener"
+     }
+   ]
+
+   Rules = [
+     {
+       Services = [
+         {
+           Name = "grpc-service"
+         }
+       ]
+     }
+   ]
+   ```
+
+1. Create service intentions that allow traffic from the gateway to each service, and apply the configuration entries with the `consul config write` command.
+
+Listeners that share a port must use the same protocol. A `tcp-route` can only bind to a `tcp` listener.
+
+### Verify HTTP/2 and gRPC traffic
+
+Complete the following steps to verify that the gateway uses HTTP/2 from the client to the service:
+
+1. Check the gateway status conditions to confirm that the listeners are accepted and the routes are bound:
+
+   ```shell-session
+   $ consul config read -kind api-gateway -name my-gateway
+   ```
+
+1. On the machine that runs the API gateway, query the Envoy admin interface to confirm that the upstream cluster for each service uses HTTP/2. By default, the Envoy admin interface listens on `localhost:19000`.
+
+   ```shell-session
+   $ curl --silent localhost:19000/config_dump \
+       | jq '.configs[]
+         | select(."@type" | contains("ClustersConfigDump"))
+         | .dynamic_active_clusters[]
+         | select(.cluster.name | startswith("grpc-service."))
+         | .cluster.typed_extension_protocol_options'
+   ```
+
+   The output includes `http2_protocol_options`, which indicates that the gateway uses HTTP/2 for the connection to the service:
+
+   ```json
+   {
+     "envoy.extensions.upstreams.http.v3.HttpProtocolOptions": {
+       "@type": "type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions",
+       "explicit_http_config": {
+         "http2_protocol_options": {}
+       }
+     }
+   }
+   ```
+
+1. Send requests through the gateway. The following examples send an HTTP/2 request to the `http2-listener` listener and a gRPC request to the `grpc-listener` listener. Replace `GATEWAY_ADDRESS` with the address of the API gateway, and `SERVICE/METHOD` with a method that your gRPC service implements.
+
+   ```shell-session
+   $ curl --http2-prior-knowledge http://GATEWAY_ADDRESS:9998/
+   $ grpcurl -plaintext GATEWAY_ADDRESS:9999 SERVICE/METHOD
+   ```
 
 ## Validation notes
 

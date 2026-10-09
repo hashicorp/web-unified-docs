@@ -5,7 +5,7 @@ description: >-
   Learn how to configure the `Gateway` resource to define how the Consul API Gateway handles incoming service mesh traffic with this configuration model and reference specifications.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2026-03-31T20:45:50.000Z
-last_modified: 2026-03-31T20:45:50.000Z
+last_modified: 2026-10-09T09:20:00.000Z
 # END AUTO GENERATED METADATA
 ---
 
@@ -157,6 +157,8 @@ Specifies the protocol the `listener` communicates on.
 
 Allowed values are `TCP`, `HTTP`, or `HTTPS`
 
+Consul on Kubernetes translates `HTTP` and `HTTPS` listeners to the `http` protocol and `TCP` listeners to the `tcp` protocol in the API gateway configuration entry. To serve HTTP/2 or gRPC traffic, set the listener protocol to `HTTP` or `HTTPS` and add the [`api-gateway.consul.hashicorp.com/listener-<sectionName>-protocol`](#annotations) annotation to the `Gateway` to select the `http2` or `grpc` protocol for the listener.
+
 ### listeners.tls
 Specifies the `tls` configurations for the `Gateway`. The `tls` object is required if `protocol` is set to `HTTPS`. The object contains the following fields:
 
@@ -183,6 +185,17 @@ tls:
   mode: Terminate
   options:
     api-gateway.consul.hashicorp.com/tls_min_version: "TLSv1_2"
+
+```
+
+To terminate HTTPS without a `certificateRefs` entry, add the [`consul.hashicorp.com/tls-enabled`](#annotations) annotation to the `Gateway`. The gateway uses its Consul service mesh leaf certificate for listeners that do not reference a certificate. Kubernetes Gateway API v1.4 and later CRDs require a `Terminate` listener to set either `certificateRefs` or `options`, so set an `options` key when you omit `certificateRefs`. In the following example, the `tls` settings do not reference a certificate:
+
+```yaml
+
+tls:
+  mode: Terminate
+  options:
+    api-gateway.consul.hashicorp.com/tls_min_version: "TLS_AUTO"
 
 ```
 
@@ -232,3 +245,137 @@ The following example creates a `Gateway` named `example-gateway` in namespace `
   ```
 
 </CodeBlockConfig>
+
+## Annotations
+
+You can add the following annotations to the `Gateway` resource metadata to configure Consul-specific gateway behavior.
+
+### consul.hashicorp.com/tls-enabled
+Enables Consul-managed TLS termination for the `Gateway`. When set to `"true"`, Consul on Kubernetes sets [`TLS.Enabled`](/consul/docs/reference/config-entry/api-gateway#tls-enabled) to `true` in the translated API gateway configuration entry. Listeners that do not reference a certificate in [`tls.certificateRefs`](#listeners-tls) terminate HTTPS with the gateway's Consul service mesh leaf certificate. Consul issues and rotates the certificate automatically.
+
+The leaf certificate includes wildcard DNS subject alternative names (SANs), such as `*.api-gateway.consul`, that match the `<service>.api-gateway.<domain>` names that Consul registers for services bound to the gateway. Refer to [Terminate HTTPS with Consul-managed certificates](/consul/docs/north-south/api-gateway/k8s/listener#terminate-https-with-consul-managed-certificates) for more information.
+
+* Type: string
+* Required: optional
+* Allowed values: `"true"`. Any other value, or omitting the annotation, leaves `TLS.Enabled` set to `false`.
+
+In the following example, the `Gateway` terminates HTTPS on port `8443` with the Consul service mesh leaf certificate:
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: my-gateway
+  annotations:
+    consul.hashicorp.com/tls-enabled: "true"
+spec:
+  gatewayClassName: consul
+  listeners:
+  - name: https
+    protocol: HTTPS
+    port: 8443
+    tls:
+      mode: Terminate
+      options:
+        api-gateway.consul.hashicorp.com/tls_min_version: "TLS_AUTO"
+    allowedRoutes:
+      namespaces:
+        from: All
+```
+
+### api-gateway.consul.hashicorp.com/default-* upstream limits
+Configures gateway-wide default upstream circuit-breaker limits and passive health checks for every backend service that routes attached to the `Gateway` target. Consul on Kubernetes translates the annotations into the [`Defaults`](/consul/docs/reference/config-entry/api-gateway#defaults) field of the API gateway configuration entry. Passive health checks configure Envoy outlier detection, which removes backend service instances that return consecutive errors from the gateway's load balancing pool.
+
+These annotations are supported on `Gateway` resources in the `gateway.networking.k8s.io` API group.
+
+The following table describes the supported annotations:
+
+| Annotation | Description | Value | Consul field |
+| --- | --- | --- | --- |
+| `api-gateway.consul.hashicorp.com/default-max-connections` | Specifies the default maximum number of connections that the gateway can establish to each backend service. | Integer greater than or equal to `0` | `Defaults.MaxConnections` |
+| `api-gateway.consul.hashicorp.com/default-max-pending-requests` | Specifies the default maximum number of requests that can queue while waiting for a connection to each backend service. | Integer greater than or equal to `0` | `Defaults.MaxPendingRequests` |
+| `api-gateway.consul.hashicorp.com/default-max-concurrent-requests` | Specifies the default maximum number of concurrent requests that the gateway can send to each backend service. | Integer greater than or equal to `0` | `Defaults.MaxConcurrentRequests` |
+| `api-gateway.consul.hashicorp.com/default-passive-health-check-interval` | Specifies the time between outlier detection analysis sweeps. | Duration, such as `"10s"` | `Defaults.PassiveHealthCheck.Interval` |
+| `api-gateway.consul.hashicorp.com/default-passive-health-check-max-failures` | Specifies the number of consecutive `5xx` errors that cause the gateway to eject a backend service instance. | Integer greater than or equal to `0` | `Defaults.PassiveHealthCheck.MaxFailures` |
+| `api-gateway.consul.hashicorp.com/default-passive-health-check-enforcing-consecutive-5xx` | Specifies the percent chance that the gateway ejects an instance when it detects an outlier through consecutive `5xx` errors. | Integer from `0` to `100` | `Defaults.PassiveHealthCheck.EnforcingConsecutive5xx` |
+| `api-gateway.consul.hashicorp.com/default-passive-health-check-max-ejection-percent` | Specifies the maximum percentage of instances of a backend service that the gateway can eject at the same time. | Integer from `0` to `100` | `Defaults.PassiveHealthCheck.MaxEjectionPercent` |
+| `api-gateway.consul.hashicorp.com/default-passive-health-check-base-ejection-time` | Specifies the base amount of time that an ejected instance stays out of the load balancing pool. | Duration, such as `"30s"` | `Defaults.PassiveHealthCheck.BaseEjectionTime` |
+
+Consul on Kubernetes ignores an annotation when the value is not valid, such as a negative number, a percentage greater than `100`, or a malformed duration. The controller logs a message that identifies the ignored annotation, and the corresponding field remains unset.
+
+To override the defaults for a specific backend service, attach a [`RouteUpstreamLimitsFilter`](/consul/docs/reference/k8s/api-gateway/routeupstreamlimitsfilter) to the backend in an `HTTPRoute`. Each circuit-breaker limit in the filter overrides the corresponding default. A passive health check in the filter replaces the default passive health check for that backend service.
+
+* Type: string
+* Required: optional
+
+In the following example, the `Gateway` limits each backend service to 40 connections and ejects a backend service instance after five consecutive `5xx` errors:
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: my-gateway
+  annotations:
+    api-gateway.consul.hashicorp.com/default-max-connections: "40"
+    api-gateway.consul.hashicorp.com/default-max-pending-requests: "80"
+    api-gateway.consul.hashicorp.com/default-max-concurrent-requests: "160"
+    api-gateway.consul.hashicorp.com/default-passive-health-check-interval: "15s"
+    api-gateway.consul.hashicorp.com/default-passive-health-check-max-failures: "5"
+    api-gateway.consul.hashicorp.com/default-passive-health-check-max-ejection-percent: "20"
+spec:
+  gatewayClassName: consul
+  listeners:
+  - name: http
+    protocol: HTTP
+    port: 80
+    allowedRoutes:
+      namespaces:
+        from: All
+```
+
+### `api-gateway.consul.hashicorp.com/listener-<sectionName>-protocol`
+Selects the Consul protocol for a specific listener. Replace `<sectionName>` in the annotation key with the `name` of the listener. Consul on Kubernetes sets the annotation value as the [`Listeners[].Protocol`](/consul/docs/reference/config-entry/api-gateway#listeners-protocol) field of the corresponding listener in the API gateway configuration entry. Each listener reads only its own annotation, so listeners on the same `Gateway` can use different protocols.
+
+Use this annotation to serve HTTP/2 or gRPC traffic. When you set the value to `http2` or `grpc`, the gateway accepts HTTP/2 connections from clients and uses HTTP/2 for the connection to the backend service. Set the listener `protocol` field to `HTTP` or `HTTPS`, and bind an `HTTPRoute` to the listener.
+
+The annotation is supported on `Gateway` resources in the `gateway.networking.k8s.io` API group.
+
+* Type: string
+* Required: optional
+* Allowed values: `http`, `http2`, `grpc`, or `tcp`. Values are not case sensitive.
+* Default: When the annotation is not set, Consul on Kubernetes derives the protocol from the listener `protocol` field.
+
+Consul on Kubernetes ignores the annotation when the value is not one of the allowed values and uses the protocol derived from the listener `protocol` field. When the `<sectionName>` in the annotation key does not match the name of any listener, the controller logs a warning and ignores the annotation.
+
+In the following example, the `grpc-listener` listener uses the `grpc` protocol, the `h2-listener` listener uses the `http2` protocol, and the `http-listener` listener uses the default `http` protocol:
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: my-gateway
+  annotations:
+    api-gateway.consul.hashicorp.com/listener-grpc-listener-protocol: "grpc"
+    api-gateway.consul.hashicorp.com/listener-h2-listener-protocol: "http2"
+spec:
+  gatewayClassName: consul
+  listeners:
+  - name: http-listener
+    protocol: HTTP
+    port: 80
+    allowedRoutes:
+      namespaces:
+        from: All
+  - name: grpc-listener
+    protocol: HTTP
+    port: 9080
+    allowedRoutes:
+      namespaces:
+        from: All
+  - name: h2-listener
+    protocol: HTTP
+    port: 9090
+    allowedRoutes:
+      namespaces:
+        from: All
+```
