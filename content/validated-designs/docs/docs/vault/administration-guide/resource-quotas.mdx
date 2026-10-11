@@ -1,0 +1,437 @@
+---
+title: Resource quotas
+description: Protect Vault Enterprise at scale by choosing, configuring, and tuning rate limit quotas and lease count quotas for your platform workloads.
+---
+
+# Resource quotas
+
+## Overview
+
+Every interaction with Vault travels through its API. When organizations operate
+Vault as a shared internal platform, that API surface reaches thousands of
+workloads across teams, namespaces, and mounts. A single incorrectly configured
+application or a sudden traffic spike from one team can exhaust Vault's
+resources and degrade service for everyone else.
+
+Resource quotas are Vault's primary mechanism for protecting platform stability
+under shared-service load. They let platform operators set enforceable limits on
+two distinct resource classes:
+
+- **Rate limit quotas** — cap the number of API requests per second (RPS)
+  reaching a given namespace, mount, path, or role
+- **Lease count quotas** — cap the total number of active leases generated
+  against a namespace, mount, or role _(Enterprise only)_
+
+Used together, these controls give platform teams the guardrails they need to
+run Vault as a reliable shared service without relying solely on consumer teams
+to behave correctly.
+
+## Prerequisites
+
+Before implementing resource quotas, confirm that you have:
+
+- Vault operator or administrator access to the root or administration namespace
+- Established a baseline for normal request volume and active lease counts
+  using Vault telemetry (see the
+  [Monitoring and Observability](https://developer.hashicorp.com/validated-designs/vault-operating-guides-adoption/monitoring-and-observability)
+  guidance)
+- Completed the adoption and standardization phases; quotas applied before
+  you establish stable usage patterns tend to require frequent retuning
+
+## Choose the right quota type
+
+The most common source of confusion with Vault quotas is applying a rate limit
+quota to a lease count problem, or a lease count quota to a rate limit problem.
+The table below maps each quota type to the class of problem it addresses.
+
+| | Rate limit quota | Lease count quota |
+| --- | --- | --- |
+| **What it limits** | API requests per second | Total active leases |
+| **Protects against** | API flood, noisy-neighbor traffic | Lease explosion, storage degradation, memory pressure |
+| **Algorithm** | Token bucket (per unique client IP, per node) | Hard counter |
+| **Available in** | Community and Enterprise | Enterprise only |
+| **Scope** | Global, namespace, mount, path, role | Global, namespace, mount, role |
+| **Replicated** | No — enforced per-node | Yes — stored on primary cluster |
+| **Audit on rejection** | Off by default; opt-in per quota configuration | Always logged |
+
+**Use rate limit quotas** when the problem is high request volume — a
+misbehaving client hammering an endpoint, a burst in authentication requests, or
+an unplanned traffic spike from a new workload.
+
+**Use lease count quotas** when the problem is lease growth — dynamic secret
+mounts generating credentials that are never revoked, clients not reusing
+existing tokens, or mounts with time-to-live (TTL) values set too high.
+These conditions accumulate a backlog of unexpired leases.
+
+When both problems are present, apply both quota types. They are independent
+controls and you can layer them at the same scope.
+
+## Rate limit quotas
+
+### How rate limit quotas work
+
+Rate limit quotas use a
+[token bucket](https://en.wikipedia.org/wiki/Token_bucket) algorithm. Each
+unique client IP address gets its own bucket on each Vault node. The
+bucket refills at the configured `rate` (requests per second). When the bucket
+is empty, Vault rejects requests with `HTTP 429 Too Many Requests`.
+
+Because each node maintains its own independent buckets, rate limit quotas are
+**not cluster-wide aggregates**. A global rate limit quota of 500 RPS allows up
+to 500 RPS from each unique IP address _on each node_. Plan your `rate` values with the
+node count in mind.
+
+### Scope and precedence
+
+You can define a rate limit quota at any of the following scopes. When multiple
+quotas match a request, the most specific one wins:
+
+| Precedence (highest to lowest) | Scope |
+| --- | --- |
+| 1 | Namespace + mount + role |
+| 2 | Namespace + mount + exact path |
+| 3 | Namespace + mount + glob prefix path |
+| 4 | Namespace + mount |
+| 5 | Namespace |
+| 6 | Closest inheritable parent namespace |
+| 7 | Global (empty path) |
+
+Start with a modest global quota to establish a baseline, then add targeted
+mount or path quotas for mounts that carry disproportionate traffic or risk.
+Avoid writing highly granular path quotas at scale — they add operational
+overhead and can obscure the broader traffic picture.
+
+<Note>
+
+Create a rate limit quota only for a path that exists on the cluster
+where you are creating it. On Performance Replication setups, create quotas for
+local mounts on the cluster that hosts the mount, not on the primary.
+
+</Note>
+
+### Blocking behavior with `block_interval`
+
+By default, a client that exceeds the rate limit gets throttled — its bucket runs
+empty and Vault rejects further requests until the bucket refills. Setting
+`block_interval` to a non-zero value changes this behavior: Vault blocks the client
+from _all_ requests for the duration specified, regardless
+of the endpoint.
+
+Use `block_interval` when you need to discourage retry storms. Without it, an
+aggressive client can sit at the rate limit boundary and continuously probe.
+With a block interval, the client faces a penalty for exceeding the limit and must
+wait before retrying.
+
+```shell-session
+$ vault write sys/quotas/rate-limit/auth-aggressive \
+    path="auth/approle" \
+    rate=100 \
+    block_interval=60
+```
+
+The preceding example limits the AppRole auth mount to 100 RPS per client IP address and
+blocks any IP address that exceeds that limit for 60 seconds.
+
+### Identity-based and collective modes (Enterprise)
+
+Vault Enterprise extends rate limit quotas with a `group_by` option that
+changes the grouping strategy for incoming requests:
+
+| `group_by` value | Behavior |
+| --- | --- |
+| `ip` | One bucket per source IP address _(default)_ |
+| `none` | One collective bucket for all requests at the target scope |
+| `entity_then_ip` | Authenticated requests bucketed by entity ID; unauthenticated by IP |
+| `entity_then_none` | Authenticated requests bucketed by entity ID; everything else in one collective bucket |
+
+**Choose `group_by=none`** when you want a collective cap across an entire
+namespace or mount — for example, a hard ceiling of 1,000 total RPS into a
+tenant namespace regardless of how many IP addresses the workloads originate from.
+
+**Choose `entity_then_ip` or `entity_then_none`** when workloads share IP addresses
+(common in containerized environments with NAT) or when individual workloads
+scale across many IP addresses. Bucketing by entity ID gives each authenticated identity
+its own consistent limit regardless of how its network addresses change.
+
+When using `entity_then_ip` or `entity_then_none`, you can set a separate
+`secondary_rate` for the non-entity bucket (unauthenticated or IP-grouped
+requests). This lets you apply a distinct limit to traffic that Vault cannot
+trace to a known identity:
+
+```shell-session
+$ vault write sys/quotas/rate-limit/ns-collective \
+    path="tenant-a/" \
+    rate=500 \
+    group_by=entity_then_none \
+    secondary_rate=1000 \
+    inheritable=true
+```
+
+<Note>
+
+`group_by`, `secondary_rate`, and `inheritable` are Vault Enterprise features.
+Community Edition rate limit quotas always use per-source-IP bucketing.
+
+</Note>
+
+## Lease count quotas
+
+### How lease count quotas work
+
+Lease count quotas are a Vault Enterprise feature that cap the total number of
+active leases generated against a configured scope. When active leases reach the cap, new lease-generating requests — such as dynamic credential generation or token
+creation — fail until existing leases expire or operators revoke them.
+
+The primary cluster stores lease count quotas and replicates them to
+performance secondaries. This means they provide a genuine cluster-wide
+aggregate limit, unlike rate limit quotas.
+
+### Protecting against lease explosions
+
+A lease explosion occurs when lease generation outpaces revocation and
+expiration, leading to an uncontrolled growth in the number of active leases.
+Left unchecked, this creates a memory drain on the active node that can cascade
+to other nodes and cause cluster-wide denial-of-service.
+
+Lease count quotas are the primary guardrail against lease explosions. Apply
+them early — before a leak occurs — so that a misbehaving mount cannot
+accumulate tens of thousands of leases undetected.
+
+Use the following checklist when designing lease count quotas for a shared Vault
+platform:
+
+- **Set a global quota as a backstop.** A global lease count quota with a
+  conservative ceiling (for example, 300,000 leases for most enterprise
+  deployments) prevents any single runaway mount from consuming all available
+  lease capacity. New Vault Enterprise installations (1.16 and later) receive a
+  default global lease count quota of 300,000 leases automatically.
+- **Add per-mount quotas for high-velocity secret engines.** Dynamic secret
+  mounts (database, AWS, PKI) are the most common sources of lease growth.
+  Set targeted per-mount quotas that reflect the expected steady-state lease
+  count for each mount, plus a reasonable burst headroom.
+- **Pair quotas with short TTL values.** A quota does not replace proper TTL
+  configuration — it is a safety net. A database mount with a 24-hour default
+  credential TTL hits its lease count ceiling much sooner than one with a
+  1-hour TTL. Tune TTL values first, then set quotas based on the resulting
+  steady-state lease count.
+- **Treat quota violations as a signal to investigate, not just a limit to raise.**
+  If a mount consistently approaches its lease count limit, the right response
+  is to investigate client behavior (Are clients reusing credentials? Are they
+  revoking leases after use?) before raising the ceiling.
+
+```shell-session
+## Apply a mount-scoped lease count quota for a database secrets engine
+$ vault write sys/quotas/lease-count/db-credentials \
+    name="db-credentials" \
+    path="database/" \
+    max_leases=5000
+```
+
+## Operational guidance
+
+### Audit logging for quota rejections
+
+Rate limit quota rejections are **not written to the audit log by default**.
+This is intentional: under high rejection volume, audit logging every rejected
+request can itself become a performance bottleneck.
+
+Enable rate limit audit logging only when you have a specific need to trace
+rejections back to individual clients — for example, when investigating an
+application with a suspected configuration error:
+
+```shell-session
+$ vault write sys/quotas/config enable_rate_limit_audit_logging=true
+Success! Data written to: sys/quotas/config
+```
+
+Disable it again after the investigation is complete if rejection volume is high.
+
+Lease count quota rejections are always logged. No additional configuration is necessary.
+
+### Telemetry metrics
+
+Vault exposes the following metrics for monitoring quota health. Each metric
+carries a `name` label that identifies the specific quota rule.
+
+| Metric | Type | What it signals |
+| --- | --- | --- |
+| `vault.quota.rate_limit.violation` | counter | Number of requests rejected by a rate limit quota |
+| `vault.quota.lease_count.counter` | gauge | Current number of active leases against a lease count quota |
+| `vault.quota.lease_count.max` | gauge | Configured maximum for a lease count quota |
+| `vault.quota.lease_count.violation` | counter | Number of requests rejected by a lease count quota |
+
+Alert on:
+
+- A sustained, non-zero rate of `vault.quota.rate_limit.violation` from a
+  specific quota indicates a mount or path is consistently at or above
+  its limit and warrants investigation.
+- `vault.quota.lease_count.counter` approaching 80 – 90% of
+  `vault.quota.lease_count.max` — this is the early warning signal for lease
+  growth before a violation. See the
+  [preceding telemetry table](#telemetry-metrics) for metric names.
+
+### Response headers
+
+Vault can return rate limit metadata in response headers, giving clients the
+information they need to implement respectful backoff without relying on
+repeated `HTTP 429` responses:
+
+```shell-session
+$ vault write sys/quotas/config enable_rate_limit_response_headers=true
+Success! Data written to: sys/quotas/config
+```
+
+When enabled, responses include `X-RateLimit-Limit`, `X-RateLimit-Remaining`,
+and `X-RateLimit-Reset` headers. Enable this when client teams have the ability
+to consume and act on these headers. It reduces retry noise without changing
+the enforcement behavior.
+
+### Exempt paths
+
+A small set of Vault paths are exempt from rate limiting by default:
+
+- `sys/generate-recovery-token/attempt`
+- `sys/generate-recovery-token/update`
+- `sys/generate-root/attempt`
+- `sys/generate-root/update`
+- `sys/health`
+- `sys/seal-status`
+- `sys/unseal`
+
+These paths remain available even when a global rate limit quota runs out,
+which is intentional — Vault requires these paths for operational recovery. Do
+not remove them from the exempt list without a clear operational reason.
+
+You can extend the exempt list using `rate_limit_exempt_paths` in the quota
+configuration. Avoid adding application paths to this list casually. Every path on the
+exempt list bypasses all rate limit enforcement, including targeted mount or
+namespace quotas.
+
+## Common scenarios
+
+### Protect a shared auth mount
+
+A shared AppRole or LDAP auth mount serving dozens of application teams is a
+common source of authentication floods. An application with an incorrect configuration that
+fails to cache its token and re-authenticates on every request can overwhelm the
+mount for all other consumers.
+
+Apply a rate limit quota at the mount level with a `block_interval` to
+discourage aggressive retry behavior. Set the rate based on your observed
+peak-legitimate RPS from telemetry, with 20 – 30% headroom:
+
+```shell-session
+$ vault write sys/quotas/rate-limit/approle-global \
+    path="auth/approle" \
+    rate=500 \
+    block_interval=30
+```
+
+Then add a stricter per-role quota for roles known to carry lower legitimate
+traffic, so a role with an incorrect configuration cannot consume the entire mount budget:
+
+```shell-session
+$ vault write sys/quotas/rate-limit/approle-webapp \
+    path="auth/approle" \
+    role="webapp" \
+    rate=50
+```
+
+### Protect a noisy namespace or path
+
+When a tenant namespace or a specific secret path is generating disproportionate
+traffic, apply a quota directly at that scope rather than raising or tightening
+the global limit. This limits the impact on other namespaces and preserves
+headroom for legitimate traffic elsewhere.
+
+On Vault Enterprise, use `inheritable=true` to apply the limit across all mounts
+within the namespace without having to create per-mount quotas:
+
+```shell-session
+$ vault write sys/quotas/rate-limit/tenant-b-cap \
+    path="tenant-b/" \
+    rate=1000 \
+    inheritable=true
+```
+
+### Guard against lease growth on a dynamic secrets mount
+
+When dynamic secret mounts begin to accumulate leases faster than expected,
+apply a lease count quota to create a hard ceiling while you investigate and
+tune client behavior. Set the quota based on the legitimate steady-state lease
+count, not the current inflated count:
+
+1. Assess the current active lease volume before setting a ceiling. Use the
+   `vault.expire.num_leases` telemetry gauge in your monitoring system to
+   observe the cluster-wide total lease count and its trend over time. To
+   enumerate leases tied specifically to the target mount, use the
+   `sys/leases/lookup` API with the mount prefix:
+
+   ```shell-session
+   vault list sys/leases/lookup/database/creds/
+   ```
+
+   The number of lease IDs returned reflects the active lease count for that
+   credential path. Use this count together with the `vault.expire.num_leases`
+   trend data to set a quota ceiling that matches the legitimate steady-state
+   load rather than a current inflated count.
+
+2. Review mount-level lease telemetry and identify the expected steady state.
+
+3. Apply a lease count quota that reflects that baseline plus headroom:
+
+   ```shell-session
+   $ vault write sys/quotas/lease-count/database-guard \
+       name="database-guard" \
+       path="database/" \
+       max_leases=2000
+   ```
+
+4. Monitor `vault.quota.lease_count.counter` against
+   `vault.quota.lease_count.max` and alert at 80% utilization.
+
+5. If violations occur, treat them as the trigger to investigate client
+   behavior — not as a prompt to raise the quota. Confirm that clients are
+   reusing credentials, revoking after use, and operating with appropriate TTL values
+   before adjusting the limit.
+
+## What not to do
+
+**Do not treat rate limit quotas as cluster-wide traffic shapers.** Vault enforces rate limit
+quotas independently on each Vault node using per-source-IP
+buckets. A `rate=1000` quota allows 1,000 RPS per IP address per node, not 1,000 RPS
+across the cluster. Designing cluster-level throughput controls requires
+understanding your node count and traffic distribution.
+
+**Do not use `group_by=none` without deliberate intent at broad scopes.** A collective
+(`none`) quota at the global or namespace level with a low rate blocks
+legitimate traffic from any source the moment the aggregate bucket empties —
+including traffic that would otherwise be well within individual limits. Use
+`group_by=none` only when a collective ceiling is the explicit intent, and
+at the narrowest scope that satisfies the requirement.
+
+**Do not conflate rate limiting with lease count management.** These protect
+against different failure modes. A low rate limit does not prevent a lease
+explosion if the client generates one expensive credential per request at
+a rate well under the limit. Apply both quota types for workloads that can fail
+in both dimensions.
+
+**Do not raise a lease count quota as the first response to a violation.**
+Quota violations are signals. An application hitting its lease count limit is
+telling you it is not cleaning up after itself. Investigate before raising the
+ceiling. Otherwise the ceiling provides no protection at all.
+
+**Do not confuse resource quotas with the deprecated request limiter.** Vault
+documentation includes references to a request limiter feature that predates
+the current resource quota system. Resource quotas are the current, supported
+mechanism. Do not mix guidance from both systems.
+
+## Related resources
+
+- [Vault resource quotas concepts](https://developer.hashicorp.com/vault/docs/concepts/resource-quotas)
+- [Create a rate limit quota](https://developer.hashicorp.com/vault/docs/configuration/create-rate-limit-quota)
+- [Rate limit quotas - collective, by IP, by entity](https://developer.hashicorp.com/vault/docs/configuration/identity-based-rate-limit)
+- [Create a lease count quota](https://developer.hashicorp.com/vault/docs/configuration/create-lease-count-quota)
+- [Prevent lease explosions](https://developer.hashicorp.com/vault/docs/configuration/prevent-lease-explosions)
+- [Vault quota telemetry metrics](https://developer.hashicorp.com/vault/docs/internals/telemetry/metrics/core-system#quota-metrics)
+- [Monitoring and observability](https://developer.hashicorp.com/validated-designs/vault-operating-guides-adoption/monitoring-and-observability)
