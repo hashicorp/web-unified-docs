@@ -1,0 +1,211 @@
+---
+page_title: Policy-as-code with Sentinel
+description: Use HashiCorp Sentinel to enforce policy guardrails across Vault Enterprise, standardizing access control beyond ACLs with role and endpoint governing policies.
+---
+
+# Policy-as-code with Sentinel
+
+<Note>
+Sentinel is available with Vault Enterprise and HCP Vault Dedicated.
+</Note>
+
+HashiCorp Sentinel is a policy-as-code framework that extends Vault Enterprise's access control model beyond traditional ACL policies. In the standardization phase, Sentinel gives platform teams a consistent, inspectable way to enforce organizational guardrails - such as requiring MFA on sensitive paths or restricting access by network location - without relying solely on per-path ACL authorship scattered across namespaces.
+
+Vault ACLs answer the question "what can this token access?" Sentinel policies answer the question "what conditions must be true for this request to succeed?" - even when ACLs already permit it. This makes Sentinel the right tool for organization-wide standards that must hold regardless of which team or application makes the request.
+
+## Understand the policy model
+
+Vault's policy system includes three types of policies that work together in a fixed evaluation order:
+
+| Policy type | Bound to | Typical use |
+| ----------- | -------- | ----------- |
+| ACL | Paths | Grant or deny capabilities on a specific path |
+| Role Governing Policy (RGP) | Tokens, identity entities, or identity groups | Enforce identity-based rules that apply regardless of path |
+| Endpoint Governing Policy (EGP) | Paths | Enforce conditions on requests to a specific path, including unauthenticated paths such as login |
+
+For authenticated access, design ACLs before introducing Sentinel policies. RGPs and EGPs add conditions on top of ACLs; they do not replace path capability grants.
+
+### When to use RGPs
+
+Use RGPs when the restriction is identity-driven rather than path-driven. RGPs travel with the token's associated identity entity or group membership, making them appropriate for:
+
+- Restricting operator actions based on their team or role metadata
+- Enforcing break-glass controls on privileged entities
+- Applying consistent rules to a set of identities across multiple namespaces
+
+### When to use EGPs
+
+Use EGPs when the restriction must apply at a specific path or when Vault must check conditions before issuing a token - for example, on login paths. EGPs are appropriate for:
+
+- Requiring MFA before a login endpoint succeeds
+- Enforcing network CIDR checks on authentication mounts
+- Blocking write access below a path unless specific conditions hold
+- Delegating scoped EGP management to application teams
+
+<Note>
+Not all unauthenticated paths support EGPs. Root token generation paths are explicitly excluded because they serve as Vault's mechanism of last resort if all clients lose access due to policy misconfiguration.
+</Note>
+
+## Understand policy evaluation and enforcement
+
+Vault evaluates policies in a fixed order for every incoming request:
+
+1. _ACLs_ - For authenticated requests, Vault must grant the request the required capabilities; failure here denies the request.
+1. _RGPs_ - For authenticated requests, Vault evaluates all RGPs attached to the token, entity, or groups; all must pass.
+1. _EGPs_ - Vault evaluates all EGPs that apply to the request path; all must pass.
+
+For unauthenticated requests, Vault skips ACL and RGP evaluation and goes directly to matching EGPs.
+
+Any failure at any applicable step denies the request. Root tokens bypass Sentinel evaluation entirely.
+
+### Enforcement levels
+
+Each Sentinel policy carries one of three enforcement levels:
+
+| Level | Behavior |
+| ----- | -------- |
+| `advisory` | Vault logs the policy failure but the request proceeds. Use this to introduce a policy without blocking operations while teams adjust. |
+| `soft-mandatory` | The policy must pass unless the requester explicitly overrides it using the `-policy-override` CLI flag or the `X-Vault-Policy-Override: true` HTTP header. |
+| `hard-mandatory` | Policy must pass unconditionally. Override is not possible. |
+
+Introduce new organizational policies at `advisory` first. Promote to `soft-mandatory` after an operational review period, and reserve `hard-mandatory` for controls where an override would constitute a compliance violation.
+
+<Note>
+Treat all `soft-mandatory` overrides as exceptions. Review their use regularly through your audit and operational logging workflows.
+</Note>
+
+## Enable Sentinel in your Vault configuration
+
+Sentinel requires a valid Vault Enterprise license. The core Sentinel framework requires no additional server-side configuration - RGP and EGP management is available through the API and command-line tool as soon as Vault Enterprise is running.
+
+The optional `sentinel` stanza in your Vault server configuration file controls advanced module access:
+
+```hcl
+sentinel {
+  additional_enabled_modules = []
+}
+```
+
+Vault enables all standard Sentinel imports by default except `http`. The `http` import allows Sentinel policies to make outbound HTTP requests during policy evaluation.
+
+<Warning>
+Do not enable the `http` import in production without explicit risk acceptance. Enabling it allows policy evaluation to issue outbound requests to arbitrary external endpoints on every policy-checked request. This introduces unbounded latency on high-volume paths and creates a potential server-side request forgery (SSRF) or data exfiltration vector. If a use case requires external data during evaluation, consider storing that data in token metadata, entity metadata, or request parameters instead.
+</Warning>
+
+## Recommended standardization patterns
+
+The following patterns cover the most common Sentinel use cases in the standardization phase. Start with the patterns that address your highest-priority control gaps.
+
+### Require MFA on login paths
+
+If your organization requires MFA for privileged access, enforce it on the authentication path rather than relying on operators to use MFA voluntarily.
+
+Use an EGP attached to the login path for the auth method. The policy should inspect the request and ensure the necessary MFA context or validation result is present before the login proceeds.
+
+This pattern is especially useful when:
+
+- Human operators authenticate through OIDC, LDAP, or another interactive auth flow
+- Administrative paths grant broad capabilities after login
+- You need a central control that applies consistently across namespaces
+
+Example EGP logic:
+
+```sentinel
+import "strings"
+
+has_mfa = rule {
+  strings.contains(request.path, "auth/oidc/login") and
+  request.data.mfa_validated is true
+}
+
+main = rule when request.operation is "update" {
+  has_mfa
+}
+```
+
+Start with `advisory`, confirm the auth flow surfaces the required context reliably, then move to `soft-mandatory` or `hard-mandatory` depending on your exception policy.
+
+### Restrict access based on identity metadata
+
+When identity groups or entities carry authoritative metadata such as department, environment, or operator tier, use an RGP to ensure requests only succeed when that metadata matches the intended control rule.
+
+This pattern is useful for:
+
+- Limiting production actions to operators in a designated group
+- Enforcing separation of duties between platform and application teams
+- Applying the same rule to many paths without copying ACL fragments
+
+Example RGP logic:
+
+```sentinel
+import "identity"
+
+main = rule {
+  identity.entity.metadata.team is "platform"
+}
+```
+
+Prefer identity metadata populated by your identity provider or provisioning workflow over free-form operator-managed values.
+
+### Enforce token lifetime guardrails
+
+Use Sentinel to prevent overly broad or long-lived tokens even when an operator has ACL permission to request them. This helps standardize token hygiene across teams.
+
+Useful controls include:
+
+- Maximum allowed token TTL for specific paths
+- Disallowing periodic tokens outside approved automation workflows
+- Requiring explicit justification metadata for exceptional token requests
+
+Example EGP logic:
+
+```sentinel
+main = rule {
+  request.data.ttl <=  "1h" and
+  request.data.period is undefined
+}
+```
+
+Apply this pattern to token creation endpoints used by humans or automation that should not mint persistent credentials casually.
+
+### Delegate EGP management with guardrails
+
+In larger organizations, platform teams may want application teams to manage some path-specific policy logic without granting them unrestricted control over cluster-wide guardrails.
+
+Use a combination of ACLs and namespace boundaries so that teams can manage EGPs only in approved paths or namespaces, while central platform teams retain control of shared auth mounts and high-risk paths.
+
+This delegation model works best when:
+
+- Platform teams define the baseline policy framework
+- Application teams own application-specific endpoints
+- Review and promotion of Sentinel changes follow the same code-review process as ACL changes
+
+Document which paths are centrally governed and which are delegated so operators understand where policy changes must be made.
+
+## Operational guidance
+
+### Roll out policies gradually
+
+Treat Sentinel adoption as a change-management exercise. Introduce policies in `advisory` mode first so you can observe impact before blocking requests. Use audit logs and operational telemetry to identify legitimate workflows that would fail under stricter enforcement.
+
+### Keep policy logic simple
+
+Prefer small, readable policies with one clear purpose over large multi-rule bundles. Simpler policies are easier to review, test, and troubleshoot during incidents.
+
+### Avoid external dependencies in policy decisions
+
+Do not make request success depend on systems outside Vault unless the risk is well understood. Policy checks run inline with request handling; slow or unreliable dependencies directly degrade operator and application experience.
+
+### Understand version-specific behavior
+
+RGP inheritance behavior across namespaces depends on Vault version. Review the product documentation for your deployed release before relying on inheritance across parent and child namespaces. The source HVD notes version boundaries around Vault `1.15.0`, `1.14.4`, and `1.13.8` for related behavior, so confirm exact semantics against your supported version during rollout.
+
+### Account for known exceptions
+
+Root tokens bypass Sentinel entirely. Certain management and recovery workflows also have special handling. Keep a documented break-glass procedure and ensure operators understand when Sentinel does and does not apply.
+
+## Related resources
+
+- <a href="https://developer.hashicorp.com/vault/docs/enterprise/sentinel" target="_blank" rel="noopener">Vault Sentinel documentation</a>
+- <a href="https://developer.hashicorp.com/vault/docs/enterprise/sentinel/properties" target="_blank" rel="noopener">Vault Sentinel properties</a>
+- <a href="https://developer.hashicorp.com/vault/docs/concepts/policies" target="_blank" rel="noopener">Vault policy concepts</a>
