@@ -95,22 +95,28 @@ const docsPathsAllVersionsFile = path.join(
 const relativeFile = 'vault/v1.21.x/docs/index.mdx'
 const sourceFile = path.join(contentDir, relativeFile)
 
+function writeGeneratedMetadataFiles(
+	metadata: Metadata = generatedMetadata,
+): void {
+	vol.writeFileSync(
+		versionMetadataFile,
+		JSON.stringify(metadata.versionMetadata),
+	)
+	vol.writeFileSync(
+		docsPathsAllVersionsFile,
+		JSON.stringify(metadata.docsPathsAllVersions),
+	)
+}
+
 let onChange: (eventType: string, filename: string | null) => void
 
 beforeEach(() => {
 	vi.resetModules()
 	vi.resetAllMocks()
 	vol.reset()
+	vi.spyOn(fs.promises, 'writeFile').mockResolvedValue(undefined)
 	vol.fromJSON({ [relativeFile]: '# Original' }, contentDir)
 	vol.mkdirSync(path.dirname(versionMetadataFile), { recursive: true })
-	vol.writeFileSync(
-		versionMetadataFile,
-		JSON.stringify(generatedMetadata.versionMetadata),
-	)
-	vol.writeFileSync(
-		docsPathsAllVersionsFile,
-		JSON.stringify(generatedMetadata.docsPathsAllVersions),
-	)
 	delete (globalThis as any).__incBuildsMetadataCache
 	vi.stubEnv('NODE_ENV', 'development')
 	vi.stubEnv('INCREMENTAL_BUILD', 'true')
@@ -149,6 +155,7 @@ describe('getMetadata', () => {
 			vi.stubEnv('NODE_ENV', nodeEnv)
 			vi.stubEnv('INCREMENTAL_BUILD', incremental)
 			vi.stubEnv('VERCEL_ENV', vercelEnv)
+			writeGeneratedMetadataFiles()
 			const { getMetadata } = await import('./metadata')
 
 			expect(await getMetadata()).toEqual(generatedMetadata)
@@ -172,6 +179,7 @@ describe('getMetadata', () => {
 		async (_name: string, missingFile: string) => {
 			vi.stubEnv('NODE_ENV', 'test')
 			vi.stubEnv('INCREMENTAL_BUILD', 'false')
+			writeGeneratedMetadataFiles()
 			vol.unlinkSync(missingFile)
 
 			const { getMetadata } = await import('./metadata')
@@ -187,6 +195,7 @@ describe('getMetadata', () => {
 	test('caches generated metadata outside incremental local development', async () => {
 		vi.stubEnv('NODE_ENV', 'test')
 		vi.stubEnv('INCREMENTAL_BUILD', 'false')
+		writeGeneratedMetadataFiles()
 		const { getMetadata } = await import('./metadata')
 
 		const [first, second] = await Promise.all([getMetadata(), getMetadata()])
@@ -201,9 +210,24 @@ describe('getMetadata', () => {
 		).toBeUndefined()
 	})
 
+	test('loads existing metadata files instead of generating metadata', async () => {
+		writeGeneratedMetadataFiles()
+		const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+		const { getMetadata } = await import('./metadata')
+
+		const first = await getMetadata()
+		expect(first).toEqual(generatedMetadata)
+		expect(log).toHaveBeenCalledWith('[watcher] loading existing metadata')
+		expect(gatherVersionMetadata).not.toHaveBeenCalled()
+		expect(gatherAllVersionsDocsPaths).not.toHaveBeenCalled()
+		expect(fs.promises.writeFile).not.toHaveBeenCalled()
+
+		writeGeneratedMetadataFiles(twoProductsMetadata)
+		expect(await getMetadata()).toBe(first)
+		expect(first).toEqual(generatedMetadata)
+	})
+
 	test('starts the watcher on module load and generates one shared cache lazily', async () => {
-		vol.unlinkSync(versionMetadataFile)
-		vol.unlinkSync(docsPathsAllVersionsFile)
 		const { getMetadata } = await import('./metadata')
 		expect(gatherVersionMetadata).not.toHaveBeenCalled()
 		expect(watch).toHaveBeenCalledOnce()
@@ -223,6 +247,15 @@ describe('getMetadata', () => {
 			generatedMetadata.versionMetadata,
 			false,
 			Object.keys(generatedMetadata.versionMetadata),
+			{ verbose: false },
+		)
+		expect(fs.promises.writeFile).toHaveBeenCalledWith(
+			versionMetadataFile,
+			JSON.stringify(generatedMetadata.versionMetadata, null, 2),
+		)
+		expect(fs.promises.writeFile).toHaveBeenCalledWith(
+			docsPathsAllVersionsFile,
+			JSON.stringify(generatedMetadata.docsPathsAllVersions, null, 2),
 		)
 		expect(
 			(globalThis as any).__unifiedDocsProductionMetadataCache,
@@ -304,6 +337,7 @@ describe('getMetadata', () => {
 
 	test('checks and regenerates only the changed product, preserving other products', async () => {
 		vol.fromJSON({ 'consul/v1.22.x/docs/index.mdx': '# Consul' }, contentDir)
+		writeGeneratedMetadataFiles(twoProductsMetadata)
 		mockMetadata(twoProductsMetadata)
 		const { getMetadata } = await import('./metadata')
 		const first = await getMetadata()
@@ -326,10 +360,19 @@ describe('getMetadata', () => {
 		expect(gatherVersionMetadata).toHaveBeenLastCalledWith(contentDir, [
 			'vault',
 		])
+		expect(fs.promises.writeFile).toHaveBeenCalledWith(
+			versionMetadataFile,
+			JSON.stringify(updatedMetadata.versionMetadata, null, 2),
+		)
+		expect(fs.promises.writeFile).toHaveBeenCalledWith(
+			docsPathsAllVersionsFile,
+			JSON.stringify(updatedMetadata.docsPathsAllVersions, null, 2),
+		)
 		expect(gatherAllVersionsDocsPaths).toHaveBeenLastCalledWith(
 			{ vault: updatedMetadata.versionMetadata.vault },
 			false,
 			['vault'],
+			{ verbose: false },
 		)
 		expect(readdir).toHaveBeenCalledWith(path.join(contentDir, 'vault'), {
 			recursive: true,
@@ -344,6 +387,36 @@ describe('getMetadata', () => {
 		expect(second.docsPathsAllVersions.consul).toBe(
 			first.docsPathsAllVersions.consul,
 		)
+	})
+
+	test('does not wait for updated metadata files to be written', async () => {
+		writeGeneratedMetadataFiles()
+		const { getMetadata } = await import('./metadata')
+		await getMetadata()
+		const updatedMetadata: Metadata = {
+			versionMetadata: {
+				vault: [{ version: 'v1.22.x', releaseStage: 'stable', isLatest: true }],
+			},
+			docsPathsAllVersions: { vault: { 'v1.22.x': [] } },
+		}
+		mockMetadata(updatedMetadata)
+		let finishWrites: () => void = () => {}
+		const writesPending = new Promise<void>((resolve: () => void) => {
+			finishWrites = resolve
+		})
+		const writeFile = vi.mocked(fs.promises.writeFile)
+		writeFile.mockReturnValue(writesPending)
+		vol.mkdirSync(path.join(contentDir, 'vault/v1.22.x'))
+		onChange('rename', 'vault/v1.22.x')
+
+		const metadata = await getMetadata()
+		await vi.waitFor(() => {
+			expect(writeFile).toHaveBeenCalledTimes(2)
+		})
+		expect(metadata.versionMetadata.vault).toEqual(
+			updatedMetadata.versionMetadata.vault,
+		)
+		finishWrites()
 	})
 
 	test('waits for a background rebuild before resolving concurrent requests', async () => {

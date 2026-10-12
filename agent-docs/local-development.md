@@ -51,22 +51,23 @@ Navigation data, redirects, and assets are read directly from `content/`.
 
 When `INCREMENTAL_BUILD=true`, `NODE_ENV=development`, and this is not a Vercel
 preview, the metadata module loads `app/utils/incBuildsMetadata.ts`, which starts
-the watcher immediately. Metadata consumers lazily generate version metadata
-and all-version document paths in memory on the first request, sharing one cache
-across API routes. Every content event logs its path and triggers a Dev Portal
-refresh. File saves are ignored for metadata, including edits to existing files.
-Structural changes schedule a background path check for the affected product.
-Only path additions, removals, and renames within an existing product regenerate
-that product's version metadata and all-version document paths; other products
-remain cached. Events without a filename check all product folders but still
-regenerate only products whose paths changed. Requests wait for the shared
-rebuild queue to finish, including changes received during generation. Atomic
-saves that replace an existing file without changing the final paths are
+the watcher immediately. On the first metadata request, it loads the generated
+JSON files if both exist; otherwise it generates metadata on demand and queues
+the files for background writing. API routes share one in-memory cache. Every
+content event logs its path and triggers a Dev Portal refresh. File saves are
+ignored for metadata, including edits to existing files. Structural changes
+schedule a background path check for the affected product. Only path additions, removals,
+and renames within an existing product regenerate that product's version
+metadata and all-version document paths; other products remain cached. After a
+product is regenerated, both metadata JSON files are updated asynchronously,
+without delaying requests. Events without a filename check all product folders
+but still regenerate only products whose paths changed. Requests wait for the
+shared rebuild queue to finish, including changes received during generation.
+Atomic saves that replace an existing file without changing the final paths are
 ignored for metadata, but still trigger a Dev Portal refresh. Background
 metadata failures are logged, waiting requests reject, and later requests retry
-failed products. No generated JSON files are rewritten. Preview and production
-continue to use `app/api/versionMetadata.json` and
-`app/api/docsPathsAllVersions.json`.
+failed products. Preview and production continue to read
+`app/api/versionMetadata.json` and `app/api/docsPathsAllVersions.json`.
 
 The pre-commit hook updates date metadata for staged MDX files under
 `content/`. It preserves an existing `created_at` value and updates

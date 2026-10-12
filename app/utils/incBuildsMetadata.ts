@@ -6,10 +6,20 @@ import type { Metadata } from '#types'
 
 const contentDir = path.join(process.cwd(), 'content')
 const products = Object.keys(PRODUCT_CONFIG)
+const versionMetadataFile = path.join(
+	process.cwd(),
+	'app/api/versionMetadata.json',
+)
+const docsPathsAllVersionsFile = path.join(
+	process.cwd(),
+	'app/api/docsPathsAllVersions.json',
+)
 export const IncBuildLocalDev =
 	process.env.INCREMENTAL_BUILD === 'true' &&
 	process.env.NODE_ENV === 'development' &&
 	process.env.VERCEL_ENV !== 'preview'
+
+let metadataWriteQueue: Promise<void> = Promise.resolve()
 
 type IncBuildsMetadataCache = {
 	promise?: Promise<Metadata>
@@ -44,6 +54,44 @@ function invalidateIfStructureChanged(cache: IncBuildsMetadataCache): void {
 	}
 
 	cache.checkProducts.clear()
+}
+
+function readExistingMetadata(): Metadata | undefined {
+	if (
+		!fs.existsSync(versionMetadataFile) ||
+		!fs.existsSync(docsPathsAllVersionsFile)
+	) {
+		return undefined
+	}
+
+	return {
+		versionMetadata: JSON.parse(
+			fs.readFileSync(versionMetadataFile, 'utf8'),
+		) as Metadata['versionMetadata'],
+		docsPathsAllVersions: JSON.parse(
+			fs.readFileSync(docsPathsAllVersionsFile, 'utf8'),
+		) as Metadata['docsPathsAllVersions'],
+	}
+}
+
+function saveMetadataFiles(metadata: Metadata): void {
+	const versionMetadata = JSON.stringify(metadata.versionMetadata, null, 2)
+	const docsPathsAllVersions = JSON.stringify(
+		metadata.docsPathsAllVersions,
+		null,
+		2,
+	)
+
+	metadataWriteQueue = metadataWriteQueue
+		.then(async (): Promise<void> => {
+			await Promise.all([
+				fs.promises.writeFile(versionMetadataFile, versionMetadata),
+				fs.promises.writeFile(docsPathsAllVersionsFile, docsPathsAllVersions),
+			])
+		})
+		.catch((error: unknown) => {
+			console.error('[watcher] failed to save metadata files', error)
+		})
 }
 
 async function generateMetadata(products?: string[]): Promise<Metadata> {
@@ -84,15 +132,29 @@ function regenerateMetadata(
 
 		if (!cache.metadata) {
 			invalidateIfStructureChanged(cache)
-			cache.pendingProducts.clear()
-			console.log('[watcher] generating initial metadata')
-			try {
-				cache.metadata = await (initialMetadata ?? generateMetadata())
-			} catch (error: unknown) {
-				console.error('[watcher] failed to generate initial metadata', error)
-				throw error
+			if (initialMetadata) {
+				cache.metadata = await initialMetadata
+			} else {
+				const existingMetadata = readExistingMetadata()
+				if (existingMetadata) {
+					console.log('[watcher] loading existing metadata')
+					cache.metadata = existingMetadata
+				} else {
+					cache.pendingProducts.clear()
+					console.log('[watcher] generating initial metadata')
+					try {
+						cache.metadata = await generateMetadata()
+					} catch (error: unknown) {
+						console.error(
+							'[watcher] failed to generate initial metadata',
+							error,
+						)
+						throw error
+					}
+					console.log('[watcher] generated initial metadata')
+					saveMetadataFiles(cache.metadata)
+				}
 			}
-			console.log('[watcher] generated initial metadata')
 		}
 
 		invalidateIfStructureChanged(cache)
@@ -112,6 +174,7 @@ function regenerateMetadata(
 					cache.metadata.docsPathsAllVersions[product] =
 						generated.docsPathsAllVersions[product]
 				}
+				saveMetadataFiles(cache.metadata)
 			} catch (error: unknown) {
 				for (const product of changedProducts) {
 					cache.pendingProducts.add(product)
