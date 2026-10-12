@@ -7,6 +7,7 @@ project {
 
   header_ignore = [
     "public/**",
+    "coverage/**",
     "content/**",
     "docs/**",
     "__fixtures__/**",
