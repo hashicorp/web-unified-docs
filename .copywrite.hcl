@@ -1,8 +1,9 @@
 schema_version = 1
 
 project {
-  license        = "BUSL-1.1"
-  copyright_year = 2024
+  license          = "BUSL-1.1"
+  copyright_year   = 2024
+  copyright_holder = "IBM Corp."
 
   header_ignore = [
     "public/**",

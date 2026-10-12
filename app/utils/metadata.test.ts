@@ -1,5 +1,5 @@
 /**
- * Copyright (c) HashiCorp, Inc.
+ * Copyright (c) IBM Corp.
  * SPDX-License-Identifier: BUSL-1.1
  */
 
