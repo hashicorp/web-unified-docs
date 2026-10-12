@@ -62,6 +62,7 @@ async function generateMetadata(products?: string[]): Promise<Metadata> {
 		versionMetadata,
 		false,
 		Object.keys(versionMetadata),
+		{ verbose: false },
 	)
 
 	return { versionMetadata, docsPathsAllVersions } as Metadata
@@ -84,7 +85,14 @@ function regenerateMetadata(
 		if (!cache.metadata) {
 			invalidateIfStructureChanged(cache)
 			cache.pendingProducts.clear()
-			cache.metadata = await (initialMetadata ?? generateMetadata())
+			console.log('[watcher] generating initial metadata')
+			try {
+				cache.metadata = await (initialMetadata ?? generateMetadata())
+			} catch (error: unknown) {
+				console.error('[watcher] failed to generate initial metadata', error)
+				throw error
+			}
+			console.log('[watcher] generated initial metadata')
 		}
 
 		invalidateIfStructureChanged(cache)
