@@ -46,8 +46,8 @@ which writes fixes to files rather than only reporting them.
 
 **Content-processing behavior:**
 
-- inspect `scripts/prebuild/`, `scripts/watch-content.mjs`, and supporting
-  utilities
+- inspect `scripts/prebuild/`, `app/utils/metadata.ts`,
+  `app/utils/incBuildsMetadata.ts`, and supporting utilities
 - verify whether the source of truth is `content/`, generated files in
   `public/`, or metadata files in `app/api/`
 

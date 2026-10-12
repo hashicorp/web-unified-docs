@@ -53,6 +53,34 @@ it('walk a directory of products and return a JSON representation of valid versi
 	expect(result).toStrictEqual(expected)
 })
 
+it('gathers only selected products without reading other product versions', async () => {
+	vol.fromJSON(
+		{
+			'./vault/v1.21.x/': null,
+			'./terraform/v1.19.x (invalid)/': null,
+		},
+		'/content',
+	)
+
+	expect(await gatherVersionMetadata('/content', ['vault'])).toStrictEqual({
+		vault: [{ version: 'v1.21.x', releaseStage: 'stable', isLatest: true }],
+	})
+})
+
+it('omits selected products that have been removed', async () => {
+	vol.fromJSON({ './terraform/v1.19.x/': null }, '/content')
+
+	expect(await gatherVersionMetadata('/content', ['vault'])).toStrictEqual({})
+})
+
+it('does not treat unconfigured directories as products', async () => {
+	vol.fromJSON({ './unconfigured/v1.0.x/': null }, '/content')
+
+	expect(
+		await gatherVersionMetadata('/content', ['unconfigured']),
+	).toStrictEqual({})
+})
+
 it('Support beta releases', async () => {
 	const expected = {
 		'terraform-enterprise': [

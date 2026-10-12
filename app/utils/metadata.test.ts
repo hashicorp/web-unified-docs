@@ -1,16 +1,22 @@
+import fs from 'node:fs'
 import path from 'node:path'
+import type { Metadata } from '#types'
 import { vol } from 'memfs'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
-const { watch, gatherVersionMetadata, gatherAllVersionsDocsPaths } = vi.hoisted(
-	() => {
-		return {
-			watch: vi.fn(),
-			gatherVersionMetadata: vi.fn(),
-			gatherAllVersionsDocsPaths: vi.fn(),
-		}
-	},
-)
+const {
+	watch,
+	portalFetch,
+	gatherVersionMetadata,
+	gatherAllVersionsDocsPaths,
+} = vi.hoisted(() => {
+	return {
+		watch: vi.fn(),
+		portalFetch: vi.fn(),
+		gatherVersionMetadata: vi.fn(),
+		gatherAllVersionsDocsPaths: vi.fn(),
+	}
+})
 
 vi.mock('node:fs', async () => {
 	const { fs: memoryFs } = await import('memfs')
@@ -23,7 +29,7 @@ vi.mock('../../scripts/prebuild/gather-all-versions-docs-paths.mjs', () => {
 	return { gatherAllVersionsDocsPaths }
 })
 
-const generatedMetadata = {
+const generatedMetadata: Metadata = {
 	versionMetadata: {
 		vault: [{ version: 'v1.21.x', releaseStage: 'stable', isLatest: true }],
 	},
@@ -34,10 +40,47 @@ const generatedMetadata = {
 					path: 'vault/docs',
 					itemPath: 'content/vault/v1.21.x/docs/index.mdx',
 					created_at: '2026-01-01',
+					last_modified: null,
 				},
 			],
 		},
 	},
+}
+
+const twoProductsMetadata: Metadata = {
+	versionMetadata: {
+		...generatedMetadata.versionMetadata,
+		consul: [{ version: 'v1.22.x', releaseStage: 'stable', isLatest: true }],
+	},
+	docsPathsAllVersions: {
+		...generatedMetadata.docsPathsAllVersions,
+		consul: { 'v1.22.x': [] },
+	},
+}
+
+function mockMetadata(metadata: Metadata): void {
+	gatherVersionMetadata.mockImplementation(
+		async (_directory: string, products?: string[]) => {
+			return Object.fromEntries(
+				Object.entries(metadata.versionMetadata).filter(
+					([product]: [string, Metadata['versionMetadata'][string]]) => {
+						return products === undefined || products.includes(product)
+					},
+				),
+			)
+		},
+	)
+	gatherAllVersionsDocsPaths.mockImplementation(
+		async (_versions: unknown, _realDates: boolean, products: string[]) => {
+			return Object.fromEntries(
+				Object.entries(metadata.docsPathsAllVersions).filter(
+					([product]: [string, Metadata['docsPathsAllVersions'][string]]) => {
+						return products.includes(product)
+					},
+				),
+			)
+		},
+	)
 }
 
 const contentDir = path.join(process.cwd(), 'content')
@@ -72,6 +115,9 @@ beforeEach(() => {
 	vi.stubEnv('NODE_ENV', 'development')
 	vi.stubEnv('INCREMENTAL_BUILD', 'true')
 	vi.stubEnv('VERCEL_ENV', '')
+	vi.stubEnv('DEV_PORTAL_URL', 'https://portal.example')
+	vi.stubGlobal('fetch', portalFetch)
+	portalFetch.mockResolvedValue({ ok: true })
 	watch.mockImplementation(
 		(_directory: string, _options: unknown, callback: typeof onChange) => {
 			onChange = callback
@@ -85,6 +131,8 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+	vi.restoreAllMocks()
+	vi.unstubAllGlobals()
 	vi.unstubAllEnvs()
 	delete (globalThis as any).__incBuildsMetadataCache
 })
@@ -104,7 +152,13 @@ describe('getMetadata', () => {
 			const { getMetadata } = await import('./metadata')
 
 			expect(await getMetadata()).toEqual(generatedMetadata)
-			expect(watch).not.toHaveBeenCalled()
+			expect(watch).toHaveBeenCalledTimes(
+				nodeEnv === 'development' &&
+					incremental === 'true' &&
+					vercelEnv !== 'preview'
+					? 1
+					: 0,
+			)
 			expect(gatherVersionMetadata).not.toHaveBeenCalled()
 			expect(gatherAllVersionsDocsPaths).not.toHaveBeenCalled()
 		},
@@ -147,12 +201,12 @@ describe('getMetadata', () => {
 		).toBeUndefined()
 	})
 
-	test('generates lazily and shares one cached result across concurrent requests', async () => {
+	test('starts the watcher on module load and generates one shared cache lazily', async () => {
 		vol.unlinkSync(versionMetadataFile)
 		vol.unlinkSync(docsPathsAllVersionsFile)
 		const { getMetadata } = await import('./metadata')
 		expect(gatherVersionMetadata).not.toHaveBeenCalled()
-		expect(watch).not.toHaveBeenCalled()
+		expect(watch).toHaveBeenCalledOnce()
 
 		const [first, second] = await Promise.all([getMetadata(), getMetadata()])
 		expect(first).toEqual(generatedMetadata)
@@ -173,6 +227,30 @@ describe('getMetadata', () => {
 		expect(
 			(globalThis as any).__unifiedDocsProductionMetadataCache,
 		).toBeUndefined()
+	})
+
+	test('refreshes the Dev Portal and logs changed files', async () => {
+		const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+		const logError = vi.spyOn(console, 'error').mockImplementation(() => {})
+		const { getMetadata } = await import('./metadata')
+		const first = await getMetadata()
+		portalFetch.mockRejectedValueOnce(new Error('Refresh failed'))
+		vol.writeFileSync(sourceFile, '# Edited')
+		onChange('change', relativeFile)
+
+		await vi.waitFor(() => {
+			expect(portalFetch).toHaveBeenCalledWith(
+				'https://portal.example/api/refresh',
+				{ method: 'POST' },
+			)
+			expect(logError).toHaveBeenCalledWith(
+				'[watcher] failed to refresh Dev Portal',
+				expect.objectContaining({ message: 'Refresh failed' }),
+			)
+		})
+		expect(log).toHaveBeenCalledWith(`[watcher] reloading ${sourceFile}`)
+		expect(await getMetadata()).toBe(first)
+		expect(gatherVersionMetadata).toHaveBeenCalledOnce()
 	})
 
 	test('shares the cache after consumers reload', async () => {
@@ -201,21 +279,155 @@ describe('getMetadata', () => {
 		expect(gatherVersionMetadata).not.toHaveBeenCalled()
 	})
 
-	test('invalidates structural changes reported as rename and regenerates on the next request', async () => {
+	test('regenerates structural changes in the background before the next request', async () => {
+		const log = vi.spyOn(console, 'log').mockImplementation(() => {})
 		const { getMetadata } = await import('./metadata')
 		const first = await getMetadata()
 		const addedFile = 'vault/v1.21.x/docs/new.mdx'
 		vol.writeFileSync(path.join(contentDir, addedFile), '# New')
 		onChange('rename', addedFile)
-		expect(gatherVersionMetadata).toHaveBeenCalledOnce()
+		await vi.waitFor(() => {
+			expect(gatherVersionMetadata).toHaveBeenCalledTimes(2)
+		})
+		expect(log).toHaveBeenCalledWith('[watcher] reloading vault metadata')
 		const second = await getMetadata()
-		expect(second).not.toBe(first)
-		expect(gatherVersionMetadata).toHaveBeenCalledTimes(2)
+		expect(second).toBe(first)
+		expect(gatherVersionMetadata).toHaveBeenLastCalledWith(contentDir, [
+			'vault',
+		])
 
 		vol.unlinkSync(path.join(contentDir, addedFile))
 		onChange('rename', null)
 		await getMetadata()
 		expect(gatherVersionMetadata).toHaveBeenCalledTimes(3)
+	})
+
+	test('checks and regenerates only the changed product, preserving other products', async () => {
+		vol.fromJSON({ 'consul/v1.22.x/docs/index.mdx': '# Consul' }, contentDir)
+		mockMetadata(twoProductsMetadata)
+		const { getMetadata } = await import('./metadata')
+		const first = await getMetadata()
+		const readdir = vi.spyOn(fs, 'readdirSync')
+		const updatedMetadata: Metadata = {
+			versionMetadata: {
+				...twoProductsMetadata.versionMetadata,
+				vault: [{ version: 'v1.22.x', releaseStage: 'stable', isLatest: true }],
+			},
+			docsPathsAllVersions: {
+				...twoProductsMetadata.docsPathsAllVersions,
+				vault: { 'v1.22.x': [] },
+			},
+		}
+		mockMetadata(updatedMetadata)
+		vol.mkdirSync(path.join(contentDir, 'vault/v1.22.x'))
+		onChange('rename', 'vault/v1.22.x')
+		const second = await getMetadata()
+
+		expect(gatherVersionMetadata).toHaveBeenLastCalledWith(contentDir, [
+			'vault',
+		])
+		expect(gatherAllVersionsDocsPaths).toHaveBeenLastCalledWith(
+			{ vault: updatedMetadata.versionMetadata.vault },
+			false,
+			['vault'],
+		)
+		expect(readdir).toHaveBeenCalledWith(path.join(contentDir, 'vault'), {
+			recursive: true,
+		})
+		expect(readdir).not.toHaveBeenCalledWith(
+			path.join(contentDir, 'consul'),
+			expect.anything(),
+		)
+		expect(second).toEqual(updatedMetadata)
+		expect(second).toBe(first)
+		expect(second.versionMetadata.consul).toBe(first.versionMetadata.consul)
+		expect(second.docsPathsAllVersions.consul).toBe(
+			first.docsPathsAllVersions.consul,
+		)
+	})
+
+	test('waits for a background rebuild before resolving concurrent requests', async () => {
+		const { getMetadata } = await import('./metadata')
+		await getMetadata()
+		let finish: (value: Metadata['docsPathsAllVersions']) => void
+		gatherAllVersionsDocsPaths.mockImplementationOnce(() => {
+			return new Promise<Metadata['docsPathsAllVersions']>(
+				(resolve: typeof finish) => {
+					finish = resolve
+				},
+			)
+		})
+		const addedFile = 'vault/v1.21.x/docs/new.mdx'
+		vol.writeFileSync(path.join(contentDir, addedFile), '# New')
+		onChange('rename', addedFile)
+		await vi.waitFor(() => {
+			expect(gatherAllVersionsDocsPaths).toHaveBeenCalledTimes(2)
+		})
+		const resolved = vi.fn()
+		const first = getMetadata().then(resolved)
+		const second = getMetadata()
+		await Promise.resolve()
+		expect(resolved).not.toHaveBeenCalled()
+
+		finish(generatedMetadata.docsPathsAllVersions)
+		const metadata = await second
+		await first
+		expect(resolved).toHaveBeenCalledWith(metadata)
+		expect(gatherVersionMetadata).toHaveBeenCalledTimes(2)
+	})
+
+	test('coalesces changes to multiple products into one scoped rebuild', async () => {
+		vol.fromJSON({ 'consul/v1.22.x/docs/index.mdx': '# Consul' }, contentDir)
+		mockMetadata(twoProductsMetadata)
+		const { getMetadata } = await import('./metadata')
+		await getMetadata()
+		for (const product of ['vault', 'consul']) {
+			const addedDir = `${product}/new-directory`
+			vol.mkdirSync(path.join(contentDir, addedDir))
+			onChange('rename', addedDir)
+			onChange('rename', addedDir)
+		}
+		expect(await getMetadata()).toEqual(twoProductsMetadata)
+		expect(gatherVersionMetadata).toHaveBeenCalledTimes(2)
+		expect(gatherVersionMetadata).toHaveBeenLastCalledWith(contentDir, [
+			'vault',
+			'consul',
+		])
+	})
+
+	test('identifies only changed products when the watcher supplies no filename', async () => {
+		vol.fromJSON({ 'consul/v1.22.x/docs/index.mdx': '# Consul' }, contentDir)
+		mockMetadata(twoProductsMetadata)
+		const { getMetadata } = await import('./metadata')
+		await getMetadata()
+		vol.mkdirSync(path.join(contentDir, 'vault/new-directory'))
+		onChange('rename', null)
+		await getMetadata()
+		expect(gatherVersionMetadata).toHaveBeenLastCalledWith(contentDir, [
+			'vault',
+		])
+	})
+
+	test('adds product metadata without rebuilding existing products', async () => {
+		mockMetadata(generatedMetadata)
+		const { getMetadata } = await import('./metadata')
+		await getMetadata()
+		mockMetadata(twoProductsMetadata)
+		vol.fromJSON({ 'consul/v1.22.x/docs/index.mdx': '# Consul' }, contentDir)
+		onChange('rename', 'consul')
+		expect(await getMetadata()).toEqual(twoProductsMetadata)
+		expect(gatherVersionMetadata).toHaveBeenLastCalledWith(contentDir, [
+			'consul',
+		])
+	})
+
+	test('ignores changes outside configured product folders', async () => {
+		const { getMetadata } = await import('./metadata')
+		const first = await getMetadata()
+		vol.fromJSON({ 'unconfigured/docs/index.mdx': '# Other' }, contentDir)
+		onChange('rename', 'unconfigured/docs/index.mdx')
+		expect(await getMetadata()).toBe(first)
+		expect(gatherVersionMetadata).toHaveBeenCalledOnce()
 	})
 
 	test.each([
@@ -287,13 +499,14 @@ describe('getMetadata', () => {
 			vol.writeFileSync(path.join(contentDir, addedFile), '# New')
 			onChange(eventType, addedFile)
 			const added = await getMetadata()
-			expect(added).not.toBe(first)
+			expect(added).toBe(first)
 			expect(gatherVersionMetadata).toHaveBeenCalledTimes(2)
 
 			vol.unlinkSync(path.join(contentDir, addedFile))
 			onChange(eventType, addedFile)
 			const removed = await getMetadata()
-			expect(removed).not.toBe(added)
+			expect(removed).toBe(added)
+			expect(removed).toEqual(generatedMetadata)
 			expect(gatherVersionMetadata).toHaveBeenCalledTimes(3)
 		},
 	)
@@ -327,11 +540,11 @@ describe('getMetadata', () => {
 			const addedFile = 'vault/v1.21.x/docs/new.mdx'
 			vol.writeFileSync(path.join(contentDir, addedFile), '# New')
 			onChange('rename', addedFile)
-			const latest = startNewRequest ? await getMetadata() : undefined
+			const latest = startNewRequest ? getMetadata() : undefined
 			finish(generatedMetadata.docsPathsAllVersions)
 			const result = await pending
 			if (startNewRequest) {
-				expect(result).toBe(latest)
+				expect(result).toBe(await latest)
 			}
 			expect(await getMetadata()).toBe(result)
 			expect(gatherVersionMetadata).toHaveBeenCalledTimes(2)
@@ -363,7 +576,10 @@ describe('getMetadata', () => {
 		},
 	)
 
-	test('does not evict a newer generation when an invalidated one fails', async () => {
+	test('logs background failures, rejects waiting requests, and retries the affected product', async () => {
+		const { getMetadata } = await import('./metadata')
+		await getMetadata()
+		const logError = vi.spyOn(console, 'error').mockImplementation(() => {})
 		let fail: (error: Error) => void
 		gatherAllVersionsDocsPaths.mockImplementationOnce(() => {
 			return new Promise(
@@ -372,19 +588,96 @@ describe('getMetadata', () => {
 				},
 			)
 		})
-		const { getMetadata } = await import('./metadata')
-		const pending = getMetadata()
-		const rejected = expect(pending).rejects.toThrow('Generation failed')
-		await vi.waitFor(() => {
-			expect(gatherAllVersionsDocsPaths).toHaveBeenCalledOnce()
-		})
 		const addedFile = 'vault/v1.21.x/docs/new.mdx'
 		vol.writeFileSync(path.join(contentDir, addedFile), '# New')
 		onChange('rename', addedFile)
-		const latest = await getMetadata()
+		await vi.waitFor(() => {
+			expect(gatherAllVersionsDocsPaths).toHaveBeenCalledTimes(2)
+		})
+		const rejected = expect(getMetadata()).rejects.toThrow('Generation failed')
 		fail(new Error('Generation failed'))
 		await rejected
-		expect(await getMetadata()).toBe(latest)
+		expect(logError).toHaveBeenCalledWith(
+			'[watcher] failed to reload vault',
+			expect.objectContaining({ message: 'Generation failed' }),
+		)
+		expect(await getMetadata()).toEqual(generatedMetadata)
+		expect(gatherVersionMetadata).toHaveBeenCalledTimes(3)
+		expect(gatherVersionMetadata).toHaveBeenLastCalledWith(contentDir, [
+			'vault',
+		])
+	})
+
+	test('drains changes arriving during a rebuild before resolving requests', async () => {
+		vol.fromJSON({ 'consul/v1.22.x/docs/index.mdx': '# Consul' }, contentDir)
+		mockMetadata(twoProductsMetadata)
+		const { getMetadata } = await import('./metadata')
+		await getMetadata()
+		let finish: (value: Metadata['docsPathsAllVersions']) => void
+		gatherAllVersionsDocsPaths.mockImplementationOnce(() => {
+			return new Promise<Metadata['docsPathsAllVersions']>(
+				(resolve: typeof finish) => {
+					finish = resolve
+				},
+			)
+		})
+		vol.mkdirSync(path.join(contentDir, 'vault/new-directory'))
+		onChange('rename', 'vault/new-directory')
+		await vi.waitFor(() => {
+			expect(gatherAllVersionsDocsPaths).toHaveBeenCalledTimes(2)
+		})
+		const pending = getMetadata()
+		vol.mkdirSync(path.join(contentDir, 'consul/new-directory'))
+		onChange('rename', 'consul/new-directory')
+		const concurrent = getMetadata()
 		expect(gatherVersionMetadata).toHaveBeenCalledTimes(2)
+		finish({ vault: generatedMetadata.docsPathsAllVersions.vault })
+
+		const result = await pending
+		expect(result).toEqual(twoProductsMetadata)
+		expect(await concurrent).toBe(result)
+		expect(gatherVersionMetadata).toHaveBeenCalledTimes(3)
+		expect(gatherVersionMetadata).toHaveBeenLastCalledWith(contentDir, [
+			'consul',
+		])
+	})
+
+	test('rebuilds the same product again when it changes during generation', async () => {
+		mockMetadata(generatedMetadata)
+		const { getMetadata } = await import('./metadata')
+		await getMetadata()
+		let finish: (value: Metadata['docsPathsAllVersions']) => void
+		gatherAllVersionsDocsPaths.mockImplementationOnce(() => {
+			return new Promise<Metadata['docsPathsAllVersions']>(
+				(resolve: typeof finish) => {
+					finish = resolve
+				},
+			)
+		})
+		vol.mkdirSync(path.join(contentDir, 'vault/new-directory'))
+		onChange('rename', 'vault/new-directory')
+		await vi.waitFor(() => {
+			expect(gatherAllVersionsDocsPaths).toHaveBeenCalledTimes(2)
+		})
+		const pending = getMetadata()
+		const updatedMetadata: Metadata = {
+			versionMetadata: {
+				vault: [{ version: 'v1.22.x', releaseStage: 'stable', isLatest: true }],
+			},
+			docsPathsAllVersions: { vault: { 'v1.22.x': [] } },
+		}
+		mockMetadata(updatedMetadata)
+		vol.mkdirSync(path.join(contentDir, 'vault/v1.22.x'))
+		onChange('rename', 'vault/v1.22.x')
+		finish(generatedMetadata.docsPathsAllVersions)
+
+		expect(await pending).toEqual(updatedMetadata)
+		expect(gatherVersionMetadata).toHaveBeenCalledTimes(3)
+		expect(gatherVersionMetadata).toHaveBeenNthCalledWith(2, contentDir, [
+			'vault',
+		])
+		expect(gatherVersionMetadata).toHaveBeenNthCalledWith(3, contentDir, [
+			'vault',
+		])
 	})
 })

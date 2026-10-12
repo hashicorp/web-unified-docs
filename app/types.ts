@@ -3,8 +3,6 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-import type { FSWatcher } from 'node:fs'
-
 // Composable productSlug param type for typing request handlers
 export type ProductParam = {
 	/**
@@ -88,13 +86,6 @@ export type DocsPathsAllVersions = Record<string, Record<string, DocsPath[]>>
 export type Metadata = {
 	versionMetadata: VersionMetadataMap
 	docsPathsAllVersions: DocsPathsAllVersions
-}
-
-export type IncBuildsMetadataCache = {
-	promise?: Promise<Metadata>
-	watcher?: FSWatcher
-	paths?: string
-	checkPaths?: boolean
 }
 
 export type Result<T, E = undefined> =
