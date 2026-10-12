@@ -4,14 +4,14 @@
  */
 
 import { Ok, Err, errorResultToString } from '#utils/result'
-import docsPathsAllVersions from '#api/docsPathsAllVersions.json'
+import type { DocsPathsAllVersions } from './metadata'
 import { getProductVersionMetadata } from './contentVersions'
 import { getMetadata } from './metadata'
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
 
 export const getDocsPaths = async (
 	productSlugs: string[],
-	docsPathsData?: typeof docsPathsAllVersions,
+	docsPathsData?: DocsPathsAllVersions,
 ) => {
 	const metadata = await getMetadata()
 	const docsPaths = docsPathsData ?? metadata.docsPathsAllVersions

@@ -42,21 +42,16 @@ vi.mock('#utils/file', async (importOriginal: any) => {
 	}
 })
 
-// Mock the versionMetadata json import in the route file
-vi.mock('#api/versionMetadata.json', () => {
+vi.mock('#utils/metadata', () => {
 	return {
-		default: {},
-	}
-})
-
-// Mock the docsPathsAllVersions json import in the route file
-vi.mock('#api/docsPathsAllVersions.json', () => {
-	return {
-		default: {
-			'terraform-plugin-framework': {},
-			'terraform-enterprise': {},
-			'validated-designs': {},
-		},
+		getMetadata: vi.fn().mockResolvedValue({
+			versionMetadata: {},
+			docsPathsAllVersions: {
+				'terraform-plugin-framework': {},
+				'terraform-enterprise': {},
+				'validated-designs': {},
+			},
+		}),
 	}
 })
 

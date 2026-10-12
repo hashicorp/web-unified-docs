@@ -11,17 +11,20 @@ import * as utilsFileModule from '#utils/file'
 import * as utilsContentVersionsModule from '#utils/contentVersions'
 import { mockRequest } from '#utils/mockRequest'
 
-vi.mock('#api/versionMetadata.json', () => {
+vi.mock('#utils/metadata', () => {
 	return {
-		default: {
-			'terraform-docs-common': [
-				{
-					version: 'v0.0.x',
-					releaseStage: 'stable',
-					isLatest: true,
-				},
-			],
-		},
+		getMetadata: vi.fn().mockResolvedValue({
+			versionMetadata: {
+				'terraform-docs-common': [
+					{
+						version: 'v0.0.x',
+						releaseStage: 'stable',
+						isLatest: true,
+					},
+				],
+			},
+			docsPathsAllVersions: {},
+		}),
 	}
 })
 

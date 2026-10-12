@@ -26,9 +26,12 @@ vi.mock('#utils/contentVersions', async (importOriginal: any) => {
 	}
 })
 
-vi.mock('#api/versionMetadata.json', () => {
+vi.mock('#utils/metadata', () => {
 	return {
-		default: {},
+		getMetadata: vi.fn().mockResolvedValue({
+			versionMetadata: {},
+			docsPathsAllVersions: {},
+		}),
 	}
 })
 

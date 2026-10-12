@@ -1,11 +1,19 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import versionMetadataJson from '#api/versionMetadata.json'
-import docsPathsAllVersionsJson from '#api/docsPathsAllVersions.json'
+import type { VersionMetadataMap } from './contentVersions'
+
+export type DocsPathsAllVersions = Record<string, Record<string, DocsPath[]>>
+
+type DocsPath = {
+	path: string
+	itemPath: string
+	created_at: string | null
+	last_modified: string | null
+}
 
 export type Metadata = {
-	versionMetadata: typeof versionMetadataJson
-	docsPathsAllVersions: typeof docsPathsAllVersionsJson
+	versionMetadata: VersionMetadataMap
+	docsPathsAllVersions: DocsPathsAllVersions
 }
 
 type MetadataCache = {
@@ -16,12 +24,20 @@ type MetadataCache = {
 }
 
 const contentDir = path.join(process.cwd(), 'content')
+const versionMetadataFile = path.join(
+	process.cwd(),
+	'app/api/versionMetadata.json',
+)
+const docsPathsAllVersionsFile = path.join(
+	process.cwd(),
+	'app/api/docsPathsAllVersions.json',
+)
 const incBuild = process.env.INCREMENTAL_BUILD === 'true'
 const incBuildPRPreview = incBuild && process.env.VERCEL_ENV === 'preview'
 export const incBuildLocalDev =
 	incBuild && process.env.NODE_ENV === 'development' && !incBuildPRPreview
 
-// Keep the shared cache and watcher alive across development module reloads.
+// Keep the development cache and watcher alive across module reloads.
 const globals = globalThis as typeof globalThis & {
 	__unifiedDocsMetadataCache?: MetadataCache
 }
@@ -58,14 +74,18 @@ async function generateMetadata(): Promise<Metadata> {
 	return { versionMetadata, docsPathsAllVersions } as Metadata
 }
 
-export function getMetadata(): Promise<Metadata> {
-	if (!incBuildLocalDev) {
-		return Promise.resolve({
-			versionMetadata: versionMetadataJson,
-			docsPathsAllVersions: docsPathsAllVersionsJson,
-		})
+function readGeneratedMetadata(): Metadata {
+	return {
+		versionMetadata: JSON.parse(
+			fs.readFileSync(versionMetadataFile, 'utf8'),
+		) as VersionMetadataMap,
+		docsPathsAllVersions: JSON.parse(
+			fs.readFileSync(docsPathsAllVersionsFile, 'utf8'),
+		) as DocsPathsAllVersions,
 	}
+}
 
+function getIncrementalLocalDevMetadata(): Promise<Metadata> {
 	const cache = (globals.__unifiedDocsMetadataCache ??= {})
 	if (!cache.watcher || cache.paths === undefined) {
 		// Replace an older watcher retained across a development module reload.
@@ -75,11 +95,8 @@ export function getMetadata(): Promise<Metadata> {
 		cache.watcher = fs.watch(
 			contentDir,
 			{ recursive: true, persistent: false },
-			(eventType: string) => {
-				// Atomic saves can emit rename events; defer checking the final path list.
-				if (eventType === 'rename') {
-					cache.checkPaths = true
-				}
+			() => {
+				cache.checkPaths = true
 			},
 		)
 	}
@@ -91,7 +108,9 @@ export function getMetadata(): Promise<Metadata> {
 			.then((metadata: Metadata) => {
 				invalidateIfStructureChanged(cache)
 				// If invalidated mid-build, wait for fresh metadata instead of returning stale data.
-				return cache.promise === pending ? metadata : getMetadata()
+				return cache.promise === pending
+					? metadata
+					: getIncrementalLocalDevMetadata()
 			})
 			.catch((error: unknown) => {
 				// Allow retries without clearing a newer generation started after invalidation.
@@ -103,4 +122,39 @@ export function getMetadata(): Promise<Metadata> {
 		cache.promise = pending
 	}
 	return cache.promise
+}
+
+let prodVersionMetadata: VersionMetadataMap | undefined
+let prodDocsPathsAllVersions: DocsPathsAllVersions | undefined
+function getProductionMetadata(): Metadata {
+	if (
+		prodVersionMetadata === undefined ||
+		prodDocsPathsAllVersions === undefined
+	) {
+		const missingFiles = [versionMetadataFile, docsPathsAllVersionsFile].filter(
+			(file: string): boolean => {
+				return !fs.existsSync(file)
+			},
+		)
+		if (missingFiles.length > 0) {
+			throw new Error(
+				`Missing generated metadata file(s): ${missingFiles.join(', ')}. Run \`npm run prebuild\` to generate them.`,
+			)
+		}
+
+		const metadata = readGeneratedMetadata()
+		prodVersionMetadata = metadata.versionMetadata
+		prodDocsPathsAllVersions = metadata.docsPathsAllVersions
+	}
+
+	return {
+		versionMetadata: prodVersionMetadata,
+		docsPathsAllVersions: prodDocsPathsAllVersions,
+	}
+}
+
+export function getMetadata(): Promise<Metadata> {
+	return incBuildLocalDev
+		? getIncrementalLocalDevMetadata()
+		: Promise.resolve().then(getProductionMetadata)
 }

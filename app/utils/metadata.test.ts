@@ -41,6 +41,14 @@ const generatedMetadata = {
 }
 
 const contentDir = path.join(process.cwd(), 'content')
+const versionMetadataFile = path.join(
+	process.cwd(),
+	'app/api/versionMetadata.json',
+)
+const docsPathsAllVersionsFile = path.join(
+	process.cwd(),
+	'app/api/docsPathsAllVersions.json',
+)
 const relativeFile = 'vault/v1.21.x/docs/index.mdx'
 const sourceFile = path.join(contentDir, relativeFile)
 
@@ -51,6 +59,15 @@ beforeEach(() => {
 	vi.resetAllMocks()
 	vol.reset()
 	vol.fromJSON({ [relativeFile]: '# Original' }, contentDir)
+	vol.mkdirSync(path.dirname(versionMetadataFile), { recursive: true })
+	vol.writeFileSync(
+		versionMetadataFile,
+		JSON.stringify(generatedMetadata.versionMetadata),
+	)
+	vol.writeFileSync(
+		docsPathsAllVersionsFile,
+		JSON.stringify(generatedMetadata.docsPathsAllVersions),
+	)
 	delete (globalThis as any).__unifiedDocsMetadataCache
 	vi.stubEnv('NODE_ENV', 'development')
 	vi.stubEnv('INCREMENTAL_BUILD', 'true')
@@ -85,20 +102,54 @@ describe('getMetadata', () => {
 			vi.stubEnv('INCREMENTAL_BUILD', incremental)
 			vi.stubEnv('VERCEL_ENV', vercelEnv)
 			const { getMetadata } = await import('./metadata')
-			const versions = await import('#api/versionMetadata.json')
-			const paths = await import('#api/docsPathsAllVersions.json')
 
-			expect(await getMetadata()).toEqual({
-				versionMetadata: versions.default,
-				docsPathsAllVersions: paths.default,
-			})
+			expect(await getMetadata()).toEqual(generatedMetadata)
 			expect(watch).not.toHaveBeenCalled()
 			expect(gatherVersionMetadata).not.toHaveBeenCalled()
 			expect(gatherAllVersionsDocsPaths).not.toHaveBeenCalled()
 		},
 	)
 
+	test.each([
+		['version metadata', versionMetadataFile],
+		['all-version paths', docsPathsAllVersionsFile],
+	])(
+		'throws when %s JSON is missing outside incremental local development',
+		async (_name: string, missingFile: string) => {
+			vi.stubEnv('NODE_ENV', 'test')
+			vi.stubEnv('INCREMENTAL_BUILD', 'false')
+			vol.unlinkSync(missingFile)
+
+			const { getMetadata } = await import('./metadata')
+
+			await expect(getMetadata()).rejects.toThrow(
+				`Missing generated metadata file(s): ${missingFile}`,
+			)
+			expect(gatherVersionMetadata).not.toHaveBeenCalled()
+			expect(gatherAllVersionsDocsPaths).not.toHaveBeenCalled()
+		},
+	)
+
+	test('caches generated metadata outside incremental local development', async () => {
+		vi.stubEnv('NODE_ENV', 'test')
+		vi.stubEnv('INCREMENTAL_BUILD', 'false')
+		const { getMetadata } = await import('./metadata')
+
+		const [first, second] = await Promise.all([getMetadata(), getMetadata()])
+
+		expect(first).toEqual(second)
+		expect(second).not.toBe(first)
+		expect(second.versionMetadata).toBe(first.versionMetadata)
+		expect(second.docsPathsAllVersions).toBe(first.docsPathsAllVersions)
+		expect((globalThis as any).__unifiedDocsMetadataCache).toBeUndefined()
+		expect(
+			(globalThis as any).__unifiedDocsProductionMetadataCache,
+		).toBeUndefined()
+	})
+
 	test('generates lazily and shares one cached result across concurrent requests', async () => {
+		vol.unlinkSync(versionMetadataFile)
+		vol.unlinkSync(docsPathsAllVersionsFile)
 		const { getMetadata } = await import('./metadata')
 		expect(gatherVersionMetadata).not.toHaveBeenCalled()
 		expect(watch).not.toHaveBeenCalled()
@@ -119,6 +170,9 @@ describe('getMetadata', () => {
 			false,
 			Object.keys(generatedMetadata.versionMetadata),
 		)
+		expect(
+			(globalThis as any).__unifiedDocsProductionMetadataCache,
+		).toBeUndefined()
 	})
 
 	test('shares the cache after consumers reload', async () => {
@@ -222,6 +276,27 @@ describe('getMetadata', () => {
 		await getMetadata()
 		expect(gatherVersionMetadata).toHaveBeenCalledTimes(5)
 	})
+
+	test.each(['change', 'add', 'delete'])(
+		'reloads on file additions and removals reported as %s',
+		async (eventType: string) => {
+			const { getMetadata } = await import('./metadata')
+			const first = await getMetadata()
+			const addedFile = 'vault/v1.21.x/docs/new.mdx'
+
+			vol.writeFileSync(path.join(contentDir, addedFile), '# New')
+			onChange(eventType, addedFile)
+			const added = await getMetadata()
+			expect(added).not.toBe(first)
+			expect(gatherVersionMetadata).toHaveBeenCalledTimes(2)
+
+			vol.unlinkSync(path.join(contentDir, addedFile))
+			onChange(eventType, addedFile)
+			const removed = await getMetadata()
+			expect(removed).not.toBe(added)
+			expect(gatherVersionMetadata).toHaveBeenCalledTimes(3)
+		},
+	)
 
 	test('retries after failed generation', async () => {
 		gatherAllVersionsDocsPaths.mockRejectedValueOnce(

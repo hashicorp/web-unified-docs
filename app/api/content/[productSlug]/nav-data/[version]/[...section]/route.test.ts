@@ -37,10 +37,12 @@ vi.mock('#utils/file', async (importOriginal: any) => {
 	}
 })
 
-// Mock the versionMetadata json import in the route file
-vi.mock('#api/versionMetadata.json', () => {
+vi.mock('#utils/metadata', () => {
 	return {
-		default: {},
+		getMetadata: vi.fn().mockResolvedValue({
+			versionMetadata: {},
+			docsPathsAllVersions: {},
+		}),
 	}
 })
 
