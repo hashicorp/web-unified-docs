@@ -53,17 +53,11 @@ Both `prodBuild` and `fullBuild` transform and copy all configured product conte
 The watcher does not transform Markdown or copy navigation data and assets;
 local incremental builds handle content when it is requested.
 
-The MDX transform module can also run directly from the repository root for one
-or more files:
-
-```text
-node scripts/prebuild/mdx-transforms/build-mdx-transforms.mjs <file-path> [file-path...]
-```
-
-It reads version metadata from `app/api/versionMetadata.json` and writes the
-requested files from `content/` to their corresponding paths in `public/content/`.
+MDX transforms are called through the module API, which requires an explicit array
+of file paths rather than discovering files from the target directory.
 Local incremental development preloads the transform module and calls it directly
-for Markdown requests, without starting a subprocess. Transform errors are
+for Markdown requests, passing only the requested Markdown path in the explicit
+file list, without starting a subprocess. Transform errors are
 returned without exiting the server.
 Navigation data, redirects, and assets are read directly from `content/`.
 

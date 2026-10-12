@@ -150,13 +150,33 @@ afterEach(() => {
 
 describe('getMetadata', () => {
 	test.each([
-		['production', 'true', 'production'],
-		['development', 'true', 'preview'],
-		['development', 'false', ''],
-		['test', 'true', ''],
+		['prodBuild', 'production', 'true', 'production', 0],
+		[
+			'prodBuild overriding development mode',
+			'development',
+			'true',
+			'production',
+			0,
+		],
+		['incBuildPRPreview', 'production', 'true', '', 0],
+		['incBuildLocalDev', 'development', 'true', '', 1],
+		[
+			'fullBuild with incremental builds disabled',
+			'development',
+			'false',
+			'',
+			0,
+		],
+		['fullBuild in the test environment', 'test', 'true', '', 0],
 	])(
-		'uses JSON for NODE_ENV=%s, INCREMENTAL_BUILD=%s, VERCEL_ENV=%s',
-		async (nodeEnv: string, incremental: string, vercelEnv: string) => {
+		'loads generated metadata for %s',
+		async (
+			_scenario: string,
+			nodeEnv: string,
+			incremental: string,
+			vercelEnv: string,
+			expectedWatchCalls: number,
+		) => {
 			vi.stubEnv('NODE_ENV', nodeEnv)
 			vi.stubEnv('INCREMENTAL_BUILD', incremental)
 			vi.stubEnv('VERCEL_ENV', vercelEnv)
@@ -164,13 +184,7 @@ describe('getMetadata', () => {
 			const { getMetadata } = await import('./metadata')
 
 			expect(await getMetadata()).toEqual(generatedMetadata)
-			expect(watch).toHaveBeenCalledTimes(
-				nodeEnv === 'development' &&
-					incremental === 'true' &&
-					vercelEnv !== 'preview'
-					? 1
-					: 0,
-			)
+			expect(watch).toHaveBeenCalledTimes(expectedWatchCalls)
 			expect(gatherVersionMetadata).not.toHaveBeenCalled()
 			expect(gatherAllVersionsDocsPaths).not.toHaveBeenCalled()
 		},

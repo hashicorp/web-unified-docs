@@ -13,5 +13,4 @@ COPY . .
 
 EXPOSE 8080
 
-# build on each startup
-CMD npm run build && npm run dev
+CMD npm run dev

@@ -5,8 +5,6 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { pathToFileURL } from 'node:url'
-import { parseArgs } from 'node:util'
 
 // Third-party
 import remark from 'remark'
@@ -28,9 +26,8 @@ import { transformExcludeContent } from './exclude-content/index.mjs'
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
 
 /**
- * Given a target directory,
- * Apply MDX transforms to all `.mdx` files found in the directory and its
- * subdirectories. Each `.mdx` file will be modified in place.
+ * Apply MDX transforms to the provided `.mdx` paths under the target
+ * directory and write the transformed files to the output directory.
  *
  * Note: we expect the following directory structure:
  * - `<targetDir>/<repoSlug>/<version>/<contentDir>/<...file>.mdx`
@@ -39,6 +36,7 @@ import { PRODUCT_CONFIG } from '#productConfig.mjs'
  *
  * @param {string} targetDir
  * @param {string} outputDir the directory to write transformed files to
+ * @param {string[]} filesToCheck the explicit paths to consider for transformation
  */
 export async function buildMdxTransforms(
 	targetDir,
@@ -190,38 +188,4 @@ async function applyMdxTransforms(entry, versionMetadata = {}, targetDir) {
 	} catch (e) {
 		return { error: String(e).split('\n')[0], file: entry.filePath }
 	}
-}
-
-if (
-	process.argv[1] &&
-	import.meta.url === pathToFileURL(process.argv[1]).href
-) {
-	const { positionals } = parseArgs({ allowPositionals: true, strict: true })
-	if (positionals.length === 0) {
-		throw new Error(
-			'Usage: node scripts/prebuild/mdx-transforms/build-mdx-transforms.mjs <filePath> [filePath...]',
-		)
-	}
-
-	const CWD = process.cwd()
-	const versionMetadata = JSON.parse(
-		fs.readFileSync(
-			path.join(CWD, 'app', 'api', 'versionMetadata.json'),
-			'utf-8',
-		),
-	)
-	void buildMdxTransforms(
-		path.join(CWD, 'content'),
-		path.join(CWD, 'public', 'content'),
-		versionMetadata,
-		{
-			added: positionals.map((filePath) => {
-				return path.resolve(CWD, filePath)
-			}),
-			modified: [],
-		},
-	).catch((error) => {
-		console.error(error)
-		process.exitCode = 1
-	})
 }

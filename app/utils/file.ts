@@ -160,7 +160,7 @@ export const fetchFile = async (
 						path.join(CWD, 'content'),
 						path.join(CWD, 'public', 'content'),
 						versionMetadata,
-						{ added: [path.join(CWD, localFilePath)], modified: [] },
+						[path.join(CWD, localFilePath)],
 						{ exitOnError: false },
 					)
 				})
