@@ -5,7 +5,7 @@
 
 import { expect, test, vi } from 'vitest'
 import { GET } from './route'
-import { ServedFrom } from '#api/types'
+import { ServedFrom } from '#types'
 import { getAssetData } from '#utils/file'
 import { getProductVersionMetadata } from '#utils/contentVersions'
 import { mockRequest } from '#utils/mockRequest'

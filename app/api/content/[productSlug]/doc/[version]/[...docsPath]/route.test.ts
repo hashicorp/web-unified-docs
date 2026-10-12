@@ -13,15 +13,11 @@ import {
 	MockInstance,
 } from 'vitest'
 import { GET } from './route'
-import { ServedFrom } from '#api/types'
+import { FileType, ServedFrom } from '#types'
 import { Err, Ok } from '#utils/result'
 import { getProductVersionMetadata } from '#utils/contentVersions'
 import { PRODUCT_CONFIG } from '__fixtures__/productConfig.mjs'
-import {
-	FileType,
-	parseMarkdownFrontMatter,
-	findFileWithMetadata,
-} from '#utils/file'
+import { parseMarkdownFrontMatter, findFileWithMetadata } from '#utils/file'
 import { mockRequest } from '#utils/mockRequest'
 
 vi.mock('#utils/contentVersions', async (importOriginal: any) => {

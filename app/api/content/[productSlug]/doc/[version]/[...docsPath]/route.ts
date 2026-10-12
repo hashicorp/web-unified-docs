@@ -4,7 +4,6 @@
  */
 
 import {
-	FileType,
 	findFileWithMetadata,
 	joinFilePath,
 	parseMarkdownFrontMatter,
@@ -14,21 +13,12 @@ import { getProductVersionMetadata } from '#utils/contentVersions'
 import { errorResultToString } from '#utils/result'
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
 import { getMetadata } from '#utils/metadata'
-import { VersionedProduct } from '#api/types'
-
-/**
- * Parameters expected by `GET` route handler
- */
-export type GetParams = VersionedProduct & {
-	/**
-	 * Full path to the location of docs on the filesystem relative to `content/`
-	 */
-	docsPath: string[]
-}
+import { FileType } from '#types'
+import type { DocRouteParams } from '#types'
 
 export async function GET(
 	request: Request,
-	{ params }: { params: Promise<GetParams> },
+	{ params }: { params: Promise<DocRouteParams> },
 ) {
 	// Grab the parameters we need to fetch content
 	const { productSlug, version, docsPath } = await params

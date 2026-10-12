@@ -68,7 +68,7 @@ beforeEach(() => {
 		docsPathsAllVersionsFile,
 		JSON.stringify(generatedMetadata.docsPathsAllVersions),
 	)
-	delete (globalThis as any).__unifiedDocsMetadataCache
+	delete (globalThis as any).__incBuildsMetadataCache
 	vi.stubEnv('NODE_ENV', 'development')
 	vi.stubEnv('INCREMENTAL_BUILD', 'true')
 	vi.stubEnv('VERCEL_ENV', '')
@@ -86,7 +86,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	vi.unstubAllEnvs()
-	delete (globalThis as any).__unifiedDocsMetadataCache
+	delete (globalThis as any).__incBuildsMetadataCache
 })
 
 describe('getMetadata', () => {
@@ -141,7 +141,7 @@ describe('getMetadata', () => {
 		expect(second).not.toBe(first)
 		expect(second.versionMetadata).toBe(first.versionMetadata)
 		expect(second.docsPathsAllVersions).toBe(first.docsPathsAllVersions)
-		expect((globalThis as any).__unifiedDocsMetadataCache).toBeUndefined()
+		expect((globalThis as any).__incBuildsMetadataCache).toBeUndefined()
 		expect(
 			(globalThis as any).__unifiedDocsProductionMetadataCache,
 		).toBeUndefined()
@@ -187,7 +187,7 @@ describe('getMetadata', () => {
 
 	test('replaces a watcher retained from the previous cache shape', async () => {
 		const close = vi.fn()
-		;(globalThis as any).__unifiedDocsMetadataCache = {
+		;(globalThis as any).__incBuildsMetadataCache = {
 			promise: Promise.resolve(generatedMetadata),
 			watcher: { close },
 		}

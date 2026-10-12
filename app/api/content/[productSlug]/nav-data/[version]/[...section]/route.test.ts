@@ -14,10 +14,10 @@ import {
 } from 'vitest'
 import { GET } from './route'
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
-import { ServedFrom } from '#api/types'
+import { FileType, ServedFrom } from '#types'
 import { Err, Ok } from '#utils/result'
 import { getProductVersionMetadata } from '#utils/contentVersions'
-import { FileType, findFileWithMetadata, parseJson } from '#utils/file'
+import { findFileWithMetadata, parseJson } from '#utils/file'
 import { mockRequest } from '#utils/mockRequest'
 
 vi.mock('#utils/contentVersions', async (importOriginal: any) => {

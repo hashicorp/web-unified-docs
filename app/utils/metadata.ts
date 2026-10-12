@@ -1,27 +1,11 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import type { VersionMetadataMap } from './contentVersions'
-
-export type DocsPathsAllVersions = Record<string, Record<string, DocsPath[]>>
-
-type DocsPath = {
-	path: string
-	itemPath: string
-	created_at: string | null
-	last_modified: string | null
-}
-
-export type Metadata = {
-	versionMetadata: VersionMetadataMap
-	docsPathsAllVersions: DocsPathsAllVersions
-}
-
-type MetadataCache = {
-	promise?: Promise<Metadata>
-	watcher?: fs.FSWatcher
-	paths?: string
-	checkPaths?: boolean
-}
+import type {
+	DocsPathsAllVersions,
+	IncBuildsMetadataCache,
+	Metadata,
+	VersionMetadataMap,
+} from '#types'
 
 const contentDir = path.join(process.cwd(), 'content')
 const versionMetadataFile = path.join(
@@ -39,14 +23,14 @@ export const incBuildLocalDev =
 
 // Keep the development cache and watcher alive across module reloads.
 const globals = globalThis as typeof globalThis & {
-	__unifiedDocsMetadataCache?: MetadataCache
+	__incBuildsMetadataCache?: IncBuildsMetadataCache
 }
 
 function getContentPaths(): string {
 	return JSON.stringify(fs.readdirSync(contentDir, { recursive: true }).sort())
 }
 
-function invalidateIfStructureChanged(cache: MetadataCache): void {
+function invalidateIfStructureChanged(cache: IncBuildsMetadataCache): void {
 	if (!cache.checkPaths) {
 		return
 	}
@@ -86,7 +70,7 @@ function readGeneratedMetadata(): Metadata {
 }
 
 function getIncrementalLocalDevMetadata(): Promise<Metadata> {
-	const cache = (globals.__unifiedDocsMetadataCache ??= {})
+	const cache = (globals.__incBuildsMetadataCache ??= {})
 	if (!cache.watcher || cache.paths === undefined) {
 		// Replace an older watcher retained across a development module reload.
 		cache.watcher?.close()

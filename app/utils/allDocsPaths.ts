@@ -4,7 +4,7 @@
  */
 
 import { Ok, Err, errorResultToString } from '#utils/result'
-import type { DocsPathsAllVersions } from './metadata'
+import type { DocsPathsAllVersions } from '#types'
 import { getProductVersionMetadata } from './contentVersions'
 import { getMetadata } from './metadata'
 import { PRODUCT_CONFIG } from '#productConfig.mjs'

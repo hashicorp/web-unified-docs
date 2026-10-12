@@ -6,7 +6,7 @@
 import { expect, test, vi } from 'vitest'
 import { GET } from './route'
 
-import { ServedFrom } from '#api/types'
+import { FileType, ServedFrom } from '#types'
 import * as utilsFileModule from '#utils/file'
 import * as utilsContentVersionsModule from '#utils/contentVersions'
 import { mockRequest } from '#utils/mockRequest'
@@ -79,7 +79,7 @@ test('Return 200 and parse the jsonc into json if valid for UNVERSIONED product'
 	expect(readFileSpy).toHaveBeenCalledWith(
 		['content', productSlug, expect.any(String), 'redirects.jsonc'],
 		expect.any(Object),
-		utilsFileModule.FileType.Redirects,
+		FileType.Redirects,
 	)
 })
 
@@ -112,6 +112,6 @@ test('Return 200 and parse the jsonc into json if valid for VERSIONED product', 
 	expect(readFileSpy).toHaveBeenCalledWith(
 		['content', productSlug, 'v202410-1', 'redirects.jsonc'],
 		{ releaseStage: 'stable', version: 'v202410-1', isLatest: false },
-		utilsFileModule.FileType.Redirects,
+		FileType.Redirects,
 	)
 })

@@ -8,18 +8,11 @@ import { getProductVersionMetadata } from '#utils/contentVersions'
 import { getMetadata } from '#utils/metadata'
 import { errorResultToString } from '#utils/result'
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
-import { VersionedProduct } from '#api/types'
-
-export type GetParams = VersionedProduct & {
-	/**
-	 * Full path to the asset in the production build, i.e. `terraform/v1.9.x/img/docs/plan-comments.png`
-	 */
-	assetPath: string[]
-}
+import type { AssetRouteParams } from '#types'
 
 export async function GET(
 	request: Request,
-	{ params }: { params: Promise<GetParams> },
+	{ params }: { params: Promise<AssetRouteParams> },
 ) {
 	// Grab the parameters we need to fetch content
 	const { productSlug, version, assetPath } = await params

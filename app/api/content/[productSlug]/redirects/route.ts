@@ -5,18 +5,15 @@
 
 import { getProductVersionMetadata } from '#utils/contentVersions'
 import { getMetadata } from '#utils/metadata'
-import { FileType, findFileWithMetadata, parseJsonc } from '#utils/file'
+import { findFileWithMetadata, parseJsonc } from '#utils/file'
 import { errorResultToString } from '#utils/result'
-import { ProductParam } from '#api/types'
+import { FileType } from '#types'
+import type { ProductParam } from '#types'
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
 
-/**
- * Parameters expected by `GET` route handler
- */
-export type GetParams = ProductParam
 export async function GET(
 	request: Request,
-	{ params }: { params: Promise<GetParams> },
+	{ params }: { params: Promise<ProductParam> },
 ) {
 	const { productSlug } = await params
 

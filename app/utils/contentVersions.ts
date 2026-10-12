@@ -6,14 +6,7 @@
 import { Ok, Err } from '#utils/result'
 
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
-
-export type ProductVersionMetadata = {
-	version: string
-	isLatest: boolean
-	releaseStage: string
-}
-
-export type VersionMetadataMap = Record<string, ProductVersionMetadata[]>
+import type { ProductVersionMetadata, VersionMetadataMap } from '#types'
 
 export const getProductVersionMetadata = (
 	productSlug: string,

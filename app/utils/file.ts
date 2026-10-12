@@ -8,19 +8,11 @@ import path from 'node:path'
 import grayMatter from 'gray-matter'
 import { parse as jsoncParse } from 'jsonc-parser'
 
-import { ServedFrom } from '#api/types'
-import { Err, Ok, Result } from './result'
-import type { ProductVersionMetadata } from './contentVersions'
+import { FileType, ServedFrom } from '#types'
+import type { ProductVersionMetadata, Result } from '#types'
+import { Err, Ok } from './result'
 import { getMetadata } from './metadata'
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
-
-// Only exported for testing purposes
-export enum FileType {
-	Markdown = 'markdown',
-	NavData = 'navData',
-	Redirects = 'redirects',
-	Asset = 'asset',
-}
 
 const MDX_TRANSFORM_SCRIPT =
 	'../../scripts/prebuild/mdx-transforms/build-mdx-transforms.mjs'

@@ -4,7 +4,7 @@
  */
 
 import { expect, test, vi, beforeEach, afterEach, describe, it } from 'vitest'
-import { ServedFrom } from '#api/types'
+import { FileType, ServedFrom } from '#types'
 
 // Must run before the module is evaluated so the module-level SELF_URL constant
 // picks up VERCEL_URL at load time.
@@ -12,7 +12,7 @@ vi.hoisted(() => {
 	process.env.VERCEL_URL = 'local-vercel-CDN'
 })
 
-import { FileType, getAssetData, resolveCdnUrl } from './file'
+import { getAssetData, resolveCdnUrl } from './file'
 
 vi.mock('#productConfig.mjs', () => {
 	return {
@@ -127,7 +127,7 @@ describe('fetchFile - INCREMENTAL_BUILD=true', () => {
 	}
 
 	test('returns Err when changedContentFiles.json cannot be read', async () => {
-		const { fetchFile, FileType } = await loadFileModuleWithEnv(incrementalEnv)
+		const { fetchFile } = await loadFileModuleWithEnv(incrementalEnv)
 		vi.mocked(readFile).mockRejectedValue(new Error('ENOENT'))
 
 		const result = await fetchFile(
@@ -143,7 +143,7 @@ describe('fetchFile - INCREMENTAL_BUILD=true', () => {
 	})
 
 	test('returns Err for a removed file', async () => {
-		const { fetchFile, FileType } = await loadFileModuleWithEnv(incrementalEnv)
+		const { fetchFile } = await loadFileModuleWithEnv(incrementalEnv)
 		vi.mocked(readFile).mockResolvedValue(
 			JSON.stringify(
 				makeChangedFiles({ removed: ['content/vault/v1.21.x/docs/index.mdx'] }),
@@ -163,7 +163,7 @@ describe('fetchFile - INCREMENTAL_BUILD=true', () => {
 	})
 
 	test('fetches from LOCAL CDN for an added file', async () => {
-		const { fetchFile, FileType } = await loadFileModuleWithEnv(incrementalEnv)
+		const { fetchFile } = await loadFileModuleWithEnv(incrementalEnv)
 		vi.mocked(readFile).mockResolvedValue(
 			JSON.stringify(
 				makeChangedFiles({ added: ['content/vault/v1.21.x/docs/index.mdx'] }),
@@ -189,7 +189,7 @@ describe('fetchFile - INCREMENTAL_BUILD=true', () => {
 	})
 
 	test('fetches from LOCAL CDN for a modified file', async () => {
-		const { fetchFile, FileType } = await loadFileModuleWithEnv(incrementalEnv)
+		const { fetchFile } = await loadFileModuleWithEnv(incrementalEnv)
 		vi.mocked(readFile).mockResolvedValue(
 			JSON.stringify(
 				makeChangedFiles({
@@ -247,7 +247,7 @@ describe('fetchFile - INCREMENTAL_BUILD=true', () => {
 		// Asset paths come in as e.g. "asset/vault/v1.21.x/img/foo.png"
 		// but changedContentFiles.json records them under "content/vault/v1.21.x/img/foo.png"
 
-		const { fetchFile, FileType } = await loadFileModuleWithEnv(incrementalEnv)
+		const { fetchFile } = await loadFileModuleWithEnv(incrementalEnv)
 		vi.mocked(readFile).mockResolvedValue(
 			JSON.stringify(
 				makeChangedFiles({ modified: ['content/vault/v1.21.x/img/foo.png'] }),
@@ -272,7 +272,7 @@ describe('fetchFile - INCREMENTAL_BUILD=true', () => {
 	})
 
 	test('asset file: fetches from PROD CDN for unchanged asset', async () => {
-		const { fetchFile, FileType } = await loadFileModuleWithEnv(incrementalEnv)
+		const { fetchFile } = await loadFileModuleWithEnv(incrementalEnv)
 		vi.mocked(readFile).mockResolvedValue(
 			JSON.stringify(makeChangedFiles()) as any,
 		)
@@ -321,7 +321,7 @@ describe('getAssetData', () => {
 
 describe('findFileWithMetadata', () => {
 	test('removes empty segments from URL path', async () => {
-		const { findFileWithMetadata, FileType } = await loadFileModuleWithEnv({
+		const { findFileWithMetadata } = await loadFileModuleWithEnv({
 			VERCEL_URL: 'local-vercel-CDN',
 			INCREMENTAL_BUILD: undefined,
 			VERCEL_ENV: undefined,

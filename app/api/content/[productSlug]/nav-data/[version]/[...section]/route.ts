@@ -3,25 +3,16 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-import { FileType, findFileWithMetadata, parseJson } from '#utils/file'
+import { findFileWithMetadata, parseJson } from '#utils/file'
 import { getProductVersionMetadata } from '#utils/contentVersions'
 import { getMetadata } from '#utils/metadata'
 import { errorResultToString } from '#utils/result'
-import { VersionedProduct } from '#api/types'
+import { FileType } from '#types'
+import type { NavDataRouteParams } from '#types'
 
-/**
- * Parameters expected by `GET` route handler
- */
-export type GetParams = VersionedProduct & {
-	/**
-	 * An array of strings representing the path relative to `content/<productSlug>/nav-data/<version>/data`
-	 * @example ['cli']
-	 */
-	section: string[]
-}
 export async function GET(
 	request: Request,
-	{ params }: { params: Promise<GetParams> },
+	{ params }: { params: Promise<NavDataRouteParams> },
 ) {
 	const { productSlug, version, section } = await params
 	const { versionMetadata: productVersions } = await getMetadata()
