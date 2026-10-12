@@ -1,3 +1,8 @@
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: BUSL-1.1
+ */
+
 import fs from 'node:fs'
 import path from 'node:path'
 import type { Metadata } from '#types'
