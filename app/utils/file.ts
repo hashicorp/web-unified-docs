@@ -8,6 +8,7 @@ import path from 'node:path'
 import grayMatter from 'gray-matter'
 import { parse as jsoncParse } from 'jsonc-parser'
 
+import { BUILD_TYPE, buildType } from '#scriptUtils/get-type-of-build.mjs'
 import { FileType, ServedFrom } from '#types'
 import type { ProductVersionMetadata, Result } from '#types'
 import { Err, Ok } from './result'
@@ -27,14 +28,10 @@ const headers = process.env.VERCEL_URL
 		})
 	: new Headers()
 
-const incBuild = process.env.INCREMENTAL_BUILD === 'true'
-const incBuildPRPreview = incBuild && process.env.VERCEL_ENV === 'preview'
-const incBuildLocalDev =
-	incBuild && process.env.NODE_ENV === 'development' && !incBuildPRPreview
-
-const mdxTransformsModule = incBuildLocalDev
-	? import(MDX_TRANSFORM_SCRIPT)
-	: undefined
+const mdxTransformsModule =
+	buildType === BUILD_TYPE.incBuildLocalDev
+		? import(MDX_TRANSFORM_SCRIPT)
+		: undefined
 
 void mdxTransformsModule?.catch((error: unknown) => {
 	console.error('Failed to preload local MDX transforms:', error)
@@ -65,19 +62,20 @@ const contentTypeFromPath = (filePath: string): string => {
 }
 
 /**
- * Fetches a file by path, applying incremental build logic when
- * `INCREMENTAL_BUILD` is set to `'true'`:
+ * Fetches a file by path, applying incremental preview logic for
+ * `BUILD_TYPE.incBuildPRPreview`:
  *   - Files in `removed`            → returns Err
  *   - Files in `added` or `modified` → fetches from SELF_URL (current build)
  *   - Files not in changedContentFiles.json  → fetches from UNIFIED_DOCS_PROD_URL
- * Otherwise falls back to the standard SELF_URL fetch.
+ * Local incremental development reads repository content.
+ * Other build types use the standard SELF_URL fetch.
  */
 // Only exported for testing purposes
 export const fetchFile = async (
 	filePath: string,
 	fileType: FileType,
 ): Promise<Result<{ response: Response; servedFrom: ServedFrom }, string>> => {
-	if (incBuildPRPreview) {
+	if (buildType === BUILD_TYPE.incBuildPRPreview) {
 		let changedFiles: {
 			added: string[]
 			modified: string[]
@@ -140,7 +138,7 @@ export const fetchFile = async (
 			response,
 			servedFrom: ServedFrom.Production,
 		})
-	} else if (incBuildLocalDev) {
+	} else if (buildType === BUILD_TYPE.incBuildLocalDev) {
 		let localFilePath = filePath
 		if (fileType === FileType.Asset) {
 			// Adjust the file path to match the paths in the content directory

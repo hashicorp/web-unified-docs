@@ -15,6 +15,7 @@ import { copyRedirectFiles } from '#scriptUtils/copy-redirect-files.mjs'
 import { copyAssetFiles } from '#scriptUtils/copy-asset-files.mjs'
 import { copyInternalOnlyProductDocs } from './copy-internal-only-product-docs.mjs'
 import { getChangedContentFiles } from '#scriptUtils/get-changed-content-files.mjs'
+import { BUILD_TYPE, buildType } from '#scriptUtils/get-type-of-build.mjs'
 import { listFiles } from '#scriptUtils/list-files.mjs'
 
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
@@ -36,7 +37,7 @@ const DOCS_PATHS_ALL_VERSIONS_FILE = path.join(
 )
 const PREBUILD_TRACE_FILE = path.join(CWD, 'scripts', 'prebuild', 'trace')
 
-const getCommandLineArgs = () => {
+const getCommandLineArgs = (buildType) => {
 	const args = process.argv.slice(2).reduce(
 		(args, arg) => {
 			if (arg === '--only-build-version-metadata') {
@@ -45,6 +46,8 @@ const getCommandLineArgs = () => {
 				args.buildAlgoliaIndex = true
 			} else if (arg === '--get-real-file-changed-metadata') {
 				args.getRealFileChangedMetadata = true
+			} else if (arg === '--force-full-rebuild') {
+				args.forceFullRebuild = true
 			}
 
 			return args
@@ -53,11 +56,12 @@ const getCommandLineArgs = () => {
 			onlyBuildVersionMetadata: false,
 			buildAlgoliaIndex: false,
 			getRealFileChangedMetadata: false,
+			forceFullRebuild: false,
 		},
 	)
 
 	// Set getRealFileChangedMetadata to true in production
-	if (process.env.VERCEL_ENV === 'production') {
+	if (buildType === BUILD_TYPE.prodBuild) {
 		args.getRealFileChangedMetadata = true
 	}
 
@@ -80,29 +84,13 @@ async function main() {
 	const startTime = process.hrtime.bigint()
 	const traceId = Math.random().toString(16).slice(2, 18)
 
-	const incBuild = process.env.INCREMENTAL_BUILD === 'true'
-	const incBuildPRPreview = incBuild && process.env.VERCEL_ENV === 'preview'
-	const incBuildLocalDev = incBuild && process.env.VERCEL_ENV === 'development'
-
-	const args = getCommandLineArgs()
+	const args = getCommandLineArgs(buildType)
 
 	console.log(
 		`Running prebuild script with args: ${JSON.stringify(args, null, 2)}\n`,
 	)
 
-	console.log(`Incremental build: ${incBuild ? 'true' : 'false'}\n`)
-
-	let changedFiles = null
-	if (incBuildPRPreview) {
-		changedFiles = getChangedContentFiles()
-
-		console.log(
-			`Changed content files: ${JSON.stringify(changedFiles, null, 2)}\n`,
-		)
-	} else if (incBuildLocalDev) {
-		// Files are served dynamically in local dev
-		changedFiles = []
-	}
+	console.log(`Build type: ${buildType}\n`)
 
 	// Gather and write out version metadata
 	const versionMetadata = await gatherVersionMetadata(CONTENT_DIR)
@@ -125,11 +113,29 @@ async function main() {
 	fs.writeFileSync(DOCS_PATHS_ALL_VERSIONS_FILE, docsPathsAllVersionsJson)
 
 	// Determine which files to check for copying and transforms
-	let filesToCheck
-	if (changedFiles !== null && !Array.isArray(changedFiles)) {
+	let filesToCheck = []
+	if (args.forceFullRebuild) {
+		console.log(
+			'Forcing a refresh of all content data; MDX, redirects, images, nav-data, etc.',
+		)
+
+		filesToCheck = (await listFiles(CONTENT_DIR)).filter((filePath) => {
+			const relativePath = path.relative(CONTENT_DIR, filePath)
+			const repoSlug = relativePath.split('/')[0]
+			return repoSlug in PRODUCT_CONFIG
+		})
+	} else if (buildType === BUILD_TYPE.incBuildPRPreview) {
+		const changedFiles = getChangedContentFiles()
+
+		console.log(
+			`Changed content files: ${JSON.stringify(changedFiles, null, 2)}\n`,
+		)
+
 		filesToCheck = [...changedFiles.added, ...changedFiles.modified]
+	} else if (buildType === BUILD_TYPE.incBuildLocalDev) {
+		console.log('Incremental local build; all content data is loaded as needed')
 	} else {
-		filesToCheck = await listFiles(CONTENT_DIR).filter((filePath) => {
+		filesToCheck = (await listFiles(CONTENT_DIR)).filter((filePath) => {
 			const relativePath = path.relative(CONTENT_DIR, filePath)
 			const repoSlug = relativePath.split('/')[0]
 			return repoSlug in PRODUCT_CONFIG

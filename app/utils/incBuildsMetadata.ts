@@ -6,6 +6,7 @@
 import fs from 'node:fs'
 import type { FSWatcher } from 'node:fs'
 import path from 'node:path'
+import { BUILD_TYPE, buildType } from '#scriptUtils/get-type-of-build.mjs'
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
 import type { Metadata } from '#types'
 
@@ -19,11 +20,6 @@ const docsPathsAllVersionsFile = path.join(
 	process.cwd(),
 	'app/api/docsPathsAllVersions.json',
 )
-export const IncBuildLocalDev =
-	process.env.INCREMENTAL_BUILD === 'true' &&
-	process.env.NODE_ENV === 'development' &&
-	process.env.VERCEL_ENV !== 'preview'
-
 let metadataWriteQueue: Promise<void> = Promise.resolve()
 
 type IncBuildsMetadataCache = {
@@ -45,6 +41,7 @@ function getProductPaths(product: string): string | undefined {
 	if (!fs.existsSync(productDir) || !fs.statSync(productDir).isDirectory()) {
 		return undefined
 	}
+
 	return JSON.stringify(fs.readdirSync(productDir, { recursive: true }).sort())
 }
 
@@ -52,6 +49,7 @@ function invalidateIfStructureChanged(cache: IncBuildsMetadataCache): void {
 	// Compare paths only: editing an existing file must not invalidate metadata.
 	for (const product of cache.checkProducts) {
 		const paths = getProductPaths(product)
+
 		if (cache.productPaths.get(product) !== paths) {
 			cache.productPaths.set(product, paths)
 			cache.pendingProducts.add(product)
@@ -137,16 +135,19 @@ function regenerateMetadata(
 
 		if (!cache.metadata) {
 			invalidateIfStructureChanged(cache)
+
 			if (initialMetadata) {
 				cache.metadata = await initialMetadata
 			} else {
 				const existingMetadata = readExistingMetadata()
+
 				if (existingMetadata) {
 					console.log('[watcher] loading existing metadata')
 					cache.metadata = existingMetadata
 				} else {
 					cache.pendingProducts.clear()
 					console.log('[watcher] generating initial metadata')
+
 					try {
 						cache.metadata = await generateMetadata()
 					} catch (error: unknown) {
@@ -156,6 +157,7 @@ function regenerateMetadata(
 						)
 						throw error
 					}
+
 					console.log('[watcher] generated initial metadata')
 					saveMetadataFiles(cache.metadata)
 				}
@@ -227,6 +229,7 @@ function startIncBuildsWatcher(): IncBuildsMetadataCache {
 			(_eventType: string, filename: string | null) => {
 				const filePath = filename ? path.join(contentDir, filename) : contentDir
 				console.log(`[watcher] reloading ${filePath}`)
+
 				void fetch(`${process.env.DEV_PORTAL_URL}/api/refresh`, {
 					method: 'POST',
 				}).catch((error: unknown) => {
@@ -238,6 +241,7 @@ function startIncBuildsWatcher(): IncBuildsMetadataCache {
 					if (!products.includes(changedProduct)) {
 						return
 					}
+
 					nextCache.checkProducts.add(changedProduct)
 				} else {
 					for (const product of products) {
@@ -268,14 +272,16 @@ function startIncBuildsWatcher(): IncBuildsMetadataCache {
 
 export function getIncBuildLocalDevMetadata(): Promise<Metadata> {
 	const cache = startIncBuildsWatcher()
+
 	if (cache.promise) {
 		return cache.promise
 	}
+
 	return cache.metadata && cache.pendingProducts.size === 0
 		? Promise.resolve(cache.metadata)
 		: regenerateMetadata(cache)
 }
 
-if (IncBuildLocalDev) {
+if (buildType === BUILD_TYPE.incBuildLocalDev) {
 	startIncBuildsWatcher()
 }

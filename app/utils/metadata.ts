@@ -5,10 +5,8 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import {
-	getIncBuildLocalDevMetadata,
-	IncBuildLocalDev,
-} from './incBuildsMetadata'
+import { BUILD_TYPE, buildType } from '#scriptUtils/get-type-of-build.mjs'
+import { getIncBuildLocalDevMetadata } from './incBuildsMetadata'
 import type { DocsPathsAllVersions, Metadata, VersionMetadataMap } from '#types'
 
 const versionMetadataFile = path.join(
@@ -62,7 +60,7 @@ function getProductionMetadata(): Metadata {
 }
 
 export function getMetadata(): Promise<Metadata> {
-	return IncBuildLocalDev
+	return buildType === BUILD_TYPE.incBuildLocalDev
 		? getIncBuildLocalDevMetadata()
 		: Promise.resolve().then(getProductionMetadata)
 }

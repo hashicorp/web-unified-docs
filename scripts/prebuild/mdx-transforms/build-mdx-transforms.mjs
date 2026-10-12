@@ -13,7 +13,6 @@ import remark from 'remark'
 import remarkMdx from 'remark-mdx'
 import grayMatter from 'gray-matter'
 
-import { listFiles } from '#scriptUtils/list-files.mjs'
 import { batchPromises } from '#scriptUtils/batch-promises.mjs'
 
 import { paragraphCustomAlertsPlugin } from './paragraph-custom-alert/paragraph-custom-alert.mjs'
@@ -45,13 +44,9 @@ export async function buildMdxTransforms(
 	targetDir,
 	outputDir,
 	versionMetadata,
-	changedFiles = null,
+	filesToCheck,
 	options = { exitOnError: true },
 ) {
-	const filesToCheck = changedFiles
-		? [...changedFiles.added, ...changedFiles.modified]
-		: await listFiles(targetDir)
-
 	// Filter for `.mdx` files
 	const mdxFiles = filesToCheck.filter((filePath) => {
 		const relativePath = path.relative(targetDir, filePath)
