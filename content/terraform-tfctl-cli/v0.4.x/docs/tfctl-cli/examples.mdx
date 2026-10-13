@@ -12,7 +12,127 @@ last_modified: 2026-07-30T22:07:32.000Z
 
 This topic provides practical examples for common tfctl operations. Use these examples as starting points for your own workflows.
 
-## Start a new workspace run
+The examples assume that your active profile sets a default organization. Refer to [Get started](/terraform/tfctl-cli#get-started) for setup instructions.
+
+## High-value workflows
+
+The following workflows combine tfctl commands to complete tasks that otherwise require several API calls, pagination handling, or UI pages.
+
+### Diagnose a failed run faster
+
+Find out why the latest run in a workspace failed without opening the run, plan, and policy pages separately.
+
+The [`tfctl run status`](/terraform/tfctl-cli/reference/cli/run/status) command accepts a workspace name, finds the latest run, and prints Terraform diagnostics, policy check failures, and run task failures together. Without tfctl, you look up the workspace ID, list its runs, and then query each part of the run.
+
+1. Check the latest run in the workspace. Replace `<WORKSPACE_NAME>` with your workspace's name.
+
+   ```shell-session
+   $ tfctl run status <WORKSPACE_NAME>
+   ```
+
+   The command exits with code `6` if the run errored or a policy check failed, so you can also use it in scripts.
+
+1. Get the latest run ID and summarize its plan:
+
+   ```shell-session
+   $ RUN_ID=$(tfctl api /workspaces/{workspace}/runs \
+       --pathparam workspace=<WORKSPACE_NAME> \
+       --page-size 1 --jq '.data[0].id')
+   $ tfctl api /runs/{run}/plan --pathparam run="$RUN_ID" \
+       --jq '.data.attributes | {
+         status: .status,
+         add: ."resource-additions",
+         change: ."resource-changes",
+         destroy: ."resource-destructions"
+       }'
+   ```
+
+### Preview and apply a bulk change across workspaces
+
+Change a setting, such as the Terraform version, on every workspace that matches a name pattern.
+
+tfctl fetches every page of matching workspaces in one command and previews each change with the global `--dry-run` flag before you send it. Without tfctl, you page through the workspaces API and send a PATCH request for each workspace.
+
+1. Save the IDs of the workspaces whose names end in `-prod`:
+
+   ```shell-session
+   $ tfctl api /organizations/{organization}/workspaces \
+       --field 'search[wildcard-name]=*-prod' --all \
+       --jq '.data[].id' > workspaces.txt
+   ```
+
+1. Preview the change for each workspace. Replace `<TERRAFORM_VERSION>` with the Terraform version to set, such as `1.9.8`. tfctl prints each request without sending it.
+
+   ```shell-session
+   $ while read -r ws; do
+       tfctl api /workspaces/{workspace} --pathparam workspace="$ws" \
+         --method PATCH --attribute terraform-version=<TERRAFORM_VERSION> \
+         --dry-run
+     done < workspaces.txt
+   ```
+
+1. Review the output, then run the same loop without `--dry-run` to apply the change.
+
+**Queue runs for the same workspaces.** Use the same list to start a run in each workspace, for example after you publish a new module version. Preview the runs first, then remove `--dry-run` to queue them.
+
+```shell-session
+$ while read -r ws; do
+    tfctl run start "$ws" --message "Module update rollout" --dry-run
+  done < workspaces.txt
+```
+
+### Compare organizations across instances
+
+Check whether two organizations, such as an EU organization and a US organization on different HCP Terraform instances, contain the same workspaces.
+
+The global `--profile` flag runs a single command against any configured profile, so you can query both instances without logging in again or switching profiles. This example uses the `eu-org` and `us-org` profiles from [Configure multiple profiles](#configure-multiple-profiles).
+
+```shell-session
+$ tfctl get workspaces --all --profile eu-org \
+    --jq '.data[].attributes.name' | sort > eu.txt
+$ tfctl get workspaces --all --profile us-org \
+    --jq '.data[].attributes.name' | sort > us.txt
+$ diff eu.txt us.txt
+```
+
+The `diff` output lists workspaces that exist in only one organization.
+
+### Audit workspace settings with JSON output
+
+Find workspaces whose settings do not match your standards.
+
+The `--all` flag handles pagination and the global `--jq` flag filters the JSON response, so you do not need to write pagination logic or install a separate jq binary.
+
+List workspaces that have auto-apply enabled:
+
+```shell-session
+$ tfctl get workspaces --all \
+    --jq '.data[] | select(.attributes."auto-apply")
+          | .attributes.name'
+```
+
+List workspaces that are not connected to a VCS repository:
+
+```shell-session
+$ tfctl get workspaces --all \
+    --jq '.data[] | select(.attributes."vcs-repo" == null)
+          | .attributes.name'
+```
+
+Export each workspace's name, Terraform version, and auto-apply setting to a CSV file:
+
+```shell-session
+$ tfctl get workspaces --all \
+    --jq '.data[] | [.attributes.name,
+          .attributes."terraform-version",
+          .attributes."auto-apply"] | @csv' > workspaces.csv
+```
+
+## Basic examples
+
+The following examples show single operations.
+
+### Start a run and check its status
 
 1. Start a new run using the [`tfctl run start`](/terraform/tfctl-cli/reference/cli/run/start) command. Replace `<WORKSPACE_NAME_OR_ID>` with your workspace's name or ID.
 
@@ -28,9 +148,7 @@ This topic provides practical examples for common tfctl operations. Use these ex
    $ tfctl run status <RUN_ID>
    ```
 
-## Import workspace variables from a file
-
-Import variables into your workspace from a file.
+### Import workspace variables from a file
 
 1. Create a [Terraform variable definition file](/terraform/language/values/variables#variable-definition-files) in HCL or JSON format with your variable definitions.
 
@@ -40,103 +158,24 @@ Import variables into your workspace from a file.
    $ tfctl variable import variables.hcl
    ```
 
-## Get workspace details by ID
+### Get workspace details by ID
 
-Get detailed information about a workspace using its ID. Replace `<WORKSPACE_ID>` with your workspace's ID.
+Use the [`tfctl get`](/terraform/tfctl-cli/reference/cli/get) command to get details about a workspace. Replace `<WORKSPACE_ID>` with your workspace's ID.
 
 ```shell-session
-$ tfctl api /workspaces/{workspace} --pathparam workspace=<WORKSPACE_ID>
+$ tfctl get <WORKSPACE_ID>
 ```
 
-## Configure multiple profiles
-
-Configure profiles for different organizations and authenticate to both. You must already have users with access to the organizations in each HCP Terraform instance.
-
-1. Create a profile for your EU organization:
-
-   ```shell-session
-   $ tfctl profile profiles create eu-org
-   ```
-
-   Set the hostname for the EU organization profile:
-
-   ```shell-session
-   $ tfctl profile set hostname app.eu.terraform.io --profile eu-org
-   ```
-
-   Set the default organization for the EU organization profile:
-
-   ```shell-session
-   $ tfctl profile set default_organization my-eu-org --profile eu-org
-   ```
-
-1. Authenticate to the EU organization:
-
-   ```shell-session
-   $ tfctl auth login --profile eu-org
-   ```
-
-   The command opens your browser to generate an API token. After you authorize the token, tfctl stores it in your profile.
-
-1. Create a profile for your US organization:
-
-   ```shell-session
-   $ tfctl profile profiles create us-org
-   ```
-
-   Set the hostname for the US organization profile:
-
-   ```shell-session
-   $ tfctl profile set hostname app.terraform.io --profile us-org
-   ```
-
-   Set the default organization for the US organization profile:
-
-   ```shell-session
-   $ tfctl profile set default_organization my-us-org --profile us-org
-   ```
-
-1. Authenticate to the US organization:
-
-   ```shell-session
-   $ tfctl auth login --profile us-org
-   ```
-
-1. Switch between profiles. Activate the EU organization profile:
-
-   ```shell-session
-   $ tfctl profile profiles activate eu-org
-   ```
-
-   List the workspaces in the EU organization:
-
-   ```shell-session
-   $ tfctl get workspaces
-   ```
-
-   Activate the US organization profile:
-
-   ```shell-session
-   $ tfctl profile profiles activate us-org
-   ```
-
-   List the workspaces in the US organization:
-
-   ```shell-session
-   $ tfctl get workspaces
-   ```
-
-## List all runs for a workspace
+### List all runs for a workspace
 
 List all runs for a specific workspace. Replace `<WORKSPACE_NAME_OR_ID>` with your workspace's name or ID.
 
 ```shell-session
-$ tfctl api /workspaces/{workspace}/runs --pathparam workspace=<WORKSPACE_NAME_OR_ID>
+$ tfctl api /workspaces/{workspace}/runs \
+    --pathparam workspace=<WORKSPACE_NAME_OR_ID>
 ```
 
-The following sequence of commands creates API token in web browser, copies it, then pastes it to terminal:
-
-## Update workspace settings
+### Update workspace settings
 
 Update workspace settings using a PATCH request. Replace `<WORKSPACE_ID>` with your workspace's ID.
 
@@ -146,3 +185,34 @@ $ tfctl api /workspaces/{workspace} \
   --attribute auto-apply=true \
   --pathparam workspace=<WORKSPACE_ID>
 ```
+
+### Configure multiple profiles
+
+Create a profile for each organization, then authenticate to each one. You must already have users with access to the organizations in each instance.
+
+1. Create and configure a profile for each organization:
+
+   ```shell-session
+   $ tfctl profile profiles create eu-org
+   $ tfctl profile set hostname app.eu.terraform.io --profile eu-org
+   $ tfctl profile set default_organization my-eu-org --profile eu-org
+   $ tfctl profile profiles create us-org
+   $ tfctl profile set hostname app.terraform.io --profile us-org
+   $ tfctl profile set default_organization my-us-org --profile us-org
+   ```
+
+1. Authenticate to each organization. The command opens your browser to generate an API token, then stores the token in the profile.
+
+   ```shell-session
+   $ tfctl auth login --profile eu-org
+   $ tfctl auth login --profile us-org
+   ```
+
+1. Run commands against either organization with the `--profile` flag:
+
+   ```shell-session
+   $ tfctl get workspaces --profile eu-org
+   $ tfctl get workspaces --profile us-org
+   ```
+
+   To change the default profile, use the [`tfctl profile profiles activate`](/terraform/tfctl-cli/reference/cli/profile/profiles/activate) command.
