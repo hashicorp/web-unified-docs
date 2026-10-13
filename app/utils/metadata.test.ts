@@ -142,6 +142,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+	vi.doUnmock('./incBuildsMetadata')
 	vi.restoreAllMocks()
 	vi.unstubAllGlobals()
 	vi.unstubAllEnvs()
@@ -149,6 +150,28 @@ afterEach(() => {
 })
 
 describe('getMetadata', () => {
+	test.each([
+		['production', 'true', 'production'],
+		['incremental preview', 'true', 'preview'],
+		['full build', 'false', ''],
+	])(
+		'does not load development-only metadata code in %s',
+		async (_scenario: string, incremental: string, vercelEnv: string) => {
+			vi.stubEnv('NODE_ENV', 'production')
+			vi.stubEnv('INCREMENTAL_BUILD', incremental)
+			vi.stubEnv('VERCEL_ENV', vercelEnv)
+			vi.doMock('./incBuildsMetadata', () => {
+				throw new Error('Development-only metadata module was loaded')
+			})
+			writeGeneratedMetadataFiles()
+
+			const { getMetadata } = await import('./metadata')
+
+			expect(await getMetadata()).toEqual(generatedMetadata)
+			expect(watch).not.toHaveBeenCalled()
+		},
+	)
+
 	test.each([
 		['prodBuild', 'production', 'true', 'production', 0],
 		[
@@ -227,6 +250,15 @@ describe('getMetadata', () => {
 		expect(
 			(globalThis as any).__unifiedDocsProductionMetadataCache,
 		).toBeUndefined()
+	})
+
+	test('reports both missing generated metadata files', async () => {
+		vi.stubEnv('NODE_ENV', 'production')
+		const { getMetadata } = await import('./metadata')
+
+		await expect(getMetadata()).rejects.toThrow(
+			`Missing generated metadata file(s): ${versionMetadataFile}, ${docsPathsAllVersionsFile}. Run \`npm run prebuild\` to generate them.`,
+		)
 	})
 
 	test('loads existing metadata files instead of generating metadata', async () => {
@@ -338,8 +370,10 @@ describe('getMetadata', () => {
 
 	test('starts the watcher on module load and generates one shared cache lazily', async () => {
 		const { getMetadata } = await import('./metadata')
+		await vi.waitFor(() => {
+			expect(watch).toHaveBeenCalledOnce()
+		})
 		expect(gatherVersionMetadata).not.toHaveBeenCalled()
-		expect(watch).toHaveBeenCalledOnce()
 
 		const [first, second] = await Promise.all([getMetadata(), getMetadata()])
 		expect(first).toEqual(generatedMetadata)

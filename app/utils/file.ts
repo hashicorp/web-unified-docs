@@ -25,12 +25,14 @@ const headers = process.env.VERCEL_URL
 		})
 	: new Headers()
 
-const mdxTransformsModule =
+// Done this way so that next.js tracing does not include this module in preview and prod builds
+const useMdxTransformsModule =
+	process.env.NODE_ENV === 'development' &&
 	buildType === BUILD_TYPE.incBuildLocalDev
 		? import('../../scripts/prebuild/mdx-transforms/build-mdx-transforms.mjs')
 		: undefined
 
-void mdxTransformsModule?.catch((error: unknown) => {
+void useMdxTransformsModule?.catch((error: unknown) => {
 	console.error('Failed to preload local MDX transforms:', error)
 })
 
@@ -135,7 +137,9 @@ export const fetchFile = async (
 			response,
 			servedFrom: ServedFrom.Production,
 		})
-	} else if (buildType === BUILD_TYPE.incBuildLocalDev) {
+
+		// this basically a check for BUILD_TYPE.incBuildLocalDev, but required or else nest.js tracing includes it in preview and prod builds
+	} else if (useMdxTransformsModule) {
 		let localFilePath = filePath
 		if (fileType === FileType.Asset) {
 			// Adjust the file path to match the paths in the content directory
@@ -150,10 +154,7 @@ export const fetchFile = async (
 				// A document can be a named file or an index file; callers try both.
 				await access(localFilePath)
 
-				const module = await mdxTransformsModule
-				if (!module) {
-					throw new Error('Local MDX transforms are unavailable')
-				}
+				const module = await useMdxTransformsModule
 				const { versionMetadata } = await getMetadata()
 				await module.buildMdxTransforms(
 					path.join(CWD, 'content'),

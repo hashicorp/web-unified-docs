@@ -23,8 +23,9 @@ npm run dev
 ```
 
 `npm run dev` starts Next.js. When local incremental development is enabled,
-loading the metadata module starts a recursive watcher for `content/` before
-the first metadata request. The watcher logs changed paths and sends a refresh
+loading the metadata module preloads the incremental metadata module, which
+starts a recursive watcher for `content/`. Metadata requests await this preload.
+The watcher logs changed paths and sends a refresh
 POST to `${DEV_PORTAL_URL}/api/refresh`.
 
 `npm run prebuild` populates the `public/` folder and only needs to run once
@@ -76,7 +77,11 @@ Environment flag changes require reloading the application utility module to
 select a new type; script callers can call `getBuildType()` again.
 When the value is `incBuildLocalDev` (`INCREMENTAL_BUILD=true`, `NODE_ENV=development`,
 and `VERCEL_ENV` is not `production`), `app/utils/incBuildsMetadata.ts` starts
-the watcher immediately on module load. On the first metadata request, it loads the generated
+the watcher immediately when its development-only dynamic import resolves.
+Direct `process.env.NODE_ENV` checks in the application utilities keep the
+watcher, MDX transforms, and local filesystem reads out of Next.js production
+bundles without changing the shared build-type detector used by Bun binaries.
+On the first metadata request, it loads the generated
 JSON files if both exist and neither file's modification time is more than one
 hour old; otherwise it generates metadata on demand and queues both files for
 background writing. The age check applies only when loading the disk cache;

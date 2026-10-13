@@ -81,6 +81,12 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+	vi.doMock(
+		'../../scripts/prebuild/mdx-transforms/build-mdx-transforms.mjs',
+		() => {
+			return { buildMdxTransforms }
+		},
+	)
 	vi.unstubAllGlobals()
 	vi.unstubAllEnvs()
 	vi.resetAllMocks()
@@ -102,6 +108,49 @@ describe('FileType', () => {
 // ---------------------------------------------------------------------------
 
 describe('fetchFile - fullBuild', () => {
+	test.each([
+		['production', 'true', 'production'],
+		['incremental preview', 'true', 'preview'],
+		['full build', 'false', ''],
+	])(
+		'does not load local MDX transforms in %s',
+		async (_scenario: string, incremental: string, vercelEnv: string) => {
+			vi.doMock(
+				'../../scripts/prebuild/mdx-transforms/build-mdx-transforms.mjs',
+				() => {
+					throw new Error('Development-only MDX transforms were loaded')
+				},
+			)
+			const { fetchFile } = await loadFileModuleWithEnv({
+				NODE_ENV: 'production',
+				INCREMENTAL_BUILD: incremental,
+				VERCEL_ENV: vercelEnv,
+				VERCEL_URL: 'local-vercel-CDN',
+			})
+			if (vercelEnv === 'preview') {
+				vi.mocked(readFile).mockResolvedValue(
+					JSON.stringify(
+						makeChangedFiles({
+							added: ['content/vault/v1.21.x/docs/index.mdx'],
+						}),
+					),
+				)
+			}
+			const mockResponse = new Response('body')
+			vi.mocked(fetch).mockResolvedValue(mockResponse)
+
+			const result = await fetchFile(
+				'content/vault/v1.21.x/docs/index.mdx',
+				FileType.Markdown,
+			)
+
+			expect(result).toEqual({
+				ok: true,
+				value: { response: mockResponse, servedFrom: ServedFrom.CurrentBuild },
+			})
+		},
+	)
+
 	test.each([FileType.Markdown, FileType.NavData, FileType.Redirects])(
 		'fetches %s files from LOCAL CDN',
 		async (fileType: FileType) => {

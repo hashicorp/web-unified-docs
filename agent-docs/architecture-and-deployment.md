@@ -41,9 +41,19 @@ files.
 - production deploy uses Vercel to build and deploy this repo
 - production deploy triggers a `dev-portal` rebuild through a deploy hook
 - production behavior is defined in `.github/workflows/deploy-udr.yml`
-- `next.config.js` excludes `scripts/prebuild/mdx-transforms/**` from deployed
-  server file traces. The transform remains available during prebuild and is
-  imported at runtime only during local incremental development.
+- `next.config.js` excludes `scripts/prebuild/**` from deployed server file
+  traces. Application imports of the incremental metadata watcher and MDX
+  transforms are guarded by a direct `process.env.NODE_ENV === 'development'`
+  check as well as the build type. Next.js removes those imports and local file
+  reads from production bundles, including incremental PR previews. A runtime
+  build-type check alone cannot prevent tracing the source content tree.
+- Production metadata reads and existence checks use explicit paths to
+  `app/api/versionMetadata.json` and `app/api/docsPathsAllVersions.json`.
+  Avoid passing paths through filesystem callbacks: Turbopack can interpret
+  these as dynamic paths and include the whole repository in function traces.
+  Content and assets are served through the CDN, not packaged inside API
+  functions. When changing these boundaries, inspect the API
+  `route.js.nft.json` files under `.next/server/app/api/` after `next build`.
 
 ## Relationship to dev-portal
 
