@@ -241,7 +241,7 @@ function startIncBuildsWatcher(): IncBuildsMetadataCache {
 		cache.watcher = fs.watch(
 			contentDir,
 			{ recursive: true, persistent: false },
-			(_eventType: string, filename: string | null) => {
+			(eventType: string, filename: string | null) => {
 				const filePath = filename ? path.join(contentDir, filename) : contentDir
 				console.log(`[watcher] reloading ${filePath}`)
 
@@ -250,6 +250,10 @@ function startIncBuildsWatcher(): IncBuildsMetadataCache {
 				}).catch((error: unknown) => {
 					console.error('[watcher] failed to refresh Dev Portal', error)
 				})
+
+				if (eventType === 'change') {
+					return
+				}
 
 				const changedProduct = filename?.split(path.sep)[0]
 				if (changedProduct !== undefined) {

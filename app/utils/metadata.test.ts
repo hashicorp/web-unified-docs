@@ -622,13 +622,85 @@ describe('getMetadata', () => {
 		async (eventType: string, filename: string | null) => {
 			const { getMetadata } = await import('./metadata')
 			const first = await getMetadata()
+			const readdir = vi.spyOn(fs, 'readdirSync')
+			const stat = vi.spyOn(fs, 'statSync')
 			vol.writeFileSync(sourceFile, '# Edited')
 			onChange(eventType, filename)
 			onChange(eventType, filename)
 			expect(await getMetadata()).toBe(first)
 			expect(gatherVersionMetadata).toHaveBeenCalledOnce()
+			expect(portalFetch).toHaveBeenCalledTimes(2)
+			if (eventType === 'change') {
+				expect(readdir).not.toHaveBeenCalled()
+				expect(stat).not.toHaveBeenCalled()
+			} else {
+				expect(readdir).toHaveBeenCalledOnce()
+			}
 		},
 	)
+
+	test('checks directory rename events for nested file additions', async () => {
+		const { getMetadata } = await import('./metadata')
+		await getMetadata()
+		const readdir = vi.spyOn(fs, 'readdirSync')
+		vol.writeFileSync(
+			path.join(contentDir, 'vault/v1.21.x/docs/new.mdx'),
+			'# New',
+		)
+		onChange('rename', 'vault/v1.21.x/docs')
+
+		await getMetadata()
+		expect(readdir).toHaveBeenCalledOnce()
+		expect(gatherVersionMetadata).toHaveBeenCalledTimes(2)
+	})
+
+	test('waits for a rename event to detect a deleted file', async () => {
+		const { getMetadata } = await import('./metadata')
+		await getMetadata()
+		vol.unlinkSync(sourceFile)
+		onChange('change', relativeFile)
+
+		await getMetadata()
+		expect(gatherVersionMetadata).toHaveBeenCalledOnce()
+
+		onChange('rename', relativeFile)
+		await getMetadata()
+		expect(gatherVersionMetadata).toHaveBeenCalledTimes(2)
+	})
+
+	test('waits for a rename event to detect a file addition reported first as change', async () => {
+		const { getMetadata } = await import('./metadata')
+		const first = await getMetadata()
+		const readdir = vi.spyOn(fs, 'readdirSync')
+		const addedFile = 'vault/v1.21.x/docs/new.mdx'
+		vol.writeFileSync(path.join(contentDir, addedFile), '# New')
+		onChange('change', addedFile)
+
+		expect(await getMetadata()).toBe(first)
+		expect(readdir).not.toHaveBeenCalled()
+		expect(gatherVersionMetadata).toHaveBeenCalledOnce()
+
+		onChange('rename', addedFile)
+		await getMetadata()
+		expect(readdir).toHaveBeenCalledOnce()
+		expect(gatherVersionMetadata).toHaveBeenCalledTimes(2)
+	})
+
+	test('does not inspect the filesystem on a file save', async () => {
+		const { getMetadata } = await import('./metadata')
+		const first = await getMetadata()
+		const logError = vi.spyOn(console, 'error').mockImplementation(() => {})
+		const readdir = vi.spyOn(fs, 'readdirSync')
+		const stat = vi.spyOn(fs, 'statSync').mockImplementationOnce(() => {
+			throw new Error('File inspection failed')
+		})
+		onChange('change', relativeFile)
+
+		expect(await getMetadata()).toBe(first)
+		expect(logError).not.toHaveBeenCalled()
+		expect(readdir).not.toHaveBeenCalled()
+		expect(stat).not.toHaveBeenCalled()
+	})
 
 	test('ignores an atomic save even when the contents change', async () => {
 		const { getMetadata } = await import('./metadata')
@@ -671,7 +743,43 @@ describe('getMetadata', () => {
 		expect(gatherVersionMetadata).toHaveBeenCalledTimes(5)
 	})
 
-	test.each(['change', 'add', 'delete'])(
+	test('regenerates metadata when a file is moved within a product', async () => {
+		const { getMetadata } = await import('./metadata')
+		await getMetadata()
+		const movedFile = 'vault/v1.21.x/docs/moved/index.mdx'
+		vol.mkdirSync(path.dirname(path.join(contentDir, movedFile)), {
+			recursive: true,
+		})
+		vol.renameSync(sourceFile, path.join(contentDir, movedFile))
+		onChange('rename', relativeFile)
+		onChange('rename', movedFile)
+
+		await getMetadata()
+		expect(gatherVersionMetadata).toHaveBeenCalledTimes(2)
+		expect(gatherVersionMetadata).toHaveBeenLastCalledWith(contentDir, [
+			'vault',
+		])
+	})
+
+	test('regenerates both products when a file is moved between products', async () => {
+		vol.fromJSON({ 'consul/v1.22.x/docs/index.mdx': '# Consul' }, contentDir)
+		mockMetadata(twoProductsMetadata)
+		const { getMetadata } = await import('./metadata')
+		await getMetadata()
+		const movedFile = 'consul/v1.22.x/docs/moved.mdx'
+		vol.renameSync(sourceFile, path.join(contentDir, movedFile))
+		onChange('rename', relativeFile)
+		onChange('rename', movedFile)
+
+		await getMetadata()
+		expect(gatherVersionMetadata).toHaveBeenCalledTimes(2)
+		expect(gatherVersionMetadata).toHaveBeenLastCalledWith(contentDir, [
+			'vault',
+			'consul',
+		])
+	})
+
+	test.each(['rename', 'add', 'delete'])(
 		'reloads on file additions and removals reported as %s',
 		async (eventType: string) => {
 			const { getMetadata } = await import('./metadata')

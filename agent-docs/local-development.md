@@ -81,20 +81,25 @@ JSON files if both exist and neither file's modification time is more than one
 hour old; otherwise it generates metadata on demand and queues both files for
 background writing. The age check applies only when loading the disk cache;
 in-memory metadata is maintained by the watcher. API routes share one in-memory cache. Every
-content event logs its path and triggers a Dev Portal refresh. File saves are
-ignored for metadata, including edits to existing files. Structural changes
-schedule a background path check for the affected product. Only path additions, removals,
-and renames within an existing product regenerate that product's version
+content event logs its path and triggers a Dev Portal refresh. `change` events
+return immediately, without filesystem checks or metadata regeneration.
+New, deleted, renamed, and moved files are detected through `rename` events,
+which schedule a background path check for the affected product. Structural
+changes reported only as `change` are detected by a later `rename` check.
+Only path additions, removals, and renames regenerate that product's version
 metadata and all-version document paths; other products remain cached. After a
 product is regenerated, both metadata JSON files are updated asynchronously,
-without delaying requests. Events without a filename check all product folders
+without delaying requests. `rename` events without a filename check all product folders
 but still regenerate only products whose paths changed. Requests wait for the
 shared rebuild queue to finish, including changes received during generation.
-Atomic saves that replace an existing file without changing the final paths are
-ignored for metadata, but still trigger a Dev Portal refresh. Background
+Atomic saves reported as `rename` still scan paths, but do not regenerate
+metadata when the final paths are unchanged. Background
 metadata failures are logged, waiting requests reject, and later requests retry
 failed products. All other build types read
 `app/api/versionMetadata.json` and `app/api/docsPathsAllVersions.json`.
+
+Restart the development server after changing the watcher implementation;
+the running watcher is retained across module reloads.
 
 The pre-commit hook updates date metadata for staged MDX files under
 `content/`. It preserves an existing `created_at` value and updates
