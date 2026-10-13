@@ -17,7 +17,8 @@ queue, and monitor the queue.
 A batch job queue holds the batch jobs that you register in a node pool and
 sends them to the scheduler one at a time. A first in, first out, or FIFO, queue
 runs jobs in the order that you register them. A dynamic priority queue adjusts
-each job's priority so that tenants who used fewer resources recently run first.
+each job's priority so that tenants whose jobs hold a smaller share of the
+allocated resources run first.
 Refer to [Batch job queue](/nomad/docs/concepts/scheduling/batch-job-queue) for
 details about how the queue orders jobs and the tradeoffs of serialized
 scheduling.
@@ -79,17 +80,13 @@ them. It has no configuration options.
    batch`, the node pool does not have an active queue. Check the
    `batch_queue` block in your node pool specification.
 
-<!-- TODO(owner: Mike Smithhisler): At f041ed9027, the server accepts an invalid batch_queue block, stores it, and silently runs the pool without a queue. Confirm whether validation ships in 2.1 and update the verification guidance. -->
-
 ## Enable a dynamic priority queue
 
 A dynamic priority queue calculates an adjusted priority for each job from its
-tenant's recent resource usage, the time the job waited, and the resources the
-job requests. Refer to [Adjusted
+tenant's share of allocated resources, the time the job waited, and the
+resources the job requests. Refer to [Adjusted
 priority](/nomad/docs/concepts/scheduling/batch-job-queue#adjusted-priority) for
 the calculation.
-
-<!-- TODO: PR #28601 in hashicorp/nomad regroups the dynamic_priority parameters and renames usage to fairshare. If it ships in 2.1, update the example specification. -->
 
 1. Create a node pool specification file named `batch.nomad.hcl` with a
    `batch_queue` block that contains a `dynamic_priority` block. This example
@@ -103,20 +100,25 @@ the calculation.
 
      batch_queue {
        dynamic_priority {
-         tenant_type   = "namespace"
          calc_interval = "10s"
-         half_life     = "1h"
 
-         usage_weight = 50
+         tenant_fairshare {
+           tenant_type   = "namespace"
+           cpu_weight    = 25
+           memory_weight = 25
+         }
 
-         age_weight = 10
-         max_age    = "1h"
+         age {
+           weight = 10
+           max    = "1h"
+         }
 
-         cpu_weight = 10
-         max_cpu    = 1000
-
-         memory_weight = 10
-         max_memory    = 1024
+         job_size {
+           cpu_weight    = 10
+           cpu_max       = 1000
+           memory_weight = 10
+           memory_max    = 1024
+         }
        }
      }
    }
@@ -124,20 +126,27 @@ the calculation.
 
    </CodeBlockConfig>
 
-   The `tenant_type`, `calc_interval`, and `half_life` parameters are required.
-   Set each weight together with its maximum. For example, set `max_age` when
-   you set `age_weight`. Refer to the [`dynamic_priority`
+   The `calc_interval` parameter and the `tenant_fairshare`, `age`, and
+   `job_size` blocks are required. In the `tenant_fairshare` block, the
+   `tenant_type`, `cpu_weight`, and `memory_weight` parameters are required. The
+   `age` and `job_size` blocks can be empty. When you set a weight in either
+   block, set its maximum too. For example, set `max` when you set `weight` in
+   the `age` block. Refer to the [`dynamic_priority`
    parameters](/nomad/docs/other-specifications/node-pool#dynamic_priority-parameters)
    for descriptions of each parameter.
 
-   {/* TODO(owner: Mike Smithhisler): Provide recommended starting values for calc_interval, half_life, the weights, and the maximums, and whether Nomad sets defaults for calc_interval and half_life in 2.1. The values in this example are for illustration only. */}
+   {/* TODO(owner: Mike Smithhisler): Provide recommended starting values for calc_interval, the weights, and the maximums. At a7f79d178, calc_interval has no default and must be greater than zero. The values in this example are for illustration only. */}
 
    To group jobs by a job metadata value instead of by namespace, set
    `tenant_type` to `metadata` and name the metadata key in `metadata_key`.
 
    ```hcl
-   tenant_type  = "metadata"
-   metadata_key = "customer"
+   tenant_fairshare {
+     tenant_type   = "metadata"
+     metadata_key  = "customer"
+     cpu_weight    = 25
+     memory_weight = 25
+   }
    ```
 
    With `metadata` tenants, jobs that do not set the metadata key skip the
@@ -156,7 +165,7 @@ the calculation.
    ```shell-session
    $ nomad queue jobs -node-pool batch
    Batch Queue Workloads
-   JobID  Tenant  Status  Adjusted Priority  Base Priority  Position  Usage  Age  Cpu  Memory  CreatedAt
+   JobID  Tenant  Status  Adjusted Priority  Base Priority  Position  Fairshare  Age  Cpu  Memory  CreatedAt
    ```
 
 ## Submit batch jobs to the queue
@@ -194,11 +203,11 @@ command. While a job waits in the queue, `nomad job status` reports its status a
 `pending`.
 
 ```shell-session
-$ nomad job status -namespace team-b
+$ nomad job status -namespace team-a
 ID           Type   Priority  Status   Submit Date
-team-b-job1  batch  50        running  2026-09-25T10:45:40-05:00
-team-b-job2  batch  50        pending  2026-09-25T10:45:40-05:00
-team-b-job3  batch  50        pending  2026-09-25T10:45:41-05:00
+team-a-job1  batch  50        running  2026-10-13T16:37:24-05:00
+team-a-job2  batch  50        pending  2026-10-13T16:37:27-05:00
+team-a-job3  batch  50        pending  2026-10-13T16:37:27-05:00
 ```
 
 ## Monitor the queue
@@ -210,33 +219,34 @@ ID.
 ```shell-session
 $ nomad queue jobs -node-pool batch -p
 Batch Queue Workloads
-JobID        Tenant  Status   Adjusted Priority  Base Priority  Position  Usage  Age  Cpu  Memory  CreatedAt
-team-a-job2  team-a  placing  61                 50             0         0      0    4    7       2026-09-25T10:45:40-05:00
-team-b-job1  team-b  queued   111                50             1         50     0    4    7       2026-09-25T10:45:40-05:00
-team-b-job2  team-b  queued   111                50             2         50     0    4    7       2026-09-25T10:45:40-05:00
-team-b-job3  team-b  queued   111                50             3         50     0    4    7       2026-09-25T10:45:41-05:00
-team-a-job3  team-a  queued   61                 50             4         0      0    4    7       2026-09-25T10:45:40-05:00
+JobID        Tenant  Status   Adjusted Priority  Base Priority  Position  Fairshare  Age  Cpu  Memory  CreatedAt
+team-a-job2  team-a  placing  61                 50             0         0          0    4    7       2026-10-13T16:37:27-05:00
+team-b-job1  team-b  queued   111                50             1         50         0    4    7       2026-10-13T16:37:28-05:00
+team-b-job2  team-b  queued   111                50             2         50         0    4    7       2026-10-13T16:37:29-05:00
+team-b-job3  team-b  queued   111                50             3         50         0    4    7       2026-10-13T16:37:30-05:00
+team-a-job3  team-a  queued   61                 50             4         0          0    4    7       2026-10-13T16:37:27-05:00
 ```
 
 The job at position `0` is the job that the queue sent to the scheduler. The
-`Usage`, `Age`, `Cpu`, and `Memory` columns show the adjustments that make up
-each job's adjusted priority. In this example, `team-a` used resources recently
-and `team-b` did not, so the `team-b` jobs move ahead of `team-a-job3`.
+`Fairshare`, `Age`, `Cpu`, and `Memory` columns show the adjustments that make
+up each job's adjusted priority. In this example, the `team-a` jobs hold all of
+the allocated resources and the `team-b` jobs hold none, so the `team-b` jobs
+move ahead of `team-a-job3`.
 
 For a dynamic priority queue, use the [`nomad queue
 tenants`](/nomad/commands/queue/tenants) command to view each tenant's share of
-recent resource usage.
+the allocated resources.
 
 ```shell-session
 $ nomad queue tenants -node-pool batch
 Batch Queue Tenants
-Tenant  Resource  Usage / Total    Percentage
+Tenant  Resource  Current / Total  Percentage
 team-a                             100
-        cpu       598.73 / 598.73
-        memory    255.46 / 255.46
+        cpu       600.00 / 600.00
+        memory    256.00 / 256.00
 team-b                             0
-        cpu       0.00 / 598.73
-        memory    0.00 / 255.46
+        cpu       0.00 / 600.00
+        memory    0.00 / 256.00
 ```
 
 ## Remove a job from the queue
@@ -257,11 +267,13 @@ To change the queue type or its parameters, update the `batch_queue` block in th
 node pool specification and apply it again with `nomad node pool apply`. Nomad
 replaces the node pool's queue and restores the queued jobs into the new queue.
 
-To remove the queue, delete the `batch_queue` block from the node pool
-specification and apply it again. Nomad then sends the evaluations for new batch
-jobs in the node pool directly to the scheduler.
+When the new queue uses `metadata` tenants, queued jobs that do not set the
+metadata key leave the queue, and Nomad sends their evaluations directly to the
+scheduler.
 
-<!-- TODO(owner: Mike Smithhisler): At f041ed9027, removing batch_queue while jobs are queued leaves their job-register evaluations pending indefinitely. `nomad job eval JOB` recovers them. Also, switching tenant_type to metadata while the pool has queued or placed jobs without the metadata key causes a server panic in dynamic_priority/queue.go:147 and the new queue never starts. Confirm fixes for 2.1 or document the workaround here. -->
+To remove the queue, delete the `batch_queue` block from the node pool
+specification and apply it again. Nomad then sends the evaluations for the
+queued jobs and for new batch jobs in the node pool directly to the scheduler.
 
 ## Next steps
 

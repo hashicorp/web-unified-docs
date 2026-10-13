@@ -74,7 +74,8 @@ The following behaviors also apply.
   configure a queue on them. Jobs that run in the `all` node pool never use a
   queue.
 - The Nomad leader holds the queue in memory. When leadership changes, the new
-  leader rebuilds each queue from the evaluations and jobs in its state store.
+  leader rebuilds each queue from the batch jobs in its state store that Nomad
+  has not placed yet and from their evaluations.
 
 ### Workload status
 
@@ -85,9 +86,8 @@ a queue with one of the following statuses.
 - `placing` means the queue sent the job to the scheduler and is waiting for
   Nomad to place its allocations, which includes waiting for resources to become
   available.
-- `blocked` means the scheduler cannot place the job because of its constraints
-  rather than a lack of resources, or because no nodes are available. The
-  status includes the reason, such as the constraint that filtered out nodes.
+
+<!-- TODO(owner: Mike Smithhisler): At a7f79d178, nothing sets the `blocked` workload status and `isConstraintFailure` in nomad/queues/queue/workload_watcher.go has no callers, so this page no longer documents it. Confirm whether PR #28400 restores the `blocked` status for 2.1. -->
 
 ### Updated and stopped jobs
 
@@ -112,7 +112,7 @@ sends to the scheduler next.
 | Queue type | Order | Configuration |
 | --- | --- | --- |
 | FIFO | The order in which Nomad created the jobs' registration evaluations | None |
-| Dynamic priority | The highest adjusted priority first, calculated from each tenant's recent resource usage and the job's age and size | Tenant model, weights, and intervals |
+| Dynamic priority | The highest adjusted priority first, calculated from each tenant's share of allocated resources and the job's age and size | Tenant model, weights, and a recalculation interval |
 
 ### FIFO
 
@@ -129,13 +129,12 @@ have the same adjusted priority, the queue sends the job it received first.
 The adjusted priority exists only inside the queue. It does not change the value
 of the job's `priority` parameter.
 
-<!-- TODO: PR #28601 in hashicorp/nomad refactors the dynamic priority configuration, groups related parameters, and renames usage to fairshare. If it ships in 2.1, update the tenant usage terms and the formula in this section. -->
-
 #### Tenants
 
-A tenant is a group of jobs that the queue tracks usage for, such as a team or a
-customer. You choose how the queue assigns jobs to tenants with the
-`tenant_type` parameter.
+A tenant is a group of jobs that the queue tracks allocated resources for, such
+as a team or a customer. You choose how the queue assigns jobs to tenants with
+the `tenant_type` parameter of the [`tenant_fairshare`
+block](/nomad/docs/other-specifications/node-pool#tenant_fairshare-parameters).
 
 - `namespace` makes each namespace a tenant.
 - `metadata` makes each distinct value of a job
@@ -152,63 +151,100 @@ The queue calculates a job's adjusted priority as the job's
 
 ```plaintext
 adjusted priority = job priority
-                  + usage adjustment
+                  + fairshare adjustment
                   + age adjustment
                   + CPU adjustment
                   + memory adjustment
 ```
 
-Each adjustment is a value between zero and its weight. The queue truncates each
-adjustment to a whole number. An adjustment whose weight is `0` or unset adds
-nothing.
+The queue truncates each adjustment to a whole number. An adjustment whose
+weight is `0` or unset adds nothing.
 
-- The **usage adjustment** is `(1 - tenant usage / total usage) × usage_weight`.
-  A tenant that used fewer resources recently than other tenants gets a larger
-  adjustment.
-- The **age adjustment** is `min(1, time since registration / max_age) ×
-  age_weight`. The adjustment grows while the job waits and reaches its full weight at
-  `max_age`.
-- The **CPU adjustment** is `(1 - min(1, job CPU / max_cpu)) × cpu_weight`. Jobs that
-  request less CPU get a larger adjustment. Job CPU is the sum of each task's
-  `cpu` resource multiplied by its group's `count`.
-- The **memory adjustment** is `(1 - min(1, job memory / max_memory)) ×
-  memory_weight`. Jobs that request less memory get a larger adjustment. Job memory is the sum
-  of each task's `memory` resource multiplied by its group's `count`.
+- The **fairshare adjustment** is the sum of a CPU part and a memory part. The
+  CPU part is `(1 - tenant CPU / total CPU) × cpu_weight`, and the memory part
+  is `(1 - tenant memory / total memory) × memory_weight`. Both weights are
+  parameters of the `tenant_fairshare` block. A tenant whose jobs hold a smaller
+  share of the allocated resources than other tenants gets a larger adjustment.
+  When no tenant has allocations, the fairshare adjustment is `0`. Refer to
+  [Tenant fairshare](#tenant-fairshare) for how the queue measures allocated
+  resources.
+- The **age adjustment** is `min(1, time since registration / max) × weight`,
+  using the parameters of the `age` block. The adjustment grows while the job
+  waits and reaches its full weight at `max`.
+- The **CPU adjustment** is `(1 - min(1, job CPU / cpu_max)) × cpu_weight`,
+  using the parameters of the `job_size` block. Jobs that request less CPU get a
+  larger adjustment. Job CPU is the sum of each task's `cpu` resource multiplied
+  by its group's `count`.
+- The **memory adjustment** is `(1 - min(1, job memory / memory_max)) ×
+  memory_weight`, using the parameters of the `job_size` block. Jobs that
+  request less memory get a larger adjustment. Job memory is the sum of each
+  task's `memory` resource multiplied by its group's `count`.
 
-For example, consider a queue with `usage_weight = 50`, `cpu_weight = 10`,
-`max_cpu = 1000`, `memory_weight = 10`, and `max_memory = 1024`. Two tenants
-each submit jobs with priority `50` that request 600 MHz of CPU and 256 MB of
-memory. The CPU adjustment is `(1 - 600 / 1000) × 10 = 4`, and the memory
-adjustment is `(1 - 256 / 1024) × 10`, which truncates to `7`. After the queue
-places a job for `team-a`, `team-a` accounts for all recent usage, so its next
-job gets a usage adjustment of `0`. The `team-b` jobs get the full usage
-adjustment of `50`, so they move ahead of the remaining `team-a` job.
+For example, consider a queue with the following configuration.
 
-```plaintext
-JobID        Tenant  Status   Adjusted Priority  Base Priority  Position  Usage  Age  Cpu  Memory
-team-a-job2  team-a  placing  61                 50             0         0      0    4    7
-team-b-job1  team-b  queued   111                50             1         50     0    4    7
-team-b-job2  team-b  queued   111                50             2         50     0    4    7
-team-b-job3  team-b  queued   111                50             3         50     0    4    7
-team-a-job3  team-a  queued   61                 50             4         0      0    4    7
+```hcl
+dynamic_priority {
+  calc_interval = "10s"
+
+  tenant_fairshare {
+    tenant_type   = "namespace"
+    cpu_weight    = 25
+    memory_weight = 25
+  }
+
+  age {
+    weight = 10
+    max    = "1h"
+  }
+
+  job_size {
+    cpu_weight    = 10
+    cpu_max       = 1000
+    memory_weight = 10
+    memory_max    = 1024
+  }
+}
 ```
 
-#### Tenant usage and decay
+Two tenants each submit jobs with priority `50` that request 600 MHz of CPU and
+256 MB of memory. The CPU adjustment is `(1 - 600 / 1000) × 10 = 4`, and the
+memory adjustment is `(1 - 256 / 1024) × 10`, which truncates to `7`. The jobs
+waited less than six minutes, so the age adjustment truncates to `0`. After
+Nomad places a job for `team-a`, `team-a` holds all of the allocated CPU and
+memory, so its next job gets a fairshare adjustment of `0`. The `team-b` jobs
+get the full fairshare adjustment of `25 + 25 = 50`, so they move ahead of the
+remaining `team-a` job.
 
-Tenant usage measures the resources that the queue placed for each tenant. When
-the queue places a job, it adds the CPU in MHz and the memory in MB that the job
-requests to its tenant's usage. Usage is based on the resources that jobs
-request, not the resources that they consume.
+```plaintext
+JobID        Tenant  Status   Adjusted Priority  Base Priority  Position  Fairshare  Age  Cpu  Memory
+team-a-job2  team-a  placing  61                 50             0         0          0    4    7
+team-b-job1  team-b  queued   111                50             1         50         0    4    7
+team-b-job2  team-b  queued   111                50             2         50         0    4    7
+team-b-job3  team-b  queued   111                50             3         50         0    4    7
+team-a-job3  team-a  queued   61                 50             4         0          0    4    7
+```
 
-Usage decays over time. Each job's contribution to its tenant's usage halves
-every `half_life` after the queue places the job. The queue removes a job's
-contribution when Nomad garbage collects the job's evaluation.
+#### Tenant fairshare
 
-The queue calculates a job's adjusted priority when the job enters the queue,
-and then recalculates the priority of every queued job every `calc_interval`.
+Tenant fairshare measures the resources that Nomad allocated to each tenant's
+batch jobs in the node pool. For each tenant, the queue adds up the CPU in MHz
+and the memory in MB of every allocation that belongs to the tenant's batch
+jobs. The queue counts allocations in any client status, including allocations
+that completed.
+
+To leave allocations out of the calculation, list their client statuses in the
+[`exclude_alloc_statuses`](/nomad/docs/other-specifications/node-pool#exclude_alloc_statuses)
+parameter. For example, `exclude_alloc_statuses = ["complete", "failed"]` leaves
+out the allocations that completed or failed.
+
+The queue calculates a job's adjusted priority when the job enters the queue.
+Every `calc_interval`, the queue measures each tenant's allocated resources again
+and recalculates the priority of every queued job.
 
 Use the [`nomad queue tenants`](/nomad/commands/queue/tenants) command to view
-each tenant's current usage.
+each tenant's allocated resources.
+
+<!-- TODO: PR #28651 in hashicorp/nomad renames the `nomad queue tenants` command to `nomad queue status` and the `/v1/queue/tenants` endpoint to `/v1/queue/status`. After it merges, update the command and endpoint names on this page. -->
 
 ## Tradeoffs
 
@@ -234,4 +270,4 @@ Use the following commands and API endpoints to inspect a batch job queue.
   the jobs in a queue with their status and position.
 - The [`nomad queue tenants`](/nomad/commands/queue/tenants) command and the
   [`/v1/queue/tenants`](/nomad/api-docs/queue#list-queue-tenants) endpoint
-  list the tenants in a dynamic priority queue with their usage.
+  list the tenants in a dynamic priority queue with their allocated resources.
