@@ -5,7 +5,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { BUILD_TYPE, buildType } from '#scriptUtils/get-type-of-build.mjs'
+import { BUILD_TYPE, buildType } from './buildType'
 import { getIncBuildLocalDevMetadata } from './incBuildsMetadata'
 import type { DocsPathsAllVersions, Metadata, VersionMetadataMap } from '#types'
 

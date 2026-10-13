@@ -6,7 +6,7 @@
 import fs from 'node:fs'
 import type { FSWatcher } from 'node:fs'
 import path from 'node:path'
-import { BUILD_TYPE, buildType } from '#scriptUtils/get-type-of-build.mjs'
+import { BUILD_TYPE, buildType } from './buildType'
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
 import type { Metadata } from '#types'
 

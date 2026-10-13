@@ -10,19 +10,22 @@ export const BUILD_TYPE = Object.freeze({
 	fullBuild: 'fullBuild',
 })
 
-export const buildType = (() => {
-	if (process.env.VERCEL_ENV === 'production') {
+export function getBuildType() {
+	// Destructure to prevent Bun from inlining NODE_ENV during compilation.
+	const { VERCEL_ENV, INCREMENTAL_BUILD, NODE_ENV } = process.env
+
+	if (VERCEL_ENV === 'production') {
 		return BUILD_TYPE.prodBuild
 	}
 
-	if (process.env.INCREMENTAL_BUILD === 'true') {
-		if (process.env.NODE_ENV === 'development') {
+	if (INCREMENTAL_BUILD === 'true') {
+		if (NODE_ENV === 'development') {
 			return BUILD_TYPE.incBuildLocalDev
 		}
-		if (process.env.NODE_ENV === 'production') {
+		if (NODE_ENV === 'production') {
 			return BUILD_TYPE.incBuildPRPreview
 		}
 	}
 
 	return BUILD_TYPE.fullBuild
-})()
+}

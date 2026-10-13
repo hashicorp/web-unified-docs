@@ -37,8 +37,9 @@ After changing prebuild sources, regenerate all three binaries with
 `npm run compile-prebuild` before rerunning the command.
 
 Prebuild selects a single build type using
-[`buildType`](../scripts/utils/get-type-of-build.mjs), computed once when the
-utility module loads:
+[`getBuildType()`](../scripts/utils/get-type-of-build.mjs) at the start of each
+run. The detector reads the current environment on every call, including in the
+compiled binaries; it does not bake the compiler's `NODE_ENV` into the result:
 
 - `prodBuild`: `VERCEL_ENV=production`, regardless of the other flags.
 - `incBuildLocalDev`: `INCREMENTAL_BUILD=true` and `NODE_ENV=development`,
@@ -61,11 +62,13 @@ file list, without starting a subprocess. Transform errors are
 returned without exiting the server.
 Navigation data, redirects, and assets are read directly from `content/`.
 
-The metadata module, watcher, and file-serving utilities use the same cached
-`buildType` value as prebuild. Incremental previews fetch added and modified files
+The metadata module, watcher, and file-serving utilities share the cached
+[`buildType`](../app/utils/buildType.ts) value, computed once when the application
+utility module loads. Incremental previews fetch added and modified files
 from the current build and unchanged files from production. `prodBuild` and
 `fullBuild` fetch all files from the current build.
-Environment flag changes require reloading the utility module to select a new type.
+Environment flag changes require reloading the application utility module to
+select a new type; script callers can call `getBuildType()` again.
 When the value is `incBuildLocalDev` (`INCREMENTAL_BUILD=true`, `NODE_ENV=development`,
 and `VERCEL_ENV` is not `production`), `app/utils/incBuildsMetadata.ts` starts
 the watcher immediately on module load. On the first metadata request, it loads the generated

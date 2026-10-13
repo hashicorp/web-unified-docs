@@ -7,7 +7,7 @@
 const nextConfig = {
 	reactStrictMode: true,
 	outputFileTracingExcludes: {
-		'/*': ['./scripts/prebuild/mdx-transforms/**/*'],
+		'/*': ['./scripts/prebuild/**/*'],
 	},
 	experimental: {
 		useTypeScriptCli: false,

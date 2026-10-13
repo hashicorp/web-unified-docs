@@ -8,7 +8,7 @@ import path from 'node:path'
 import grayMatter from 'gray-matter'
 import { parse as jsoncParse } from 'jsonc-parser'
 
-import { BUILD_TYPE, buildType } from '#scriptUtils/get-type-of-build.mjs'
+import { BUILD_TYPE, buildType } from './buildType'
 import { FileType, ServedFrom } from '#types'
 import type { ProductVersionMetadata, Result } from '#types'
 import { Err, Ok } from './result'

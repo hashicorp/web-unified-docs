@@ -15,7 +15,7 @@ import { copyRedirectFiles } from '#scriptUtils/copy-redirect-files.mjs'
 import { copyAssetFiles } from '#scriptUtils/copy-asset-files.mjs'
 import { copyInternalOnlyProductDocs } from './copy-internal-only-product-docs.mjs'
 import { getChangedContentFiles } from '#scriptUtils/get-changed-content-files.mjs'
-import { BUILD_TYPE, buildType } from '#scriptUtils/get-type-of-build.mjs'
+import { BUILD_TYPE, getBuildType } from '#scriptUtils/get-type-of-build.mjs'
 import { listFiles } from '#scriptUtils/list-files.mjs'
 
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
@@ -80,6 +80,7 @@ function writeTraceData(traceEvent) {
  * Define the prebuild script.
  */
 async function main() {
+	const buildType = getBuildType()
 	let skipTraceFile = false
 	const startTime = process.hrtime.bigint()
 	const traceId = Math.random().toString(16).slice(2, 18)
