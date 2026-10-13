@@ -351,7 +351,6 @@ describe('fetchFile - incBuildLocalDev', () => {
 			path.join(process.cwd(), 'public', 'content'),
 			metadata.versionMetadata,
 			[path.join(process.cwd(), markdownPath)],
-			{ exitOnError: false },
 		)
 		expect(result.ok).toBe(true)
 		if (result.ok) {

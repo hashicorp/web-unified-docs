@@ -207,4 +207,7 @@ async function main() {
 /**
  * Run the prebuild script.
  */
-main()
+main().catch((error) => {
+	console.error('Prebuild failed:', error)
+	process.exitCode = 1
+})

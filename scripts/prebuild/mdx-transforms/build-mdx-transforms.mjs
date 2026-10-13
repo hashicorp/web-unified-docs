@@ -37,13 +37,13 @@ import { PRODUCT_CONFIG } from '#productConfig.mjs'
  * @param {string} targetDir
  * @param {string} outputDir the directory to write transformed files to
  * @param {string[]} filesToCheck the explicit paths to consider for transformation
+ * @throws {Error} If any file fails, with details for every failed file.
  */
 export async function buildMdxTransforms(
 	targetDir,
 	outputDir,
 	versionMetadata,
 	filesToCheck,
-	options = { exitOnError: true },
 ) {
 	// Filter for `.mdx` files
 	const mdxFiles = filesToCheck.filter((filePath) => {
@@ -100,16 +100,13 @@ export async function buildMdxTransforms(
 			console.error(`❌ ${error} in file: ${file}`)
 		})
 		console.error('\n❗ Build failed due to errors in MDX transforms.')
-		if (!options.exitOnError) {
-			throw new Error(
-				errors
-					.map(({ error, file }) => {
-						return `${error} in file: ${file}`
-					})
-					.join('\n'),
-			)
-		}
-		process.exit(1)
+		throw new Error(
+			errors
+				.map(({ error, file }) => {
+					return `${error} in file: ${file}`
+				})
+				.join('\n'),
+		)
 	}
 	// Log out that the script has complete
 	console.log(`✅ Applied MDX transforms to ${mdxFileEntries.length} files.`)

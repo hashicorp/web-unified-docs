@@ -59,8 +59,10 @@ of file paths rather than discovering files from the target directory.
 Local incremental development preloads the transform module with a typed literal
 dynamic import and calls it directly
 for Markdown requests, passing only the requested Markdown path in the explicit
-file list, without starting a subprocess. Transform errors are
-returned without exiting the server.
+file list, without starting a subprocess. The shared transform API rejects with
+file-specific errors instead of terminating the process. The prebuild CLI logs
+failures and sets exit status 1; local Markdown requests return the errors
+without exiting the server.
 Source existence is checked with `access()` before transformation; the file
 loader reads only the transformed output.
 Navigation data, redirects, and assets are read directly from `content/`.

@@ -160,7 +160,6 @@ export const fetchFile = async (
 					path.join(CWD, 'public', 'content'),
 					versionMetadata,
 					[path.join(CWD, localFilePath)],
-					{ exitOnError: false },
 				)
 			} catch (error) {
 				return Err(

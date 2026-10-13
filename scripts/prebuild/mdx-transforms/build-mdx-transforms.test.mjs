@@ -506,6 +506,10 @@ AppRole is designed for machine authentication.
 	})
 
 	describe('Error Cases', () => {
+		afterEach(() => {
+			vi.restoreAllMocks()
+		})
+
 		test('should handle error when partial file does not exist', async () => {
 			vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({
 				vault: {
@@ -536,13 +540,12 @@ page_title: Test Page
 				.spyOn(process, 'exit')
 				.mockImplementation(() => {})
 
-			await transformFixtureFiles()
+			await expect(transformFixtureFiles()).rejects.toThrow(
+				'in file: /content/vault/v1.20.x/docs/test.mdx',
+			)
 
-			expect(processExitSpy).toHaveBeenCalledWith(1)
+			expect(processExitSpy).not.toHaveBeenCalled()
 			expect(consoleErrorSpy).toHaveBeenCalled()
-
-			consoleErrorSpy.mockRestore()
-			processExitSpy.mockRestore()
 		})
 
 		test('should handle error with malformed exclusion directive in partial', async () => {
@@ -582,13 +585,12 @@ page_title: Test Page
 				.spyOn(process, 'exit')
 				.mockImplementation(() => {})
 
-			await transformFixtureFiles()
+			await expect(transformFixtureFiles()).rejects.toThrow(
+				'in file: /content/vault/v1.20.x/docs/test.mdx',
+			)
 
-			expect(processExitSpy).toHaveBeenCalledWith(1)
+			expect(processExitSpy).not.toHaveBeenCalled()
 			expect(consoleErrorSpy).toHaveBeenCalled()
-
-			consoleErrorSpy.mockRestore()
-			processExitSpy.mockRestore()
 		})
 
 		test('should handle error with mismatched exclusion BEGIN/END in partial', async () => {
@@ -628,13 +630,44 @@ page_title: Test Page
 				.spyOn(process, 'exit')
 				.mockImplementation(() => {})
 
-			await transformFixtureFiles()
+			await expect(transformFixtureFiles()).rejects.toThrow(
+				'in file: /content/vault/v1.20.x/docs/test.mdx',
+			)
 
-			expect(processExitSpy).toHaveBeenCalledWith(1)
+			expect(processExitSpy).not.toHaveBeenCalled()
 			expect(consoleErrorSpy).toHaveBeenCalled()
+		})
 
-			consoleErrorSpy.mockRestore()
-			processExitSpy.mockRestore()
+		test('rejects with every failed file without logging a success summary or exiting', async () => {
+			vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({
+				vault: {
+					versionedDocs: true,
+					basePaths: ['docs'],
+					supportsExclusionDirectives: false,
+				},
+			})
+			vol.fromJSON({
+				'/content/vault/v1.20.x/docs/first.mdx': "@include 'missing-first.mdx'",
+				'/content/vault/v1.20.x/docs/second.mdx':
+					"@include 'missing-second.mdx'",
+				'/content/vault/v1.20.x/docs/valid.mdx': '# Valid',
+			})
+			const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+			vi.spyOn(console, 'error').mockImplementation(() => {})
+			const exit = vi.spyOn(process, 'exit').mockImplementation(() => {})
+
+			const pending = transformFixtureFiles()
+			await expect(pending).rejects.toThrow(
+				'in file: /content/vault/v1.20.x/docs/first.mdx',
+			)
+			await expect(pending).rejects.toThrow(
+				'in file: /content/vault/v1.20.x/docs/second.mdx',
+			)
+			expect(exit).not.toHaveBeenCalled()
+			expect(log).not.toHaveBeenCalledWith(
+				expect.stringContaining('Applied MDX transforms'),
+			)
+			expect(fs.existsSync('/output/vault/v1.20.x/docs/valid.mdx')).toBe(true)
 		})
 	})
 	describe('Global Partials Skip Content Exclusion', () => {
