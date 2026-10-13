@@ -56,10 +56,13 @@ local incremental builds handle content when it is requested.
 
 MDX transforms are called through the module API, which requires an explicit array
 of file paths rather than discovering files from the target directory.
-Local incremental development preloads the transform module and calls it directly
+Local incremental development preloads the transform module with a typed literal
+dynamic import and calls it directly
 for Markdown requests, passing only the requested Markdown path in the explicit
 file list, without starting a subprocess. Transform errors are
 returned without exiting the server.
+Source existence is checked with `access()` before transformation; the file
+loader reads only the transformed output.
 Navigation data, redirects, and assets are read directly from `content/`.
 
 The metadata module, watcher, and file-serving utilities share the cached

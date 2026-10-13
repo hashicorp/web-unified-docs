@@ -42,11 +42,12 @@ vi.mock('#productConfig.mjs', () => {
 
 vi.mock('fs/promises', () => {
 	return {
+		access: vi.fn(),
 		readFile: vi.fn(),
 	}
 })
 
-import { readFile } from 'node:fs/promises'
+import { access, readFile } from 'node:fs/promises'
 
 const makeChangedFiles = (
 	overrides: Partial<{
@@ -328,21 +329,21 @@ describe('fetchFile - incBuildLocalDev', () => {
 	}
 
 	beforeEach(() => {
+		vi.mocked(access).mockResolvedValue(undefined)
 		getMetadata.mockResolvedValue(metadata)
 		buildMdxTransforms.mockResolvedValue(undefined)
 	})
 
 	test('transforms the requested Markdown file and serves its local output', async () => {
 		const { fetchFile } = await loadFileModuleWithEnv(localEnv)
-		vi.mocked(readFile)
-			.mockResolvedValueOnce('# Source')
-			.mockResolvedValueOnce('# Transformed')
+		vi.mocked(readFile).mockResolvedValue('# Transformed')
 
 		const result = await fetchFile(markdownPath, FileType.Markdown)
 
-		expect(readFile).toHaveBeenCalledTimes(2)
-		expect(readFile).toHaveBeenNthCalledWith(1, markdownPath)
-		expect(readFile).toHaveBeenNthCalledWith(2, outputPath, 'utf-8')
+		expect(access).toHaveBeenCalledOnce()
+		expect(access).toHaveBeenCalledWith(markdownPath)
+		expect(readFile).toHaveBeenCalledOnce()
+		expect(readFile).toHaveBeenCalledWith(outputPath, 'utf-8')
 		expect(getMetadata).toHaveBeenCalledOnce()
 		expect(buildMdxTransforms).toHaveBeenCalledOnce()
 		expect(buildMdxTransforms).toHaveBeenCalledWith(
@@ -377,12 +378,37 @@ describe('fetchFile - incBuildLocalDev', () => {
 		await vi.waitFor(() => {
 			expect(buildMdxTransforms).toHaveBeenCalledOnce()
 		})
-		expect(readFile).toHaveBeenCalledTimes(1)
+		expect(readFile).not.toHaveBeenCalled()
 
 		finishTransform()
 		expect((await pending).ok).toBe(true)
-		expect(readFile).toHaveBeenNthCalledWith(2, outputPath, 'utf-8')
+		expect(readFile).toHaveBeenCalledOnce()
+		expect(readFile).toHaveBeenCalledWith(outputPath, 'utf-8')
 		expect(fetch).not.toHaveBeenCalled()
+	})
+
+	test('waits for the source file existence check before transforming Markdown', async () => {
+		const { fetchFile } = await loadFileModuleWithEnv(localEnv)
+		vi.mocked(readFile).mockResolvedValue('# Transformed')
+		let finishAccess: () => void
+		vi.mocked(access).mockReturnValueOnce(
+			new Promise<void>((resolve: () => void) => {
+				finishAccess = resolve
+			}),
+		)
+
+		const pending = fetchFile(markdownPath, FileType.Markdown)
+		await vi.waitFor(() => {
+			expect(access).toHaveBeenCalledOnce()
+		})
+		expect(getMetadata).not.toHaveBeenCalled()
+		expect(buildMdxTransforms).not.toHaveBeenCalled()
+		expect(readFile).not.toHaveBeenCalled()
+
+		finishAccess()
+		expect((await pending).ok).toBe(true)
+		expect(buildMdxTransforms).toHaveBeenCalledOnce()
+		expect(readFile).toHaveBeenCalledWith(outputPath, 'utf-8')
 	})
 
 	test.each([
@@ -417,6 +443,7 @@ describe('fetchFile - incBuildLocalDev', () => {
 			}
 			expect(getMetadata).not.toHaveBeenCalled()
 			expect(buildMdxTransforms).not.toHaveBeenCalled()
+			expect(access).not.toHaveBeenCalled()
 			expect(fetch).not.toHaveBeenCalled()
 		},
 	)
@@ -445,6 +472,7 @@ describe('fetchFile - incBuildLocalDev', () => {
 		}
 		expect(getMetadata).not.toHaveBeenCalled()
 		expect(buildMdxTransforms).not.toHaveBeenCalled()
+		expect(access).not.toHaveBeenCalled()
 		expect(fetch).not.toHaveBeenCalled()
 	})
 
@@ -469,7 +497,11 @@ describe('fetchFile - incBuildLocalDev', () => {
 		'returns Err for missing local %s files without using the CDN',
 		async (fileType: FileType, filePath: string, failedPath: string) => {
 			const { fetchFile } = await loadFileModuleWithEnv(localEnv)
-			vi.mocked(readFile).mockRejectedValue(new Error('ENOENT'))
+			if (fileType === FileType.Markdown) {
+				vi.mocked(access).mockRejectedValueOnce(new Error('ENOENT'))
+			} else {
+				vi.mocked(readFile).mockRejectedValueOnce(new Error('ENOENT'))
+			}
 
 			expect(await fetchFile(filePath, fileType)).toEqual({
 				ok: false,
@@ -477,42 +509,42 @@ describe('fetchFile - incBuildLocalDev', () => {
 			})
 			expect(getMetadata).not.toHaveBeenCalled()
 			expect(buildMdxTransforms).not.toHaveBeenCalled()
+			if (fileType === FileType.Markdown) {
+				expect(access).toHaveBeenCalledWith(markdownPath)
+				expect(readFile).not.toHaveBeenCalled()
+			}
 			expect(fetch).not.toHaveBeenCalled()
 		},
 	)
 
 	test('returns Err when local Markdown transformation fails', async () => {
 		const { fetchFile } = await loadFileModuleWithEnv(localEnv)
-		vi.mocked(readFile).mockResolvedValue('# Source')
 		buildMdxTransforms.mockRejectedValueOnce(new Error('Transform failed'))
 
 		expect(await fetchFile(markdownPath, FileType.Markdown)).toEqual({
 			ok: false,
 			value: `Failed to read local file at path: ${markdownPath}, error: Error: Transform failed`,
 		})
-		expect(readFile).toHaveBeenCalledOnce()
+		expect(readFile).not.toHaveBeenCalled()
 		expect(fetch).not.toHaveBeenCalled()
 	})
 
 	test('returns Err when metadata cannot be loaded for a local Markdown transform', async () => {
 		const { fetchFile } = await loadFileModuleWithEnv(localEnv)
-		vi.mocked(readFile).mockResolvedValue('# Source')
 		getMetadata.mockRejectedValueOnce(new Error('Metadata unavailable'))
 
 		expect(await fetchFile(markdownPath, FileType.Markdown)).toEqual({
 			ok: false,
 			value: `Failed to read local file at path: ${markdownPath}, error: Error: Metadata unavailable`,
 		})
-		expect(readFile).toHaveBeenCalledOnce()
+		expect(readFile).not.toHaveBeenCalled()
 		expect(buildMdxTransforms).not.toHaveBeenCalled()
 		expect(fetch).not.toHaveBeenCalled()
 	})
 
 	test('returns Err when the transformed Markdown output cannot be read', async () => {
 		const { fetchFile } = await loadFileModuleWithEnv(localEnv)
-		vi.mocked(readFile)
-			.mockResolvedValueOnce('# Source')
-			.mockRejectedValueOnce(new Error('ENOENT'))
+		vi.mocked(readFile).mockRejectedValueOnce(new Error('ENOENT'))
 
 		expect(await fetchFile(markdownPath, FileType.Markdown)).toEqual({
 			ok: false,
@@ -548,6 +580,26 @@ describe('getAssetData', () => {
 })
 
 describe('findFileWithMetadata', () => {
+	test('returns the file path and error when a fetch fails', async () => {
+		const { findFileWithMetadata } = await loadFileModuleWithEnv({
+			INCREMENTAL_BUILD: undefined,
+			VERCEL_ENV: undefined,
+		})
+		vi.mocked(fetch).mockRejectedValueOnce(new Error('Fetch failed'))
+
+		const result = await findFileWithMetadata(
+			['content', 'vault', 'v1.21.x', 'docs/index.mdx'],
+			{ version: 'v1.21.x', releaseStage: 'stable', isLatest: true },
+			FileType.Markdown,
+		)
+
+		expect(result).toEqual({
+			ok: false,
+			value:
+				'Failed to read file at path: content/vault/v1.21.x/docs/index.mdx, error: Error: Fetch failed',
+		})
+	})
+
 	test('removes empty segments from URL path', async () => {
 		const { findFileWithMetadata } = await loadFileModuleWithEnv({
 			VERCEL_URL: 'local-vercel-CDN',

@@ -2,7 +2,7 @@
  * Copyright IBM Corp. 2024, 2026
  * SPDX-License-Identifier: BUSL-1.1
  */
-import { readFile } from 'node:fs/promises'
+import { access, readFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import grayMatter from 'gray-matter'
@@ -14,9 +14,6 @@ import type { ProductVersionMetadata, Result } from '#types'
 import { Err, Ok } from './result'
 import { getMetadata } from './metadata'
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
-
-const MDX_TRANSFORM_SCRIPT =
-	'../../scripts/prebuild/mdx-transforms/build-mdx-transforms.mjs'
 
 const SELF_URL = process.env.VERCEL_URL
 	? `https://${process.env.VERCEL_URL}`
@@ -30,7 +27,7 @@ const headers = process.env.VERCEL_URL
 
 const mdxTransformsModule =
 	buildType === BUILD_TYPE.incBuildLocalDev
-		? import(MDX_TRANSFORM_SCRIPT)
+		? import('../../scripts/prebuild/mdx-transforms/build-mdx-transforms.mjs')
 		: undefined
 
 void mdxTransformsModule?.catch((error: unknown) => {
@@ -150,20 +147,21 @@ export const fetchFile = async (
 			const CWD = process.cwd()
 
 			try {
-				// See if the file exist as MDX files can exist in the path of
-				// "doc.mdx" or "doc/index.mdx" and we often have to check for both
-				await readFile(localFilePath)
+				// A document can be a named file or an index file; callers try both.
+				await access(localFilePath)
 
-				await mdxTransformsModule?.then(async (module: any) => {
-					const { versionMetadata } = await getMetadata()
-					await module.buildMdxTransforms(
-						path.join(CWD, 'content'),
-						path.join(CWD, 'public', 'content'),
-						versionMetadata,
-						[path.join(CWD, localFilePath)],
-						{ exitOnError: false },
-					)
-				})
+				const module = await mdxTransformsModule
+				if (!module) {
+					throw new Error('Local MDX transforms are unavailable')
+				}
+				const { versionMetadata } = await getMetadata()
+				await module.buildMdxTransforms(
+					path.join(CWD, 'content'),
+					path.join(CWD, 'public', 'content'),
+					versionMetadata,
+					[path.join(CWD, localFilePath)],
+					{ exitOnError: false },
+				)
 			} catch (error) {
 				return Err(
 					`Failed to read local file at path: ${localFilePath}, error: ${error}`,
@@ -205,18 +203,10 @@ export const fetchFile = async (
 	})
 }
 
-/**
- * NOTE: we currently read files by fetching them from the `public` folder
- * via the Vercel CDN.
- *
- **/
 export const findFileWithMetadata = async (
 	filePath: string[],
 	versionMetaData: ProductVersionMetadata,
 	fileType: FileType,
-	options: {
-		loadFromContentDir?: boolean
-	} = { loadFromContentDir: false },
 ) => {
 	const newFilePath = ifNeededAddReleaseStageToPath(
 		filePath,
@@ -243,9 +233,9 @@ export const findFileWithMetadata = async (
 			text,
 			servedFrom,
 		})
-	} catch {
+	} catch (error) {
 		return Err(
-			`Failed to read file at path: ${newFilePathJoined}, with options: ${JSON.stringify(options, null, 2)}`,
+			`Failed to read file at path: ${newFilePathJoined}, error: ${error}`,
 		)
 	}
 }
