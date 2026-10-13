@@ -246,6 +246,96 @@ describe('getMetadata', () => {
 		expect(first).toEqual(generatedMetadata)
 	})
 
+	describe('existing metadata freshness', () => {
+		const oneHourMs = 60 * 60 * 1000
+		const metadataFiles = [versionMetadataFile, docsPathsAllVersionsFile]
+
+		function setFileAge(files: string[], ageMs: number): void {
+			const now = Date.now()
+			vi.spyOn(Date, 'now').mockReturnValue(now)
+			const modifiedAt = new Date(now - ageMs)
+			for (const file of files) {
+				vol.utimesSync(file, modifiedAt, modifiedAt)
+			}
+		}
+
+		test.each([oneHourMs - 1, oneHourMs])(
+			'reuses existing metadata that is %i milliseconds old',
+			async (ageMs: number) => {
+				writeGeneratedMetadataFiles()
+				setFileAge(metadataFiles, ageMs)
+				const { getMetadata } = await import('./metadata')
+
+				expect(await getMetadata()).toEqual(generatedMetadata)
+				expect(gatherVersionMetadata).not.toHaveBeenCalled()
+				expect(gatherAllVersionsDocsPaths).not.toHaveBeenCalled()
+				expect(fs.promises.writeFile).not.toHaveBeenCalled()
+			},
+		)
+
+		test.each([
+			['version metadata', [versionMetadataFile]],
+			['all-version paths', [docsPathsAllVersionsFile]],
+			['both metadata files', metadataFiles],
+		])(
+			'regenerates and saves metadata when %s is older than one hour',
+			async (_name: string, staleFiles: string[]) => {
+				writeGeneratedMetadataFiles(twoProductsMetadata)
+				setFileAge(staleFiles, oneHourMs + 1)
+				const { getMetadata } = await import('./metadata')
+
+				const [first, second] = await Promise.all([
+					getMetadata(),
+					getMetadata(),
+				])
+
+				expect(first).toEqual(generatedMetadata)
+				expect(second).toBe(first)
+				expect(gatherVersionMetadata).toHaveBeenCalledOnce()
+				expect(gatherVersionMetadata).toHaveBeenCalledWith(
+					contentDir,
+					undefined,
+				)
+				expect(gatherAllVersionsDocsPaths).toHaveBeenCalledOnce()
+				for (const [file, metadata] of [
+					[versionMetadataFile, generatedMetadata.versionMetadata],
+					[docsPathsAllVersionsFile, generatedMetadata.docsPathsAllVersions],
+				]) {
+					expect(fs.promises.writeFile).toHaveBeenCalledWith(
+						file,
+						JSON.stringify(metadata, null, 2),
+					)
+				}
+			},
+		)
+
+		test.each([
+			['production', 'production', 'true', 'production'],
+			['incremental preview', 'production', 'true', 'preview'],
+			['full build', 'development', 'false', ''],
+		])(
+			'does not expire generated metadata during %s',
+			async (
+				_name: string,
+				nodeEnv: string,
+				incremental: string,
+				vercelEnv: string,
+			) => {
+				vi.stubEnv('NODE_ENV', nodeEnv)
+				vi.stubEnv('INCREMENTAL_BUILD', incremental)
+				vi.stubEnv('VERCEL_ENV', vercelEnv)
+				writeGeneratedMetadataFiles(twoProductsMetadata)
+				setFileAge(metadataFiles, oneHourMs + 1)
+				const { getMetadata } = await import('./metadata')
+
+				expect(await getMetadata()).toEqual(twoProductsMetadata)
+				expect(watch).not.toHaveBeenCalled()
+				expect(gatherVersionMetadata).not.toHaveBeenCalled()
+				expect(gatherAllVersionsDocsPaths).not.toHaveBeenCalled()
+			},
+		)
+	})
+
 	test('starts the watcher on module load and generates one shared cache lazily', async () => {
 		const { getMetadata } = await import('./metadata')
 		expect(gatherVersionMetadata).not.toHaveBeenCalled()

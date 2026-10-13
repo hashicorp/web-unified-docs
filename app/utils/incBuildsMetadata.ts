@@ -10,6 +10,7 @@ import { BUILD_TYPE, buildType } from './buildType'
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
 import type { Metadata } from '#types'
 
+const METADATA_MAX_AGE_MS = 60 * 60 * 1000
 const contentDir = path.join(process.cwd(), 'content')
 const products = Object.keys(PRODUCT_CONFIG)
 const versionMetadataFile = path.join(
@@ -64,6 +65,20 @@ function readExistingMetadata(): Metadata | undefined {
 		!fs.existsSync(versionMetadataFile) ||
 		!fs.existsSync(docsPathsAllVersionsFile)
 	) {
+		return undefined
+	}
+
+	const oldestAllowedMtime = Date.now() - METADATA_MAX_AGE_MS
+	const expired = [versionMetadataFile, docsPathsAllVersionsFile].some(
+		(file: string): boolean => {
+			return fs.statSync(file).mtimeMs < oldestAllowedMtime
+		},
+	)
+
+	if (expired) {
+		console.log(
+			'[watcher] existing metadata is older than one hour; regenerating',
+		)
 		return undefined
 	}
 

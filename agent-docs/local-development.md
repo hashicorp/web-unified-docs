@@ -72,8 +72,10 @@ select a new type; script callers can call `getBuildType()` again.
 When the value is `incBuildLocalDev` (`INCREMENTAL_BUILD=true`, `NODE_ENV=development`,
 and `VERCEL_ENV` is not `production`), `app/utils/incBuildsMetadata.ts` starts
 the watcher immediately on module load. On the first metadata request, it loads the generated
-JSON files if both exist; otherwise it generates metadata on demand and queues
-the files for background writing. API routes share one in-memory cache. Every
+JSON files if both exist and neither file's modification time is more than one
+hour old; otherwise it generates metadata on demand and queues both files for
+background writing. The age check applies only when loading the disk cache;
+in-memory metadata is maintained by the watcher. API routes share one in-memory cache. Every
 content event logs its path and triggers a Dev Portal refresh. File saves are
 ignored for metadata, including edits to existing files. Structural changes
 schedule a background path check for the affected product. Only path additions, removals,
