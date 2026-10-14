@@ -48,6 +48,7 @@ const EXT_TO_CONTENT_TYPE: Record<string, string> = {
 	'.svg': 'image/svg+xml',
 	'.txt': 'text/plain; charset=utf-8',
 	'.webp': 'image/webp',
+	'.pdf': 'application/pdf',
 }
 
 const contentTypeFromPath = (filePath: string): string => {
