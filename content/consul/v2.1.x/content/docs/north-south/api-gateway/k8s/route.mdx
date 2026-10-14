@@ -4,7 +4,7 @@ page_title: Define API gateway routes on Kubernetes
 description: Learn how to define and attach HTTP and TCP routes to Consul API gateway listeners in Kubernetes-orchestrated networks.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2026-03-31T13:43:36-07:00
-last_modified: 2026-07-31T14:48:26.000Z
+last_modified: 2026-10-09T09:19:57.000Z
 # END AUTO GENERATED METADATA
 ---
 
@@ -186,6 +186,238 @@ When configured, certificate selection precedence is:
 - Ensure `spec.sds.certResource` is non-empty.
 - Ensure `clusterName` is provided or can be inherited from listener/gateway SDS.
 - For hostname-based routing checks, verify `hostnames` and request host headers match expected values.
+
+## Upstream limits and passive health checks
+
+You can configure upstream circuit-breaker limits and passive health checks for the backend services that an API gateway routes traffic to. Passive health checks configure Envoy outlier detection on the gateway. When an instance of a backend service returns consecutive errors, the gateway removes the instance from its load balancing pool for a period of time and sends requests to the remaining healthy instances.
+
+Upstream limits and passive health checks require Consul v2.1 or later and Consul Helm chart v2.1.0 or later. They are supported for `Gateway` and `HTTPRoute` resources in the `gateway.networking.k8s.io` API group.
+
+You can configure the settings in the following locations:
+
+- Gateway-wide defaults: `api-gateway.consul.hashicorp.com/default-*` annotations on the `Gateway`. The defaults apply to every backend service that routes attached to the gateway target. Refer to [Gateway annotations](/consul/docs/reference/k8s/api-gateway/gateway#annotations) for the list of annotations.
+- Backend-level overrides: A [`RouteUpstreamLimitsFilter`](/consul/docs/reference/k8s/api-gateway/routeupstreamlimitsfilter) resource attached to a backend in `HTTPRoute.rules[].backendRefs[].filters[]`.
+
+Values in a `RouteUpstreamLimitsFilter` take precedence over the gateway-wide defaults:
+
+- Each circuit-breaker limit that you set in the filter overrides the corresponding gateway default. Limits that you do not set inherit the gateway default.
+- A passive health check in the filter replaces the gateway default passive health check for the backend service. Consul does not merge individual passive health check fields.
+
+### Configure gateway-wide defaults
+
+Add the default annotations to the `Gateway`. The following example limits each backend service to 40 connections and ejects a backend service instance after five consecutive `5xx` errors:
+
+<CodeBlockConfig filename="my-gateway.yaml" highlight="5-11">
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: my-gateway
+  annotations:
+    api-gateway.consul.hashicorp.com/default-max-connections: "40"
+    api-gateway.consul.hashicorp.com/default-max-pending-requests: "80"
+    api-gateway.consul.hashicorp.com/default-max-concurrent-requests: "160"
+    api-gateway.consul.hashicorp.com/default-passive-health-check-interval: "15s"
+    api-gateway.consul.hashicorp.com/default-passive-health-check-max-failures: "5"
+    api-gateway.consul.hashicorp.com/default-passive-health-check-max-ejection-percent: "20"
+spec:
+  gatewayClassName: consul
+  listeners:
+  - name: http
+    protocol: HTTP
+    port: 80
+    allowedRoutes:
+      namespaces:
+        from: All
+```
+
+</CodeBlockConfig>
+
+Consul on Kubernetes ignores annotations that have invalid values, such as negative numbers, percentages greater than `100`, or malformed durations, and logs a message in the controller logs.
+
+### Override the defaults for a backend service
+
+Create a `RouteUpstreamLimitsFilter` and attach it to the backend in the `HTTPRoute`. The filter must be in the same namespace as the `HTTPRoute`. The following example overrides the defaults for the `static-server` backend:
+
+<CodeBlockConfig filename="limits-route.yaml">
+
+```yaml
+apiVersion: consul.hashicorp.com/v1alpha1
+kind: RouteUpstreamLimitsFilter
+metadata:
+  name: static-server-limits
+spec:
+  maxConnections: 25
+  maxPendingRequests: 50
+  maxConcurrentRequests: 100
+  passiveHealthCheck:
+    interval: 10s
+    maxFailures: 3
+    enforcingConsecutive5xx: 100
+    maxEjectionPercent: 50
+    baseEjectionTime: 30s
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: limits-route
+spec:
+  parentRefs:
+  - name: my-gateway
+  rules:
+  - backendRefs:
+    - name: static-server
+      port: 80
+      filters:
+      - type: ExtensionRef
+        extensionRef:
+          group: consul.hashicorp.com
+          kind: RouteUpstreamLimitsFilter
+          name: static-server-limits
+```
+
+</CodeBlockConfig>
+
+Apply the configuration:
+
+```shell-session
+$ kubectl apply --filename limits-route.yaml
+```
+
+When you update the filter or the `Gateway` annotations, Consul on Kubernetes updates the Consul configuration entries and the gateway applies the new values.
+
+### Verify upstream limits and passive health checks
+
+Complete the following steps to verify that the gateway applies the settings:
+
+1. Read the Consul configuration entries to confirm that Consul on Kubernetes translated the settings. The gateway annotations appear in the `Defaults` field of the `api-gateway` configuration entry, and the filter values appear in the `Limits` field of the backend service in the `http-route` configuration entry. Run the commands from a host where the `consul` CLI can reach your Consul servers, and set `CONSUL_HTTP_TOKEN` if ACLs are enabled.
+
+   ```shell-session
+   $ consul config read -kind api-gateway -name my-gateway
+   $ consul config read -kind http-route -name limits-route
+   ```
+
+1. Forward the Envoy admin port of the gateway pod to your local machine:
+
+   ```shell-session
+   $ kubectl port-forward \
+       $(kubectl get pods --selector gateway.consul.hashicorp.com/name=my-gateway --output jsonpath='{.items[0].metadata.name}') \
+       19000:19000
+   ```
+
+1. In a separate terminal, query the Envoy configuration for the `static-server` cluster. The `circuit_breakers` block contains the upstream limits, and the `outlier_detection` block contains the passive health check settings.
+
+   ```shell-session
+   $ curl --silent localhost:19000/config_dump \
+       | jq '.configs[]
+         | select(."@type" | contains("ClustersConfigDump"))
+         | .dynamic_active_clusters[]
+         | select(.cluster.name | startswith("static-server."))
+         | {circuit_breakers: .cluster.circuit_breakers, outlier_detection: .cluster.outlier_detection}'
+   ```
+
+   The output contains the values from the `RouteUpstreamLimitsFilter`, such as `"max_connections": 25` and `"consecutive_5xx": 3`.
+
+## Negate header matches
+
+The Kubernetes Gateway API does not provide a way to negate an HTTP header match. To route requests when a header value does not match a specific value, attach a [`RouteHeaderMatchInvertFilter`](/consul/docs/reference/k8s/api-gateway/routeheadermatchinvertfilter) to the `HTTPRoute` rule and list the names of the headers whose match conditions you want to negate. Consul on Kubernetes sets [`Invert`](/consul/docs/reference/config-entry/http-route#rules-matches-headers-invert) to `true` on those header matches in the `http-route` configuration entry.
+
+Negated header matches require Consul v2.1 or later and Consul Helm chart v2.1.0 or later. They are supported for `HTTPRoute` resources in the `gateway.networking.k8s.io` API group.
+
+The following behavior applies to negated header matches:
+
+- Attach the filter in `HTTPRoute.rules[].filters[]`. The filter applies to header matches in all `matches` entries of the rule.
+- The filter must be in the same namespace as the `HTTPRoute`.
+- Header names in the filter are not case sensitive.
+- A negated `Exact` or `RegularExpression` condition matches requests that include the header when the value does not match. It does not match requests that do not include the header.
+
+### Configure a negated header match
+
+The following example routes requests to the `service-v2` service when the `x-version` header value is not `v1`:
+
+<CodeBlockConfig filename="version-route.yaml">
+
+```yaml
+apiVersion: consul.hashicorp.com/v1alpha1
+kind: RouteHeaderMatchInvertFilter
+metadata:
+  name: invert-version
+spec:
+  headerNames:
+    - x-version
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: version-route
+spec:
+  parentRefs:
+  - name: my-gateway
+  rules:
+  - matches:
+    - headers:
+      - type: Exact
+        name: x-version
+        value: v1
+    filters:
+    - type: ExtensionRef
+      extensionRef:
+        group: consul.hashicorp.com
+        kind: RouteHeaderMatchInvertFilter
+        name: invert-version
+    backendRefs:
+    - name: service-v2
+      port: 80
+```
+
+</CodeBlockConfig>
+
+Apply the configuration:
+
+```shell-session
+$ kubectl apply --filename version-route.yaml
+```
+
+When you change the header names in the filter, reference a different filter, or remove the filter from the rule, Consul on Kubernetes updates the `http-route` configuration entry. When you remove the filter, Consul on Kubernetes sets `Invert` to `false` on the header matches.
+
+### Verify negated header matches
+
+Complete the following steps to verify that the gateway applies the negated header match:
+
+1. Read the `http-route` configuration entry and confirm that the header match includes `"Invert": true`. Run the command from a host where the `consul` CLI can reach your Consul servers, and set `CONSUL_HTTP_TOKEN` if ACLs are enabled.
+
+   ```shell-session
+   $ consul config read -kind http-route -name version-route
+   ```
+
+   The header match in the output is similar to the following example:
+
+   ```json
+   {
+     "Match": "exact",
+     "Name": "x-version",
+     "Value": "v1",
+     "Invert": true
+   }
+   ```
+
+1. Forward the Envoy admin port of the gateway pod to your local machine:
+
+   ```shell-session
+   $ kubectl port-forward \
+       $(kubectl get pods --selector gateway.consul.hashicorp.com/name=my-gateway --output jsonpath='{.items[0].metadata.name}') \
+       19000:19000
+   ```
+
+1. In a separate terminal, query the Envoy route configuration. The header matcher for `x-version` includes `"invert_match": true`.
+
+   ```shell-session
+   $ curl --silent localhost:19000/config_dump \
+       | jq '.configs[]
+         | select(."@type" | contains("RoutesConfigDump"))
+         | .dynamic_route_configs[].route_config.virtual_hosts[].routes[].match.headers'
+   ```
 
 ## Deploy the route configuration
 
