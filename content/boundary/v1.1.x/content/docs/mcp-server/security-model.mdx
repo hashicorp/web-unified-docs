@@ -1,0 +1,97 @@
+---
+layout: docs
+page_title: Boundary MCP server security model
+description: >-
+  Understand how the Boundary MCP server authenticates and authorizes requests, which operations it does not support, and which threats to consider when you connect AI assistants to Boundary.
+---
+
+# Boundary MCP server security model
+
+The Boundary Model Context Protocol (MCP) server lets AI assistants call the Boundary API. This page explains how the server handles identity, secrets, and network access, which threats apply to MCP servers, and how to reduce your exposure.
+
+@include 'alerts/beta.mdx'
+
+Review this page before you connect an AI assistant to a Boundary controller.
+
+## Authentication and authorization
+
+The MCP server does not have an identity of its own in Boundary. Each user supplies their own Boundary token, and the server uses that token for every Boundary API call it makes for that user. The Boundary controller enforces [role-based access control (RBAC)](/boundary/docs/rbac) on each operation, so an assistant has the same permissions as the token's owner and no more.
+
+### Where the token comes from
+
+The deployment mode determines how the server receives the token:
+
+- **Local mode:** The server runs on your local machine. It reads the token from the `BOUNDARY_TOKEN` environment variable, or from the `BOUNDARY_TOKEN` header that your MCP client sends.
+- **Remote mode:** The server runs as a shared service for multiple users. The server ignores the `BOUNDARY_TOKEN` environment variable, and every request must include a `BOUNDARY_TOKEN` header. This token passthrough lets one server instance serve users with different permissions.
+
+### Token validation
+
+The server validates a token against the Boundary controller when a session first uses it. The token must then match the session's original token on every MCP request.
+
+The server revalidates the token with the controller on `tools/call` requests, at most once every 30 seconds for each session by default. Use the `--token-revalidation-interval` flag to change the interval. A value of `0` revalidates on every tool call. Cached `ping`, `initialize`, and `tools/list` requests do not trigger revalidation.
+
+When validation fails, the server removes the cached client and clears its token. The revalidation interval does not weaken authorization. The controller continues to enforce authorization on every API operation, so a revoked token cannot act during the interval.
+
+### Limit access with a least-privilege token
+
+Create a token for each MCP user from a Boundary account that has only the roles and grants the user needs. Do not share tokens between users, and do not use an administrator token when read access is enough.
+
+## Secrets
+
+The MCP server does not support any Boundary API endpoint that handles secrets, because AI assistants must not read secrets.
+
+Unsupported operations include creating static credentials, creating Vault credential stores, and setting a password when you create or update an account. You can still read, list, update, and delete the non-secret values of these resources, such as a name or description.
+
+### Credential brokering and injection
+
+The server does not support credential brokering, because brokering returns credentials to the requester. To establish a session with the `connect` toolset, configure the target for credential injection. With injection, Boundary supplies the credential to the session, and the credential never passes through the assistant or the model.
+
+For more information about the two workflows, refer to [Credential management](/boundary/docs/concepts/credential-management).
+
+## Toolsets and permissions
+
+The MCP server only registers the tools in the toolsets that you enable when you start it. By default, the server enables the `targets` and `sessions` toolsets.
+
+The toolset configuration is a second layer of control on top of RBAC. For example, if you start the server with the `read-only` keyword, an assistant cannot create, update, or delete any resource, even if the token's owner has permission to do so.
+
+## Network access and transport
+
+The server uses the Streamable HTTP transport and listens on `127.0.0.1:8080` by default. Keep the server bound to a loopback address unless you must provide a shared service.
+
+The transport enables the MCP SDK's DNS-rebinding protection. The server rejects requests that it receives over a loopback connection with a non-loopback `Host` header. The server does not use the `Host` header to select or route to a Boundary controller.
+
+If you deploy the server in remote mode, enable TLS to protect tokens and data in transit by setting the `BOUNDARY_MCP_TLS_CERT` environment variable, and restrict network access to the server.
+
+## Threat model
+
+The security of the MCP server depends on the MCP clients and LLMs that you connect to it.
+
+<Warning title="Disclaimer">
+
+Depending on the query, the MCP server may expose Boundary resource data to the MCP client and the large language model (LLM). Do not use the MCP server with untrusted MCP clients or LLMs.
+
+Your use of a third-party MCP client or LLM is subject solely to the terms of use for that client or LLM. IBM is not responsible for the performance of third-party tools. IBM expressly disclaims any and all warranties and liability for third-party MCP clients and LLMs, and may not be able to provide support to resolve issues that third-party tools cause.
+
+</Warning>
+
+Consider the following threats, which apply to MCP servers in general, when you decide which MCP clients, LLMs, and toolsets to use with Boundary:
+
+- **Hallucination:** AI models can generate incorrect information, including incorrect commands and resource identifiers. Validate the output of an LLM before you apply any change to your environment.
+- **Prompt injection:** Untrusted content that an assistant reads, such as a resource description, can contain instructions that manipulate the assistant into calling tools you did not intend. Enable only the toolsets you need, and use read-only toolsets when possible.
+- **Tool poisoning:** Hidden instructions in a tool description can cause an assistant to take unwanted actions. Use only MCP servers that you trust.
+- **Post-approval tool changes (rug pull attacks):** A remotely hosted MCP server can change its tools and descriptions after you approve it. Review the tools that a server provides after each upgrade.
+- **Tool shadowing:** When you connect multiple MCP servers, a malicious server can override the tools of a trusted server. Connect only MCP servers that you trust to the same client.
+
+### Threat model exclusions
+
+The following are not part of the threat model for the Boundary MCP server:
+
+- **Foundation models:** Concerns about the underlying AI models, their training data, and their inherent vulnerabilities.
+- **MCP clients and LLMs:** The security and terms of use of third-party MCP clients and LLMs.
+
+## More information
+
+- [Boundary MCP server overview](/boundary/docs/mcp-server)
+- [Boundary security model](/boundary/docs/secure/security-model)
+- [Permissions in Boundary](/boundary/docs/rbac)
+- [Credential management](/boundary/docs/concepts/credential-management)
