@@ -4,6 +4,7 @@
  */
 
 import { expect, test, vi, beforeEach, afterEach, describe, it } from 'vitest'
+import { copyFileSync, mkdirSync } from 'node:fs'
 import path from 'node:path'
 import { FileType, ServedFrom } from '#types'
 import type { Metadata } from '#types'
@@ -34,20 +35,32 @@ vi.mock(
 vi.mock('#productConfig.mjs', () => {
 	return {
 		PRODUCT_CONFIG: {
+			vault: { versionedDocs: true, basePaths: ['docs', 'api-docs'] },
 			'validated-designs': { versionedDocs: false },
 			'terraform-plugin-log': { versionedDocs: true },
 		},
 	}
 })
 
-vi.mock('fs/promises', () => {
-	return {
-		access: vi.fn(),
-		readFile: vi.fn(),
+vi.mock('node:fs', () => {
+	const fs = {
+		copyFileSync: vi.fn(),
+		existsSync: vi.fn(),
+		mkdirSync: vi.fn(),
 	}
+	return { default: fs, ...fs }
 })
 
-import { access, readFile } from 'node:fs/promises'
+vi.mock('fs/promises', () => {
+	const fs = {
+		access: vi.fn(),
+		readFile: vi.fn(),
+		writeFile: vi.fn(),
+	}
+	return { default: fs, ...fs }
+})
+
+import { access, readFile, writeFile } from 'node:fs/promises'
 
 const makeChangedFiles = (
 	overrides: Partial<{
@@ -81,6 +94,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+	vi.doUnmock('../../scripts/prebuild/add-version-to-nav-data.mjs')
 	vi.doMock(
 		'../../scripts/prebuild/mdx-transforms/build-mdx-transforms.mjs',
 		() => {
@@ -109,29 +123,44 @@ describe('FileType', () => {
 
 describe('fetchFile - fullBuild', () => {
 	test.each([
-		['production', 'true', 'production'],
-		['incremental preview', 'true', 'preview'],
-		['full build', 'false', ''],
+		['production', FileType.Markdown, 'true', 'production'],
+		['production', FileType.NavData, 'true', 'production'],
+		['incremental preview', FileType.Markdown, 'true', 'preview'],
+		['incremental preview', FileType.NavData, 'true', 'preview'],
+		['full build', FileType.Markdown, 'false', ''],
+		['full build', FileType.NavData, 'false', ''],
 	])(
-		'does not load local MDX transforms in %s',
-		async (_scenario: string, incremental: string, vercelEnv: string) => {
+		'does not load local content processors in %s for %s',
+		async (
+			_scenario: string,
+			fileType: FileType,
+			incremental: string,
+			vercelEnv: string,
+		) => {
 			vi.doMock(
 				'../../scripts/prebuild/mdx-transforms/build-mdx-transforms.mjs',
 				() => {
 					throw new Error('Development-only MDX transforms were loaded')
 				},
 			)
+			vi.doMock('../../scripts/prebuild/add-version-to-nav-data.mjs', () => {
+				throw new Error('Development-only navigation processing was loaded')
+			})
 			const { fetchFile } = await loadFileModuleWithEnv({
 				NODE_ENV: 'production',
 				INCREMENTAL_BUILD: incremental,
 				VERCEL_ENV: vercelEnv,
 				VERCEL_URL: 'local-vercel-CDN',
 			})
+			const filePath =
+				fileType === FileType.Markdown
+					? 'content/vault/v1.21.x/docs/index.mdx'
+					: 'content/vault/v1.21.x/data/docs-nav-data.json'
 			if (vercelEnv === 'preview') {
 				vi.mocked(readFile).mockResolvedValue(
 					JSON.stringify(
 						makeChangedFiles({
-							added: ['content/vault/v1.21.x/docs/index.mdx'],
+							added: [filePath],
 						}),
 					),
 				)
@@ -139,10 +168,7 @@ describe('fetchFile - fullBuild', () => {
 			const mockResponse = new Response('body')
 			vi.mocked(fetch).mockResolvedValue(mockResponse)
 
-			const result = await fetchFile(
-				'content/vault/v1.21.x/docs/index.mdx',
-				FileType.Markdown,
-			)
+			const result = await fetchFile(filePath, fileType)
 
 			expect(result).toEqual({
 				ok: true,
@@ -372,7 +398,11 @@ describe('fetchFile - incBuildLocalDev', () => {
 	const outputPath = path.join('public', markdownPath)
 	const metadata: Metadata = {
 		versionMetadata: {
-			vault: [{ version: 'v1.21.x', releaseStage: 'stable', isLatest: true }],
+			vault: [
+				{ version: 'v1.21.x', releaseStage: 'stable', isLatest: true },
+				{ version: 'v1.20.x', releaseStage: 'beta', isLatest: false },
+				{ version: 'v1.19.x', releaseStage: 'stable', isLatest: false },
+			],
 		},
 		docsPathsAllVersions: {},
 	}
@@ -460,11 +490,80 @@ describe('fetchFile - incBuildLocalDev', () => {
 	})
 
 	test.each([
-		[
-			FileType.NavData,
-			'content/vault/v1.21.x/data/docs-nav-data.json',
-			'application/json; charset=utf-8',
-		],
+		{ product: 'vault', version: 'v1.19.x', prefix: 'v1.19.x/' },
+		{ product: 'vault', version: 'v1.20.x (beta)', prefix: 'v1.20.x/' },
+		{ product: 'vault', version: 'v1.21.x', prefix: '' },
+		{ product: 'validated-designs', version: '', prefix: '' },
+	])(
+		'serves local $product $version navigation with in-memory version rewriting',
+		async ({
+			product,
+			version,
+			prefix,
+		}: {
+			product: string
+			version: string
+			prefix: string
+		}) => {
+			const { fetchFile } = await loadFileModuleWithEnv(localEnv)
+			const filePath = path.join(
+				'content',
+				product,
+				version,
+				'data',
+				'docs-nav-data.json',
+			)
+			const versionedPath = `${prefix || 'v1.21.x/'}already-versioned`
+			const navData = [
+				{ title: 'Introduction', path: 'intro' },
+				{
+					title: 'Nested',
+					routes: [
+						{ title: 'CLI', href: '/docs/commands' },
+						{ title: 'API', href: '/api-docs/sys/health' },
+						{ title: 'Versioned', path: versionedPath },
+						{ title: 'External', href: 'https://developer.hashicorp.com' },
+						{ title: 'Cross product', href: '/consul/docs' },
+					],
+				},
+			]
+			vi.mocked(readFile).mockResolvedValue(JSON.stringify(navData))
+
+			const result = await fetchFile(filePath, FileType.NavData)
+
+			expect(result.ok).toBe(true)
+			if (result.ok) {
+				expect(await result.value.response.json()).toEqual([
+					{ title: 'Introduction', path: `${prefix}intro` },
+					{
+						title: 'Nested',
+						routes: [
+							{ title: 'CLI', href: `/docs/${prefix}commands` },
+							{ title: 'API', href: `/api-docs/${prefix}sys/health` },
+							{ title: 'Versioned', path: versionedPath },
+							{ title: 'External', href: 'https://developer.hashicorp.com' },
+							{ title: 'Cross product', href: '/consul/docs' },
+						],
+					},
+				])
+				expect(result.value.servedFrom).toBe(ServedFrom.CurrentBuild)
+				expect(result.value.response.headers.get('content-type')).toBe(
+					'application/json; charset=utf-8',
+				)
+			}
+			expect(readFile).toHaveBeenCalledOnce()
+			expect(readFile).toHaveBeenCalledWith(filePath, 'utf-8')
+			expect(copyFileSync).not.toHaveBeenCalled()
+			expect(mkdirSync).not.toHaveBeenCalled()
+			expect(writeFile).not.toHaveBeenCalled()
+			expect(access).not.toHaveBeenCalled()
+			expect(getMetadata).toHaveBeenCalledTimes(product === 'vault' ? 1 : 0)
+			expect(buildMdxTransforms).not.toHaveBeenCalled()
+			expect(fetch).not.toHaveBeenCalled()
+		},
+	)
+
+	test.each([
 		[
 			FileType.Redirects,
 			'content/vault/v1.21.x/redirects.jsonc',
@@ -529,17 +628,17 @@ describe('fetchFile - incBuildLocalDev', () => {
 		[
 			FileType.NavData,
 			'content/vault/v1.21.x/data/docs-nav-data.json',
-			'content/vault/v1.21.x/data/docs-nav-data.json',
+			'content/vault/v1.21.x/data/docs-nav-data.json, error: Error: ENOENT',
 		],
 		[
 			FileType.Redirects,
 			'content/vault/v1.21.x/redirects.jsonc',
-			'content/vault/v1.21.x/redirects.jsonc',
+			'content/vault/v1.21.x/redirects.jsonc, error: Error: ENOENT',
 		],
 		[
 			FileType.Asset,
 			'asset/vault/v1.21.x/img/logo.png',
-			'content/vault/v1.21.x/img/logo.png',
+			'content/vault/v1.21.x/img/logo.png, error: Error: ENOENT',
 		],
 	])(
 		'returns Err for missing local %s files without using the CDN',
@@ -558,7 +657,7 @@ describe('fetchFile - incBuildLocalDev', () => {
 			expect(getMetadata).not.toHaveBeenCalled()
 			expect(buildMdxTransforms).not.toHaveBeenCalled()
 			if (fileType === FileType.Markdown) {
-				expect(access).toHaveBeenCalledWith(markdownPath)
+				expect(access).toHaveBeenCalledWith(filePath)
 				expect(readFile).not.toHaveBeenCalled()
 			}
 			expect(fetch).not.toHaveBeenCalled()
@@ -577,16 +676,98 @@ describe('fetchFile - incBuildLocalDev', () => {
 		expect(fetch).not.toHaveBeenCalled()
 	})
 
-	test('returns Err when metadata cannot be loaded for a local Markdown transform', async () => {
-		const { fetchFile } = await loadFileModuleWithEnv(localEnv)
-		getMetadata.mockRejectedValueOnce(new Error('Metadata unavailable'))
+	test.each([FileType.Markdown, FileType.NavData])(
+		'returns Err when metadata cannot be loaded for local %s processing',
+		async (fileType: FileType) => {
+			const { fetchFile } = await loadFileModuleWithEnv(localEnv)
+			const filePath =
+				fileType === FileType.Markdown
+					? markdownPath
+					: 'content/vault/v1.21.x/data/docs-nav-data.json'
+			vi.mocked(readFile).mockResolvedValue('[{"path":"intro"}]')
+			getMetadata.mockRejectedValueOnce(new Error('Metadata unavailable'))
 
-		expect(await fetchFile(markdownPath, FileType.Markdown)).toEqual({
+			expect(await fetchFile(filePath, fileType)).toEqual({
+				ok: false,
+				value: `Failed to read local file at path: ${filePath}, error: Error: Metadata unavailable`,
+			})
+			if (fileType === FileType.Markdown) {
+				expect(readFile).not.toHaveBeenCalled()
+			} else {
+				expect(readFile).toHaveBeenCalledOnce()
+				expect(readFile).toHaveBeenCalledWith(filePath, 'utf-8')
+			}
+			expect(buildMdxTransforms).not.toHaveBeenCalled()
+			expect(copyFileSync).not.toHaveBeenCalled()
+			expect(fetch).not.toHaveBeenCalled()
+		},
+	)
+
+	test('returns Err when local navigation contains invalid JSON', async () => {
+		const { fetchFile } = await loadFileModuleWithEnv(localEnv)
+		const filePath = 'content/vault/v1.19.x/data/docs-nav-data.json'
+		vi.mocked(readFile).mockResolvedValue('{')
+
+		expect(await fetchFile(filePath, FileType.NavData)).toEqual({
 			ok: false,
-			value: `Failed to read local file at path: ${markdownPath}, error: Error: Metadata unavailable`,
+			value: expect.stringContaining(
+				`Failed to read local file at path: ${filePath}, error: SyntaxError:`,
+			),
 		})
-		expect(readFile).not.toHaveBeenCalled()
-		expect(buildMdxTransforms).not.toHaveBeenCalled()
+		expect(copyFileSync).not.toHaveBeenCalled()
+		expect(writeFile).not.toHaveBeenCalled()
+		expect(fetch).not.toHaveBeenCalled()
+	})
+
+	test('waits for version metadata before returning transformed local navigation', async () => {
+		const { fetchFile } = await loadFileModuleWithEnv(localEnv)
+		const filePath = 'content/vault/v1.19.x/data/docs-nav-data.json'
+		vi.mocked(readFile).mockResolvedValue('[{"path":"intro"}]')
+		let finishMetadata: (value: Metadata) => void
+		getMetadata.mockReturnValueOnce(
+			new Promise<Metadata>((resolve: (value: Metadata) => void) => {
+				finishMetadata = resolve
+			}),
+		)
+
+		const pending = fetchFile(filePath, FileType.NavData)
+		await vi.waitFor(() => {
+			expect(getMetadata).toHaveBeenCalledOnce()
+		})
+		expect(readFile).toHaveBeenCalledOnce()
+		expect(copyFileSync).not.toHaveBeenCalled()
+		expect(writeFile).not.toHaveBeenCalled()
+
+		finishMetadata(metadata)
+		const result = await pending
+		expect(result.ok).toBe(true)
+		if (result.ok) {
+			expect(await result.value.response.json()).toEqual([
+				{ path: 'v1.19.x/intro' },
+			])
+		}
+		expect(readFile).toHaveBeenCalledOnce()
+		expect(readFile).toHaveBeenCalledWith(filePath, 'utf-8')
+		expect(copyFileSync).not.toHaveBeenCalled()
+		expect(writeFile).not.toHaveBeenCalled()
+		expect(fetch).not.toHaveBeenCalled()
+	})
+
+	test('returns Err when version metadata is missing for local navigation', async () => {
+		const { fetchFile } = await loadFileModuleWithEnv(localEnv)
+		const filePath = 'content/vault/v1.19.x/data/docs-nav-data.json'
+		vi.mocked(readFile).mockResolvedValue('[{"path":"intro"}]')
+		getMetadata.mockResolvedValueOnce({
+			...metadata,
+			versionMetadata: {},
+		})
+
+		expect(await fetchFile(filePath, FileType.NavData)).toEqual({
+			ok: false,
+			value: `Failed to read local file at path: ${filePath}, error: Error: No version metadata found for product: vault`,
+		})
+		expect(copyFileSync).not.toHaveBeenCalled()
+		expect(writeFile).not.toHaveBeenCalled()
 		expect(fetch).not.toHaveBeenCalled()
 	})
 
@@ -596,7 +777,7 @@ describe('fetchFile - incBuildLocalDev', () => {
 
 		expect(await fetchFile(markdownPath, FileType.Markdown)).toEqual({
 			ok: false,
-			value: `Failed to read local file at path: ${outputPath}`,
+			value: `Failed to read local file at path: ${outputPath}, error: Error: ENOENT`,
 		})
 		expect(buildMdxTransforms).toHaveBeenCalledOnce()
 		expect(fetch).not.toHaveBeenCalled()

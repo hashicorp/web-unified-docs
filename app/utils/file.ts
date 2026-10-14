@@ -176,10 +176,29 @@ export const fetchFile = async (
 		}
 
 		try {
-			const fileContent =
+			let fileContent =
 				fileType === FileType.Asset
 					? await readFile(localFilePath)
 					: await readFile(localFilePath, 'utf-8')
+
+			// nav-data also needs to be transformed
+			if (fileType === FileType.NavData) {
+				const [, product, version] = localFilePath.split('/')
+				if (PRODUCT_CONFIG[product].versionedDocs) {
+					const { addVersionToNavDataPaths } = await import(
+						'../../scripts/prebuild/add-version-to-nav-data.mjs'
+					)
+					const { versionMetadata } = await getMetadata()
+					fileContent = JSON.stringify(
+						addVersionToNavDataPaths(
+							JSON.parse(fileContent as string),
+							product,
+							version,
+							versionMetadata,
+						),
+					)
+				}
+			}
 
 			// Wrap the file content in a Response object to mimic the fetch API's Response which is expected downstream.
 
@@ -189,8 +208,10 @@ export const fetchFile = async (
 				},
 			})
 			return Ok({ response, servedFrom: ServedFrom.CurrentBuild })
-		} catch {
-			return Err(`Failed to read local file at path: ${localFilePath}`)
+		} catch (error) {
+			return Err(
+				`Failed to read local file at path: ${localFilePath}, error: ${error}`,
+			)
 		}
 	}
 

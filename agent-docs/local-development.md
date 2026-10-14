@@ -66,7 +66,12 @@ failures and sets exit status 1; local Markdown requests return the errors
 without exiting the server.
 Source existence is checked with `access()` before transformation; the file
 loader reads only the transformed output.
-Navigation data, redirects, and assets are read directly from `content/`.
+Versioned navigation data is read directly from `content/` and version-rewritten
+in memory using the same transformation as prebuild, without copying or writing
+files. Unversioned navigation bypasses the transformation and metadata lookup.
+Historical navigation paths and section links include the selected version;
+latest and unversioned navigation remains unchanged.
+Redirects and assets are also read directly from `content/`.
 
 The metadata module, watcher, and file-serving utilities share the cached
 [`buildType`](../app/utils/buildType.ts) value, computed once when the application
@@ -79,8 +84,9 @@ When the value is `incBuildLocalDev` (`INCREMENTAL_BUILD=true`, `NODE_ENV=develo
 and `VERCEL_ENV` is not `production`), `app/utils/incBuildsMetadata.ts` starts
 the watcher immediately when its development-only dynamic import resolves.
 Direct `process.env.NODE_ENV` checks in the application utilities keep the
-watcher, MDX transforms, and local filesystem reads out of Next.js production
-bundles without changing the shared build-type detector used by Bun binaries.
+watcher, MDX transforms, navigation rewriting module, and local filesystem reads
+out of Next.js production bundles without changing the shared build-type detector
+used by Bun binaries.
 On the first metadata request, it loads the generated
 JSON files if both exist and neither file's modification time is more than one
 hour old; otherwise it generates metadata on demand and queues both files for
