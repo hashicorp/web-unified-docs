@@ -717,6 +717,47 @@ describe('findFileWithMetadata', () => {
 })
 
 describe('resolveCdnUrl', () => {
+	test.each([
+		[
+			'local incremental development',
+			'development',
+			'',
+			'http://localhost:8080/api/assets/validated-designs/latest',
+		],
+		[
+			'production',
+			'production',
+			'production',
+			'https://local-vercel-CDN/assets/validated-designs',
+		],
+	])(
+		'uses /latest only for unversioned local incremental download links (%s)',
+		async (
+			_scenario: string,
+			nodeEnv: string,
+			vercelEnv: string,
+			expectedBaseUrl: string,
+		) => {
+			const { resolveCdnUrl } = await loadFileModuleWithEnv({
+				NODE_ENV: nodeEnv,
+				INCREMENTAL_BUILD: 'true',
+				VERCEL_ENV: vercelEnv,
+				VERCEL_URL: nodeEnv === 'development' ? undefined : 'local-vercel-CDN',
+				UNIFIED_DOCS_PORT: '8080',
+			})
+
+			expect(
+				resolveCdnUrl(
+					'[Guide]({{CDN_URL}}/pdf/Boundary-Administration-Guide.pdf)',
+					'validated-designs',
+					'',
+				),
+			).toBe(
+				`[Guide](${expectedBaseUrl}/pdf/Boundary-Administration-Guide.pdf)`,
+			)
+		},
+	)
+
 	it('replaces {{CDN_URL}} with versioned assets URL for versioned products', () => {
 		const result = resolveCdnUrl(
 			'[Guide]({{CDN_URL}}/img/diagram.png)',

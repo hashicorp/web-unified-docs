@@ -344,6 +344,8 @@ export function resolveCdnUrl(
 
 	const isVersioned = PRODUCT_CONFIG[productSlug].versionedDocs
 	const versionSegment = isVersioned ? `/${version}` : ''
-	const cdnUrl = `${SELF_URL}/assets/${productSlug}${versionSegment}`
+	const cdnUrl = useMdxTransformsModule
+		? `${SELF_URL}/api/assets/${productSlug}/${isVersioned ? version : 'latest'}`
+		: `${SELF_URL}/assets/${productSlug}${versionSegment}`
 	return markdownSource.replaceAll('{{CDN_URL}}', cdnUrl)
 }
