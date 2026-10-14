@@ -4,7 +4,7 @@ page_title: Deploy API gateway listeners in Kubernetes
 description: Learn how to create API gateway configurations in Kubernetes that enable you to instantiate gateway instances.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2026-03-31T13:43:36-07:00
-last_modified: 2026-07-31T14:48:25.000Z
+last_modified: 2026-10-09T09:19:57.000Z
 # END AUTO GENERATED METADATA
 ---
 
@@ -47,6 +47,7 @@ Create an API gateway values file that defines the gateway and listeners.
       - `port`: Specifies the port that the listener receives traffic on.
       - `name`: Specifies a unique name for the listener.
       - `protocol`: You can set either `tcp` or `http` 
+      - To serve HTTP/2 or gRPC traffic, add a listener protocol annotation to the `Gateway`. Refer to [HTTP/2 and gRPC listeners](#http-2-and-grpc-listeners) for additional information.
       - `allowedRoutes.namespaces`: Contains configurations for determining which namespaces are allowed to attach a route to the listener. 
 2. Configure any additional fields necessary for your use case, such as the namespace or admin partition. Refer to the [API gateway configuration entry reference](/consul/docs/reference/k8s/api-gateway/gateway) for additional information.
 3. Save the configuration.
@@ -227,3 +228,290 @@ Apply the configuration to your cluster using the `kubectl` command. The followi
 ```shell-session
 $ kubectl apply -f my-gateway.yaml -n consul
 ```
+## Terminate HTTPS with Consul-managed certificates
+
+You can configure the API gateway to terminate downstream HTTPS with its Consul service mesh leaf certificate instead of a certificate that you store in a Kubernetes `Secret`. Consul issues and rotates the leaf certificate automatically, so you do not need to create a `Secret` or configure `tls.certificateRefs` on the listener.
+
+The leaf certificate is signed by the Consul service mesh certificate authority (CA) and includes wildcard DNS subject alternative names (SANs), such as `*.api-gateway.consul` and `*.api-gateway.<datacenter>.consul`. Consul also registers each service that a bound route targets in Consul DNS at `<service>.api-gateway.<domain>`. As a result, clients that trust the Consul CA root certificate can reach the service over verified HTTPS without additional certificate configuration. Refer to [Certificate DNS names](/consul/docs/north-south/api-gateway/secure-traffic/encrypt#certificate-dns-names) for the complete list of SANs, including the namespace-scoped SANs for Consul Enterprise.
+
+### Requirements for Consul-managed certificates
+
+- Consul v2.1 or later
+- Consul Helm chart v2.1.0 or later
+- To resolve `<service>.api-gateway.<domain>` names from pods, enable Consul DNS with the [`dns.enabled`](/consul/docs/reference/k8s/helm#v-dns-enabled) Helm value and configure your cluster DNS to forward the `consul` domain to Consul. Refer to [Resolve Consul DNS requests in Kubernetes](/consul/docs/discover/dns/k8s) for instructions.
+
+### Enable Consul-managed TLS on the gateway
+
+Add the `consul.hashicorp.com/tls-enabled: "true"` annotation to the `Gateway` resource and configure an `HTTPS` listener without `tls.certificateRefs`. Consul on Kubernetes translates the annotation into the [`TLS.Enabled`](/consul/docs/reference/config-entry/api-gateway#tls-enabled) field of the API gateway configuration entry. The annotation is supported on both the Standard API gateway (`gateway.networking.k8s.io/v1`) and the Consul API gateway (`consul.hashicorp.com/v1beta1`).
+
+The following example configures an `HTTPS` listener on port `8443`:
+
+<CodeBlockConfig filename="my-gateway.yaml" highlight="5-6,15-18">
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: my-gateway
+  annotations:
+    consul.hashicorp.com/tls-enabled: "true"
+  labels:
+    component: api-gateway
+spec:
+  gatewayClassName: consul
+  listeners:
+  - name: https
+    protocol: HTTPS
+    port: 8443
+    tls:
+      mode: Terminate
+      options:
+        api-gateway.consul.hashicorp.com/tls_min_version: "TLS_AUTO"
+    allowedRoutes:
+      namespaces:
+        from: "All"
+```
+
+</CodeBlockConfig>
+
+Kubernetes Gateway API v1.4 and later CRDs require a `Terminate` listener to set either `tls.certificateRefs` or `tls.options`. When you omit `tls.certificateRefs`, set a `tls.options` key, such as `api-gateway.consul.hashicorp.com/tls_min_version: "TLS_AUTO"`, to satisfy the validation rule. The `TLS_AUTO` value does not change the gateway's TLS behavior.
+
+Bind an `HTTPRoute` to the listener and create service intentions that allow traffic from the gateway to the destination service. The following example routes traffic to the `static-server` service:
+
+<CodeBlockConfig filename="my-route.yaml">
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: my-route
+spec:
+  parentRefs:
+  - name: my-gateway
+  rules:
+  - backendRefs:
+    - name: static-server
+      port: 80
+```
+
+</CodeBlockConfig>
+
+Apply the configurations to your cluster:
+
+```shell-session
+$ kubectl apply --filename my-gateway.yaml --filename my-route.yaml
+```
+
+Certificates that you configure on a listener with `tls.certificateRefs` or SDS take precedence for requests whose server name indication (SNI) matches the certificate hosts. The leaf certificate serves all other requests. When you remove the annotation, Consul sets `TLS.Enabled` to `false` in the API gateway configuration entry.
+
+### Verify DNS resolution
+
+When the `HTTPRoute` binds to the gateway, Consul maps each service that the route targets to the gateway in the gateway-services catalog mapping, which is the same mapping that ingress gateways use. Consul resolves `<service>.api-gateway.<domain>` queries from this mapping. Refer to [API gateway service mapping](/consul/docs/discover/service/static#api-gateway-service-mapping) for more information.
+
+Complete the following steps to verify the mapping and DNS resolution:
+
+1. Confirm that Consul mapped the service to the gateway. The gateway name in the mapping is the name of the `Gateway` resource. If ACLs are enabled, set `CONSUL_HTTP_TOKEN` to a token with `service:read` permission on the gateway. The following example assumes that you installed Consul in the `consul` namespace with [`global.tls.enabled`](/consul/docs/reference/k8s/helm#v-global-tls-enabled) set to `true`.
+
+   ```shell-session
+   $ kubectl exec --namespace consul consul-server-0 -- \
+       curl --silent --cacert /consul/tls/ca/tls.crt \
+       --header "X-Consul-Token: $CONSUL_HTTP_TOKEN" \
+       https://localhost:8501/v1/catalog/gateway-services/my-gateway \
+       | jq '[.[] | {Service: .Service.Name, GatewayKind, Port}]'
+   ```
+
+   The output includes an entry for the service with `"GatewayKind": "api-gateway"` and the listener port:
+
+   ```json
+   [
+     {
+       "Service": "static-server",
+       "GatewayKind": "api-gateway",
+       "Port": 8443
+     }
+   ]
+   ```
+
+1. Resolve the service name from a pod in the cluster. The A record returns the address of each healthy gateway instance, and the SRV record returns the listener port.
+
+   ```shell-session
+   $ kubectl run dns-test --rm --stdin --restart=Never --image=anubhavmishra/tiny-tools -- \
+       dig +short static-server.api-gateway.consul A static-server.api-gateway.consul SRV
+   ```
+
+   If the lookup does not return any records, verify that the `HTTPRoute` status shows that the route is accepted and bound to the gateway, and that your cluster DNS forwards the `consul` domain to Consul DNS. Refer to [Verify API gateway DNS resolution](/consul/docs/discover/service/static#verify-api-gateway-dns-resolution) for additional troubleshooting steps.
+
+### Verify HTTPS traffic
+
+Complete the following steps to verify that the gateway terminates HTTPS with a certificate that clients can trust:
+
+1. Retrieve the active Consul service mesh CA root certificate from a Consul server. The following example assumes that you installed Consul in the `consul` namespace with [`global.tls.enabled`](/consul/docs/reference/k8s/helm#v-global-tls-enabled) set to `true`. If TLS is not enabled, use `http://localhost:8500` instead.
+
+   ```shell-session
+   $ kubectl exec --namespace consul consul-server-0 -- \
+       curl --silent --cacert /consul/tls/ca/tls.crt https://localhost:8501/v1/connect/ca/roots \
+       | jq --raw-output '.Roots[] | select(.Active) | .RootCert' > consul-ca.pem
+   ```
+
+1. Copy the CA root certificate to a client pod that can resolve Consul DNS. Replace `CLIENT_POD` with the name of the pod.
+
+   ```shell-session
+   $ kubectl cp consul-ca.pem CLIENT_POD:/tmp/consul-ca.pem
+   ```
+
+1. Send an HTTPS request to the service through the gateway and verify the certificate with the CA root certificate:
+
+   ```shell-session
+   $ kubectl exec CLIENT_POD -- curl --cacert /tmp/consul-ca.pem https://static-server.api-gateway.consul:8443
+   ```
+
+   The request succeeds without the `--insecure` flag because the gateway certificate includes the `*.api-gateway.consul` SAN and chains to the Consul service mesh CA.
+
+In Consul Enterprise, when you enable [Kubernetes namespace mirroring](/consul/docs/reference/k8s/helm#v-connectinject-consulnamespaces-mirroringk8s), services in a non-default namespace use namespace-scoped SANs, such as `*.api-gateway.<namespace>.consul`. To verify the gateway certificate, clients must send a server name that matches these SANs, for example `static-server.api-gateway.<namespace>.consul`.
+
+## HTTP/2 and gRPC listeners
+
+By default, Consul on Kubernetes configures `HTTP` and `HTTPS` listeners to use HTTP/1.1 for the connection from the gateway to the backend service. To serve HTTP/2 or gRPC traffic from the client to the backend service, add the `api-gateway.consul.hashicorp.com/listener-<sectionName>-protocol` annotation to the `Gateway`. Replace `<sectionName>` with the name of the listener and set the value to `http2` or `grpc`. Each listener reads only its own annotation, so listeners on the same `Gateway` can use different protocols.
+
+### Requirements for HTTP/2 and gRPC listeners
+
+- Consul v2.1 or later
+- Consul Helm chart v2.1.0 or later
+- A `Gateway` and `HTTPRoute` in the `gateway.networking.k8s.io` API group
+
+### Configure HTTP/2 and gRPC listeners
+
+Complete the following steps to route HTTP/2 and gRPC traffic through an API gateway:
+
+1. Set the protocol of each backend service in a `ServiceDefaults` resource. The following example sets the `grpc-server` protocol to `grpc` and the `h2-server` protocol to `http2`:
+
+   <CodeBlockConfig filename="servicedefaults.yaml">
+
+   ```yaml
+   apiVersion: consul.hashicorp.com/v1alpha1
+   kind: ServiceDefaults
+   metadata:
+     name: grpc-server
+   spec:
+     protocol: grpc
+   ---
+   apiVersion: consul.hashicorp.com/v1alpha1
+   kind: ServiceDefaults
+   metadata:
+     name: h2-server
+   spec:
+     protocol: http2
+   ```
+
+   </CodeBlockConfig>
+
+1. Define the `Gateway` with a listener for each protocol, and add a protocol annotation for each `http2` or `grpc` listener. Set the listener `protocol` field to `HTTP` or `HTTPS`:
+
+   <CodeBlockConfig filename="my-gateway.yaml" highlight="5-7">
+
+   ```yaml
+   apiVersion: gateway.networking.k8s.io/v1
+   kind: Gateway
+   metadata:
+     name: my-gateway
+     annotations:
+       api-gateway.consul.hashicorp.com/listener-grpc-listener-protocol: "grpc"
+       api-gateway.consul.hashicorp.com/listener-h2-listener-protocol: "http2"
+   spec:
+     gatewayClassName: consul
+     listeners:
+     - name: http-listener
+       protocol: HTTP
+       port: 80
+       allowedRoutes:
+         namespaces:
+           from: All
+     - name: grpc-listener
+       protocol: HTTP
+       port: 9080
+       allowedRoutes:
+         namespaces:
+           from: All
+     - name: h2-listener
+       protocol: HTTP
+       port: 9090
+       allowedRoutes:
+         namespaces:
+           from: All
+   ```
+
+   </CodeBlockConfig>
+
+   The `http-listener` listener does not have an annotation, so it uses the `http` protocol.
+
+1. Bind an `HTTPRoute` to each listener with the `sectionName` field. The following example routes traffic from the `grpc-listener` listener to the `grpc-server` service:
+
+   <CodeBlockConfig filename="grpc-route.yaml">
+
+   ```yaml
+   apiVersion: gateway.networking.k8s.io/v1
+   kind: HTTPRoute
+   metadata:
+     name: grpc-route
+   spec:
+     parentRefs:
+     - name: my-gateway
+       sectionName: grpc-listener
+     rules:
+     - backendRefs:
+       - name: grpc-server
+         port: 9000
+   ```
+
+   </CodeBlockConfig>
+
+1. Apply the configurations:
+
+   ```shell-session
+   $ kubectl apply --filename servicedefaults.yaml --filename my-gateway.yaml --filename grpc-route.yaml
+   ```
+
+You can add, change, or remove the annotation on an existing `Gateway`. Consul on Kubernetes updates the listener protocol in the API gateway configuration entry and does not change the other listeners.
+
+Consul on Kubernetes ignores an annotation value that is not `http`, `http2`, `grpc`, or `tcp`, and uses the protocol derived from the listener `protocol` field. When the `<sectionName>` in the annotation key does not match the name of any listener, the controller logs a warning that lists the ignored annotation keys.
+
+### Verify HTTP/2 and gRPC listeners
+
+Complete the following steps to verify that the gateway uses the configured protocols:
+
+1. Read the API gateway configuration entry to confirm that each listener has the expected `Protocol` value. Run the command from a host where the `consul` CLI can reach your Consul servers, and set `CONSUL_HTTP_TOKEN` if ACLs are enabled.
+
+   ```shell-session
+   $ consul config read -kind api-gateway -name my-gateway
+   ```
+
+1. Forward the Envoy admin port of the gateway pod to your local machine:
+
+   ```shell-session
+   $ kubectl port-forward \
+       $(kubectl get pods --selector gateway.consul.hashicorp.com/name=my-gateway --output jsonpath='{.items[0].metadata.name}') \
+       19000:19000
+   ```
+
+1. In a separate terminal, confirm that the upstream cluster for the `grpc-server` service uses HTTP/2. The output includes `http2_protocol_options`:
+
+   ```shell-session
+   $ curl --silent localhost:19000/config_dump \
+       | jq '.configs[]
+         | select(."@type" | contains("ClustersConfigDump"))
+         | .dynamic_active_clusters[]
+         | select(.cluster.name | startswith("grpc-server."))
+         | .cluster.typed_extension_protocol_options'
+   ```
+
+   Run the same command for the `h2-server` cluster. Upstream clusters for services that you route through an `http` listener do not include `http2_protocol_options`.
+
+1. List the HTTP filters on each gateway listener. The listener for the `grpc-listener` listener includes the `grpc_stats` and `grpc_http1_bridge` HTTP filters:
+
+   ```shell-session
+   $ curl --silent localhost:19000/config_dump \
+       | jq '.configs[]
+         | select(."@type" | contains("ListenersConfigDump"))
+         | .dynamic_listeners[]
+         | {name: .name, filters: [.active_state.listener.filter_chains[].filters[].typed_config.http_filters[]?.name]}'
+   ```

@@ -4,7 +4,7 @@ page_title: Encrypt API gateway traffic on virtual machines
 description: Learn how to define inline certificate config entries and deploy them to Consul. Inline certificate configuration entries enable you to attach TLS certificates and keys to gateway listeners so that traffic between external clients and gateway listeners is encrypted.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2026-03-31T20:45:25.000Z
-last_modified: 2026-03-31T20:45:25.000Z
+last_modified: 2026-10-09T09:19:57.000Z
 # END AUTO GENERATED METADATA
 ---
 
@@ -91,3 +91,108 @@ Run the `consul config write` command to enable listeners to use the certificate
 ```shell-session
 $ consul config write my-certificate.hcl
 ```
+
+## Terminate TLS with Consul-managed certificates
+
+You can configure the API gateway to terminate downstream TLS with its Consul service mesh leaf certificate instead of a certificate that you provide. Consul issues and rotates the leaf certificate automatically, so you do not need to create a `file-system-certificate` or `inline-certificate` configuration entry.
+
+The leaf certificate is signed by the Consul service mesh certificate authority (CA). Clients that trust the CA root certificate can verify the gateway certificate without additional configuration.
+
+### Requirements for Consul-managed certificates
+
+- Consul v2.1 or later
+- A Consul cluster with service mesh enabled. Refer to [`connect`](/consul/docs/reference/agent/configuration-file/service-mesh#connect-parameters)
+- To resolve services by name, clients must be able to query [Consul DNS](/consul/docs/discover/dns)
+
+### Certificate DNS names
+
+Consul adds DNS subject alternative names (SANs) to the leaf certificate so that clients can reach each service exposed by the gateway at its `<service>.api-gateway.<domain>` DNS name. Refer to [API gateway service lookups](/consul/docs/discover/service/static#api-gateway-service-lookups) for more information about how Consul registers these names.
+
+The following table describes the wildcard SANs that the leaf certificate includes:
+
+| Services targeted by routes | Wildcard SANs |
+| --- | --- |
+| Services in the `default` namespace and `default` admin partition | `*.api-gateway.<domain>`<br/>`*.api-gateway.<datacenter>.<domain>` |
+| Services in a non-default namespace <EnterpriseAlert inline /> | `*.api-gateway.<namespace>.<domain>`<br/>`*.api-gateway.<namespace>.<datacenter>.<domain>` |
+| Services in the `default` namespace of a non-default admin partition <EnterpriseAlert inline /> | `*.api-gateway.<partition>.<domain>`<br/>`*.api-gateway.<partition>.<datacenter>.<domain>` |
+| Services in a non-default namespace of a non-default admin partition <EnterpriseAlert inline /> | `*.api-gateway.<namespace>.<partition>.<domain>`<br/>`*.api-gateway.<namespace>.<partition>.<datacenter>.<domain>` |
+
+Consul adds one set of wildcard SANs for each namespace and admin partition that contains a service targeted by a bound route.
+
+The certificate also includes the following SANs:
+
+- The `Hostname` value of each gateway listener, when set.
+- The `Hostnames` values of each HTTP route bound to the gateway.
+- The equivalent wildcard SANs for the [`alt_domain`](/consul/docs/reference/agent/configuration-file/dns#_alt_domain), when configured.
+
+When you add or remove routes, listeners, or hostnames, Consul reissues the leaf certificate with the updated SANs.
+
+### Enable Consul-managed TLS
+
+Complete the following steps to terminate TLS with the gateway's leaf certificate:
+
+1. Create an API gateway configuration entry and set `TLS.Enabled` to `true`. Do not reference a certificate in the listener `TLS.Certificates` field. The following example configures an HTTP listener on port `8443`:
+
+   <CodeBlockConfig filename="gateway.hcl">
+
+   ```hcl
+   Kind = "api-gateway"
+   Name = "my-gateway"
+
+   TLS = {
+     Enabled = true
+   }
+
+   Listeners = [
+     {
+       Name     = "my-https-listener"
+       Port     = 8443
+       Protocol = "http"
+     }
+   ]
+   ```
+
+   </CodeBlockConfig>
+
+1. Apply the configuration entry.
+
+   ```shell-session
+   $ consul config write gateway.hcl
+   ```
+
+1. Bind an HTTP route or TCP route to the listener and create service intentions that allow traffic from the gateway to the destination service. Refer to [Define API gateway routes on virtual machines](/consul/docs/north-south/api-gateway/vm/route) for more information.
+
+`TLS.Enabled` applies to every listener on the gateway. Certificates that you configure on a listener with `TLS.Certificates` or `TLS.SDS` take precedence for requests whose server name indication (SNI) matches the certificate hosts. The leaf certificate serves all other requests. When you configure a gateway-level `TLS.SDS` certificate, the SDS certificate remains the default certificate and the gateway does not serve the leaf certificate. Refer to [`TLS.Enabled`](/consul/docs/reference/config-entry/api-gateway#tls-enabled) in the API gateway configuration reference for more information.
+
+### Verify HTTPS traffic
+
+Complete the following steps to verify that the gateway terminates HTTPS with a certificate that clients can trust:
+
+1. Confirm that Consul mapped the service to the gateway. The output includes an entry for the service with `"GatewayKind": "api-gateway"` and the listener port. Refer to [API gateway service mapping](/consul/docs/discover/service/static#api-gateway-service-mapping) for more information.
+
+   ```shell-session
+   $ curl --silent $CONSUL_HTTP_ADDR/v1/catalog/gateway-services/my-gateway \
+       | jq '[.[] | {Service: .Service.Name, GatewayKind, Port}]'
+   ```
+
+1. Resolve the DNS name of the service that the route targets. The A record returns the address of each healthy gateway instance, and the SRV record returns the listener port. The following example resolves the `web` service:
+
+   ```shell-session
+   $ dig @127.0.0.1 -p 8600 web.api-gateway.consul A +short
+   $ dig @127.0.0.1 -p 8600 web.api-gateway.consul SRV +short
+   ```
+
+1. Retrieve the active Consul service mesh CA root certificate. Refer to the [`/connect/ca/roots` API endpoint](/consul/api-docs/connect/ca#list-ca-root-certificates) for more information.
+
+   ```shell-session
+   $ curl --silent $CONSUL_HTTP_ADDR/v1/connect/ca/roots \
+       | jq --raw-output '.Roots[] | select(.Active) | .RootCert' > consul-ca.pem
+   ```
+
+1. Send an HTTPS request to the service through the gateway and verify the certificate with the CA root certificate:
+
+   ```shell-session
+   $ curl --cacert consul-ca.pem https://web.api-gateway.consul:8443
+   ```
+
+   The request succeeds without the `--insecure` flag because the gateway certificate includes the `*.api-gateway.consul` SAN and chains to the Consul service mesh CA.
