@@ -6,11 +6,12 @@
 import fs from 'node:fs'
 import type { FSWatcher } from 'node:fs'
 import path from 'node:path'
+import { isDeepStrictEqual } from 'node:util'
+import { Worker } from 'node:worker_threads'
 import { BUILD_TYPE, buildType } from './buildType'
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
 import type { Metadata } from '#types'
 
-const METADATA_MAX_AGE_MS = 60 * 60 * 1000
 const contentDir = path.join(process.cwd(), 'content')
 const products = Object.keys(PRODUCT_CONFIG)
 const versionMetadataFile = path.join(
@@ -30,7 +31,13 @@ type IncBuildsMetadataCache = {
 	productPaths: Map<string, string | undefined>
 	checkProducts: Set<string>
 	pendingProducts: Set<string>
+	needsStartupValidation: boolean
+	rebuildingProducts: boolean
 }
+
+type StartupMetadataCheck =
+	| { changed: false }
+	| { changed: true; metadata: Metadata }
 
 // Keep the development cache and watcher alive across module reloads.
 const globals = globalThis as typeof globalThis & {
@@ -68,20 +75,6 @@ function readExistingMetadata(): Metadata | undefined {
 		return undefined
 	}
 
-	const oldestAllowedMtime = Date.now() - METADATA_MAX_AGE_MS
-	const expired = [versionMetadataFile, docsPathsAllVersionsFile].some(
-		(file: string): boolean => {
-			return fs.statSync(file).mtimeMs < oldestAllowedMtime
-		},
-	)
-
-	if (expired) {
-		console.log(
-			'[watcher] existing metadata is older than one hour; regenerating',
-		)
-		return undefined
-	}
-
 	return {
 		versionMetadata: JSON.parse(
 			fs.readFileSync(versionMetadataFile, 'utf8'),
@@ -90,6 +83,51 @@ function readExistingMetadata(): Metadata | undefined {
 			fs.readFileSync(docsPathsAllVersionsFile, 'utf8'),
 		) as Metadata['docsPathsAllVersions'],
 	}
+}
+
+function checkStartupMetadata(
+	metadata: Metadata,
+): Promise<StartupMetadataCheck> {
+	return new Promise<StartupMetadataCheck>(
+		(
+			resolve: (result: StartupMetadataCheck) => void,
+			reject: (error: Error) => void,
+		) => {
+			const worker = new Worker(
+				path.join(process.cwd(), 'app/utils/incBuildsMetadataWorker.mjs'),
+				{ workerData: { contentDir, metadata } },
+			)
+			let receivedResult = false
+			worker.once('message', (result: StartupMetadataCheck) => {
+				receivedResult = true
+				resolve(result)
+			})
+			worker.once('error', reject)
+			worker.once('exit', (code: number) => {
+				if (!receivedResult) {
+					reject(
+						new Error(
+							`Startup metadata worker exited without a result (code ${code})`,
+						),
+					)
+				}
+			})
+		},
+	)
+}
+
+function refreshDevPortal(): void {
+	void fetch(`${process.env.DEV_PORTAL_URL}/api/refresh`, {
+		method: 'POST',
+	})
+		.then((response: Response) => {
+			if (!response.ok) {
+				throw new Error(`Dev Portal refresh returned HTTP ${response.status}`)
+			}
+		})
+		.catch((error: unknown) => {
+			console.error('[watcher] failed to refresh Dev Portal', error)
+		})
 }
 
 function saveMetadataFiles(metadata: Metadata): void {
@@ -154,28 +192,34 @@ function regenerateMetadata(
 			if (initialMetadata) {
 				cache.metadata = await initialMetadata
 			} else {
-				const existingMetadata = readExistingMetadata()
+				cache.pendingProducts.clear()
+				console.log('[watcher] generating initial metadata')
 
-				if (existingMetadata) {
-					console.log('[watcher] loading existing metadata')
-					cache.metadata = existingMetadata
-				} else {
-					cache.pendingProducts.clear()
-					console.log('[watcher] generating initial metadata')
+				try {
+					cache.metadata = await generateMetadata()
+				} catch (error: unknown) {
+					console.error('[watcher] failed to generate initial metadata', error)
+					throw error
+				}
 
-					try {
-						cache.metadata = await generateMetadata()
-					} catch (error: unknown) {
-						console.error(
-							'[watcher] failed to generate initial metadata',
-							error,
-						)
-						throw error
-					}
+				console.log('[watcher] generated initial metadata')
+				saveMetadataFiles(cache.metadata)
+			}
+		}
 
-					console.log('[watcher] generated initial metadata')
+		let startupMetadataChanged = false
+		if (cache.needsStartupValidation) {
+			console.log('[watcher] checking startup metadata in the background')
+			try {
+				const result = await checkStartupMetadata(cache.metadata)
+				if (result.changed) {
+					cache.metadata = result.metadata
+					startupMetadataChanged = true
 					saveMetadataFiles(cache.metadata)
 				}
+			} catch (error: unknown) {
+				console.error('[watcher] failed to check startup metadata', error)
+				throw error
 			}
 		}
 
@@ -187,10 +231,24 @@ function regenerateMetadata(
 				console.log(`[watcher] reloading ${product} metadata`)
 			}
 
+			cache.rebuildingProducts = true
 			try {
 				const generated = await generateMetadata(changedProducts)
 
 				for (const product of changedProducts) {
+					if (
+						cache.needsStartupValidation &&
+						(!isDeepStrictEqual(
+							cache.metadata.versionMetadata[product],
+							generated.versionMetadata[product],
+						) ||
+							!isDeepStrictEqual(
+								cache.metadata.docsPathsAllVersions[product],
+								generated.docsPathsAllVersions[product],
+							))
+					) {
+						startupMetadataChanged = true
+					}
 					cache.metadata.versionMetadata[product] =
 						generated.versionMetadata[product]
 					cache.metadata.docsPathsAllVersions[product] =
@@ -204,9 +262,19 @@ function regenerateMetadata(
 				}
 
 				throw error
+			} finally {
+				cache.rebuildingProducts = false
 			}
 
 			invalidateIfStructureChanged(cache)
+		}
+
+		if (cache.needsStartupValidation) {
+			cache.needsStartupValidation = false
+			console.log('[watcher] completed startup metadata check')
+			if (startupMetadataChanged) {
+				refreshDevPortal()
+			}
 		}
 
 		return cache.metadata
@@ -222,12 +290,22 @@ function regenerateMetadata(
 
 function startIncBuildsWatcher(): IncBuildsMetadataCache {
 	let cache = globals.__incBuildsMetadataCache
-	if (!cache?.watcher || !cache.productPaths) {
+	if (
+		!cache?.watcher ||
+		!cache.productPaths ||
+		typeof cache.needsStartupValidation !== 'boolean' ||
+		typeof cache.rebuildingProducts !== 'boolean'
+	) {
 		// Replace an older watcher retained across a development module reload.
 		cache?.watcher?.close()
 		const initialMetadata = cache?.promise
+		const metadata =
+			cache?.metadata ?? (initialMetadata ? undefined : readExistingMetadata())
+		if (metadata && !cache?.metadata) {
+			console.log('[watcher] loading existing metadata')
+		}
 		const nextCache: IncBuildsMetadataCache = {
-			metadata: cache?.metadata,
+			metadata,
 			productPaths: new Map(
 				products.map((product: string) => {
 					return [product, getProductPaths(product)]
@@ -235,6 +313,8 @@ function startIncBuildsWatcher(): IncBuildsMetadataCache {
 			),
 			checkProducts: new Set(),
 			pendingProducts: new Set(),
+			needsStartupValidation: Boolean(metadata || initialMetadata),
+			rebuildingProducts: false,
 		}
 		cache = globals.__incBuildsMetadataCache = nextCache
 
@@ -245,11 +325,7 @@ function startIncBuildsWatcher(): IncBuildsMetadataCache {
 				const filePath = filename ? path.join(contentDir, filename) : contentDir
 				console.log(`[watcher] reloading ${filePath}`)
 
-				void fetch(`${process.env.DEV_PORTAL_URL}/api/refresh`, {
-					method: 'POST',
-				}).catch((error: unknown) => {
-					console.error('[watcher] failed to refresh Dev Portal', error)
-				})
+				refreshDevPortal()
 
 				if (eventType === 'change') {
 					return
@@ -277,7 +353,7 @@ function startIncBuildsWatcher(): IncBuildsMetadataCache {
 			},
 		)
 
-		if (initialMetadata) {
+		if (initialMetadata || cache.needsStartupValidation) {
 			void regenerateMetadata(cache, initialMetadata).catch(
 				(error: unknown) => {
 					console.error('[watcher] failed to reload metadata', error)
@@ -291,6 +367,17 @@ function startIncBuildsWatcher(): IncBuildsMetadataCache {
 
 export function getIncBuildLocalDevMetadata(): Promise<Metadata> {
 	const cache = startIncBuildsWatcher()
+
+	if (cache.metadata && cache.needsStartupValidation) {
+		invalidateIfStructureChanged(cache)
+		if (cache.pendingProducts.size === 0 && !cache.rebuildingProducts) {
+			if (!cache.promise) {
+				// Startup failures are logged before rejecting; a later request retries.
+				void regenerateMetadata(cache).catch(() => {})
+			}
+			return Promise.resolve(cache.metadata)
+		}
+	}
 
 	if (cache.promise) {
 		return cache.promise

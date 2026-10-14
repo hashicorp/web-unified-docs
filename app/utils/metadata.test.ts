@@ -4,6 +4,7 @@
  */
 
 import fs from 'node:fs'
+import { EventEmitter } from 'node:events'
 import path from 'node:path'
 import type { Metadata } from '#types'
 import { vol } from 'memfs'
@@ -14,12 +15,14 @@ const {
 	portalFetch,
 	gatherVersionMetadata,
 	gatherAllVersionsDocsPaths,
+	metadataWorker,
 } = vi.hoisted(() => {
 	return {
 		watch: vi.fn(),
 		portalFetch: vi.fn(),
 		gatherVersionMetadata: vi.fn(),
 		gatherAllVersionsDocsPaths: vi.fn(),
+		metadataWorker: vi.fn(),
 	}
 })
 
@@ -32,6 +35,9 @@ vi.mock('../../scripts/prebuild/gather-version-metadata.mjs', () => {
 })
 vi.mock('../../scripts/prebuild/gather-all-versions-docs-paths.mjs', () => {
 	return { gatherAllVersionsDocsPaths }
+})
+vi.mock('node:worker_threads', () => {
+	return { Worker: metadataWorker }
 })
 
 const generatedMetadata: Metadata = {
@@ -60,6 +66,26 @@ const twoProductsMetadata: Metadata = {
 	docsPathsAllVersions: {
 		...generatedMetadata.docsPathsAllVersions,
 		consul: { 'v1.22.x': [] },
+	},
+}
+
+const twoVersionsMetadata: Metadata = {
+	versionMetadata: {
+		vault: [
+			{ version: 'v1.22.x', releaseStage: 'stable', isLatest: true },
+			{ ...generatedMetadata.versionMetadata.vault[0], isLatest: false },
+		],
+	},
+	docsPathsAllVersions: {
+		vault: {
+			...generatedMetadata.docsPathsAllVersions.vault,
+			'v1.22.x': [
+				{
+					...generatedMetadata.docsPathsAllVersions.vault['v1.21.x'][0],
+					itemPath: 'content/vault/v1.22.x/docs/index.mdx',
+				},
+			],
+		},
 	},
 }
 
@@ -115,6 +141,19 @@ function writeGeneratedMetadataFiles(
 
 let onChange: (eventType: string, filename: string | null) => void
 
+function holdStartupCheck(): EventEmitter {
+	const worker = new EventEmitter()
+	metadataWorker.mockReturnValue(worker)
+	return worker
+}
+
+async function waitForStartupCheck(): Promise<void> {
+	const globals = globalThis as typeof globalThis & {
+		__incBuildsMetadataCache?: { promise?: Promise<Metadata> }
+	}
+	await globals.__incBuildsMetadataCache?.promise
+}
+
 beforeEach(() => {
 	vi.resetModules()
 	vi.resetAllMocks()
@@ -139,9 +178,17 @@ beforeEach(() => {
 	gatherAllVersionsDocsPaths.mockResolvedValue(
 		generatedMetadata.docsPathsAllVersions,
 	)
+	metadataWorker.mockImplementation(() => {
+		const worker = new EventEmitter()
+		setImmediate(() => {
+			worker.emit('message', { changed: false })
+		})
+		return worker
+	})
 })
 
-afterEach(() => {
+afterEach(async () => {
+	await waitForStartupCheck()
 	vi.doUnmock('./incBuildsMetadata')
 	vi.restoreAllMocks()
 	vi.unstubAllGlobals()
@@ -169,6 +216,7 @@ describe('getMetadata', () => {
 
 			expect(await getMetadata()).toEqual(generatedMetadata)
 			expect(watch).not.toHaveBeenCalled()
+			expect(metadataWorker).not.toHaveBeenCalled()
 		},
 	)
 
@@ -278,6 +326,218 @@ describe('getMetadata', () => {
 		expect(first).toEqual(generatedMetadata)
 	})
 
+	test('serves cached metadata while checking an offline version addition in the background', async () => {
+		writeGeneratedMetadataFiles()
+		vol.fromJSON(
+			{ 'vault/v1.22.x/docs/index.mdx': '# New version' },
+			contentDir,
+		)
+		const worker = holdStartupCheck()
+		const { getMetadata } = await import('./metadata')
+		const first = await getMetadata()
+		await vi.waitFor(() => {
+			expect(metadataWorker).toHaveBeenCalledOnce()
+		})
+
+		expect(first).toEqual(generatedMetadata)
+		expect(await getMetadata()).toBe(first)
+		expect(portalFetch).not.toHaveBeenCalled()
+		expect(fs.promises.writeFile).not.toHaveBeenCalled()
+
+		worker.emit('message', { changed: true, metadata: twoVersionsMetadata })
+		await waitForStartupCheck()
+
+		expect(await getMetadata()).toEqual(twoVersionsMetadata)
+		expect(portalFetch).toHaveBeenCalledOnce()
+		expect(portalFetch).toHaveBeenCalledWith(
+			'https://portal.example/api/refresh',
+			{ method: 'POST' },
+		)
+		expect(fs.promises.writeFile).toHaveBeenCalledWith(
+			versionMetadataFile,
+			JSON.stringify(twoVersionsMetadata.versionMetadata, null, 2),
+		)
+		expect(fs.promises.writeFile).toHaveBeenCalledWith(
+			docsPathsAllVersionsFile,
+			JSON.stringify(twoVersionsMetadata.docsPathsAllVersions, null, 2),
+		)
+	})
+
+	test('starts the background check without waiting for a metadata request', async () => {
+		writeGeneratedMetadataFiles()
+		const worker = holdStartupCheck()
+		await import('./incBuildsMetadata')
+		await vi.waitFor(() => {
+			expect(metadataWorker).toHaveBeenCalledOnce()
+		})
+
+		expect(metadataWorker).toHaveBeenCalledWith(
+			path.join(process.cwd(), 'app/utils/incBuildsMetadataWorker.mjs'),
+			{ workerData: { contentDir, metadata: generatedMetadata } },
+		)
+		worker.emit('message', { changed: false })
+		await waitForStartupCheck()
+		expect(portalFetch).not.toHaveBeenCalled()
+		expect(fs.promises.writeFile).not.toHaveBeenCalled()
+	})
+
+	test('does not repeat the startup check after a development module reload', async () => {
+		writeGeneratedMetadataFiles()
+		const firstModule = await import('./metadata')
+		const first = await firstModule.getMetadata()
+		await waitForStartupCheck()
+		vi.resetModules()
+		const secondModule = await import('./metadata')
+
+		expect(await secondModule.getMetadata()).toBe(first)
+		expect(metadataWorker).toHaveBeenCalledOnce()
+		expect(portalFetch).not.toHaveBeenCalled()
+	})
+
+	test('shares an in-flight startup check after consumers reload', async () => {
+		writeGeneratedMetadataFiles()
+		const worker = holdStartupCheck()
+		const firstModule = await import('./metadata')
+		const first = await firstModule.getMetadata()
+		await vi.waitFor(() => {
+			expect(metadataWorker).toHaveBeenCalledOnce()
+		})
+		vi.resetModules()
+		const secondModule = await import('./metadata')
+
+		expect(await secondModule.getMetadata()).toBe(first)
+		expect(metadataWorker).toHaveBeenCalledOnce()
+		worker.emit('message', { changed: false })
+		await waitForStartupCheck()
+	})
+
+	test('logs a failed startup check and retries without blocking cached responses', async () => {
+		writeGeneratedMetadataFiles()
+		const logError = vi.spyOn(console, 'error').mockImplementation(() => {})
+		const worker = holdStartupCheck()
+		const { getMetadata } = await import('./metadata')
+		const first = await getMetadata()
+		await vi.waitFor(() => {
+			expect(metadataWorker).toHaveBeenCalledOnce()
+		})
+		const failedCheck = waitForStartupCheck()
+		worker.emit('error', new Error('Startup check failed'))
+		await expect(failedCheck).rejects.toThrow('Startup check failed')
+		expect(logError).toHaveBeenCalledWith(
+			'[watcher] failed to check startup metadata',
+			expect.objectContaining({ message: 'Startup check failed' }),
+		)
+		expect(portalFetch).not.toHaveBeenCalled()
+
+		const retryWorker = holdStartupCheck()
+		expect(await getMetadata()).toBe(first)
+		await vi.waitFor(() => {
+			expect(metadataWorker).toHaveBeenCalledTimes(2)
+		})
+		retryWorker.emit('message', {
+			changed: true,
+			metadata: twoVersionsMetadata,
+		})
+		await waitForStartupCheck()
+		expect(await getMetadata()).toEqual(twoVersionsMetadata)
+		expect(portalFetch).toHaveBeenCalledOnce()
+	})
+
+	test.each([0, 1])(
+		'reports a startup worker exiting with code %i without a result',
+		async (code: number) => {
+			writeGeneratedMetadataFiles()
+			const logError = vi.spyOn(console, 'error').mockImplementation(() => {})
+			const worker = holdStartupCheck()
+			const { getMetadata } = await import('./metadata')
+			expect(await getMetadata()).toEqual(generatedMetadata)
+			await vi.waitFor(() => {
+				expect(metadataWorker).toHaveBeenCalledOnce()
+			})
+			const pending = waitForStartupCheck()
+			worker.emit('exit', code)
+
+			await expect(pending).rejects.toThrow(
+				`Startup metadata worker exited without a result (code ${code})`,
+			)
+			expect(logError).toHaveBeenCalledWith(
+				'[watcher] failed to check startup metadata',
+				expect.any(Error),
+			)
+			expect(portalFetch).not.toHaveBeenCalled()
+		},
+	)
+
+	test('logs an unsuccessful completion refresh without discarding updated metadata', async () => {
+		writeGeneratedMetadataFiles()
+		const logError = vi.spyOn(console, 'error').mockImplementation(() => {})
+		const worker = holdStartupCheck()
+		const { getMetadata } = await import('./metadata')
+		await getMetadata()
+		await vi.waitFor(() => {
+			expect(metadataWorker).toHaveBeenCalledOnce()
+		})
+		portalFetch.mockResolvedValueOnce({ ok: false, status: 503 })
+		worker.emit('message', { changed: true, metadata: twoVersionsMetadata })
+		await waitForStartupCheck()
+
+		await vi.waitFor(() => {
+			expect(logError).toHaveBeenCalledWith(
+				'[watcher] failed to refresh Dev Portal',
+				expect.objectContaining({
+					message: 'Dev Portal refresh returned HTTP 503',
+				}),
+			)
+		})
+		expect(await getMetadata()).toEqual(twoVersionsMetadata)
+		expect(metadataWorker).toHaveBeenCalledOnce()
+		expect(portalFetch).toHaveBeenCalledOnce()
+	})
+
+	test('drains structural changes during the startup check before its completion refresh', async () => {
+		writeGeneratedMetadataFiles()
+		const worker = holdStartupCheck()
+		const { getMetadata } = await import('./metadata')
+		await getMetadata()
+		await vi.waitFor(() => {
+			expect(metadataWorker).toHaveBeenCalledOnce()
+		})
+		mockMetadata(twoVersionsMetadata)
+		let finish: (value: Metadata['docsPathsAllVersions']) => void
+		gatherAllVersionsDocsPaths.mockImplementationOnce(() => {
+			return new Promise<Metadata['docsPathsAllVersions']>(
+				(resolve: typeof finish) => {
+					finish = resolve
+				},
+			)
+		})
+		const addedFile = 'vault/v1.22.x/docs/index.mdx'
+		vol.fromJSON({ [addedFile]: '# New version' }, contentDir)
+		onChange('rename', addedFile)
+		const resolved = vi.fn()
+		const pending = getMetadata().then(resolved)
+		worker.emit('message', { changed: false })
+		await vi.waitFor(() => {
+			expect(gatherAllVersionsDocsPaths).toHaveBeenCalledOnce()
+		})
+
+		expect(resolved).not.toHaveBeenCalled()
+		expect(portalFetch).toHaveBeenCalledOnce()
+		const lateResolved = vi.fn()
+		const lateRequest = getMetadata().then(lateResolved)
+		await new Promise<void>((resolve: () => void) => {
+			setImmediate(resolve)
+		})
+		const resolvedDuringRebuild = lateResolved.mock.calls.length > 0
+		finish(twoVersionsMetadata.docsPathsAllVersions)
+		await Promise.all([pending, lateRequest])
+
+		expect(resolvedDuringRebuild).toBe(false)
+		expect(await getMetadata()).toEqual(twoVersionsMetadata)
+		expect(portalFetch).toHaveBeenCalledTimes(2)
+		expect(metadataWorker).toHaveBeenCalledOnce()
+	})
+
 	describe('existing metadata freshness', () => {
 		const oneHourMs = 60 * 60 * 1000
 		const metadataFiles = [versionMetadataFile, docsPathsAllVersionsFile]
@@ -291,7 +551,7 @@ describe('getMetadata', () => {
 			}
 		}
 
-		test.each([oneHourMs - 1, oneHourMs])(
+		test.each([oneHourMs - 1, oneHourMs, oneHourMs + 1])(
 			'reuses existing metadata that is %i milliseconds old',
 			async (ageMs: number) => {
 				writeGeneratedMetadataFiles()
@@ -310,10 +570,11 @@ describe('getMetadata', () => {
 			['all-version paths', [docsPathsAllVersionsFile]],
 			['both metadata files', metadataFiles],
 		])(
-			'regenerates and saves metadata when %s is older than one hour',
+			'serves old %s immediately and refreshes it after the startup check',
 			async (_name: string, staleFiles: string[]) => {
 				writeGeneratedMetadataFiles(twoProductsMetadata)
 				setFileAge(staleFiles, oneHourMs + 1)
+				const worker = holdStartupCheck()
 				const { getMetadata } = await import('./metadata')
 
 				const [first, second] = await Promise.all([
@@ -321,14 +582,16 @@ describe('getMetadata', () => {
 					getMetadata(),
 				])
 
-				expect(first).toEqual(generatedMetadata)
+				expect(first).toEqual(twoProductsMetadata)
 				expect(second).toBe(first)
-				expect(gatherVersionMetadata).toHaveBeenCalledOnce()
-				expect(gatherVersionMetadata).toHaveBeenCalledWith(
-					contentDir,
-					undefined,
-				)
-				expect(gatherAllVersionsDocsPaths).toHaveBeenCalledOnce()
+				expect(fs.promises.writeFile).not.toHaveBeenCalled()
+				await vi.waitFor(() => {
+					expect(metadataWorker).toHaveBeenCalledOnce()
+				})
+				worker.emit('message', { changed: true, metadata: generatedMetadata })
+				await waitForStartupCheck()
+				expect(await getMetadata()).toEqual(generatedMetadata)
+				expect(portalFetch).toHaveBeenCalledOnce()
 				for (const [file, metadata] of [
 					[versionMetadataFile, generatedMetadata.versionMetadata],
 					[docsPathsAllVersionsFile, generatedMetadata.docsPathsAllVersions],

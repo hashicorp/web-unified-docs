@@ -87,11 +87,21 @@ Direct `process.env.NODE_ENV` checks in the application utilities keep the
 watcher, MDX transforms, navigation rewriting module, and local filesystem reads
 out of Next.js production bundles without changing the shared build-type detector
 used by Bun binaries.
-On the first metadata request, it loads the generated
-JSON files if both exist and neither file's modification time is more than one
-hour old; otherwise it generates metadata on demand and queues both files for
-background writing. The age check applies only when loading the disk cache;
-in-memory metadata is maintained by the watcher. API routes share one in-memory cache. Every
+If both generated metadata JSON files exist, it loads them immediately,
+regardless of age. Each cold development start checks this cached metadata
+against the current content tree in a worker thread
+(`app/utils/incBuildsMetadataWorker.mjs`), using the same metadata generators
+as prebuild. The check performs a complete metadata scan without blocking
+cached requests on that scan. Cached data may briefly be stale, including
+versions or documents changed while the server was stopped.
+If metadata differs, it replaces the in-memory cache, queues both JSON files
+for background writing, and refreshes Dev Portal after the startup check and
+any concurrent structural rebuilds finish. An unchanged result does not write
+files or refresh Dev Portal. Missing metadata is generated on the first request,
+which waits for that generation. Startup check failures are logged; cached
+metadata remains available and later requests retry the check.
+API routes share one in-memory cache, and development module reloads share the
+same startup check rather than starting another worker. Every
 content event logs its path and triggers a Dev Portal refresh. `change` events
 return immediately, without filesystem checks or metadata regeneration.
 New, deleted, renamed, and moved files are detected through `rename` events,
@@ -102,7 +112,8 @@ metadata and all-version document paths; other products remain cached. After a
 product is regenerated, both metadata JSON files are updated asynchronously,
 without delaying requests. `rename` events without a filename check all product folders
 but still regenerate only products whose paths changed. Requests wait for the
-shared rebuild queue to finish, including changes received during generation.
+shared structural rebuild queue to finish, including changes received during
+generation; cached requests do not wait for a startup check alone.
 Atomic saves reported as `rename` still scan paths, but do not regenerate
 metadata when the final paths are unchanged. Background
 metadata failures are logged, waiting requests reject, and later requests retry
