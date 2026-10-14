@@ -40,7 +40,7 @@ export function addVersionToNavDataPaths(
 	}
 
 	const basePaths = PRODUCT_CONFIG[product].basePaths
-	const basePathPrefixes = basePaths.map((basePath) => {
+	const basePathPrefixes = basePaths?.map((basePath) => {
 		return `/${basePath}`
 	})
 
