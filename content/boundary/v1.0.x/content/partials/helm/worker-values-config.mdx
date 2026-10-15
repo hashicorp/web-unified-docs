@@ -1,0 +1,267 @@
+## Boundary runtime configuration
+
+The `worker.config` contains the Boundary worker HCL. The chart writes this value into a ConfigMap and mounts it at `/etc/boundary/boundary-worker.hcl`.
+
+The chart renders `worker.config` with Helm's `tpl` function. Helm template expressions inside the HCL are evaluated during rendering.
+
+At container startup, the chart replaces `${POD_NAME_LOWER}` with the pod name converted to lowercase and starts Boundary with the processed configuration file.
+
+The chart does not fully validate Boundary HCL semantics. It performs targeted checks for the controller-generated activation token reference and operations listener TLS alignment. You are responsible for configuring valid listeners, registration settings, upstreams, storage paths, and worker tags.
+
+## Kubernetes infrastructure configuration
+
+Kubernetes-specific values control the Deployment, Services, PVCs, security contexts, and scheduling options. These values do not replace or generate the Boundary runtime HCL.
+
+For example, if you change `worker.service.proxy.targetPort` to `9222`, you must also update the proxy listener port in `worker.config`.
+
+Refer to the [configuration alignment checklist](#configuration-alignment-checklist) before you finalize any changes.
+
+The following sections describe all available Helm values, grouped by function. Each table lists the key, default value, and a description.
+
+## Image values
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `image.repository` | `""` | Worker image repository. On Kubernetes, an empty value resolves to `hashicorp/boundary-enterprise`. |
+| `image.tag` | `""` | Worker image tag. An empty value resolves to the chart application version, currently `1.0.2-ent`. |
+| `image.pullPolicy` | `IfNotPresent` | Kubernetes image pull policy |
+| `imagePullSecrets` | `[]` | Optional image pull secrets for private registries |
+
+With both image values empty, the effective Kubernetes image is `hashicorp/boundary-enterprise:1.0.2-ent`.
+
+## Naming and namespace values
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `nameOverride` | `""` | Overrides the `app.kubernetes.io/name` label. It does not change resource-name prefixes. |
+| `fullnameOverride` | `""` | Overrides the release-name prefix used for resource names. |
+| `namespace` | `""` | Namespace written to namespaced resources. Empty uses the Helm release namespace. Prefer setting the namespace with Helm's `--namespace` option. |
+
+By default, resource names use the Helm release name. A release named `boundary-worker` creates `boundary-worker-deployment`, `boundary-worker-config`, `boundary-worker-proxy`, and `boundary-worker-ops`.
+
+## Worker runtime values
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `worker.config` | Embedded sample HCL | Boundary worker HCL stored in a ConfigMap and mounted into the worker container. Replace placeholders before installing. |
+| `worker.terminationGracePeriodSeconds` | `7200` | Pod termination grace period in seconds. Allows long-running sessions time to drain before forced termination. |
+
+The default `worker.config` includes `disable_mlock = true`. The chart's default security model drops all Linux capabilities and disallows privilege escalation. We do not recommend changing this value. Memory locking requires elevated privileges that the chart does not grant. If you enable swap on your nodes, address any resulting data-at-rest exposure through platform controls.
+
+## Probe values
+
+The chart adds liveness and readiness probes against `/health` on the ops listener. The probe scheme is derived from `tls.ops.disabled`: `HTTP` when true and `HTTPS` when false.
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `worker.livenessProbe.initialDelaySeconds` | `10` | Initial liveness probe delay |
+| `worker.livenessProbe.periodSeconds` | `10` | Liveness probe period |
+| `worker.livenessProbe.failureThreshold` | `3` | Liveness probe failure threshold |
+| `worker.livenessProbe.timeoutSeconds` | `5` | Liveness probe timeout |
+| `worker.readinessProbe.initialDelaySeconds` | `10` | Initial readiness probe delay |
+| `worker.readinessProbe.periodSeconds` | `10` | Readiness probe period |
+| `worker.readinessProbe.failureThreshold` | `3` | Readiness probe failure threshold |
+| `worker.readinessProbe.timeoutSeconds` | `5` | Readiness probe timeout |
+
+## Proxy Service values
+
+The chart always renders the proxy Service. It exposes the worker's session traffic listener.
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `worker.service.proxy.type` | `LoadBalancer` | Kubernetes Service type for proxy traffic |
+| `worker.service.proxy.port` | `9202` | Service port for proxy traffic |
+| `worker.service.proxy.targetPort` | `9202` | Container port targeted by the proxy Service. Must match the proxy listener in `worker.config`. |
+| `worker.service.proxy.annotations` | `{}` | Annotations added to the proxy Service. AWS load balancer annotations are omitted automatically when the proxy Service type is not `LoadBalancer`. |
+
+## Operations Service values
+
+The chart always renders the operations Service. It exposes the worker operations listener for health and metrics.
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `worker.service.ops.type` | `ClusterIP` | Kubernetes Service type for operations traffic |
+| `worker.service.ops.port` | `9203` | Service port for the operations endpoint |
+| `worker.service.ops.targetPort` | `9203` | Container port targeted by the operations Service. Must match the ops listener in `worker.config`. |
+| `worker.service.ops.annotations` | `{}` | Annotations added to the operations Service |
+
+Keep the operations Service internal unless a trusted monitoring path requires a different exposure model.
+
+The Deployment declares fixed container ports `9202` and `9203`, and its probes use the named ops port at `9203`. Keep the ops HCL listener and `worker.service.ops.targetPort` at `9203`. You can change `worker.service.ops.port`, which is the Service-facing port. A numeric proxy `targetPort` can route to a different proxy listener, but update both values together.
+
+## Operations TLS values
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `tls.ops.disabled` | `false` | Controls operations listener TLS. The default mounts the TLS Secret and makes health probes use HTTPS. Set to `true` to use HTTP and omit the TLS volume. |
+| `tls.secretName` | `boundary-worker-tls` | Existing Kubernetes Secret mounted when ops TLS is enabled. The Secret must contain `tls.crt` and `tls.key`. |
+| `tls.mountPath` | `/etc/boundary/tls` | Directory where the TLS Secret is mounted. The ops listener certificate paths must be `<mountPath>/tls.crt` and `<mountPath>/tls.key`. |
+
+The chart validates the rendered ops listener against `tls.ops.disabled`. With TLS disabled, the listener must contain `tls_disable=true`. With TLS enabled, it must not disable TLS and its certificate and key paths must exactly match `tls.mountPath`. Create the configured Secret before installation. The chart does not verify that the TLS Secret exists or contains the expected keys before Kubernetes creates the pod, and the pod cannot start when the default Secret is absent.
+
+## Resource values
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `worker.resources.requests.cpu` | `100m` | CPU request for the worker container |
+| `worker.resources.requests.memory` | `512Mi` | Memory request for the worker container |
+| `worker.resources.limits.cpu` | `200m` | CPU limit for the worker container |
+| `worker.resources.limits.memory` | `1Gi` | Memory limit for the worker container |
+
+Tune resource values for your expected connection volume, recording usage, and cluster sizing.
+
+## Auth storage values
+
+Auth storage stores worker identity and authentication material for registration models that require local persistence.
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `worker.persistence.authStorage.enabled` | `false` | Creates and mounts an auth storage PVC when enabled. When disabled, the chart mounts an `emptyDir` at the auth storage path. |
+| `worker.persistence.authStorage.size` | `1Gi` | Size of the auth storage PVC |
+| `worker.persistence.authStorage.accessMode` | `ReadWriteOnce` | Access mode for the auth storage PVC |
+| `worker.persistence.authStorage.storageClass` | `""` | StorageClass name for the auth storage PVC. Empty omits `storageClassName`, allowing Kubernetes to use its default StorageClass behavior. |
+| `worker.persistence.authStorage.path` | `/var/lib/boundary` | Mount path for auth storage. Must match `auth_storage_path` in `worker.config`. |
+| `worker.persistence.authStorage.retainOnUninstall` | `true` | Preserves the auth storage PVC after `helm uninstall`. Set to `false` to delete the PVC on uninstall. |
+
+Disable auth storage only when your worker authentication model does not require persistent local auth material, such as KMS-backed worker authentication.
+
+When enabled, the claim is named `<fullname>-auth-storage`. The chart always mounts the configured path. When you disable persistence, the backing volume is `emptyDir`.
+
+## Recording storage values
+
+Recording storage stores session recordings when recording is configured in Boundary.
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `worker.persistence.recording.enabled` | `false` | Creates and mounts a recording PVC when enabled |
+| `worker.persistence.recording.size` | `10Gi` | Size of the recording PVC |
+| `worker.persistence.recording.accessMode` | `ReadWriteOnce` | Access mode for the recording PVC |
+| `worker.persistence.recording.storageClass` | `""` | StorageClass name for the recording PVC. Empty omits `storageClassName`, allowing Kubernetes to use its default StorageClass behavior. |
+| `worker.persistence.recording.path` | `/boundary/recording` | Mount path for recording storage. Must match `recording_storage_path` in `worker.config` when recording is enabled. |
+| `worker.persistence.recording.retainOnUninstall` | `true` | Preserves the recording PVC after `helm uninstall`. Set to `false` to delete the PVC on uninstall. |
+
+If you disable recording storage, remove `recording_storage_path` from the HCL or ensure recording data does not need to persist.
+
+When enabled, the claim is named `<fullname>-recording-storage`. The chart requests storage using the configured Kubernetes quantity, access mode, and optional StorageClass. It does not expose PVC selectors or `volumeName` for explicitly binding a particular pre-provisioned volume. When you disable persistence, the configured recording path is backed by `emptyDir`.
+
+For either claim, `retainOnUninstall=true` adds `helm.sh/resource-policy: keep`. Configuring `false` omits that annotation. The retention values control Helm deletion during uninstall, not the StorageClass reclaim policy or the underlying PersistentVolume lifecycle.
+
+## Secret reference values
+
+The chart injects values from an existing Kubernetes Secret as environment variables into the worker container. Use this to supply sensitive values such as a controller-generated activation token without embedding them in `worker.config`.
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `secretRefs.secretName` | `""` | Name of an existing Kubernetes Secret. The chart injects its token key only when rendered `worker.config` uses the required `env://` reference. The Secret is not mounted as a volume. |
+| `secretRefs.validateExisting` | `false` | When true, Helm uses a cluster lookup to require the referenced Secret and token key, provided the rendered configuration uses the supported token reference. |
+| `secretRefs.keys.controllerGeneratedActivationToken` | `worker-controller-generated-activation-token` | Key in the Secret used for `BOUNDARY_WORKER_CONTROLLER_GENERATED_ACTIVATION_TOKEN`. Must match the key name in the Kubernetes Secret. |
+
+To use a Secret for controller-led registration, set `controller_generated_activation_token = "env://BOUNDARY_WORKER_CONTROLLER_GENERATED_ACTIVATION_TOKEN"` in `worker.config` and point `secretRefs.secretName` at the Secret that contains the token key.
+
+When you set `secretRefs.secretName`, a different `env://` name or a hardcoded `controller_generated_activation_token` fails chart rendering. If the field is absent, the chart neither injects nor validates the Secret. Because `validateExisting` uses Helm's `lookup` in the Helm release namespace, use it during an install or upgrade connected to the target cluster and keep `namespace` aligned with `--namespace`. Client-only rendering cannot confirm the Secret.
+
+## Extra environment variables
+
+Use `extraEnv` to inject additional environment variables into the worker container. This supports any valid Kubernetes `env` entry, including plain `name`/`value` pairs and `valueFrom` references.
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `extraEnv` | `[]` | List of additional environment variables injected into the worker container |
+
+Example using a plain value:
+
+```yaml
+extraEnv:
+  - name: BOUNDARY_WORKER_CONTROLLER_GENERATED_ACTIVATION_TOKEN
+    value: "act_1234abcd..."
+```
+
+Example using a Secret reference:
+
+```yaml
+extraEnv:
+  - name: BOUNDARY_WORKER_CONTROLLER_GENERATED_ACTIVATION_TOKEN
+    valueFrom:
+      secretKeyRef:
+        name: boundary-worker-secrets
+        key: worker-controller-generated-activation-token
+```
+
+Use `extraEnv` as an alternative to `secretRefs` when you need finer control over how Secret keys are mapped to environment variable names, or when injecting variables unrelated to activation tokens.
+
+## Extra volumes and manifests
+
+Use the passthrough values to mount additional Kubernetes volumes or render resources with the Helm release.
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `extraVolumes` | `[]` | Additional entries appended to the pod's `volumes` list. |
+| `extraVolumeMounts` | `[]` | Additional entries appended to the worker container's `volumeMounts` list. Each mount must reference an available volume. |
+| `extraManifests` | `[]` | Additional Kubernetes manifests rendered as separate documents. Accepts a list or map of YAML objects or template strings and evaluates each entry with `tpl`. |
+
+For example, you can mount an existing ConfigMap and render a NetworkPolicy:
+
+```yaml
+extraVolumes:
+  - name: worker-extra-config
+    configMap:
+      name: worker-extra-config
+
+extraVolumeMounts:
+  - name: worker-extra-config
+    mountPath: /etc/boundary/extra
+    readOnly: true
+
+extraManifests:
+  - apiVersion: networking.k8s.io/v1
+    kind: NetworkPolicy
+    metadata:
+      name: '{{ .Release.Name }}-worker'
+    spec:
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/instance: '{{ .Release.Name }}'
+          app.kubernetes.io/component: worker
+      policyTypes:
+        - Ingress
+```
+
+## Security context values
+
+The default security settings run the worker without elevated privileges.
+
+| Key | Default |
+| --- | --- |
+| `podSecurityContext.runAsNonRoot` | `true` |
+| `podSecurityContext.runAsUser` | `100` |
+| `podSecurityContext.runAsGroup` | `1000` |
+| `podSecurityContext.fsGroup` | `1000` |
+| `podSecurityContext.fsGroupChangePolicy` | `OnRootMismatch` |
+| `podSecurityContext.seccompProfile.type` | `RuntimeDefault` |
+| `containerSecurityContext.runAsNonRoot` | `true` |
+| `containerSecurityContext.runAsUser` | `100` |
+| `containerSecurityContext.runAsGroup` | `1000` |
+| `containerSecurityContext.allowPrivilegeEscalation` | `false` |
+| `containerSecurityContext.readOnlyRootFilesystem` | `true` |
+| `containerSecurityContext.capabilities.drop` | `ALL` |
+| `containerSecurityContext.seccompProfile.type` | `RuntimeDefault` |
+
+The Deployment also sets `SKIP_SETCAP=1`, which prevents the container startup path from attempting Linux capability modification.
+
+## ServiceAccount values
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `serviceAccount.name` | `""` | Existing ServiceAccount assigned to the worker pod. Empty omits `serviceAccountName`, so Kubernetes uses the namespace's default ServiceAccount. The chart does not create a ServiceAccount. |
+| `serviceAccount.automountServiceAccountToken` | `false` | Controls whether the pod service account token is mounted. Set to `true` when using IRSA or Workload Identity. |
+
+Create and annotate any required ServiceAccount separately before installing the chart.
+
+## Scheduling values
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `podAnnotations` | `{}` | Additional pod annotations |
+| `nodeSelector` | `{}` | Node selector constraints |
+| `tolerations` | `[]` | Pod tolerations |
+| `affinity` | `{}` | Pod affinity rules |
