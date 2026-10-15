@@ -12,6 +12,8 @@ We welcome contributions to our documentation. Feel free to open issues or pull 
 
 Documentation content is located in the `content` directory, with subdirectories organized by product.
 
+Please refer to and follow our [documentation style guide](docs/style-guide/).
+
 ### Local Preview
 
 You can preview the site and any local changes you make in your browser using the local preview function.
