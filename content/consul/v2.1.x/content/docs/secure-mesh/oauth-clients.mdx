@@ -1,0 +1,75 @@
+---
+layout: docs
+page_title: OAuth clients for AI services
+description: >-
+  Consul Enterprise registers OAuth clients for AI agent and MCP server services and uses those clients for on-behalf-of token exchange. Learn how to enable the consul-ai feature gate, select one OIDC auth method, and declare an ai block on each service.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-10-15T13:45:00+05:30
+last_modified: 2026-10-15T13:45:00.000Z
+# END AUTO GENERATED METADATA
+---
+
+# OAuth clients for AI services
+
+<EnterpriseAlert>
+
+This feature requires Consul Enterprise.
+Refer to the [enterprise feature matrix](/consul/docs/enterprise#consul-enterprise-feature-availability) for additional information.
+
+</EnterpriseAlert>
+
+Consul can register an OAuth client for a service and use that client when a mesh proxy exchanges a caller token for a token bound to the next service. This page describes the cluster and service configuration that starts dynamic client registration (DCR) and on-behalf-of (OBO) token exchange.
+
+Consul registers clients with IBM Security Verify. Each client authenticates with `private_key_jwt` and an inline JSON Web Key Set (JWKS).
+
+## Requirements
+
+Complete the following steps before you register an AI service:
+
+1. Enable the `consul-ai` feature gate. Consul rejects a service registration that contains an `ai` block while the gate is off.
+
+   ```shell-session
+   $ consul operator feature set consul-ai true
+   ```
+
+1. Create exactly one ACL auth method with `Type` set to `oidc` and `EnableServiceDCR` set to `true`. Consul waits to register clients when the cluster has no flagged method or more than one flagged method. Refer to [`EnableServiceDCR`](/consul/docs/secure/acl/auth-method/oidc#enableservicedcr).
+
+   The flagged method is the cluster identity provider. Set `OIDCDiscoveryURL`, `OIDCClientID`, and `OIDCClientSecret` on that method. Consul uses `OIDCClientID` and `OIDCClientSecret` as the bootstrap client that registers service clients. You can omit `AllowedRedirectURIs` when the method is used for service registration.
+
+   Consul rejects an agent configuration block named `oauth.iam`. Configure the identity provider with the auth method.
+
+1. Register each AI workload with an [`ai`](/consul/docs/reference/service#ai) block. You can set the block in a service definition file, the [catalog register API](/consul/api-docs/catalog#register-entity), or the [agent service register API](/consul/api-docs/agent/service#register-service).
+
+## Roles
+
+The `ai.role` value selects the sub-block and the OAuth behavior.
+
+| `role` | Sub-block | Dynamic client registration | On-behalf-of credential |
+| --- | --- | --- | --- |
+| `ai-agent` | `agent` | Yes | Yes. The agent exchanges tokens for outbound calls. |
+| `mcp-server` | `mcp_server` | Yes | No. The server is an audience for callers. |
+| `inference-model` | `inference_model` | No | No |
+
+Set exactly one sub-block, and set the sub-block that matches `role`.
+
+## Audiences
+
+An on-behalf-of audience is the identity of the next service in the call. Consul builds that map from the proxy upstreams. For each upstream, Consul uses the destination service's registered client ID. You do not set an audience list on the service definition.
+
+## Registration state
+
+Consul stores the registration record in the KV store at `oauth/<service>/state`. `<service>` is the service name. Read the `state` field to see whether registration finished:
+
+| `state` | Meaning |
+| --- | --- |
+| `PENDING` | Registration has started and is not finished. |
+| `ACTIVE` | The identity provider accepted the client. |
+| `ROTATING` | Consul is rotating the client key. |
+| `REVOKING` | The service was deregistered and Consul is removing the client. |
+| `BLOCKED` | The identity provider rejected the client. Change the tenant or the bootstrap client, then register the service again. `last_error` on the same record describes the rejection. |
+
+The record contains the OAuth client credential. Grant `key:read` on the `oauth/` prefix only to tokens that administer client registration.
+
+```shell-session
+$ consul kv get oauth/billing-agent/state
+```

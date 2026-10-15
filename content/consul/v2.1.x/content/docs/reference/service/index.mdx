@@ -46,6 +46,11 @@ The following outline shows how to format the configurations in the root `servic
 - [`connect`](#connect): map 
   - [`native`](#connect): boolean   
   - [`sidecar_service`](#connect): object   
+- [`ai`](#ai): map <EnterpriseAlert inline />
+  - [`role`](#ai): string
+  - [`inference_model`](#ai): map
+  - [`mcp_server`](#ai): map
+  - [`agent`](#ai): map
 - [`locality`](#locality): map <EnterpriseAlert inline/>
    - [`region`](#locality): string
    - [`zone`](#locality): string
@@ -395,6 +400,176 @@ The following table describes the parameters that you can place in the `connect`
 | ---       | ---         | ---     |
 | `native` | Boolean value that advertises the service as a native service mesh proxy. Use this parameter to integrate your application with the `connect` API. Refer to [Service Mesh Native App Integration Overview](/consul/docs/automate/native) for additional information. If set to `true`, do not configure a `sidecar_service`. | `false` |
 | `sidecar_service` | Object that defines a sidecar proxy for the service. Do not configure if `native` is set to `true`. Refer to [Deploy sidecar services](/consul/docs/reference/proxy/sidecar) for usage and configuration details. | Refer to [Sidecar service defaults](/consul/docs/reference/proxy/sidecar#sidecar-service-defaults). |
+
+### `ai` <EnterpriseAlert inline />
+
+Map that declares the AI role for the service. Consul uses the role to register an OAuth client and, for `ai-agent`, to exchange tokens on behalf of the caller. Refer to [OAuth clients for AI services](/consul/docs/secure-mesh/oauth-clients).
+
+Consul rejects a service definition that contains `ai` until you enable the `consul-ai` feature gate with `consul operator feature set consul-ai true`.
+
+Set `role` to one of `inference-model`, `mcp-server`, or `ai-agent`. Set the one sub-block that matches `role`.
+
+| `role` | Sub-block | Dynamic client registration | On-behalf-of credential |
+| --- | --- | --- | --- |
+| `inference-model` | `inference_model` | No | No |
+| `mcp-server` | `mcp_server` | Yes | No. The service is an audience. |
+| `ai-agent` | `agent` | Yes | Yes. The service exchanges tokens for outbound calls. |
+
+On-behalf-of audiences come from the proxy upstreams. Each upstream resolves to the destination service's client ID. The service definition does not contain an audience list.
+
+#### `inference_model`
+
+Set this block when `role` is `inference-model`.
+
+| Parameter | Description | Data type | Default |
+| --- | --- | --- | --- |
+| `protocol` | API dialect the model serves. One of `openai`, `anthropic`, or `passthrough`. | String | None |
+| `path` | Base path for the model API, for example `/v1`. | String | None |
+| `defaults.max_tokens` | Default maximum tokens for a request. | Number | None |
+| `defaults.temperature` | Default sampling temperature for a request. | Number | None |
+
+#### `mcp_server`
+
+Set this block when `role` is `mcp-server`.
+
+| Parameter | Description | Data type | Default |
+| --- | --- | --- | --- |
+| `transport` | MCP transport. One of `streamable-http`, `sse`, or `stdio`. | String | None |
+| `path` | MCP endpoint path, for example `/mcp`. | String | None |
+| `protocol_version` | MCP specification version this server implements. Required. | String | None |
+
+#### `agent`
+
+Set this block when `role` is `ai-agent`. Every parameter in the block is optional.
+
+| Parameter | Description | Data type | Default |
+| --- | --- | --- | --- |
+| `inference.specialization` | Specializations the agent requests from the inference gateway. | List of strings | None |
+| `inference.vendor` | Vendor the agent requests from the inference gateway. | String | None |
+| `mcp.port` | Loopback port the agent dials for MCP tool calls. When you set `mcp`, set the connect proxy `mode` to `transparent`. | Number | `15101` |
+| `mcp.hitl.port` | Loopback port of the agent's human-in-the-loop approval server. | Number | `16101` |
+| `mcp.hitl.approval_timeout` | How long to wait for an approval verdict before rejecting the tool call. Use a Go duration, for example `60s`. | String | `60s` |
+| `rate_limits.tool_calls_per_minute` | Maximum tool calls per minute. | Number | None |
+| `rate_limits.tool_calls_per_hour` | Maximum tool calls per hour. | Number | None |
+| `interceptor.port` | Loopback port of the co-located governance interceptor. | Number | `21101` |
+
+<CodeTabs tabs={[ "HCL", "JSON" ]}>
+
+```hcl
+service {
+  name = "billing-agent"
+  port = 8080
+  connect {
+    sidecar_service {
+      proxy {
+        mode = "transparent"
+      }
+    }
+  }
+  ai {
+    role = "ai-agent"
+    agent {
+      inference {
+        specialization = ["billing"]
+        vendor         = "openai"
+      }
+      mcp {
+        port = 15101
+        hitl {
+          port             = 16101
+          approval_timeout = "60s"
+        }
+      }
+      rate_limits {
+        tool_calls_per_minute = 60
+        tool_calls_per_hour   = 1000
+      }
+      interceptor {
+        port = 21101
+      }
+    }
+  }
+}
+```
+
+```json
+{
+  "service": {
+    "name": "billing-agent",
+    "port": 8080,
+    "connect": {
+      "sidecar_service": {
+        "proxy": {
+          "mode": "transparent"
+        }
+      }
+    },
+    "ai": {
+      "role": "ai-agent",
+      "agent": {
+        "inference": {
+          "specialization": ["billing"],
+          "vendor": "openai"
+        },
+        "mcp": {
+          "port": 15101,
+          "hitl": {
+            "port": 16101,
+            "approval_timeout": "60s"
+          }
+        },
+        "rate_limits": {
+          "tool_calls_per_minute": 60,
+          "tool_calls_per_hour": 1000
+        },
+        "interceptor": {
+          "port": 21101
+        }
+      }
+    }
+  }
+}
+```
+
+</CodeTabs>
+
+The following example registers an MCP server. Consul registers an OAuth client for the service and does not deliver an on-behalf-of credential to it.
+
+<CodeTabs tabs={[ "HCL", "JSON" ]}>
+
+```hcl
+service {
+  name = "billing-tools"
+  port = 8080
+  ai {
+    role = "mcp-server"
+    mcp_server {
+      transport        = "streamable-http"
+      path             = "/mcp"
+      protocol_version = "2025-03-26"
+    }
+  }
+}
+```
+
+```json
+{
+  "service": {
+    "name": "billing-tools",
+    "port": 8080,
+    "ai": {
+      "role": "mcp-server",
+      "mcp_server": {
+        "transport": "streamable-http",
+        "path": "/mcp",
+        "protocol_version": "2025-03-26"
+      }
+    }
+  }
+}
+```
+
+</CodeTabs>
 
 ###  `locality` <EnterpriseAlert inline/>  
 
