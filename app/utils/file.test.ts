@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-import { expect, test, vi, beforeEach, afterEach, describe } from 'vitest'
+import { expect, test, vi, beforeEach, afterEach, describe, it } from 'vitest'
 import { ServedFrom } from '#api/types'
 
 // Must run before the module is evaluated so the module-level SELF_URL constant
@@ -12,7 +12,22 @@ vi.hoisted(() => {
 	process.env.VERCEL_URL = 'local-vercel-CDN'
 })
 
-import { fetchFile, findFileWithMetadata, getAssetData, FileType } from './file'
+import {
+	fetchFile,
+	findFileWithMetadata,
+	getAssetData,
+	FileType,
+	resolveCdnUrl,
+} from './file'
+
+vi.mock('#productConfig.mjs', () => {
+	return {
+		PRODUCT_CONFIG: {
+			'validated-designs': { versionedDocs: false },
+			'terraform-plugin-log': { versionedDocs: true },
+		},
+	}
+})
 
 vi.mock('fs/promises', () => {
 	return {
@@ -282,5 +297,38 @@ describe('findFileWithMetadata', () => {
 		await findFileWithMetadata(filePath, versionMetaData)
 
 		expect(fetch.mock.calls[0][0]).not.toContain('//docs')
+	})
+})
+
+describe('resolveCdnUrl', () => {
+	it('replaces {{CDN_URL}} with versioned assets URL for versioned products', () => {
+		const result = resolveCdnUrl(
+			'[Guide]({{CDN_URL}}/img/diagram.png)',
+			'terraform-plugin-log',
+			'v0.4.x',
+		)
+		expect(result).toBe(
+			'[Guide](https://local-vercel-CDN/assets/terraform-plugin-log/v0.4.x/img/diagram.png)',
+		)
+	})
+
+	it('replaces {{CDN_URL}} without version segment for unversioned products', () => {
+		const result = resolveCdnUrl(
+			'[Guide]({{CDN_URL}}/pdf/Boundary-Administration-Guide.pdf)',
+			'validated-designs',
+			'v0.0.x',
+		)
+		expect(result).toBe(
+			'[Guide](https://local-vercel-CDN/assets/validated-designs/pdf/Boundary-Administration-Guide.pdf)',
+		)
+	})
+
+	it('does not modify markdown without {{CDN_URL}}', () => {
+		const result = resolveCdnUrl(
+			'[External](https://example.com/file.pdf)',
+			'validated-designs',
+			'v0.0.x',
+		)
+		expect(result).toBe('[External](https://example.com/file.pdf)')
 	})
 })

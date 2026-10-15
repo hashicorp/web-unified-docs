@@ -105,6 +105,17 @@ export function addDateMetadata(filePath, defaultDate) {
 		return
 	}
 
+	// A provided date means this is a normal content commit. Keep the original
+	// creation date rather than recalculating it from repository history.
+	if (defaultDate !== null) {
+		const existingCreatedDate = frontmatter.match(
+			/# START AUTO GENERATED METADATA, DO NOT EDIT\ncreated_at: (.*)\nlast_modified:/,
+		)?.[1]
+		if (existingCreatedDate) {
+			createdDate = existingCreatedDate
+		}
+	}
+
 	// Remove existing auto-generated metadata if present
 	const autoGenRegex =
 		/# START AUTO GENERATED METADATA, DO NOT EDIT\ncreated_at:.*\nlast_modified:.*\n# END AUTO GENERATED METADATA/g

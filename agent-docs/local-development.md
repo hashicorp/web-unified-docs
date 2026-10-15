@@ -27,6 +27,10 @@ npm run dev
 `productConfig.mjs`). It is a long-running process; run it manually when
 needed rather than before every `npm run dev`.
 
+The pre-commit hook updates date metadata for staged MDX files under
+`content/`. It preserves an existing `created_at` value and updates
+`last_modified` to the commit time.
+
 ## Runtime
 
 The repo uses Next.js and requires Node `>=24` (see `package.json` `engines`).
