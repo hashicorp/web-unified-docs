@@ -1,0 +1,109 @@
+This is an example GitLab pipeline configuration YAML file. The pipeline
+downloads the latest vault-radar executable and then runs the `vault-radar scan
+ci` commands to scan for risks when you create commits and open merge requests.
+
+Make the `HCP_PROJECT_ID`, `HCP_CLIENT_ID`, and `HCP_CLIENT_SECRET` evnironment variables available
+to the pipeline job as pipeline variables in GitLab natively. 
+
+<Warning>
+
+Mask your secret if using GitLab variables.
+
+</Warning>
+
+An alternative is to use a secret manager, [see here for instructions on how to integrate a Secret
+Manager](https://docs.gitlab.com/ee/ci/secrets/) like Vault with your GitLab
+pipelines.
+
+GitLab's default runners use an amd64 architecture. The sample provided supports
+that architecture. If you are using a different architecture, [tag the
+jobs
+appropriately](https://docs.gitlab.com/ee/ci/runners/hosted_runners/linux.html)
+and use the matching `vault-radar` CLI.
+
+Refer to the [release page](https://releases.hashicorp.com/vault-radar/) for the available
+versions and architectures supported.
+
+<Note>
+
+Add the `variables` section with a variable `GIT_DEPTH` set to `0` so the cloned
+repository has the entire history. Without this, the results can be inaccurate.
+
+</Note>
+
+```yaml
+variables:
+  GIT_DEPTH: 0
+
+stages:
+  - install-vault-radar
+  - run-vault-radar
+
+install-vault-radar:
+  tags:
+    - saas-linux-small-amd64 # default runner
+  stage: install-vault-radar
+  rules: # Run on commits and merge requests
+  - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+  - if: $CI_PIPELINE_SOURCE != 'merge_request_event'
+  before_script:
+    - apt-get -qq update
+    - apt-get install -y jq # install jq to use later
+  script:
+    - export LATEST_VERSION=$(curl https://api.releases.hashicorp.com/v1/releases/vault-radar/latest | jq -r .version)
+    - curl https://releases.hashicorp.com/vault-radar/${LATEST_VERSION}/vault-radar_${LATEST_VERSION}_linux_amd64.zip -o vr.zip # download latest binary
+    - unzip vr.zip -d vr # unzip the archive
+    - mv vr/vault-radar vault-radar
+  artifacts:
+    when: on_success
+    access: none
+    expire_in: 1 hour
+    paths:
+      - vault-radar
+
+run-vault-radar-on-commit:
+  tags:
+    - saas-linux-small-amd64 # default runner
+  stage: run-vault-radar
+  dependencies:
+    - install-vault-radar
+  rules: # Run on merge requests and commits pushed to main branch
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+    - if: $CI_PIPELINE_SOURCE == 'push' && $CI_COMMIT_BRANCH == "main"
+  script:
+    - ./vault-radar scan ci tip -s high -o vault-radar.jsonl -l vault-radar.log --pretty=gha
+  artifacts:
+    untracked: false
+    when: on_success
+    access: all
+    expire_in: 1 days
+    paths:
+      - vault-radar.jsonl
+      - vault-radar.log
+
+
+run-vault-radar-in-merge-request:
+  tags:
+    - saas-linux-small-amd64 # default runner
+  stage: run-vault-radar
+  dependencies:
+    - install-vault-radar
+  rules: # Run only on merge requests
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+  script:
+    - | # See: https://docs.gitlab.com/ee/ci/variables/predefined_variables.html
+      ./vault-radar scan ci pr \
+      --head-ref "${CI_COMMIT_SHA}" \
+      --base-ref "${CI_MERGE_REQUEST_DIFF_BASE_SHA}" \
+      --ref-name "${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME}" \
+      -s high -o vault-radar.jsonl -l vault-radar.log --pretty=gha
+  artifacts:
+    untracked: false
+    when: on_success
+    access: all
+    expire_in: 1 days
+    paths:
+      - vault-radar.jsonl
+      - vault-radar.log
+
+```
