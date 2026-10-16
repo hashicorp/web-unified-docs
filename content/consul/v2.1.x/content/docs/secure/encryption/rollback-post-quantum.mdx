@@ -1,0 +1,193 @@
+---
+layout: docs
+page_title: Roll back post-quantum TLS
+description: >-
+  Return Consul mesh and agent TLS to explicit classical key exchange while retaining Consul 2.1, TLS encryption, and certificate verification.
+---
+
+# Roll back post-quantum TLS
+
+This topic describes how to return a Consul deployment from hybrid post-quantum key exchange to an explicit classical group list.
+
+## Introduction
+
+This is a configuration rollback on Consul 2.1, not a binary downgrade. The examples use classical `X25519` while retaining TLS 1.3. Use your deployment's approved classical groups if they differ.
+
+~> **Security:** Keep TLS encryption, certificate verification, CA and leaf certificates, ACLs, and service intentions enabled. Do not delete the mesh entry or restore a Consul snapshot as part of this procedure. Returning to classical key exchange removes post-quantum key-exchange protection for new connections.
+
+Deleting a group field does not reliably disable hybrid key exchange. With a TLS 1.3 minimum, missing or empty mesh lists select the hybrid-plus-X25519 default. Agent inheritance and Go TLS defaults can also select hybrid groups when fields are absent or empty. Use explicit classical values.
+
+## Requirements
+
+Before you begin, you need:
+
+- Authenticated access to the affected configuration and a recovery path to agent files or the Kubernetes management plane if Consul API connectivity is impaired.
+- A known-compatible classical list supported by all peers. The `X25519` examples are not FIPS compliance guidance.
+- The authoritative mesh definition, agent files, and applicable Helm values or GitOps manifests.
+- The health baseline and acceptance criteria captured during [migration](/consul/docs/secure/encryption/migrate-post-quantum).
+
+## Stop the rollout and identify the failure
+
+Limit further changes while retaining management access.
+
+1. Pause the post-quantum rollout and coordinate configuration owners. Ensure automated reconciliation does not reapply the unwanted policy.
+1. Identify whether the failure is an unsupported group, incompatible TLS versions, a protocol override, rejected Kubernetes admission, or an unrelated certificate or application problem. Refer to [Troubleshoot post-quantum TLS](/consul/docs/secure/encryption/post-quantum#troubleshoot).
+1. Identify every affected mesh direction and agent interface, including federated or peered dependencies. Inspect `tls.defaults` and all `internal_rpc`, `https`, and `grpc` overrides.
+1. Keep TLS 1.3 during the group rollback. If a peer cannot use TLS 1.3, evaluate restoring a previously approved TLS floor as a separate compatibility recovery; changing the group alone does not solve that failure.
+
+## Preserve a shared group during the transition
+
+Avoid an intermediate state in which peers have no common key-exchange group.
+
+1. If every affected endpoint already allows both `X25519MLKEM768` and `X25519`, proceed to the explicit classical configuration.
+1. If any endpoint is hybrid-only, first restore overlapping hybrid-plus-classical lists on the necessary peers. For mesh settings, use `["X25519MLKEM768", "X25519"]`; for agents, use `"X25519MLKEM768,X25519"`.
+1. Confirm that peers have accepted the overlapping configuration before changing any required peer to classical-only. Do not send a hybrid-containing list to a binary that cannot parse the hybrid group.
+
+## Restore classical mesh key exchange
+
+Update both directions in the correct datacenter and admin partition.
+
+1. Read the current full mesh entry through its configuration owner. Compare it with your saved baseline, but preserve unrelated changes made since the backup.
+1. Set both group lists explicitly to `["X25519"]`, or your approved classical list. Keep the current TLS bounds and unrelated settings.
+1. For CLI/API-managed entries, use the [read, modify, and CAS procedure](/consul/docs/secure/encryption/migrate-post-quantum#enable-mesh-key-exchange) with the current `ModifyIndex`. Re-read and merge on conflict.
+1. For Kubernetes-owned entries, edit and reconcile the full `Mesh` source manifest instead of writing directly to Consul. Inspect admission, controller status, and active Envoy configuration.
+
+The following examples show a minimal classical-only policy that retains TLS 1.3. Merge the fields into your full definition; do not replace an existing entry with the minimal example.
+
+<CodeTabs tabs={["HCL", "Kubernetes YAML", "JSON"]}>
+
+```hcl
+Kind = "mesh"
+Name = "mesh"
+
+TLS {
+  Incoming {
+    TLSMinVersion = "TLSv1_3"
+    TLSMaxVersion = "TLSv1_3"
+    ECDHCurves    = ["X25519"]
+  }
+  Outgoing {
+    TLSMinVersion = "TLSv1_3"
+    TLSMaxVersion = "TLSv1_3"
+    ECDHCurves    = ["X25519"]
+  }
+}
+```
+
+```yaml
+apiVersion: consul.hashicorp.com/v1alpha1
+kind: Mesh
+metadata:
+  name: mesh
+  namespace: NAMESPACE
+spec:
+  tls:
+    incoming:
+      tlsMinVersion: TLSv1_3
+      tlsMaxVersion: TLSv1_3
+      ecdhCurves:
+        - X25519
+    outgoing:
+      tlsMinVersion: TLSv1_3
+      tlsMaxVersion: TLSv1_3
+      ecdhCurves:
+        - X25519
+```
+
+```json
+{
+  "Kind": "mesh",
+  "Name": "mesh",
+  "TLS": {
+    "Incoming": {
+      "TLSMinVersion": "TLSv1_3",
+      "TLSMaxVersion": "TLSv1_3",
+      "ECDHCurves": ["X25519"]
+    },
+    "Outgoing": {
+      "TLSMinVersion": "TLSv1_3",
+      "TLSMaxVersion": "TLSv1_3",
+      "ECDHCurves": ["X25519"]
+    }
+  }
+}
+```
+
+</CodeTabs>
+
+Replace `NAMESPACE` with the namespace of the existing `Mesh` resource. Do not delete that resource or clear either list: reconciliation or automatic defaults can restore hybrid selection.
+
+## Restore classical agent key exchange
+
+Set explicit values in both defaults and protocol stanzas that might override them.
+
+1. Merge `tls_ecdh_curves = "X25519"` into the relevant agent settings. The example explicitly covers all three protocols so that a previous hybrid or empty override cannot take precedence.
+1. Preserve existing minimum versions, certificate paths, and verification settings. The example contains group changes only, not a complete secure TLS configuration.
+1. Validate the complete configuration with `consul validate CONFIG_DIRECTORY`, then apply it using the [agent reload or Helm rollout workflow](/consul/docs/secure/encryption/migrate-post-quantum#enable-agent-key-exchange).
+1. Confirm effective settings and health for each agent before expanding the rollout.
+
+<CodeTabs tabs={["HCL", "JSON"]}>
+
+```hcl
+tls {
+  defaults {
+    tls_ecdh_curves = "X25519"
+  }
+  internal_rpc {
+    tls_ecdh_curves = "X25519"
+  }
+  https {
+    tls_ecdh_curves = "X25519"
+  }
+  grpc {
+    tls_ecdh_curves = "X25519"
+  }
+}
+```
+
+```json
+{
+  "tls": {
+    "defaults": {
+      "tls_ecdh_curves": "X25519"
+    },
+    "internal_rpc": {
+      "tls_ecdh_curves": "X25519"
+    },
+    "https": {
+      "tls_ecdh_curves": "X25519"
+    },
+    "grpc": {
+      "tls_ecdh_curves": "X25519"
+    }
+  }
+}
+```
+
+</CodeTabs>
+
+For Helm-managed servers, merge these JSON fields into the existing `server.extraConfig` string in the full values file. Make equivalent changes in `client.extraConfig` only if you run client agents. Preserve unrelated configuration and update the GitOps source if one controls the release.
+
+Pin the existing chart and image versions when applying this configuration-only change. Do not use a blanket `helm rollback`, which can also change binaries or chart resources without addressing CRD compatibility. Follow the deployment's controlled reload or rolling update process and retain server quorum.
+
+## Verify recovery
+
+Existing connections keep their negotiated parameters until they close. Verify new handshakes rather than expecting immediate changes in cumulative statistics.
+
+1. Confirm that the authoritative mesh entry and active Envoy TLS contexts contain only the approved classical groups, with no rejected updates.
+1. Establish fresh connections for the affected mesh and agent paths. Use the [negotiated-group diagnostics](/consul/docs/secure/encryption/post-quantum#verify-negotiated-key-exchange). Confirm classical groups and retained certificate verification; for the examples, confirm TLS 1.3 with `X25519`.
+1. For Envoy, correlate increases in the targeted listener or cluster's classical-group counters with fresh handshakes. Historical hybrid counts do not indicate rollback failure.
+1. Check service connectivity, proxy and agent errors, latency, membership, and quorum against the saved baseline. Verify HTTPS, gRPC, and internal RPC separately; an HTTPS test does not cover the other interfaces.
+1. Use controlled draining or reconnection if you need to replace established hybrid connections. Do not interrupt all server connections at once.
+1. Confirm that Helm, controllers, and GitOps retain the classical configuration after reconciliation.
+
+## Binary downgrade considerations
+
+A successful key-exchange rollback does not establish that an earlier Consul binary can read the current state or that an earlier controller accepts the current resources. This guide does not downgrade Consul, Envoy, Consul Dataplane, Helm charts, or CRDs.
+
+If recovery requires a version change, review the [general upgrade and recovery guidance](/consul/docs/upgrade/instructions/general), [version-specific guidance](/consul/docs/upgrade/version-specific), and [Kubernetes upgrade guidance](/consul/docs/upgrade/k8s). Do not combine an unplanned binary downgrade or snapshot restore with this configuration procedure.
+
+## Next steps
+
+- Diagnose component compatibility with [Configure post-quantum TLS](/consul/docs/secure/encryption/post-quantum).
+- Resume the [staged migration](/consul/docs/secure/encryption/migrate-post-quantum) only after you resolve the cause of the rollback.

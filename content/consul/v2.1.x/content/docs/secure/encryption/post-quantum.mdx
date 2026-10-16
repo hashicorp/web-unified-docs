@@ -1,0 +1,247 @@
+---
+layout: docs
+page_title: Configure post-quantum TLS
+description: >-
+  Configure hybrid post-quantum key exchange for Consul service mesh and agent TLS, and verify which group new connections negotiate.
+---
+
+# Configure post-quantum TLS
+
+This topic describes how to configure hybrid post-quantum key exchange for Consul service mesh and agent TLS, including deployments on Kubernetes. For an existing deployment, follow [Migrate to post-quantum TLS](/consul/docs/secure/encryption/migrate-post-quantum) to prepare components and stage the change.
+
+## Introduction
+
+Post-quantum cryptography (PQC) addresses threats from quantum computers, including attempts to decrypt previously captured traffic. Consul supports the `X25519MLKEM768` hybrid key-exchange group. This group combines classical X25519 with the post-quantum Module-Lattice-Based Key-Encapsulation Mechanism, ML-KEM-768, to establish TLS session keys.
+
+This feature changes key exchange, not certificate authentication. It does not provide post-quantum certificate signatures or replace your certificate authority (CA). Keep your existing certificates, mutual TLS (mTLS) verification, access control lists (ACLs), and service intentions.
+
+The examples allow both `X25519MLKEM768` and classical `X25519`. This permits compatible peers to negotiate hybrid key exchange while retaining classical fallback. A connection that negotiates `X25519` does not have post-quantum key exchange. Hybrid negotiation requires TLS 1.3; TLS 1.3 alone does not prove hybrid negotiation.
+
+### Configuration scope
+
+Configure service mesh and agent TLS separately:
+
+| Connection | Configuration | Scope |
+| --- | --- | --- |
+| Incoming mesh TLS | `TLS.Incoming.ECDHCurves` in the `mesh` configuration entry | Includes sidecar listeners and terminating gateways' mesh-facing listeners. |
+| Outgoing mesh TLS | `TLS.Outgoing.ECDHCurves` in the `mesh` configuration entry | Includes mesh upstream connections from sidecars and mesh-facing upstreams from ingress and API gateways. |
+| Agent TLS | `tls.defaults.tls_ecdh_curves` and protocol-specific overrides | Covers agent internal RPC, HTTPS, and gRPC TLS. Configure peers and clients for each interface separately. |
+| Kubernetes-managed mesh TLS | `spec.tls.incoming.ecdhCurves` and `spec.tls.outgoing.ecdhCurves` in the `Mesh` resource | The controller writes the corresponding Consul configuration entry. |
+| Kubernetes-hosted agent TLS | Agent settings in Helm `server.extraConfig` | Applies to server agents, not service mesh proxies. `client.extraConfig` applies only to deployments that run client agents. |
+
+Do not treat mesh settings as a policy for every gateway connection. External ingress and API gateway TLS listeners use separate configuration. A mesh gateway that passes through TCP traffic does not terminate another TLS connection; the terminating endpoints negotiate the group. Mesh-gateway L7 peering termination uses mesh TLS settings.
+
+These settings do not enable TLS on plaintext interfaces, change gossip encryption, or encrypt traffic between an application and its local proxy.
+
+## Requirements
+
+Before you begin, you need:
+
+- Consul 2.1 or later.
+- A functioning TLS-enabled deployment. Refer to [Manage agent mTLS encryption](/consul/docs/secure/encryption/tls/mtls) and [Secure service mesh](/consul/docs/secure-mesh) for initial setup.
+- TLS 1.3 support on every peer that must connect after you raise the minimum version.
+- Envoy builds whose TLS provider recognizes `X25519MLKEM768`, including the Envoy bundled in Consul Dataplane. Check [Consul and Envoy compatibility](/consul/docs/reference/proxy/envoy) in addition to hybrid-group support. An ordinarily compatible Envoy version is not sufficient evidence of hybrid support.
+- For Kubernetes, a compatible Helm chart, controller, and installed `Mesh` custom resource definition (CRD) that expose `ecdhCurves`. Confirm the installed schema with `kubectl explain mesh.spec.tls.incoming.ecdhCurves` and `kubectl explain mesh.spec.tls.outgoing.ecdhCurves`. Follow the [Kubernetes compatibility guidance](/consul/docs/upgrade/k8s/compatibility); do not assume that upgrading Consul alone upgrades these components.
+- Authenticated management access and permission to update the affected configuration. Mesh writes require `mesh:write` or `operator:write` when ACLs are enabled. Refer to the [configuration entries API](/consul/api-docs/config).
+
+The allowed group names are `X25519MLKEM768`, `X25519`, `P-256`, `P-384`, and `P-521`. An allowed name does not establish availability in every TLS provider or compliance with Federal Information Processing Standards (FIPS). Evaluate the exact builds and cryptographic modules required by your deployment.
+
+## Configure mesh TLS
+
+Set both incoming and outgoing policy so that both ends of mesh connections can negotiate the intended group.
+
+1. Read the complete, authoritative mesh configuration for your target datacenter and, for Consul Enterprise, admin partition. Preserve unrelated settings.
+1. Set the incoming and outgoing minimum and maximum versions to TLS 1.3. Consul does not automatically raise an unspecified maximum version; Envoy's upstream maximum can otherwise default to TLS 1.2.
+1. Set both group lists to `X25519MLKEM768` and `X25519`. Remove explicit TLS 1.2 `CipherSuites` settings from directions whose minimum you raise to TLS 1.3.
+1. Apply the complete updated definition through its existing owner. Use the [safe mesh update procedure](/consul/docs/secure/encryption/migrate-post-quantum#enable-mesh-key-exchange) for CLI-managed or Kubernetes-managed configuration.
+
+The following equivalent definitions show the TLS fields in a minimal mesh configuration. Merge these fields into your existing definition rather than replacing it with this example. Replace `NAMESPACE` with the namespace watched by your Consul controller.
+
+<CodeTabs tabs={["HCL", "Kubernetes YAML", "JSON"]}>
+
+```hcl
+Kind = "mesh"
+Name = "mesh"
+
+TLS {
+  Incoming {
+    TLSMinVersion = "TLSv1_3"
+    TLSMaxVersion = "TLSv1_3"
+    ECDHCurves    = ["X25519MLKEM768", "X25519"]
+  }
+  Outgoing {
+    TLSMinVersion = "TLSv1_3"
+    TLSMaxVersion = "TLSv1_3"
+    ECDHCurves    = ["X25519MLKEM768", "X25519"]
+  }
+}
+```
+
+```yaml
+apiVersion: consul.hashicorp.com/v1alpha1
+kind: Mesh
+metadata:
+  name: mesh
+  namespace: NAMESPACE
+spec:
+  tls:
+    incoming:
+      tlsMinVersion: TLSv1_3
+      tlsMaxVersion: TLSv1_3
+      ecdhCurves:
+        - X25519MLKEM768
+        - X25519
+    outgoing:
+      tlsMinVersion: TLSv1_3
+      tlsMaxVersion: TLSv1_3
+      ecdhCurves:
+        - X25519MLKEM768
+        - X25519
+```
+
+```json
+{
+  "Kind": "mesh",
+  "Name": "mesh",
+  "TLS": {
+    "Incoming": {
+      "TLSMinVersion": "TLSv1_3",
+      "TLSMaxVersion": "TLSv1_3",
+      "ECDHCurves": ["X25519MLKEM768", "X25519"]
+    },
+    "Outgoing": {
+      "TLSMinVersion": "TLSv1_3",
+      "TLSMaxVersion": "TLSv1_3",
+      "ECDHCurves": ["X25519MLKEM768", "X25519"]
+    }
+  }
+}
+```
+
+</CodeTabs>
+
+With a minimum of TLS 1.3, an omitted or empty mesh group list automatically selects `["X25519MLKEM768", "X25519"]`. Setting only the maximum to TLS 1.3 does not trigger this default. Explicit lists make your intended policy clear and provide a reliable way to [roll back to classical groups](/consul/docs/secure/encryption/rollback-post-quantum).
+
+Refer to the [`mesh` configuration entry reference](/consul/docs/reference/config-entry/mesh) for field details.
+
+## Configure agent TLS
+
+Agent configuration uses a comma-separated string, not the lists used in mesh configuration.
+
+1. Inspect `tls.defaults` and the `internal_rpc`, `https`, and `grpc` stanzas on each affected agent.
+1. Merge the following fields into your existing TLS configuration. Keep CA, certificate, key, and verification settings unchanged. Remove explicit TLS 1.2 cipher-suite settings where you raise the effective minimum to TLS 1.3.
+1. Update protocol-specific minimum versions and group overrides intentionally. An explicit per-protocol group string takes precedence over `defaults`.
+1. Validate and apply the configuration through your deployment's management workflow, as described in [Enable agent key exchange](/consul/docs/secure/encryption/migrate-post-quantum#enable-agent-key-exchange).
+
+These examples show only the fields to merge, not a complete secure agent configuration:
+
+<CodeTabs tabs={["HCL", "JSON"]}>
+
+```hcl
+tls {
+  defaults {
+    tls_min_version = "TLSv1_3"
+    tls_ecdh_curves  = "X25519MLKEM768,X25519"
+  }
+}
+```
+
+```json
+{
+  "tls": {
+    "defaults": {
+      "tls_min_version": "TLSv1_3",
+      "tls_ecdh_curves": "X25519MLKEM768,X25519"
+    }
+  }
+}
+```
+
+</CodeTabs>
+
+For Helm-managed servers, merge the same JSON fields into the existing `server.extraConfig` JSON string in your full values file. Preserve all other extra configuration:
+
+```yaml
+server:
+  extraConfig: |
+    {
+      "tls": {
+        "defaults": {
+          "tls_min_version": "TLSv1_3",
+          "tls_ecdh_curves": "X25519MLKEM768,X25519"
+        }
+      }
+    }
+```
+
+`server.extraConfig` overrides earlier agent configuration. Inspect the resulting configuration, including protocol-specific settings. Do not add `client.extraConfig` to a Consul Dataplane deployment that does not run client agents.
+
+When a protocol inherits no explicit groups and has an effective minimum of TLS 1.3, Consul selects the hybrid-plus-X25519 pair. An explicit empty protocol string can instead leave group selection to Go's TLS defaults. Neither deleting the field nor setting it to an empty string reliably disables hybrid key exchange.
+
+Refer to the [agent TLS reference](/consul/docs/reference/agent/configuration-file/tls) for inheritance and protocol-specific settings.
+
+## Verify negotiated key exchange
+
+Configuration acceptance and successful traffic are necessary, but neither proves that a connection negotiated hybrid key exchange. Verify each relevant connection path with fresh, full TLS handshakes. Existing connections retain their negotiated parameters until they close.
+
+### Service mesh
+
+Use Envoy's administration interface only through loopback or a controlled local access path. Do not expose it publicly.
+
+1. Inspect the active listener and cluster configurations for the service path:
+
+   ```shell-session
+   $ curl --fail --silent --show-error http://127.0.0.1:ADMIN_PORT/config_dump
+   ```
+
+   Confirm that the relevant TLS contexts contain `ecdh_curves` with your intended groups and both TLS bounds set to `TLSv1_3`. Check for rejected updates; a configuration stored in Consul might not be active in Envoy.
+
+1. Record the relevant listener's and upstream cluster's TLS statistics before generating traffic:
+
+   ```shell-session
+   $ curl --fail --silent --show-error 'http://127.0.0.1:ADMIN_PORT/stats?filter=ssl'
+   ```
+
+1. Generate traffic on the intended service path using new connections. Account for proxy connection pooling and session resumption; use controlled draining or reconnection when necessary.
+1. Read the statistics again. For the targeted listener or cluster, look for increases in `ssl.handshake`, `ssl.versions.TLSv1.3`, and `ssl.curves.X25519MLKEM768`. Group labels depend on the TLS provider; consult the [Envoy TLS statistics reference](https://www.envoyproxy.io/docs/envoy/latest/configuration/listeners/stats#tls-statistics) for your build.
+
+A historical nonzero counter does not prove that your test traffic used hybrid key exchange. Correlate counter changes with the intended connections. An increase in `ssl.curves.X25519` indicates classical negotiation, even when TLS 1.3 is in use.
+
+### Agent HTTPS
+
+Use a TLS diagnostic client that supports `X25519MLKEM768`, such as OpenSSL 3.5 with the appropriate provider. The following [`openssl s_client`](https://docs.openssl.org/3.5/man1/openssl-s_client/) command tests a fresh connection directly to an agent's HTTPS listener, not to a TLS-terminating load balancer:
+
+```shell-session
+$ openssl s_client \
+  -connect AGENT_ADDRESS:HTTPS_PORT \
+  -servername AGENT_DNS_NAME \
+  -verify_hostname AGENT_DNS_NAME \
+  -verify_return_error \
+  -CAfile CA_FILE \
+  -cert CLIENT_CERT_FILE \
+  -key CLIENT_KEY_FILE \
+  -tls1_3 \
+  -groups X25519MLKEM768:X25519 \
+  -brief </dev/null
+```
+
+Replace the placeholders with your agent address, certificate DNS name, and trusted CA and client certificate files. Keep certificate verification enabled. Inspect the negotiated protocol and group, which OpenSSL reports as the negotiated group or server temporary key, depending on its version.
+
+TLS 1.3 with `X25519MLKEM768` demonstrates hybrid key exchange for this HTTPS connection only. Repeat with `-groups X25519` to check the intended classical fallback. This test does not prove that internal RPC, gRPC, or another HTTPS client negotiated hybrid key exchange. Verify those paths separately with protocol-appropriate connection diagnostics, including the group selected in a fresh TLS handshake.
+
+## Troubleshoot
+
+Use the failure location to distinguish policy problems from certificate or application problems:
+
+| Symptom | Possible cause | Action |
+| --- | --- | --- |
+| Envoy rejects an update containing `X25519MLKEM768` | The proxy's TLS provider does not recognize the group. | Use a compatible build or apply an explicit classical list. Adding `X25519` fallback does not make an unknown group parseable. |
+| TLS configuration is rejected | Incompatible minimum/maximum versions, explicit TLS 1.2 cipher suites with a TLS 1.3 minimum, or a misspelled group. | Check both directions or protocol stanzas against the reference. Set mesh minimum and maximum explicitly. |
+| Traffic succeeds but negotiates `X25519` | Classical fallback, an override, or a peer without hybrid support. | Inspect both endpoints and active settings; confirm the group on new handshakes. |
+| A `Mesh` resource rejects or loses `ecdhCurves` | The installed CRD or controller lacks the field. | Upgrade the compatible Kubernetes components and verify the schema before applying the manifest. |
+| Agent defaults appear ineffective | A protocol-specific override, an explicit empty string, or an existing connection. | Inspect all effective protocol settings and test new handshakes after reload or rollout. |
+
+## Next steps
+
+- [Migrate an existing deployment to post-quantum TLS](/consul/docs/secure/encryption/migrate-post-quantum).
+- [Roll back to explicit classical key exchange](/consul/docs/secure/encryption/rollback-post-quantum).
