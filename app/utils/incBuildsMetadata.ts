@@ -323,15 +323,15 @@ export function startIncBuildsWatcher(): IncBuildsMetadataCache {
 				const filePath = filename ? path.join(contentDir, filename) : contentDir
 				console.log(`[watcher] reloading ${filePath}`)
 
-				refreshDevPortal()
-
 				if (eventType === 'change') {
+					refreshDevPortal()
 					return
 				}
 
 				const changedProduct = filename?.split(path.sep)[0]
 				if (changedProduct !== undefined) {
 					if (!products.includes(changedProduct)) {
+						refreshDevPortal()
 						return
 					}
 
@@ -342,12 +342,14 @@ export function startIncBuildsWatcher(): IncBuildsMetadataCache {
 					}
 				}
 
-				const alreadyRegenerating = nextCache.promise !== undefined
 				const pending = regenerateMetadata(nextCache)
-				if (!alreadyRegenerating) {
-					// The regeneration logs product-specific failures before rejecting.
-					void pending.catch(() => {})
-				}
+				void pending
+					.then(() => {
+						refreshDevPortal()
+					})
+					.catch(() => {
+						// Regeneration logs its failures; don't refresh stale metadata.
+					})
 			},
 		)
 

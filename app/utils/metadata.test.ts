@@ -623,7 +623,7 @@ describe('getMetadata', () => {
 		})
 
 		expect(resolved).not.toHaveBeenCalled()
-		expect(portalFetch).toHaveBeenCalledOnce()
+		expect(portalFetch).not.toHaveBeenCalled()
 		const lateResolved = vi.fn()
 		const lateRequest = getMetadata().then(lateResolved)
 		await new Promise<void>((resolve: () => void) => {

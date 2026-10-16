@@ -29,6 +29,8 @@ metadata module also preloads the incremental metadata module without initializi
 another watcher. Metadata requests await this preload and reuse the startup cache.
 The watcher logs changed paths and sends a refresh
 POST to `${DEV_PORTAL_URL}/api/refresh`.
+For structural changes, it refreshes Dev Portal after the product metadata is
+regenerated.
 
 `npm run prebuild` generates metadata. Full builds also populate the `public/`
 folder and can be long-running; run them manually when needed rather than before
