@@ -11,16 +11,11 @@ last_modified: 2026-10-15T13:45:00.000Z
 
 # OAuth clients for AI services
 
-<EnterpriseAlert>
+Consul registers an OAuth client for an AI agent or Model Context Protocol (MCP) server, which is a service whose `ai.role` is `ai-agent` or `mcp-server`. Consul uses that client when a mesh proxy exchanges a caller token for a token bound to the next service. A service whose role is `inference-model` does not get an OAuth client. Refer to the [`inference_model` block](/consul/docs/reference/service#inference_model) on the service definition for its fields. This page describes the cluster and service configuration that starts dynamic client registration (DCR) and on-behalf-of token exchange.
 
-This feature requires Consul Enterprise.
-Refer to the [enterprise feature matrix](/consul/docs/enterprise#consul-enterprise-feature-availability) for additional information.
+Consul registers clients with IBM Verify. Each client authenticates with `private_key_jwt` and an inline JSON Web Key Set (JWKS).
 
-</EnterpriseAlert>
-
-Consul registers an OAuth client for a service whose `ai.role` is `ai-agent` or `mcp-server`, and uses that client when a mesh proxy exchanges a caller token for a token bound to the next service. A service whose role is `inference-model` does not get an OAuth client. Its fields are on the [`ai` service definition](/consul/docs/reference/service#ai). This page describes the cluster and service configuration that starts dynamic client registration (DCR) and on-behalf-of (OBO) token exchange.
-
-Consul registers clients with IBM Security Verify. Each client authenticates with `private_key_jwt` and an inline JSON Web Key Set (JWKS).
+@include 'alerts/enterprise-alert.mdx'
 
 ## Requirements
 
@@ -32,15 +27,16 @@ Complete the following steps before you register an `ai-agent` or `mcp-server`:
    $ consul operator feature set consul-ai true
    ```
 
-1. Create exactly one ACL auth method with `Type` set to `oidc` and `EnableServiceDCR` set to `true`. Consul waits to register clients when the cluster has no flagged method or more than one flagged method. Refer to [`EnableServiceDCR`](/consul/docs/secure/acl/auth-method/oidc#enableservicedcr).
+1. Create exactly one ACL auth method with `Type` set to `oidc` and `EnableServiceDCR` set to `true`. The flagged method is the cluster identity provider. Consul waits to register clients when the cluster has no flagged method or more than one flagged method. Refer to [`EnableServiceDCR`](/consul/docs/secure/acl/auth-method/oidc#enableservicedcr).
 
-   The flagged method is the cluster identity provider. Set `OIDCDiscoveryURL`, `OIDCClientID`, and `OIDCClientSecret` on that method. Set `JWTSupportedAlgs` to `["ES256"]`. IBM Security Verify signs tokens with ES256, and this field defaults to RS256. Consul uses `OIDCClientID` and `OIDCClientSecret` as the bootstrap client that registers service clients. You can omit `AllowedRedirectURIs` when the method is used for service registration. Set a nonzero `MaxTokenTTL` on the auth method. That field is not part of `Config`, and Consul rejects an `oidc` method when it is unset. The [service registration example](/consul/docs/secure/acl/auth-method/oidc#example-configuration-for-service-client-registration) uses `1h`.
+1. Configure the following settings on the flagged auth method:
 
-   Consul rejects an agent configuration block named `oauth.iam`. Configure the identity provider with the auth method.
+   - Set `OIDCDiscoveryURL`, `OIDCClientID`, and `OIDCClientSecret`. Consul uses `OIDCClientID` and `OIDCClientSecret` as the bootstrap client that registers service clients.
+   - Set `JWTSupportedAlgs` to `["ES256"]`. IBM Verify signs tokens with ES256, and this field defaults to RS256.
+   - Set a nonzero `MaxTokenTTL`. This field is outside `Config`, and Consul rejects an `oidc` method when it is unset. The [service registration example](/consul/docs/secure/acl/auth-method/oidc#example-configuration-for-service-client-registration) uses `1h`.
+   - You can omit `AllowedRedirectURIs` when you use the method only for service registration.
 
 1. Register the service with an [`ai`](/consul/docs/reference/service#ai) block whose `role` is `ai-agent` or `mcp-server`. You can set the block in a service definition file, the [catalog register API](/consul/api-docs/catalog#register-entity), or the [agent service register API](/consul/api-docs/agent/service#register-service).
-
-   Consul registers clients for services in the `default` namespace and `default` partition. The KV record uses the service name, not the service ID. Consul does not register a second client for the connect-proxy sidecar. An `inference-model` registration uses the same feature gate and does not create a client or a KV record.
 
 ## Roles
 
@@ -51,7 +47,15 @@ The `ai.role` value selects which services receive a client.
 | `ai-agent` | `agent` | Yes. The agent exchanges tokens for outbound calls. |
 | `mcp-server` | `mcp_server` | No. The server is an audience for callers. |
 
-Set the one sub-block that matches `role`. `inference-model` is not a client role. Configure it on the [service definition](/consul/docs/reference/service#inference_model).
+Set the one sub-block that matches `role`. `inference-model` is not a client role. An `inference-model` registration requires the same feature gate and does not create a client or a key-value record. Configure it on the [service definition](/consul/docs/reference/service#inference_model).
+
+## Limitations
+
+Client registration has the following limitations:
+
+- Consul registers clients only for services in the `default` namespace and `default` partition.
+- Consul does not register a second client for the sidecar proxy.
+- Consul rejects an agent configuration block named `oauth.iam`. Configure the identity provider with the auth method instead.
 
 ## Audiences
 
@@ -61,7 +65,7 @@ Consul does not add an audience for a wildcard upstream, a centrally configured 
 
 ## MCP calls from an AI agent
 
-Set `agent.mcp` and register a connect sidecar for the agent. The local agent copies the `ai-agent` block onto that sidecar. Consul then opens a loopback listener at `http://127.0.0.1:<mcp.port>/mcp`. The port is `15101` when unset. A catalog registration of the application service creates the OAuth client and does not open this listener. Consul does not copy an `inference-model` or `mcp-server` block onto a sidecar.
+Set `agent.mcp` and register a sidecar proxy for the agent. The local agent copies the `ai-agent` block onto that sidecar. Consul then opens a loopback listener at `http://127.0.0.1:<mcp.port>/mcp`. The port is `15101` when unset. A catalog registration of the application service creates the OAuth client and does not open this listener. Consul does not copy an `inference-model` or `mcp-server` block onto a sidecar.
 
 The listener allows a tool call when a [service intention](/consul/docs/reference/config-entry/service-intentions) names the MCP server as the destination and the agent as the source. The allow permission must set the HTTP path to exactly `/mcp` and match the `x-mcp-tool` header with `Exact` or `Regex`. The header value is the tool name. A `<server>__<tool>` prefix names the MCP server. Without that prefix, the intention destination is the server. Consul ignores permissions that use a different path or that omit an `x-mcp-tool` exact or regex match.
 
@@ -69,13 +73,17 @@ Set the connect proxy `mode` to `transparent` when `agent.mcp` is set. An intent
 
 Human-in-the-loop approval runs when the request includes the `x-mcp-hitl` header. Consul applies `mcp.hitl.approval_timeout` to those requests. The default is `60s`. Requests without the header skip approval.
 
-The following configuration allows `billing-agent` to call the `billing.lookup` tool on `billing-tools`. Set the destination protocol to `http` first. The default protocol is `tcp`, and Consul rejects this L7 permission for a TCP destination. Refer to [service defaults](/consul/docs/reference/config-entry/service-defaults).
+To allow `billing-agent` to call the `billing.lookup` tool on `billing-tools`, first set the destination protocol to `http`. The default protocol is `tcp`, and Consul rejects a layer 7 (L7) permission for a TCP destination. Refer to [service defaults](/consul/docs/reference/config-entry/service-defaults).
+
+The following service defaults configuration entry sets the protocol for `billing-tools`:
 
 ```hcl
 Kind = "service-defaults"
 Name = "billing-tools"
 Protocol = "http"
 ```
+
+The following service intentions configuration entry allows `billing-agent` to call the `billing.lookup` tool:
 
 ```hcl
 Kind = "service-intentions"
@@ -103,7 +111,7 @@ Sources = [
 
 ## Registration state
 
-Consul stores the registration record in the KV store at `oauth/<service>/state`. `<service>` is the service name. The `state` field is one of the following:
+Consul stores the registration record in the key-value store at `oauth/<service>/state`. `<service>` is the service name, not the service ID. The `state` field is one of the following:
 
 | `state` | Meaning |
 | --- | --- |
