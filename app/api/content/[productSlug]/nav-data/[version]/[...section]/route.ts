@@ -7,8 +7,7 @@ import { findFileWithMetadata, parseJson } from '#utils/file'
 import { getProductVersionMetadata } from '#utils/contentVersions'
 import { getMetadata } from '#utils/metadata'
 import { errorResultToString } from '#utils/result'
-import { FileType } from '#types'
-import type { NavDataRouteParams } from '#types'
+import { FileType, type NavDataRouteParams } from '#types'
 
 export async function GET(
 	request: Request,

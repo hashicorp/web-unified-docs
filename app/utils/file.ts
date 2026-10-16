@@ -9,8 +9,12 @@ import grayMatter from 'gray-matter'
 import { parse as jsoncParse } from 'jsonc-parser'
 
 import { BUILD_TYPE, buildType } from './buildType'
-import { FileType, ServedFrom } from '#types'
-import type { ProductVersionMetadata, Result } from '#types'
+import {
+	FileType,
+	ServedFrom,
+	type ProductVersionMetadata,
+	type Result,
+} from '#types'
 import { Err, Ok } from './result'
 import { getMetadata } from './metadata'
 import { PRODUCT_CONFIG } from '#productConfig.mjs'

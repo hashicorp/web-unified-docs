@@ -13,8 +13,7 @@ import { getProductVersionMetadata } from '#utils/contentVersions'
 import { errorResultToString } from '#utils/result'
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
 import { getMetadata } from '#utils/metadata'
-import { FileType } from '#types'
-import type { DocRouteParams } from '#types'
+import { FileType, type DocRouteParams } from '#types'
 
 export async function GET(
 	request: Request,

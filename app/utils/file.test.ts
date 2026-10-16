@@ -6,8 +6,7 @@
 import { expect, test, vi, beforeEach, afterEach, describe, it } from 'vitest'
 import { copyFileSync, mkdirSync } from 'node:fs'
 import path from 'node:path'
-import { FileType, ServedFrom } from '#types'
-import type { Metadata } from '#types'
+import { FileType, ServedFrom, type Metadata } from '#types'
 
 // Must run before the module is evaluated so the module-level SELF_URL constant
 // picks up VERCEL_URL at load time.

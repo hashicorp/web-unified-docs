@@ -7,8 +7,7 @@ import { getProductVersionMetadata } from '#utils/contentVersions'
 import { getMetadata } from '#utils/metadata'
 import { findFileWithMetadata, parseJsonc } from '#utils/file'
 import { errorResultToString } from '#utils/result'
-import { FileType } from '#types'
-import type { ProductParam } from '#types'
+import { FileType, type ProductParam } from '#types'
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
 
 export async function GET(

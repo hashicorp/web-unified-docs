@@ -3,8 +3,7 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-import fs from 'node:fs'
-import type { FSWatcher } from 'node:fs'
+import fs, { type FSWatcher } from 'node:fs'
 import path from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import { Worker } from 'node:worker_threads'
