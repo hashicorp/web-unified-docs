@@ -1,0 +1,305 @@
+---
+layout: docs
+page_title: Localized virtual DNS resolution
+description: >-
+  Enable localized DNS so Consul Dataplane and Envoy sidecars resolve virtual service domains locally and keep DNS working during a control plane outage.
+---
+
+# Localized virtual DNS resolution
+
+Localized DNS lets Consul Dataplane and the Envoy sidecar resolve `*.virtual.consul` domains locally, so workloads in a Consul service mesh keep resolving the virtual IPs of their upstreams during a control plane outage. The sidecar answers queries from a table of its configured upstreams and contacts the Consul servers only when the table has no answer. Localized DNS applies to transparent proxy sidecars that run with Consul Dataplane.
+
+@include '../../../global/partials/alerts/experimental.mdx'
+
+Localized DNS is disabled by default. Consul does not push the DNS listeners to your sidecar proxies until you enable the `localized-dns` feature gate. Until then, all DNS queries resolve through Consul. Refer to [Enable localized DNS](#enable-localized-dns).
+
+## DNS resolution during a control plane outage
+
+In an agentless service mesh, Consul servers resolve all DNS queries. If the servers are unavailable, workloads cannot resolve the virtual IP (VIP) of the services they call, even though the data plane is otherwise able to keep routing traffic. To avoid this dependency, you can run a mesh architecture with servers across many datacenters or with a dedicated control plane per cluster, but both options increase infrastructure and maintenance costs.
+
+Localized DNS resolution moves virtual domain lookups into the data plane. The Envoy sidecar holds a table that maps the virtual domain of each configured upstream to its VIP. Consul Dataplane answers virtual domain queries from that table, and only contacts the Consul servers when it cannot.
+
+Localized DNS provides the following benefits:
+
+- **Resilience.** Virtual domains of configured upstreams keep resolving if the Consul servers are unreachable. Envoy continues to use its last known configuration until the control plane returns.
+- **Lower latency and server load.** The sidecar answers queries on the loopback interface instead of the servers. Consul Dataplane instances also avoid the brief resolution gap that occurs when they reconnect to a different server.
+- **Minimal resource use.** The table only contains the proxy's own upstreams. Consul builds it from existing proxy configuration snapshots, so it does not add watches or daemons.
+- **Visibility.** You can inspect the table in the Envoy configuration to confirm whether an upstream is configured and what its virtual domain is.
+
+Localized DNS is not a DNS cache. The sidecar acts as an authoritative resolver for the virtual domains of configured upstreams and does not cache responses for other names.
+
+## How localized DNS works
+
+Localized DNS uses two UDP listeners that Consul servers push to the Envoy sidecar over the Envoy discovery service (xDS) APIs. Both listeners bind to `127.0.0.1` only, use non-privileged ports, and are never reachable from outside the host. The following table describes each listener:
+
+| Listener | Envoy listener name | Address | Purpose |
+| :------- | :------------------ | :------ | :------ |
+| Inline virtual DNS | `virtual_dns` | `127.0.0.1:8653` | Answers virtual domains from an inline table that maps each upstream's fully qualified domain name to its VIP. |
+| Egress DNS | `egress_dns` | `127.0.0.1:8654` | Forwards non-Consul queries to the configured recursors. |
+
+Because the listeners are part of the proxy's listener configuration, Consul recomputes and pushes them when upstreams, virtual IPs, or recursors change. Envoy updates them without a restart.
+
+### Virtual domain format
+
+Consul derives the table entries from each upstream's identity. The table only has an entry for the expanded form:
+
+```text
+<service>.virtual.<namespace>.ns.<partition>.ap.<datacenter>.dc.consul
+```
+
+An example entry is `service-response.virtual.default.ns.partition-vms.ap.dc1.dc.consul`.
+
+Consul Dataplane treats a name as a virtual domain only if it ends in `.consul` and matches one of the following forms. The `ns`, `ap`, and `dc` qualifiers can appear in any combination, in this order, and an optional `<port>.` prefix selects a named port:
+
+```text
+<service>.virtual.consul
+<service>.virtual.<namespace>.ns.consul
+<service>.virtual.<partition>.ap.consul
+<service>.virtual.<datacenter>.dc.consul
+<service>.virtual.<namespace>.ns.<partition>.ap.<datacenter>.dc.consul
+```
+
+Applications can use shortened names, such as `service-response.virtual.consul`. Consul Dataplane expands them to the full form before it queries Envoy, and rewrites the name back in the answer.
+
+Each service has one VIP, so there is no DNS-level load balancing. The VIP maps to a cluster of endpoints, and Envoy load balances across them.
+
+### Query flow
+
+The transparent proxy iptables rules redirect application DNS queries to the Consul Dataplane DNS server at `127.0.0.1:8600`. Consul Dataplane then routes each query based on its domain:
+
+| Query | Path |
+| :---- | :--- |
+| `*.virtual.consul` | Consul Dataplane forwards the expanded name to Envoy on `8653`. If Envoy has an entry, it returns the VIP. If Envoy returns `NXDOMAIN` or is unavailable, Consul Dataplane queries the Consul servers with the original query. |
+| Other `*.consul` | Consul Dataplane queries the Consul servers over gRPC. |
+| Non-Consul domains | Consul Dataplane forwards the query to Envoy on `8654`, which resolves it through the configured recursors. If the egress listener is not present or fails, Consul Dataplane queries the Consul servers. |
+
+The following diagram shows the path each query takes:
+
+```text
+Application
+    |  UDP or TCP DNS
+    v
+iptables redirect
+    |
+    v
+Consul Dataplane (127.0.0.1:8600, UDP and TCP)
+    |
+    |-- *.virtual.consul ---> Envoy inline table (127.0.0.1:8653, UDP only)
+    |                            |-- hit: returns the VIP to the application
+    |                            '-- miss (NXDOMAIN): Consul servers
+    |
+    |-- other *.consul -----> Consul servers (gRPC, keeps UDP or TCP)
+    |
+    '-- non-Consul ---------> Envoy egress (127.0.0.1:8654, UDP only) --> recursors
+                                 '-- failure or miss: Consul servers
+```
+
+Consul Dataplane forwards queries to Envoy over UDP, even when the application uses TCP, and returns the response over the application's original protocol. Consul domains never reach public recursors. Consul Dataplane only sends non-Consul names to the egress listener, and the inline table is authoritative for the `consul` suffix.
+
+### Resolution by query type
+
+The following table shows which component answers each type of query. The servers are always the fallback, so a query that the local listeners cannot answer still resolves while the servers are reachable:
+
+| Query or condition | Example | Answered by | Works during a control plane outage |
+| :----------------- | :------ | :---------- | :---------------------------------- |
+| Virtual domain of an upstream in the table | `web.virtual.consul`, `web.virtual.default.ns.default.ap.dc1.dc.consul` | Envoy inline listener on port `8653` | Yes |
+| Virtual domain with a named port | `http.web.virtual.consul` | Consul servers | No |
+| Virtual domain with more than one address in the table, such as a local and a peered service with the same name | `web.virtual.consul` | Consul servers | No |
+| Virtual domain that is not in the table | `unknown.virtual.consul` | Consul servers, after Envoy returns `NXDOMAIN` | No |
+| Virtual domain while the inline listener is missing, unresponsive, or in its 1-second backoff | `web.virtual.consul` | Consul servers | No |
+| `<service>.service.virtual.consul` form | `web.service.virtual.consul` | Consul servers | No |
+| Other `.consul` names, such as service, node, or prepared query lookups | `web.service.consul`, `node1.node.consul` | Consul servers | No |
+| `.consul` name with an unrecognized virtual qualifier | `web.virtual.foo.consul` | Consul servers | No |
+| Custom `domain` or `alt_domain` names | `web.service.example` | Treated as external names | Depends on the external name |
+| External name with `recursors` configured and a healthy egress listener | `example.com` | Envoy egress listener on port `8654`, through the recursors | Yes |
+| External name with no `recursors` configured | `example.com` | Consul servers | No |
+| External name when the egress listener is missing, slow, returns `NXDOMAIN`, or is in its 5-second backoff | `example.com` | Consul servers | No |
+| Any query when the feature gate is off, the servers do not meet the version requirement, or the proxy has no upstream with a virtual IP | `web.virtual.consul` | Consul servers | No |
+
+### Failure handling
+
+Consul Dataplane waits up to 300ms for each answer from an Envoy listener. If the listener fails, Consul Dataplane answers the query through the Consul servers and stops sending queries to that listener for a fixed backoff period. During the backoff, all queries of that type go directly to the servers, so a missing or unhealthy listener does not add latency to every query.
+
+The conditions that start a backoff and the length of the backoff differ for each listener:
+
+| Listener | What starts the backoff | Backoff period |
+| :------- | :---------------------- | :------------- |
+| Inline virtual DNS on port `8653` | The listener does not answer, such as a connection error or a timeout. An `NXDOMAIN` answer does not start a backoff. | 1 second |
+| Egress DNS on port `8654` | The listener does not answer, or answers with anything other than success, such as `NXDOMAIN`. | 5 seconds |
+
+The backoff applies to the whole Consul Dataplane instance, not to a single domain. It has a fixed length and does not grow with repeated failures. A new failure while the backoff is active can extend the end time, but never shorten it. After the backoff ends, the next matching query tries the listener again.
+
+Envoy limits recursor lookups with a 2-second resolver timeout and a maximum of 256 pending lookups, which prevents unresponsive recursors from exhausting sockets.
+
+## Requirements
+
+- Consul servers version 2.1.0 or later with the `localized-dns` feature gate enabled. On servers that do not meet this version, the feature gate stays disabled even if you enable it. Those servers do not push the listeners, and virtual domains continue to resolve through the servers.
+- Consul Dataplane with the DNS server enabled. In Kubernetes, enable `dns.enabled` and `connectInject.consulDNS.enabled`, and enable transparent proxy redirection.
+- Transparent proxy for workloads whose upstreams you resolve by virtual domain.
+
+When you upgrade, upgrade the Consul servers before Consul Dataplane. Because the iptables rules do not change, you can then roll out workloads with a standard rolling update.
+
+## Enable localized DNS
+
+Localized DNS is disabled by default. Complete the following steps to enable it. Applications do not require changes.
+
+1. Upgrade the Consul servers to the version listed in [Requirements](#requirements).
+1. Use the operator feature API to enable the `localized-dns` feature gate. Without the feature gate, the servers do not push the `8653` listener. The request requires a token with operator write permissions.
+
+   ```shell-session
+   $ curl --silent --insecure --request PUT \
+       --header "X-Consul-Token: $CONSUL_HTTP_TOKEN" \
+       --data '{"Enabled": true}' \
+       https://localhost:8501/v1/operator/feature/localized-dns
+   ```
+
+   Consul returns the state of the feature:
+
+   ```json
+   {
+     "Applied": true,
+     "Feature": {
+       "Name": "localized-dns",
+       "Stage": "experimental",
+       "MinVersion": "2.1.0",
+       "DefaultEnabled": false,
+       "BeforeMinimumVersion": "disabled",
+       "Description": "Add inline virtual DNS and egress recursor DNS listeners to connect-proxy sidecars",
+       "Owner": "proxycfg",
+       "DesiredEnabled": true,
+       "EffectiveEnabled": true,
+       "Eligible": true,
+       "Source": "operator",
+       "Reason": "operator-enabled",
+       "PolicyIndex": 249,
+       "StatusIndex": 249
+     }
+   }
+   ```
+
+   Confirm that `EffectiveEnabled` and `Eligible` are `true`. If `EffectiveEnabled` is `false`, the `Reason` field explains why, for example because the servers do not meet `MinVersion`.
+
+1. Upgrade the Consul Dataplane image and restart your workloads. With the feature gate on, the servers push the `8653` listener to every transparent proxy that has at least one upstream with a virtual IP.
+1. Verify that the `virtual_dns` listener exists on a workload. Envoy exposes the listener on its admin interface:
+
+   ```shell-session
+   $ kubectl exec <pod> -c consul-dataplane -- \
+       wget -qO- http://127.0.0.1:19000/listeners | grep virtual_dns
+   virtual_dns:127.0.0.1:8653::127.0.0.1:8653
+   ```
+
+1. Resolve a virtual domain from the application container:
+
+   ```shell-session
+   $ kubectl exec <pod> -c app -- nslookup service-response.virtual.consul
+   ```
+
+   The address in the answer is a VIP, such as `240.0.0.1`.
+
+### Enable egress resolution for non-Consul domains
+
+The egress listener on `8654` exists only when the Consul servers have at least one recursor configured. Set the [`recursors`](/consul/docs/reference/agent/configuration-file/dns#recursors) option in the server configuration:
+
+```hcl
+recursors = ["8.8.8.8", "8.8.4.4"]
+```
+
+Recursors must be IP addresses, with an optional port such as `10.0.0.2:5353`. Consul uses port `53` if you omit the port and ignores entries that are not valid IP addresses.
+
+## Disable localized DNS
+
+You can disable all of localized DNS or only the egress listener. You can also return individual workloads to server-based resolution or roll back the upgrade.
+
+### Disable the feature gate
+
+Set `Enabled` to `false` for the `localized-dns` feature. Consul stops pushing both listeners, and all DNS queries resolve through the Consul servers.
+
+```shell-session
+$ curl --silent --insecure --request PUT \
+    --header "X-Consul-Token: $CONSUL_HTTP_TOKEN" \
+    --data '{"Enabled": false}' \
+    https://localhost:8501/v1/operator/feature/localized-dns
+```
+
+### Disable the egress listener
+
+Remove all entries from `recursors` in the server configuration. Consul stops pushing the `8654` listener, and Consul Dataplane resolves non-Consul names through the Consul servers instead.
+
+### Return a workload to server-based resolution
+
+Resolution through the servers is always the fallback. If a workload has no `8653` listener, or the listener has no entry for the name, Consul Dataplane queries the servers. To return a workload to server-based resolution, deploy a Consul Dataplane and server version that does not support localized DNS, or remove the upstream so that the table has no entry for it.
+
+### Roll back the upgrade
+
+Roll back Consul Dataplane first and then the servers. Keep the servers on the localized DNS version until you roll back all Consul Dataplane instances, because rolling back the servers first removes the listeners that Consul Dataplane routes to. Consul Dataplane automatically falls back to the servers when a listener is absent.
+
+## Monitor localized DNS listeners
+
+Envoy reports separate statistics for each listener, so you can tell a missing upstream apart from a failed external lookup:
+
+| Stat prefix | Listener |
+| :---------- | :------- |
+| `consul_virtual_dns` | Inline virtual domain table on port `8653` |
+| `consul_egress_dns` | Egress recursor forwarding on port `8654` |
+
+To list the table entries, query the Envoy admin interface for the `virtual_dns` listener and extract its virtual domains. The following example runs `jq` on your local machine and shows one entry that maps a virtual domain to its VIP:
+
+```shell-session
+$ kubectl exec <pod> -c consul-dataplane -- \
+    wget -qO- 'http://127.0.0.1:19000/config_dump?resource=dynamic_listeners&name_regex=virtual_dns.*' \
+    | jq '.configs[].active_state.listener.listener_filters[].typed_config.server_config.inline_dns_table.virtual_domains'
+[
+  {
+    "name": "service-response.virtual.default.ns.default.ap.dc1.dc.consul",
+    "endpoint": {
+      "address_list": {
+        "address": [
+          "240.0.0.1"
+        ]
+      }
+    }
+  }
+]
+```
+
+## Limitations
+
+Localized DNS has the following limitations:
+
+- **Virtual domains only.** The inline table only answers the forms listed in [Virtual domain format](#virtual-domain-format). Consul Dataplane sends all other `.consul` names, including `<service>.service.virtual.consul` and names with an unrecognized qualifier, to the Consul servers unchanged.
+- **Default `consul` domain only.** Consul Dataplane matches the `.consul` suffix. Consul Dataplane does not recognize a custom [`domain`](/consul/docs/reference/agent/configuration-file/dns#domain) or [`alt_domain`](/consul/docs/reference/agent/configuration-file/dns#alt_domain) and treats queries in those domains as external names.
+- **Sidecar proxies only.** Consul pushes the listeners to `connect-proxy` sidecars. Gateways do not receive them.
+- **Only upstreams with a virtual IP.** The table has entries for the upstreams of that proxy that have a virtual IP. Consul does not push the `8653` listener to a proxy that has no such upstream.
+- **Unconfigured upstreams fail during an outage.** Consul Dataplane treats every Envoy answer other than a successful response as a miss and queries the servers. During a control plane outage, a virtual domain for an upstream that was not in the proxy configuration before the outage does not resolve.
+- **No new configuration during an outage.** Envoy and Consul Dataplane keep their last known configuration. New upstreams, changed virtual IPs, and recursor changes take effect after the control plane returns.
+- **Consul servers resolve named-port virtual domains.** The table uses the service name as its key and does not store per-port virtual IPs, so queries such as `<port>.<service>.virtual.consul` do not work during an outage.
+- **Multiple identities for one name fall back to the servers.** If the same domain maps to more than one virtual IP, such as a local and a peered service with the same name, Consul Dataplane discards the answer from Envoy and queries the servers. These queries do not work during an outage.
+- **Short names use the proxy's own identity.** Consul Dataplane fills in the namespace, partition, and datacenter that a short name omits from the proxy's own values, not from its upstreams. To resolve an upstream in another namespace, partition, or datacenter, qualify the name with those values.
+- **UDP only between Consul Dataplane and Envoy.** The Envoy DNS filter and the egress resolver only support UDP, and Envoy has no TCP fallback.
+- **Non-Consul domains need recursors and a healthy listener.** Without `recursors` on the servers, Consul Dataplane sends external queries to the servers, so external names do not resolve during an outage. Refer to [Failure handling](#failure-handling) for timeouts and backoff periods.
+- **One VIP per service, no DNS load balancing.** Envoy load balances across the endpoints behind the VIP.
+- **No caching.** Localized DNS does not cache responses and does not replace the DNS caching and time-to-live (TTL) options on the [Scale Consul DNS](/consul/docs/discover/dns/scale) page.
+- **Fixed ports.** The listeners use `8653` and `8654` on `127.0.0.1`. You cannot change them, and no other process in the pod can use them.
+- **Recursors are global.** Recursors come from the Consul server configuration, not from per-proxy settings.
+- **Requires Consul Dataplane DNS and redirection.** Applications must send DNS queries to Consul Dataplane at `127.0.0.1:8600`, which transparent proxy redirection configures. Localized DNS does not apply to workloads that send queries elsewhere.
+- **Experimental.** The `localized-dns` feature gate is experimental and disabled by default.
+
+## Troubleshooting
+
+The following table lists common symptoms, their causes, and how to resolve them:
+
+| Symptom | Cause and resolution |
+| :------ | :------------------- |
+| `virtual_dns` listener is missing | The servers do not meet the version requirement, the proxy has no upstream with a VIP, or the Consul Dataplane instance has not restarted since the upgrade. |
+| Virtual domain returns `NXDOMAIN` | The upstream is not configured on the proxy and the servers cannot find it. Check the service defaults, intentions, and upstream configuration. |
+| Virtual domain resolves slowly after an outage | Consul Dataplane is waiting for the server fallback. Check whether the upstream appears in the table. Refer to [Monitor localized DNS listeners](#monitor-localized-dns-listeners). |
+| Public names do not resolve through the sidecar | No `recursors` are configured, so Consul Dataplane uses the servers. Add `recursors` to the server configuration. |
+| Port conflict on startup | Another process listens on `8653` or `8654`. Change the application. You cannot change the ports. |
+
+## Next steps
+
+- [Transparent proxy overview](/consul/docs/connect/proxy/transparent-proxy)
+- [Consul dataplane](/consul/docs/architecture/control-plane/dataplane)
+- [Configure Consul DNS behavior](/consul/docs/discover/dns/configure)
+- [Scale Consul DNS](/consul/docs/discover/dns/scale)
+- [Resolve Consul DNS in Kubernetes](/consul/docs/discover/dns/k8s)
