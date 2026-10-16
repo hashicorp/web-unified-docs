@@ -27,7 +27,8 @@ import { PRODUCT_CONFIG } from '#productConfig.mjs'
 
 /**
  * Apply MDX transforms to the provided `.mdx` paths under the target
- * directory and write the transformed files to the output directory.
+ * directory and write the transformed files to the output directory, or
+ * return them without writing when requested.
  *
  * Note: we expect the following directory structure:
  * - `<targetDir>/<repoSlug>/<version>/<contentDir>/<...file>.mdx`
@@ -37,8 +38,11 @@ import { PRODUCT_CONFIG } from '#productConfig.mjs'
  * @param {string} targetDir
  * @param {string} outputDir the directory to write transformed files to
  * @param {string[]} filesToCheck the explicit paths to consider for transformation
- * @param {{ verbose?: boolean }} [options] Progress logging, enabled by default.
+ * @param {{ verbose?: boolean, returnTransformedMdx?: boolean }} [options]
+ * Progress logging is enabled by default. Set `returnTransformedMdx` to return
+ * transformed content for each file without writing it to the output directory.
  * Errors are always logged.
+ * @returns {Promise<string[] | void>} Transformed files when requested.
  * @throws {Error} If any file fails, with details for every failed file.
  */
 export async function buildMdxTransforms(
@@ -48,7 +52,7 @@ export async function buildMdxTransforms(
 	filesToCheck,
 	options = { verbose: true },
 ) {
-	const { verbose = true } = options
+	const { verbose = true, returnTransformedMdx = false } = options
 
 	// Filter for `.mdx` files
 	const mdxFiles = filesToCheck.filter((filePath) => {
@@ -91,7 +95,12 @@ export async function buildMdxTransforms(
 		'MDX transforms',
 		mdxFileEntries,
 		(entry) => {
-			return applyMdxTransforms(entry, versionMetadata, targetDir)
+			return applyMdxTransforms(
+				entry,
+				versionMetadata,
+				targetDir,
+				returnTransformedMdx,
+			)
 		},
 		{ loggingEnabled: verbose },
 	)
@@ -123,11 +132,17 @@ export async function buildMdxTransforms(
 	if (verbose) {
 		console.log(`✅ Applied MDX transforms to ${mdxFileEntries.length} files.`)
 	}
+
+	if (returnTransformedMdx) {
+		return results.map(({ transformedMdx }) => {
+			return transformedMdx
+		})
+	}
 }
 
 /**
- * Given an `.mdx` file entry, read the file in, apply MDX transforms,
- * and then write it out.
+ * Given an `.mdx` file entry, read it, apply MDX transforms, and either
+ * return the transformed content or write it out.
  *
  * If an error is encountered during MDX transforms, we catch the error,
  * and return it as a string. If there are no errors, we return { error: null}.
@@ -138,7 +153,12 @@ export async function buildMdxTransforms(
  * @param {string} entry.outPath
  * @return {object} { error: string | null }
  */
-async function applyMdxTransforms(entry, versionMetadata = {}, targetDir) {
+async function applyMdxTransforms(
+	entry,
+	versionMetadata = {},
+	targetDir,
+	returnTransformedMdx = false,
+) {
 	try {
 		const { filePath, partialsDir, outPath, version, redirectsDir } = entry
 		const redirects = await loadRedirects(version, redirectsDir)
@@ -187,6 +207,10 @@ async function applyMdxTransforms(entry, versionMetadata = {}, targetDir) {
 
 		const transformedContent = String(remarkResults)
 		const transformedFileString = grayMatter.stringify(transformedContent, data)
+
+		if (returnTransformedMdx) {
+			return { error: null, transformedMdx: transformedFileString }
+		}
 
 		// Ensure the parent directory for the output file path exists
 		const outDir = path.dirname(outPath)

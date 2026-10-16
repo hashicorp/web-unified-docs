@@ -148,7 +148,7 @@ export const fetchFile = async (
 			parts[0] = 'content'
 			localFilePath = parts.join('/')
 		} else if (fileType === FileType.Markdown) {
-			// Apply MDX transforms, writing out transformed MDX files to `public`
+			// Apply MDX transforms and return the content without writing to `public`
 			const CWD = process.cwd()
 
 			try {
@@ -157,23 +157,30 @@ export const fetchFile = async (
 
 				const module = await useMdxTransformsModule
 				const { versionMetadata } = await getMetadata()
-				await module.buildMdxTransforms(
+				const transformedMdxs = await module.buildMdxTransforms(
 					path.join(CWD, 'content'),
 					path.join(CWD, 'public', 'content'),
 					versionMetadata,
 					[path.join(CWD, localFilePath)],
-					{ verbose: false },
+					{ verbose: false, returnTransformedMdx: true },
 				)
+
+				const transformedMdx = transformedMdxs?.[0]
+				if (typeof transformedMdx !== 'string') {
+					throw new Error('No transformed MDX returned')
+				}
+
+				const response = new Response(transformedMdx, {
+					headers: {
+						'content-type': contentTypeFromPath(localFilePath),
+					},
+				})
+				return Ok({ response, servedFrom: ServedFrom.CurrentBuild })
 			} catch (error) {
 				return Err(
 					`Failed to read local file at path: ${localFilePath}, error: ${error}`,
 				)
 			}
-
-			// Add /public to the path for markdown files to match the transformed output directory
-			const parts = filePath.split('/')
-			parts.unshift('public')
-			localFilePath = parts.join('/')
 		}
 
 		try {

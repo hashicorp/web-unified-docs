@@ -34,7 +34,7 @@ describe('applyMdxTransforms - Integration Tests', () => {
 		versionMetadata = mockVersionMetadata,
 		options,
 	) {
-		await buildMdxTransforms(
+		return buildMdxTransforms(
 			'/content',
 			'/output',
 			versionMetadata,
@@ -94,6 +94,30 @@ describe('applyMdxTransforms - Integration Tests', () => {
 			}
 		},
 	)
+
+	test('returns transformed MDX without writing output when requested', async () => {
+		vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({
+			vault: {
+				versionedDocs: true,
+				basePaths: ['docs'],
+				supportsExclusionDirectives: false,
+			},
+		})
+		vol.fromJSON({
+			'/content/vault/v1.20.x/docs/test.mdx':
+				'---\npage_title: Test\n---\n\n# Test\n',
+		})
+
+		const transformedMdx = await transformFixtureFiles(mockVersionMetadata, {
+			verbose: false,
+			returnTransformedMdx: true,
+		})
+
+		expect(transformedMdx).toHaveLength(1)
+		expect(transformedMdx[0]).toContain('page_title: Test')
+		expect(transformedMdx[0]).toContain('# Test')
+		expect(fs.existsSync('/output/vault/v1.20.x/docs/test.mdx')).toBe(false)
+	})
 
 	describe('Global Partials Processing', () => {
 		test('should resolve partials from latest/docs/partials for latest version folder', async () => {

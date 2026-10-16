@@ -395,7 +395,6 @@ describe('fetchFile - incBuildLocalDev', () => {
 		UNIFIED_DOCS_PROD_URL: undefined,
 	}
 	const markdownPath = 'content/vault/v1.21.x/docs/index.mdx'
-	const outputPath = path.join('public', markdownPath)
 	const metadata: Metadata = {
 		versionMetadata: {
 			vault: [
@@ -415,14 +414,13 @@ describe('fetchFile - incBuildLocalDev', () => {
 
 	test('transforms the requested Markdown file and serves its local output', async () => {
 		const { fetchFile } = await loadFileModuleWithEnv(localEnv)
-		vi.mocked(readFile).mockResolvedValue('# Transformed')
+		buildMdxTransforms.mockResolvedValueOnce(['# Transformed'])
 
 		const result = await fetchFile(markdownPath, FileType.Markdown)
 
 		expect(access).toHaveBeenCalledOnce()
 		expect(access).toHaveBeenCalledWith(markdownPath)
-		expect(readFile).toHaveBeenCalledOnce()
-		expect(readFile).toHaveBeenCalledWith(outputPath, 'utf-8')
+		expect(readFile).not.toHaveBeenCalled()
 		expect(getMetadata).toHaveBeenCalledOnce()
 		expect(buildMdxTransforms).toHaveBeenCalledOnce()
 		expect(buildMdxTransforms).toHaveBeenCalledWith(
@@ -430,7 +428,7 @@ describe('fetchFile - incBuildLocalDev', () => {
 			path.join(process.cwd(), 'public', 'content'),
 			metadata.versionMetadata,
 			[path.join(process.cwd(), markdownPath)],
-			{ verbose: false },
+			{ verbose: false, returnTransformedMdx: true },
 		)
 		expect(result.ok).toBe(true)
 		if (result.ok) {
@@ -443,12 +441,11 @@ describe('fetchFile - incBuildLocalDev', () => {
 		expect(fetch).not.toHaveBeenCalled()
 	})
 
-	test('waits for Markdown transforms before reading the output', async () => {
+	test('waits for Markdown transforms before returning transformed content', async () => {
 		const { fetchFile } = await loadFileModuleWithEnv(localEnv)
-		vi.mocked(readFile).mockResolvedValue('# Transformed')
-		let finishTransform: () => void
+		let finishTransform: (result: string[]) => void
 		buildMdxTransforms.mockReturnValueOnce(
-			new Promise<void>((resolve: () => void) => {
+			new Promise<string[]>((resolve: (result: string[]) => void) => {
 				finishTransform = resolve
 			}),
 		)
@@ -457,18 +454,20 @@ describe('fetchFile - incBuildLocalDev', () => {
 		await vi.waitFor(() => {
 			expect(buildMdxTransforms).toHaveBeenCalledOnce()
 		})
-		expect(readFile).not.toHaveBeenCalled()
 
-		finishTransform()
-		expect((await pending).ok).toBe(true)
-		expect(readFile).toHaveBeenCalledOnce()
-		expect(readFile).toHaveBeenCalledWith(outputPath, 'utf-8')
+		finishTransform(['# Transformed'])
+		const result = await pending
+		expect(result.ok).toBe(true)
+		if (result.ok) {
+			expect(await result.value.response.text()).toBe('# Transformed')
+		}
+		expect(readFile).not.toHaveBeenCalled()
 		expect(fetch).not.toHaveBeenCalled()
 	})
 
 	test('waits for the source file existence check before transforming Markdown', async () => {
 		const { fetchFile } = await loadFileModuleWithEnv(localEnv)
-		vi.mocked(readFile).mockResolvedValue('# Transformed')
+		buildMdxTransforms.mockResolvedValueOnce(['# Transformed'])
 		let finishAccess: () => void
 		vi.mocked(access).mockReturnValueOnce(
 			new Promise<void>((resolve: () => void) => {
@@ -487,7 +486,7 @@ describe('fetchFile - incBuildLocalDev', () => {
 		finishAccess()
 		expect((await pending).ok).toBe(true)
 		expect(buildMdxTransforms).toHaveBeenCalledOnce()
-		expect(readFile).toHaveBeenCalledWith(outputPath, 'utf-8')
+		expect(readFile).not.toHaveBeenCalled()
 	})
 
 	test.each([
@@ -772,15 +771,16 @@ describe('fetchFile - incBuildLocalDev', () => {
 		expect(fetch).not.toHaveBeenCalled()
 	})
 
-	test('returns Err when the transformed Markdown output cannot be read', async () => {
+	test('returns Err when the transform does not return Markdown content', async () => {
 		const { fetchFile } = await loadFileModuleWithEnv(localEnv)
-		vi.mocked(readFile).mockRejectedValueOnce(new Error('ENOENT'))
+		buildMdxTransforms.mockResolvedValueOnce([])
 
 		expect(await fetchFile(markdownPath, FileType.Markdown)).toEqual({
 			ok: false,
-			value: `Failed to read local file at path: ${outputPath}, error: Error: ENOENT`,
+			value: `Failed to read local file at path: ${markdownPath}, error: Error: No transformed MDX returned`,
 		})
 		expect(buildMdxTransforms).toHaveBeenCalledOnce()
+		expect(readFile).not.toHaveBeenCalled()
 		expect(fetch).not.toHaveBeenCalled()
 	})
 })
