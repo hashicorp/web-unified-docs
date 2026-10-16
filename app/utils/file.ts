@@ -143,7 +143,7 @@ export const fetchFile = async (
 			servedFrom: ServedFrom.Production,
 		})
 
-		// this basically a check for BUILD_TYPE.incBuildLocalDev, but required or else nest.js tracing includes it in preview and prod builds
+		// this basically a check for BUILD_TYPE.incBuildLocalDev, but required or else next.js tracing includes it in preview and prod builds
 	} else if (useMdxTransformsModule) {
 		let localFilePath = filePath
 		if (fileType === FileType.Asset) {
