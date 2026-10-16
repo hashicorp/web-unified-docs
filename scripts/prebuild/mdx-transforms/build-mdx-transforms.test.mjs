@@ -6,6 +6,7 @@
 import { expect, test, describe, vi, beforeEach, afterEach } from 'vitest'
 import { fs, vol } from 'memfs'
 import { buildMdxTransforms } from './build-mdx-transforms.mjs'
+import { listFiles } from '#scriptUtils/list-files.mjs'
 import * as repoConfig from '#productConfig.mjs'
 
 vi.mock('node:fs')
@@ -13,6 +14,7 @@ vi.mock('node:fs/promises')
 
 describe('applyMdxTransforms - Integration Tests', () => {
 	const mockVersionMetadata = {
+		terraform: [{ version: 'v1.14.x', releaseStage: 'stable', isLatest: true }],
 		vault: [
 			{ version: 'v1.19.x', releaseStage: 'stable', isLatest: false },
 			{ version: 'v1.20.x', releaseStage: 'stable', isLatest: false },
@@ -28,6 +30,19 @@ describe('applyMdxTransforms - Integration Tests', () => {
 		],
 	}
 
+	async function transformFixtureFiles(
+		versionMetadata = mockVersionMetadata,
+		options,
+	) {
+		return buildMdxTransforms(
+			'/content',
+			'/output',
+			versionMetadata,
+			await listFiles('/content'),
+			options,
+		)
+	}
+
 	beforeEach(() => {
 		vol.reset()
 		vi.clearAllMocks()
@@ -37,7 +52,109 @@ describe('applyMdxTransforms - Integration Tests', () => {
 		vol.reset()
 	})
 
+	test.each([
+		{ name: 'omitted', options: undefined, loggingEnabled: true },
+		{ name: 'empty', options: {}, loggingEnabled: true },
+		{ name: 'verbose', options: { verbose: true }, loggingEnabled: true },
+		{ name: 'quiet', options: { verbose: false }, loggingEnabled: false },
+	])(
+		'controls progress logging when options are $name',
+		async ({ options, loggingEnabled }) => {
+			vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({
+				vault: {
+					versionedDocs: true,
+					basePaths: ['docs'],
+					supportsExclusionDirectives: false,
+				},
+			})
+			vol.fromJSON({
+				'/content/vault/v1.20.x/docs/test.mdx': '# Test\n',
+			})
+			const consoleLogSpy = vi
+				.spyOn(console, 'log')
+				.mockImplementation(() => {})
+
+			try {
+				await transformFixtureFiles(mockVersionMetadata, options)
+
+				if (loggingEnabled) {
+					expect(consoleLogSpy.mock.calls).toEqual([
+						['Running MDX transforms on 1 files...'],
+						['MDX transforms 1 / 1 completed...'],
+						[expect.stringContaining('Applied MDX transforms to 1 files.')],
+					])
+				} else {
+					expect(consoleLogSpy).not.toHaveBeenCalled()
+				}
+				expect(
+					fs.readFileSync('/output/vault/v1.20.x/docs/test.mdx', 'utf8'),
+				).toContain('# Test')
+			} finally {
+				consoleLogSpy.mockRestore()
+			}
+		},
+	)
+
+	test('returns transformed MDX without writing output when requested', async () => {
+		vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({
+			vault: {
+				versionedDocs: true,
+				basePaths: ['docs'],
+				supportsExclusionDirectives: false,
+			},
+		})
+		vol.fromJSON({
+			'/content/vault/v1.20.x/docs/test.mdx':
+				'---\npage_title: Test\n---\n\n# Test\n',
+		})
+
+		const transformedMdx = await transformFixtureFiles(mockVersionMetadata, {
+			verbose: false,
+			returnTransformedMdx: true,
+		})
+
+		expect(transformedMdx).toHaveLength(1)
+		expect(transformedMdx[0]).toContain('page_title: Test')
+		expect(transformedMdx[0]).toContain('# Test')
+		expect(fs.existsSync('/output/vault/v1.20.x/docs/test.mdx')).toBe(false)
+	})
+
 	describe('Global Partials Processing', () => {
+		test('should resolve partials from latest/docs/partials for latest version folder', async () => {
+			vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({
+				terraform: {
+					versionedDocs: true,
+					basePaths: ['terraform'],
+					supportsExclusionDirectives: false,
+				},
+			})
+
+			const mainContent = `---
+page_title: Latest Page
+---
+
+# Latest Page
+
+@include 'from-latest.mdx'
+`
+
+			vol.fromJSON({
+				'/content/terraform/latest/docs/example.mdx': mainContent,
+				'/content/terraform/latest/docs/partials/from-latest.mdx':
+					'Content from latest partial.',
+			})
+
+			await transformFixtureFiles()
+
+			const outputContent = fs.readFileSync(
+				'/output/terraform/latest/docs/example.mdx',
+				'utf8',
+			)
+
+			expect(outputContent).toContain('Content from latest partial.')
+			expect(outputContent).not.toContain('@include')
+		})
+
 		test('should process global partials and include content in output', async () => {
 			vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({
 				vault: {
@@ -70,7 +187,7 @@ Regular content after partial.
 					globalPartialContent,
 			})
 
-			await buildMdxTransforms('/content', '/output', mockVersionMetadata)
+			await transformFixtureFiles()
 
 			const outputContent = fs.readFileSync(
 				'/output/vault/v1.20.x/docs/test.mdx',
@@ -125,7 +242,7 @@ Main content.
 				'/content/vault/v1.20.x/docs/partials/nested.mdx': nestedPartialContent,
 			})
 
-			await buildMdxTransforms('/content', '/output', mockVersionMetadata)
+			await transformFixtureFiles()
 
 			const outputContent = fs.readFileSync(
 				'/output/vault/v1.20.x/docs/test.mdx',
@@ -176,7 +293,7 @@ page_title: Test Page
 					globalPartialContent,
 			})
 
-			await buildMdxTransforms('/content', '/output', mockVersionMetadata)
+			await transformFixtureFiles()
 
 			const outputV120 = fs.readFileSync(
 				'/output/vault/v1.20.x/docs/test.mdx',
@@ -196,7 +313,7 @@ page_title: Test Page
 					globalPartialContent,
 			})
 
-			await buildMdxTransforms('/content', '/output', mockVersionMetadata)
+			await transformFixtureFiles()
 
 			const outputV121 = fs.readFileSync(
 				'/output/vault/v1.21.x/docs/test.mdx',
@@ -242,7 +359,7 @@ Regular content.
 					globalPartialContent,
 			})
 
-			await buildMdxTransforms('/content', '/output', mockVersionMetadata)
+			await transformFixtureFiles()
 
 			const outputV120 = fs.readFileSync(
 				'/output/vault/v1.20.x/docs/test.mdx',
@@ -259,7 +376,7 @@ Regular content.
 					globalPartialContent,
 			})
 
-			await buildMdxTransforms('/content', '/output', mockVersionMetadata)
+			await transformFixtureFiles()
 
 			const outputV121 = fs.readFileSync(
 				'/output/vault/v1.21.x/docs/test.mdx',
@@ -314,7 +431,7 @@ Always visible content.
 					globalPartialContent,
 			})
 
-			await buildMdxTransforms('/content', '/output', mockVersionMetadata)
+			await transformFixtureFiles()
 
 			const outputV120 = fs.readFileSync(
 				'/output/vault/v1.20.x/docs/test.mdx',
@@ -335,7 +452,7 @@ Always visible content.
 					globalPartialContent,
 			})
 
-			await buildMdxTransforms('/content', '/output', mockVersionMetadata)
+			await transformFixtureFiles()
 
 			const outputV121 = fs.readFileSync(
 				'/output/vault/v1.21.x/docs/test.mdx',
@@ -356,7 +473,7 @@ Always visible content.
 					globalPartialContent,
 			})
 
-			await buildMdxTransforms('/content', '/output', mockVersionMetadata)
+			await transformFixtureFiles()
 
 			const outputV122 = fs.readFileSync(
 				'/output/vault/v1.22.x/docs/test.mdx',
@@ -434,7 +551,7 @@ AppRole is designed for machine authentication.
 					partialContent,
 			})
 
-			await buildMdxTransforms('/content', '/output', mockVersionMetadata)
+			await transformFixtureFiles()
 
 			const output = fs.readFileSync(
 				'/output/vault/v1.20.x/docs/auth-methods.mdx',
@@ -460,16 +577,22 @@ AppRole is designed for machine authentication.
 	})
 
 	describe('Error Cases', () => {
-		test('should handle error when partial file does not exist', async () => {
-			vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({
-				vault: {
-					versionedDocs: true,
-					basePaths: ['docs'],
-					supportsExclusionDirectives: false,
-				},
-			})
+		afterEach(() => {
+			vi.restoreAllMocks()
+		})
 
-			const mainContent = `---
+		test.each([false, true])(
+			'should log errors when verbose is %s and a partial file does not exist',
+			async (verbose) => {
+				vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({
+					vault: {
+						versionedDocs: true,
+						basePaths: ['docs'],
+						supportsExclusionDirectives: false,
+					},
+				})
+
+				const mainContent = `---
 page_title: Test Page
 ---
 
@@ -478,26 +601,35 @@ page_title: Test Page
 @include 'nonexistent.mdx'
 `
 
-			vol.fromJSON({
-				'/content/vault/v1.20.x/docs/test.mdx': mainContent,
-			})
+				vol.fromJSON({
+					'/content/vault/v1.20.x/docs/test.mdx': mainContent,
+				})
 
-			// Mock console.error to suppress error output during test
-			const consoleErrorSpy = vi
-				.spyOn(console, 'error')
-				.mockImplementation(() => {})
-			const processExitSpy = vi
-				.spyOn(process, 'exit')
-				.mockImplementation(() => {})
+				// Mock console.error to suppress error output during test
+				const consoleErrorSpy = vi
+					.spyOn(console, 'error')
+					.mockImplementation(() => {})
+				const consoleLogSpy = vi
+					.spyOn(console, 'log')
+					.mockImplementation(() => {})
+				const processExitSpy = vi
+					.spyOn(process, 'exit')
+					.mockImplementation(() => {})
 
-			await buildMdxTransforms('/content', '/output', mockVersionMetadata)
+				await expect(
+					transformFixtureFiles(mockVersionMetadata, { verbose }),
+				).rejects.toThrow('in file: /content/vault/v1.20.x/docs/test.mdx')
 
-			expect(processExitSpy).toHaveBeenCalledWith(1)
-			expect(consoleErrorSpy).toHaveBeenCalled()
-
-			consoleErrorSpy.mockRestore()
-			processExitSpy.mockRestore()
-		})
+				expect(processExitSpy).not.toHaveBeenCalled()
+				expect(consoleErrorSpy).toHaveBeenCalledTimes(3)
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					expect.stringContaining(
+						'in file: /content/vault/v1.20.x/docs/test.mdx',
+					),
+				)
+				expect(consoleLogSpy).toHaveBeenCalledTimes(verbose ? 2 : 0)
+			},
+		)
 
 		test('should handle error with malformed exclusion directive in partial', async () => {
 			vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({
@@ -536,13 +668,12 @@ page_title: Test Page
 				.spyOn(process, 'exit')
 				.mockImplementation(() => {})
 
-			await buildMdxTransforms('/content', '/output', mockVersionMetadata)
+			await expect(transformFixtureFiles()).rejects.toThrow(
+				'in file: /content/vault/v1.20.x/docs/test.mdx',
+			)
 
-			expect(processExitSpy).toHaveBeenCalledWith(1)
+			expect(processExitSpy).not.toHaveBeenCalled()
 			expect(consoleErrorSpy).toHaveBeenCalled()
-
-			consoleErrorSpy.mockRestore()
-			processExitSpy.mockRestore()
 		})
 
 		test('should handle error with mismatched exclusion BEGIN/END in partial', async () => {
@@ -582,13 +713,44 @@ page_title: Test Page
 				.spyOn(process, 'exit')
 				.mockImplementation(() => {})
 
-			await buildMdxTransforms('/content', '/output', mockVersionMetadata)
+			await expect(transformFixtureFiles()).rejects.toThrow(
+				'in file: /content/vault/v1.20.x/docs/test.mdx',
+			)
 
-			expect(processExitSpy).toHaveBeenCalledWith(1)
+			expect(processExitSpy).not.toHaveBeenCalled()
 			expect(consoleErrorSpy).toHaveBeenCalled()
+		})
 
-			consoleErrorSpy.mockRestore()
-			processExitSpy.mockRestore()
+		test('rejects with every failed file without logging a success summary or exiting', async () => {
+			vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({
+				vault: {
+					versionedDocs: true,
+					basePaths: ['docs'],
+					supportsExclusionDirectives: false,
+				},
+			})
+			vol.fromJSON({
+				'/content/vault/v1.20.x/docs/first.mdx': "@include 'missing-first.mdx'",
+				'/content/vault/v1.20.x/docs/second.mdx':
+					"@include 'missing-second.mdx'",
+				'/content/vault/v1.20.x/docs/valid.mdx': '# Valid',
+			})
+			const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+			vi.spyOn(console, 'error').mockImplementation(() => {})
+			const exit = vi.spyOn(process, 'exit').mockImplementation(() => {})
+
+			const pending = transformFixtureFiles()
+			await expect(pending).rejects.toThrow(
+				'in file: /content/vault/v1.20.x/docs/first.mdx',
+			)
+			await expect(pending).rejects.toThrow(
+				'in file: /content/vault/v1.20.x/docs/second.mdx',
+			)
+			expect(exit).not.toHaveBeenCalled()
+			expect(log).not.toHaveBeenCalledWith(
+				expect.stringContaining('Applied MDX transforms'),
+			)
+			expect(fs.existsSync('/output/vault/v1.20.x/docs/valid.mdx')).toBe(true)
 		})
 	})
 	describe('Global Partials Skip Content Exclusion', () => {
@@ -630,7 +792,7 @@ page_title: Test Page
 					globalPartialContent,
 			})
 
-			await buildMdxTransforms('/content', '/output', mockVersionMetadata)
+			await transformFixtureFiles()
 
 			// The global partial file itself should NOT be processed for exclusions
 			// It should be written as-is with directives intact
@@ -695,7 +857,7 @@ You can configure HCP Terraform to automatically destroy.
 					partialContent,
 			})
 
-			await buildMdxTransforms('/content', '/output', mockVersionMetadata)
+			await transformFixtureFiles()
 
 			const output = fs.readFileSync(
 				'/output/terraform-enterprise/v202409-2/docs/enterprise/projects/managing.mdx',
@@ -744,7 +906,7 @@ page_title: Test Page
 					globalPartialContent,
 			})
 
-			await buildMdxTransforms('/content', '/output', mockVersionMetadata)
+			await transformFixtureFiles()
 
 			const output = fs.readFileSync(
 				'/output/terraform-docs-common/v1.20.x/docs/test.mdx',
@@ -814,7 +976,7 @@ Keep track of changes to the API for Terraform Cloud and Terraform Enterprise.
 					partialContent,
 			})
 
-			await buildMdxTransforms('/content', '/output', mockVersionMetadata)
+			await transformFixtureFiles()
 
 			const output = fs.readFileSync(
 				'/output/terraform-enterprise/v202301-1/docs/enterprise/api-docs/changelog.mdx',
@@ -887,7 +1049,7 @@ page_title: File 2
 				'/content/vault/v1.20.x/docs/partials/versioned.mdx': versionedPartial,
 			})
 
-			await buildMdxTransforms('/content', '/output', mockVersionMetadata)
+			await transformFixtureFiles()
 
 			const output1 = fs.readFileSync(
 				'/output/vault/v1.20.x/docs/file1.mdx',
@@ -939,7 +1101,7 @@ Automatic destroy run notifications contain the following information.
 						partialContent,
 				})
 
-				await buildMdxTransforms('/content', '/output', mockVersionMetadata)
+				await transformFixtureFiles()
 
 				const output = fs.readFileSync(
 					'/output/terraform-enterprise/v202311-1/docs/enterprise/api-docs/notification-configurations.mdx',
@@ -990,7 +1152,7 @@ Keep this content.
 						partialContent,
 				})
 
-				await buildMdxTransforms('/content', '/output', mockVersionMetadata)
+				await transformFixtureFiles()
 
 				const output = fs.readFileSync(
 					'/output/terraform-enterprise/v202402-1/docs/test.mdx',
@@ -1042,7 +1204,7 @@ Regular content.
 						partialContent,
 				})
 
-				await buildMdxTransforms('/content', '/output', mockVersionMetadata)
+				await transformFixtureFiles()
 
 				const output = fs.readFileSync(
 					'/output/terraform-enterprise/v202310-1/docs/test.mdx',
@@ -1107,7 +1269,7 @@ Keep this.
 						partialContent,
 				})
 
-				await buildMdxTransforms('/content', '/output', mockVersionMetadata)
+				await transformFixtureFiles()
 
 				const output = fs.readFileSync(
 					'/output/terraform-enterprise/v202301-1/docs/test.mdx',
@@ -1153,7 +1315,7 @@ Regular content.
 						partialContent,
 				})
 
-				await buildMdxTransforms('/content', '/output', mockVersionMetadata)
+				await transformFixtureFiles()
 
 				const output = fs.readFileSync(
 					'/output/terraform-docs-common/v1.9.x/docs/cloud-docs/test.mdx',
@@ -1222,7 +1384,7 @@ The API includes endpoints for system-level operations, such as health checks an
 						partialContent,
 				})
 
-				await buildMdxTransforms('/content', '/output', {
+				await transformFixtureFiles({
 					'terraform-enterprise': [
 						{ version: 'v202507-1', releaseStage: 'stable', isLatest: true },
 					],
@@ -1320,7 +1482,7 @@ Additional documentation content.
 						partialContent,
 				})
 
-				await buildMdxTransforms('/content', '/output', mockVersionMetadata)
+				await transformFixtureFiles()
 
 				const output = fs.readFileSync(
 					'/output/terraform-enterprise/v1.1.x/docs/api-docs/workspaces.mdx',
@@ -1404,7 +1566,7 @@ More content.
 						partialContent,
 				})
 
-				await buildMdxTransforms('/content', '/output', mockVersionMetadata)
+				await transformFixtureFiles()
 
 				const output = fs.readFileSync(
 					'/output/terraform-docs-common/v1.20.x/docs/workspaces.mdx',
@@ -1532,7 +1694,7 @@ Additional documentation content.
 						workspaceWithVcsPartial,
 				})
 
-				await buildMdxTransforms('/content', '/output', mockVersionMetadata)
+				await transformFixtureFiles()
 
 				const output = fs.readFileSync(
 					'/output/terraform-enterprise/v1.1.x/docs/api-docs/workspaces.mdx',
@@ -1601,7 +1763,7 @@ Regular content.
 				'/content/vault/v1.22.x/docs/partials/new-feature.mdx': partialContent,
 			})
 
-			await buildMdxTransforms('/content', '/output', mockVersionMetadata)
+			await transformFixtureFiles(mockVersionMetadata)
 
 			const output = fs.readFileSync(
 				'/output/vault/v1.22.x/docs/test.mdx',
@@ -1646,7 +1808,7 @@ Available in both products.
 					partialContent,
 			})
 
-			await buildMdxTransforms('/content', '/output', mockVersionMetadata)
+			await transformFixtureFiles(mockVersionMetadata)
 
 			const output = fs.readFileSync(
 				'/output/terraform-enterprise/v202409-2/docs/test.mdx',
@@ -1701,7 +1863,7 @@ Common documentation.
 					partialContent,
 			})
 
-			await buildMdxTransforms('/content', '/output', mockVersionMetadata)
+			await transformFixtureFiles(mockVersionMetadata)
 
 			const output = fs.readFileSync(
 				'/output/terraform-docs-common/docs/test.mdx',
@@ -1761,7 +1923,7 @@ As your organization grows, keeping track of your sprawling infrastructure estat
 					partialContent,
 			})
 
-			await buildMdxTransforms('/content', '/output', mockVersionMetadata)
+			await transformFixtureFiles(mockVersionMetadata)
 
 			const output = fs.readFileSync(
 				'/output/terraform-docs-common/docs/cloud-docs/workspaces/explorer.mdx',

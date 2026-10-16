@@ -7,6 +7,7 @@ import { expect, test, vi, beforeEach, afterEach } from 'vitest'
 import { GET } from './route'
 import { mockRequest } from '#utils/mockRequest'
 import { findDocVersions } from '#utils/findDocVersions'
+import { getMetadata } from '#utils/metadata'
 
 import { vol } from 'memfs'
 
@@ -37,9 +38,19 @@ vi.mock('#utils/findDocVersions', () => {
 	}
 })
 
+vi.mock('#utils/metadata', () => {
+	return {
+		getMetadata: vi.fn(),
+	}
+})
+
 beforeEach(() => {
 	// Reset the state of in-memory fs
 	vol.reset()
+	vi.mocked(getMetadata).mockResolvedValue({
+		versionMetadata: {},
+		docsPathsAllVersions: {},
+	})
 })
 
 afterEach(() => {

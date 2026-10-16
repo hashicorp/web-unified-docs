@@ -79,12 +79,18 @@ async function runPrebuild() {
 
 		// Execute the prebuild binary with the same arguments passed in
 		const args = process.argv.slice(2)
+		const env = { ...process.env }
+
+		if (!env.NODE_ENV) {
+			env.NODE_ENV = 'development'
+		}
 
 		if (binaryExists) {
-			execFileSync(filename, args, { stdio: 'inherit' })
+			execFileSync(filename, args, { stdio: 'inherit', env })
 		} else {
 			execFileSync('node', [path.join(__dirname, 'prebuild.mjs'), ...args], {
 				stdio: 'inherit',
+				env,
 			})
 		}
 	} catch (error) {

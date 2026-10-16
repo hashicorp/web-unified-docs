@@ -18,9 +18,13 @@ const acceptedReleaseStages = ['alpha', 'beta', 'rc']
  * based on the content directory structure, and return it.
  *
  * @param {string} contentDir
+ * @param {string[]} products
  * @returns {Promise<Record<string, unknown>} versionMetadata
  */
-export async function gatherVersionMetadata(contentDir) {
+export async function gatherVersionMetadata(
+	contentDir,
+	products = Object.keys(PRODUCT_CONFIG),
+) {
 	// Set up the version metadata object, this is what we'll return
 	const versionMetadata = {}
 	/**
@@ -28,15 +32,16 @@ export async function gatherVersionMetadata(contentDir) {
 	 * Note that "product" and "content source repo" are used interchangeably.
 	 * Some products, such as Terraform, have multiple content source repos.
 	 */
-	const products = fs.readdirSync(contentDir).filter((file) => {
+	const productDirs = fs.readdirSync(contentDir).filter((file) => {
 		return (
+			products.includes(file) &&
 			Object.keys(PRODUCT_CONFIG).includes(file) &&
 			fs.statSync(path.join(contentDir, file)).isDirectory()
 		)
 	})
 
 	// Iterate over each product directory, adding to `versionMetadata`
-	for (const product of products) {
+	for (const product of productDirs) {
 		// Initialize the product array
 		versionMetadata[product] = []
 

@@ -28,6 +28,19 @@ use run mode to avoid hanging — for example `npx vitest run` or
 `npx vitest run path/to/file`. Note that `npm run lint` runs `eslint --fix`,
 which writes fixes to files rather than only reporting them.
 
+## Copyright headers
+
+Use the latest Copywrite release from the repository root to update copyright
+headers and validate them with the same command as CI:
+
+```sh
+copywrite headers
+copywrite headers --plan
+```
+
+The exclusions in `.copywrite.hcl` keep generated files, including coverage
+reports, out of header updates.
+
 ## TDD expectations by change type
 
 **Utility or transformation logic:**
@@ -46,8 +59,8 @@ which writes fixes to files rather than only reporting them.
 
 **Content-processing behavior:**
 
-- inspect `scripts/prebuild/`, `scripts/watch-content.mjs`, and supporting
-  utilities
+- inspect `scripts/prebuild/`, `app/utils/metadata.ts`,
+  `app/utils/incBuildsMetadata.ts`, and supporting utilities
 - verify whether the source of truth is `content/`, generated files in
   `public/`, or metadata files in `app/api/`
 

@@ -48,7 +48,7 @@ the feature's behavior, update that co-located documentation in the same PR.
 Inspect the following areas first:
 
 - `scripts/prebuild/`
-- `scripts/watch-content.mjs`
+- `app/utils/metadata.ts` and `app/utils/incBuildsMetadata.ts`
 - `app/api/`
 - `app/utils/`
 - `productConfig.mjs`

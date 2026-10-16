@@ -17,23 +17,31 @@ const execAsync = promisify(exec)
 export async function gatherAllVersionsDocsPaths(
 	versionMetadata,
 	getRealFileChangedMetadata,
+	products = Object.keys(PRODUCT_CONFIG),
+	options = { verbose: true },
 ) {
 	const allDocsPaths = {}
-	const allProducts = Object.keys(PRODUCT_CONFIG)
+	const allProducts = products
 
 	// Iterate over each product directory, adding to `allDocsPaths`
-	console.log(
-		`🪄 Gathering file information for ${allProducts.length} products...`,
-	)
+	if (options.verbose) {
+		console.log(
+			`🪄 Gathering file information for ${allProducts.length} products...`,
+		)
+	}
 
 	if (getRealFileChangedMetadata) {
-		console.log(
-			'\nℹ️ Using REAL created_at dates for file metadata. This may take a while...\n',
-		)
+		if (options.verbose) {
+			console.log(
+				'\nℹ️ Using REAL created_at dates for file metadata. This may take a while...\n',
+			)
+		}
 	} else {
-		console.log(
-			"\nℹ️ Using DEBUG created_at date of 2025-06-03T18:02:21+00:00 for file metadata.\nIf you want to use the real created_at dates, run with '--use-real-file-changed-metadata'.\ne.g. `npm run prebuild -- --use-real-file-changed-metadata`\n",
-		)
+		if (options.verbose) {
+			console.log(
+				"\nℹ️ Using DEBUG created_at date of 2025-06-03T18:02:21+00:00 for file metadata.\nIf you want to use the real created_at dates, run with '--use-real-file-changed-metadata'.\ne.g. `npm run prebuild -- --use-real-file-changed-metadata`\n",
+			)
+		}
 	}
 
 	for (const product of allProducts) {
@@ -46,7 +54,9 @@ export async function gatherAllVersionsDocsPaths(
 		}
 		const allVersions = versionMetadata[product]
 
-		console.log(`Gathering file information for ${product}...`)
+		if (options.verbose) {
+			console.log(`Gathering file information for ${product}...`)
+		}
 
 		for (const metadata of allVersions) {
 			let versionPath = metadata.version
@@ -82,9 +92,11 @@ export async function gatherAllVersionsDocsPaths(
 		}
 	}
 
-	console.log(
-		`✅ Gathered file information for ${allProducts.length} products\n`,
-	)
+	if (options.verbose) {
+		console.log(
+			`✅ Gathered file information for ${allProducts.length} products\n`,
+		)
+	}
 	// Return the paths
 	return allDocsPaths
 }
