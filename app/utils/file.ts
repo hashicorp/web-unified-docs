@@ -213,8 +213,12 @@ export const fetchFile = async (
 			}
 
 			// Wrap the file content in a Response object to mimic the fetch API's Response which is expected downstream.
+			const responseBody =
+				typeof fileContent === 'string'
+					? fileContent
+					: Uint8Array.from(fileContent)
 
-			const response = new Response(fileContent, {
+			const response = new Response(responseBody, {
 				headers: {
 					'content-type': contentTypeFromPath(localFilePath),
 				},

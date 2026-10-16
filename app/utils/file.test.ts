@@ -803,8 +803,7 @@ describe('getAssetData', () => {
 		const mockResponse = new Response('image body')
 		vi.mocked(fetch).mockResolvedValue(mockResponse)
 		await getAssetData(unversionedFilePath, unversionMetaData)
-		console.log('here failing', fetch.mock.calls[0][0])
-		expect(fetch.mock.calls[0][0]).not.toContain('//img')
+		expect(vi.mocked(fetch).mock.calls[0][0]).not.toContain('//img')
 	})
 })
 
@@ -855,7 +854,7 @@ describe('findFileWithMetadata', () => {
 
 		await findFileWithMetadata(filePath, versionMetaData, FileType.Markdown)
 
-		expect(fetch.mock.calls[0][0]).not.toContain('//docs')
+		expect(vi.mocked(fetch).mock.calls[0][0]).not.toContain('//docs')
 	})
 
 	test.each([
