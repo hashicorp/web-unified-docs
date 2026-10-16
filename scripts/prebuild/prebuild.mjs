@@ -80,18 +80,27 @@ function writeTraceData(traceEvent) {
  * Define the prebuild script.
  */
 async function main() {
-	const buildType = getBuildType()
 	let skipTraceFile = false
 	const startTime = process.hrtime.bigint()
 	const traceId = Math.random().toString(16).slice(2, 18)
 
-	const args = getCommandLineArgs(buildType)
+	const args = getCommandLineArgs(getBuildType())
 
 	console.log(
 		`Running prebuild script with args: ${JSON.stringify(args, null, 2)}\n`,
 	)
 
-	console.log(`Build type: ${buildType}\n`)
+	console.log(`Build type: ${getBuildType()}\n`)
+
+	if (
+		getBuildType() === BUILD_TYPE.incBuildLocalDev &&
+		!args.forceFullRebuild
+	) {
+		console.log(
+			'Incremental local build; all content data is dynamically loaded as needed. Prebuild is no longer necessary to run.\n',
+		)
+		return
+	}
 
 	// Gather and write out version metadata
 	const versionMetadata = await gatherVersionMetadata(CONTENT_DIR)
@@ -125,7 +134,7 @@ async function main() {
 			const repoSlug = relativePath.split('/')[0]
 			return repoSlug in PRODUCT_CONFIG
 		})
-	} else if (buildType === BUILD_TYPE.incBuildPRPreview) {
+	} else if (getBuildType() === BUILD_TYPE.incBuildPRPreview) {
 		const changedFiles = getChangedContentFiles()
 
 		console.log(
@@ -133,8 +142,6 @@ async function main() {
 		)
 
 		filesToCheck = [...changedFiles.added, ...changedFiles.modified]
-	} else if (buildType === BUILD_TYPE.incBuildLocalDev) {
-		console.log('Incremental local build; all content data is loaded as needed')
 	} else {
 		filesToCheck = (await listFiles(CONTENT_DIR)).filter((filePath) => {
 			const relativePath = path.relative(CONTENT_DIR, filePath)

@@ -187,6 +187,7 @@ async function applyMdxTransforms(entry, versionMetadata = {}, targetDir) {
 
 		const transformedContent = String(remarkResults)
 		const transformedFileString = grayMatter.stringify(transformedContent, data)
+
 		// Ensure the parent directory for the output file path exists
 		const outDir = path.dirname(outPath)
 		if (!fs.existsSync(outDir)) {
@@ -194,6 +195,7 @@ async function applyMdxTransforms(entry, versionMetadata = {}, targetDir) {
 		}
 		// Write out the file
 		fs.writeFileSync(outPath, transformedFileString)
+
 		return { error: null }
 	} catch (e) {
 		return { error: String(e).split('\n')[0], file: entry.filePath }

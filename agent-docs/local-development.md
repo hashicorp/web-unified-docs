@@ -30,18 +30,30 @@ another watcher. Metadata requests await this preload and reuse the startup cach
 The watcher logs changed paths and sends a refresh
 POST to `${DEV_PORTAL_URL}/api/refresh`.
 
-`npm run prebuild` populates the `public/` folder and only needs to run once
-(or when prebuild sources change — see `scripts/prebuild/**` or
-`productConfig.mjs`). It is a long-running process; run it manually when
-needed rather than before every `npm run dev`.
+`npm run prebuild` generates metadata. Full builds also populate the `public/`
+folder and can be long-running; run them manually when needed rather than before
+every `npm run dev`. Local incremental builds finish after metadata generation,
+without running MDX transforms, Algolia indexing, or any content or asset copy
+steps, including the internal-only product-docs pass. They do not write a prebuild
+trace. Use `npm run prebuild -- --force-full-rebuild` to explicitly populate
+`public/` during local incremental development. `--build-algolia-index` also
+requests the full content pass before generating search records.
 
 On supported platforms, `npm run prebuild` runs a committed prebuild binary.
 After changing prebuild sources, regenerate all three binaries with
 `npm run compile-prebuild` before rerunning the command.
 
-Prebuild selects a single build type using
-[`getBuildType()`](../scripts/utils/get-type-of-build.mjs) at the start of each
-run. The detector reads the current environment on every call, including in the
+Node and npm do not set `NODE_ENV` automatically, unlike `next dev`. For local
+incremental runs, the prebuild launcher defaults an unset or empty `NODE_ENV` to
+`development` when `INCREMENTAL_BUILD=true` and neither `VERCEL_ENV` nor `CI` is set.
+It passes this environment to both the compiled binary and the Node fallback.
+Explicit `NODE_ENV` values and deployment or CI environments are left unchanged.
+Direct invocations of the source script or binary must still set `NODE_ENV`
+explicitly.
+
+Prebuild determines the build type using
+[`getBuildType()`](../scripts/utils/get-type-of-build.mjs).
+The detector reads the current environment on every call, including in the
 compiled binaries; it does not bake the compiler's `NODE_ENV` into the result:
 
 - `prodBuild`: `VERCEL_ENV=production`, regardless of the other flags.

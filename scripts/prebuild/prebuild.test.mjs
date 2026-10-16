@@ -51,14 +51,15 @@ afterEach(() => {
 	rmSync(directory, { recursive: true, force: true })
 })
 
-function runPrebuild() {
-	return spawnSync(process.execPath, [prebuildScript], {
+function runPrebuild(env = {}, args = []) {
+	return spawnSync(process.execPath, [prebuildScript, ...args], {
 		cwd: directory,
 		env: {
 			...process.env,
 			NODE_ENV: 'production',
 			INCREMENTAL_BUILD: 'false',
 			VERCEL_ENV: 'preview',
+			...env,
 		},
 		encoding: 'utf8',
 		timeout: 10_000,
@@ -70,8 +71,84 @@ test('exits successfully after transforming content', () => {
 
 	expect(result.error).toBeUndefined()
 	expect(result.status, result.stderr).toBe(0)
+	expect(result.stdout).toContain('Build type: fullBuild')
 	expect(existsSync(outputFile)).toBe(true)
 	expect(existsSync(path.join(directory, 'scripts/prebuild/trace'))).toBe(true)
+})
+
+test('skips prebuild work for local incremental builds', () => {
+	writeFileSync(
+		path.join(directory, 'content/vault/v1.0.x/version-config.json'),
+		'invalid JSON that must not be read by the internal-docs copy step',
+	)
+
+	const result = runPrebuild({
+		NODE_ENV: 'development',
+		INCREMENTAL_BUILD: 'true',
+		VERCEL_ENV: '',
+	})
+
+	expect(result.error).toBeUndefined()
+	expect(result.status, result.stderr).toBe(0)
+	expect(result.stdout).toContain('Build type: incBuildLocalDev')
+	expect(result.stdout).toContain(
+		'all content data is dynamically loaded as needed',
+	)
+	expect(result.stdout).not.toContain('Running MDX transforms')
+	expect(result.stdout).not.toContain('Copying')
+	expect(existsSync(path.join(directory, 'public'))).toBe(false)
+	expect(existsSync(path.join(directory, 'scripts/prebuild/trace'))).toBe(false)
+	expect(existsSync(path.join(directory, 'app/api/versionMetadata.json'))).toBe(
+		false,
+	)
+	expect(
+		existsSync(path.join(directory, 'app/api/docsPathsAllVersions.json')),
+	).toBe(false)
+})
+
+test('forces a full rebuild during local incremental builds', () => {
+	const result = runPrebuild(
+		{
+			NODE_ENV: 'development',
+			INCREMENTAL_BUILD: 'true',
+			VERCEL_ENV: '',
+		},
+		['--force-full-rebuild'],
+	)
+
+	expect(result.error).toBeUndefined()
+	expect(result.status, result.stderr).toBe(0)
+	expect(result.stdout).toContain('Build type: incBuildLocalDev')
+	expect(existsSync(outputFile)).toBe(true)
+})
+
+test('skips a local incremental build when only the Algolia index is requested', () => {
+	const result = runPrebuild(
+		{
+			NODE_ENV: 'development',
+			INCREMENTAL_BUILD: 'true',
+			VERCEL_ENV: '',
+		},
+		['--build-algolia-index'],
+	)
+
+	expect(result.error).toBeUndefined()
+	expect(result.status, result.stderr).toBe(0)
+	expect(result.stdout).toContain('"buildAlgoliaIndex": true')
+	expect(result.stdout).toContain('Build type: incBuildLocalDev')
+	expect(result.stdout).toContain(
+		'all content data is dynamically loaded as needed',
+	)
+	expect(result.stdout).not.toContain('Running MDX transforms')
+	expect(existsSync(outputFile)).toBe(false)
+	expect(
+		existsSync(
+			path.join(
+				directory,
+				'scripts/algolia/batch-post-records/algoliaRecords.json',
+			),
+		),
+	).toBe(false)
 })
 
 test('logs rejected transform errors and exits unsuccessfully at the CLI boundary', () => {
