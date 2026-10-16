@@ -8,7 +8,6 @@ import type { FSWatcher } from 'node:fs'
 import path from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import { Worker } from 'node:worker_threads'
-import { BUILD_TYPE, buildType } from './buildType'
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
 import type { Metadata } from '#types'
 
@@ -288,7 +287,7 @@ function regenerateMetadata(
 	return pending
 }
 
-function startIncBuildsWatcher(): IncBuildsMetadataCache {
+export function startIncBuildsWatcher(): IncBuildsMetadataCache {
 	let cache = globals.__incBuildsMetadataCache
 	if (
 		!cache?.watcher ||
@@ -386,8 +385,4 @@ export function getIncBuildLocalDevMetadata(): Promise<Metadata> {
 	return cache.metadata && cache.pendingProducts.size === 0
 		? Promise.resolve(cache.metadata)
 		: regenerateMetadata(cache)
-}
-
-if (buildType === BUILD_TYPE.incBuildLocalDev) {
-	startIncBuildsWatcher()
 }

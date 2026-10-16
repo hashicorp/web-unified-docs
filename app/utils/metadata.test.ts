@@ -309,6 +309,91 @@ describe('getMetadata', () => {
 		)
 	})
 
+	test('initializes metadata once at server startup before any metadata request', async () => {
+		writeGeneratedMetadataFiles()
+		vi.stubEnv('NEXT_RUNTIME', 'nodejs')
+		const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+		const worker = holdStartupCheck()
+		const { register } = await import('../../instrumentation')
+
+		await register()
+		await vi.waitFor(() => {
+			expect(metadataWorker).toHaveBeenCalledOnce()
+		})
+		expect(watch).toHaveBeenCalledOnce()
+		expect(log).toHaveBeenCalledWith('[watcher] loading existing metadata')
+		expect(log).toHaveBeenCalledWith(
+			'[watcher] checking startup metadata in the background',
+		)
+
+		await register()
+		const { getMetadata } = await import('./metadata')
+		expect(await getMetadata()).toEqual(generatedMetadata)
+		expect(watch).toHaveBeenCalledOnce()
+		expect(metadataWorker).toHaveBeenCalledOnce()
+
+		worker.emit('message', { changed: false })
+		await waitForStartupCheck()
+		expect(await getMetadata()).toEqual(generatedMetadata)
+		for (const message of [
+			'[watcher] loading existing metadata',
+			'[watcher] checking startup metadata in the background',
+			'[watcher] completed startup metadata check',
+		]) {
+			expect(
+				log.mock.calls.filter(([entry]: [unknown]) => {
+					return entry === message
+				}),
+			).toHaveLength(1)
+		}
+	})
+
+	test.each([
+		['production server', 'production', 'nodejs', 'true', ''],
+		['edge runtime', 'development', 'edge', 'true', ''],
+		['non-incremental development', 'development', 'nodejs', 'false', ''],
+		['Vercel production', 'development', 'nodejs', 'true', 'production'],
+	])(
+		'does not initialize local metadata at startup in %s',
+		async (
+			_scenario: string,
+			nodeEnv: string,
+			runtime: string,
+			incremental: string,
+			vercelEnv: string,
+		) => {
+			vi.stubEnv('NODE_ENV', nodeEnv)
+			vi.stubEnv('NEXT_RUNTIME', runtime)
+			vi.stubEnv('INCREMENTAL_BUILD', incremental)
+			vi.stubEnv('VERCEL_ENV', vercelEnv)
+			vi.doMock('./incBuildsMetadata', () => {
+				throw new Error('Development-only metadata module was loaded')
+			})
+			const { register } = await import('../../instrumentation')
+
+			await register()
+
+			expect(watch).not.toHaveBeenCalled()
+			expect(metadataWorker).not.toHaveBeenCalled()
+		},
+	)
+
+	test('does not initialize metadata during route-discovery imports', async () => {
+		writeGeneratedMetadataFiles()
+		const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+		const readFile = vi.spyOn(fs, 'readFileSync')
+
+		await import('./metadata')
+		await import('./incBuildsMetadata')
+
+		expect(watch).not.toHaveBeenCalled()
+		expect(readFile).not.toHaveBeenCalled()
+		expect(metadataWorker).not.toHaveBeenCalled()
+		expect(gatherVersionMetadata).not.toHaveBeenCalled()
+		expect(gatherAllVersionsDocsPaths).not.toHaveBeenCalled()
+		expect(log).not.toHaveBeenCalled()
+	})
+
 	test('loads existing metadata files instead of generating metadata', async () => {
 		writeGeneratedMetadataFiles()
 		const log = vi.spyOn(console, 'log').mockImplementation(() => {})
@@ -363,10 +448,12 @@ describe('getMetadata', () => {
 		)
 	})
 
-	test('starts the background check without waiting for a metadata request', async () => {
+	test('starts the background check on the first cached metadata request', async () => {
 		writeGeneratedMetadataFiles()
 		const worker = holdStartupCheck()
-		await import('./incBuildsMetadata')
+		const { getMetadata } = await import('./metadata')
+		expect(watch).not.toHaveBeenCalled()
+		expect(await getMetadata()).toEqual(generatedMetadata)
 		await vi.waitFor(() => {
 			expect(metadataWorker).toHaveBeenCalledOnce()
 		})
@@ -383,6 +470,7 @@ describe('getMetadata', () => {
 
 	test('does not repeat the startup check after a development module reload', async () => {
 		writeGeneratedMetadataFiles()
+		const log = vi.spyOn(console, 'log').mockImplementation(() => {})
 		const firstModule = await import('./metadata')
 		const first = await firstModule.getMetadata()
 		await waitForStartupCheck()
@@ -390,8 +478,21 @@ describe('getMetadata', () => {
 		const secondModule = await import('./metadata')
 
 		expect(await secondModule.getMetadata()).toBe(first)
+		expect(await secondModule.getMetadata()).toBe(first)
+		expect(watch).toHaveBeenCalledOnce()
 		expect(metadataWorker).toHaveBeenCalledOnce()
 		expect(portalFetch).not.toHaveBeenCalled()
+		for (const message of [
+			'[watcher] loading existing metadata',
+			'[watcher] checking startup metadata in the background',
+			'[watcher] completed startup metadata check',
+		]) {
+			expect(
+				log.mock.calls.filter(([entry]: [unknown]) => {
+					return entry === message
+				}),
+			).toHaveLength(1)
+		}
 	})
 
 	test('shares an in-flight startup check after consumers reload', async () => {
@@ -631,11 +732,9 @@ describe('getMetadata', () => {
 		)
 	})
 
-	test('starts the watcher on module load and generates one shared cache lazily', async () => {
+	test('starts one watcher on the first metadata request', async () => {
 		const { getMetadata } = await import('./metadata')
-		await vi.waitFor(() => {
-			expect(watch).toHaveBeenCalledOnce()
-		})
+		expect(watch).not.toHaveBeenCalled()
 		expect(gatherVersionMetadata).not.toHaveBeenCalled()
 
 		const [first, second] = await Promise.all([getMetadata(), getMetadata()])

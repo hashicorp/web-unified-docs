@@ -37,6 +37,8 @@ import { PRODUCT_CONFIG } from '#productConfig.mjs'
  * @param {string} targetDir
  * @param {string} outputDir the directory to write transformed files to
  * @param {string[]} filesToCheck the explicit paths to consider for transformation
+ * @param {{ verbose?: boolean }} [options] Progress logging, enabled by default.
+ * Errors are always logged.
  * @throws {Error} If any file fails, with details for every failed file.
  */
 export async function buildMdxTransforms(
@@ -44,7 +46,10 @@ export async function buildMdxTransforms(
 	outputDir,
 	versionMetadata,
 	filesToCheck,
+	options = { verbose: true },
 ) {
+	const { verbose = true } = options
+
 	// Filter for `.mdx` files
 	const mdxFiles = filesToCheck.filter((filePath) => {
 		const relativePath = path.relative(targetDir, filePath)
@@ -78,13 +83,17 @@ export async function buildMdxTransforms(
 		return { repoSlug, filePath, partialsDir, outPath, version, redirectsDir }
 	})
 
-	console.log(`Running MDX transforms on ${mdxFileEntries.length} files...`)
+	if (verbose) {
+		console.log(`Running MDX transforms on ${mdxFileEntries.length} files...`)
+	}
+
 	const results = await batchPromises(
 		'MDX transforms',
 		mdxFileEntries,
 		(entry) => {
 			return applyMdxTransforms(entry, versionMetadata, targetDir)
 		},
+		{ loggingEnabled: verbose },
 	)
 	// Log out any errors encountered
 	const errors = results
@@ -99,6 +108,7 @@ export async function buildMdxTransforms(
 		errors.forEach(({ error, file }) => {
 			console.error(`❌ ${error} in file: ${file}`)
 		})
+
 		console.error('\n❗ Build failed due to errors in MDX transforms.')
 		throw new Error(
 			errors
@@ -108,8 +118,11 @@ export async function buildMdxTransforms(
 				.join('\n'),
 		)
 	}
+
 	// Log out that the script has complete
-	console.log(`✅ Applied MDX transforms to ${mdxFileEntries.length} files.`)
+	if (verbose) {
+		console.log(`✅ Applied MDX transforms to ${mdxFileEntries.length} files.`)
+	}
 }
 
 /**

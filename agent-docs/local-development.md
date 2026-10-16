@@ -23,8 +23,10 @@ npm run dev
 ```
 
 `npm run dev` starts Next.js. When local incremental development is enabled,
-loading the metadata module preloads the incremental metadata module, which
-starts a recursive watcher for `content/`. Metadata requests await this preload.
+the Node.js startup hook in `instrumentation.ts` initializes incremental metadata
+and starts a recursive watcher for `content/`, before any API request. Loading the
+metadata module also preloads the incremental metadata module without initializing
+another watcher. Metadata requests await this preload and reuse the startup cache.
 The watcher logs changed paths and sends a refresh
 POST to `${DEV_PORTAL_URL}/api/refresh`.
 
@@ -61,7 +63,10 @@ Local incremental development preloads the transform module with a typed literal
 dynamic import and calls it directly
 for Markdown requests, passing only the requested Markdown path in the explicit
 file list, without starting a subprocess. The shared transform API rejects with
-file-specific errors instead of terminating the process. The prebuild CLI logs
+file-specific errors instead of terminating the process. Its `options.verbose`
+flag defaults to `true`; local Markdown requests pass `{ verbose: false }` to
+suppress transform progress messages. Errors are logged regardless of this flag.
+The prebuild CLI logs
 failures and sets exit status 1; local Markdown requests return the errors
 without exiting the server.
 Source existence is checked with `access()` before transformation; the file
@@ -82,7 +87,11 @@ Environment flag changes require reloading the application utility module to
 select a new type; script callers can call `getBuildType()` again.
 When the value is `incBuildLocalDev` (`INCREMENTAL_BUILD=true`, `NODE_ENV=development`,
 and `VERCEL_ENV` is not `production`), `app/utils/incBuildsMetadata.ts` starts
-the watcher immediately when its development-only dynamic import resolves.
+the watcher when the Node.js startup hook calls `startIncBuildsWatcher()`, not when
+its development-only dynamic import resolves. Next.js also imports dynamic API
+routes in temporary route-discovery workers; those imports must not start watchers,
+read generated metadata, or launch startup checks. A direct metadata request can
+initialize the same cache if the startup hook has not run.
 Direct `process.env.NODE_ENV` checks in the application utilities keep the
 watcher, MDX transforms, navigation rewriting module, and local filesystem reads
 out of Next.js production bundles without changing the shared build-type detector

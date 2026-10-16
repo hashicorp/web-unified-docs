@@ -30,12 +30,16 @@ describe('applyMdxTransforms - Integration Tests', () => {
 		],
 	}
 
-	async function transformFixtureFiles(versionMetadata = mockVersionMetadata) {
+	async function transformFixtureFiles(
+		versionMetadata = mockVersionMetadata,
+		options,
+	) {
 		await buildMdxTransforms(
 			'/content',
 			'/output',
 			versionMetadata,
 			await listFiles('/content'),
+			options,
 		)
 	}
 
@@ -47,6 +51,49 @@ describe('applyMdxTransforms - Integration Tests', () => {
 	afterEach(() => {
 		vol.reset()
 	})
+
+	test.each([
+		{ name: 'omitted', options: undefined, loggingEnabled: true },
+		{ name: 'empty', options: {}, loggingEnabled: true },
+		{ name: 'verbose', options: { verbose: true }, loggingEnabled: true },
+		{ name: 'quiet', options: { verbose: false }, loggingEnabled: false },
+	])(
+		'controls progress logging when options are $name',
+		async ({ options, loggingEnabled }) => {
+			vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({
+				vault: {
+					versionedDocs: true,
+					basePaths: ['docs'],
+					supportsExclusionDirectives: false,
+				},
+			})
+			vol.fromJSON({
+				'/content/vault/v1.20.x/docs/test.mdx': '# Test\n',
+			})
+			const consoleLogSpy = vi
+				.spyOn(console, 'log')
+				.mockImplementation(() => {})
+
+			try {
+				await transformFixtureFiles(mockVersionMetadata, options)
+
+				if (loggingEnabled) {
+					expect(consoleLogSpy.mock.calls).toEqual([
+						['Running MDX transforms on 1 files...'],
+						['MDX transforms 1 / 1 completed...'],
+						[expect.stringContaining('Applied MDX transforms to 1 files.')],
+					])
+				} else {
+					expect(consoleLogSpy).not.toHaveBeenCalled()
+				}
+				expect(
+					fs.readFileSync('/output/vault/v1.20.x/docs/test.mdx', 'utf8'),
+				).toContain('# Test')
+			} finally {
+				consoleLogSpy.mockRestore()
+			}
+		},
+	)
 
 	describe('Global Partials Processing', () => {
 		test('should resolve partials from latest/docs/partials for latest version folder', async () => {
@@ -510,16 +557,18 @@ AppRole is designed for machine authentication.
 			vi.restoreAllMocks()
 		})
 
-		test('should handle error when partial file does not exist', async () => {
-			vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({
-				vault: {
-					versionedDocs: true,
-					basePaths: ['docs'],
-					supportsExclusionDirectives: false,
-				},
-			})
+		test.each([false, true])(
+			'should log errors when verbose is %s and a partial file does not exist',
+			async (verbose) => {
+				vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({
+					vault: {
+						versionedDocs: true,
+						basePaths: ['docs'],
+						supportsExclusionDirectives: false,
+					},
+				})
 
-			const mainContent = `---
+				const mainContent = `---
 page_title: Test Page
 ---
 
@@ -528,25 +577,35 @@ page_title: Test Page
 @include 'nonexistent.mdx'
 `
 
-			vol.fromJSON({
-				'/content/vault/v1.20.x/docs/test.mdx': mainContent,
-			})
+				vol.fromJSON({
+					'/content/vault/v1.20.x/docs/test.mdx': mainContent,
+				})
 
-			// Mock console.error to suppress error output during test
-			const consoleErrorSpy = vi
-				.spyOn(console, 'error')
-				.mockImplementation(() => {})
-			const processExitSpy = vi
-				.spyOn(process, 'exit')
-				.mockImplementation(() => {})
+				// Mock console.error to suppress error output during test
+				const consoleErrorSpy = vi
+					.spyOn(console, 'error')
+					.mockImplementation(() => {})
+				const consoleLogSpy = vi
+					.spyOn(console, 'log')
+					.mockImplementation(() => {})
+				const processExitSpy = vi
+					.spyOn(process, 'exit')
+					.mockImplementation(() => {})
 
-			await expect(transformFixtureFiles()).rejects.toThrow(
-				'in file: /content/vault/v1.20.x/docs/test.mdx',
-			)
+				await expect(
+					transformFixtureFiles(mockVersionMetadata, { verbose }),
+				).rejects.toThrow('in file: /content/vault/v1.20.x/docs/test.mdx')
 
-			expect(processExitSpy).not.toHaveBeenCalled()
-			expect(consoleErrorSpy).toHaveBeenCalled()
-		})
+				expect(processExitSpy).not.toHaveBeenCalled()
+				expect(consoleErrorSpy).toHaveBeenCalledTimes(3)
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					expect.stringContaining(
+						'in file: /content/vault/v1.20.x/docs/test.mdx',
+					),
+				)
+				expect(consoleLogSpy).toHaveBeenCalledTimes(verbose ? 2 : 0)
+			},
+		)
 
 		test('should handle error with malformed exclusion directive in partial', async () => {
 			vi.spyOn(repoConfig, 'PRODUCT_CONFIG', 'get').mockReturnValue({
