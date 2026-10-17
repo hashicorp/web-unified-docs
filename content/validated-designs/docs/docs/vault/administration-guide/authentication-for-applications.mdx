@@ -47,6 +47,8 @@ When the client app is running on a compute construct (e.g. container, VM, or se
 
 In the trusted orchestrator model, you have an orchestrator which is already authenticated against Vault with privileged permissions. The orchestrator launches new applications and injects a mechanism they can use to authenticate (e.g. PKI cert, token, AppRole etc.) with Vault.
 
+Some orchestrators can issue their own signed identity for each workload instead of injecting a credential. For example, Red Hat Ansible Automation Platform (AAP) 2.7 and later issues a JWT for each automation job, which the job uses to authenticate with Vault through the JWT/OIDC auth method. The orchestrator stores no Vault credential. Refer to [JWT/OIDC workload identity](#jwtoidc-workload-identity) for details.
+
 ![Trusted orchestrator model](/img/vault/operating-guides/adoption/image24.png)
 
 For example, suppose <a href="https://developer.hashicorp.com/terraform" target="_blank" rel="noopener">Terraform</a> is being used as a trusted orchestrator. This means Terraform already has a Vault token, with enough capabilities to generate new tokens or create new credentials. Terraform can interact with platforms such as VMware to provision new virtual machines. VMware does not provide a cryptographic identity, so a platform integration is not possible. Instead, Terraform can create and inject an AppRole credential into a new machine, acting as a trusted orchestrator that extends trust to the machine, allowing it or its application to authenticate against Vault using the injected credentials.
@@ -55,13 +57,14 @@ For example, suppose <a href="https://developer.hashicorp.com/terraform" target=
 
 #### Use case
 
-When you are using an orchestrator tool such as Chef to launch applications, this model can be applied in an environment where [platform integration](#platform-integration) isn't possible (e.g. VMware host). See the section on [AppRole auth method](#approle-auth-method) for more details.
+When you are using an orchestrator tool such as Chef to launch applications, this model can be applied in an environment where [platform integration](#platform-integration) isn't possible (e.g. VMware host). See the section on [AppRole auth method](#approle-auth-method) for more details. If the orchestrator is AAP 2.7 or later, refer to [JWT/OIDC workload identity](#jwtoidc-workload-identity) instead.
 
 #### Reference materials
 
 - <a href="https://developer.hashicorp.com/vault/docs/auth/approle" target="_blank" rel="noopener">AppRole Auth Method</a>
 - <a href="https://developer.hashicorp.com/vault/docs/auth/cert" target="_blank" rel="noopener">TLS Certificates Auth Method</a>
 - <a href="https://developer.hashicorp.com/vault/docs/auth/token" target="_blank" rel="noopener">Token Auth Method</a>
+- <a href="https://developer.hashicorp.com/vault/docs/auth/jwt" target="_blank" rel="noopener">JWT/OIDC Auth Method</a>
 
 ### Vault agent
 
@@ -69,7 +72,7 @@ Vault Agent is a client daemon which automates the workflow of client login and 
 
 ## Configure machine auth method
 
-We recommend that customers use the most specific auth method for their environment. In this section, we will cover two common machine auth methods that organizations utilize: cloud provider auth method and the AppRole auth method.
+We recommend that customers use the most specific auth method for their environment. In this section, we will cover three common machine auth methods that organizations utilize: cloud provider auth method, JWT/OIDC workload identity for orchestrators such as AAP 2.7 and later, and the AppRole auth method.
 
 ### Cloud provider auth method
 
@@ -190,6 +193,165 @@ $ vault login -method=aws header_value=vault.example.com role=demo \
 
 - <a href="https://developer.hashicorp.com/vault/docs/auth/aws" target="_blank" rel="noopener">AWS Auth Method</a>
 
+### JWT/OIDC workload identity
+
+<Note>
+
+Using JWT/OIDC workload identity with Red Hat Ansible Automation Platform (AAP) is _emerging guidance_. We continually update this guidance as we identify common best practices and configurations to help customers get the most from the product. AAP workload identity and the AAP OIDC authentication integration for HashiCorp Vault are Technology Preview features in AAP 2.7. Review Red Hat's support scope for Technology Preview features before you use them for production workloads.
+
+</Note>
+
+Some orchestrators can issue their own signed identity for each workload they run. AAP 2.7 and later acts as an OIDC provider: for every automation job that uses a Vault OIDC credential, AAP issues a short-lived JWT that describes the job. Vault validates the JWT through the JWT/OIDC auth method, using the OIDC discovery document that AAP publishes, and returns a token with the policies of the matching role.
+
+This removes secret zero from the AAP integration. AAP does not store a Vault token, RoleID, or SecretID, so you have no long-lived Vault credential to rotate, leak, or revoke. Every job authenticates on its own and records its own identity in the Vault audit log.
+
+The JWT lifetime matches the job timeout when the job template defines one. Otherwise AAP uses a configurable platform default of 5 minutes plus 1 minute of clock skew.
+
+#### Use case
+
+Use JWT/OIDC workload identity when AAP 2.7 or later is the orchestrator that looks up secrets in Vault or requests signed SSH certificates from Vault, and your organization accepts the Technology Preview status of the feature. In AAP, use one of these credential types:
+
+- **HashiCorp Vault Secret Lookup (OIDC)** for reading secrets.
+- **HashiCorp Vault Signed SSH (OIDC)** for signing SSH keys.
+
+Keep using the [AppRole auth method](#approle-auth-method) for AAP versions earlier than 2.7, or when you cannot adopt Technology Preview features.
+
+#### Recommendations
+
+- **Create one role per AAP organization and job template.** Scope each role to the smallest set of jobs that share the same access need, and attach a least-privilege policy to it. Avoid one shared role for every AAP job.
+- **Bind on IDs, not names.** Use `aap_controller_organization_id` and `aap_controller_job_template_id` in `bound_claims`. Administrators can rename AAP objects or reuse a name, but IDs stay stable. The name claims, such as `aap_controller_job_template_name`, are easier to read and are an acceptable alternative only if you control renames in AAP.
+- **Pin the subject when you need an exact match.** AAP sets `sub` to `workload_type:aap_controller_automation_job:organization:<org>:job_template:<template>`. You can set `bound_subject` to this full string to pin a role to one job template.
+- **Always bind the audience and issuer.** Set `bound_audiences` to the exact Vault URL that AAP places in the `aud` claim, and set `bound_issuer` on the auth method configuration, not on the role, to the AAP issuer URL. A mismatch in either value causes every login to fail.
+- **Map job metadata into token metadata.** Use `claim_mappings` to copy the job template, organization, and launching user into token metadata so that audit log entries identify which job read which secret.
+- **Keep token lifetimes short.** Set `token_ttl` close to the expected job duration, and set `token_explicit_max_ttl` as a hard ceiling that renewal cannot extend. If a job needs Vault after its token expires, let it fail and investigate the job instead of issuing a long-lived token.
+
+#### Claims for binding
+
+AAP adds standard claims and custom claims with the `aap_controller_` prefix to each JWT. The following claims are the most useful for binding and auditing. Refer to the Red Hat documentation for the full list.
+
+| Claim | Description | Recommended use |
+| --- | --- | --- |
+| `iss` | AAP OIDC provider URL, for example `https://aap.example.com/o` | `bound_issuer` on the auth method configuration |
+| `aud` | Vault server URL, for example `https://vault.example.com:8200` | `bound_audiences` |
+| `sub` | Workload type, organization, and job template | `user_claim`, optional `bound_subject` |
+| `aap_controller_organization_id` | AAP organization ID | `bound_claims` |
+| `aap_controller_job_template_id` | AAP job template ID | `bound_claims` |
+| `aap_controller_organization_name` | AAP organization name | `claim_mappings` |
+| `aap_controller_job_template_name` | AAP job template name | `claim_mappings` |
+| `aap_controller_project_id` | AAP project ID | Optional `bound_claims` |
+| `aap_controller_inventory_id` | AAP inventory ID | Optional `bound_claims` |
+| `aap_controller_launched_by_name` | User or schedule that launched the job | `claim_mappings` |
+
+#### Configuring JWT/OIDC auth method for AAP
+
+The steps below show how to configure Vault to trust AAP job identities. You configure the auth method once per AAP instance, then add one role for each organization and job template that needs access. For details on specific settings, refer to the <a href="https://developer.hashicorp.com/vault/docs/auth/jwt" target="_blank" rel="noopener">JWT/OIDC Auth Method</a> documentation and the <a href="https://developer.hashicorp.com/vault/api-docs/auth/jwt" target="_blank" rel="noopener">JWT/OIDC Auth Method API</a>.
+
+##### Step 1: Enable the auth method
+
+Log in to Vault as an administrator and enable the JWT auth method under the tenant namespace. Use a dedicated mount path for AAP so that it stays separate from other JWT issuers.
+
+```shell-session
+$ export VAULT_ADDR=https://vault.example.com:8200
+$ export VAULT_NAMESPACE=<tenant namespace>
+$ vault auth enable -path=aap jwt
+```
+
+##### Step 2: Configure OIDC discovery
+
+Point the auth method at the AAP OIDC provider. Vault fetches the discovery document and signing keys from this URL, so the Vault servers must be able to reach AAP over HTTPS.
+
+<!-- HUMAN-INPUT-REQUIRED: Confirm the AAP 2.7 OIDC discovery URL. Red Hat docs give the issuer (https://aap.example.com/o) but not the discovery path; Vault appends /.well-known/openid-configuration to oidc_discovery_url. -->
+
+<Warning>
+
+**Draft recommendation** — human review required before merging.
+
+Set `oidc_discovery_url` and `bound_issuer` on the auth method configuration to the AAP issuer URL, which is the value of the `iss` claim in AAP tokens. Vault appends `/.well-known/openid-configuration` to `oidc_discovery_url`, so AAP must serve its discovery document at `https://aap.example.com/o/.well-known/openid-configuration`.
+
+_This recommendation is based on available documentation but has not been validated against real-world operational patterns. A practitioner should confirm this before the content is merged to main._
+
+</Warning>
+
+```shell-session
+$ vault write auth/aap/config \
+    oidc_discovery_url="https://aap.example.com/o" \
+    bound_issuer="https://aap.example.com/o"
+```
+
+If AAP uses a certificate from a private CA, also set `oidc_discovery_ca_pem` to the CA certificate in PEM format.
+
+##### Step 3: Create a policy
+
+Create a least-privilege policy for the job template. The following example grants read access to one application's secrets in the KV v2 secrets engine.
+
+```hcl
+path "secret/data/billing/*" {
+  capabilities = ["read"]
+}
+```
+
+```shell-session
+$ vault policy write aap-billing-read aap-billing-read.hcl
+```
+
+##### Step 4: Create a role
+
+Create a role that binds the policy to one AAP organization and job template. Use a JSON file for the role because `bound_claims` and `claim_mappings` are maps.
+
+<!-- HUMAN-INPUT-REQUIRED: Confirm whether AAP encodes aap_controller_*_id claims as JSON numbers or strings, and whether the string values in bound_claims below match them. Test with a real AAP 2.7 token. -->
+
+<Warning>
+
+**Draft recommendation** — human review required before merging.
+
+The Red Hat documentation does not state whether AAP encodes ID claims as JSON numbers or strings. The example below quotes the IDs as strings. Before you roll out roles, decode a token from a test job and confirm that logins succeed with the `bound_claims` values as written.
+
+_This recommendation is based on available documentation but has not been validated against real-world operational patterns. A practitioner should confirm this before the content is merged to main._
+
+</Warning>
+
+```json
+{
+  "role_type": "jwt",
+  "bound_audiences": ["https://vault.example.com:8200"],
+  "user_claim": "sub",
+  "bound_claims_type": "string",
+  "bound_claims": {
+    "aap_controller_organization_id": "1",
+    "aap_controller_job_template_id": "42"
+  },
+  "claim_mappings": {
+    "aap_controller_organization_name": "organization",
+    "aap_controller_job_template_name": "job_template",
+    "aap_controller_launched_by_name": "launched_by"
+  },
+  "token_policies": ["aap-billing-read"],
+  "token_ttl": "10m",
+  "token_explicit_max_ttl": "15m"
+}
+```
+
+```shell-session
+$ vault write auth/aap/role/aap-billing @aap-billing-role.json
+```
+
+The `bound_audiences` value must match the Vault URL that AAP places in the `aud` claim. To pin the role to one job template by subject as well, add `bound_subject` with the full `sub` value.
+
+##### Step 5: Configure the AAP credential and test
+
+In AAP, create a credential of type **HashiCorp Vault Secret Lookup (OIDC)** that points to the Vault address, namespace, `aap` auth mount path, and `aap-billing` role. Attach it to the job template, then launch the job and confirm that:
+
+1. The job reads the expected secret.
+1. The Vault audit log shows a login on `auth/aap/login` with the mapped `organization`, `job_template`, and `launched_by` metadata.
+1. A job template that is not bound to the role fails to log in.
+
+##### Reference material
+
+- <a href="https://developer.hashicorp.com/vault/docs/auth/jwt" target="_blank" rel="noopener">JWT/OIDC Auth Method</a>
+- <a href="https://developer.hashicorp.com/vault/api-docs/auth/jwt" target="_blank" rel="noopener">JWT/OIDC Auth Method API</a>
+- <a href="https://docs.redhat.com/en/documentation/red_hat_ansible_automation_platform/2.7/whats_new-new_features_and_enhancements" target="_blank" rel="noopener">AAP 2.7 new features and enhancements</a>
+- <a href="https://docs.redhat.com/en/documentation/red_hat_ansible_automation_platform/2.7/whats_new-oidc_authentication_for_hashicorp_vault" target="_blank" rel="noopener">AAP 2.7 OIDC authentication for HashiCorp Vault</a>
+
 ### AppRole auth method
 
 The AppRole auth method allows machines or applications to authenticate with Vault using custom roles defined in Vault. It is typically used in an environment where [platform integration](#platform-integration) is not possible (e.g. VMware host). The AppRole auth method is designed to enable automated workflows for a large number of applications, where a unique role is created for each application that wants to access Vault. Each role is attached to a set of Vault policies, which restricts the access needed for the application.
@@ -199,6 +361,17 @@ Each role configured under the AppRole auth method is associated with a RoleID a
 <Note>
 
 While AppRole is a valid use case, use this auth method as a last resort. Relying on alternative platform authentication methods is inherently more secure because AppRole can be misconfigured, leading to a less secure posture than is possible.
+
+</Note>
+
+<Note>
+
+If you use AppRole with Red Hat Ansible Automation Platform (AAP), AAP 2.7 and later can use [JWT/OIDC workload identity](#jwtoidc-workload-identity) instead. That guidance is _emerging guidance_ and relies on Technology Preview features in AAP 2.7. AppRole remains the recommended method for AAP versions earlier than 2.7. To migrate an AAP job template from AppRole:
+
+1. Create a JWT role alongside the existing AppRole role, with equivalent policies.
+1. Switch the job template credentials to the **HashiCorp Vault Secret Lookup (OIDC)** or **HashiCorp Vault Signed SSH (OIDC)** credential type and validate that the job succeeds.
+1. Delete the AppRole role with `vault delete auth/approle/role/<role>`, which invalidates all of its SecretIDs. If you must keep the role temporarily, list the SecretID accessors with `vault list auth/approle/role/<role>/secret-id` and destroy each one with `vault write auth/approle/role/<role>/secret-id-accessor/destroy secret_id_accessor=<accessor>`.
+1. Revoke tokens that AppRole logins already issued with `vault token revoke -mode=path auth/approle/login`, or let them expire at their TTL. Disable the AppRole auth method only if nothing else uses it.
 
 </Note>
 
