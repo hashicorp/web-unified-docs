@@ -29,7 +29,7 @@ Configure service mesh and agent TLS separately:
 | Kubernetes-managed mesh TLS | `spec.tls.incoming.ecdhCurves` and `spec.tls.outgoing.ecdhCurves` in the `Mesh` resource | The controller writes the corresponding Consul configuration entry. |
 | Kubernetes-hosted agent TLS | Agent settings in Helm `server.extraConfig` | Applies to server agents, not service mesh proxies. `client.extraConfig` applies only to deployments that run client agents. |
 
-Do not treat mesh settings as a policy for every gateway connection. External ingress and API gateway TLS listeners use separate configuration. A mesh gateway that passes through TCP traffic does not terminate another TLS connection; the terminating endpoints negotiate the group. Mesh-gateway L7 peering termination uses mesh TLS settings.
+Do not treat mesh settings as a policy for every gateway connection. External ingress and API gateway TLS listener configuration does not expose a key-exchange-group setting. Consul supplies no group list for those listeners, so the Envoy TLS provider's defaults apply. A mesh gateway that passes through TCP traffic does not terminate another TLS connection; the terminating endpoints negotiate the group. Mesh-gateway L7 peering termination uses mesh TLS settings.
 
 These settings do not enable TLS on plaintext interfaces, change gossip encryption, or encrypt traffic between an application and its local proxy.
 
@@ -44,7 +44,20 @@ Before you begin, you need:
 - For Kubernetes, a compatible Helm chart, controller, and installed `Mesh` custom resource definition (CRD) that expose `ecdhCurves`. Confirm the installed schema with `kubectl explain mesh.spec.tls.incoming.ecdhCurves` and `kubectl explain mesh.spec.tls.outgoing.ecdhCurves`. Follow the [Kubernetes compatibility guidance](/consul/docs/upgrade/k8s/compatibility); do not assume that upgrading Consul alone upgrades these components.
 - Authenticated management access and permission to update the affected configuration. Mesh writes require `mesh:write` or `operator:write` when ACLs are enabled. Refer to the [configuration entries API](/consul/api-docs/config).
 
-The allowed group names are `X25519MLKEM768`, `X25519`, `P-256`, `P-384`, and `P-521`. An allowed name does not establish availability in every TLS provider or compliance with Federal Information Processing Standards (FIPS). Evaluate the exact builds and cryptographic modules required by your deployment.
+The allowed group names are `X25519MLKEM768`, `X25519`, `P-256`, `P-384`, and `P-521`. An allowed name does not establish availability in every TLS provider or compliance with Federal Information Processing Standards (FIPS). Evaluate the exact builds and cryptographic modules required by your deployment. Refer to [FIPS TLS restrictions](/consul/docs/deploy/server/fips#tls-restrictions); do not treat the classical `X25519` fallback in these examples as FIPS compliance guidance.
+
+### Exercised builds
+
+Integration testing with Consul 2.1.0-rc1 demonstrated `X25519MLKEM768` negotiation with the following builds. These are observed combinations, not a minimum-version guarantee or a replacement for the supported component matrices:
+
+| Component | Builds |
+| --- | --- |
+| Envoy with BoringSSL | 1.37.6, 1.38.4, and 1.39.1 |
+| Envoy with BoringSSL-FIPS | 1.38.4 and 1.39.1, using the `fips1403` image variants |
+| Consul Dataplane | `hashicorp/consul-dataplane:2.1.0-rc1` |
+| Consul on Kubernetes | Helm chart and controller 2.1.0-rc1 with the matching Mesh CRD |
+
+Successful negotiation in a FIPS build does not establish that the configuration meets your compliance requirements. Verify the cryptographic module and approved operating mode separately.
 
 ## Configure mesh TLS
 
@@ -188,7 +201,7 @@ Configuration acceptance and successful traffic are necessary, but neither prove
 
 Use Envoy's administration interface only through loopback or a controlled local access path. Do not expose it publicly.
 
-1. Inspect the active listener and cluster configurations for the service path:
+1. Inspect the active listener and cluster configurations for the service path with Envoy's [`/config_dump` administration endpoint](https://www.envoyproxy.io/docs/envoy/v1.38.4/operations/admin.html#get--config_dump):
 
    ```shell-session
    $ curl --fail --silent --show-error http://127.0.0.1:ADMIN_PORT/config_dump
@@ -196,14 +209,14 @@ Use Envoy's administration interface only through loopback or a controlled local
 
    Confirm that the relevant TLS contexts contain `ecdh_curves` with your intended groups and both TLS bounds set to `TLSv1_3`. Check for rejected updates; a configuration stored in Consul might not be active in Envoy.
 
-1. Record the relevant listener's and upstream cluster's TLS statistics before generating traffic:
+1. Record the relevant listener's and upstream cluster's TLS statistics with Envoy's [`/stats` administration endpoint](https://www.envoyproxy.io/docs/envoy/v1.38.4/operations/admin.html#get--stats). The `filter` parameter selects statistics whose names match the supplied regular expression:
 
    ```shell-session
    $ curl --fail --silent --show-error 'http://127.0.0.1:ADMIN_PORT/stats?filter=ssl'
    ```
 
 1. Generate traffic on the intended service path using new connections. Account for proxy connection pooling and session resumption; use controlled draining or reconnection when necessary.
-1. Read the statistics again. For the targeted listener or cluster, look for increases in `ssl.handshake`, `ssl.versions.TLSv1.3`, and `ssl.curves.X25519MLKEM768`. Group labels depend on the TLS provider; consult the [Envoy TLS statistics reference](https://www.envoyproxy.io/docs/envoy/latest/configuration/listeners/stats#tls-statistics) for your build.
+1. Read the statistics again. For the targeted listener or cluster, look for increases in `ssl.handshake`, `ssl.versions.TLSv1.3`, and `ssl.curves.X25519MLKEM768`. Group labels depend on the TLS provider; consult the [Envoy TLS statistics reference](https://www.envoyproxy.io/docs/envoy/v1.38.4/configuration/listeners/stats#tls-statistics) for your build. Envoy's [TLS connection logging implementation](https://github.com/envoyproxy/envoy/blob/v1.38.4/source/common/tls/context_impl.cc#L548-L563) records the provider's name for the negotiated group.
 
 A historical nonzero counter does not prove that your test traffic used hybrid key exchange. Correlate counter changes with the intended connections. An increase in `ssl.curves.X25519` indicates classical negotiation, even when TLS 1.3 is in use.
 
@@ -240,6 +253,8 @@ Use the failure location to distinguish policy problems from certificate or appl
 | Traffic succeeds but negotiates `X25519` | Classical fallback, an override, or a peer without hybrid support. | Inspect both endpoints and active settings; confirm the group on new handshakes. |
 | A `Mesh` resource rejects or loses `ecdhCurves` | The installed CRD or controller lacks the field. | Upgrade the compatible Kubernetes components and verify the schema before applying the manifest. |
 | Agent defaults appear ineffective | A protocol-specific override, an explicit empty string, or an existing connection. | Inspect all effective protocol settings and test new handshakes after reload or rollout. |
+
+For Envoy's BoringSSL-based TLS implementation, group-list parsing occurs before negotiation. Envoy [rejects TLS-context initialization when the configured list is invalid](https://github.com/envoyproxy/envoy/blob/v1.38.4/source/common/tls/context_impl.cc#L152-L157), and the [BoringSSL group-list parser](https://github.com/google/boringssl/blob/0.20260413.0/ssl/ssl_lib.cc#L1982-L2025) rejects a list containing an unknown name. Classical handshake fallback does not bypass this configuration check.
 
 ## Next steps
 
