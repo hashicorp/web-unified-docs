@@ -17,6 +17,19 @@ last_modified: 2026-09-01T02:31:20.000Z
 Configure users and OIDC applications in IBM Verify to use with Vault Enterprise
 agentic IAM.
 
+The following diagram shows how the objects you configure in Verify work
+together. The human user and agent user sign in to the authentication
+application, which issues a JWT access token for each of them. A separate token
+exchange application sends both tokens to Verify, where the STS client
+exchanges them for a delegated on-behalf-of (OBO) JWT. The STS client uses the
+authorization detail type to validate the Rich Authorization Requests (RAR)
+claim in the delegated JWT. Vault validates the delegated JWT. The API client
+gives your application access to the Verify management APIs and is not part of
+the token flow.
+
+![IBM Verify configuration flow showing how the human and agent users, authentication application, token exchange application, STS client, and authorization detail type produce a delegated JWT for Vault](/img/agentic-ai/diagram-verify-config-flow_light.png#light-theme-only)
+![IBM Verify configuration flow showing how the human and agent users, authentication application, token exchange application, STS client, and authorization detail type produce a delegated JWT for Vault](/img/agentic-ai/diagram-verify-config-flow_dark.png#dark-theme-only)
+
 
 ## Before you start
 
@@ -443,16 +456,60 @@ and the addition of an `authorization_details` Rich Authorization Requests
 1. Click **Complete setup**. You do not need to apply an access policy.
 
 
-## Step 8: Validate token retrieval
+## Step 8: Create a token exchange application
 
-Use your application client ID and client secret values with the `oauth2c` tool
-to get a token from Verify as a validation step.
+Create a second OIDC application to request the delegated OBO token. Verify does
+not allow a client to exchange tokens that it issued itself. If you request the
+token exchange with the client ID of the application from Step 2, Verify
+returns the error `CSIAQ5207E Clients are not allowed to perform a token
+exchange on their own tokens`.
+
+1. In the navigation menu, click **Applications** → **Applications**.
+
+1. Click **Add an application**.
+
+1. For application type, click **OpenID Connect**.
+
+1. Click **Add Application**.
+
+1. Under **OpenID Connect** enter a name for the application. For example,
+   `vault-obo-exchange`.
+
+1. For **Company name**, enter the required value.
+
+1. Click **Add owner** and assign an admin user as the owner of this
+   application.
+
+1. Click **Sign-on**.
+
+1. For **Grant types**, click and enable **Token exchange**.
+
+1. Ensure that **Public client (no client secret)** is unchecked.
+
+1. Under **Token settings** > **Access token format**, select **JWT**.
+
+1. Click **Save**.
+
+1. On the **Entitlements** tab, click the **Automatic access for all users and
+   groups** radio button.
+
+1. Click **Save**.
+
+1. Click **Sign-on** and note the **Client ID** and **Client secret** values.
+   You need them to request the delegated token in Step 11.
+
+
+## Step 9: Validate token retrieval
+
+Use the client ID and client secret of the authentication application from
+Step 2 with the `oauth2c` tool to get a token from Verify as a validation step.
 
 1. Get your application details:
 
     1. Click **Applications** > **Applications**.
 
-    1. Click the gear icon next to your application name to open settings.
+    1. Click the gear icon next to the authentication application name, for
+       example `vault-authn-entry`, to open settings.
 
     1. Click **Sign-on**.
 
@@ -467,9 +524,9 @@ to get a token from Verify as a validation step.
 1. Export your Verify tenant name, client ID, and secret as environment variables:
 
     ```shell-session
-    $ export IBM_VERIFY_TENANT=`<tenant name>`                          \
-        IBM_VERIFY_CLIENT_ID=`<client ID generated from previous step>` \
-        IBM_VERIFY_CLIENT_SECRET=`<client secret generated from previous step>`
+    $ export IBM_VERIFY_TENANT="<tenant name>"                     \
+        IBM_VERIFY_CLIENT_ID="<authentication app client ID>"     \
+        IBM_VERIFY_CLIENT_SECRET="<authentication app client secret>"
     ```
 
 1. Request an example token with the oauth2c command-line tool.
@@ -504,43 +561,81 @@ The final output string after the SUCCESS messages represents the JWT value,
 which validates both the workflow and token issuance from Verify.
 
 
-## Step 9: Validate token exchange
+## Step 10: Retrieve the human and agent tokens
 
-You can also exchange the AI agent (actor) and human user (subject) tokens with
-RAR `authorization_detail` claims with a similar workflow by providing token
-values from tokens issued for both the AI agent and the human.
+Use the same `oauth2c` authorization code flow from Step 9 to get an access
+token for each user. The human user token is the subject token, and the agent
+user token is the actor token.
 
-1. Export the AI agent token value as the AGENT_TOKEN environment variable.
+1. Run the `oauth2c` command from Step 9.
+
+1. Visit the URL under `Go to the following URL:` and sign in as the **human
+   user** you created in Step 1.
+
+1. Copy the `access_token` value from the token response in the `oauth2c`
+   output, and export it as the `HUMAN_TOKEN` environment variable.
 
     ```shell-session
-    $ export AGENT_TOKEN=...
+    $ export HUMAN_TOKEN="<human user access token>"
     ```
 
-1. Export the human user token value as the HUMAN_TOKEN environment variable.
+1. Sign out of Verify, or open a private browser window, so that the next
+   sign-in does not reuse the human user session.
+
+1. Run the `oauth2c` command again, and sign in as the **agent user** you
+   created in Step 1.
+
+1. Copy the `access_token` value from the output, and export it as the
+   `AGENT_TOKEN` environment variable.
 
     ```shell-session
-    $ export HUMAN_TOKEN=...
+    $ export AGENT_TOKEN="<agent user access token>"
     ```
 
-1. Export the DELEGATION_TOKEN environment variable to hold the output of
-   the token exchange.
+
+## Step 11: Validate token exchange
+
+Exchange the human user (subject) and AI agent (actor) tokens for a delegated
+token with a RAR `authorization_details` claim. Use the client ID and client
+secret of the token exchange application from Step 8, not the authentication
+application from Step 2.
+
+1. Export the token exchange application client ID and client secret as
+   environment variables.
 
     ```shell-session
-    $ export DELEGATION_TOKEN=$(curl --request POST \
-    --url https://vv-agentic-iam-demo.ite4.idng.ibmcloudsecurity.com/oauth2/token \
+    $ export IBM_VERIFY_OBO_CLIENT_ID="<token exchange app client ID>" \
+        IBM_VERIFY_OBO_CLIENT_SECRET="<token exchange app client secret>"
+    ```
+
+1. Request the token exchange and export the result as the `DELEGATED_JWT`
+   environment variable. The request uses the `IBM_VERIFY_TENANT` environment
+   variable from Step 9 to build your tenant token endpoint URL. Replace the
+   `path` value in `authorization_details` with the Vault path your use case
+   requires.
+
+    ```shell-session
+    $ export DELEGATED_JWT=$(curl --request POST \
+    --url "https://${IBM_VERIFY_TENANT}.verify.ibm.com/oauth2/token" \
     --header 'Content-Type: application/x-www-form-urlencoded' \
     --data grant_type=urn:ietf:params:oauth:grant-type:token-exchange \
     --data subject_token="${HUMAN_TOKEN}" \
     --data subject_token_type=urn:ietf:params:oauth:token-type:access_token \
     --data actor_token="${AGENT_TOKEN}" \
     --data actor_token_type=urn:ietf:params:oauth:token-type:access_token \
-    --data client_id="${IBM_VERIFY_CLIENT_ID}" \
-    --data client_secret="${IBM_VERIFY_CLIENT_SECRET}" \
-    --data 'authorization_details=[{"type":"vault:path_access","path":"secret-v2/data/shared-secret/foo", "capabilities":["create"]}]' | jq -r '.access_token)
+    --data client_id="${IBM_VERIFY_OBO_CLIENT_ID}" \
+    --data client_secret="${IBM_VERIFY_OBO_CLIENT_SECRET}" \
+    --data 'authorization_details=[{"type":"vault:path_access","path":"secret-v2/data/shared-secret/foo", "capabilities":["create"]}]' | jq -r '.access_token')
+    ```
+
+1. Confirm that `DELEGATED_JWT` contains a token rather than `null`.
+
+    ```shell-session
+    $ echo "${DELEGATED_JWT}"
     ```
 
 
-## Step 10: Save your provider information
+## Step 12: Save your provider information
 
 Confirm your subject and actor details from Verify. To configure agentic IAM,
 you must have the following information:
