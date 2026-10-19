@@ -35,7 +35,7 @@ processing of the claims data in the JWT.
 
 @include 'legacy/jwt_or_oidc.mdx'
 
-## Config Parameters
+## Config parameters
 
 The following auth method [`Config`](/consul/api-docs/acl/auth-methods#config)
 parameters are required to properly configure an auth method of type
@@ -98,6 +98,22 @@ parameters are required to properly configure an auth method of type
 - `VerboseOIDCLogging` `(bool: false)` - Log received OIDC tokens and claims when
   debug-level logging is active. Not recommended in production since sensitive
   information may be present in OIDC responses.
+
+- `OIDCLogoutURL` `(string: "")` - The identity provider's relying party (RP)
+  initiated logout endpoint, as defined in
+  [OpenID Connect RP-Initiated Logout 1.0](https://openid.net/specs/openid-connect-rpinitiated-1_0.html).
+  By default, Consul uses the `end_session_endpoint` from the
+  provider's discovery document. Set this parameter when your provider supports
+  RP-initiated logout but does not advertise `end_session_endpoint`. If you set
+  this parameter, Consul uses it instead of the discovered endpoint. The value
+  must be an `https` URL that includes a host. Refer to [OIDC logout](#oidc-logout) for details.
+
+- `OIDCPostLogoutRedirectURIs` `(array<string>)` - URIs that the identity
+  provider can redirect the user to after logout. Consul sends the first entry
+  as the `post_logout_redirect_uri` parameter. Each entry must be an `https` URL
+  that includes a host, and you must also register it with your provider. If you
+  do not set this parameter, the provider decides where to send the user after
+  logout.
 
 ### Example configuration with client secret
 
@@ -163,14 +179,44 @@ The following example enables an OIDC auth method that sets a JWT signed with an
 }
 ```
 
-## JWT Verification
+### Example configuration with IdP logout
+
+The following example configures the identity provider logout endpoint for a
+provider that does not advertise `end_session_endpoint` in its discovery
+document, and sends the user back to the Consul UI after logout:
+
+```json
+{
+    "Name": "example-oidc-auth",
+    "Type": "oidc",
+    "Description": "Example OIDC auth method with IdP logout",
+    "Config": {
+        "AllowedRedirectURIs": [
+            "http://localhost:8550/oidc/callback",
+            "https://consul.example.com/ui/oidc/callback"
+        ],
+        "BoundAudiences": [
+            "V1RPi2MYptMV1RPi2MYptMV1RPi2MYpt"
+        ],
+        "OIDCClientID": "V1RPi2MYptMV1RPi2MYptMV1RPi2MYpt",
+        "OIDCClientSecret": "...(omitted)...",
+        "OIDCDiscoveryURL": "https://idp.example.com/",
+        "OIDCLogoutURL": "https://idp.example.com/oidc/logout",
+        "OIDCPostLogoutRedirectURIs": [
+            "https://consul.example.com/ui/"
+        ]
+    }
+}
+```
+
+## JWT verification
 
 JWT signatures will be verified against public keys from the issuer via OIDC
 discovery. Keys will be fetched from the OIDC Discovery URL during
 authentication and OIDC validation criteria (e.g. `iss`, `aud`, etc.) will be
 applied.
 
-## OIDC Authentication
+## OIDC authentication
 
 Consul includes two built-in OIDC login flows: the Consul UI, and the CLI using
 [`consul login`](/consul/commands/login).
@@ -184,7 +230,7 @@ method with the [`AllowedRedirectURIs`](#allowedredirecturis) parameter. There
 are different redirect URIs to configure the Consul UI and CLI flows, so one or
 both will need to be set up depending on the installation.
 
-#### Consul UI
+#### Consul UI redirect URI
 
 Logging in via the Consul UI requires a redirect URI of the form:
 `http://localhost:8500/ui/oidc/callback` or
@@ -192,7 +238,7 @@ Logging in via the Consul UI requires a redirect URI of the form:
 
 The "host:port" must be correct for the Consul agent serving the Consul UI.
 
-#### CLI
+#### CLI redirect URI
 
 If you plan to support authentication via `consul login -type=oidc -method=<name>`, a localhost redirect URI must be set (usually this is
 `http://localhost:8550/oidc/callback`). Logins via the CLI may specify a
@@ -200,15 +246,15 @@ different host and/or listening port if needed, and a URI with this host/port
 must match one of the configured redirected URIs. These same "localhost" URIs
 must be added to the provider as well.
 
-### OIDC Login
+### OIDC login
 
-#### Consul UI
+#### Log in to the Consul UI
 
 1. Click the "Log in" link at the top right of the menu bar.
 2. Click one of the "Continue with..." buttons for your OIDC auth method of choice.
 3. Complete the authentication with the configured provider.
 
-#### CLI
+#### Log in with the CLI
 
 ```shell-session
 $ consul login -method=oidc -type=oidc -token-sink-file=consul.token
@@ -228,7 +274,70 @@ The callback listener defaults to listen on `localhost:8550`. If you want to
 customize that use the optional flag
 [`-oidc-callback-listen-addr=<host:port>`](/consul/commands/login#oidc-callback-listen-addr).
 
-## OIDC Configuration Troubleshooting
+### OIDC logout
+
+When a user logs out of a token created by an `oidc` auth method, Consul can
+also end the user's session at the identity provider by using
+[OpenID Connect RP-Initiated Logout 1.0](https://openid.net/specs/openid-connect-rpinitiated-1_0.html).
+Without it, the provider session stays active, and the next Consul login can
+complete without asking for credentials.
+
+Identity provider (IdP) logout is available when one of the following is true:
+
+- The provider advertises an `end_session_endpoint` in its discovery document.
+- You set [`OIDCLogoutURL`](#oidclogouturl) on the auth method.
+
+The logout endpoint must be an `https` URL that includes a host, because the
+logout URL contains the user's ID token. If the endpoint does not meet this
+requirement, logout only destroys the Consul token.
+
+When the user logs in, Consul builds the provider logout URL from the logout
+endpoint, the user's ID token as the `id_token_hint` parameter, and the first
+[`OIDCPostLogoutRedirectURIs`](#oidcpostlogoutredirecturis) entry as the
+`post_logout_redirect_uri` parameter, if set. Consul returns the URL to the
+client that logged in and does not store it on the Consul servers.
+
+The provider session is tied to the user's browser, so the user must open the
+logout URL in that browser. Consul servers do not call the provider to log the user
+out.
+
+#### Log out of the Consul UI
+
+If you logged in to the Consul UI with the auth method, logging out of the UI
+also opens the provider logout URL in a new browser tab.
+
+#### Log out with the CLI
+
+When you log in with `consul login -type=oidc`, Consul saves the provider
+logout URL in a file next to the token sink file, with `.oidc-logout` appended
+to its name. For example, `-token-sink-file=consul.token` creates
+`consul.token.oidc-logout`. Only the file owner can read it.
+
+To log out, run [`consul logout`](/consul/commands/logout) with the same token
+file. Pass the file with the `-token-file` flag or the `CONSUL_HTTP_TOKEN_FILE`
+environment variable. Consul destroys the token, prints the provider logout URL,
+and deletes the `.oidc-logout` file.
+
+Open the URL in a browser to end the provider session. To open it automatically
+in your default browser, add the [`-open-browser`](/consul/commands/logout#open-browser)
+flag or set the `CONSUL_LOGOUT_OPEN_BROWSER` environment variable to `true`.
+
+The following example destroys the token and opens the provider logout URL in
+the default browser:
+
+```shell-session
+$ consul logout -token-file=consul.token -open-browser
+To also end your identity provider session, open the following URL in a browser:
+    https://idp.example.com/oidc/logout?id_token_hint=ID_TOKEN&post_logout_redirect_uri=https%3A%2F%2Fconsul.example.com%2Fui%2F
+Opened the identity provider logout URL in your default browser.
+```
+
+If the Consul token has expired or no longer exists, `consul logout` reports the
+error and still prints the provider logout URL. If you pass the token with the
+`-token` flag or only the `CONSUL_HTTP_TOKEN` environment variable, Consul
+destroys the token but does not print the provider logout URL.
+
+## OIDC configuration troubleshooting
 
 The amount of configuration required for OIDC is relatively small, but it can
 be tricky to debug why things aren't working. Some tips for setting up OIDC:
@@ -249,14 +358,28 @@ be tricky to debug why things aren't working. Some tips for setting up OIDC:
   requested, and can be added by setting
   `[OIDCScopes](#oidcscopes)="profile,groups"` on the auth method.
 
-- If you're seeing claim-related errors in logs, review the provider's docs
-  very carefully to see how they're naming and structuring their claims.
+- If you find claim-related errors in logs, review the provider's documentation
+  to learn how the provider names and structures its claims.
   Depending on the provider, you may be able to construct a simple `curl`
   [implicit grant](https://developer.okta.com/blog/2018/05/24/what-is-the-oauth2-implicit-grant-type)
   request to obtain a JWT that you can inspect. An example of how to decode the
   JWT (in this case located in the `access_token` field of a JSON response):
 
       jq --raw-output '.access_token / "." | .[1] | @base64d' jwt.json
+
+- If logging out does not end the provider session, check the Consul server
+  logs for an `INFO` message that contains
+  `skipping IdP logout: no OIDCLogoutURL configured` when the user logs in. This
+  message means that the provider does not advertise an `end_session_endpoint`
+  and the auth method does not set [`OIDCLogoutURL`](#oidclogouturl). Set
+  `OIDCLogoutURL` to the provider's logout endpoint. For CLI logins, run
+  `consul logout` with the token file from `consul login`.
+
+- If the Consul server logs contain a `WARN` message that contains
+  `OIDC logout endpoint is not a valid https URL` when the user logs in, the
+  provider advertises an `end_session_endpoint` that is not an `https` URL with
+  a host. Set [`OIDCLogoutURL`](#oidclogouturl) to the provider's `https` logout
+  endpoint.
 
 - The [`VerboseOIDCLogging`](#verboseoidclogging) option is available which
   will log the received OIDC token if debug level logging is enabled. This can
