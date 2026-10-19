@@ -21,12 +21,11 @@ export async function gatherAllVersionsDocsPaths(
 	options = { verbose: true },
 ) {
 	const allDocsPaths = {}
-	const allProducts = products
 
 	// Iterate over each product directory, adding to `allDocsPaths`
 	if (options.verbose) {
 		console.log(
-			`🪄 Gathering file information for ${allProducts.length} products...`,
+			`🪄 Gathering file information for ${products.length} products...`,
 		)
 	}
 
@@ -44,7 +43,7 @@ export async function gatherAllVersionsDocsPaths(
 		}
 	}
 
-	for (const product of allProducts) {
+	for (const product of products) {
 		// Initialize the product array
 		allDocsPaths[product] = {}
 
@@ -94,7 +93,7 @@ export async function gatherAllVersionsDocsPaths(
 
 	if (options.verbose) {
 		console.log(
-			`✅ Gathered file information for ${allProducts.length} products\n`,
+			`✅ Gathered file information for ${products.length} products\n`,
 		)
 	}
 	// Return the paths

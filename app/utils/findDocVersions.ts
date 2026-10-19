@@ -26,15 +26,15 @@ export function findDocVersions(
 		return []
 	}
 
-	const docsVersions = Object.keys(docsPathsForProduct)
-	docsVersions.forEach((version: string) => {
-		const versionPaths = docsPathsForProduct[version]
-		versionPaths.forEach((versionInfo: { path: string }) => {
-			if (versionInfo.path.endsWith(fullPath) && !versions.includes(version)) {
-				versions.push(version)
-			}
-		})
-	})
+	for (const [version, versionPaths] of Object.entries(docsPathsForProduct)) {
+		if (
+			versionPaths.some((versionInfo: { path: string }) => {
+				return versionInfo.path.endsWith(fullPath)
+			})
+		) {
+			versions.push(version)
+		}
+	}
 
 	return versions
 }

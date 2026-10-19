@@ -50,7 +50,7 @@ export async function buildMdxTransforms(
 	outputDir,
 	versionMetadata,
 	filesToCheck,
-	options = { verbose: true },
+	options = {},
 ) {
 	const { verbose = true, returnTransformedMdx = false } = options
 

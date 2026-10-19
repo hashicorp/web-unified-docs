@@ -37,11 +37,12 @@ type StartupMetadataCheck =
 	| { changed: false }
 	| { changed: true; metadata: Metadata }
 
-// Keep the development cache and watcher alive across module reloads.
+// Keep the cache on globalThis so module reloads can reuse the watcher.
 const globals = globalThis as typeof globalThis & {
 	__incBuildsMetadataCache?: IncBuildsMetadataCache
 }
 
+// Returns a recursive path snapshot, or undefined when the product directory is missing.
 function getProductPaths(product: string): string | undefined {
 	const productDir = path.join(contentDir, product)
 	if (!fs.existsSync(productDir) || !fs.statSync(productDir).isDirectory()) {
@@ -51,8 +52,9 @@ function getProductPaths(product: string): string | undefined {
 	return JSON.stringify(fs.readdirSync(productDir, { recursive: true }).sort())
 }
 
+// Queues products whose content paths differ from the cached snapshot.
 function invalidateIfStructureChanged(cache: IncBuildsMetadataCache): void {
-	// Compare paths only: editing an existing file must not invalidate metadata.
+	// Content edits don't affect metadata; only path changes do.
 	for (const product of cache.checkProducts) {
 		const paths = getProductPaths(product)
 
@@ -65,6 +67,7 @@ function invalidateIfStructureChanged(cache: IncBuildsMetadataCache): void {
 	cache.checkProducts.clear()
 }
 
+// Reads both generated metadata files when they are present.
 function readExistingMetadata(): Metadata | undefined {
 	if (
 		!fs.existsSync(versionMetadataFile) ||
@@ -83,6 +86,7 @@ function readExistingMetadata(): Metadata | undefined {
 	}
 }
 
+// Checks cached metadata against a fresh scan in a worker thread.
 function checkStartupMetadata(
 	metadata: Metadata,
 ): Promise<StartupMetadataCheck> {
@@ -96,12 +100,15 @@ function checkStartupMetadata(
 				{ workerData: { contentDir, metadata } },
 			)
 			let receivedResult = false
+
 			worker.once('message', (result: StartupMetadataCheck) => {
 				receivedResult = true
 				resolve(result)
 			})
+
 			worker.once('error', reject)
 			worker.once('exit', (code: number) => {
+				// A normal exit is valid only after the worker sends its result.
 				if (!receivedResult) {
 					reject(
 						new Error(
@@ -114,6 +121,7 @@ function checkStartupMetadata(
 	)
 }
 
+// Requests a Dev Portal refresh without blocking the caller.
 function refreshDevPortal(): void {
 	void fetch(`${process.env.DEV_PORTAL_URL}/api/refresh`, {
 		method: 'POST',
@@ -128,6 +136,7 @@ function refreshDevPortal(): void {
 		})
 }
 
+// Queues writes of both generated metadata files.
 function saveMetadataFiles(metadata: Metadata): void {
 	const versionMetadata = JSON.stringify(metadata.versionMetadata, null, 2)
 	const docsPathsAllVersions = JSON.stringify(
@@ -136,6 +145,7 @@ function saveMetadataFiles(metadata: Metadata): void {
 		2,
 	)
 
+	// Serialize writes so a slower rebuild can't overwrite newer metadata.
 	metadataWriteQueue = metadataWriteQueue
 		.then(async (): Promise<void> => {
 			await Promise.all([
@@ -148,8 +158,9 @@ function saveMetadataFiles(metadata: Metadata): void {
 		})
 }
 
+// Generates version and document-path metadata for all or selected products.
 async function generateMetadata(products?: string[]): Promise<Metadata> {
-	// These are cached automatically by module runtime
+	// ESM caches these imports across incremental rebuilds.
 	const [versionsModule, pathsModule] = await Promise.all([
 		import('../../scripts/prebuild/gather-version-metadata.mjs'),
 		import('../../scripts/prebuild/gather-all-versions-docs-paths.mjs'),
@@ -170,6 +181,7 @@ async function generateMetadata(products?: string[]): Promise<Metadata> {
 	return { versionMetadata, docsPathsAllVersions } as Metadata
 }
 
+// Coalesces startup validation and pending product rebuilds into one shared update.
 function regenerateMetadata(
 	cache: IncBuildsMetadataCache,
 	initialMetadata?: Promise<Metadata>,
@@ -206,6 +218,8 @@ function regenerateMetadata(
 		}
 
 		let startupMetadataChanged = false
+
+		// Validate cached files off-thread while requests continue using the cache.
 		if (cache.needsStartupValidation) {
 			console.log('[watcher] checking startup metadata in the background')
 			try {
@@ -221,6 +235,7 @@ function regenerateMetadata(
 			}
 		}
 
+		// Drain path changes received during validation or a previous rebuild.
 		invalidateIfStructureChanged(cache)
 		while (cache.pendingProducts.size > 0) {
 			const changedProducts = [...cache.pendingProducts]
@@ -267,6 +282,7 @@ function regenerateMetadata(
 			invalidateIfStructureChanged(cache)
 		}
 
+		// Refresh once, after startup validation and all structural rebuilds finish.
 		if (cache.needsStartupValidation) {
 			cache.needsStartupValidation = false
 			console.log('[watcher] completed startup metadata check')
@@ -286,88 +302,98 @@ function regenerateMetadata(
 	return pending
 }
 
+// Reuses or initializes the global cache and recursive content watcher.
 export function startIncBuildsWatcher(): IncBuildsMetadataCache {
-	let cache = globals.__incBuildsMetadataCache
+	const existingCache = globals.__incBuildsMetadataCache
+
 	if (
-		!cache?.watcher ||
-		!cache.productPaths ||
-		typeof cache.needsStartupValidation !== 'boolean' ||
-		typeof cache.rebuildingProducts !== 'boolean'
+		existingCache?.watcher &&
+		existingCache.productPaths &&
+		typeof existingCache.needsStartupValidation === 'boolean' &&
+		typeof existingCache.rebuildingProducts === 'boolean'
 	) {
-		// Replace an older watcher retained across a development module reload.
-		cache?.watcher?.close()
-		const initialMetadata = cache?.promise
-		const metadata =
-			cache?.metadata ?? (initialMetadata ? undefined : readExistingMetadata())
-		if (metadata && !cache?.metadata) {
-			console.log('[watcher] loading existing metadata')
-		}
-		const nextCache: IncBuildsMetadataCache = {
-			metadata,
-			productPaths: new Map(
-				products.map((product: string) => {
-					return [product, getProductPaths(product)]
-				}),
-			),
-			checkProducts: new Set(),
-			pendingProducts: new Set(),
-			needsStartupValidation: Boolean(metadata || initialMetadata),
-			rebuildingProducts: false,
-		}
-		cache = globals.__incBuildsMetadataCache = nextCache
+		return existingCache
+	}
 
-		cache.watcher = fs.watch(
-			contentDir,
-			{ recursive: true, persistent: false },
-			(eventType: string, filename: string | null) => {
-				const filePath = filename ? path.join(contentDir, filename) : contentDir
-				console.log(`[watcher] reloading ${filePath}`)
+	// Close a watcher tied to an outdated cache shape.
+	existingCache?.watcher?.close()
+	const initialMetadata = existingCache?.promise
+	const metadata =
+		existingCache?.metadata ??
+		(initialMetadata ? undefined : readExistingMetadata())
+	if (metadata && !existingCache?.metadata) {
+		console.log('[watcher] loading existing metadata')
+	}
+	const cache: IncBuildsMetadataCache = {
+		metadata,
+		productPaths: new Map(
+			products.map((product: string) => {
+				return [product, getProductPaths(product)]
+			}),
+		),
+		checkProducts: new Set(),
+		pendingProducts: new Set(),
+		needsStartupValidation: Boolean(metadata || initialMetadata),
+		rebuildingProducts: false,
+	}
+	globals.__incBuildsMetadataCache = cache
 
-				if (eventType === 'change') {
+	cache.watcher = fs.watch(
+		contentDir,
+		{ recursive: true, persistent: false },
+		(eventType: string, filename: string | null) => {
+			const filePath = filename ? path.join(contentDir, filename) : contentDir
+			console.log(`[watcher] reloading ${filePath}`)
+
+			// Content edits refresh the portal but don't affect metadata structure.
+			if (eventType === 'change') {
+				refreshDevPortal()
+				return
+			}
+
+			// Rename events require a path comparison to identify affected products.
+			const changedProduct = filename?.split(path.sep)[0]
+
+			if (changedProduct !== undefined) {
+				if (!products.includes(changedProduct)) {
 					refreshDevPortal()
 					return
 				}
 
-				const changedProduct = filename?.split(path.sep)[0]
-				if (changedProduct !== undefined) {
-					if (!products.includes(changedProduct)) {
-						refreshDevPortal()
-						return
-					}
-
-					nextCache.checkProducts.add(changedProduct)
-				} else {
-					for (const product of products) {
-						nextCache.checkProducts.add(product)
-					}
+				cache.checkProducts.add(changedProduct)
+			} else {
+				// Without a filename, check every configured product.
+				for (const product of products) {
+					cache.checkProducts.add(product)
 				}
+			}
 
-				const pending = regenerateMetadata(nextCache)
-				void pending
-					.then(() => {
-						refreshDevPortal()
-					})
-					.catch(() => {
-						// Regeneration logs its failures; don't refresh stale metadata.
-					})
-			},
-		)
+			const pending = regenerateMetadata(cache)
+			void pending
+				.then(() => {
+					refreshDevPortal()
+				})
+				.catch(() => {
+					// Regeneration logs its failures; don't refresh stale metadata.
+				})
+		},
+	)
 
-		if (initialMetadata || cache.needsStartupValidation) {
-			void regenerateMetadata(cache, initialMetadata).catch(
-				(error: unknown) => {
-					console.error('[watcher] failed to reload metadata', error)
-				},
-			)
-		}
+	// Validate cached metadata at startup without blocking the first cached read.
+	if (initialMetadata || cache.needsStartupValidation) {
+		void regenerateMetadata(cache, initialMetadata).catch((error: unknown) => {
+			console.error('[watcher] failed to reload metadata', error)
+		})
 	}
 
 	return cache
 }
 
+// Returns local metadata, waiting for initial generation or pending path rebuilds.
 export function getIncBuildLocalDevMetadata(): Promise<Metadata> {
 	const cache = startIncBuildsWatcher()
 
+	// Serve cached data during validation unless a structural rebuild is pending.
 	if (cache.metadata && cache.needsStartupValidation) {
 		invalidateIfStructureChanged(cache)
 		if (cache.pendingProducts.size === 0 && !cache.rebuildingProducts) {

@@ -83,19 +83,16 @@ async function main() {
 	let skipTraceFile = false
 	const startTime = process.hrtime.bigint()
 	const traceId = Math.random().toString(16).slice(2, 18)
-
-	const args = getCommandLineArgs(getBuildType())
+	const buildType = getBuildType()
+	const args = getCommandLineArgs(buildType)
 
 	console.log(
 		`Running prebuild script with args: ${JSON.stringify(args, null, 2)}\n`,
 	)
 
-	console.log(`Build type: ${getBuildType()}\n`)
+	console.log(`Build type: ${buildType}\n`)
 
-	if (
-		getBuildType() === BUILD_TYPE.incBuildLocalDev &&
-		!args.forceFullRebuild
-	) {
+	if (buildType === BUILD_TYPE.incBuildLocalDev && !args.forceFullRebuild) {
 		console.log(
 			'Incremental local build; all content data is dynamically loaded as needed. Prebuild is no longer necessary to run.\n',
 		)
@@ -123,18 +120,8 @@ async function main() {
 	fs.writeFileSync(DOCS_PATHS_ALL_VERSIONS_FILE, docsPathsAllVersionsJson)
 
 	// Determine which files to check for copying and transforms
-	let filesToCheck = []
-	if (args.forceFullRebuild) {
-		console.log(
-			'Forcing a refresh of all content data; MDX, redirects, images, nav-data, etc.',
-		)
-
-		filesToCheck = (await listFiles(CONTENT_DIR)).filter((filePath) => {
-			const relativePath = path.relative(CONTENT_DIR, filePath)
-			const repoSlug = relativePath.split('/')[0]
-			return repoSlug in PRODUCT_CONFIG
-		})
-	} else if (getBuildType() === BUILD_TYPE.incBuildPRPreview) {
+	let filesToCheck
+	if (buildType === BUILD_TYPE.incBuildPRPreview && !args.forceFullRebuild) {
 		const changedFiles = getChangedContentFiles()
 
 		console.log(
@@ -143,6 +130,12 @@ async function main() {
 
 		filesToCheck = [...changedFiles.added, ...changedFiles.modified]
 	} else {
+		if (args.forceFullRebuild) {
+			console.log(
+				'Forcing a refresh of all content data; MDX, redirects, images, nav-data, etc.',
+			)
+		}
+
 		filesToCheck = (await listFiles(CONTENT_DIR)).filter((filePath) => {
 			const relativePath = path.relative(CONTENT_DIR, filePath)
 			const repoSlug = relativePath.split('/')[0]
