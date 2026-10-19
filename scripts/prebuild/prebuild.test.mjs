@@ -118,7 +118,7 @@ test('forces a full rebuild during local incremental builds', () => {
 
 	expect(result.error).toBeUndefined()
 	expect(result.status, result.stderr).toBe(0)
-	expect(result.stdout).toContain('Build type: incBuildLocalDev')
+	expect(result.stdout).toContain('Build type: fullBuild')
 	expect(existsSync(outputFile)).toBe(true)
 })
 
@@ -159,7 +159,7 @@ test('logs rejected transform errors and exits unsuccessfully at the CLI boundar
 	expect(result.error).toBeUndefined()
 	expect(result.status).toBe(1)
 	expect(result.stderr).toContain('Prebuild failed:')
-	expect(result.stderr).toContain(`in file: ${sourceFile}`)
+	expect(result.stderr).toContain(`In File: ${sourceFile}`)
 	expect(result.stdout).not.toContain('Applied MDX transforms')
 	expect(existsSync(outputFile)).toBe(false)
 	expect(existsSync(path.join(directory, 'scripts/prebuild/trace'))).toBe(false)

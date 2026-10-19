@@ -83,8 +83,11 @@ async function main() {
 	let skipTraceFile = false
 	const startTime = process.hrtime.bigint()
 	const traceId = Math.random().toString(16).slice(2, 18)
-	const buildType = getBuildType()
+	let buildType = getBuildType()
 	const args = getCommandLineArgs(buildType)
+
+	// Update buildType if forced through CLI args
+	buildType = args.forceFullRebuild ? BUILD_TYPE.fullBuild : buildType
 
 	console.log(
 		`Running prebuild script with args: ${JSON.stringify(args, null, 2)}\n`,
@@ -92,7 +95,7 @@ async function main() {
 
 	console.log(`Build type: ${buildType}\n`)
 
-	if (buildType === BUILD_TYPE.incBuildLocalDev && !args.forceFullRebuild) {
+	if (buildType === BUILD_TYPE.incBuildLocalDev) {
 		console.log(
 			'Incremental local build; all content data is dynamically loaded as needed. Prebuild is no longer necessary to run.\n',
 		)
@@ -121,7 +124,7 @@ async function main() {
 
 	// Determine which files to check for copying and transforms
 	let filesToCheck
-	if (buildType === BUILD_TYPE.incBuildPRPreview && !args.forceFullRebuild) {
+	if (buildType === BUILD_TYPE.incBuildPRPreview) {
 		const changedFiles = getChangedContentFiles()
 
 		console.log(
@@ -130,12 +133,6 @@ async function main() {
 
 		filesToCheck = [...changedFiles.added, ...changedFiles.modified]
 	} else {
-		if (args.forceFullRebuild) {
-			console.log(
-				'Forcing a refresh of all content data; MDX, redirects, images, nav-data, etc.',
-			)
-		}
-
 		filesToCheck = (await listFiles(CONTENT_DIR)).filter((filePath) => {
 			const relativePath = path.relative(CONTENT_DIR, filePath)
 			const repoSlug = relativePath.split('/')[0]
@@ -208,6 +205,6 @@ async function main() {
  * Run the prebuild script.
  */
 main().catch((error) => {
-	console.error('Prebuild failed:', error)
+	console.error('Prebuild failed:', error.message)
 	process.exitCode = 1
 })

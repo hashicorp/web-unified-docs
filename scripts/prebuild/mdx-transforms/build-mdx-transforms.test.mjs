@@ -618,16 +618,23 @@ page_title: Test Page
 
 				await expect(
 					transformFixtureFiles(mockVersionMetadata, { verbose }),
-				).rejects.toThrow('in file: /content/vault/v1.20.x/docs/test.mdx')
+				).rejects.toThrow('MDX Transform Error')
 
 				expect(processExitSpy).not.toHaveBeenCalled()
-				expect(consoleErrorSpy).toHaveBeenCalledTimes(3)
+				expect(consoleErrorSpy).toHaveBeenCalledTimes(verbose ? 2 : 1)
 				expect(consoleErrorSpy).toHaveBeenCalledWith(
 					expect.stringContaining(
-						'in file: /content/vault/v1.20.x/docs/test.mdx',
+						'In File: /content/vault/v1.20.x/docs/test.mdx',
 					),
 				)
-				expect(consoleLogSpy).toHaveBeenCalledTimes(verbose ? 2 : 0)
+				const failureSummary =
+					'\n❗ Build failed due to errors in MDX transforms.'
+				if (verbose) {
+					expect(consoleErrorSpy).toHaveBeenCalledWith(failureSummary)
+				} else {
+					expect(consoleErrorSpy).not.toHaveBeenCalledWith(failureSummary)
+				}
+				expect(consoleLogSpy).toHaveBeenCalledTimes(verbose ? 4 : 2)
 			},
 		)
 
@@ -669,7 +676,7 @@ page_title: Test Page
 				.mockImplementation(() => {})
 
 			await expect(transformFixtureFiles()).rejects.toThrow(
-				'in file: /content/vault/v1.20.x/docs/test.mdx',
+				'MDX Transform Error',
 			)
 
 			expect(processExitSpy).not.toHaveBeenCalled()
@@ -714,7 +721,7 @@ page_title: Test Page
 				.mockImplementation(() => {})
 
 			await expect(transformFixtureFiles()).rejects.toThrow(
-				'in file: /content/vault/v1.20.x/docs/test.mdx',
+				'MDX Transform Error',
 			)
 
 			expect(processExitSpy).not.toHaveBeenCalled()
@@ -740,12 +747,8 @@ page_title: Test Page
 			const exit = vi.spyOn(process, 'exit').mockImplementation(() => {})
 
 			const pending = transformFixtureFiles()
-			await expect(pending).rejects.toThrow(
-				'in file: /content/vault/v1.20.x/docs/first.mdx',
-			)
-			await expect(pending).rejects.toThrow(
-				'in file: /content/vault/v1.20.x/docs/second.mdx',
-			)
+			await expect(pending).rejects.toThrow('MDX Transform Error')
+			await expect(pending).rejects.toThrow('MDX Transform Error')
 			expect(exit).not.toHaveBeenCalled()
 			expect(log).not.toHaveBeenCalledWith(
 				expect.stringContaining('Applied MDX transforms'),

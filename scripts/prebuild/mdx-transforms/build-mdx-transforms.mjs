@@ -113,19 +113,23 @@ export async function buildMdxTransforms(
 			return { error, file }
 		})
 	if (errors.length > 0) {
-		console.error(`\n❗ Encountered ${errors.length} errors:`)
-		errors.forEach(({ error, file }) => {
-			console.error(`❌ ${error} in file: ${file}`)
-		})
+		if (errors.length !== 1) {
+			console.error(`\n❗ Encountered ${errors.length} errors:`)
+		}
 
-		console.error('\n❗ Build failed due to errors in MDX transforms.')
-		throw new Error(
-			errors
-				.map(({ error, file }) => {
-					return `${error} in file: ${file}`
-				})
-				.join('\n'),
-		)
+		console.log('\n')
+		errors.forEach(({ error, file }) => {
+			// displayed in red
+			console.error(
+				`\x1b[31m❌ MDX Transform Error\n${error}\nIn File: ${file}\x1b[0m`,
+			)
+		})
+		console.log('\n')
+
+		if (verbose) {
+			console.error('\n❗ Build failed due to errors in MDX transforms.')
+		}
+		throw new Error('MDX Transform Error')
 	}
 
 	// Log out that the script has complete
