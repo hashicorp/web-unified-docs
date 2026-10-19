@@ -6,7 +6,7 @@ description: >-
   process beyond the standard flow.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2026-03-31T20:46:31.000Z
-last_modified: 2026-03-31T20:46:31.000Z
+last_modified: 2026-10-14T11:13:47.000Z
 # END AUTO GENERATED METADATA
 ---
 
@@ -17,6 +17,588 @@ standard upgrade. However, specific versions of Consul may have more details
 provided for their upgrades as a result of new features or changed behavior.
 This page is used to document those details separately from the standard
 upgrade flow.
+
+## Consul 2.1.x
+
+Consul 2.1 adds configurable TLS key-exchange groups for service mesh and agent connections.
+
+### Hybrid post-quantum TLS
+
+The `mesh` configuration entry supports `TLS.Incoming.ECDHCurves` and `TLS.Outgoing.ECDHCurves`. Agent TLS supports the comma-separated `tls_ecdh_curves` string in `tls.defaults` and the protocol-specific stanzas.
+
+Before upgrading, review existing TLS 1.3 settings. A mesh direction with minimum TLS 1.3 and omitted or empty curves automatically selects `X25519MLKEM768` and `X25519`. Agent protocols with effective minimum TLS 1.3 and no explicit or inherited groups also select this pair. Hybrid key exchange can therefore become active during the upgrade without a separate opt-in change.
+
+Prepare compatible Envoy builds, Consul Dataplane images, and agent clients before the upgrade affects these connections. On Kubernetes, also prepare the chart, controller, and installed `Mesh` CRD. Classical fallback does not make an unsupported hybrid group acceptable to an older TLS provider.
+
+For mesh TLS, explicitly set both minimum and maximum versions to TLS 1.3 when enabling hybrid negotiation. Consul does not automatically promote an unspecified maximum; the upstream default can otherwise remain TLS 1.2. Setting only the maximum does not trigger automatic hybrid-group selection.
+
+Follow [Migrate to post-quantum TLS](/consul/docs/secure/encryption/migrate-post-quantum) for preparation and staged adoption. To return to classical key exchange without downgrading Consul or disabling TLS, follow [Roll back post-quantum TLS](/consul/docs/secure/encryption/rollback-post-quantum). Use explicit classical lists rather than deleting or emptying group fields.
+
+### API gateway features that require a completed upgrade
+
+Consul 2.1 adds the following API gateway configuration options. Consul 2.0 servers and client agents do not recognize these options, so they reject them, ignore them, or apply them incorrectly.
+
+| Option | Configuration entry | Result on a Consul 2.0 server or client agent |
+| --- | --- | --- |
+| [`Listeners[].Protocol`](/consul/docs/reference/config-entry/api-gateway#listeners-protocol) set to `http2` or `grpc` | `api-gateway` | The server rejects the configuration entry, or the route does not bind and the gateway listener has no routes. |
+| [`Rules[].Matches[].Headers[].Invert`](/consul/docs/reference/config-entry/http-route#rules-matches-headers-invert) | `http-route` | Consul drops the field without an error and applies the header match without negation. |
+| [`Defaults.PassiveHealthCheck`](/consul/docs/reference/config-entry/api-gateway#defaults-passivehealthcheck) and `Limits.PassiveHealthCheck` | `api-gateway`, `http-route`, `tcp-route` | Consul drops the field without an error, and the gateway does not eject failing service instances. |
+
+On Kubernetes, the following resources set these options, so the same requirement applies to them:
+
+- The `api-gateway.consul.hashicorp.com/listener-<sectionName>-protocol` `Gateway` annotation
+- The [`RouteHeaderMatchInvertFilter`](/consul/docs/reference/k8s/api-gateway/routeheadermatchinvertfilter) resource
+- The `passiveHealthCheck` field of the [`RouteUpstreamLimitsFilter`](/consul/docs/reference/k8s/api-gateway/routeupstreamlimitsfilter) resource, and the `api-gateway.consul.hashicorp.com/default-passive-health-check-*` `Gateway` annotations
+
+Complete the following steps before you use these options:
+
+1. Upgrade all Consul servers to 2.1.
+1. If you run API gateways with Consul client agents, upgrade the client agent on each node that runs an API gateway. API gateways that run with Consul Dataplane receive their configuration from the servers.
+1. Confirm that the servers and client agents report version 2.1 in the `Build` column of the [`consul members`](/consul/commands/members) output:
+
+   ```shell-session
+   $ consul members
+   Node      Address         Status  Type    Build  Protocol  DC   Partition  Segment
+   server-1  10.0.0.10:8301  alive   server  2.1.0  2         dc1  default    <all>
+   server-2  10.0.0.11:8301  alive   server  2.1.0  2         dc1  default    <all>
+   server-3  10.0.0.12:8301  alive   server  2.1.0  2         dc1  default    <all>
+   gw-node   10.0.0.20:8301  alive   client  2.1.0  2         dc1  default    <default>
+   ```
+
+The following sections describe how each option behaves during the upgrade, provide configuration examples, and explain how to verify the result and roll back.
+
+### API gateway `TLS.Enabled` enables HTTPS termination
+
+In Consul 2.0, setting [`TLS.Enabled`](/consul/docs/reference/config-entry/api-gateway#tls-enabled) to `true` in an `api-gateway` configuration entry has no effect unless a listener also references a certificate, an SDS certificate, or TLS parameters such as `TLSMinVersion`. The listener serves plain HTTP.
+
+In Consul 2.1, `TLS.Enabled = true` turns on TLS termination for every listener on the gateway. Listeners without a certificate terminate HTTPS with the gateway's Consul service mesh leaf certificate. Refer to [Terminate TLS with Consul-managed certificates](/consul/docs/north-south/api-gateway/secure-traffic/encrypt#terminate-tls-with-consul-managed-certificates) for more information.
+
+This change affects your deployment in the following cases:
+
+- A gateway sets `TLS.Enabled = true`, and a listener has no certificate, SDS certificate, or TLS parameters. After the upgrade, the listener serves HTTPS instead of plain HTTP, and plain HTTP clients fail to connect.
+- A gateway sets `TLS.Enabled = true`, and a listener references certificates. In Consul 2.0, the gateway rejects TLS connections whose server name indication (SNI) does not match any of the certificates. In Consul 2.1, the gateway completes these connections with its leaf certificate.
+
+Before you upgrade, find the API gateways that set `TLS.Enabled`. In Consul Enterprise, repeat the command for each namespace and admin partition with the `-namespace` and `-partition` flags.
+
+```shell-session
+$ consul config list -kind api-gateway | while read -r gateway; do
+    consul config read -kind api-gateway -name "$gateway" \
+      | jq -r 'select(.TLS.Enabled == true) | .Name'
+  done
+api-gateway
+```
+
+For each gateway in the output, choose one of the following options before you upgrade.
+
+#### Keep plain HTTP
+
+Remove `TLS.Enabled` from the configuration entry. In the following example, the `api-gateway` gateway serves plain HTTP on port `8443` in Consul 2.0:
+
+<CodeBlockConfig filename="api-gateway.hcl" highlight="4-6">
+
+```hcl
+Kind = "api-gateway"
+Name = "api-gateway"
+
+TLS = {
+  Enabled = true
+}
+
+Listeners = [
+  {
+    Name     = "https"
+    Port     = 8443
+    Protocol = "http"
+  }
+]
+```
+
+</CodeBlockConfig>
+
+Remove the `TLS` block and apply the configuration entry before you upgrade:
+
+<CodeBlockConfig filename="api-gateway.hcl">
+
+```hcl
+Kind = "api-gateway"
+Name = "api-gateway"
+
+Listeners = [
+  {
+    Name     = "https"
+    Port     = 8443
+    Protocol = "http"
+  }
+]
+```
+
+</CodeBlockConfig>
+
+```shell-session
+$ consul config write api-gateway.hcl
+Config entry written: api-gateway/api-gateway
+```
+
+#### Switch clients to HTTPS
+
+Keep `TLS.Enabled = true` and prepare clients to connect over HTTPS and trust the Consul service mesh certificate authority (CA). The gateway certificate is valid for `*.api-gateway.<domain>`, `*.api-gateway.<datacenter>.<domain>`, and the hostnames of the gateway listeners and HTTP routes.
+
+1. Download the active Consul CA root certificate and distribute it to your clients:
+
+   ```shell-session
+   $ curl --silent $CONSUL_HTTP_ADDR/v1/connect/ca/roots \
+       | jq --raw-output '.Roots[] | select(.Active) | .RootCert' > consul-ca.pem
+   ```
+
+1. After the upgrade, verify that the gateway presents its leaf certificate:
+
+   ```shell-session
+   $ openssl s_client -connect GATEWAY_ADDRESS:8443 -servername web.api-gateway.consul </dev/null 2>/dev/null \
+       | openssl x509 -noout -ext subjectAltName
+   X509v3 Subject Alternative Name: critical
+       DNS:*.api-gateway.consul, DNS:*.api-gateway.dc1.consul, DNS:web.api-gateway.consul, URI:spiffe://...
+   ```
+
+1. Send a request with the CA root certificate. Replace `GATEWAY_ADDRESS` with the address of the API gateway:
+
+   ```shell-session
+   $ curl --cacert consul-ca.pem --resolve web.api-gateway.consul:8443:GATEWAY_ADDRESS https://web.api-gateway.consul:8443/
+   hello from web
+   ```
+
+On Kubernetes, Consul on Kubernetes sets `TLS.Enabled` only when a `Gateway` has the [`consul.hashicorp.com/tls-enabled`](/consul/docs/reference/k8s/api-gateway/gateway#annotations) annotation. `Gateway` resources without the annotation are not affected.
+
+### Proxies close established connections once during the upgrade
+
+Consul 2.1 changes how some proxies receive their Connect leaf certificate. Each affected proxy rebuilds its listener once when it first receives configuration from Consul 2.1. Envoy drains the old listener and closes the established connections on it when the drain time ends. Short-lived HTTP requests are not affected. Long-lived connections, such as AMQP, database, or gRPC streaming connections, close once and must reconnect.
+
+| Proxy | Reason for the one-time change |
+| --- | --- |
+| Sidecar proxies and terminating gateways | Consul 2.1 delivers the leaf certificate and CA roots over the Envoy secret discovery service (SDS) instead of including them in the listener configuration. |
+| API gateways with TLS listeners | Consul 2.1 issues a new leaf certificate that includes `*.api-gateway.<domain>` DNS names. API gateways include the leaf certificate in the listener configuration. |
+
+The change happens at the following points during the upgrade:
+
+- For proxies that you start with `consul connect envoy`, when you upgrade the Consul client agent that the proxy connects to.
+- For Consul Dataplane, when Consul Dataplane connects to an upgraded Consul server.
+
+The drain time determines how long Envoy waits before it closes the connections. Envoy proxies that you start with `consul connect envoy` use the Envoy default of 600 seconds, unless you pass the Envoy `--drain-time-s` option. Consul Dataplane uses 30 seconds, unless you set the `-envoy-drain-time-seconds` flag or the `DP_ENVOY_DRAIN_TIME` environment variable.
+
+Complete the following steps for services with long-lived connections:
+
+1. Schedule the client agent and server upgrades during a maintenance window for these services.
+1. Confirm that the clients of these services reconnect automatically when the server closes a connection.
+1. After the upgrade, verify that the sidecar proxy receives the leaf certificate over SDS. Query the Envoy admin interface of the proxy. The default address is `localhost:19000`.
+
+   ```shell-session
+   $ curl --silent localhost:19000/config_dump \
+       | jq -r '.configs[] | select(."@type" | contains("SecretsConfigDump")) | .dynamic_active_secrets[].name'
+   connect-leaf
+   connect-root
+   ```
+
+   Terminating gateways list one `<service>-connect-leaf` secret for each linked service.
+
+After the upgrade, sidecar proxies and terminating gateways keep established connections open when Consul rotates the leaf certificate.
+
+### Header match inversion in HTTP routes
+
+Consul 2.1 adds the [`Invert`](/consul/docs/reference/config-entry/http-route#rules-matches-headers-invert) field to `http-route` header matches. Consul 2.0 servers and client agents drop the field without an error and apply the header match without negation. As a result, the rule matches the opposite set of requests and routes traffic to the wrong service.
+
+This problem occurs in the following situations:
+
+- You write the configuration entry while a Consul 2.0 server is the leader. Consul stores the route without `Invert`.
+- A Consul 2.0 server or client agent provides the configuration to an API gateway.
+- You downgrade Consul after you configure `Invert`.
+
+The following example sends requests without the `x-canary` header to the `s2` service and requests with the header to the `s1` service. On a Consul 2.0 server or client agent, the first rule matches requests that include the header instead, and sends canary traffic to `s2`.
+
+<CodeBlockConfig filename="canary-route.hcl" highlight="18">
+
+```hcl
+Kind = "http-route"
+Name = "canary-route"
+
+Parents = [
+  {
+    Kind        = "api-gateway"
+    Name        = "api-gateway"
+    SectionName = "listener-one"
+  }
+]
+
+Rules = [
+  {
+    Matches = [
+      {
+        Headers = [
+          {
+            Name   = "x-canary"
+            Match  = "present"
+            Invert = true
+          }
+        ]
+      }
+    ]
+    Services = [
+      {
+        Name = "s2"
+      }
+    ]
+  },
+  {
+    Matches = [
+      {
+        Headers = [
+          {
+            Name  = "x-canary"
+            Match = "present"
+          }
+        ]
+      }
+    ]
+    Services = [
+      {
+        Name = "s1"
+      }
+    ]
+  }
+]
+```
+
+</CodeBlockConfig>
+
+Complete the following steps to use `Invert`:
+
+1. Complete the steps in [API gateway features that require a completed upgrade](#api-gateway-features-that-require-a-completed-upgrade).
+1. Apply the route:
+
+   ```shell-session
+   $ consul config write canary-route.hcl
+   ```
+
+1. Verify that Consul stored the `Invert` field:
+
+   ```shell-session
+   $ consul config read -kind http-route -name canary-route | jq -c '.Rules[].Matches[].Headers'
+   [{"Match":"present","Name":"x-canary","Value":"","Invert":true}]
+   [{"Match":"present","Name":"x-canary","Value":""}]
+   ```
+
+   If the first line does not include `"Invert":true`, a Consul 2.0 server stored the route. Write the configuration entry again after you upgrade all servers.
+
+1. Verify that the API gateway applies the inverted match. On the node that runs the API gateway, query the Envoy admin interface:
+
+   ```shell-session
+   $ curl --silent localhost:19000/config_dump \
+       | jq -c '.configs[] | select(."@type" | contains("RoutesConfigDump"))
+         | .dynamic_route_configs[].route_config.virtual_hosts[].routes[].match.headers'
+   [{"name":"x-canary","present_match":true,"invert_match":true}]
+   [{"name":"x-canary","present_match":true}]
+   ```
+
+On Kubernetes, create [`RouteHeaderMatchInvertFilter`](/consul/docs/reference/k8s/api-gateway/routeheadermatchinvertfilter) resources and attach them to `HTTPRoute` rules only after you upgrade Consul.
+
+Before you downgrade Consul, remove `Invert` from your routes, or remove the rules that use it. On Kubernetes, remove the `RouteHeaderMatchInvertFilter` references from your `HTTPRoute` rules.
+
+### HTTP/2 and gRPC listener protocols
+
+Consul 2.1 adds the `http2` and `grpc` values for the API gateway [`Listeners[].Protocol`](/consul/docs/reference/config-entry/api-gateway#listeners-protocol) field. Consul 2.0 does not support these values. The following table describes the result when a Consul 2.0 component processes a listener that uses them:
+
+| Consul 2.0 component | Result |
+| --- | --- |
+| Leader server | Consul rejects the configuration entry: `unsupported listener protocol "grpc", must be one of 'tcp', or 'http'` |
+| Leader server, when the gateway already uses `http2` or `grpc` | The `http-route` does not bind to the listener, because Consul 2.0 requires the route and listener protocols to match. |
+| Client agent that runs the API gateway | The listener receives no routes, and requests fail. |
+
+Existing `http` and `tcp` listeners are not affected by the upgrade. An `http` listener continues to connect to services over HTTP/1.1, even when a service's protocol is `grpc` or `http2`. To route gRPC or HTTP/2 traffic over HTTP/2 from end to end, change the listener protocol after the upgrade.
+
+The following example routes traffic to the `grpc-service` service. Before the upgrade, the listener uses the `http` protocol, so the gateway connects to the service over HTTP/1.1 and gRPC requests fail.
+
+<CodeBlockConfig filename="api-gateway.hcl">
+
+```hcl
+Kind = "api-gateway"
+Name = "api-gateway"
+
+Listeners = [
+  {
+    Name     = "grpc-listener"
+    Port     = 9999
+    Protocol = "http"
+  }
+]
+```
+
+</CodeBlockConfig>
+
+Complete the following steps to change the listener protocol:
+
+1. Complete the steps in [API gateway features that require a completed upgrade](#api-gateway-features-that-require-a-completed-upgrade).
+1. Set the protocol of the service in a service defaults configuration entry:
+
+   <CodeBlockConfig filename="service-defaults-grpc.hcl">
+
+   ```hcl
+   Kind     = "service-defaults"
+   Name     = "grpc-service"
+   Protocol = "grpc"
+   ```
+
+   </CodeBlockConfig>
+
+   ```shell-session
+   $ consul config write service-defaults-grpc.hcl
+   ```
+
+1. Change the listener protocol to `grpc`, or to `http2` for HTTP/2 services, and apply the configuration entry. You do not need to change the `http-route` entries that bind to the listener.
+
+   <CodeBlockConfig filename="api-gateway.hcl" highlight="8">
+
+   ```hcl
+   Kind = "api-gateway"
+   Name = "api-gateway"
+
+   Listeners = [
+     {
+       Name     = "grpc-listener"
+       Port     = 9999
+       Protocol = "grpc"
+     }
+   ]
+   ```
+
+   </CodeBlockConfig>
+
+   ```shell-session
+   $ consul config write api-gateway.hcl
+   ```
+
+1. Verify that the `http-route` entries remain bound to the listener:
+
+   ```shell-session
+   $ consul config read -kind http-route -name grpc-route | jq -c '[.Status.Conditions[] | {Type, Status}]'
+   [{"Type":"Accepted","Status":"True"},{"Type":"Bound","Status":"True"}]
+   ```
+
+1. Verify that the gateway connects to the service over HTTP/2. On the node that runs the API gateway, query the Envoy admin interface. The upstream cluster for the service includes `http2_protocol_options`.
+
+   ```shell-session
+   $ curl --silent localhost:19000/config_dump \
+       | jq -c '.configs[] | select(."@type" | contains("ClustersConfigDump"))
+         | .dynamic_active_clusters[]
+         | select(.cluster.name | test("(^|~)grpc-service\\."))
+         | .cluster.typed_extension_protocol_options."envoy.extensions.upstreams.http.v3.HttpProtocolOptions".explicit_http_config'
+   {"http2_protocol_options":{}}
+   ```
+
+1. Send a gRPC request through the gateway. Replace `GATEWAY_ADDRESS` with the address of the API gateway:
+
+   ```shell-session
+   $ grpcurl -plaintext GATEWAY_ADDRESS:9999 list
+   ```
+
+On Kubernetes, add the [`api-gateway.consul.hashicorp.com/listener-<sectionName>-protocol`](/consul/docs/reference/k8s/api-gateway/gateway#annotations) annotation to the `Gateway` only after you upgrade Consul. When a Consul 2.0 server rejects the listener protocol, the `Gateway` is not accepted.
+
+Before you downgrade Consul, change all `http2` and `grpc` listeners back to `http`. On Kubernetes, remove the listener protocol annotations.
+
+### Passive health checks for API gateway routes
+
+Consul 2.1 adds the `PassiveHealthCheck` field to API gateway upstream limits. Consul 2.0 servers and client agents drop the field without an error. The gateway then keeps sending requests to failing service instances instead of ejecting them.
+
+The following example configures a gateway-wide passive health check, and a route that overrides it for the `s2` service:
+
+<CodeBlockConfig filename="api-gateway.hcl">
+
+```hcl
+Kind = "api-gateway"
+Name = "api-gateway"
+
+Listeners = [
+  {
+    Name     = "http"
+    Port     = 9999
+    Protocol = "http"
+  }
+]
+
+Defaults = {
+  PassiveHealthCheck = {
+    Interval                = "5s"
+    MaxFailures             = 3
+    EnforcingConsecutive5xx = 100
+    MaxEjectionPercent      = 50
+    BaseEjectionTime        = "30s"
+  }
+}
+```
+
+</CodeBlockConfig>
+
+<CodeBlockConfig filename="demo-route.hcl">
+
+```hcl
+Kind = "http-route"
+Name = "demo-route"
+
+Parents = [
+  {
+    Kind        = "api-gateway"
+    Name        = "api-gateway"
+    SectionName = "http"
+  }
+]
+
+Rules = [
+  {
+    Matches = [{ Path = { Match = "prefix", Value = "/s1" } }]
+    Services = [
+      {
+        Name = "s1"
+      }
+    ]
+  },
+  {
+    Matches = [{ Path = { Match = "prefix", Value = "/s2" } }]
+    Services = [
+      {
+        Name = "s2"
+        Limits = {
+          PassiveHealthCheck = {
+            Interval                = "10s"
+            MaxFailures             = 3
+            EnforcingConsecutive5xx = 0
+            MaxEjectionPercent      = 50
+            BaseEjectionTime        = "60s"
+          }
+        }
+      }
+    ]
+  }
+]
+```
+
+</CodeBlockConfig>
+
+Complete the following steps to configure passive health checks:
+
+1. Complete the steps in [API gateway features that require a completed upgrade](#api-gateway-features-that-require-a-completed-upgrade).
+1. Apply the configuration entries:
+
+   ```shell-session
+   $ consul config write api-gateway.hcl
+   $ consul config write demo-route.hcl
+   ```
+
+1. Verify that Consul stored the passive health check:
+
+   ```shell-session
+   $ consul config read -kind api-gateway -name api-gateway | jq -c '.Defaults.PassiveHealthCheck'
+   {"Interval":5000000000,"MaxFailures":3,"EnforcingConsecutive5xx":100,"MaxEjectionPercent":50,"BaseEjectionTime":30000000000}
+   ```
+
+   The command output shows `Interval` and `BaseEjectionTime` in nanoseconds. If the output is `null`, a Consul 2.0 server stored the configuration entry. Write the configuration entry again after you upgrade all servers.
+
+1. Verify that the gateway applies the passive health check. On the node that runs the API gateway, query the Envoy admin interface for the `outlier_detection` block of the upstream cluster:
+
+   ```shell-session
+   $ curl --silent localhost:19000/config_dump \
+       | jq -c '.configs[] | select(."@type" | contains("ClustersConfigDump"))
+         | .dynamic_active_clusters[]
+         | select(.cluster.name | startswith("s1."))
+         | .cluster.outlier_detection'
+   {"consecutive_5xx":3,"interval":"5s","base_ejection_time":"30s","max_ejection_percent":50,"enforcing_consecutive_5xx":100,"enforcing_consecutive_gateway_failure":0}
+   ```
+
+On Kubernetes, add the `api-gateway.consul.hashicorp.com/default-passive-health-check-*` annotations to the `Gateway`, and the `passiveHealthCheck` field to [`RouteUpstreamLimitsFilter`](/consul/docs/reference/k8s/api-gateway/routeupstreamlimitsfilter) resources, only after you upgrade Consul.
+
+After a downgrade to Consul 2.0, the gateway no longer applies passive health checks. Circuit-breaker limits, such as `MaxConnections`, continue to apply.
+
+### Kubernetes CRDs for API gateway route filters
+
+Consul on Kubernetes 2.1 adds the [`RouteUpstreamLimitsFilter`](/consul/docs/reference/k8s/api-gateway/routeupstreamlimitsfilter) and [`RouteHeaderMatchInvertFilter`](/consul/docs/reference/k8s/api-gateway/routeheadermatchinvertfilter) custom resource definitions (CRDs).
+
+When [`connectInject.enabled`](/consul/docs/reference/k8s/helm#v-connectinject-enabled) is `true`, the Consul Helm chart installs and upgrades these CRDs, so you do not need to take any action. Verify that the CRDs exist after the upgrade:
+
+```shell-session
+$ kubectl get crd routeupstreamlimitsfilters.consul.hashicorp.com routeheadermatchinvertfilters.consul.hashicorp.com
+NAME                                                  CREATED AT
+routeupstreamlimitsfilters.consul.hashicorp.com       2026-10-14T10:40:22Z
+routeheadermatchinvertfilters.consul.hashicorp.com    2026-10-14T10:40:22Z
+```
+
+If you manage CRDs outside of the Helm chart, install the CRDs before you create these resources. Replace `VERSION` with your Consul on Kubernetes version, for example `2.1.0`:
+
+```shell-session
+$ kubectl apply \
+    --filename https://raw.githubusercontent.com/hashicorp/consul-k8s/vVERSION/control-plane/config/crd/bases/consul.hashicorp.com_routeupstreamlimitsfilters.yaml \
+    --filename https://raw.githubusercontent.com/hashicorp/consul-k8s/vVERSION/control-plane/config/crd/bases/consul.hashicorp.com_routeheadermatchinvertfilters.yaml
+```
+
+### API gateway DNS registration
+
+Consul 2.1 registers each service that a bound route targets in Consul DNS at `<service>.api-gateway.<domain>`. You do not need to take any action. After you upgrade all servers, the leader reconciles existing API gateways and builds the gateway-services mapping that DNS lookups use. Refer to [API gateway service lookups](/consul/docs/discover/service/static#api-gateway-service-lookups) for more information.
+
+After the upgrade, verify the mapping and the DNS lookup for a gateway:
+
+```shell-session
+$ curl --silent $CONSUL_HTTP_ADDR/v1/catalog/gateway-services/api-gateway \
+    | jq -c '[.[] | {Service: .Service.Name, GatewayKind, Port}]'
+[{"Service":"web","GatewayKind":"api-gateway","Port":8443}]
+
+$ dig @127.0.0.1 -p 8600 web.api-gateway.consul SRV +short
+1 1 8443 gw-node.node.dc1.consul.
+```
+
+## Consul 2.0.x
+
+<Note>
+
+For step-by-step instructions on upgrading from Consul Enterprise 1.21.x (LTS) to 2.0.x, refer to [Upgrade Consul to v2.0.x](/consul/docs/upgrade/instructions/upgrade-to-2-0-x).
+
+</Note>
+
+### Versioning scheme change
+
+Beginning with Consul 2.0.0, the release versioning format changed from semantic versioning (`X.Y.Z`) to IBM's Version-Modification-Fix (`V.M.F`) model. A new `V` (Version) milestone starts a new support lifecycle, an `M` (Modification) milestone adds features without starting a new lifecycle, and monthly `F` (Fix) releases patch the existing release. This change does not require any configuration updates, but it does affect how you plan future upgrades and read release numbers. For more information, refer to [Consul Enterprise Long Term Support](/consul/docs/upgrade/lts).
+
+### IBM Consul Enterprise license prerequisite
+
+If you use a HashiCorp Consul Enterprise license, you must upgrade to Consul Enterprise 1.21.7 or later and switch to an IBM Consul Enterprise license before upgrading to 2.0.x. Attempting to upgrade directly to 2.0.x with a HashiCorp-issued license causes agents to fail to start. For the complete process, refer to [Upgrade to IBM Consul Enterprise license](/consul/docs/upgrade#upgrade-to-ibm-consul-enterprise-license).
+
+### Multi-port service mesh routing is Enterprise-only
+
+Consul 2.0.0 introduces multi-port routing for service mesh, letting a single sidecar proxy serve a service that exposes multiple named ports. This feature, and the related `proxy.local_service_ports` and `proxy.upstreams[].destination_port` configuration fields, requires Consul Enterprise. Community Edition deployments are unaffected by this change and continue to register single-port services as before. For more information, refer to [multi-port services](/consul/docs/connect/proxy/multiport).
+
+### API gateway Kubernetes resource types changed for OpenShift compatibility
+
+Consul 2.0.0 introduces new API gateway Kubernetes resource types in the `consul.hashicorp.com` API group to support OpenShift Container Platform (OCP) 4.19 and later, which are incompatible with the `v1alpha` Kubernetes Gateway API resources used by previous Consul releases. If you run Consul API Gateway on Kubernetes, and especially on OCP, you must migrate existing `Gateway`, `HTTPRoute`, `TCPRoute`, and `ReferenceGrant` resources to the new resource types as part of your upgrade. For step-by-step instructions, refer to [Upgrade Gateway resource types](/consul/docs/north-south/api-gateway/k8s/resource-upgrade).
+
+### Opt-in telemetry reporting introduced
+
+Consul 2.0.0 adds an opt-in telemetry reporting feature that is **disabled by default**. No action is required to preserve existing behavior. If you want to enable anonymized usage reporting, refer to [Opt-in to telemetry data reporting](/consul/docs/monitor/telemetry#opt-in-to-data-reporting).
+
+
+
+### Versioning scheme change
+
+Beginning with Consul 2.0.0, the release versioning format changed from semantic versioning (`X.Y.Z`) to IBM's Version-Modification-Fix (`V.M.F`) model. A new `V` (Version) milestone starts a new support lifecycle, an `M` (Modification) milestone adds features without starting a new lifecycle, and monthly `F` (Fix) releases patch the existing release. This change does not require any configuration updates, but it does affect how you plan future upgrades and read release numbers. For more information, refer to [Consul Enterprise Long Term Support](/consul/docs/upgrade/lts).
+
+### IBM Consul Enterprise license prerequisite
+
+If you use a HashiCorp Consul Enterprise license, you must upgrade to Consul Enterprise 1.21.7 or later and switch to an IBM Consul Enterprise license before upgrading to 2.0.x. Attempting to upgrade directly to 2.0.x with a HashiCorp-issued license causes agents to fail to start. For the complete process, refer to [Upgrade to IBM Consul Enterprise license](/consul/docs/upgrade#upgrade-to-ibm-consul-enterprise-license).
+
+### Multi-port service mesh routing is Enterprise-only
+
+Consul 2.0.0 introduces multi-port routing for service mesh, letting a single sidecar proxy serve a service that exposes multiple named ports. This feature, and the related `proxy.local_service_ports` and `proxy.upstreams[].destination_port` configuration fields, requires Consul Enterprise. Community Edition deployments are unaffected by this change and continue to register single-port services as before. For more information, refer to [multi-port services](/consul/docs/connect/proxy/multiport).
+
+### API gateway Kubernetes resource types changed for OpenShift compatibility
+
+Consul 2.0.0 introduces new API gateway Kubernetes resource types in the `consul.hashicorp.com` API group to support OpenShift Container Platform (OCP) 4.19 and later, which are incompatible with the `v1alpha` Kubernetes Gateway API resources used by previous Consul releases. If you run Consul API Gateway on Kubernetes, and especially on OCP, you must migrate existing `Gateway`, `HTTPRoute`, `TCPRoute`, and `ReferenceGrant` resources to the new resource types as part of your upgrade. For step-by-step instructions, refer to [Upgrade Gateway resource types](/consul/docs/north-south/api-gateway/k8s/resource-upgrade).
+
+### Opt-in telemetry reporting introduced
+
+Consul 2.0.0 adds an opt-in telemetry reporting feature that is **disabled by default**. No action is required to preserve existing behavior. If you want to enable anonymized usage reporting, refer to [Opt-in to telemetry data reporting](/consul/docs/monitor/telemetry#opt-in-to-data-reporting).
 
 ## Consul 1.21.x
 
