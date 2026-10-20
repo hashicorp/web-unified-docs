@@ -38,9 +38,11 @@ provider "instana" {
 }
 
 provider "github" {
-  owner = "hashicorp"
-  # PAT comes from env var in HCP:
+  # comes from env var in HCP:
   # GITHUB_TOKEN
+
+  # comes from env var in HCP:
+  # GITHUB_OWNER
 }
 
 provider "vercel" {
