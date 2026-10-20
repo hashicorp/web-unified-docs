@@ -21,8 +21,17 @@ The MCP server does not have an identity of its own in Boundary. Each user suppl
 
 The deployment mode determines how the server receives the token:
 
-- **Local mode:** The server runs on your local machine. It reads the token from the `BOUNDARY_TOKEN` environment variable, or from the `BOUNDARY_TOKEN` header that your MCP client sends.
-- **Remote mode:** The server runs as a shared service for multiple users. The server ignores the `BOUNDARY_TOKEN` environment variable, and every request must include a `BOUNDARY_TOKEN` header. This token passthrough lets one server instance serve users with different permissions.
+- **Local mode:** The server runs on your local machine. It reads the token from the `BOUNDARY_TOKEN` header that your MCP client sends, falling back to the `BOUNDARY_TOKEN` environment variable. For the controller address, the `BOUNDARY_ADDR` header takes precedence, then the `--boundary-addr` flag, then the `BOUNDARY_ADDR` environment variable.
+- **Remote mode:** The server runs as a shared service for multiple users. The server ignores the `BOUNDARY_TOKEN` environment variable, and every request must include a `BOUNDARY_TOKEN` header. This token passthrough lets one server instance serve users with different permissions. The controller address is fixed at startup using `--boundary-addr` or the `BOUNDARY_ADDR` environment variable, and the `BOUNDARY_ADDR` request header is ignored. Fixing the address prevents a caller from redirecting the server's outbound requests, including the token check, to another host.
+
+### Where the Boundary address comes from
+
+The deployment mode also determines how the server resolves the Boundary controller address:
+
+- **Local mode:** The server uses the `BOUNDARY_ADDR` environment variable or the `--boundary-addr` flag. If a request includes a `BOUNDARY_ADDR` header, that value overrides the server-side configuration for that request.
+- **Remote mode:** The address comes only from the `BOUNDARY_ADDR` environment variable or the `--boundary-addr` flag, and the server will not start without one. Any `BOUNDARY_ADDR` header on a request is ignored and the server logs a warning.
+
+Allowing callers to set the address in a shared deployment would be a server-side request forgery risk: a caller could point the server's outbound requests, including the token validation check, at any host. Fixing the address server-side in remote mode prevents the forgery risk.
 
 ### Token validation
 
@@ -44,7 +53,7 @@ Unsupported operations include creating static credentials, creating Vault crede
 
 ### Credential brokering and injection
 
-The server does not support credential brokering, because brokering returns credentials to the requester. To establish a session with the `connect` toolset, configure the target for credential injection. With injection, Boundary supplies the credential to the session, and the credential never passes through the assistant or the model.
+The server does not support credential brokering, because brokering returns credentials to the requester. To establish a session with the `connect` toolset, configure the target for credential injection. With injection, Boundary supplies the credential to the session, and the credential never passes through the assistant or the model. Credential injection is supported for SSH and RDP targets only. TCP targets are not supported.
 
 For more information about the two workflows, refer to [Credential management](/boundary/docs/concepts/credential-management).
 
@@ -52,15 +61,19 @@ For more information about the two workflows, refer to [Credential management](/
 
 The MCP server only registers the tools in the toolsets that you enable when you start it. By default, the server enables the `targets` and `sessions` toolsets.
 
-The toolset configuration is a second layer of control on top of RBAC. For example, if you start the server with the `read-only` keyword, an assistant cannot create, update, or delete any resource, even if the token's owner has permission to do so.
+The toolset configuration is a second layer of control on top of RBAC. For example, if you start the server with only the `targets` toolset, an assistant cannot perform any operation outside of listing and reading targets, even if the token's owner has permission to do so.
+
+Neither `default` nor `read-only` is strictly non-destructive. Both include the `sessions` toolset, which can cancel active sessions. In local mode, `read-only` also includes the `connect` toolset, which can create new sessions. For a fully inert tool surface, use `--tools` to name only the specific `list_*` and `read_*` tools you need, or explicitly list toolsets that contain no mutating operations.
 
 ## Network access and transport
 
-The server uses the Streamable HTTP transport and listens on `127.0.0.1:8080` by default. Keep the server bound to a loopback address unless you must provide a shared service.
+The server uses the Streamable HTTP transport and listens on `127.0.0.1:0` by default. Keep the server bound to a loopback address unless you must provide a shared service. The server logs a warning at startup when it listens on a non-loopback address without TLS.
 
 The transport enables the MCP SDK's DNS-rebinding protection. The server rejects requests that it receives over a loopback connection with a non-loopback `Host` header. The server does not use the `Host` header to select or route to a Boundary controller.
 
-If you deploy the server in remote mode, enable TLS to protect tokens and data in transit by setting the `BOUNDARY_MCP_TLS_CERT` environment variable, and restrict network access to the server.
+Each MCP session is rate-limited to 10 requests per second with a burst of 20. The server rejects requests that exceed the limit before making any call to Boundary.
+
+If you deploy the server in remote mode, enable TLS to protect tokens and data in transit by setting the `BOUNDARY_MCP_TLS_CERT` and `BOUNDARY_MCP_TLS_KEY` environment variables, and restrict network access to the server.
 
 ## Threat model
 
