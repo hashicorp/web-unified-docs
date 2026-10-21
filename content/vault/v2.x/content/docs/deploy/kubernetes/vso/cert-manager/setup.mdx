@@ -37,6 +37,14 @@ that match your environment:
 - **Install [cert-manager](https://cert-manager.io/docs/installation/)** in your
   Kubernetes cluster.
 
+- **Install [Helm](https://helm.sh/docs/intro/install/)** 3.7 or later.
+
+- **Use Vault Secrets Operator 1.7.0 or later**. Replace `<VSO_VERSION>` in the
+  Helm commands on this page with the version you install.
+
+- **Create the application namespace** if it does not already exist. The
+  examples use the `app` namespace.
+
 - **Configure a Vault auth method for Kubernetes workloads**. The examples on
   this page use the [Kubernetes auth method](/vault/docs/auth/kubernetes)
   mounted at `kubernetes`. Refer to
@@ -66,10 +74,10 @@ $ vault write pki/roles/example-dot-com \
     max_ttl=72h
 ```
 
-The Vault PKI role has the final say over each certificate. The role's `ttl`
-applies when a `Certificate` does not set `spec.duration`, and `max_ttl` limits
-the lifetime of every certificate. The `key_type=any` setting lets the role
-sign CSRs for any key algorithm that cert-manager generates. Refer to
+The role's `ttl` applies when a `Certificate` omits `spec.duration`. Requests
+must fit `max_ttl` and the CA's validity constraints; excessive durations can
+fail rather than being shortened. `key_type=any` accepts the key algorithms
+that cert-manager generates. Refer to
 [Create/Update role](/vault/api-docs/secret/pki#create-update-role) for all role
 parameters.
 
@@ -100,7 +108,10 @@ use when it signs certificates.
    `pki/issuer/example-issuer/sign/example-dot-com`.
 
 1. Create a Kubernetes auth role that binds the policy to a service account.
-   The namespace of the service account depends on the issuer type:
+   Use a dedicated service account named `pki-issuer`, which you create in
+   [Step 4](#step-4-create-the-connection-and-auth-resources). Do not use this
+   account for application Pods. The namespace of the service account depends
+   on the issuer type:
 
    <Tabs>
 
@@ -111,7 +122,7 @@ use when it signs certificates.
 
    ```shell-session
    $ vault write auth/kubernetes/role/pki-issuer \
-       bound_service_account_names=default \
+       bound_service_account_names=pki-issuer \
        bound_service_account_namespaces=app \
        token_policies=pki-issuer \
        audience=vault \
@@ -128,7 +139,7 @@ use when it signs certificates.
 
    ```shell-session
    $ vault write auth/kubernetes/role/pki-issuer \
-       bound_service_account_names=default \
+       bound_service_account_names=pki-issuer \
        bound_service_account_namespaces=vault-secrets-operator \
        token_policies=pki-issuer \
        audience=vault \
@@ -144,16 +155,25 @@ use when it signs certificates.
 cert-manager must approve each `CertificateRequest` before the Vault Secrets
 Operator signs it. Set `certManager.approverRBAC.enabled=true` to let the
 cert-manager built-in approver approve requests for the Vault Secrets Operator
-issuers:
+issuers.
 
-```shell-session
-$ helm install                                  \
-    --create-namespace                          \
-    --namespace vault-secrets-operator          \
-    --set certManager.approverRBAC.enabled=true \
-    vault-secrets-operator                      \
-    hashicorp/vault-secrets-operator
-```
+1. Add the HashiCorp Helm repository:
+
+   ```shell-session
+   $ helm repo add hashicorp https://helm.releases.hashicorp.com
+   ```
+
+1. Install the Vault Secrets Operator:
+
+   ```shell-session
+   $ helm install                                  \
+       --version <VSO_VERSION>                     \
+       --create-namespace                          \
+       --namespace vault-secrets-operator          \
+       --set certManager.approverRBAC.enabled=true \
+       vault-secrets-operator                      \
+       hashicorp/vault-secrets-operator
+   ```
 
 When you enable this setting, cert-manager approves every request for the
 Vault Secrets Operator issuers. Use
@@ -179,8 +199,8 @@ for the upgrade command.
 
 ## Step 4: Create the connection and auth resources
 
-Create a `VaultConnection` resource that points to your Vault server, and a
-`VaultAuth` resource that uses the auth role from
+Create the dedicated service account, a `VaultConnection` resource that points
+to your Vault server, and a `VaultAuth` resource that uses the auth role from
 [Step 2](#step-2-create-a-vault-policy-and-auth-role).
 
 <Tabs>
@@ -190,6 +210,13 @@ Create a `VaultConnection` resource that points to your Vault server, and a
 Create the resources in the application namespace:
 
 ```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pki-issuer
+  namespace: app
+automountServiceAccountToken: false
+---
 apiVersion: secrets.hashicorp.com/v1beta1
 kind: VaultConnection
 metadata:
@@ -209,7 +236,7 @@ spec:
   mount: kubernetes
   kubernetes:
     role: pki-issuer
-    serviceAccount: default
+    serviceAccount: pki-issuer
     audiences:
       - vault
 ```
@@ -223,6 +250,13 @@ Create the resources in the Vault Secrets Operator namespace. Set
 cluster issuer, or to `["*"]` to allow all namespaces:
 
 ```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pki-issuer
+  namespace: vault-secrets-operator
+automountServiceAccountToken: false
+---
 apiVersion: secrets.hashicorp.com/v1beta1
 kind: VaultConnection
 metadata:
@@ -244,7 +278,7 @@ spec:
     - app
   kubernetes:
     role: pki-issuer
-    serviceAccount: default
+    serviceAccount: pki-issuer
     audiences:
       - vault
 ```
@@ -257,6 +291,9 @@ resources.
 </Tab>
 
 </Tabs>
+
+Automatic token mounting is not required. Restrict who can use this service
+account in Pods or request its tokens.
 
 Save the resources to a file named `vault-auth.yaml`. Apply the file and
 confirm that the `READY` column shows `True` for the `VaultAuth`:
@@ -436,8 +473,8 @@ $ cmctl approve --namespace app <CERTIFICATE_REQUEST_NAME>
        | openssl x509 -noout -subject -issuer -dates -ext subjectAltName
    ```
 
-   The subject alternative names include `web.example.com`, and the validity
-   period matches the `spec.duration` value, up to the role's `max_ttl`.
+   Confirm the SANs include `web.example.com` and check the intended expiration,
+   accounting for Vault's backdating and CA expiration settings.
 
 1. Confirm that the Vault Secrets Operator signed the certificate. The
    `CertificateIssued` event has the message
