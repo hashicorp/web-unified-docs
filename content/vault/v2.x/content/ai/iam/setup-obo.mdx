@@ -6,7 +6,7 @@ description: >-
   OAuth resource server profiles, and OBO ceiling policies.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2026-08-31T12:55:58-07:00
-last_modified: 2026-09-29T14:01:27.000Z
+last_modified: 2026-10-21T05:59:46.000Z
 # END AUTO GENERATED METADATA
 ---
 
@@ -44,6 +44,7 @@ operations on Vault.
     ```shell-session
     $ cat > verify-oauth.json << EOF
     {
+      "actor_claim":          "actor-token.sub",
       "issuer_id":            "${ISSUER}",
       "use_jwks":             true,
       "user_claim":           "sub",
@@ -76,7 +77,7 @@ operations on Vault.
 
     Key                               Value
     ---                               -----
-    actor_claim                       act.sub
+    actor_claim                       actor-token.sub
     audiences                         [https://localhost:8200/v1]
     clock_skew_leeway                 0
     config_id                         de81dc66-e00d-23c6-7dfc-9cdbc5aaf97e
@@ -208,9 +209,8 @@ Map your external agent and human users to Vault entities.
    variables for later use:
 
     ```shell-session
-    $ export
-      OBO_HUMAN_CANONICAL_ID="0427b0f5-ac11-4f25-75f6-5764b85176aa" \
-      OBO_AGENT_CANONICAL_ID="ef897bd9-0060-1fa4-68ba-65ae5b0747ec"
+    $ export OBO_HUMAN_CANONICAL_ID="0427b0f5-ac11-4f25-75f6-5764b85176aa" \
+        OBO_AGENT_CANONICAL_ID="ef897bd9-0060-1fa4-68ba-65ae5b0747ec"
     ```
 
 </Tab>
@@ -418,7 +418,7 @@ perform.
     $ cat > ceiling-policy.hcl << EOF
     # Allow KV2 read and write
     path "secret-v2/data/shared-secret/*" {
-      capabilities = ["read", "list", "update"]
+      capabilities = ["create", "read", "update", "list"]
     }
 
     path "secret-v2/metadata/shared-secret/*" {
@@ -474,7 +474,7 @@ $ vault write agent-registry/register      \
     display_name="<descriptive_name>"      \
     description="<meaningful_description>" \
     entity_id="${OBO_AGENT_CANONICAL_ID}"  \
-    ceiling_policies='["ceiling-all"]'
+    ceiling_policies=ceiling-all
 ```
 
 For example:
@@ -486,7 +486,7 @@ $ vault write agent-registry/register        \
     display_name="obo-danielle-agent"        \
     description="Personal code review agent" \
     entity_id="${OBO_AGENT_CANONICAL_ID}"    \
-    ceiling_policies='["ceiling-all"]'
+    ceiling_policies=ceiling-all
 
 Key             Value
 ---             -----
@@ -603,25 +603,47 @@ policies assigned to the human user, and RAR constraints to evaluate agent acces
 
 <Tab heading="Verify" group="verify">
 
-1. Create an authorization details file, `rarRequest.json`, that only allows
-   `create` and `read` access to `kv` secrets:
-    ```json
-    {
-      "type": "vault:path_access",
-      "path": "secret-v2/data/shared-secret/foo",
-      "capabilities": ["create", "read"]
-    }
-    ```
+1. Login to your auth application to retrieve a token for the "human" user using oauth2c:
+
+  ```shell-session
+  $ export HUMAN_TOKEN=$(oauth2c https://"${IBM_VERIFY_TENANT}".verify.ibm.com/oauth2 \
+      --pkce                                                     \
+      --client-id "${IBM_VERIFY_CLIENT_ID}"                      \
+      --client-secret "${IBM_VERIFY_CLIENT_SECRET}"              \
+      --response-types code                                      \
+      --response-mode query                                      \
+      --grant-type authorization_code                            \
+      --auth-method client_secret_basic --no-browser | jq -r '.access_token')
+  ```
+
+1. Login again to your auth application to retrieve a token for the "agent" user using oauth2c:
+
+  ```shell-session
+  $ export AGENT_TOKEN=$(oauth2c https://"${IBM_VERIFY_TENANT}".verify.ibm.com/oauth2 \
+      --pkce                                                     \
+      --client-id "${IBM_VERIFY_CLIENT_ID}"                      \
+      --client-secret "${IBM_VERIFY_CLIENT_SECRET}"              \
+      --response-types code                                      \
+      --response-mode query                                      \
+      --grant-type authorization_code                            \
+      --auth-method client_secret_basic --no-browser | jq -r '.access_token')
+  ```
 
 1. Use `curl` to request a delegation token from Verify and save it to an
    environment variable:
 
     ```shell-session
-    $ export AGENT_TOKEN=$(curl --request POST             \
-        --variable authz_request=[@rarRequest.json]        \
-        --expand-data                                      \
-        --data 'authorization_details=[{{authz_request}}]' \
-        ${ISSUER} | jq -r '.access_token)
+    $ export DELEGATION_TOKEN=$(curl --request POST \
+        --url "https://${IBM_VERIFY_TENANT}.verify.ibm.com/oauth2/token" \
+        --header 'Content-Type: application/x-www-form-urlencoded' \
+        --data grant_type=urn:ietf:params:oauth:grant-type:token-exchange \
+        --data subject_token="${HUMAN_TOKEN}" \
+        --data subject_token_type=urn:ietf:params:oauth:token-type:access_token \
+        --data actor_token="${AGENT_TOKEN}" \
+        --data actor_token_type=urn:ietf:params:oauth:token-type:access_token \
+        --data client_id="${IBM_VERIFY_STS_CLIENT_ID}" \
+        --data client_secret="${IBM_VERIFY_STS_CLIENT_SECRET}" \
+        --data 'authorization_details=[{"type":"vault:path_access","path":"secret-v2/data/shared-secret/foo", "capabilities":["create", "read"]}]' | jq -r '.access_token')
     ```
 
 1. Use the delegation token from the token exchange to write a new secret:
@@ -656,24 +678,20 @@ policies assigned to the human user, and RAR constraints to evaluate agent acces
    Vault prohibits the update because the current RAR policy only allows `create`
    and `read`.
 
-1. Update `rarRequest.json` to include `update` and `delete` permission:
-
-    ```json
-    {
-      "type": "vault:path_access",
-      "path": "secret-v2/data/shared-secret/foo",
-      "capabilities": ["create", "read", "update", "delete"]
-    }
-    ```
-
-1. Request an updated RAR token:
+1. Request an updated RAR token that includes `update` and `delete` permission:
 
     ```shell-session
-    $ export AGENT_TOKEN=$(curl --request POST             \
-        --variable authz_request=[@rarRequest.json]        \
-        --expand-data                                      \
-        --data 'authorization_details=[{{authz_request}}]' \
-        ${ISSUER} | jq -r '.access_token)
+    $ export DELEGATION_TOKEN=$(curl --request POST \
+        --url "https://${IBM_VERIFY_TENANT}.verify.ibm.com/oauth2/token" \
+        --header 'Content-Type: application/x-www-form-urlencoded' \
+        --data grant_type=urn:ietf:params:oauth:grant-type:token-exchange \
+        --data subject_token="${HUMAN_TOKEN}" \
+        --data subject_token_type=urn:ietf:params:oauth:token-type:access_token \
+        --data actor_token="${AGENT_TOKEN}" \
+        --data actor_token_type=urn:ietf:params:oauth:token-type:access_token \
+        --data client_id="${IBM_VERIFY_STS_CLIENT_ID}" \
+        --data client_secret="${IBM_VERIFY_STS_CLIENT_SECRET}" \
+        --data 'authorization_details=[{"type":"vault:path_access","path":"secret-v2/data/shared-secret/foo", "capabilities":["create", "read", "update", "delete"]}]' | jq -r '.access_token')
     ```
 
 1. Update the existing secret:
@@ -710,7 +728,7 @@ policies assigned to the human user, and RAR constraints to evaluate agent acces
     URL: PUT http://127.0.0.1:8200/v1/secret-v2/data/shared-secret/foo
     Code: 403. Errors:
     * 2 errors occurred:
-    	* RAR_NO_MATCH: No valid authorization_details claim found matching this request.
+    	* CEILING_POLICY_DENIED: actor ceiling policy denied permission
     	* permission denied
     ```
 
