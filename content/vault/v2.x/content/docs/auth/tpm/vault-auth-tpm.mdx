@@ -27,7 +27,7 @@ reference.
 - You must have [UTM](https://mac.getutm.app/) installed to run a Linux VM.
 - You must have [Vagrant](/vagrant/install) and the Vagrant SCP plugin installed.
 - You must have [Vault Enterprise](/vault/install/enterprise) installed on both the Linux
-  VM (to run `vault tpm attest` and `vault login`) and your host OS
+  VM (to run `vault tpm enroll`, `vault tpm attest`, and `vault login`) and your host OS
 
 ## Step 1: Set up the software vTPM
 
@@ -186,55 +186,73 @@ Start a new Linux VM and install swtpm on the Linux VM, independent of Vault. Th
    $ newgrp tss
    ```
 
-   You will run TPM configuration commands from this terminal.
+   Keep this terminal open. Enrollment in the next step runs here, after you
+   point the VM at Vault.
 
 ## Step 2: Enroll the TPM and configure Vault
 
-Retrieve the relevant information from swtpm to configure Vault.
+Enroll the software TPM from the Ubuntu VM. `vault tpm enroll` reads the
+endorsement key from the local device and registers the TPM in the Vault
+identity store. The VM needs the Vault address, CA certificate, and a token
+that can write to `identity/tpm`.
 
-1. From the terminal session of your Ubuntu VM, export the EK from the Linux VM.
+1. From the terminal session where you exported the `VAULT_ADDR` environment
+   variable, change to the directory with the Vagrantfile.
 
    ```shell-session
-   $ tpm2_readpublic -c 0x81010001 -f pem -o ek.pem -T device:/dev/tpmrm0 
+   $ cd ~/learn-vault-tpm
    ```
 
-   Vault identifies this TPM as `sha256-<hex>` of the DER-encoded EK public
-   key.
-
-1. Read the certificate.
+1. Copy the Vault dev server's CA certificate to the Linux VM.
 
    ```shell-session
-   $ cat ek.pem
+   $ vagrant scp $(echo $VAULT_CACERT) :~/
    ```
 
-1. Copy the full PEM output, including the `BEGIN`/`END PUBLIC KEY` lines.
+1. Print the token for the host session.
 
-1. Switch to the terminal session where you exported the `VAULT_ADDR` environment
-   variable.
-
-1. Export the certificate as an environment variable.
-   
    ```shell-session
-   $ export EK_PEM='-----BEGIN PUBLIC KEY-----
-    MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvneMK6d4EH/UNgnMeVtV
-                .............example.............
-    6/faxJnLwWo2kD+nzPTJZcHnQiHUpu2oCcF0FdZvL89E+URUy8UVedK2VqyUG4Fo
-    3QIDAQAB
-    -----END PUBLIC KEY-----'
+   $ vault print token
    ```
 
-1. Write the certificate to the Vault identity plugin and save the output as an
-   environment variable.
+1. Switch to the terminal session of your Ubuntu VM.
+
+1. Export the Vault environment variables. Replace `OPERATOR_TOKEN` with the
+   token from the previous command.
+
+   <Warning>
+
+   `VAULT_SKIP_VERIFY=1` disables TLS verification and is only appropriate for
+   a local lab setup like this one, where `VAULT_CACERT` is already pointed at
+   the right certificate. Don't carry this setting into any shared or
+   production environment.
+
+   </Warning>
 
    ```shell-session
-   $ TPM_ID=$(vault write -field=id identity/tpm tpm_ek_public_key="$EK_PEM") && \
+   $ export VAULT_CACERT=/home/vagrant/vault-ca.pem \
+       VAULT_ADDR=https://10.0.2.2:8200 \
+       VAULT_TOKEN='OPERATOR_TOKEN' \
+       VAULT_SKIP_VERIFY=1
+   ```
+
+   `10.0.2.2` is the default gateway address for UTM NAT networks.
+
+1. Enroll the TPM and save the TPM ID. Use the resource-managed device path
+   printed by `swtpm-setup.sh`. This example uses `/dev/tpmrm0`.
+
+   ```shell-session
+   $ TPM_ID=$(vault tpm enroll -field=id \
+       -name=my-tpm \
+       -tpm-device-path=/dev/tpmrm0) && \
       echo $TPM_ID
    ```
 
-   You use the TPM ID to configure the TPM auth method role.
+   Vault identifies this TPM as `sha256-<hex>` of the DER-encoded EK public
+   key. You use the TPM ID to configure the TPM auth method role.
 
 1. Enable the TPM auth method.
-   
+
    ```shell-session
    $ vault auth enable tpm
    ```
@@ -262,44 +280,19 @@ Retrieve the relevant information from swtpm to configure Vault.
    policy scoped using the principle of least privilege for the workload(s)
    authenticating to Vault.
 
+1. Remove the operator token from the environment.
+
+   ```shell-session
+   $ unset VAULT_TOKEN
+   ```
+
+   `vault login` in the next step stores the TPM token in the token helper.
+   With `VAULT_TOKEN` set, Vault uses that token for later commands.
+
 ## Step 3: Authenticate to Vault with the TPM auth method
 
-Now that you have Vault configured for the TPM auth method, you will log in and
-get a Vault token.
-
-1. From the terminal session where you exported the `VAULT_ADDR` environment
-   variable, change to the directory with the Vagrantfile.
-
-   ```shell-session
-   $ cd ~/learn-vault-tpm
-   ```
-   
-1. Copy the Vault dev server's CA certificate to the Linux VM.
-
-   ```shell-session
-   $ vagrant scp $(echo $VAULT_CACERT) :~/
-   ```
-
-1. Switch to the terminal session of your Ubuntu VM.
-
-1. Export the Vault environment variables.
-
-   <Warning>
-   
-   `VAULT_SKIP_VERIFY=1` disables TLS verification and is only appropriate for
-   a local lab setup like this one, where `VAULT_CACERT` is already pointed at
-   the right certificate. Don't carry this setting into any shared or
-   production environment.
-   
-   </Warning>
-
-   ```shell-session
-   $ export VAULT_CACERT=/home/vagrant/vault-ca.pem \
-       VAULT_ADDR=https://10.0.2.2:8200 \
-       VAULT_SKIP_VERIFY=1
-   ```
-
-   `10.0.2.2` is the default gateway address for UTM NAT networks.
+Now that you have Vault configured for the TPM auth method, log in and get a
+Vault token. Run these commands in the same Ubuntu VM session.
 
 1. Authenticate the workload to Vault.
 
@@ -359,7 +352,7 @@ get a Vault token.
 ## Summary
 
 In this guide, you installed a vTPM (swtpm) in a Linux VM to replicate a physical TPM.
-You then added the ID from the vTPM to Vault, configured the TPM auth method,
+You enrolled that TPM with `vault tpm enroll`, configured the TPM auth method,
 and logged in using the vTPM.
 
 ## Additional resources
