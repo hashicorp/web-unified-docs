@@ -4,9 +4,11 @@ import remarkMdx from 'remark-mdx'
 import { readFileSync } from 'fs'
 import path from 'path'
 import { includePartials } from '../include-partials/include-partials.mjs'
-// import { parseDirectiveBlocks } from '../exclude-content/ast-utils.mjs'
-import { createCustomVariableMap } from './createCustomVariableMap.mjs'
-import { injectCustomVariables } from './injectCustomVariables.mjs'
+import {
+	findAndReplaceCustomVariables,
+	removeVariableNodesFromContent,
+} from './custom-variable-utils.mjs'
+import { parseDirectiveBlocks } from '../exclude-content/ast-utils.mjs'
 
 const filePath = path.resolve(
 	process.argv[2] ?? new URL('./test-fixture.mdx', import.meta.url).pathname,
@@ -46,14 +48,9 @@ console.log('=== Partials injected ===\n')
 
 let tree = remark().use(remarkMdx).parse(src)
 
-// console.log('=== Parsed Directory Blocks ===\n')
-// const blocks = parseDirectiveBlocks(tree)
-
 console.log('=== Variable Map ===')
-const [variableMap, contentNodesToReplace] = createCustomVariableMap(tree)
+findAndReplaceCustomVariables(tree, repoSlug)
+removeVariableNodesFromContent(tree)
 
-console.log('=== Injecting Variables ===')
-injectCustomVariables(tree, variableMap, contentNodesToReplace, repoSlug)
-
-// console.log('=== Parsed Directory Blocks ===\n')
-// parseDirectiveBlocks(tree)
+console.log('=== Checking if content updated properly ===')
+parseDirectiveBlocks(tree)

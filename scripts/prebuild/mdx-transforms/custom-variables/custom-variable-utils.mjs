@@ -27,8 +27,16 @@ const BEGIN_VARIABLE_DECLARATIVE_REGEX = new RegExp(
 const END_VARIABLE_DECLARATIVE_REGEX = new RegExp(
 	`^(\\s+)?<!--\\s+END:\\s+${VARIABLE_BLOCK_NAME}\\s+-->(\\s+)?$`,
 )
-const VARIABLE_NAME_REGEX = /^[a-zA-Z]+(?:-[a-zA-Z]+)*:[\r\n]/
-const VARIABLE_SYNTAX_REGEX = /{{\s[a-zA-Z]+(?:-[a-zA-Z]+)*\s}}/g
+
+// Restrictions for how a variable/variable entry can be written when defining
+const VARIABLE_NAME = '[a-zA-Z]+(?:-[a-zA-Z]+)*'
+
+const VARIABLE_NAME_REGEX = new RegExp(`^${VARIABLE_NAME}:[\\r\\n]`)
+const VARIABLE_ENTRY_NAME_REGEX = new RegExp(`^${VARIABLE_NAME}$`)
+const VARIABLE_USAGE_SYNTAX_REGEX = new RegExp(
+	`{{\\s${VARIABLE_NAME}\\s}}`,
+	'g',
+)
 
 /**
  * Concatenates the text content of a node and its descendants
@@ -67,7 +75,7 @@ function parseVariableContent(content) {
 		console.log(e)
 		// Catch all for any malformed structuring in variables.mdx
 		throw new Error(
-			"Couldn't create custom variable map - Make sure the variables and content inside variables.mdx follow proper partials & YAML formatting.",
+			`Couldn't create custom variable map - ${e.reason}. Make sure the variables and content inside variables.mdx is not empty and follow proper partials & YAML formatting.`,
 		)
 	}
 
@@ -84,7 +92,7 @@ function extractVariableMapEntriesFromDocument(document, definedVariables) {
 		// Enforcing the "- product: value" syntax
 		if (!Array.isArray(variableEntries) || variableEntries === null) {
 			throw new Error(
-				`Couldn't create custom variable map - '${variableName}' must contain a list of '- product: value' entries`,
+				`Couldn't create custom variable map - '${variableName}' must contain a list of '- product: value' entries.`,
 			)
 		}
 
@@ -93,11 +101,16 @@ function extractVariableMapEntriesFromDocument(document, definedVariables) {
 		for (const entry of variableEntries) {
 			if (typeof entry !== 'object') {
 				throw new Error(
-					`Couldn't create custom variable map - '${entry}' must be formatted as a '- product: value' entry in variables.mdx`,
+					`Couldn't create custom variable map - '${entry}' must be formatted as a '- product: value' entry in variables.mdx.`,
 				)
 			}
 			const productEntries = Object.entries(entry)
 			for (const [product, content] of productEntries) {
+				if (!VARIABLE_ENTRY_NAME_REGEX.test(product)) {
+					throw new Error(
+						`Couldn't create custom variable map - '${product}' is not a valid entry name. Entry names must only contain alphabetical characters and a single '-' separator between words like 'product' or 'my-product'.`,
+					)
+				}
 				if (content === null) {
 					throw new Error(
 						`Couldn't create custom variable map - '${variableName}: ${product}' has no value. Please provide a value for each product entry.`,
@@ -118,7 +131,7 @@ function getVariablesToReplace(value, definedVariables) {
 	const variablesToBeReplaced = []
 	// Find all instances of {{ var }}
 	// store a [varName, startIndex, endIndex] entry in nodesWithContentToBeReplaced
-	const matches = [...value.matchAll(VARIABLE_SYNTAX_REGEX)]
+	const matches = [...value.matchAll(VARIABLE_USAGE_SYNTAX_REGEX)]
 	for (const m of matches) {
 		const variableString = m[0] // '{{ some-string }}'
 		const startIndex = m['index']
@@ -187,9 +200,9 @@ export function replaceCustomVariables(
 	}
 
 	// update the node value
-	console.log('Current content: ', currentContentString)
-	console.log('Updated content: ', newContentString)
-	console.log()
+	// console.log('Current content: ', currentContentString)
+	// console.log('Updated content: ', newContentString)
+	// console.log()
 
 	// replace the value for the current text node
 	node.value = newContentString
@@ -228,7 +241,7 @@ export function findAndReplaceCustomVariables(
 
 			// set isGlobal to true if 'global' is found
 			isGlobal = value.includes('global')
-			console.log(isGlobal)
+			// console.log(isGlobal)
 			return
 		}
 
@@ -241,7 +254,7 @@ export function findAndReplaceCustomVariables(
 			// REGEX to check if a variable name is valid
 			if (!VARIABLE_NAME_REGEX.test(variableName)) {
 				throw new Error(
-					`Couldn't create custom variable map - ${variableName} is not a valid definition. Please define the variable with alphabetical characters and/or '-' between words like 'varName:' or 'var-name:'`,
+					`Couldn't create custom variable map - ${variableName.trim()} is not a valid definition. Please define the variable with alphabetical characters and/or '-' between words like 'varName:' or 'var-name:'`,
 				)
 			}
 			variablesContent += variableName
@@ -291,8 +304,8 @@ export function findAndReplaceCustomVariables(
 				variableMap[varName][product] = content
 			}
 
-			console.log('=== Updated Variable Map ===')
-			console.log(variableMap)
+			// console.log('=== Updated Variable Map ===')
+			// console.log(variableMap)
 
 			readVariables = false
 			isGlobal = false
@@ -303,8 +316,8 @@ export function findAndReplaceCustomVariables(
 		// {{ vars }} can be found in text/code; Should we ignore in code?
 		// how do we handle URLs?
 		if (type === 'text' || type === 'code') {
-			const containsOneOrMoreVariables = VARIABLE_SYNTAX_REGEX.test(value)
-			VARIABLE_SYNTAX_REGEX.lastIndex = 0 // need to reset index as it moves after testing
+			const containsOneOrMoreVariables = VARIABLE_USAGE_SYNTAX_REGEX.test(value)
+			VARIABLE_USAGE_SYNTAX_REGEX.lastIndex = 0 // need to reset index as it moves after testing
 			if (containsOneOrMoreVariables) {
 				const variablesToReplace = getVariablesToReplace(
 					value,

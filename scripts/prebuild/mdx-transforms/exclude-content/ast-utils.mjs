@@ -38,8 +38,7 @@ export function parseDirectiveBlocks(tree) {
 	visit(tree, (node) => {
 		const nodeValue = node.value
 		const lineNumber = node.position?.end?.line
-		console.log('---PARSING TREE---')
-		console.log('Node: ', node)
+		// console.log(node)
 
 		if (!nodeValue || !lineNumber) {
 			return

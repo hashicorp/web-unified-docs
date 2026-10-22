@@ -16,7 +16,7 @@ import { PRODUCT_CONFIG } from '#productConfig.mjs'
  * `@include`ing a path beginning with one of these will cause the loader to
  * attempt to resolve the path using the corresponding partials directory.
  *
- * @example `@include "{{global}}/my-partial.mdx"` will cause the loader to try
+ * @example `@include "@global/my-partial.mdx"` will cause the loader to try
  * to attempt to resolve the path using the top-level global partials directory.
  */
 export const PARTIALS_ALIAS = {
@@ -36,9 +36,9 @@ export const PARTIALS_ALIAS = {
  * - There must be no other content or whitespace around the `@include`.
  * Example: `@include 'path/to/file.mdx'` or `@include "path/to/file.mdx"`
  *
- * You can also use the `{{global}}` alias to explicitly target the
+ * You can also use the `@global` alias to explicitly target the
  * top-level partials directory (`content/global/partials`).
- * Example: `@include "{{global}}/my-partial.mdx"`
+ * Example: `@include "@global/my-partial.mdx"`
  */
 export function remarkIncludePartialsPlugin({
 	partialsDir,
@@ -98,7 +98,7 @@ export function remarkIncludePartialsPlugin({
 			const isInternalProductAlias = rawPath.startsWith('@') && !isGlobalAlias
 
 			if (isGlobalAlias) {
-				// {{global}} paths resolve only against topLevelPartialsDir — no local fallback,
+				// @global paths resolve only against topLevelPartialsDir — no local fallback,
 				// to prevent name conflicts with product-specific partials.
 				includePath = path.join(topLevelPartialsDir, resolvedPath)
 			} else {

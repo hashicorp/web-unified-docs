@@ -6,6 +6,7 @@
 import { parseDirectiveBlocks } from './ast-utils.mjs'
 import { processOnlyDirective } from './only-processor.mjs'
 import { processVersionDirective } from './version-processor.mjs'
+import { VARIABLE_BLOCK_CONTENT_REGEX } from '../custom-variables/custom-variable-utils.mjs'
 
 /**
  * Maps a directive tag (the text before the colon in a BEGIN/END comment) to
@@ -61,6 +62,12 @@ export function transformExcludeContent(options = {}) {
  * Route directive blocks to the generic processors based on the directive shape
  */
 function routeAndProcessBlock(block, tree, options) {
+	// Custom variables blocks (name:variables / name:global-variables) share the
+	// BEGIN/END comment syntax but are handled by transformCustomVariables
+	if (VARIABLE_BLOCK_CONTENT_REGEX.test(block.content)) {
+		return
+	}
+
 	// Parse the directive: "Vault:>=v1.21.x" -> tag="Vault", directive=">=v1.21.x"
 	const [tag, ...rest] = block.content.split(':')
 	const directive = rest.join(':') // Handle edge cases like "TFEnterprise:only name:something"

@@ -27,6 +27,7 @@ import {
 import { transformExcludeContent } from './exclude-content/index.mjs'
 
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
+import { transformCustomVariables } from './custom-variables/custom-variables.mjs'
 
 /**
  * Given a target directory,
@@ -167,6 +168,28 @@ async function applyMdxTransforms(entry, versionMetadata = {}, targetDir) {
 			})
 		}
 
+		// Partials are not transformed for variables on their own. Their {{ }} are
+		// resolved once the partial is included into a page, where the variables
+		// block lives. Product partials sit in `partialsDir`;
+		// product-level `global/partials` are covered by `isGlobalPartial`
+		// since `partialsDir` does not point to them.
+		const isPartial =
+			isGlobalPartial || filePath.startsWith(partialsDir + path.sep)
+
+		if (!isPartial) {
+			// This is necessary to ensure that the directive blocks we use for variables
+			// is verified only once to prevent unnecessary tree traversals
+			const directivePairingValidated =
+				!isInternalProduct &&
+				PRODUCT_CONFIG[entry.repoSlug]?.supportsExclusionDirectives
+
+			processor.use(transformCustomVariables, {
+				directivePairingValidated,
+				repoSlug: entry.repoSlug,
+				filePath,
+			})
+		}
+
 		const remarkResults = await processor
 			.use(paragraphCustomAlertsPlugin)
 			.use(rewriteInternalRedirectsPlugin, {
@@ -174,6 +197,8 @@ async function applyMdxTransforms(entry, versionMetadata = {}, targetDir) {
 			})
 			.use(rewriteInternalLinksPlugin, { entry, versionMetadata })
 			.process(content)
+
+		// this is where we should put the variables plugin
 
 		const transformedContent = String(remarkResults)
 		const transformedFileString = grayMatter.stringify(transformedContent, data)
