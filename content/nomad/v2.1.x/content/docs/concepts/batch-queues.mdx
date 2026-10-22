@@ -1,0 +1,98 @@
+---
+layout: docs
+page_title: Nomad batch queue specification
+description: |-
+  Learn about Nomad's batch queue specification. Review example batch queue specifications.
+---
+
+# Overview
+
+Nomad batch queues are node pool specific internal queueing mechanisms for batch job
+registrations. They allow for more precise control and deterministic scheduling of
+batch jobs within a node pool.
+
+# How do batch queues work?
+
+Under normal Nomad scheduling, a job registration will result in a Nomad job-register
+evaluation. This is an event that signifies a desired state change in the cluster.
+Nomad can process many Evaluations in parallel due to it's optimistic scheduling
+architecture. Being able to process events in parallel makes Nomad very fast,
+but also makes it impossible to guarantee the ordering in which events are processed.
+That means if Job A is submitted to Nomad, then Job B, it is possible that Job B is
+scheduled first. When the resources within a cluster are greater than total resources
+reserved by all jobs, this is not a problem. However, as is the case with batch jobs,
+when many jobs are submitted that result in many pending jobs waiting to be scheduled,
+this can result in unexpected behavior.
+
+Nomad batch queues are a builtin queue of batch job registrations that serialize the
+scheduling of batch jobs and allow for deterministic ordering. Batch queues will queue
+and then release queued job-register evaluations to Nomad to be scheduled in the cluster.
+The queue will then wait until the entire job is finished placing before selecting the next
+queued evaluation. Note the queues wait for placement, not for the workload to complete.
+
+There are currently 2 batch queue implementations, FIFO and Dynamic Priority.
+
+- `FIFO` - A First-In-First-Out queue where batch jobs are scheduled in the order of their
+Raft index. A job with a smaller Raft index will always be scheduled before a job with
+a larger Raft index.
+
+- `Dynamic Priority` - Batch jobs in the queue are ordered based on an internal "priority"
+that dynamically changes based off several configured parameters. This priority includes the
+job priority, but does _not_ modify it. The dynamic priority is internal to the queue.
+The parameters used by the dynamic queue include how long the job has been on the queue,
+how many resources are being reserved, and a builtin tenancy model. Each parameter has a
+configurable weight so the amount it impacts the priority is also configurable.
+Refer to the example specification below for more details.
+
+# Head of line blocking
+
+The Nomad Batch Queue serializes the placement of jobs in a cluster. It does not do any scheduling
+itself, so cannot interpret constraints. Care should be taken to not submit a job with unsatisfiable
+constraints as these can create a head of line blocking scenario in the queue. When this happens,
+a job will never be placed in the cluster, so the queue will wait forever. Manual intervention is
+currently necessary to stop a job that is blocking the queue in order for it to continue processing
+other jobs.
+
+# New Job Versions
+
+When a job is sitting in the queue and a newer version of that job is submitted to the queue, the older
+version will be removed from the queue and the newer version will be added similarly to a new job. This is
+akin to stepping out of line and then returning to the back of the line, not the same spot you were
+already in.
+
+# Nomad batch queue specifications
+
+The FIFO queue is the simplest to configure. It currently needs no specific configuration.
+
+```hcl
+node_pool "batch" {
+  batch_queue {
+    fifo {}
+  }
+}
+```
+
+The Dynamic Priority queue has more configuration. Below is an example
+and description of each parameter.
+
+```hcl
+node_pool "batch" {
+  batch_queue {
+    tenant_type = "metadata"
+    metadata_key = "uid" // an example metadata key
+  
+    dynamic_priority {
+      calc_interval = "10s"
+      max_age       = "10m"
+      half_life     = "12h"
+      max_cpu       = 1000
+      max_memory    = 1024
+  
+      age_weight    = 10
+      usage_weight  = 10
+      cpu_weight    = 10
+      memory_weight = 10
+    }
+  }
+}
+```
