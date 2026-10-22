@@ -80,8 +80,9 @@ Successfully applied node pool "example"!
 
 - `batch_queue` <code>([BatchQueue][batch-queue]: nil)</code> - Configures a
   [batch job queue][] for the node pool. The queue holds the batch jobs
-  registered in the node pool and sends them to the scheduler one at a time. If
-  not defined, the node pool does not queue batch jobs. You cannot configure a
+  registered in the node pool and sends them to the scheduler one at a time.
+  Child jobs that a [periodic][] job launches do not enter the queue. If not
+  defined, the node pool does not queue batch jobs. You cannot configure a
   batch job queue on the built-in `default` and `all` node pools.
 
 ### `scheduler_config` parameters <EnterpriseAlert inline />
@@ -94,8 +95,8 @@ Successfully applied node pool "example"!
 
 ### `batch_queue` parameters
 
-The `batch_queue` block must contain exactly one of the following blocks, which
-sets the queue type.
+The `batch_queue` block must contain one of the following blocks, which sets the
+queue type.
 
 - `fifo` <code>([Fifo][fifo]: nil)</code> - Configures a FIFO queue, which sends
   jobs to the scheduler in the order that you register them.
@@ -105,15 +106,16 @@ sets the queue type.
   order of their adjusted priority. Refer to [Adjusted priority][] for how the
   queue calculates it.
 
-- `constraint_timeout` `(string: "")` - Specifies how long the queue waits for a
-  job that Nomad cannot place because of its constraints, as a duration string
-  such as `"5m"`. The timeout starts when the scheduler creates the job's
-  blocked evaluation. When the timeout expires, the queue sends the next job to
-  the scheduler, and the blocked job waits for placement outside the queue.
+- `constraint_timeout` `(string: <optional>)` - Specifies how long the queue
+  waits for a job that Nomad cannot place because of its constraints, as a
+  duration string such as `"5m"`. The timeout starts when the scheduler creates
+  the job's blocked evaluation. When the timeout expires, the queue sends the
+  next job to the scheduler, and the blocked job waits for placement outside the
+  queue. If not set, the queue waits until Nomad places the job or you stop it.
   The timeout does not apply to jobs that wait for resources. Refer to [Head of
   line blocking][] for details.
 
-  <!-- TODO(owner: Mike Smithhisler): Confirm the intended behavior of constraint_timeout before release. A Nomad binary built from main at 9d4576f1dd with constraint_timeout = "120s" sent the next job to the scheduler about one second after a constraint-blocked job, and the watcher logged "context canceled". In WorkloadWatcher.wait in nomad/queues/queue/workload_watcher.go, the loop reassigns ctx with context.WithDeadline and then calls cancel, so the next WatchCtx call returns immediately. Also confirm the behavior when the parameter is unset, where the zero value ends the wait as soon as Nomad blocks the job. -->
+  <!-- TODO(owner: Mike Smithhisler): constraint_timeout still ends the wait early at release/2.1.0-rc.1 (215402ecfd). A dev agent built from that branch with constraint_timeout = "30s" and "120s" placed the next job about two seconds after it was registered. The watcher logged "constraint failure" and then "shutting down workload watcher for job ... err=context canceled" in the same millisecond that the blocked evaluation was created. In WorkloadWatcher.wait in nomad/queues/queue/workload_watcher.go, the loop reassigns ctx with context.WithDeadline at line 122 and calls cancel at line 127, so the next WatchCtx call returns immediately. Commit 69097488a0 fixed the unset case, and the same dev agent held the queue for more than 90 seconds with no constraint_timeout until the blocked job was stopped. Confirm the fix for a set timeout before release. -->
 
 This example configures a dynamic priority queue that treats each namespace as a
 tenant.
@@ -176,7 +178,7 @@ batch_queue {
   how much the resources that a job requests affect its priority. Specify an
   empty block, `job_size {}`, to leave job size out of the calculation.
 
-<!-- TODO(owner: Mike Smithhisler): At 9d4576f1dd, `nomad node pool apply` rejects a dynamic_priority block that omits the age or job_size block, or that omits cpu_weight or memory_weight in tenant_fairshare. api/batch_job_queue.go has a "validate and set sensible defaults" TODO. Confirm whether these stay required in 2.1. Also, BatchQueueConfig.Validate in nomad/structs/batch_queue.go accepts a batch_queue block that sets both fifo and dynamic_priority, and the pool runs a dynamic priority queue. Confirm whether that is intended. -->
+<!-- TODO(owner: Mike Smithhisler): At release/2.1.0-rc.1 (215402ecfd), `nomad node pool apply` rejects a dynamic_priority block that omits the age or job_size block, or that omits cpu_weight or memory_weight in tenant_fairshare. api/batch_job_queue.go has a "validate and set sensible defaults" TODO. Confirm whether these stay required in 2.1. Also, BatchQueueConfig.Validate in nomad/structs/batch_queue.go accepts a batch_queue block that sets both fifo and dynamic_priority. A dev agent built from rc.1 applied such a block, and /v1/queue/jobs reported the type dynamic_priority. Confirm whether that is intended. -->
 
 ##### `tenant_fairshare` parameters
 
@@ -191,13 +193,14 @@ batch_queue {
 
 - `cpu_weight` `(int: <required>)` - Specifies the maximum amount that a
   tenant's share of allocated CPU adds to the priority of its jobs. Tenants
-  whose batch jobs hold a smaller share of the CPU allocated in the node pool
-  receive more of this weight. If `0`, allocated CPU does not affect priority.
+  whose jobs hold a smaller share of the CPU allocated to batch jobs in the node
+  pool receive more of this weight. If `0`, allocated CPU does not affect
+  priority.
 
 - `memory_weight` `(int: <required>)` - Specifies the maximum amount that a
   tenant's share of allocated memory adds to the priority of its jobs. Tenants
-  whose batch jobs hold a smaller share of the memory allocated in the node pool
-  receive more of this weight. If `0`, allocated memory does not affect
+  whose jobs hold a smaller share of the memory allocated to batch jobs in the
+  node pool receive more of this weight. If `0`, allocated memory does not affect
   priority.
 
 - `exclude_alloc_statuses` `(array<string>: [])` - Specifies the allocation
@@ -210,7 +213,8 @@ batch_queue {
 
 - `weight` `(int: 0)` - Specifies the maximum amount that the time a job waits
   in the queue adds to its priority. If `0`, job age does not affect priority.
-  Set `max` when you set this parameter.
+  Set `max` when you set this parameter. If `max` is not set, every job receives
+  the full `weight` as soon as it enters the queue.
 
 - `max` `(string: "")` - Specifies the wait time, as a duration string such as
   `"12h"`, at which a job receives the full `weight`.
@@ -220,16 +224,19 @@ batch_queue {
 - `cpu_weight` `(int: 0)` - Specifies the maximum amount that a job's requested
   CPU adds to its priority. Jobs that request less CPU receive more of this
   weight. If `0`, requested CPU does not affect priority. Set `cpu_max` when you
-  set this parameter.
+  set this parameter. If `cpu_max` is not set, jobs that request CPU receive
+  none of this weight.
 
 - `cpu_max` `(int: 0)` - Specifies the requested CPU, in MHz, at or above which a
   job receives none of the `cpu_weight`. A job's requested CPU is the sum of
-  each task's `cpu` resource multiplied by its group's `count`.
+  each task's `cpu` resource multiplied by its group's `count`. A task that sets
+  [`cores`][cores] instead of `cpu` adds `0` MHz to the sum.
 
 - `memory_weight` `(int: 0)` - Specifies the maximum amount that a job's
   requested memory adds to its priority. Jobs that request less memory receive
   more of this weight. If `0`, requested memory does not affect priority. Set
-  `memory_max` when you set this parameter.
+  `memory_max` when you set this parameter. If `memory_max` is not set, jobs
+  that request memory receive none of this weight.
 
 - `memory_max` `(int: 0)` - Specifies the requested memory, in MB, at or above
   which a job receives none of the `memory_weight`. A job's requested memory is
@@ -250,5 +257,7 @@ batch_queue {
 [Adjusted priority]: /nomad/docs/concepts/scheduling/batch-job-queue#adjusted-priority
 [Tenant fairshare]: /nomad/docs/concepts/scheduling/batch-job-queue#tenant-fairshare
 [meta]: /nomad/docs/job-specification/meta
+[periodic]: /nomad/docs/job-specification/periodic
+[cores]: /nomad/docs/job-specification/resources#cores
 [scheduler algorithm]: /nomad/api-docs/operator/scheduler#scheduleralgorithm-1
 [memory oversubscription]: /nomad/api-docs/operator/scheduler#memoryoversubscriptionenabled-1
