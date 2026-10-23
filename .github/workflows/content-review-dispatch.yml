@@ -31,31 +31,94 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Detect content changes
-        id: detect-content
+      - name: Get changed files
+        id: changed-files
         run: |
-          # Get changed files
           git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} > /tmp/changed_files.txt
-          
-          # Check for consul content changes
-          if grep -q "^content/consul/" /tmp/changed_files.txt; then
-            echo "has-consul-changes=true" >> $GITHUB_OUTPUT
-          else
-            echo "has-consul-changes=false" >> $GITHUB_OUTPUT
-          fi
-          
-          # Log detected changes
           echo "Changed files:"
           cat /tmp/changed_files.txt
 
-      - name: Route to Consul Review workflow
-        if: steps.detect-content.outputs.has-consul-changes == 'true'
-        uses: actions/workflow_dispatch@v4
+      - name: Parse config and route reviews
+        id: route-reviews
+        uses: actions/github-script@v7
         with:
-          workflow: consul-content-review.yml
-          ref: ${{ github.event.pull_request.head.ref }}
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            
+            // Read config file
+            const configPath = '.github/content-review-config.json';
+            const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+            
+            // Read changed files
+            const changedFilesPath = '/tmp/changed_files.txt';
+            const changedFiles = fs.readFileSync(changedFilesPath, 'utf8').trim().split('\n').filter(f => f);
+            
+            console.log('Changed files:', changedFiles);
+            console.log('Config entries:', config.reviews.length);
+            
+            // Find matching reviews
+            const matchedReviews = [];
+            
+            for (const review of config.reviews) {
+              // Check if any changed file matches any path pattern
+              for (const pattern of review.paths) {
+                // Simple glob matching: convert ** and * to regex
+                const regexPattern = pattern
+                  .replace(/\./g, '\\.')
+                  .replace(/\*\*/g, '.*')
+                  .replace(/\*/g, '[^/]*');
+                const regex = new RegExp(`^${regexPattern}$`);
+                
+                const hasMatch = changedFiles.some(file => regex.test(file));
+                
+                if (hasMatch) {
+                  console.log(`✓ Matched: ${review.name} (pattern: ${pattern})`);
+                  matchedReviews.push(review);
+                  break; // Don't add same review twice
+                }
+              }
+            }
+            
+            // Store matched reviews as JSON for next step
+            const matched = matchedReviews.map(r => ({
+              name: r.name,
+              workflow: r.workflow
+            }));
+            
+            core.setOutput('matched-reviews', JSON.stringify(matched));
+            core.setOutput('review-count', matched.length);
+            
+            if (matched.length === 0) {
+              console.log('ℹ️ No content-specific reviews triggered for this PR');
+            } else {
+              console.log(`✓ Triggering ${matched.length} review workflow(s)`);
+              matched.forEach(r => console.log(`  - ${r.name}: ${r.workflow}`));
+            }
 
-      - name: No content reviews triggered
-        if: steps.detect-content.outputs.has-consul-changes == 'false'
+      - name: Trigger matched workflows
+        if: fromJson(steps.route-reviews.outputs.matched-reviews) != null && steps.route-reviews.outputs.review-count > 0
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const matchedReviews = JSON.parse('${{ steps.route-reviews.outputs.matched-reviews }}');
+            
+            for (const review of matchedReviews) {
+              console.log(`Triggering workflow: ${review.workflow}`);
+              
+              // Use workflow_dispatch to trigger the workflow
+              await github.rest.actions.createWorkflowDispatch({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: review.workflow,
+                ref: context.ref,
+                inputs: {
+                  pull_number: context.payload.pull_request.number.toString()
+                }
+              });
+            }
+
+      - name: Log skipped (no reviews triggered)
+        if: steps.route-reviews.outputs.review-count == '0'
         run: |
           echo "No content-specific reviews triggered for this PR"
