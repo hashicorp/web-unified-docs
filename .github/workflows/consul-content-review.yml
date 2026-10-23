@@ -1,0 +1,123 @@
+name: 'Consul Content Review'
+
+on:
+  workflow_call:
+    inputs:
+      pull_number:
+        description: 'Pull request number'
+        required: true
+        type: string
+
+permissions:
+  pull-requests: read
+  checks: write
+
+jobs:
+  consul-review-check:
+    name: 'Validate Consul Content Review'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get PR information
+        id: pr-info
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: ${{ inputs.pull_number }}
+            });
+            
+            core.setOutput('pr-number', pr.data.number);
+            core.setOutput('pr-head-sha', pr.data.head.sha);
+
+      - name: Get PR reviews
+        id: get-reviews
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const reviews = await github.rest.pulls.listReviews({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: ${{ inputs.pull_number }}
+            });
+            
+            // Get approved reviews only
+            const approvedReviews = reviews.data.filter(r => r.state === 'APPROVED');
+            
+            // Count approvals from each team
+            let consulDocsApproved = false;
+            let consulMaintainersApproved = false;
+            
+            for (const review of approvedReviews) {
+              const author = review.user.login;
+              
+              try {
+                // Check if user is in consul-docs team
+                await github.rest.teams.getMembershipForUserInOrg({
+                  org: 'hashicorp',
+                  team_slug: 'consul-docs',
+                  username: author
+                }).then(() => {
+                  consulDocsApproved = true;
+                }).catch(() => {});
+              } catch (e) {}
+              
+              try {
+                // Check if user is in consul-selfmanage-maintainers team
+                await github.rest.teams.getMembershipForUserInOrg({
+                  org: 'hashicorp',
+                  team_slug: 'consul-selfmanage-maintainers',
+                  username: author
+                }).then(() => {
+                  consulMaintainersApproved = true;
+                }).catch(() => {});
+              } catch (e) {}
+            }
+            
+            core.setOutput('consul-docs-approved', consulDocsApproved);
+            core.setOutput('consul-maintainers-approved', consulMaintainersApproved);
+            core.setOutput('total-approvals', (consulDocsApproved ? 1 : 0) + (consulMaintainersApproved ? 1 : 0));
+
+      - name: Post check result
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const consulDocsApproved = '${{ steps.get-reviews.outputs.consul-docs-approved }}' === 'true';
+            const consulMaintainersApproved = '${{ steps.get-reviews.outputs.consul-maintainers-approved }}' === 'true';
+            const totalApprovals = parseInt('${{ steps.get-reviews.outputs.total-approvals }}') || 0;
+            
+            const headSha = '${{ steps.pr-info.outputs.pr-head-sha }}';
+            
+            let summary = `**Consul Content Review Requirements**\n\n`;
+            summary += `Requires approval from:\n`;
+            summary += `- @hashicorp/consul-docs: ${consulDocsApproved ? '✅ APPROVED' : '⏳ Pending'}\n`;
+            summary += `- @hashicorp/consul-selfmanage-maintainers: ${consulMaintainersApproved ? '✅ APPROVED' : '⏳ Pending'}\n\n`;
+            summary += `Status: ${totalApprovals}/2 approvals received\n`;
+            
+            const status = (consulDocsApproved && consulMaintainersApproved) ? 'completed' : 'in_progress';
+            const conclusion = (consulDocsApproved && consulMaintainersApproved) ? 'success' : 'failure';
+            
+            await github.rest.checks.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              name: 'Consul Content Review',
+              head_sha: headSha,
+              status: status,
+              conclusion: conclusion,
+              output: {
+                title: 'Consul Content Review',
+                summary: summary
+              }
+            });
+
+      - name: Fail if insufficient approvals
+        if: steps.get-reviews.outputs.consul-docs-approved != 'true' || steps.get-reviews.outputs.consul-maintainers-approved != 'true'
+        run: |
+          echo "::error title=Consul Content Review Failed::This PR modifies Consul content (/content/consul/) and requires approval from both @hashicorp/consul-docs and @hashicorp/consul-selfmanage-maintainers"
+          exit 1
