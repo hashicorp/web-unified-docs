@@ -2,22 +2,22 @@
  * Copyright IBM Corp. 2024, 2026
  * SPDX-License-Identifier: BUSL-1.1
  */
-import { readFile } from 'fs/promises'
-import path from 'path'
+import { access, readFile } from 'node:fs/promises'
+import path from 'node:path'
 
 import grayMatter from 'gray-matter'
 import { parse as jsoncParse } from 'jsonc-parser'
 
-import { ServedFrom } from '#api/types'
-import { Err, Ok, Result } from './result'
-import type { ProductVersionMetadata } from './contentVersions'
+import { BUILD_TYPE, buildType } from './buildType'
+import {
+	FileType,
+	ServedFrom,
+	type ProductVersionMetadata,
+	type Result,
+} from '#types'
+import { Err, Ok } from './result'
+import { getMetadata } from './metadata'
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
-
-// Only exported for testing purposes
-export enum FileType {
-	Content = 'content',
-	Asset = 'asset',
-}
 
 const SELF_URL = process.env.VERCEL_URL
 	? `https://${process.env.VERCEL_URL}`
@@ -29,20 +29,57 @@ const headers = process.env.VERCEL_URL
 		})
 	: new Headers()
 
+// Done this way so that next.js tracing does not include this module in preview and prod builds
+const useMdxTransformsModule =
+	process.env.NODE_ENV === 'development' &&
+	buildType === BUILD_TYPE.incBuildLocalDev
+		? import('../../scripts/prebuild/mdx-transforms/build-mdx-transforms.mjs')
+		: undefined
+
+void useMdxTransformsModule?.catch((error: unknown) => {
+	console.error('Failed to preload local MDX transforms:', error)
+})
+
+const EXT_TO_CONTENT_TYPE: Record<string, string> = {
+	'.avif': 'image/avif',
+	'.gif': 'image/gif',
+	'.jpeg': 'image/jpeg',
+	'.jpg': 'image/jpeg',
+	'.json': 'application/json; charset=utf-8',
+	'.md': 'text/markdown; charset=utf-8',
+	'.mdx': 'text/markdown; charset=utf-8',
+	'.png': 'image/png',
+	'.svg': 'image/svg+xml',
+	'.txt': 'text/plain; charset=utf-8',
+	'.webp': 'image/webp',
+	'.pdf': 'application/pdf',
+}
+
+const contentTypeFromPath = (filePath: string): string => {
+	const ext = path.extname(filePath).toLowerCase()
+	if (EXT_TO_CONTENT_TYPE[ext]) {
+		return EXT_TO_CONTENT_TYPE[ext]
+	}
+
+	// Default to text/plain for unknown file types
+	return 'text/plain; charset=utf-8'
+}
+
 /**
- * Fetches a file by path, applying incremental build logic when
- * `INCREMENTAL_BUILD` is set to `'true'`:
+ * Fetches a file by path, applying incremental preview logic for
+ * `BUILD_TYPE.incBuildPRPreview`:
  *   - Files in `removed`            → returns Err
  *   - Files in `added` or `modified` → fetches from SELF_URL (current build)
  *   - Files not in changedContentFiles.json  → fetches from UNIFIED_DOCS_PROD_URL
- * Otherwise falls back to the standard SELF_URL fetch.
+ * Local incremental development reads repository content.
+ * Other build types use the standard SELF_URL fetch.
  */
 // Only exported for testing purposes
 export const fetchFile = async (
 	filePath: string,
 	fileType: FileType,
 ): Promise<Result<{ response: Response; servedFrom: ServedFrom }, string>> => {
-	if (process.env.INCREMENTAL_BUILD === 'true') {
+	if (buildType === BUILD_TYPE.incBuildPRPreview) {
 		let changedFiles: {
 			added: string[]
 			modified: string[]
@@ -105,6 +142,93 @@ export const fetchFile = async (
 			response,
 			servedFrom: ServedFrom.Production,
 		})
+
+		// this basically a check for BUILD_TYPE.incBuildLocalDev, but required or else next.js tracing includes it in preview and prod builds
+	} else if (useMdxTransformsModule) {
+		let localFilePath = filePath
+		if (fileType === FileType.Asset) {
+			// Adjust the file path to match the paths in the content directory
+			const parts = filePath.split('/')
+			parts[0] = 'content'
+			localFilePath = parts.join('/')
+		} else if (fileType === FileType.Markdown) {
+			// Apply MDX transforms and return the content without writing to `public`
+			const CWD = process.cwd()
+
+			try {
+				// A document can be a named file or an index file; callers try both.
+				await access(localFilePath)
+
+				const module = await useMdxTransformsModule
+				const { versionMetadata } = await getMetadata()
+				const transformedMdxs = await module.buildMdxTransforms(
+					path.join(CWD, 'content'),
+					path.join(CWD, 'public', 'content'),
+					versionMetadata,
+					[path.join(CWD, localFilePath)],
+					{ verbose: false, returnTransformedMdx: true },
+				)
+
+				const transformedMdx = transformedMdxs?.[0]
+				if (typeof transformedMdx !== 'string') {
+					throw new Error('No transformed MDX returned')
+				}
+
+				const response = new Response(transformedMdx, {
+					headers: {
+						'content-type': contentTypeFromPath(localFilePath),
+					},
+				})
+				return Ok({ response, servedFrom: ServedFrom.CurrentBuild })
+			} catch (error) {
+				return Err(
+					`Failed to read local file at path: ${localFilePath}, error: ${error}`,
+				)
+			}
+		}
+
+		try {
+			let fileContent =
+				fileType === FileType.Asset
+					? await readFile(localFilePath)
+					: await readFile(localFilePath, 'utf-8')
+
+			// nav-data also needs to be transformed
+			if (fileType === FileType.NavData) {
+				const [, product, version] = localFilePath.split('/')
+				if (PRODUCT_CONFIG[product].versionedDocs) {
+					const { addVersionToNavDataPaths } = await import(
+						'../../scripts/prebuild/add-version-to-nav-data.mjs'
+					)
+					const { versionMetadata } = await getMetadata()
+					fileContent = JSON.stringify(
+						addVersionToNavDataPaths(
+							JSON.parse(fileContent as string),
+							product,
+							version,
+							versionMetadata,
+						),
+					)
+				}
+			}
+
+			// Wrap the file content in a Response object to mimic the fetch API's Response which is expected downstream.
+			const responseBody =
+				typeof fileContent === 'string'
+					? fileContent
+					: Uint8Array.from(fileContent)
+
+			const response = new Response(responseBody, {
+				headers: {
+					'content-type': contentTypeFromPath(localFilePath),
+				},
+			})
+			return Ok({ response, servedFrom: ServedFrom.CurrentBuild })
+		} catch (error) {
+			return Err(
+				`Failed to read local file at path: ${localFilePath}, error: ${error}`,
+			)
+		}
 	}
 
 	const response = await fetch(`${SELF_URL}/${filePath}`, {
@@ -117,35 +241,20 @@ export const fetchFile = async (
 	})
 }
 
-/**
- * NOTE: we currently read files by fetching them from the `public` folder
- * via the Vercel CDN.
- *
- **/
 export const findFileWithMetadata = async (
 	filePath: string[],
 	versionMetaData: ProductVersionMetadata,
-	options: {
-		loadFromContentDir?: boolean
-	} = { loadFromContentDir: false },
+	fileType: FileType,
 ) => {
 	const newFilePath = ifNeededAddReleaseStageToPath(
 		filePath,
 		versionMetaData.releaseStage,
 	)
 
-	const newFilePathJoined = newFilePath.filter(Boolean).join('/')
+	const newFilePathJoined = joinFilePath(newFilePath)
 
 	try {
-		// TODO: when we do inc builds locally we want to load all files from the content dir and transform them on demand if needed
-		if (options.loadFromContentDir) {
-			// Special join needed here to load the file from the local file system
-			const filePathString = joinFilePath(newFilePath)
-			const fileContent = await readFile(filePathString, 'utf-8')
-			return Ok({ text: fileContent, servedFrom: ServedFrom.CurrentBuild })
-		}
-
-		const fetchResult = await fetchFile(newFilePathJoined, FileType.Content)
+		const fetchResult = await fetchFile(newFilePathJoined, fileType)
 		if (!fetchResult.ok) {
 			// Rewrap the error string or else we expand the OK type downstream
 			return Err(fetchResult.value as string)
@@ -162,9 +271,9 @@ export const findFileWithMetadata = async (
 			text,
 			servedFrom,
 		})
-	} catch {
+	} catch (error) {
 		return Err(
-			`Failed to read file at path: ${newFilePathJoined}, with options: ${JSON.stringify(options, null, 2)}`,
+			`Failed to read file at path: ${newFilePathJoined}, error: ${error}`,
 		)
 	}
 }
@@ -173,12 +282,15 @@ export const getAssetData = async (
 	filePath: string[],
 	versionMetaData: ProductVersionMetadata,
 ) => {
-	const newFilePath = joinFilePath(
-		ifNeededAddReleaseStageToPath(filePath, versionMetaData.releaseStage),
+	const newFilePath = ifNeededAddReleaseStageToPath(
+		filePath,
+		versionMetaData.releaseStage,
 	)
 
+	const newFilePathJoined = joinFilePath(newFilePath)
+
 	try {
-		const fetchResult = await fetchFile(newFilePath, FileType.Asset)
+		const fetchResult = await fetchFile(newFilePathJoined, FileType.Asset)
 		if (!fetchResult.ok) {
 			// Rewrap the error string or else we expand the OK type downstream
 			return Err(fetchResult.value as string)
@@ -186,7 +298,7 @@ export const getAssetData = async (
 
 		const { response, servedFrom } = fetchResult.value
 		if (!response.ok) {
-			return Err(`Failed to read asset at path: ${newFilePath}`)
+			return Err(`Failed to read asset at path: ${newFilePathJoined}`)
 		}
 
 		const buffer = await response.arrayBuffer()
@@ -197,7 +309,7 @@ export const getAssetData = async (
 			servedFrom,
 		})
 	} catch {
-		return Err(`Failed to read asset at path: ${newFilePath}`)
+		return Err(`Failed to read asset at path: ${newFilePathJoined}`)
 	}
 }
 
@@ -251,6 +363,7 @@ function ifNeededAddReleaseStageToPath(
 }
 
 export const joinFilePath = (path: string[] = []): string => {
+	// Filter out duplicate slashes and empty segments
 	return path
 		.filter(Boolean)
 		.join('/')
@@ -268,6 +381,8 @@ export function resolveCdnUrl(
 
 	const isVersioned = PRODUCT_CONFIG[productSlug].versionedDocs
 	const versionSegment = isVersioned ? `/${version}` : ''
-	const cdnUrl = `${SELF_URL}/assets/${productSlug}${versionSegment}`
+	const cdnUrl = useMdxTransformsModule
+		? `${SELF_URL}/api/assets/${productSlug}/${isVersioned ? version : 'latest'}`
+		: `${SELF_URL}/assets/${productSlug}${versionSegment}`
 	return markdownSource.replaceAll('{{CDN_URL}}', cdnUrl)
 }

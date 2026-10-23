@@ -12,22 +12,12 @@ import {
 import { getProductVersionMetadata } from '#utils/contentVersions'
 import { errorResultToString } from '#utils/result'
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
-import docsPathsAllVersions from '#api/docsPathsAllVersions.json'
-import { VersionedProduct } from '#api/types'
-
-/**
- * Parameters expected by `GET` route handler
- */
-export type GetParams = VersionedProduct & {
-	/**
-	 * Full path to the location of docs on the filesystem relative to `content/`
-	 */
-	docsPath: string[]
-}
+import { getMetadata } from '#utils/metadata'
+import { FileType, type DocRouteParams } from '#types'
 
 export async function GET(
 	request: Request,
-	{ params }: { params: Promise<GetParams> },
+	{ params }: { params: Promise<DocRouteParams> },
 ) {
 	// Grab the parameters we need to fetch content
 	const { productSlug, version, docsPath } = await params
@@ -43,7 +33,13 @@ export async function GET(
 
 	// Determine the content directory based on the "product" (actually repo) slug
 	const { contentDir } = PRODUCT_CONFIG[productSlug]
-	const productVersionResult = getProductVersionMetadata(productSlug, version)
+	const { versionMetadata: productVersions, docsPathsAllVersions } =
+		await getMetadata()
+	const productVersionResult = getProductVersionMetadata(
+		productSlug,
+		version,
+		productVersions,
+	)
 	if (!productVersionResult.ok) {
 		console.error(errorResultToString('API', productVersionResult))
 		return new Response('Not found', { status: 404 })
@@ -91,7 +87,11 @@ export async function GET(
 
 	let foundContent, servedFrom, githubFile, createdAt
 	for (const loc of possibleContentLocations) {
-		const readFileResult = await findFileWithMetadata(loc, versionMetadata)
+		const readFileResult = await findFileWithMetadata(
+			loc,
+			versionMetadata,
+			FileType.Markdown,
+		)
 
 		if (readFileResult.ok) {
 			foundContent = readFileResult.value.text

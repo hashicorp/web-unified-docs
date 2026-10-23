@@ -5,25 +5,21 @@
 
 import { findFileWithMetadata, parseJson } from '#utils/file'
 import { getProductVersionMetadata } from '#utils/contentVersions'
+import { getMetadata } from '#utils/metadata'
 import { errorResultToString } from '#utils/result'
-import { VersionedProduct } from '#api/types'
+import { FileType, type NavDataRouteParams } from '#types'
 
-/**
- * Parameters expected by `GET` route handler
- */
-export type GetParams = VersionedProduct & {
-	/**
-	 * An array of strings representing the path relative to `content/<productSlug>/nav-data/<version>/data`
-	 * @example ['cli']
-	 */
-	section: string[]
-}
 export async function GET(
 	request: Request,
-	{ params }: { params: Promise<GetParams> },
+	{ params }: { params: Promise<NavDataRouteParams> },
 ) {
 	const { productSlug, version, section } = await params
-	const productVersionResult = getProductVersionMetadata(productSlug, version)
+	const { versionMetadata: productVersions } = await getMetadata()
+	const productVersionResult = getProductVersionMetadata(
+		productSlug,
+		version,
+		productVersions,
+	)
 	if (!productVersionResult.ok) {
 		console.error(errorResultToString('API', productVersionResult))
 		return new Response('Not found', { status: 404 })
@@ -42,6 +38,7 @@ export async function GET(
 			`${sectionPath}-nav-data.json`,
 		],
 		versionMetadata,
+		FileType.NavData,
 	)
 
 	if (!readFileResult.ok) {

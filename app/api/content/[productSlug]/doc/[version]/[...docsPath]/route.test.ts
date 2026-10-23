@@ -13,7 +13,7 @@ import {
 	MockInstance,
 } from 'vitest'
 import { GET } from './route'
-import { ServedFrom } from '#api/types'
+import { FileType, ServedFrom } from '#types'
 import { Err, Ok } from '#utils/result'
 import { getProductVersionMetadata } from '#utils/contentVersions'
 import { PRODUCT_CONFIG } from '__fixtures__/productConfig.mjs'
@@ -38,21 +38,16 @@ vi.mock('#utils/file', async (importOriginal: any) => {
 	}
 })
 
-// Mock the versionMetadata json import in the route file
-vi.mock('#api/versionMetadata.json', () => {
+vi.mock('#utils/metadata', () => {
 	return {
-		default: {},
-	}
-})
-
-// Mock the docsPathsAllVersions json import in the route file
-vi.mock('#api/docsPathsAllVersions.json', () => {
-	return {
-		default: {
-			'terraform-plugin-framework': {},
-			'terraform-enterprise': {},
-			'validated-designs': {},
-		},
+		getMetadata: vi.fn().mockResolvedValue({
+			versionMetadata: {},
+			docsPathsAllVersions: {
+				'terraform-plugin-framework': {},
+				'terraform-enterprise': {},
+				'validated-designs': {},
+			},
+		}),
 	}
 })
 
@@ -226,6 +221,11 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 		expect(result.version).toBe(metadata.version)
 		expect(result.markdownSource).toBe(markdownSource)
 		expect(result.githubFile).toBe(expectedPath.join('/'))
+		expect(findFileWithMetadata).toHaveBeenCalledWith(
+			expectedPath,
+			metadata,
+			FileType.Markdown,
+		)
 	})
 
 	it('returns the ONLY the markdown source of the requested docs with the mdOnly=true flag', async () => {

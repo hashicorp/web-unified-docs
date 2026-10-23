@@ -11,9 +11,6 @@ import remark from 'remark'
 import remarkMdx from 'remark-mdx'
 import grayMatter from 'gray-matter'
 
-import semver from 'semver'
-
-import { listFiles } from '#scriptUtils/list-files.mjs'
 import { batchPromises } from '#scriptUtils/batch-promises.mjs'
 
 import { paragraphCustomAlertsPlugin } from './paragraph-custom-alert/paragraph-custom-alert.mjs'
@@ -29,9 +26,9 @@ import { transformExcludeContent } from './exclude-content/index.mjs'
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
 
 /**
- * Given a target directory,
- * Apply MDX transforms to all `.mdx` files found in the directory and its
- * subdirectories. Each `.mdx` file will be modified in place.
+ * Apply MDX transforms to the provided `.mdx` paths under the target
+ * directory and write the transformed files to the output directory, or
+ * return them without writing when requested.
  *
  * Note: we expect the following directory structure:
  * - `<targetDir>/<repoSlug>/<version>/<contentDir>/<...file>.mdx`
@@ -40,16 +37,22 @@ import { PRODUCT_CONFIG } from '#productConfig.mjs'
  *
  * @param {string} targetDir
  * @param {string} outputDir the directory to write transformed files to
+ * @param {string[]} filesToCheck the explicit paths to consider for transformation
+ * @param {{ verbose?: boolean, returnTransformedMdx?: boolean }} [options]
+ * Progress logging is enabled by default. Set `returnTransformedMdx` to return
+ * transformed content for each file without writing it to the output directory.
+ * Errors are always logged.
+ * @returns {Promise<string[] | void>} Transformed files when requested.
+ * @throws {Error} If any file fails, with details for every failed file.
  */
 export async function buildMdxTransforms(
 	targetDir,
 	outputDir,
 	versionMetadata,
-	changedFiles = null,
+	filesToCheck,
+	options = {},
 ) {
-	const filesToCheck = changedFiles
-		? [...changedFiles.added, ...changedFiles.modified]
-		: await listFiles(targetDir)
+	const { verbose = true, returnTransformedMdx = false } = options
 
 	// Filter for `.mdx` files
 	const mdxFiles = filesToCheck.filter((filePath) => {
@@ -63,18 +66,15 @@ export async function buildMdxTransforms(
 	const mdxFileEntries = mdxFiles.map((filePath) => {
 		const relativePath = path.relative(targetDir, filePath)
 		const [repoSlug, version, contentDir] = relativePath.split('/')
+		const isVersionedDocs = PRODUCT_CONFIG[repoSlug].versionedDocs
 		/**
 		 * handles version and content dir for versionless docs
 		 * these values are index based
 		 * if versionless, version becomes the content dir
 		 * which will cause an error when trying resolve partials
 		 */
-		const verifiedVersion = PRODUCT_CONFIG[repoSlug].versionedDocs
-			? version
-			: ''
-		const verifiedContentDir = semver.valid(semver.coerce(version))
-			? contentDir
-			: version
+		const verifiedVersion = isVersionedDocs ? version : ''
+		const verifiedContentDir = isVersionedDocs ? contentDir : version
 		const partialsDir = path.join(
 			targetDir,
 			repoSlug,
@@ -87,13 +87,22 @@ export async function buildMdxTransforms(
 		return { repoSlug, filePath, partialsDir, outPath, version, redirectsDir }
 	})
 
-	console.log(`Running MDX transforms on ${mdxFileEntries.length} files...`)
+	if (verbose) {
+		console.log(`Running MDX transforms on ${mdxFileEntries.length} files...`)
+	}
+
 	const results = await batchPromises(
 		'MDX transforms',
 		mdxFileEntries,
 		(entry) => {
-			return applyMdxTransforms(entry, versionMetadata, targetDir)
+			return applyMdxTransforms(
+				entry,
+				versionMetadata,
+				targetDir,
+				returnTransformedMdx,
+			)
 		},
+		{ loggingEnabled: verbose },
 	)
 	// Log out any errors encountered
 	const errors = results
@@ -104,20 +113,40 @@ export async function buildMdxTransforms(
 			return { error, file }
 		})
 	if (errors.length > 0) {
-		console.error(`\n❗ Encountered ${errors.length} errors:`)
+		if (errors.length !== 1) {
+			console.error(`\n❗ Encountered ${errors.length} errors:`)
+		}
+
+		console.log('\n')
 		errors.forEach(({ error, file }) => {
-			console.error(`❌ ${error} in file: ${file}`)
+			// displayed in red
+			console.error(
+				`\x1b[31m❌ MDX Transform Error\n${error}\nIn File: ${file}\x1b[0m`,
+			)
 		})
-		console.error('\n❗ Build failed due to errors in MDX transforms.')
-		process.exit(1)
+		console.log('\n')
+
+		if (verbose) {
+			console.error('\n❗ Build failed due to errors in MDX transforms.')
+		}
+		throw new Error('MDX Transform Error')
 	}
+
 	// Log out that the script has complete
-	console.log(`✅ Applied MDX transforms to ${mdxFileEntries.length} files.`)
+	if (verbose) {
+		console.log(`✅ Applied MDX transforms to ${mdxFileEntries.length} files.`)
+	}
+
+	if (returnTransformedMdx) {
+		return results.map(({ transformedMdx }) => {
+			return transformedMdx
+		})
+	}
 }
 
 /**
- * Given an `.mdx` file entry, read the file in, apply MDX transforms,
- * and then write it out.
+ * Given an `.mdx` file entry, read it, apply MDX transforms, and either
+ * return the transformed content or write it out.
  *
  * If an error is encountered during MDX transforms, we catch the error,
  * and return it as a string. If there are no errors, we return { error: null}.
@@ -128,7 +157,12 @@ export async function buildMdxTransforms(
  * @param {string} entry.outPath
  * @return {object} { error: string | null }
  */
-async function applyMdxTransforms(entry, versionMetadata = {}, targetDir) {
+async function applyMdxTransforms(
+	entry,
+	versionMetadata = {},
+	targetDir,
+	returnTransformedMdx = false,
+) {
 	try {
 		const { filePath, partialsDir, outPath, version, redirectsDir } = entry
 		const redirects = await loadRedirects(version, redirectsDir)
@@ -177,6 +211,11 @@ async function applyMdxTransforms(entry, versionMetadata = {}, targetDir) {
 
 		const transformedContent = String(remarkResults)
 		const transformedFileString = grayMatter.stringify(transformedContent, data)
+
+		if (returnTransformedMdx) {
+			return { error: null, transformedMdx: transformedFileString }
+		}
+
 		// Ensure the parent directory for the output file path exists
 		const outDir = path.dirname(outPath)
 		if (!fs.existsSync(outDir)) {
@@ -184,6 +223,7 @@ async function applyMdxTransforms(entry, versionMetadata = {}, targetDir) {
 		}
 		// Write out the file
 		fs.writeFileSync(outPath, transformedFileString)
+
 		return { error: null }
 	} catch (e) {
 		return { error: String(e).split('\n')[0], file: entry.filePath }

@@ -28,7 +28,7 @@ vi.mock('#api/docsPathsAllVersions.json', () => {
 test('GET should return a 200 response with no products', async () => {
 	vi.spyOn(getDocsPaths, 'getDocsPaths').mockResolvedValueOnce({
 		ok: true,
-		value: Object.values(docsPathsMock).flat(),
+		value: Object.values(docsPathsMock).flatMap(Object.values).flat(),
 	})
 	const response = await mockRequest(GET, {})
 

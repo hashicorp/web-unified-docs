@@ -6,12 +6,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { findDocVersions } from './findDocVersions'
 
-vi.mock('#api/docsPathsAllVersions.json', () => {
-	return {
-		default: {},
-	}
-})
-
 describe('findDocVersions', () => {
 	it('should return an array of versions where the fullPath exists', () => {
 		const mockDocsPathsData = {
@@ -67,9 +61,9 @@ describe('findDocVersions', () => {
 		expect(result).toEqual(['1.0'])
 	})
 
-	it('should use the default docsPathsAllVersions data if no custom data is provided', () => {
+	it('should return no versions if the product is absent from the supplied data', () => {
 		const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
-		const result = findDocVersions('nonexistentProduct', '/docs/path1')
+		const result = findDocVersions('nonexistentProduct', '/docs/path1', {})
 		expect(result).toEqual([])
 		expect(spy).toHaveBeenCalledWith(
 			'Product, nonexistentProduct, not found in docs paths',

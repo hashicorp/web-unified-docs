@@ -5,20 +5,14 @@
 
 import { getAssetData, joinFilePath } from '#utils/file'
 import { getProductVersionMetadata } from '#utils/contentVersions'
+import { getMetadata } from '#utils/metadata'
 import { errorResultToString } from '#utils/result'
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
-import { VersionedProduct } from '#api/types'
-
-export type GetParams = VersionedProduct & {
-	/**
-	 * Full path to the asset in the production build, i.e. `terraform/v1.9.x/img/docs/plan-comments.png`
-	 */
-	assetPath: string[]
-}
+import type { AssetRouteParams } from '#types'
 
 export async function GET(
 	request: Request,
-	{ params }: { params: Promise<GetParams> },
+	{ params }: { params: Promise<AssetRouteParams> },
 ) {
 	// Grab the parameters we need to fetch content
 	const { productSlug, version, assetPath } = await params
@@ -30,7 +24,12 @@ export async function GET(
 		return new Response('Not found', { status: 404 })
 	}
 
-	const productVersionResult = getProductVersionMetadata(productSlug, version)
+	const { versionMetadata: productVersions } = await getMetadata()
+	const productVersionResult = getProductVersionMetadata(
+		productSlug,
+		version,
+		productVersions,
+	)
 	if (!productVersionResult.ok) {
 		console.error(errorResultToString('API', productVersionResult))
 		return new Response('Not found', { status: 404 })
@@ -54,7 +53,7 @@ export async function GET(
 	}
 
 	// TODO: should we add caching headers?
-	return new Response(assetData.value.buffer, {
+	return new Response(Uint8Array.from(assetData.value.buffer), {
 		headers: {
 			'content-type': assetData.value.contentType,
 			'served-from': assetData.value.servedFrom,
