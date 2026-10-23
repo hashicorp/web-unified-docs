@@ -84,6 +84,60 @@ connectInject:
 
 The endpoint to scrape service metrics from can be configured only on a per-Pod basis with the Pod annotations `consul.hashicorp.com/service-metrics-port` and `consul.hashicorp.com/service-metrics-path`. If these are not configured, the service metrics port  defaults to the port used to register the service with Consul (`consul.hashicorp.com/connect-service-port`), which in turn defaults to the first port on the first container of the Pod. The service metrics path defaults to `/metrics`.
 
+### Metrics merging for multi-port workloads
+
+The `consul.hashicorp.com/service-metrics-port` and `consul.hashicorp.com/service-metrics-path` annotations configure a single service metrics endpoint. When you do not set `service-metrics-port`, the service metrics endpoint defaults to the first port in `consul.hashicorp.com/connect-service-port`. When a container serves metrics on more than one port, use the `consul.hashicorp.com/service-metrics-endpoints` annotation to merge all of them.
+
+The annotation value is a comma-separated list of entries in the format `<port>[:<path>]`:
+
+- `port` is a port number or the name of a container port. Consul resolves a port name against the ports declared on any container in the Pod. The port must be in the range `1` to `65535`. Privileged ports are allowed.
+- `path` is the HTTP path that serves metrics. The path must begin with `/` and defaults to `/metrics`.
+
+The following Deployment configures a container that serves metrics on port `8080` at `/metrics` and on the named port `metrics-b` at `/alt-metrics`:
+
+<CodeBlockConfig filename="web.yaml" highlight="11">
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+spec:
+  template:
+    metadata:
+      annotations:
+        consul.hashicorp.com/connect-inject: 'true'
+        consul.hashicorp.com/connect-service-port: '8080'
+        consul.hashicorp.com/service-metrics-endpoints: '8080:/metrics,metrics-b:/alt-metrics'
+    spec:
+      containers:
+        - name: web
+          image: example/web:latest
+          ports:
+            - containerPort: 8080
+              name: metrics-a
+            - containerPort: 9090
+              name: metrics-b
+```
+
+</CodeBlockConfig>
+
+Metrics merging must be enabled for the Pod, either through the [`connectInject.metrics.defaultEnableMerging`](/consul/docs/reference/k8s/helm#v-connectinject-metrics-defaultenablemerging) Helm value or the `consul.hashicorp.com/enable-metrics-merging` annotation. The Consul dataplane scrapes every endpoint and merges the results with the Envoy sidecar metrics into the merged metrics endpoint. Prometheus continues to scrape a single port, as described in [Mesh Service and Sidecar Metrics with Metrics Merging](#mesh-service-and-sidecar-metrics-with-metrics-merging).
+
+Consider the following behaviors:
+
+- The `service-metrics-endpoints` annotation takes precedence over `service-metrics-port` and `service-metrics-path`. When you set `service-metrics-endpoints`, Consul does not read the other two annotations, and it does not validate them.
+- Consul removes entries that repeat the same port and path, so each endpoint is scraped once.
+- Consul rejects the Pod during injection if an entry is missing a port, names a port that does not exist, uses a port outside the valid range, or specifies a path that does not begin with `/`.
+- The dataplane scrapes each endpoint independently. If one endpoint is unavailable, the merged metrics endpoint still serves the Envoy metrics and the metrics from the endpoints that respond.
+- The endpoints that you configure for metrics are independent of the port that the service registers with Consul.
+
+<Note>
+
+Pods that register several separate services with a comma-separated `consul.hashicorp.com/connect-service` annotation do not support metrics or metrics merging. The injector rejects these Pods when either feature is enabled.
+
+</Note>
+
 ## Consul Agent Metrics
 
 Metrics from the Consul server Pods can be scraped with Prometheus by setting the field `global.metrics.enableAgentMetrics` to `true`. Additionally, one can configure the metrics retention time on the agents by configuring
