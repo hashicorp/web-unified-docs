@@ -8,56 +8,32 @@ description: |-
 # Batch job queue
 
 When many batch jobs wait for resources, Nomad can schedule them in any order,
-and one tenant's jobs can crowd out other tenants. A Nomad batch job queue holds
-a node pool's batch jobs and sends them to the scheduler one at a time, in first
-in, first out (FIFO) order or by a dynamic priority that gives each tenant a fair
-share of resources. Learn how the queue orders jobs and what tradeoffs it
-introduces.
+without regard for who submitted the job. A Nomad batch job queue holds
+a node pool's batch jobs and sends them to the scheduler one at a time, in
+a deterministic order. You can configure the queue to be first in, first out (FIFO)
+or to use a dynamic priority based on job age, size, and fairness of resources
+requested. Learn how the queue orders jobs and what tradeoffs it introduces.
 
 @include '../../../global/partials/status/experimental.mdx'
 
 To configure a queue on a node pool, refer to [Queue batch jobs](/nomad/docs/govern/queue-batch-jobs).
 
-## Why use a batch job queue
-
-Batch jobs run until they complete and then stop. Operators often submit more
-batch jobs than a cluster has resources for and let Nomad work through them.
-When a cluster does not have enough resources, Nomad marks the evaluations for
-those jobs as blocked. When resources become available on a node, Nomad
-unblocks every evaluation that could run on that node, schedules as many as it
-can, and blocks the rest again.
-
-Nomad processes many evaluations in parallel, which makes scheduling fast but
-means Nomad cannot guarantee the order in which it schedules jobs. When you
-register job A and then job B, Nomad might schedule job B first. When a cluster
-has more resources than its jobs reserve, the order does not matter. When many
-batch jobs wait for resources, the order becomes unpredictable.
-
-Job priority and resource quotas are also the only fairness controls. In a
-cluster that many teams or customers share, one tenant can submit so many batch
-jobs that other tenants wait a long time for their jobs to run, even when those
-tenants submitted only a few jobs.
-
-A batch job queue addresses both problems. Instead of releasing every batch job
-to the scheduler at once, the queue decides which job the scheduler receives
-next, which makes the scheduling order predictable.
-
 ## How a batch job queue works
 
-You configure a batch job queue on a node pool with the [`batch_queue`
-block](/nomad/docs/other-specifications/node-pool#batch_queue-parameters) of the
-node pool specification. Each node pool has its own queue, and node pools without
-a `batch_queue` block do not queue batch jobs.
+You configure a batch job queue on a node pool with the 
+[`batch_queue`](/nomad/docs/other-specifications/node-pool#batch_queue-parameters) block of the
+node pool specification. Each node pool with the exception of the `Default` pool has its own queue,
+and node pools without a `batch_queue` block do not queue batch jobs.
 
 When you register a batch job that runs in a node pool with a queue, Nomad adds
 the job's registration evaluation to the queue instead of sending it to the
 scheduler. The queue then works through its jobs one at a time.
 
 1. The queue selects the next job and sends its evaluation to the scheduler.
-1. The queue waits until Nomad places the job's allocations. If the job does not
+1. The queue waits until Nomad places all the job's allocations. If the job does not
    fit on the available nodes, the scheduler creates a blocked evaluation, and
    the queue waits for that evaluation to complete as well.
-1. After Nomad places the job, the queue selects the next job.
+1. After Nomad places the entire job, the queue selects the next job.
 
 The queue waits for Nomad to place each job, not for the job to finish running.
 
@@ -69,10 +45,10 @@ The following behaviors also apply.
 - Only batch jobs use the queue. Nomad schedules service, system, and sysbatch
   jobs as usual.
 - Only evaluations that job registration creates enter the queue. Nomad sends
-  other evaluations for a job, such as the blocked evaluations that the
-  scheduler creates, directly to the scheduler. Child jobs that a
-  [periodic](/nomad/docs/job-specification/periodic) job launches also skip the
-  queue.
+  other evaluations for a job, such as the reschedule evaluations that the
+  scheduler creates, directly to the scheduler. 
+- Child jobs that a [periodic](/nomad/docs/job-specification/periodic) job
+  launches also skip the queue.
 - You cannot modify the built-in `default` and `all` node pools, so you cannot
   configure a queue on them. Jobs that run in the `all` node pool never use a
   queue.
@@ -94,8 +70,7 @@ a queue with one of the following statuses.
 
 When you register a new version of a job while an earlier version is still in
 the queue, the queue keeps only the newer version. Nomad cancels the evaluation
-for the older version and sets its status description to `redundant job-register
-eval exists on batch queue`.
+for the older version.
 
 The queue treats the newer version as a new job. In a FIFO queue, the newer
 version moves to the back of the queue instead of keeping the position of the
@@ -123,8 +98,7 @@ node pool to run in submission order.
 
 ### Dynamic priority
 
-A dynamic priority queue calculates an adjusted priority for each job and sends
-the job with the highest adjusted priority to the scheduler first. When two jobs
+A dynamic priority queue calculates an adjusted priority for each job. When two jobs
 have the same adjusted priority, the queue sends the job it received first.
 
 The adjusted priority exists only inside the queue. It does not change the value
@@ -132,113 +106,23 @@ of the job's `priority` parameter.
 
 #### Tenants
 
-A tenant is a group of jobs that the queue tracks allocated resources for, such
-as a team or a customer. You choose how the queue assigns jobs to tenants with
-the `tenant_type` parameter of the [`tenant_fairshare`
-block](/nomad/docs/other-specifications/node-pool#tenant_fairshare-parameters).
+The dynamic priority queue introduces the concept of cluster tenancy to ensure each tenant
+gets a [fair share](https://en.wikipedia.org/wiki/Fair-share_scheduling) of cluster resources. A tenant is a 
+group of jobs that the queue tracks allocated resources for, such as a team or a customer.
+Tenant fairshare measures the resources that Nomad allocated to each tenant's
+batch jobs in the node pool.
+
+You choose how the queue assigns jobs to tenants with the `tenant_type` parameter of the
+[`tenant_fairshare`](/nomad/docs/other-specifications/node-pool#tenant_fairshare-parameters)
+block.
 
 - `namespace` makes each namespace a tenant.
 - `metadata` makes each distinct value of a job
   [`meta`](/nomad/docs/job-specification/meta) key a tenant. You name the key
-  in `metadata_key`.
+  in `metadata_key`. You must use the top level `job.meta` block.
 
 When you use `metadata` tenants, jobs that do not set the metadata key do not
 enter the queue. Nomad sends their evaluations directly to the scheduler.
-
-#### Adjusted priority
-
-The queue calculates a job's adjusted priority as the job's
-[`priority`](/nomad/docs/job-specification/job#priority) plus four adjustments.
-
-```plaintext
-adjusted priority = job priority
-                  + fairshare adjustment
-                  + age adjustment
-                  + CPU adjustment
-                  + memory adjustment
-```
-
-The queue truncates each adjustment to a whole number. An adjustment whose
-weight is `0` or unset adds nothing.
-
-- The **fairshare adjustment** is the sum of a CPU part and a memory part. The
-  CPU part is `(1 - tenant CPU / total CPU) × cpu_weight`, and the memory part
-  is `(1 - tenant memory / total memory) × memory_weight`. Both weights are
-  parameters of the `tenant_fairshare` block. A tenant whose jobs hold a smaller
-  share of the allocated resources than other tenants gets a larger adjustment.
-  When no tenant has allocations, the fairshare adjustment is `0`. Refer to
-  [Tenant fairshare](#tenant-fairshare) for how the queue measures allocated
-  resources.
-- The **age adjustment** is `min(1, time since registration / max) × weight`,
-  using the parameters of the `age` block. The adjustment grows while the job
-  waits and reaches its full weight at `max`.
-- The **CPU adjustment** is `(1 - min(1, job CPU / cpu_max)) × cpu_weight`,
-  using the parameters of the `job_size` block. Jobs that request less CPU get a
-  larger adjustment. Job CPU is the sum of each task's `cpu` resource multiplied
-  by its group's `count`. A task that sets
-  [`cores`](/nomad/docs/job-specification/resources#cores) instead of `cpu` adds
-  `0` MHz to the sum.
-- The **memory adjustment** is `(1 - min(1, job memory / memory_max)) ×
-  memory_weight`, using the parameters of the `job_size` block. Jobs that
-  request less memory get a larger adjustment. Job memory is the sum of each
-  task's `memory` resource multiplied by its group's `count`.
-
-For example, consider a queue with the following configuration.
-
-```hcl
-dynamic_priority {
-  calc_interval = "10s"
-
-  tenant_fairshare {
-    tenant_type   = "namespace"
-    cpu_weight    = 25
-    memory_weight = 25
-  }
-
-  age {
-    weight = 10
-    max    = "1h"
-  }
-
-  job_size {
-    cpu_weight    = 10
-    cpu_max       = 1000
-    memory_weight = 10
-    memory_max    = 1024
-  }
-}
-```
-
-Two tenants each submit jobs with priority `50` that request 600 MHz of CPU and
-256 MB of memory. The CPU adjustment is `(1 - 600 / 1000) × 10 = 4`, and the
-memory adjustment is `(1 - 256 / 1024) × 10`, which truncates to `7`. The jobs
-waited less than six minutes, so the age adjustment truncates to `0`. After
-Nomad places a job for `team-a`, `team-a` holds all of the allocated CPU and
-memory, so its next job gets a fairshare adjustment of `0`. The `team-b` jobs
-get the full fairshare adjustment of `25 + 25 = 50`, so they move ahead of the
-remaining `team-a` job.
-
-```plaintext
-JobID        Tenant  Status   Adjusted Priority  Base Priority  Position  Fairshare  Age  Cpu  Memory
-team-a-job2  team-a  placing  61                 50             0         0          0    4    7
-team-b-job1  team-b  queued   111                50             1         50         0    4    7
-team-b-job2  team-b  queued   111                50             2         50         0    4    7
-team-b-job3  team-b  queued   111                50             3         50         0    4    7
-team-a-job3  team-a  queued   61                 50             4         0          0    4    7
-```
-
-#### Tenant fairshare
-
-Tenant fairshare measures the resources that Nomad allocated to each tenant's
-batch jobs in the node pool. For each tenant, the queue adds up the CPU in MHz
-and the memory in MB of every allocation that belongs to the tenant's batch
-jobs. The queue counts allocations in any client status, including allocations
-that completed.
-
-To leave allocations out of the calculation, list their client statuses in the
-[`exclude_alloc_statuses`](/nomad/docs/other-specifications/node-pool#exclude_alloc_statuses)
-parameter. For example, `exclude_alloc_statuses = ["complete", "failed"]` leaves
-out the allocations that completed or failed.
 
 The queue calculates a job's adjusted priority when the job enters the queue.
 Every `calc_interval`, the queue measures each tenant's allocated resources again
@@ -253,22 +137,19 @@ Consider the following tradeoffs before you configure a batch job queue.
 
 - **Serialized scheduling.** The queue sends one job at a time to the scheduler
   and waits for Nomad to place it. Batch jobs in a node pool with a queue
-  schedule more slowly than batch jobs in a node pool without one.
+  may schedule more slowly than batch jobs in a node pool without one.
 - **Head of line blocking.** A job that waits for resources stays at the front of
   the queue and holds every job behind it. The queue does not skip the job to
   run a smaller job that fits. Stop the job to release the queue.
 
-  For a job that Nomad cannot place because of its constraints, such as a
-  constraint that no node in the node pool meets, the queue waits only for the
+  For a job that Nomad cannot place because of unsatisfiable constraints, such as a jobs
+  requesting a driver that no node contains, the queue waits only for the
   [`constraint_timeout`](/nomad/docs/other-specifications/node-pool#constraint_timeout)
-  duration. The queue treats a job as blocked by constraints when constraints
-  filter out nodes and no node runs out of resources, or when the node pool has
-  no available nodes. After the timeout, the queue sends the next job to the
+  duration. After the timeout, the queue sends the next job to the
   scheduler, and the blocked job waits for placement outside the queue. If you
   do not set a timeout, the job holds the queue until Nomad places it or you
   stop it.
 
-  <!-- TODO(owner: Mike Smithhisler): Confirm the constraint_timeout behavior before release. A dev agent built from release/2.1.0-rc.1 (215402ecfd) placed the next job about two seconds after a constraint-blocked job, even with constraint_timeout = "120s". With no constraint_timeout, the blocked job held the queue as described. Refer to the TODO on constraint_timeout in docs/other-specifications/node-pool.mdx. -->
 - **Similar jobs work best.** Because the queue cannot skip jobs, it works best
   when jobs in a node pool have similar constraints and resource requirements.
 
