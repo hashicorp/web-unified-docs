@@ -7,6 +7,74 @@ import fs from 'node:fs/promises'
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
 
 /**
+ * Rewrites a versioned product's parsed navigation data in place without I/O.
+ *
+ * @template T
+ * @param {T} navData
+ * @param {string} product
+ * @param {string} version
+ * @param {import('../../app/types').VersionMetadataMap} versionMetadata
+ * @returns {T}
+ */
+export function addVersionToNavDataPaths(
+	navData,
+	product,
+	version,
+	versionMetadata,
+) {
+	const productVersions = versionMetadata[product]
+	if (!productVersions) {
+		throw new Error(`No version metadata found for product: ${product}`)
+	}
+
+	const latestVersion = productVersions.find((version) => {
+		return version.isLatest
+	})?.version
+	if (!latestVersion) {
+		throw new Error(`No latest version found for product: ${product}`)
+	}
+
+	const cleanVersion = version.replace(/\s*\([^)]+\)/, '')
+	if (cleanVersion === latestVersion) {
+		return navData
+	}
+
+	const basePaths = PRODUCT_CONFIG[product].basePaths
+	const basePathPrefixes = basePaths?.map((basePath) => {
+		return `/${basePath}`
+	})
+
+	const updatePaths = (obj) => {
+		for (const key in obj) {
+			if (typeof obj[key] === 'object') {
+				updatePaths(obj[key])
+			} else if (
+				(key === 'href' || key === 'path') &&
+				typeof obj[key] === 'string' &&
+				!obj[key].startsWith('http') &&
+				!obj[key].includes(cleanVersion)
+			) {
+				// href allows linking outside of content subpath
+				const basePath = basePathPrefixes?.find((basePath) => {
+					return obj[key].startsWith(basePath)
+				})
+
+				// if the href starts with a basepath, e.g. "/cli", add version after the basepath
+				if (basePath && basePath.length) {
+					obj[key] =
+						`${basePath}/${cleanVersion}${obj[key].substring(basePath.length)}`
+				} else if (key === 'path') {
+					obj[key] = `${cleanVersion}/${obj[key]}`
+				}
+			}
+		}
+	}
+
+	updatePaths(navData)
+	return navData
+}
+
+/**
  * Adds version information to navigation data in a JSON file.
  *
  * This function reads a JSON file containing navigation data, updates the paths or hrefs
@@ -34,16 +102,9 @@ export async function addVersionToNavData(filePath, versionMetadata) {
 		 */
 		const [product, version] = relativePath.split('/')
 
-		// Remove any release stage in parentheses)
-		const cleanVersion = version.replace(/\s*\([^)]+\)/, '')
-
 		// We are looking at a versionless doc
 		if (PRODUCT_CONFIG[product].versionedDocs === false) {
 			return
-		}
-
-		if (!versionMetadata[product]) {
-			throw new Error(`No version metadata found for product: ${product}`)
 		}
 
 		const data = await fs.readFile(filePath, 'utf-8')
@@ -59,43 +120,7 @@ export async function addVersionToNavData(filePath, versionMetadata) {
 			return
 		}
 
-		// Use app/api/versionMetadata.json to get the latest version
-		const latestVersion = versionMetadata[product].find((version) => {
-			return version.isLatest
-		}).version
-
-		// Update href or path properties
-		const updatePaths = (obj) => {
-			for (const key in obj) {
-				if (typeof obj[key] === 'object') {
-					updatePaths(obj[key])
-				} else if (
-					(key === 'href' || key === 'path') &&
-					typeof obj[key] === 'string' &&
-					!obj[key].startsWith('http') &&
-					cleanVersion !== latestVersion &&
-					!obj[key].includes(cleanVersion)
-				) {
-					// href allows linking outside of content subpath
-					let basePath = PRODUCT_CONFIG[product].basePaths?.find((basePath) => {
-						return obj[key].startsWith(`/${basePath}`)
-					})
-
-					basePath =
-						typeof basePath === 'undefined' ? undefined : `/${basePath}`
-
-					// if the href starts with a basepath, e.g. "/cli", add version after the basepath
-					if (basePath && basePath.length) {
-						obj[key] =
-							`${basePath}/${cleanVersion}${obj[key].substring(basePath.length)}`
-					} else if (key === 'path') {
-						obj[key] = `${cleanVersion}/${obj[key]}`
-					}
-				}
-			}
-		}
-
-		updatePaths(jsonData)
+		addVersionToNavDataPaths(jsonData, product, version, versionMetadata)
 
 		// Write the updated JSON back to the file
 		await fs.writeFile(filePath, JSON.stringify(jsonData, null, 2), 'utf-8')

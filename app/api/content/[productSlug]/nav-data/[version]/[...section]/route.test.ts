@@ -14,7 +14,7 @@ import {
 } from 'vitest'
 import { GET } from './route'
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
-import { ServedFrom } from '#api/types'
+import { FileType, ServedFrom } from '#types'
 import { Err, Ok } from '#utils/result'
 import { getProductVersionMetadata } from '#utils/contentVersions'
 import { findFileWithMetadata, parseJson } from '#utils/file'
@@ -37,10 +37,12 @@ vi.mock('#utils/file', async (importOriginal: any) => {
 	}
 })
 
-// Mock the versionMetadata json import in the route file
-vi.mock('#api/versionMetadata.json', () => {
+vi.mock('#utils/metadata', () => {
 	return {
-		default: {},
+		getMetadata: vi.fn().mockResolvedValue({
+			versionMetadata: {},
+			docsPathsAllVersions: {},
+		}),
 	}
 })
 
@@ -206,6 +208,11 @@ describe('GET /[productSlug]/[version]/[...section]', () => {
 		expect(response.status).toBe(200)
 		const { result } = await response.json()
 		expect(result).toEqual({ navData: sectionData })
+		expect(findFileWithMetadata).toHaveBeenCalledWith(
+			['content', productSlug, metadata.version, 'data', 'intro-nav-data.json'],
+			metadata,
+			FileType.NavData,
+		)
 		// A little fuzzy, but just make sure that our response (roughly)
 		// contains the data we're expecting to see - which in this case would
 		// be a heading for "Introduction to Terraform"

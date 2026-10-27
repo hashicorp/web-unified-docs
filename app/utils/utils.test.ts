@@ -17,18 +17,6 @@ afterEach(() => {
 	vi.resetAllMocks()
 })
 
-vi.mock('#api/versionMetadata.json', () => {
-	return {
-		default: '',
-	}
-})
-
-vi.mock('#api/docsPathsAllVersions.json', () => {
-	return {
-		default: {},
-	}
-})
-
 vi.mock('#productConfig.mjs', () => {
 	return {
 		PRODUCT_CONFIG: {
@@ -113,7 +101,7 @@ test('getProductVersionMetadata should return error for non-existent product', (
 		value: 'Product, noproduct, not found in version metadata',
 	}
 
-	const result = getProductMetadata('noproduct')
+	const result = getProductMetadata('noproduct', {})
 	expect(result).toStrictEqual(expected)
 })
 
@@ -123,7 +111,7 @@ test('getProductVersionMetadata should return error for empty product name', () 
 		value: 'Product, , not found in version metadata',
 	}
 
-	const result = getProductMetadata('')
+	const result = getProductMetadata('', {})
 	expect(result).toStrictEqual(expected)
 })
 
@@ -167,7 +155,7 @@ test('getProductVersionMetadata should return empty array for product with no ve
 		value: 'Product, emptyproduct, not found in version metadata',
 	}
 
-	const result = getProductMetadata('emptyproduct')
+	const result = getProductMetadata('emptyproduct', {})
 	expect(result).toStrictEqual(expected)
 })
 

@@ -15,6 +15,10 @@ import { copyRedirectFiles } from '#scriptUtils/copy-redirect-files.mjs'
 import { copyAssetFiles } from '#scriptUtils/copy-asset-files.mjs'
 import { copyInternalOnlyProductDocs } from './copy-internal-only-product-docs.mjs'
 import { getChangedContentFiles } from '#scriptUtils/get-changed-content-files.mjs'
+import { BUILD_TYPE, getBuildType } from '#scriptUtils/get-type-of-build.mjs'
+import { listFiles } from '#scriptUtils/list-files.mjs'
+
+import { PRODUCT_CONFIG } from '#productConfig.mjs'
 
 const NUM_OF_MICROSEC_IN_NANOSEC = BigInt('1000')
 
@@ -33,7 +37,7 @@ const DOCS_PATHS_ALL_VERSIONS_FILE = path.join(
 )
 const PREBUILD_TRACE_FILE = path.join(CWD, 'scripts', 'prebuild', 'trace')
 
-const getCommandLineArgs = () => {
+const getCommandLineArgs = (buildType) => {
 	const args = process.argv.slice(2).reduce(
 		(args, arg) => {
 			if (arg === '--only-build-version-metadata') {
@@ -42,6 +46,8 @@ const getCommandLineArgs = () => {
 				args.buildAlgoliaIndex = true
 			} else if (arg === '--get-real-file-changed-metadata') {
 				args.getRealFileChangedMetadata = true
+			} else if (arg === '--force-full-rebuild') {
+				args.forceFullRebuild = true
 			}
 
 			return args
@@ -50,11 +56,12 @@ const getCommandLineArgs = () => {
 			onlyBuildVersionMetadata: false,
 			buildAlgoliaIndex: false,
 			getRealFileChangedMetadata: false,
+			forceFullRebuild: false,
 		},
 	)
 
 	// Set getRealFileChangedMetadata to true in production
-	if (process.env.VERCEL_ENV === 'production') {
+	if (buildType === BUILD_TYPE.prodBuild) {
 		args.getRealFileChangedMetadata = true
 	}
 
@@ -76,23 +83,23 @@ async function main() {
 	let skipTraceFile = false
 	const startTime = process.hrtime.bigint()
 	const traceId = Math.random().toString(16).slice(2, 18)
-	const incBuild = process.env.INCREMENTAL_BUILD === 'true'
+	let buildType = getBuildType()
+	const args = getCommandLineArgs(buildType)
 
-	const args = getCommandLineArgs()
+	// Update buildType if forced through CLI args
+	buildType = args.forceFullRebuild ? BUILD_TYPE.fullBuild : buildType
 
 	console.log(
 		`Running prebuild script with args: ${JSON.stringify(args, null, 2)}\n`,
 	)
 
-	console.log(`Incremental build: ${incBuild ? 'true' : 'false'}\n`)
+	console.log(`Build type: ${buildType}\n`)
 
-	let changedFiles = null
-	if (incBuild) {
-		changedFiles = await getChangedContentFiles()
-
+	if (buildType === BUILD_TYPE.incBuildLocalDev) {
 		console.log(
-			`Changed content files: ${JSON.stringify(changedFiles, null, 2)}\n`,
+			'Incremental local build; all content data is dynamically loaded as needed. Prebuild is no longer necessary to run.\n',
 		)
+		return
 	}
 
 	// Gather and write out version metadata
@@ -115,12 +122,30 @@ async function main() {
 	const docsPathsAllVersionsJson = JSON.stringify(docsPathsAllVersions, null, 2)
 	fs.writeFileSync(DOCS_PATHS_ALL_VERSIONS_FILE, docsPathsAllVersionsJson)
 
+	// Determine which files to check for copying and transforms
+	let filesToCheck
+	if (buildType === BUILD_TYPE.incBuildPRPreview) {
+		const changedFiles = getChangedContentFiles()
+
+		console.log(
+			`Changed content files: ${JSON.stringify(changedFiles, null, 2)}\n`,
+		)
+
+		filesToCheck = [...changedFiles.added, ...changedFiles.modified]
+	} else {
+		filesToCheck = (await listFiles(CONTENT_DIR)).filter((filePath) => {
+			const relativePath = path.relative(CONTENT_DIR, filePath)
+			const repoSlug = relativePath.split('/')[0]
+			return repoSlug in PRODUCT_CONFIG
+		})
+	}
+
 	// Apply MDX transforms, writing out transformed MDX files to `public`
 	await buildMdxTransforms(
 		CONTENT_DIR,
 		CONTENT_DIR_OUT,
 		versionMetadata,
-		incBuild ? changedFiles : null,
+		filesToCheck,
 	)
 
 	if (args.buildAlgoliaIndex) {
@@ -138,22 +163,14 @@ async function main() {
 		CONTENT_DIR,
 		CONTENT_DIR_OUT,
 		versionMetadata,
-		incBuild ? changedFiles : null,
+		filesToCheck,
 	)
 
 	// Copy `redirects.jsonc` files from `content` to `public/content
-	await copyRedirectFiles(
-		CONTENT_DIR,
-		CONTENT_DIR_OUT,
-		incBuild ? changedFiles : null,
-	)
+	await copyRedirectFiles(CONTENT_DIR, CONTENT_DIR_OUT, filesToCheck)
 
 	// Copy all asset files from `content` to `public/assets`
-	await copyAssetFiles(
-		CONTENT_DIR,
-		CONTENT_DIR_OUT_ASSETS,
-		incBuild ? changedFiles : null,
-	)
+	await copyAssetFiles(CONTENT_DIR, CONTENT_DIR_OUT_ASSETS, filesToCheck)
 
 	// Copy internal-only product docs and assets to `public/content` and `public/assets` for their
 	// corresponding products based on version-config.json imports
@@ -187,4 +204,7 @@ async function main() {
 /**
  * Run the prebuild script.
  */
-main()
+main().catch((error) => {
+	console.error('Prebuild failed:', error.message)
+	process.exitCode = 1
+})

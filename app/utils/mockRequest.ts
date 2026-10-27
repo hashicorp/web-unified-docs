@@ -19,19 +19,15 @@
  *   // Other assertions...
  * ```
  */
-export const mockRequest = <
-	ApiHandler extends (request: Request, context: { params: any }) => any,
->(
-	handler: ApiHandler,
-	params: ApiHandler extends (
+export const mockRequest = <Params, HandlerResult>(
+	handler: (
 		request: Request,
-		context: { params: infer P },
-	) => any
-		? P
-		: never,
+		context: { params: Promise<Params> },
+	) => HandlerResult,
+	params: Params,
 	path?: string,
 ) => {
 	const baseUrl = new URL(`http://localhost:8080/api/${path ? path : ''}`)
 	const request = new Request(baseUrl)
-	return handler(request, { params })
+	return handler(request, { params: Promise.resolve(params) })
 }

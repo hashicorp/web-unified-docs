@@ -6,22 +6,25 @@
 import { expect, test, vi } from 'vitest'
 import { GET } from './route'
 
-import { ServedFrom } from '#api/types'
+import { FileType, ServedFrom } from '#types'
 import * as utilsFileModule from '#utils/file'
 import * as utilsContentVersionsModule from '#utils/contentVersions'
 import { mockRequest } from '#utils/mockRequest'
 
-vi.mock('#api/versionMetadata.json', () => {
+vi.mock('#utils/metadata', () => {
 	return {
-		default: {
-			'terraform-docs-common': [
-				{
-					version: 'v0.0.x',
-					releaseStage: 'stable',
-					isLatest: true,
-				},
-			],
-		},
+		getMetadata: vi.fn().mockResolvedValue({
+			versionMetadata: {
+				'terraform-docs-common': [
+					{
+						version: 'v0.0.x',
+						releaseStage: 'stable',
+						isLatest: true,
+					},
+				],
+			},
+			docsPathsAllVersions: {},
+		}),
 	}
 })
 
@@ -73,6 +76,11 @@ test('Return 200 and parse the jsonc into json if valid for UNVERSIONED product'
 	expect(response.status).toBe(200)
 	const text = await response.text()
 	expect(text).toBe(jsoncFixtureAfter)
+	expect(readFileSpy).toHaveBeenCalledWith(
+		['content', productSlug, expect.any(String), 'redirects.jsonc'],
+		expect.any(Object),
+		FileType.Redirects,
+	)
 })
 
 test('Return 200 and parse the jsonc into json if valid for VERSIONED product', async () => {
@@ -101,4 +109,9 @@ test('Return 200 and parse the jsonc into json if valid for VERSIONED product', 
 	expect(response.status).toBe(200)
 	const text = await response.text()
 	expect(text).toBe(jsoncFixtureAfter)
+	expect(readFileSpy).toHaveBeenCalledWith(
+		['content', productSlug, 'v202410-1', 'redirects.jsonc'],
+		{ releaseStage: 'stable', version: 'v202410-1', isLatest: false },
+		FileType.Redirects,
+	)
 })

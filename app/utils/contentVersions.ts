@@ -3,23 +3,15 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
-import versionMetadata from '#api/versionMetadata.json'
 import { Ok, Err } from '#utils/result'
 
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
-
-export type ProductVersionMetadata = {
-	version: string
-	isLatest: boolean
-	releaseStage: string
-}
-
-type VersionMetadataMap = Record<string, ProductVersionMetadata[]>
+import type { ProductVersionMetadata, VersionMetadataMap } from '#types'
 
 export const getProductVersionMetadata = (
 	productSlug: string,
 	version: string,
-	versionMetaData: VersionMetadataMap = versionMetadata,
+	versionMetaData: VersionMetadataMap,
 ) => {
 	const productVersionMetadata = versionMetaData[productSlug]
 
@@ -65,7 +57,7 @@ export const getProductVersionMetadata = (
 
 export const getProductMetadata = (
 	productSlug: string,
-	versionMetaData: VersionMetadataMap = versionMetadata,
+	versionMetaData: VersionMetadataMap,
 ) => {
 	if (versionMetaData[productSlug]) {
 		return Ok(versionMetaData[productSlug])

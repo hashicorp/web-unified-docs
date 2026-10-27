@@ -5,7 +5,7 @@
 
 import { expect, test, vi } from 'vitest'
 import { GET } from './route'
-import { ServedFrom } from '#api/types'
+import { ServedFrom } from '#types'
 import { getAssetData } from '#utils/file'
 import { getProductVersionMetadata } from '#utils/contentVersions'
 import { mockRequest } from '#utils/mockRequest'
@@ -20,8 +20,13 @@ vi.mock('#productConfig.mjs', () => {
 	}
 })
 
-vi.mock('#api/versionMetadata.json', () => {
-	return {}
+vi.mock('#utils/metadata', () => {
+	return {
+		getMetadata: vi.fn().mockResolvedValue({
+			versionMetadata: {},
+			docsPathsAllVersions: {},
+		}),
+	}
 })
 
 test("Return 404 if `product` doesn't exist", async () => {
