@@ -1,0 +1,190 @@
+---
+layout: docs
+page_title: Configure Vault access for the Consul feature-gate job
+description: >-
+  Set featureGateSetRole so the Consul on Kubernetes feature-gate job can read its ACL token from Vault. Reuse the ACL-init role or create a dedicated role.
+---
+
+# Configure Vault access for the Consul feature-gate job
+
+When [Vault is your Consul on Kubernetes secrets
+backend](/consul/docs/deploy/server/k8s/vault), the Helm feature-gate job reads
+its access control list (ACL) token from Vault. Set
+`global.secretsBackend.vault.featureGateSetRole` to a Vault Kubernetes auth role
+that can read the token, and bind that role to the job's ServiceAccount.
+
+Refer to [Feature gates](/consul/docs/manage/feature-gates) to learn about
+feature gates and how to enable them in Consul.
+
+## When you must set featureGateSetRole
+
+The Helm chart runs the feature-gate job after each install and upgrade. The job authenticates to Vault with the role in `featureGateSetRole`.
+
+You must set `featureGateSetRole` when `global.secretsBackend.vault.enabled` is `true` and you also set either of the following values:
+
+- `global.acls.manageSystemACLs`
+- `global.acls.bootstrapToken.secretName`
+
+When you omit `featureGateSetRole` in the aforementioned scenario, the chart fails to render with the error `global.secretsBackend.vault.featureGateSetRole is required when the feature-gate-set job reads a Vault ACL token.`
+
+The roles in `manageSystemACLsRole`, `adminPartitionsRole`, and `connectInjectRole` serve other components. They do not replace `featureGateSetRole`.
+
+When the job reads only the Consul certificate authority (CA) certificate from Vault and no ACL token, it uses `global.secretsBackend.vault.consulCARole` instead. This page does not apply to that case.
+
+## Requirements
+
+- Complete the [systems integration](/consul/docs/deploy/server/k8s/vault/backend), including [Vault Kubernetes authentication](/vault/docs/auth/kubernetes).
+- Authenticate to Vault with permission to manage roles and policies.
+- Store the ACL token in Vault. The job reads the [bootstrap token](/consul/docs/deploy/server/k8s/vault/data/bootstrap-token) from `global.acls.bootstrapToken.secretName`. In a secondary datacenter without a bootstrap token, it reads the [replication token](/consul/docs/deploy/server/k8s/vault/data/replication-token) from `global.acls.replicationToken.secretName`.
+- Note the Vault API path of that token. For the [key/value (KV) v2 secrets engine](/vault/docs/secrets/kv/kv-v2), include `/data/` in the path, as in `secret/data/consul/bootstrap-token`.
+- Confirm that the Consul token has `operator:write` permissions. Vault read access only lets the job retrieve the token. It does not grant Consul ACL permissions. Refer to [Feature gates](/consul/docs/manage/feature-gates#requirements).
+
+## Find the feature-gate ServiceAccount name
+
+The ServiceAccount name depends on the Helm release name and chart configuration. The examples on this page use the namespace `consul` and the ServiceAccount `consul-consul-feature-gate-set`.
+
+Render the ServiceAccount and check `metadata.name`.
+
+```shell-session
+$ helm template hashicorp/consul \
+    --release-name ${RELEASE_NAME} \
+    --show-only templates/feature-gate-set-serviceaccount.yaml \
+    --values values.yaml
+```
+
+## Choose a role configuration
+
+Choose one of the following options:
+
+- [Reuse the ACL-init role](#reuse-the-acl-init-role). Use this option to avoid creating a new role. The feature-gate job gets every policy already attached to that role.
+- [Create a dedicated role](#create-a-dedicated-role). Use this option when you need narrower permissions.
+
+### Reuse the ACL-init role
+
+Add the feature-gate ServiceAccount to the role named in `global.secretsBackend.vault.manageSystemACLsRole`. The existing ServiceAccount bindings stay in place. This option requires `jq`.
+
+1. Set the Kubernetes auth mount path, the existing role name, and the feature-gate ServiceAccount. Replace `<manage-system-acls-role>` with the role name from `manageSystemACLsRole`.
+
+   ```shell-session
+   $ VAULT_AUTH_PATH=kubernetes
+   $ ROLE=<manage-system-acls-role>
+   $ FEATURE_GATE_SA=consul-consul-feature-gate-set
+   ```
+
+1. Read the role and add the ServiceAccount to its bindings. The command keeps the role's other settings. It writes only after the read and the JSON transformation both succeed.
+
+   ```shell-session
+   $ ROLE_JSON=$(vault read -format=json \
+       "auth/${VAULT_AUTH_PATH}/role/${ROLE}") &&
+     UPDATED_ROLE_JSON=$(printf '%s\n' "$ROLE_JSON" \
+       | jq --arg sa "$FEATURE_GATE_SA" \
+           '.data
+            | .bound_service_account_names =
+                ((.bound_service_account_names + [$sa]) | unique)') &&
+     printf '%s\n' "$UPDATED_ROLE_JSON" \
+       | vault write "auth/${VAULT_AUTH_PATH}/role/${ROLE}" -
+   ```
+
+1. Read the updated role.
+
+   ```shell-session
+   $ vault read "auth/${VAULT_AUTH_PATH}/role/${ROLE}"
+   ```
+
+1. Confirm the following in the output:
+
+   - `bound_service_account_names` includes the feature-gate ServiceAccount.
+   - `bound_service_account_namespaces` includes the Helm release namespace.
+   - The attached policies permit reading the ACL token path.
+   - When you enable TLS, the attached policies also permit reading the `global.tls.caCert.secretName` path.
+
+### Create a dedicated role
+
+1. Set the Kubernetes auth mount path, role, policy, namespace, and ServiceAccount. Choose unused role and policy names so you do not replace an existing configuration.
+
+   ```shell-session
+   $ VAULT_AUTH_PATH=kubernetes
+   $ ROLE=feature-gate-set
+   $ POLICY=consul-feature-gate-set
+   $ NAMESPACE=consul
+   $ SERVICE_ACCOUNT=consul-consul-feature-gate-set
+   ```
+
+1. Create a policy file that permits reading the ACL token. Replace the example path with the API path of your token.
+
+   <CodeBlockConfig filename="feature-gate-set-policy.hcl">
+
+   ```hcl
+   path "secret/data/consul/bootstrap-token" {
+     capabilities = ["read"]
+   }
+   ```
+
+   </CodeBlockConfig>
+
+1. When you enable TLS, add read access to the CA certificate in the same file. Replace the example path with your `global.tls.caCert.secretName` path.
+
+   <CodeBlockConfig filename="feature-gate-set-policy.hcl">
+
+   ```hcl
+   path "secret/data/consul/ca-cert" {
+     capabilities = ["read"]
+   }
+   ```
+
+   </CodeBlockConfig>
+
+1. Write the policy to Vault.
+
+   ```shell-session
+   $ vault policy write "$POLICY" feature-gate-set-policy.hcl
+   ```
+
+1. Create a Kubernetes auth role that binds the policy to the job's ServiceAccount and namespace.
+
+   ```shell-session
+   $ vault write "auth/${VAULT_AUTH_PATH}/role/${ROLE}" \
+       bound_service_account_names="$SERVICE_ACCOUNT" \
+       bound_service_account_namespaces="$NAMESPACE" \
+       token_policies="$POLICY" \
+       token_ttl=15m \
+       token_max_ttl=1h
+   ```
+
+1. Verify the policy.
+
+   ```shell-session
+   $ vault policy read "$POLICY"
+   ```
+
+1. Verify the role's ServiceAccount, namespace, and policy bindings.
+
+   ```shell-session
+   $ vault read "auth/${VAULT_AUTH_PATH}/role/${ROLE}"
+   ```
+
+## Update the Consul on Kubernetes Helm chart
+
+1. Add the role name to your existing Helm values. Replace `<feature-gate-role>` with the role you configured.
+
+   <CodeBlockConfig filename="values.yaml">
+
+   ```yaml
+   global:
+     secretsBackend:
+       vault:
+         enabled: true
+         featureGateSetRole: <feature-gate-role>
+   ```
+
+   </CodeBlockConfig>
+
+1. Reapply your Helm configuration with the same release, namespace, chart version, and existing values. You can also pass `--set global.secretsBackend.vault.featureGateSetRole="$ROLE"` to that Helm command instead of editing `values.yaml`.
+
+1. Verify that the feature-gate job completes successfully.
+
+1. Verify that the gate has the expected state.
+
+   ```shell-session
+   $ consul operator feature list
+   ```
