@@ -2,7 +2,7 @@
 layout: docs
 page_title: Nomad node pool specification
 description: |-
-  Learn about Nomad's node pool specification. Review an example node pool specification. Configure description, metadata, and scheduler options.
+  Learn about Nomad's node pool specification. Review an example specification. Configure description, metadata, scheduler options, and a batch job queue.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2026-02-16T16:54:03.000Z
 last_modified: 2026-02-16T16:54:03.000Z
@@ -74,11 +74,19 @@ Successfully applied node pool "example"!
   issued to nodes in this node pool. The value must be a valid duration string
   (e.g. "30m", "1h", "24h"). If not set, the default value is "24h".
 
-- `scheduler_config` <code>([SchedulerConfig][sched-config]: nil)</code> <EnterpriseAlert inline /> -
+- `scheduler_config` <code>([SchedulerConfig][sched-config]: nil)</code> -
   Sets scheduler configuration options specific to the node pool. If not
-  defined, the global scheduler configurations are used.
+  defined, the global scheduler configurations are used. <EnterpriseAlert inline />
 
-### `scheduler_config` parameters <EnterpriseAlert inline />
+- `batch_queue` <code>([BatchQueue][batch-queue]: nil)</code> - Configures a
+  [batch job queue][] for the node pool. The queue holds the batch jobs
+  registered in the node pool and sends them to the scheduler one at a time.
+  If not defined, the node pool does not queue batch jobs. You cannot configure a
+  batch job queue on the built-in `default` and `all` node pools.
+
+### `scheduler_config` parameters
+
+<EnterpriseAlert inline />
 
 - `scheduler_algorithm` `(string: <optional>)` - The [scheduler algorithm][]
   used for this node pool. Must be one of `binpack` or `spread`.
@@ -86,9 +94,169 @@ Successfully applied node pool "example"!
 - `memory_oversubscription_enabled` `(bool: <optional>)` - The [memory
   oversubscription][] setting to use for this node pool.
 
+### `batch_queue` parameters
+
+@include '../../../global/partials/status/experimental.mdx'
+
+The `batch_queue` block must contain one of the following blocks, which sets the
+queue type:
+
+- `fifo` <code>([Fifo][fifo]: nil)</code> - Configures a FIFO queue, which sends
+jobs to the scheduler in the order that you register them.
+
+- `dynamic_priority` <code>([DynamicPriority][dynamic-priority]: nil)</code> -
+Configures a dynamic priority queue, which sends jobs to the scheduler in
+order of their adjusted priority. Refer to [Adjusted priority][] for how the
+queue calculates it.
+
+The `batch_queue` block has the following optional parameter:
+
+- `constraint_timeout` `(string: <optional>)` - Specifies how long the queue
+  waits for a job that Nomad cannot place because of its constraints, as a
+  duration string such as `"5m"`. The timeout starts when the scheduler creates
+  the job's blocked evaluation. When the timeout expires, the queue sends the
+  next job to the scheduler, and the blocked job waits for placement outside the
+  queue. If not set, the queue waits until Nomad places the job or you stop it.
+  The timeout does not apply to jobs that wait for resources.
+
+This example configures a dynamic priority queue that treats each namespace as a
+tenant.
+
+```hcl
+node_pool "batch" {
+  description = "Clients that run batch workloads"
+
+  batch_queue {
+    dynamic_priority {
+      calc_interval = "10s"
+
+      tenant_fairshare {
+        tenant_type   = "namespace"
+        cpu_weight    = 25
+        memory_weight = 25
+      }
+
+      age {
+        weight = 10
+        max    = "1h"
+      }
+
+      job_size {
+        cpu_weight    = 10
+        cpu_max       = 1000
+        memory_weight = 10
+        memory_max    = 1024
+      }
+    }
+  }
+}
+```
+
+#### `fifo` parameters
+
+The `fifo` block has no parameters. Specify an empty block.
+
+```hcl
+batch_queue {
+  fifo {}
+}
+```
+
+#### `dynamic_priority` parameters
+
+- `calc_interval` `(string: <required>)` - Specifies how often the queue
+  recalculates each tenant's fairshare and the adjusted priority of every queued
+  job, as a duration string such as `"30s"`. Must be greater than zero.
+
+- `tenant_fairshare` <code>([TenantFairshare][tenant-fairshare]: &lt;required&gt;)</code> -
+  Configures how the queue groups jobs into tenants and how much each tenant's
+  share of allocated resources affects the priority of its jobs.
+
+- `age` <code>([Age][age]: &lt;required&gt;)</code> - Configures how much the
+  time a job waits in the queue affects its priority. Specify an empty block,
+  `age {}`, to leave job age out of the calculation.
+
+- `job_size` <code>([JobSize][job-size]: &lt;required&gt;)</code> - Configures
+  how much the resources that a job requests affect its priority. Specify an
+  empty block, `job_size {}`, to leave job size out of the calculation.
+
+##### `tenant_fairshare` parameters
+
+- `tenant_type` `(string: <required>)` - Specifies how the queue groups jobs into
+  tenants. Must be one of `namespace` or `metadata`. With `namespace`, each
+  namespace is a tenant. With `metadata`, each distinct value of the job
+  [`meta`][meta] key named in `metadata_key` is a tenant, and jobs that do not
+  set that key skip the queue.
+
+- `metadata_key` `(string: "")` - Specifies the job `meta` key whose value
+  identifies a job's tenant. Required when `tenant_type` is `metadata`.
+
+- `cpu_weight` `(int: <required>)` - Specifies the maximum amount that a
+  tenant's share of allocated CPU adds to the priority of its jobs. Tenants
+  whose jobs hold a smaller share of the CPU allocated to batch jobs in the node
+  pool receive more of this weight. If `0`, allocated CPU does not affect
+  priority.
+
+- `memory_weight` `(int: <required>)` - Specifies the maximum amount that a
+  tenant's share of allocated memory adds to the priority of its jobs. Tenants
+  whose jobs hold a smaller share of the memory allocated to batch jobs in the
+  node pool receive more of this weight. If `0`, allocated memory does not affect
+  priority.
+
+- `exclude_alloc_statuses` `(array<string>: [])` - Specifies the allocation
+  client statuses that the queue excludes when it adds up the resources
+  allocated to each tenant. For example, `["failed", "lost"]` excludes failed
+  and lost allocations. If empty, the queue counts every allocation of the
+  tenant's batch jobs. Refer to [Tenant fairshare][] for details.
+
+##### `age` parameters
+
+- `weight` `(int: 0)` - Specifies the maximum amount that the time a job waits
+  in the queue adds to its priority. If `0`, job age does not affect priority.
+  Set `max` when you set this parameter. If `max` is not set, every job receives
+  the full `weight` as soon as it enters the queue.
+
+- `max` `(string: "")` - Specifies the wait time, as a duration string such as
+  `"12h"`, at which a job receives the full `weight`.
+
+##### `job_size` parameters
+
+- `cpu_weight` `(int: 0)` - Specifies the maximum amount that a job's requested
+  CPU adds to its priority. Jobs that request less CPU receive more of this
+  weight. If `0`, requested CPU does not affect priority. Set `cpu_max` when you
+  set this parameter.
+
+- `cpu_max` `(int: 0)` - Specifies the requested CPU, in MHz, at or above which a
+  job receives none of the `cpu_weight`. A job's requested CPU is the sum of
+  each task's `cpu` resource multiplied by its group's `count`. A task that sets
+  [`cores`][cores] instead of `cpu` adds `0` MHz to the sum. Must be set if
+  `cpu_weight` is greater than 0.
+
+- `memory_weight` `(int: 0)` - Specifies the maximum amount that a job's
+  requested memory adds to its priority. Jobs that request less memory receive
+  more of this weight. If `0`, requested memory does not affect priority. Set
+  `memory_max` when you set this parameter.
+
+- `memory_max` `(int: 0)` - Specifies the requested memory, in MB, at or above
+  which a job receives none of the `memory_weight`. A job's requested memory is
+  the sum of each task's `memory` resource multiplied by its group's `count`.
+  Must be set if `memory_weight` is greater than 0.
+
 [pool-apply]: /nomad/commands/node-pool/apply
 [jobspecs]: /nomad/docs/job-specification
 [pool-init]: /nomad/commands/node-pool/init
 [sched-config]: #scheduler_config-parameters
+[batch-queue]: #batch_queue-parameters
+[batch job queue]: /nomad/docs/concepts/scheduling/batch-job-queue
+[fifo]: #fifo-parameters
+[dynamic-priority]: #dynamic_priority-parameters
+[tenant-fairshare]: #tenant_fairshare-parameters
+[age]: #age-parameters
+[job-size]: #job_size-parameters
+[Adjusted priority]: /nomad/docs/concepts/scheduling/batch-job-queue#adjusted-priority
+[Tenant fairshare]: /nomad/docs/concepts/scheduling/batch-job-queue#tenant-fairshare
+[meta]: /nomad/docs/job-specification/meta
+[periodic]: /nomad/docs/job-specification/periodic
+[cores]: /nomad/docs/job-specification/resources#cores
 [scheduler algorithm]: /nomad/api-docs/operator/scheduler#scheduleralgorithm-1
 [memory oversubscription]: /nomad/api-docs/operator/scheduler#memoryoversubscriptionenabled-1
