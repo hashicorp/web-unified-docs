@@ -1,0 +1,500 @@
+---
+layout: docs
+page_title: Connecting business intelligence (BI) tools to the data warehouse
+description: >-
+  Integrate business intelligence tools with Boundary's built-in PostgreSQL data warehouse schema for access analytics and session auditing.
+---
+
+# Connecting business intelligence (BI) tools to the data warehouse
+
+@include 'data-warehouse/overview.mdx'
+
+This guide shows you how to:
+1. Create a safe read-only database user for BI tools
+2. Connect a free BI tool (Metabase is the primary example)
+3. Run proven queries for access review, session analytics, and audit reporting
+
+It was validated against Boundary v0.21.0.
+
+## Step 1: Create a read-only database user
+
+Run the following command once from a PostgreSQL client connected to your Boundary database:
+
+```sql
+-- Create the role
+CREATE ROLE boundary_bi_readonly WITH LOGIN PASSWORD 'set-your-own-password-here';
+GRANT CONNECT ON DATABASE boundary TO boundary_bi_readonly;
+GRANT USAGE ON SCHEMA public TO boundary_bi_readonly;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO boundary_bi_readonly;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO boundary_bi_readonly;
+
+-- Safety: prevent any writes
+ALTER ROLE boundary_bi_readonly SET default_transaction_read_only = ON;
+
+-- Optional: cap query runtime to avoid production impact
+ALTER ROLE boundary_bi_readonly SET statement_timeout = '60s';
+```
+
+<Warning>
+
+**Never give BI tools write access.** The Boundary database runs your production access proxy.
+
+</Warning>
+
+## Step 2: Connect Metabase (free, open source)
+
+Metabase is a free BI tool that runs on your laptop or a server. [Download it here](https://www.metabase.com/start/oss/).
+
+### 2.1: Add the database
+
+Complete the following steps to add the database:
+
+1. Start Metabase (`java -jar metabase.jar` or Docker: `docker run -p 3000:3000 metabase/metabase`).
+2. Go to **Settings** (gear icon), and then click **Admin settings**.
+3. Click **Databases**, and then click **Add database**.
+3. Complete the following fields:
+   - **Database type**: PostgreSQL
+   - **Display name**: Boundary Analytics
+   - **Host**: Your Boundary database host (e.g., `localhost` or the Docker container name)
+   - **Port**: The database port (default `5432`; for `boundary dev`, check the `Dev Database Url` in output)
+   - **Database name**: `boundary`
+   - **Username**: `boundary_bi_readonly`
+   - **Password**: The password you set in step 1
+4. Click **Save**.
+
+### 2.2: Verify connectivity
+
+In Metabase, go to **Browse Data**, and then select **Boundary Analytics**. You should see tables like `wh_session_accumulating_fact`, `wh_user_dimension`, and `wh_host_dimension`.
+
+If you only see `wh_date_dimension` and `wh_time_of_day_dimension`, your warehouse hasn't recorded any sessions yet. Generate some activity in Boundary and check again.
+
+## Step 3: Key tables
+
+Refer to the following table for descriptions of the key tables in the data warehouse:
+
+| Table | Description |
+|-------|-------------------|
+| `wh_session_accumulating_fact` | Every session: who, what target, when, how long, how much data |
+| `wh_session_connection_accumulating_fact` | Every connection within a session: client IP, bytes up/down |
+| `wh_auth_token_accumulating_fact` | User login tokens: issued time, last used, deleted |
+| `wh_user_dimension` | Users with auth method, email, organization |
+| `wh_host_dimension` | Targets with full org→project→target hierarchy |
+| `wh_credential_dimension` | Credential libraries, stores, Vault paths |
+| `wh_date_dimension` | Calendar dates (pre-filled, use for grouping) |
+| `wh_time_of_day_dimension` | Seconds in a day (pre-filled) |
+
+<Tip>
+
+Always filter with `current_row_indicator = 'Current'` to get the latest version of each record. These tables use historical tracking (SCD Type 2), so stale versions coexist with current ones.
+
+</Tip>
+
+## Step 4: Proven queries
+
+Paste the following queries into Metabase's **SQL Editor** (the native query editor, not the visual builder).
+
+### 4.1: Session activity — Last 30 days
+
+```sql
+SELECT
+    dd.date_actual AS session_date,
+    wh.target_name,
+    wh.project_name,
+    COUNT(*) AS session_count
+FROM wh_session_accumulating_fact wsf
+JOIN wh_host_dimension wh ON wh.key = wsf.host_key
+    AND wh.current_row_indicator = 'Current'
+JOIN wh_date_dimension dd ON dd.key = wsf.session_pending_date_key
+WHERE dd.date_actual >= CURRENT_DATE - INTERVAL '30 days'
+GROUP BY dd.date_actual, wh.target_name, wh.project_name
+ORDER BY session_date DESC, session_count DESC;
+```
+
+**In Metabase:** Visualize as a **line chart**: X = session_date, Y = session_count, series = target_name.
+
+### 4.2: User access roster (quarterly access review)
+
+```sql
+SELECT
+    u.user_name,
+    u.auth_account_email,
+    u.auth_method_type,
+    u.user_organization_name,
+    COUNT(DISTINCT s.session_id) AS sessions_last_90d,
+    COUNT(DISTINCT h.target_id) AS unique_targets,
+    MAX(s.session_pending_time) AS last_activity
+FROM wh_user_dimension u
+LEFT JOIN wh_session_accumulating_fact s ON u.key = s.user_key
+LEFT JOIN wh_host_dimension h ON s.host_key = h.key AND h.current_row_indicator = 'Current'
+WHERE u.current_row_indicator = 'Current'
+  AND (s.session_pending_time >= CURRENT_DATE - INTERVAL '90 days' OR s.session_pending_time IS NULL)
+GROUP BY u.user_name, u.auth_account_email, u.auth_method_type, u.user_organization_name
+ORDER BY last_activity DESC NULLS LAST;
+```
+
+### 4.3: Session duration by target
+
+```sql
+SELECT
+    wh.target_name,
+    COUNT(*) AS completed_sessions,
+    ROUND(AVG(EXTRACT(EPOCH FROM (wsf.session_terminated_time - wsf.session_active_time)))::numeric, 1) AS avg_seconds,
+    ROUND(MAX(EXTRACT(EPOCH FROM (wsf.session_terminated_time - wsf.session_active_time)))::numeric, 1) AS max_seconds
+FROM wh_session_accumulating_fact wsf
+JOIN wh_host_dimension wh ON wh.key = wsf.host_key AND wh.current_row_indicator = 'Current'
+WHERE wsf.session_terminated_time <> 'infinity'
+  AND wsf.session_active_time <> 'infinity'
+  AND wsf.session_pending_time >= CURRENT_DATE - INTERVAL '30 days'
+GROUP BY wh.target_name
+ORDER BY avg_seconds DESC;
+```
+
+### 4.4: Connection audit trail (source IPs, bytes)
+
+```sql
+SELECT
+    u.user_name,
+    h.target_name,
+    c.connection_authorized_time,
+    c.client_tcp_address,
+    c.endpoint_tcp_address || ':' || c.endpoint_tcp_port_number AS endpoint,
+    c.bytes_up,
+    c.bytes_down
+FROM wh_session_connection_accumulating_fact c
+JOIN wh_user_dimension u ON c.user_key = u.key AND u.current_row_indicator = 'Current'
+JOIN wh_host_dimension h ON c.host_key = h.key AND h.current_row_indicator = 'Current'
+WHERE c.connection_authorized_time >= CURRENT_DATE - INTERVAL '7 days'
+ORDER BY c.connection_authorized_time DESC;
+```
+
+### 4.5: Target inventory — All targets With usage
+
+```sql
+SELECT
+    h.target_name,
+    h.target_type,
+    h.target_default_port_number,
+    h.project_name,
+    h.organization_name,
+    COUNT(DISTINCT s.session_id) AS sessions_last_30d,
+    MAX(s.session_pending_time) AS last_session
+FROM wh_host_dimension h
+LEFT JOIN wh_session_accumulating_fact s ON s.host_key = h.key
+    AND s.session_pending_time >= CURRENT_DATE - INTERVAL '30 days'
+WHERE h.current_row_indicator = 'Current'
+  AND h.host_id <> 'None'  -- exclude the default placeholder record
+GROUP BY h.target_name, h.target_type, h.target_default_port_number,
+         h.project_name, h.organization_name
+ORDER BY sessions_last_30d DESC;
+```
+
+### 4.6: Sessions with zero connections (potential authorization failures)
+
+```sql
+SELECT
+    s.session_id,
+    u.user_name,
+    h.target_name,
+    s.session_pending_time,
+    s.session_terminated_time
+FROM wh_session_accumulating_fact s
+JOIN wh_user_dimension u ON s.user_key = u.key AND u.current_row_indicator = 'Current'
+JOIN wh_host_dimension h ON s.host_key = h.key AND h.current_row_indicator = 'Current'
+LEFT JOIN wh_session_connection_accumulating_fact c ON s.session_id = c.session_id
+WHERE s.session_pending_time >= CURRENT_DATE - INTERVAL '7 days'
+GROUP BY s.session_id, u.user_name, h.target_name, s.session_pending_time, s.session_terminated_time
+HAVING COUNT(c.connection_id) = 0
+ORDER BY s.session_pending_time DESC;
+```
+
+### 4.7: Auth token usage — Multi-IP detection
+
+```sql
+SELECT
+    u.user_name,
+    a.auth_token_id,
+    a.auth_token_issued_time,
+    a.auth_token_approximate_last_access_time,
+    array_agg(DISTINCT c.client_tcp_address::text) AS client_ips
+FROM wh_auth_token_accumulating_fact a
+JOIN wh_user_dimension u ON a.user_key = u.key AND u.current_row_indicator = 'Current'
+JOIN wh_session_accumulating_fact s ON a.auth_token_id = s.auth_token_id
+JOIN wh_session_connection_accumulating_fact c ON s.session_id = c.session_id
+WHERE a.auth_token_issued_time >= CURRENT_DATE - INTERVAL '7 days'
+GROUP BY u.user_name, a.auth_token_id, a.auth_token_issued_time, a.auth_token_approximate_last_access_time
+HAVING COUNT(DISTINCT c.client_tcp_address) > 1
+ORDER BY array_length(array_agg(DISTINCT c.client_tcp_address::text), 1) DESC;
+```
+
+### 4.8: Compliance - Complete audit trail (SOC 2, SOX, PCI, HIPAA)
+
+This query is the primary resource for any compliance audit. It returns every access event with who, what, when, from where, and how much data moved - all the fields auditors ask for.
+
+```sql
+SELECT
+    s.session_id,
+    s.session_pending_time AS access_time,
+    s.session_terminated_time AS end_time,
+    CASE
+        WHEN s.session_terminated_time = 'infinity' THEN NULL
+        ELSE ROUND(EXTRACT(EPOCH FROM (s.session_terminated_time - s.session_pending_time))::numeric, 1)
+    END AS duration_seconds,
+    u.user_name,
+    u.auth_account_email,
+    u.auth_method_type,
+    h.target_name,
+    h.target_type,
+    h.project_name,
+    h.organization_name,
+    c.client_tcp_address,
+    c.endpoint_tcp_address,
+    ROUND(COALESCE(c.bytes_up, 0) / 1024.0, 1) AS kb_uploaded,
+    ROUND(COALESCE(c.bytes_down, 0) / 1024.0, 1) AS kb_downloaded,
+    s.total_connection_count
+FROM wh_session_accumulating_fact s
+JOIN wh_user_dimension u ON s.user_key = u.key AND u.current_row_indicator = 'Current'
+JOIN wh_host_dimension h ON s.host_key = h.key AND h.current_row_indicator = 'Current'
+LEFT JOIN wh_session_connection_accumulating_fact c ON s.session_id = c.session_id
+WHERE s.session_pending_time BETWEEN '2026-01-01' AND '2026-06-30'
+ORDER BY s.session_pending_time DESC;
+```
+
+**In Metabase:** Save this as a **Question** called "Access Audit Trail" and add date range filters. Export to CSV for auditors.
+
+### 4.9: Compliance - Inactive & orphaned account detection
+
+This query finds accounts that have never been used or haven't been used in 90+ days, a core requirement for quarterly access certification reviews.
+
+```sql
+SELECT
+    u.user_name,
+    u.auth_account_email,
+    u.auth_method_type,
+    COUNT(DISTINCT s.session_id) AS total_sessions,
+    COUNT(DISTINCT h.target_id) AS unique_targets,
+    MAX(s.session_pending_time) AS last_activity,
+    CASE
+        WHEN MAX(s.session_pending_time) IS NULL THEN 'NEVER USED — deprovision'
+        WHEN MAX(s.session_pending_time) < CURRENT_DATE - INTERVAL '90 days' THEN 'INACTIVE >90d — review'
+        ELSE 'ACTIVE'
+    END AS status
+FROM wh_user_dimension u
+LEFT JOIN wh_session_accumulating_fact s ON u.key = s.user_key
+LEFT JOIN wh_host_dimension h ON s.host_key = h.key AND h.current_row_indicator = 'Current'
+WHERE u.current_row_indicator = 'Current'
+GROUP BY u.user_name, u.auth_account_email, u.auth_method_type
+ORDER BY last_activity DESC NULLS LAST;
+```
+
+**Review cadence:** Run this query quarterly. Deprovision "NEVER USED" accounts. Flag "INACTIVE >90d" for manager confirmation.
+
+### 4.10: Compliance - Separation of duties check
+
+This query detects users who access both production and non-production environments, a violation of basic separation of duties. Adapt the `ILIKE` patterns to match your naming conventions.
+
+```sql
+WITH user_env AS (
+    SELECT
+        u.user_name,
+        CASE
+            WHEN h.target_name ILIKE '%prod%' THEN 'PROD'
+            WHEN h.target_name ILIKE '%dev%' OR h.target_name ILIKE '%test%' THEN 'NON-PROD'
+            ELSE 'OTHER'
+        END AS env,
+        COUNT(*) AS accesses
+    FROM wh_session_accumulating_fact s
+    JOIN wh_user_dimension u ON s.user_key = u.key AND u.current_row_indicator = 'Current'
+    JOIN wh_host_dimension h ON s.host_key = h.key AND h.current_row_indicator = 'Current'
+    WHERE s.session_pending_time >= CURRENT_DATE - INTERVAL '90 days'
+    GROUP BY u.user_name, env
+)
+SELECT user_name, array_agg(DISTINCT env) AS environments, SUM(accesses) AS total
+FROM user_env
+GROUP BY user_name
+HAVING 'PROD' = ANY(array_agg(env)) AND 'NON-PROD' = ANY(array_agg(env));
+```
+
+**Any rows returned = potential violation.** Review whether production and non-production access is authorized for that user.
+
+### 4.11: SecOps - Lateral movement detection
+
+This query finds users hitting multiple different targets in a short time window, a strong indicator of lateral movement during a compromise.
+
+```sql
+WITH rapid AS (
+    SELECT
+        u.user_name,
+        COUNT(DISTINCT h.target_id) AS unique_targets,
+        MIN(s.session_pending_time) AS first_access,
+        MAX(s.session_pending_time) AS last_access,
+        ROUND(EXTRACT(EPOCH FROM (MAX(s.session_pending_time) - MIN(s.session_pending_time))) / 60)::int AS minutes,
+        array_agg(DISTINCT h.target_name ORDER BY h.target_name) AS targets
+    FROM wh_session_accumulating_fact s
+    JOIN wh_user_dimension u ON s.user_key = u.key AND u.current_row_indicator = 'Current'
+    JOIN wh_host_dimension h ON s.host_key = h.key AND h.current_row_indicator = 'Current'
+    WHERE s.session_pending_time >= CURRENT_DATE - INTERVAL '24 hours'
+    GROUP BY u.user_name
+)
+SELECT * FROM rapid
+WHERE unique_targets >= 3
+ORDER BY unique_targets DESC;
+```
+
+**Triage:** For 3+ targets in 24h → investigate. For 5+ targets in under an hour → escalate to incident response.
+
+### 4.12: SecOps - Data exfiltration detection
+
+This query compares each user's recent connection volumes against their own 30-day baseline. Connections with 3 or more standard deviations above normal are flagged.
+
+```sql
+WITH baseline AS (
+    SELECT user_key, AVG(bytes_down) AS avg_dn, STDDEV(bytes_down) AS std_dn
+    FROM wh_session_connection_accumulating_fact
+    WHERE connection_authorized_time >= CURRENT_DATE - INTERVAL '30 days'
+    GROUP BY user_key
+),
+recent AS (
+    SELECT c.connection_id, c.user_key, u.user_name, h.target_name,
+           c.bytes_down, c.connection_authorized_time
+    FROM wh_session_connection_accumulating_fact c
+    JOIN wh_user_dimension u ON c.user_key = u.key AND u.current_row_indicator = 'Current'
+    JOIN wh_host_dimension h ON c.host_key = h.key AND h.current_row_indicator = 'Current'
+    WHERE c.connection_authorized_time >= CURRENT_DATE - INTERVAL '24 hours'
+)
+SELECT r.user_name, r.target_name,
+       ROUND(r.bytes_down / 1024.0, 1) AS kb_downloaded,
+       ROUND(b.avg_dn / 1024.0, 1) AS avg_kb,
+       ROUND((r.bytes_down - b.avg_dn) / NULLIF(b.std_dn, 0), 1) AS std_devs
+FROM recent r
+JOIN baseline b ON r.user_key = b.user_key
+WHERE r.bytes_down > (b.avg_dn + 3 * b.std_dn)
+ORDER BY std_devs DESC;
+```
+
+**Alert thresholds:** Connections with 3 or more standard deviations → unusual, investigate. Connections with 5 or more standard deviations → critical, escalate immediately.
+
+### 4.13: SecOps - Incident timeline reconstruction
+
+When you are investigating a security incident, this query reconstructs the complete chronological timeline for a specific user. Replace `'user'` with the user's name and adjust the date range.
+
+```sql
+SELECT s.session_pending_time AS event_time, 'AUTHORIZED' AS event,
+       u.user_name, h.target_name, NULL::text AS client_ip,
+       NULL::double precision AS kb
+FROM wh_session_accumulating_fact s
+JOIN wh_user_dimension u ON s.user_key = u.key AND u.current_row_indicator = 'Current'
+JOIN wh_host_dimension h ON s.host_key = h.key AND h.current_row_indicator = 'Current'
+WHERE u.user_name = 'user'
+  AND s.session_pending_time >= CURRENT_DATE - INTERVAL '7 days'
+
+UNION ALL
+
+SELECT c.connection_authorized_time, 'CONNECTED',
+       u.user_name, h.target_name, c.client_tcp_address::text,
+       (COALESCE(c.bytes_up, 0) + COALESCE(c.bytes_down, 0)) / 1024.0
+FROM wh_session_connection_accumulating_fact c
+JOIN wh_user_dimension u ON c.user_key = u.key AND u.current_row_indicator = 'Current'
+JOIN wh_host_dimension h ON c.host_key = h.key AND h.current_row_indicator = 'Current'
+WHERE u.user_name = 'user'
+  AND c.connection_authorized_time >= CURRENT_DATE - INTERVAL '7 days'
+
+UNION ALL
+
+SELECT s.session_terminated_time, 'TERMINATED',
+       u.user_name, h.target_name, NULL,
+       COALESCE(s.total_bytes_down, 0) / 1024.0
+FROM wh_session_accumulating_fact s
+JOIN wh_user_dimension u ON s.user_key = u.key AND u.current_row_indicator = 'Current'
+JOIN wh_host_dimension h ON s.host_key = h.key AND h.current_row_indicator = 'Current'
+WHERE u.user_name = 'user'
+  AND s.session_terminated_time <> 'infinity'
+  AND s.session_terminated_time >= CURRENT_DATE - INTERVAL '7 days'
+
+ORDER BY event_time;
+```
+
+**Output:** This query outputs a chronological table of every AUTHORIZED → CONNECTED → TERMINATED event for the user, ready to paste into an incident report.
+
+## Step 5: Alternative BI tools
+
+Refer to the following sections for some BI tools that are alternatives to Metabase.
+
+### Grafana (free, open source)
+
+To configure Grafana for use with the data warehouse:
+
+1. Add a PostgreSQL data source pointing to your Boundary database.
+2. Use the same queries above in **Grafana Dashboard → Add Panel → SQL**.
+3. Set format to **Table** or **Time series** depending on the query.
+4. Grafana requires a time column for time-series panels, use `session_pending_time` or a date-dimension join.
+
+### Apache Superset (free, open source)
+
+To configure Apache Superset for use with the data warehouse:
+
+1. Add a PostgreSQL database connection.
+2. Create **SQL Lab** queries or build charts with **Explore**.
+3. For the warehouse dimension tables, use `current_row_indicator = 'Current'` in your WHERE clauses.
+
+### DBeaver / pgAdmin (free SQL clients)
+
+DBEaver and pgAdmin are perfect for ad-hoc exploration. You can connect directly and run any of the queries above.
+
+## Step 6: Troubleshooting
+
+Refer to the following sections for troubleshooting steps when you encounter issues.
+
+### The warehouse tables are empty
+
+This is normal for a fresh Boundary deployment. The warehouse populates as users authenticate and create sessions. To verify:
+
+```sql
+SELECT COUNT(*) FROM wh_session_accumulating_fact;
+SELECT COUNT(*) FROM wh_auth_token_accumulating_fact;
+```
+
+If both are 0, use Boundary to authorize a session and connect to a target. Then try again.
+
+### Metabase says "permission denied"
+
+If you encounter this error, verify the following:
+
+- The `boundary_bi_readonly` role was created with `GRANT CONNECT` and `GRANT SELECT`.
+- You're using the correct password.
+- The database host/port are correct.
+
+### Queries are slow
+
+If queries are slow:
+
+- Use date filters (`WHERE ... >= CURRENT_DATE - INTERVAL 'X days'`)
+- Set a statement timeout: `ALTER ROLE boundary_bi_readonly SET statement_timeout = '30s';`
+- Use a read replica for BI queries if available
+
+### Column names differ from my version
+
+Boundary's internal schema evolves. To inspect your version:
+
+```sql
+-- List all warehouse tables and their columns
+SELECT table_name, column_name, data_type
+FROM information_schema.columns
+WHERE table_schema = 'public' AND table_name LIKE 'wh_%'
+ORDER BY table_name, ordinal_position;
+```
+
+## Summary
+
+You now have a working read-only BI connection to Boundary's built-in data warehouse. The key workflow is as follows:
+
+1. **Connect** Metabase (or any PostgreSQL-compatible BI tool) to your Boundary database.
+2. **Query** the `wh_*` tables using the proven queries above.
+3. **Build dashboards** for access reviews, session monitoring, and audit reporting.
+4. **Schedule refreshes** — the data updates in near-real-time via Boundary's internal triggers.
+
+No ETL, no middleware, no data pipelines. Just PostgreSQL queries against a warehouse that Boundary maintains for you.
+
+## More information
+
+- Refer to [Boundary data warehouse](/boundary/docs/data-warehouse) for more information about the data warehouse's architecture and tables.
+- Refer to [Audit the data warehouse](/boundary/docs/data-warehouse/audit-data-warehouse) for examples of queries that you can run against the data warehouse.
