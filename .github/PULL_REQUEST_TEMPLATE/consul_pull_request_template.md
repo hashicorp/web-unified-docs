@@ -12,12 +12,12 @@ If your content is an update to:
   want your changes published when the PR is merged. We publish Consul content
   from the `main` branch.
 
-- Upcoming Consul release
+- Upcoming major Consul release
 
   Choose the branch for the Consul release that your content is for. Consul
   release branches use the `consul/<exact-release-number>` format. If you are not
   able to find the upcoming Consul release branch that you are looking for,
-  contact the tech writer that works with the Consul team.
+  choose the `main` branch and state which upcoming release in the PR description.
 
 **Backports**
 
@@ -36,6 +36,8 @@ should be aware of.
 Include the target release as well as prior versions if applicable.
 -->
 
+Which Consul version is this content for? 
+
 ## Links
 <!--
 Please include links to GitHub issues, documentation, or similar which is relevant to this PR. If
@@ -47,6 +49,10 @@ GitHub Issue: <issue-link>
 
 The bot does publish a root-level link to the deploy preview. The link changes with each build.
 -->
+
+Consul Code PR:
+Jira Issue:
+GitHub Issue:
 
 ## Contributor checklists
 
