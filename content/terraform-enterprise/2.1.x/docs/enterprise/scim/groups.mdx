@@ -1,0 +1,174 @@
+---
+page_title: Group management with SCIM for Terraform Enterprise
+description: >-
+  Learn how SCIM 2.0 manages identity provider groups and synchronizes
+  membership with Terraform Enterprise.
+---
+
+# Group management with SCIM
+
+This topic describes how Terraform Enterprise manages SCIM groups from your identity provider (IdP) and how group membership synchronizes with Terraform Enterprise teams.
+
+## Overview
+
+SCIM groups represent groups from your IdP. Terraform Enterprise stores groups provisioned through SCIM separately from native Terraform Enterprise teams. You can then link these SCIM groups to teams to automate team membership management.
+
+SCIM groups enable you to:
+
+- Automatically sync group membership from your IdP to Terraform Enterprise
+- Link a single IdP group to multiple Terraform Enterprise teams across different organizations
+- Maintain your IdP as the single source of truth for group membership
+
+## Groups and teams
+
+SCIM groups are representations of IdP groups. Terraform Enterprise provisions them through SCIM and stores them separately from native Terraform Enterprise teams. Team mapping links SCIM groups to Terraform Enterprise teams so Terraform Enterprise can automatically synchronize team membership according to the groups defined in your IdP.
+
+The following table provides more information about how SCIM groups relate to Terraform Enterprise teams.
+
+| | SCIM groups | Terraform Enterprise teams |
+| --- | --- | --- |
+| **Description** | Stored separately from native teams and contain membership information synced from your IdP. | Organization-scoped entities that control access to workspaces, projects, and other resources. Teams have associated permissions and can contain members. |
+| **Management** | Managed by your IdP through SCIM API calls. | Managed in the Terraform Enterprise UI or API, or linked to SCIM groups for automated membership. |
+| **Scope** | Global to your Terraform Enterprise instance. | Scoped to a specific organization in Terraform Enterprise. |
+| **Permissions** | No permissions. | Configurable permissions for workspaces, projects, and organization-level access. |
+| **Membership source** | IdP. | Managed manually or synchronized from a linked SCIM group. |
+
+Refer to [Link SCIM groups to teams](/terraform/enterprise/scim/manage/team-mapping) for instructions on creating and managing team mappings.
+
+### Group-to-team links
+
+When you link a SCIM group to one or more Terraform Enterprise teams, Terraform Enterprise performs the following actions:
+
+1. Replaces the Terraform Enterprise team's existing human user membership with the SCIM group's membership. Existing service account memberships are preserved.
+1. Adds users in the SCIM group to the organization if they are not already members.
+1. Automatically propagates membership changes in the IdP to all linked Terraform Enterprise teams.
+
+A single SCIM group can be linked to up to 10,000 Terraform Enterprise teams across different organizations, but you can only link a team to one SCIM group.
+
+You can't create a team mapping in the following cases:
+
+- **Owners team**: The owners team in each organization cannot be SCIM-managed. This ensures administrators can always access Terraform Enterprise even if SCIM or SSO experiences issues.
+- **Site admin group**: The group configured as the site administrator group in SCIM settings cannot be mapped to regular Terraform Enterprise teams.
+
+## Group lifecycle
+
+SCIM groups follow a standard create, update, and delete lifecycle managed by your identity provider.
+
+### Create stage
+
+Terraform Enterprise performs the following actions when your IdP creates a group through SCIM:
+
+1. Generates a unique SCIM `id` for the group.
+1. Stores the group with its `displayName` and any `externalId` from the IdP.
+
+Terraform Enterprise teams aren't linked to the group until you explicitly create a mapping to establish the connection. After creation, the group is available for team mapping.
+
+SCIM group `displayName` values must be unique across Terraform Enterprise. Values aren't case-sensitive. As a result, Terraform Enterprise considers `Engineering` and `engineering` to be the same `displayName`. When you attempt to provision a group with an existing `displayName`, Terraform Enterprise rejects the request with HTTP `409 Conflict`.
+
+Terraform Enterprise preserves the original letter case of SCIM group display names when it stores them. API responses return the stored `displayName` with that preserved letter case.
+
+To reference a group member in the `members[].value` object, you must include the user's public SCIM `id` value from `/scim/v2/Users`. Before you can perform group membership operations, the user must already be provisioned in Terraform Enterprise through SCIM.
+
+### Update stage
+
+Your IdP can update the following group properties:
+
+- **Display name changes**: Updates to the group's display name are stored in Terraform Enterprise with the letter case provided by the IdP.
+- **Membership changes**: Adding or removing users from the group triggers membership synchronization to all linked Terraform Enterprise teams.
+
+Terraform Enterprise supports both full group replacement and partial group updates from supported identity providers:
+
+- Full replacement updates reconcile the group's membership to the roster provided by the IdP.
+- Partial updates support the common group change patterns used by Okta and Microsoft Entra ID, including display name changes, full member replacement, and incremental member add or remove operations.
+
+For the exact public SCIM endpoints, request shapes, supported `PATCH` request forms, and omitted-attribute behavior, refer to the [SCIM Groups API](/terraform/enterprise/api-docs/scim/groups).
+
+Refer to [Membership synchronization](#membership-synchronization) for details on how membership updates propagate.
+
+### Delete stage
+
+Terraform Enterprise performs the following actions when your IdP deletes a group through SCIM:
+
+1. Removes the SCIM group record.
+1. Removes the SCIM group as a synchronization source for any linked teams.
+1. Stops sending updates from that group to previously linked Terraform Enterprise teams.
+
+After deletion, verify the resulting mapping state and team membership for affected teams. Decide whether each affected team should be managed manually in Terraform Enterprise or linked to a different SCIM group.
+
+If the deleted SCIM group was configured as the site admin group, Terraform Enterprise clears the site admin group mapping. Existing site administrator grants are not automatically revoked.
+
+For exact delete semantics and status codes, refer to the [SCIM Groups API](/terraform/enterprise/api-docs/scim/groups).
+
+## Membership synchronization
+
+When your IdP updates group membership, Terraform Enterprise synchronizes the changes to all linked Terraform Enterprise teams.
+
+### Synchronization process
+
+Terraform Enterprise performs the following actions when your IdP sends a membership update:
+
+1. Updates the SCIM group's membership records.
+1. For each linked Terraform Enterprise team where synchronization is not paused, Terraform Enterprise:
+   - Removes users who are no longer in the SCIM group.
+   - Adds users newly added to the SCIM group.
+   - Creates organization membership for users if needed.
+1. Applies all changes as discrete records in a single transaction.
+
+### Transaction behavior
+
+Terraform Enterprise synchronizes membership as discrete records in a transaction to ensure data consistency.
+
+Terraform Enterprise doesn't partially apply changes. All changes either succeed or roll back depending on the success of the synchronization. If the transaction times out or fails, the team retains its previous membership state.
+
+### Synchronization scope
+
+Membership changes propagate to all linked Terraform Enterprise teams where synchronization is active. Teams with paused synchronization are not affected until you unpause them.
+
+When you unpause synchronization for a team, Terraform Enterprise compares the current SCIM group membership with the team's membership and reconciles any differences to match the SCIM group.
+
+If the linked SCIM group is deleted, Terraform Enterprise no longer has a source group to sync from. Verify the resulting mapping state and current team membership before making manual changes.
+
+## Group size limits
+
+Terraform Enterprise enforces limits on group membership to ensure reliable synchronization within transaction timeouts.
+
+| Limit | Value | Behavior |
+|-------|-------|----------|
+| Maximum members per SCIM group request | 1,000 | Public SCIM group create or update requests that would create or project a group over this limit return HTTP `413 Payload Too Large` |
+
+Terraform Enterprise also enforces public SCIM request-size and PATCH request limits. Refer to the [Public SCIM API](/terraform/enterprise/api-docs/scim) and the [SCIM Groups API](/terraform/enterprise/api-docs/scim/groups) for the exact request-size, operation-count, and response details.
+
+### Handling large groups
+
+If you have IdP groups exceeding the maximum limit, consider the following approaches:
+
+- **Split into smaller groups**: Create multiple smaller IdP groups based on functional roles or departments
+- **Use multiple team mappings**: Link smaller groups to separate Terraform Enterprise teams with appropriate permissions
+- **Consolidate access patterns**: Review whether all members need the same level of access
+
+## Rate limits
+
+SCIM group operations are subject to rate limiting to protect Terraform Enterprise performance.
+
+Public SCIM provisioning requests and admin team-linking operations use different rate limits.
+
+Public SCIM provisioning uses shared rate limits across the public SCIM endpoints, while admin team-linking and pause-toggle operations use separate admin rate limits.
+
+For the exact rate limit values, refer to the [Public SCIM API](/terraform/enterprise/api-docs/scim) and the [Team SCIM Group Mapping API](/terraform/enterprise/api-docs/admin/team-scim-group-mapping).
+
+## API reference
+
+Use the following API references for SCIM group operations:
+
+- Refer to the [Public SCIM API](/terraform/enterprise/api-docs/scim) for authentication, discovery endpoints, pagination, supported filters, and shared rate limits.
+- Refer to the [SCIM Groups API](/terraform/enterprise/api-docs/scim/groups) for the public `/scim/v2/Groups` provisioning endpoints, supported `excludedAttributes` behavior, and group create or update semantics.
+- Refer to the [Admin SCIM Groups API](/terraform/enterprise/api-docs/admin/scim-groups) to list the SCIM groups available for team mapping.
+
+### IdP-specific behavior
+
+Different identity providers send membership updates in different formats:
+
+- **Okta**: Sends `PUT` requests with a complete list of all group members
+- **Microsoft Entra ID**: Sends `PATCH` requests with lists of members to add and remove
+
+Terraform Enterprise handles both formats and applies the appropriate membership changes.
