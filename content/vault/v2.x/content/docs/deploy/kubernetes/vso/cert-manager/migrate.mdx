@@ -1,0 +1,511 @@
+---
+layout: docs
+page_title: Migrate from the cert-manager Vault issuer
+description: >-
+  Move cert-manager Certificate resources from the built-in cert-manager Vault
+  issuer to the Vault Secrets Operator VaultIssuer or VaultClusterIssuer.
+---
+
+# Migrate from the cert-manager Vault issuer
+
+@include 'alerts/enterprise-only.mdx'
+
+Replace the built-in cert-manager `Issuer` or `ClusterIssuer` with a Vault
+Secrets Operator `VaultIssuer` or `VaultClusterIssuer`. Keep your `Certificate`
+resources and Secret names, and migrate one certificate at a time by changing
+its `issuerRef`. You may also need an explicit `spec.duration` to preserve its
+intended lifetime.
+
+Keep the original issuer and its credentials until migration and renewal
+succeed so that you can roll back.
+
+## Before you start
+
+- **Use [Vault Enterprise](https://www.hashicorp.com/products/vault/pricing)**,
+  with cert-manager already issuing certificates through Vault.
+- **Install [Helm](https://helm.sh/docs/intro/install/)** 3.7 or later and
+  [`jq`](https://jqlang.org/download/).
+- **Use Vault Secrets Operator 2.0.0 or later**. Replace `<VSO_VERSION>` in the
+  Helm commands on this page with the version you install or upgrade to.
+- **Check your permissions** to update Vault policies and auth roles, install
+  or upgrade the operator, and manage Kubernetes issuers and certificates.
+- **Plan a change window**. Changing `issuerRef` triggers reissuance and can
+  rotate the private key, depending on `spec.privateKey.rotationPolicy`.
+
+The examples use the application namespace `app`, the operator namespace
+`vault-secrets-operator`, and the signing path `pki/sign/example-dot-com`.
+Replace these values with your configuration.
+
+If you manage cert-manager or Vault Secrets Operator resources with a GitOps
+tool, such as Argo CD or Flux, make the resource changes in this guide in your
+source repository instead of with `kubectl`. Otherwise, the next sync can
+revert them.
+
+## Step 1: Plan the configuration
+
+Review the following settings before you migrate, and update your configuration
+where needed:
+
+- **Authentication**: The issuers authenticate to Vault with a `VaultAuth`
+  resource, which supports the Kubernetes, JWT, AppRole, AWS, and GCP auth
+  methods. If your current issuer uses a static token (`tokenSecretRef`) or TLS
+  certificate authentication (`clientCertificate`), set up one of these methods
+  in Vault before you migrate. Refer to
+  [Vault authentication in detail](/vault/docs/deploy/kubernetes/vso/sources/vault/auth).
+- **Vault connection**: The issuers connect to Vault with a `VaultConnection`
+  resource, which verifies the Vault server certificate with a CA bundle. If
+  your current issuer sets `clientCertSecretRef` and `clientKeySecretRef`
+  because your Vault endpoint requires client certificates, confirm that the
+  Vault Secrets Operator can connect to the endpoint before you migrate. Keep TLS
+  verification enabled.
+- **Certificate lifetime**: When a `Certificate` does not set `spec.duration`,
+  the cert-manager Vault issuer requests 90 days (`2160h`). With the Vault
+  Secrets Operator issuers, Vault applies the PKI role's `ttl` instead. To keep
+  the current lifetime, set `spec.duration` on the certificate when you migrate
+  it, rather than changing a shared PKI role. Vault shortens a requested
+  duration that exceeds the role's `max_ttl`. Vault rejects a request when the
+  certificate would expire after the issuing CA certificate, unless the issuer's
+  `leaf_not_after_behavior` setting allows it.
+
+## Step 2: Inventory the issuers and certificates
+
+1. Export your issuers. For each `spec.vault` block, record the server, signing
+   path, Vault namespace, TLS, and authentication settings:
+
+   ```shell-session
+   $ kubectl get issuer,clusterissuer --all-namespaces --output yaml \
+       > issuer-inventory.yaml
+   ```
+
+1. Find certificates referencing the original issuer. Match its namespace,
+   name, kind, and API group:
+
+   <Tabs>
+
+   <Tab heading="Issuer" group="vaultissuer">
+
+   ```shell-session
+   $ kubectl get certificate --namespace app --output json \
+       | jq --raw-output '.items[]
+         | select(.spec.issuerRef.name == "vault-issuer"
+             and (.spec.issuerRef.kind // "Issuer") == "Issuer"
+             and (.spec.issuerRef.group // "cert-manager.io") == "cert-manager.io")
+         | "\(.metadata.namespace)/\(.metadata.name)"'
+   ```
+
+   </Tab>
+
+   <Tab heading="ClusterIssuer" group="vaultclusterissuer">
+
+   ```shell-session
+   $ kubectl get certificate --all-namespaces --output json \
+       | jq --raw-output '.items[]
+         | select(.spec.issuerRef.name == "vault-cluster-issuer"
+             and .spec.issuerRef.kind == "ClusterIssuer"
+             and (.spec.issuerRef.group // "cert-manager.io") == "cert-manager.io")
+         | "\(.metadata.namespace)/\(.metadata.name)"'
+   ```
+
+   </Tab>
+
+   </Tabs>
+
+1. Save a rollback patch for each certificate, using a separate file per
+   certificate. This captures its issuer and lifetime settings, including
+   absent fields as `null`, so that the rollback patch removes values that the
+   migration adds:
+
+   ```shell-session
+   $ kubectl get certificate web --namespace app --output json \
+       | jq '{spec: {issuerRef: {name: .spec.issuerRef.name,
+             kind: .spec.issuerRef.kind, group: .spec.issuerRef.group},
+           duration: .spec.duration, renewBefore: .spec.renewBefore,
+           renewBeforePercentage: .spec.renewBeforePercentage}}' \
+       > web-rollback.json
+   ```
+
+## Step 3: Grant access to Vault
+
+1. Create a dedicated policy. Replace the signing path with the original
+   issuer's `spec.vault.path`, including any `issuer/<issuerRef>` segment:
+
+   ```shell-session
+   $ vault policy write pki-issuer - <<EOF
+   path "pki/sign/example-dot-com" {
+     capabilities = ["create", "update"]
+   }
+
+   path "sys/license/status" {
+     capabilities = ["read"]
+   }
+   EOF
+   ```
+
+1. Create an auth role for the operator. This Kubernetes auth example uses a
+   dedicated service account named `pki-issuer`, created in Step 4:
+
+   ```shell-session
+   $ vault write auth/kubernetes/role/pki-issuer \
+       bound_service_account_names=pki-issuer \
+       bound_service_account_namespaces=<AUTH_SERVICE_ACCOUNT_NAMESPACE> \
+       token_policies=pki-issuer \
+       audience=vault \
+       token_ttl=1h
+   ```
+
+   Set `<AUTH_SERVICE_ACCOUNT_NAMESPACE>` according to the replacement issuer:
+
+   | Issuer | Service account namespace |
+   | --- | --- |
+   | `VaultIssuer` | The issuer's namespace, for example `app`. |
+   | `VaultClusterIssuer` | The `VaultAuth` namespace; `vault-secrets-operator` for the Helm-created `default` auth. |
+
+   If you reuse an auth role, add the policy without replacing its existing
+   policies. All consumers of that role gain signing access; prefer a
+   dedicated role and `VaultAuth`.
+
+## Step 4: Set up the Vault Secrets Operator
+
+Choose the path for an existing or new operator installation.
+
+<Tabs>
+
+<Tab heading="Existing installation" group="existing">
+
+1. Update the chart repository and export your current release values:
+
+   ```shell-session
+   $ helm repo update hashicorp
+
+   $ helm get values vault-secrets-operator \
+       --namespace vault-secrets-operator --output yaml > values.yaml
+   ```
+
+1. Check CRD upgrades. CRDs update automatically when
+   `hooks.upgradeCRDs.enabled=true` and Helm hooks are enabled. Otherwise,
+   apply the target chart's CRDs **before** upgrading:
+
+   ```shell-session
+   $ helm show crds hashicorp/vault-secrets-operator --version <VSO_VERSION> \
+       > vso-crds.yaml
+
+   $ kubectl apply --filename vso-crds.yaml
+   ```
+
+1. Preview the upgrade with your current values and approval permission:
+
+   ```shell-session
+   $ helm upgrade vault-secrets-operator hashicorp/vault-secrets-operator \
+       --version <VSO_VERSION> \
+       --namespace vault-secrets-operator \
+       --values values.yaml \
+       --set certManager.approverRBAC.enabled=true \
+       --dry-run
+   ```
+
+   Review the rendered changes. Then run the same command without `--dry-run`
+   to upgrade.
+
+   Pass `--values` to preserve your settings while receiving new chart
+   defaults; avoid `--reuse-values`, which retains old chart defaults.
+
+1. Reuse your `VaultConnection` and create the service account and dedicated
+   `VaultAuth` for the role from Step 3. Refer to
+   [Create the connection and auth resources](/vault/docs/deploy/kubernetes/vso/cert-manager/setup#step-4-create-the-connection-and-auth-resources).
+
+</Tab>
+
+<Tab heading="New installation" group="new">
+
+The Helm chart creates a `VaultConnection` and `VaultAuth`, both named
+`default`, in the operator namespace.
+
+1. Map your existing issuer settings to chart values:
+
+   | cert-manager field | Helm value |
+   | --- | --- |
+   | `spec.vault.server` | `defaultVaultConnection.address` |
+   | `spec.vault.serverName` | `defaultVaultConnection.tlsServerName` |
+   | `spec.vault.caBundle` or `spec.vault.caBundleSecretRef` | `defaultVaultConnection.caCertSecret`, which you create in a following step. |
+   | `spec.vault.namespace` | `defaultAuthMethod.namespace` |
+   | `spec.vault.auth.kubernetes.mountPath` | `defaultAuthMethod.mount`; remove `/v1/auth/`. |
+   | Auth role from Step 3 | `defaultAuthMethod.kubernetes.role` |
+
+   For other supported auth methods, refer to
+   [`defaultAuthMethod`](/vault/docs/deploy/kubernetes/vso/helm#h-defaultauthmethod).
+
+1. Add the repository and create the operator namespace:
+
+   ```shell-session
+   $ helm repo add hashicorp https://helm.releases.hashicorp.com
+
+   $ kubectl create namespace vault-secrets-operator
+   ```
+
+1. Create the service account in the namespace bound to the role in Step 3.
+   Save the following manifest as `pki-issuer-sa.yaml`, replacing
+   `<AUTH_SERVICE_ACCOUNT_NAMESPACE>`:
+
+   ```yaml
+   apiVersion: v1
+   kind: ServiceAccount
+   metadata:
+     name: pki-issuer
+     namespace: <AUTH_SERVICE_ACCOUNT_NAMESPACE>
+   automountServiceAccountToken: false
+   ```
+
+   Apply the manifest:
+
+   ```shell-session
+   $ kubectl apply --filename pki-issuer-sa.yaml
+   ```
+
+   Reserve this account for Vault authentication and restrict who can use it
+   in Pods or request its tokens. The operator does not need automatic token
+   mounting.
+
+1. If your issuer uses a custom CA bundle, save its decoded PEM contents from
+   `caBundle` or the referenced Secret to `vault-ca.pem`. Create the Secret
+   before installing the operator:
+
+   ```shell-session
+   $ kubectl create secret generic vault-ca \
+       --namespace vault-secrets-operator --from-file=ca.crt=vault-ca.pem
+   ```
+
+   If Vault uses a publicly trusted certificate, skip this step and omit
+   `defaultVaultConnection.caCertSecret` from the install command.
+
+1. Install with the mapped connection and auth settings:
+
+   ```shell-session
+   $ helm install vault-secrets-operator hashicorp/vault-secrets-operator \
+       --version <VSO_VERSION> \
+       --namespace vault-secrets-operator \
+       --set defaultVaultConnection.enabled=true \
+       --set defaultVaultConnection.address=https://vault.example.com:8200 \
+       --set defaultVaultConnection.caCertSecret=vault-ca \
+       --set defaultVaultConnection.tlsServerName=vault.example.com \
+       --set defaultAuthMethod.enabled=true \
+       --set defaultAuthMethod.kubernetes.role=pki-issuer \
+       --set defaultAuthMethod.kubernetes.serviceAccount=pki-issuer \
+       --set 'defaultAuthMethod.kubernetes.tokenAudiences={vault}' \
+       --set certManager.approverRBAC.enabled=true
+   ```
+
+   Set `defaultVaultConnection.tlsServerName` to the `serverName` of your
+   existing issuer. Omit it when your issuer does not set `serverName`.
+
+</Tab>
+
+</Tabs>
+
+Confirm the issuer CRDs exist and your connection and auth resources are ready:
+
+```shell-session
+$ kubectl get crd vaultissuers.secrets.hashicorp.com \
+    vaultclusterissuers.secrets.hashicorp.com
+
+$ kubectl get vaultconnection,vaultauth --all-namespaces
+```
+
+The approval setting lets cert-manager approve every request for these issuers.
+For policy-based approval, leave it disabled and configure
+[approver-policy](/vault/docs/deploy/kubernetes/vso/cert-manager#certificate-request-approval)
+instead. If cert-manager uses a non-default controller service account, set
+`certManager.approverRBAC.serviceAccountName` and
+`certManager.approverRBAC.serviceAccountNamespace`.
+
+## Step 5: Create the issuer
+
+Map the signing path and authentication reference:
+
+| Original setting | Replacement issuer setting |
+| --- | --- |
+| `pki/sign/example-dot-com` | `mount: pki`, `role: example-dot-com` |
+| `pki/issuer/example-issuer/sign/example-dot-com` | Also set `issuerRef: example-issuer`. |
+| `spec.vault.namespace` | `spec.namespace`; omit to inherit from `VaultAuth`. |
+| Dedicated `VaultAuth` | Set `vaultAuthRef` to `name` or `namespace/name`; omit for the operator namespace's `default` auth. |
+
+When you set `issuerRef`, the Vault Secrets Operator signs certificates with the
+`<mount>/issuer/<issuerRef>/sign/<role>` path, for example
+`pki/issuer/example-issuer/sign/example-dot-com`. Make sure the policy from
+[Step 3](#step-3-grant-access-to-vault) grants that path. Otherwise, Vault
+returns a `403` error and the certificate request fails.
+
+Save the matching resource as `vso-issuer.yaml`. These examples use the
+Helm-created `default` auth; set `vaultAuthRef` if you created a dedicated auth.
+
+<Tabs>
+
+<Tab heading="Replace an Issuer" group="vaultissuer">
+
+```yaml
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultIssuer
+metadata:
+  name: vso-issuer
+  namespace: app
+spec:
+  mount: pki
+  role: example-dot-com
+```
+
+</Tab>
+
+<Tab heading="Replace a ClusterIssuer" group="vaultclusterissuer">
+
+```yaml
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultClusterIssuer
+metadata:
+  name: vso-cluster-issuer
+spec:
+  mount: pki
+  role: example-dot-com
+```
+
+</Tab>
+
+</Tabs>
+
+The operator namespace's `default` auth allows all namespaces. For a dedicated
+auth, configure `allowedNamespaces` for the namespaces requesting certificates.
+Refer to [namespace access](/vault/docs/deploy/kubernetes/vso/cert-manager#vault-authentication-and-namespace-access).
+
+Apply the resource and confirm that the matching issuer's `READY` column is
+`True`:
+
+```shell-session
+$ kubectl apply --filename vso-issuer.yaml
+
+$ kubectl get vaultissuer --namespace app
+
+$ kubectl get vaultclusterissuer
+```
+
+Before migrating production, issue a test `Certificate` in the same namespace
+with the intended subject, SANs, key, and lifetime settings and the replacement
+`issuerRef`. Use a unique certificate name and Secret name, such as
+`web-migration-test` and `web-migration-test-tls`. Verify it with Step 7, then
+delete those test resources. Issuer readiness alone does not prove signing
+works.
+
+## Step 6: Update one certificate
+
+Start with a low-risk certificate. If its duration is omitted, add
+`"duration":"2160h"` alongside `"issuerRef"` in the patch to preserve the
+built-in issuer's requested lifetime, or choose another approved duration.
+Check the role and CA limits and ensure its renewal settings fit that lifetime.
+Do not change a shared PKI role's `ttl` just for this migration.
+
+<Tabs>
+
+<Tab heading="Replace an Issuer" group="vaultissuer">
+
+```shell-session
+$ kubectl patch certificate web --namespace app --type merge \
+    --patch '{"spec":{"issuerRef":{"group":"secrets.hashicorp.com","kind":"VaultIssuer","name":"vso-issuer"}}}'
+```
+
+</Tab>
+
+<Tab heading="Replace a ClusterIssuer" group="vaultclusterissuer">
+
+```shell-session
+$ kubectl patch certificate web --namespace app --type merge \
+    --patch '{"spec":{"issuerRef":{"group":"secrets.hashicorp.com","kind":"VaultClusterIssuer","name":"vso-cluster-issuer"}}}'
+```
+
+</Tab>
+
+</Tabs>
+
+cert-manager requests a replacement certificate. The Secret retains the
+existing certificate until cert-manager writes the replacement.
+
+## Step 7: Verify the certificate
+
+1. Confirm that the new request is approved and ready, and that the
+   `Certificate` is ready. Inspect the request's `spec.issuerRef` to ensure
+   it names the replacement issuer in `secrets.hashicorp.com`, not the old
+   issuer:
+
+   ```shell-session
+   $ kubectl get certificaterequest,certificate --namespace app
+
+   $ kubectl get certificaterequest <CERTIFICATE_REQUEST_NAME> \
+       --namespace app --output yaml
+   ```
+
+1. Inspect the certificate stored in the Secret. Check the SANs and intended
+   expiration, accounting for Vault's backdating and CA expiration settings:
+
+   ```shell-session
+   $ kubectl get secret web-tls --namespace app \
+       --output jsonpath='{.data.tls\.crt}' \
+       | base64 --decode \
+       | openssl x509 -noout -subject -issuer -dates -ext subjectAltName
+   ```
+
+1. Confirm the request has a `CertificateIssued` event with the message
+   `Certificate issued successfully`:
+
+   ```shell-session
+   $ kubectl get events --namespace app \
+       --field-selector involvedObject.kind=CertificateRequest,involvedObject.name=<CERTIFICATE_REQUEST_NAME>
+   ```
+
+Repeat Steps 6 and 7 for each certificate. Applications must reload the updated
+Secret to use the replacement certificate.
+
+To roll back either issuer type, apply the patch saved for that certificate:
+
+```shell-session
+$ kubectl patch certificate web --namespace app --type merge \
+    --patch-file web-rollback.json
+```
+
+This restores the original issuer and lifetime settings and triggers reissuance;
+it does not restore the previous Secret contents. Verify issuance by the
+original issuer before considering rollback complete.
+
+## Step 8: Remove the cert-manager Vault issuer
+
+After all migrated certificates complete at least one automatic renewal:
+
+1. Delete the original issuer:
+
+   <Tabs>
+
+   <Tab heading="Issuer" group="vaultissuer">
+
+   ```shell-session
+   $ kubectl delete issuer vault-issuer --namespace app
+   ```
+
+   </Tab>
+
+   <Tab heading="ClusterIssuer" group="vaultclusterissuer">
+
+   ```shell-session
+   $ kubectl delete clusterissuer vault-cluster-issuer
+   ```
+
+   </Tab>
+
+   </Tabs>
+
+1. Revoke credentials and remove credential Secrets used **only** by that
+   issuer. Do not remove shared authentication resources.
+
+After cleanup, rollback requires recreating the issuer from
+`issuer-inventory.yaml` and restoring or replacing its credentials.
+
+## Additional resources
+
+- [Set up the cert-manager issuer](/vault/docs/deploy/kubernetes/vso/cert-manager/setup)
+- [Troubleshoot the cert-manager issuer](/vault/docs/deploy/kubernetes/vso/cert-manager/troubleshoot)
+- [Install and upgrade the Vault Secrets Operator](/vault/docs/deploy/kubernetes/vso/installation)
+- [cert-manager Vault issuer documentation](https://cert-manager.io/docs/configuration/vault/)
