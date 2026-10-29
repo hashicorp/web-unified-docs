@@ -2,43 +2,134 @@
 layout: docs
 page_title: Upgrade Consul to v2.1.x
 description: >-
-  Upgrade a Consul Enterprise datacenter from v2.0.x to v2.1.x. Review version-specific considerations and upgrade procedures before you begin.
+  Upgrade Consul from v2.0.x to v2.1.x. Review API Gateway, multiport, feature-gate, and rollback requirements before you begin.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-10-19T16:30:10+05:30
+last_modified: 2026-10-29T12:22:53.000Z
+# END AUTO GENERATED METADATA
 ---
 
 # Upgrade Consul to v2.1.x
 
-Version-specific migration requirements and validations for upgrading to Consul 2.1.x.
-
-For general upgrade procedures, refer to the [General Upgrade Process](/consul/docs/upgrade/instructions/general).
+Review the version-specific requirements for upgrading to Consul 2.1.x. Follow the [General Upgrade Process](/consul/docs/upgrade/instructions/general) for the standard server and client upgrade sequence.
 
 ## From Consul 2.0.x to 2.1.x
 
-### Pre-Upgrade Validations
+### Requirements
 
-{/* TODO: Add validations specific to 2.0.x → 2.1.x upgrade path */}
+Peered multiport routing is available in Consul Enterprise 2.1.0 and later. Before you enable it, upgrade every Consul server in both peered clusters, and the mesh gateways, client agents, and sidecar proxies that serve the exporting and consuming services, to Consul Enterprise 2.1.0 or later. Each cluster must have a mesh gateway, and the exporting service must be registered as multiport, exported to the peer, and allowed by a service intention.
 
-### Post-Upgrade Validations
+Kubernetes multiport registration has a separate Helm chart switch. Set `connectInject.multiportServiceRegistration.enabled` to `true`; it defaults to `false`. Enabling the server feature gate does not enable multiport registration in the Kubernetes injector.
 
-{/* TODO: Add validations specific to 2.0.x → 2.1.x upgrade path */}
+### Pre-upgrade checks
+
+1. Review the [General Upgrade Process](/consul/docs/upgrade/instructions/general) and plan the server and client upgrade sequence.
+1. For peered multiport routing, confirm that both clusters can run Consul Enterprise 2.1.0 or later on every server, mesh gateway, client agent, and sidecar proxy involved in the traffic path. The feature gate remains disabled until all servers in each cluster meet the minimum version.
+1. For Kubernetes workloads, set `connectInject.multiportServiceRegistration.enabled` to `true` in the Helm values before deploying Pods that register multiple ports. When a Pod exposes named ports across multiple containers, set `consul.hashicorp.com/connect-service-port` to a comma-separated list such as `http,metrics`. The injector derives its default from the first container only.
+1. If you run API gateways that receive their configuration directly from Consul servers (Consul Dataplane without a client agent) and route to services that use service-router or service-resolver subsets, plan to enable the `api-gateway-upstream-routing` feature gate after the upgrade. Refer to [API Gateway upstream routing](#api-gateway-upstream-routing).
+
+### Enable peered multiport routing
+
+The `peering-multiport-upstreams` feature gate is experimental and disabled by default. It enables named-port routing to services imported from cluster peers. Multiport services within one cluster and peer services that use only their default port do not require this gate.
+
+After all servers in both clusters run Consul Enterprise 2.1.0 or later, enable the gate in both the exporting and consuming clusters:
+
+```shell-session
+$ consul operator feature set peering-multiport-upstreams enabled
+```
+
+Check the requested and effective state in each cluster:
+
+```shell-session
+$ consul operator feature get peering-multiport-upstreams
+```
+
+The `feature_gates.bootstrap` server configuration sets initial gate state only when you create a datacenter. For existing clusters, use the `consul operator feature set` command. For upstream and DNS configuration, refer to [Multiport services across cluster peers](/consul/docs/connect/proxy/multiport#multiport-services-across-cluster-peers).
+
+For Kubernetes, enable the Helm chart switch separately:
+
+```yaml
+connectInject:
+  multiportServiceRegistration:
+    enabled: true
+```
+
+When this value is `false`, the injector starts with `-disable-multiport-registration=true` and rejects Pods that select multiple service ports. Check the injector logs for `multi-port service registrations will remain disabled` when registration does not take effect.
+
+### Post-upgrade checks
+
+1. Confirm that every server, mesh gateway, client agent, and sidecar proxy in both clusters reports Consul Enterprise 2.1.0 or later.
+1. Check the `peering-multiport-upstreams` gate in both clusters with `consul operator feature get`.
+1. Inspect the exported service registration and confirm that its named ports appear in `Ports`. For a Kubernetes Pod with ports in different containers, confirm that the `connect-service-port` annotation lists every port name.
+1. Test a peer-qualified DNS name for each port. For example, query `http.api.virtual.dc2-peer.peer.consul.` for the `http` port of the `api` service imported from `dc2-peer`. The name `http.api.virtual.consul` does not query the peer and returns no answer when no matching local service exists. Both `http.api.virtual.dc2-peer.consul.` and `http.api.virtual.dc2-peer.peer.consul.` resolve in the tested configuration. When you use `curlimages/curl`, include the trailing dot so the resolver treats the name as absolute.
+
+When the gate is disabled, per-port virtual IPs can remain allocated and per-port DNS names can still resolve, but connections to those addresses reset. A successful lookup alone does not confirm that the feature gate is enabled or that traffic can pass.
+
+### Multiport registration and lookup considerations
+
+- The injector derives its default port list from the first container in the Pod. If named ports are split across containers, explicitly set `consul.hashicorp.com/connect-service-port` to a comma-separated list such as `http,metrics`.
+- Do not set both the single-port `Port` field and multiport `Ports` field in one service registration. The conflicting fields produce `Cannot set both Port and Ports`.
+- A removed or nonexistent named port does not always produce an error. A DNS lookup for a removed port can return the service's default virtual IP after the service is no longer registered as multiport. A non-transparent upstream with a removed or nonexistent `destination_port` can also route to the default port and return a successful HTTP response.
+- A single-port service can resolve a `<port-name>.<service>.virtual...` name to its base virtual IP. Do not rely on an NXDOMAIN response or a failed request to detect a misspelled or removed port name.
+- Removing and re-adding ports can allocate new per-port virtual IPs. A previously observed address can later identify a different port; refresh cached addresses after changing a service's port registration.
+- The warning that names a service, affected ports, and protocol is not present in the tested Consul binary. The related upstream warning is emitted on the consumer sidecar; do not use it to infer exporter-side discovery-chain behavior.
+
+During validation, disabling the gate took about 5 seconds and enabling it took about 19 seconds. After an intention change, each route path converged separately in 0 to 9 seconds. Treat these as observed approximate timings, not service-level guarantees.
 
 ## From Consul 1.21.x to 2.1.x
 
-First, follow [Upgrade Consul to v2.0.x](/consul/docs/upgrade/instructions/upgrade-to-2-0-x), then return to the [2.0.x to 2.1.x section](#from-consul-2-0-x-to-2-1-x) above.
+First, follow [Upgrade Consul to v2.0.x](/consul/docs/upgrade/instructions/upgrade-to-2-0-x). Then complete the applicable checks and upgrade steps in the [2.0.x to 2.1.x section](#from-consul-2-0-x-to-2-1-x).
 
-## Behavior Changes
+## Behavior changes
 
 ### Hybrid post-quantum TLS
 
-{/* TODO: Document auto-activation behavior and migration procedures */}
+Consul 2.1 can automatically select hybrid key-exchange groups when TLS 1.3 is the effective minimum and the curve list is unset. Review your TLS settings and prepare compatible proxies and agents before upgrading. Follow [Migrate to post-quantum TLS](/consul/docs/secure/encryption/migrate-post-quantum) for staged adoption and [version-specific upgrade details](/consul/docs/upgrade/version-specific#hybrid-post-quantum-tls) for upgrade behavior.
 
-### API gateway features
+### API Gateway upstream routing
 
-{/* TODO: Document API gateway configuration changes (http2/grpc, TLS.Enabled, SNI handling, etc.) */}
+In Consul 2.0.x, an API gateway always builds each route from the backend service's discovery chain. Service-router rules are composed with the HTTPRoute matches, and service-resolver subsets are resolved. Consul 2.0.x has no feature gate for this behavior.
+
+Consul 2.1.x adds the experimental `api-gateway-upstream-routing` feature gate. The gate is disabled by default and applies only to API gateways that receive their configuration directly from Consul servers, such as gateways that run with Consul Dataplane and no Consul client agent. API gateways that run with a Consul client agent always compose upstream routing, so the gate does not change their behavior.
+
+| API gateway type | Consul 2.0.x | Consul 2.1.x, gate disabled (default) | Consul 2.1.x, gate enabled |
+| :--------------- | :----------- | :------------------------------------ | :------------------------- |
+| Receives configuration from a Consul client agent | Composes upstream routing | Composes upstream routing | Composes upstream routing |
+| Receives configuration directly from Consul servers | Composes upstream routing | Uses the legacy HTTPRoute-to-router shape | Composes upstream routing |
+
+When the gate is disabled, a gateway that receives its configuration directly from Consul servers does not compose backend service-router rules with HTTPRoute matches and does not preserve service-resolver subset definitions. Routes to services that use service-router entries can return HTTP 503 until you enable the gate. If your gateways routed to such services before the upgrade, enable the gate as soon as the upgrade completes.
+
+To enable upstream routing for these gateways:
+
+1. Upgrade every Consul server in the datacenter to Consul 2.1.0 or later. The gate stays ineffective, with the reason `below-minimum-version`, until every server meets the minimum version.
+1. Enable the gate in each datacenter that has affected gateways:
+
+   ```shell-session
+   $ consul operator feature set api-gateway-upstream-routing enabled
+   ```
+
+1. Confirm that `Effective` is `true`:
+
+   ```shell-session
+   $ consul operator feature get api-gateway-upstream-routing
+   ```
+
+Consul rebuilds the configuration for affected gateways automatically when the effective gate state changes. You do not need to restart the gateways. To return to the legacy shape, set the gate to `disabled`.
+
+The `feature_gates.bootstrap` server configuration sets initial gate state only when you create a datacenter. For existing clusters, use the `consul operator feature set` command. For more information, refer to [Feature gates](/consul/docs/manage/feature-gates).
+
+The `api-gateway-upstream-routing` gate is separate from the `peering-multiport-upstreams` feature gate. The latter controls named-port routing to services imported from cluster peers and does not affect API gateways.
+
+Consul 2.0 servers and client agents do not support API Gateway options added in 2.1, including `http2` and `grpc` listener protocols, inverted header matches, and passive health checks. Upgrade all servers and any client agents that run API gateways before you configure these options. For detailed behavior and validation steps, refer to [API Gateway features that require a completed upgrade](/consul/docs/upgrade/version-specific#api-gateway-features-that-require-a-completed-upgrade).
 
 ### Other version-specific changes
 
-{/* TODO: Document additional 2.1.x-specific behavior changes */}
+Review the [version-specific upgrade details](/consul/docs/upgrade/version-specific) for changes to API Gateway TLS, proxy certificate delivery, and other Consul 2.1 behavior.
 
 ## Rollback
 
-{/* TODO: Add version-specific rollback procedures */}
+When you disable peered multiport routing, disable `peering-multiport-upstreams` in both the exporting and consuming clusters. A one-sided change leaves the peers in different feature states and can interrupt named-port traffic. If you also roll back Kubernetes multiport registration, set `connectInject.multiportServiceRegistration.enabled` to `false` after you stop deploying multiport Pods.
+
+During validation, named-port requests failed for up to 35 seconds after disabling the gate and about 18 seconds after enabling it. Per-port route virtual hosts remained in the Envoy `config_dump` for about 30 seconds after disable, so an immediate configuration dump may still show them. The gate removes peering-specific per-port routing from mesh gateways; local `.internal.` per-port chains and clusters remain. Treat these timings and observations as approximate, not service-level guarantees.
+
+Disabling the gate does not immediately remove per-port virtual IP allocations or DNS answers. Connections to those addresses reset while the gate is off. Verify gate state in both clusters and test traffic before you conclude that a rollback or re-enable has completed.
