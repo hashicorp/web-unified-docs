@@ -1,0 +1,170 @@
+---
+layout: docs
+page_title: Batch job queue
+description: |-
+  Schedule a Nomad node pool's batch jobs one at a time with a batch job queue, in FIFO order or by a dynamic priority that gives each tenant a fair share.
+---
+
+# Batch job queue
+
+When many batch jobs wait for resources, Nomad can schedule them in any order,
+without regard for who submitted the job. A Nomad batch job queue holds
+a node pool's batch jobs and sends them to the scheduler one at a time, in
+a deterministic order. You can configure the queue to be first in, first out (FIFO)
+or to use a dynamic priority based on job age, size, and fairness of resources
+requested. Learn how the queue orders jobs and what tradeoffs it introduces.
+
+@include '../../../global/partials/status/experimental.mdx'
+
+To configure a queue on a node pool, refer to [Queue batch jobs](/nomad/docs/govern/queue-batch-jobs).
+
+## How a batch job queue works
+
+You configure a batch job queue on a node pool with the 
+[`batch_queue`](/nomad/docs/other-specifications/node-pool#batch_queue-parameters) block of the
+node pool specification. Each node pool with the exception of the `Default` pool has its own queue,
+and node pools without a `batch_queue` block do not queue batch jobs.
+
+When you register a batch job that runs in a node pool with a queue, Nomad adds
+the job's registration evaluation to the queue instead of sending it to the
+scheduler. The queue then works through its jobs one at a time.
+
+1. The queue selects the next job and sends its evaluation to the scheduler.
+1. The queue waits until Nomad places all the job's allocations. If the job does not
+   fit on the available nodes, the scheduler creates a blocked evaluation, and
+   the queue waits for that evaluation to complete as well.
+1. After Nomad places the entire job, the queue selects the next job.
+
+The queue waits for Nomad to place each job, not for the job to finish running.
+
+While a job waits in the queue, `nomad job status` reports the job's status as
+`pending`, and the Nomad UI shows the job with the Pending status.
+
+The following behaviors also apply.
+
+- Only batch jobs use the queue. Nomad schedules service, system, and sysbatch
+  jobs as usual.
+- Only evaluations that job registration creates enter the queue. Nomad sends
+  other evaluations for a job, such as the reschedule evaluations that the
+  scheduler creates, directly to the scheduler. 
+- Child jobs that a [periodic](/nomad/docs/job-specification/periodic) job
+  launches also skip the queue.
+- You cannot modify the built-in `default` and `all` node pools, so you cannot
+  configure a queue on them. Jobs that run in the `all` node pool never use a
+  queue.
+- The Nomad leader holds the queue in memory. When leadership changes, the new
+  leader rebuilds each queue from the batch jobs in its state store that Nomad
+  has not placed yet and from their evaluations.
+
+### Workload status
+
+The [`nomad queue jobs`](/nomad/commands/queue/jobs) command reports each job in
+a queue with one of the following statuses.
+
+- `queued` means the job is waiting in the queue.
+- `placing` means the queue sent the job to the scheduler and is waiting for
+  Nomad to place its allocations, which includes waiting for resources to become
+  available.
+
+### Updated and stopped jobs
+
+When you register a new version of a job while an earlier version is still in
+the queue, the queue keeps only the newer version. Nomad cancels the evaluation
+for the older version.
+
+The queue treats the newer version as a new job. In a FIFO queue, the newer
+version moves to the back of the queue instead of keeping the position of the
+older version. In a dynamic priority queue, the age adjustment of the newer
+version starts over.
+
+When you stop a job that is waiting in the queue, Nomad removes the job from the
+queue and cancels its registration evaluation.
+
+## Queue types
+
+A node pool's queue uses one of two types. The type decides which job the queue
+sends to the scheduler next.
+
+| Queue type | Order | Configuration |
+| --- | --- | --- |
+| FIFO | The order in which Nomad created the jobs' registration evaluations | None |
+| Dynamic priority | The highest adjusted priority first, calculated from each tenant's share of allocated resources and the job's age and size | Tenant model, weights, and a recalculation interval |
+
+### FIFO
+
+A FIFO queue sends jobs to the scheduler in the order that you registered them.
+It has no configuration options. Use a FIFO queue when you want batch jobs in a
+node pool to run in submission order.
+
+### Dynamic priority
+
+A dynamic priority queue calculates an adjusted priority for each job. When two jobs
+have the same adjusted priority, the queue sends the job it received first.
+
+The adjusted priority exists only inside the queue. It does not change the value
+of the job's `priority` parameter.
+
+#### Tenants
+
+The dynamic priority queue introduces the concept of cluster tenancy to ensure each tenant
+gets a [fair share](https://en.wikipedia.org/wiki/Fair-share_scheduling) of cluster resources. A tenant is a 
+group of jobs that the queue tracks allocated resources for, such as a team or a customer.
+Tenant fairshare measures the resources that Nomad allocated to each tenant's
+batch jobs in the node pool.
+
+You choose how the queue assigns jobs to tenants with the `tenant_type` parameter of the
+[`tenant_fairshare`](/nomad/docs/other-specifications/node-pool#tenant_fairshare-parameters)
+block.
+
+- `namespace` makes each namespace a tenant.
+- `metadata` makes each distinct value of a job
+  [`meta`](/nomad/docs/job-specification/meta) key a tenant. You name the key
+  in `metadata_key`. You must use the top level `job.meta` block.
+
+When you use `metadata` tenants, jobs that do not set the metadata key do not
+enter the queue. Nomad sends their evaluations directly to the scheduler.
+
+The queue calculates a job's adjusted priority when the job enters the queue.
+Every `calc_interval`, the queue measures each tenant's allocated resources again
+and recalculates the priority of every queued job.
+
+Use the [`nomad queue status`](/nomad/commands/queue/status) command to view
+each tenant's allocated resources.
+
+## Tradeoffs
+
+Consider the following tradeoffs before you configure a batch job queue.
+
+- **Serialized scheduling.** The queue sends one job at a time to the scheduler
+  and waits for Nomad to place it. Batch jobs in a node pool with a queue
+  may schedule more slowly than batch jobs in a node pool without one.
+- **Head of line blocking.** A job that waits for resources stays at the front of
+  the queue and holds every job behind it. The queue does not skip the job to
+  run a smaller job that fits. Stop the job to release the queue.
+
+  For a job that Nomad cannot place because of unsatisfiable constraints, such as a jobs
+  requesting a driver that no node contains, the queue waits only for the
+  [`constraint_timeout`](/nomad/docs/other-specifications/node-pool#constraint_timeout)
+  duration. After the timeout, the queue sends the next job to the
+  scheduler, and the blocked job waits for placement outside the queue. If you
+  do not set a timeout, the job holds the queue until Nomad places it or you
+  stop it.
+
+- **Similar jobs work best.** Because the queue cannot skip jobs, it works best
+  when jobs in a node pool have similar constraints and resource requirements.
+
+## Monitor a queue
+
+Use the following commands and API endpoints to inspect a batch job queue.
+
+- The [`nomad queue jobs`](/nomad/commands/queue/jobs) command and the
+  [`/v1/queue/jobs`](/nomad/api-docs/queue#list-queued-jobs) endpoint list
+  the jobs in a queue with their status and position.
+- The [`nomad queue status`](/nomad/commands/queue/status) command and the
+  [`/v1/queue/status`](/nomad/api-docs/queue#read-queue-status) endpoint
+  report the status of a queue, such as the tenants in a dynamic priority queue
+  and their allocated resources.
+- The `nomad.queue.jobs` and `nomad.queue.watcher.since_job_submitted`
+  [server metrics](/nomad/docs/reference/metrics#server-metrics) report the
+  number of jobs in each queue and how long the queue has waited for its
+  current job to place since you submitted it.
