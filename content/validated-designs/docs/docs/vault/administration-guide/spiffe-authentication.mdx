@@ -1,0 +1,488 @@
+---
+page_title: SPIFFE authentication for non-human identities
+description: Configure the SPIFFE auth method to authenticate workloads to Vault using SPIFFE SVIDs, and configure Vault as an upstream certificate authority for SPIRE.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-09-02T00:00:00.000Z
+last_modified: 2026-09-02T00:00:00.000Z
+# END AUTO GENERATED METADATA
+---
+
+# SPIFFE authentication for non-human identities
+
+Non-human workloads — services, microservices, CI/CD pipelines, and AI agents — vastly outnumber human operators in most enterprises, yet they continue to authenticate using long-lived, hard-coded static credentials. These credentials accumulate across clouds, datacenters, and container clusters without a consistent lifecycle, creating secrets sprawl and expanding the blast radius when any single credential is compromised.
+
+SPIFFE (Secure Production Identity Framework for Everyone) is an open standard that solves this by assigning every workload a short-lived, cryptographically verifiable identity: a SPIFFE ID. SPIRE (SPIFFE Runtime Environment) is the reference implementation that automates SPIFFE identity issuance across virtual machines, Kubernetes clusters, and hybrid environments. The Vault SPIFFE auth method closes the loop by letting workloads exchange their SPIFFE identity for a Vault token scoped to a narrow policy — replacing the static credential with an ephemeral, platform-agnostic identity.
+
+<Warning>
+
+The SPIFFE auth method is a Vault Enterprise feature available in Vault Enterprise 1.21 and later. It is not available in Vault Community Edition.
+
+</Warning>
+
+## SPIFFE/SPIRE capabilities within Vault
+
+Vault integrates with SPIFFE and SPIRE through three complementary patterns that together replace static credentials with ephemeral, platform-agnostic workload identities.
+
+1. **Vault as upstream authority for SPIRE.** SPIRE Server delegates CA signing to Vault's PKI secrets engine via the Vault UpstreamAuthority plugin. All SVIDs issued by SPIRE ultimately chain back to a root CA key managed in Vault, providing centralized audit, rotation, and compliance tracking. This is a separate configuration from the SPIFFE auth method and does not require SPIFFE auth to be enabled.
+2. **SVID minting via Vault PKI.** Vault's PKI secrets engine can issue X.509 certificates with SPIFFE IDs embedded in the URI SAN, providing SVID-like identities for mutual TLS in environments that do not use SPIRE. The SPIFFE secrets engine extends this further by minting JWT-SVIDs on demand, with [OIDC compliance](https://developer.hashicorp.com/vault/docs/secrets/spiffe#integrate-with-oidc) for cross-system interoperability.
+
+## SPIFFE auth method
+
+The SPIFFE auth method is the primary mechanism for workloads holding a valid SVID from SPIRE to authenticate to Vault and receive a scoped Vault token. SPIFFE is the identity component — it provides the SVID that proves who the workload is. It does not specify authorization. The SVID is used by the workload to access secrets and certificates within Vault, with access governed by the Vault policies attached to the matched SPIFFE auth role.
+
+This provides a platform-agnostic alternative to cloud-specific auth methods and eliminates the static credential delivery problem of AppRole.
+
+### Use case
+
+Use the SPIFFE auth method when one or more of the following applies to your organization:
+
+- **Multi-cloud or hybrid workloads:** Applications span AWS, Azure, GCP, and on-premises environments where cloud-specific auth methods cannot provide a consistent identity mechanism.
+- **Zero Trust mandate:** Your security policy requires mutual TLS (mTLS) between all services with cryptographically verified workload identities.
+- **Standardised non-human identity:** Your platform team wants a single identity model for all non-human actors — services, CI/CD agents, and AI agents — without per-cloud IAM role management.
+- **Agentic AI workloads:** AI agents require short-lived credentials with an auditable identity trail connecting agent actions back to a registered workload identity.
+
+If your workloads run exclusively on a single supported cloud provider and platform integration (AWS, GCP, Azure, or Kubernetes auth) is simpler to operate, prefer the platform-specific auth method. Reserve SPIFFE for environments where a consistent, platform-agnostic identity mechanism is needed.
+
+### Reference materials
+
+- <a href="https://developer.hashicorp.com/vault/docs/auth/spiffe" target="_blank" rel="noopener">SPIFFE auth method documentation</a>
+- <a href="https://developer.hashicorp.com/vault/api-docs/auth/spiffe" target="_blank" rel="noopener">SPIFFE auth method API</a>
+- <a href="https://developer.hashicorp.com/vault/docs/v1.21.x/updates/release-notes" target="_blank" rel="noopener">Vault Enterprise 1.21 release notes</a>
+- <a href="https://github.com/spiffe/spire/blob/main/doc/plugin_server_upstreamauthority_vault.md" target="_blank" rel="noopener">SPIRE Vault UpstreamAuthority plugin</a>
+- <a href="https://spiffe.io/docs/latest/spire-about/spire-concepts/" target="_blank" rel="noopener">SPIRE concepts</a>
+- <a href="https://github.com/spiffe/spire-controller-manager" target="_blank" rel="noopener">SPIRE Controller Manager</a>
+- <a href="https://developer.hashicorp.com/validated-designs/vault-operating-guides-scaling/pki-certificate-management" target="_blank" rel="noopener">PKI Certificate Management with Vault (Scaling Guide)</a>
+
+## Configure the SPIFFE auth method
+
+The following steps configure end-to-end SPIFFE-based workload authentication: Vault as the root CA for SPIRE, the SPIFFE auth method, and your first workload role. TLS must be enabled on the Vault listener (`tls_disable = false`). X.509-SVID authentication additionally requires `tls_disable_client_certs = false` in the TCP listener configuration.
+
+### Step 1: Configure Vault as upstream authority for SPIRE
+
+Configuring Vault as the upstream authority for SPIRE makes Vault the root of trust for your entire workload identity plane. SPIRE Server authenticates to Vault using a supported auth method and requests that Vault sign its intermediate CA certificate. All SVIDs issued by SPIRE ultimately chain back to a CA key that lives in Vault, enabling centralized audit, rotation, and compliance tracking.
+
+This step configures the PKI integration between SPIRE and Vault. Configuring Vault as an upstream authority is a separate feature from the SPIFFE auth method itself. In a deployment where SPIRE uses its own PKI rather than Vault's, you can skip this step and configure the SPIFFE auth method to fetch the trust bundle directly from SPIRE's federation API.
+
+#### Enable and configure the PKI secrets engine
+
+Enable a dedicated PKI secrets engine mount for SPIRE. Do not share this mount with application certificate issuance.
+
+```shell-session
+vault secrets enable -path=spire-pki pki
+```
+
+Configure the maximum certificate TTL for this mount. This controls the maximum lifetime of the intermediate CA certificate that SPIRE Server will hold.
+
+```shell-session
+vault secrets tune -max-lease-ttl=87600h spire-pki
+```
+
+Generate a root CA within this mount, or import an existing one. The root CA private key stays in Vault.
+
+```shell-session
+$ vault write spire-pki/root/generate/internal \
+    common_name="Vault Root CA for SPIRE" \
+    ttl=87600h
+```
+
+#### Create the Vault policy for SPIRE
+
+Create a narrowly-scoped Vault policy that grants SPIRE Server exactly the permission it needs to sign its intermediate CA certificate.
+
+```hcl
+# spire-upstream-authority-policy.hcl
+path "spire-pki/root/sign-intermediate" {
+  capabilities = ["update"]
+}
+```
+
+Apply the policy to Vault:
+
+```shell-session
+vault policy write spire-upstream-authority spire-upstream-authority-policy.hcl
+```
+
+Do not grant SPIRE Server broader access to the PKI mount. The `sign-intermediate` path is the only operation SPIRE Server requires.
+
+#### Configure SPIRE Server authentication to Vault
+
+SPIRE Server must authenticate to Vault to call the `sign-intermediate` endpoint. Use one of the following auth methods depending on your environment.
+
+| Environment | Recommended auth method |
+| --- | --- |
+| SPIRE and Vault both on Kubernetes | Kubernetes auth method |
+| SPIRE on VMs, Vault on VMs or cloud | AppRole auth method (only when no platform-specific auth method is available) |
+| On-premises with existing PKI | TLS certificate auth method |
+| Development and testing only | Token auth |
+
+Use Kubernetes auth or TLS certificate auth in production where possible. AppRole is acceptable when no platform-specific auth method is available — SPIRE supports a range of [node attestation plugins](https://github.com/spiffe/spire/blob/main/doc/plugin_server_upstreamauthority_vault.md) that may provide a better alternative. Avoid token auth outside of development — static tokens do not rotate automatically and cannot be tightly scoped.
+
+Enable AppRole and create a role for the SPIRE Server:
+
+```shell-session
+$ vault auth enable approle
+
+$ vault write auth/approle/role/spire-server \
+    secret_id_ttl=0 \
+    token_ttl=1h \
+    token_max_ttl=4h \
+    token_policies="spire-upstream-authority"
+```
+
+Retrieve the RoleID and a SecretID, then provide them to the SPIRE Server configuration.
+
+```shell-session
+vault read auth/approle/role/spire-server/role-id
+
+vault write -force -field=secret_id auth/approle/role/spire-server/secret-id
+```
+
+#### Configure the SPIRE Vault UpstreamAuthority plugin
+
+In your SPIRE Server configuration file, add the `UpstreamAuthority "vault"` block. The following example shows AppRole authentication; substitute the `approle_auth` block with `k8s_auth` or `cert_auth` for other auth methods.
+
+```hcl
+UpstreamAuthority "vault" {
+  plugin_data {
+    vault_addr       = "https://vault.example.com:8200"
+    pki_mount_point  = "spire-pki"
+    namespace        = "prod"   # Vault Enterprise namespace; omit for root namespace
+
+    approle_auth {
+      approle_id_file_path        = "/run/spire/secrets/approle-id"
+      approle_secret_id_file_path = "/run/spire/secrets/approle-secret-id"
+    }
+  }
+}
+```
+
+Place the RoleID in the `approle-id` file and the SecretID in the `approle-secret-id` file on the SPIRE Server host before starting the service. Set file permissions to restrict access to the SPIRE Server process.
+
+<Note>
+
+The Vault UpstreamAuthority plugin does not support the `PublishJWTKey` RPC. This means it cannot serve as the upstream authority in nested SPIRE deployments that rely on JWT-SVIDs. If you use nested SPIRE with JWT-SVIDs, place Vault as the upstream authority only at the root SPIRE Server level, and use a different upstream for nested servers that require JWT-SVID support.
+
+</Note>
+
+After restarting SPIRE Server, verify that it successfully signed an intermediate CA by checking the SPIRE Server logs for a line similar to:
+
+```text
+level=info msg="X509 CA signed" method=AuthorizeCSR
+```
+
+### Step 2: Enable the auth method
+
+Enable the SPIFFE auth method. For JWT-SVID support, you must pass the `Authorization` header through to Vault. Include the `-passthrough-request-headers` flag at enable time.
+
+```shell-session
+$ export VAULT_ADDR=https://vault.example.com:8200
+$ export VAULT_NAMESPACE=<tenant namespace>
+
+$ vault auth enable \
+    -passthrough-request-headers="Authorization" \
+    spiffe
+```
+
+<Note>
+
+If you do not include `-passthrough-request-headers="Authorization"` when enabling the auth method, JWT-SVID login will fail with an authentication error. This flag cannot be added after the fact without re-mounting the auth method. Set it at enable time.
+
+</Note>
+
+If you only require X.509-SVID authentication and do not need JWT-SVIDs, you can omit the passthrough header flag. Ensure `tls_disable_client_certs = false` is set in your Vault listener configuration before proceeding with X.509 login.
+
+### Step 3: Configure the trust domain and trust bundle
+
+Configure the SPIFFE auth mount with your trust domain and the trust bundle that Vault will use to validate incoming SVIDs. Choose the bundle profile that matches your SPIRE deployment.
+
+| Profile | When to use |
+| --- | --- |
+| `static` | SPIRE federation is not available; you have a PEM trust bundle to embed directly |
+| `https_web_pem` | SPIRE is unavailable but you can fetch the trust bundle from an HTTPS endpoint |
+| `https_web_bundle` | SPIRE federation endpoint is configured with `https_web` format |
+| `https_spiffe_bundle` | SPIRE federation endpoint is configured with `https_spiffe` format |
+
+Prefer `https_web_bundle` or `https_spiffe_bundle` in production when SPIRE federation is available. These profiles allow Vault to automatically refresh the trust bundle when SPIRE rotates its intermediate CA, without requiring manual intervention. The SPIFFE auth method can also fetch the trust bundle directly from SPIRE's federation API when Vault is not configured as the upstream authority, making these live-fetch profiles the preferred approach regardless of the upstream CA configuration.
+
+#### Option A: Static trust bundle (no SPIRE federation)
+
+```shell-session
+$ vault write auth/spiffe/config \
+    trust_domain="prod.example.com" \
+    profile="static" \
+    bundle=@/path/to/spire-bundle.pem
+```
+
+#### Option B: Live bundle fetch from SPIRE federation endpoint
+
+```shell-session
+$ vault write auth/spiffe/config \
+    trust_domain="prod.example.com" \
+    profile="https_web_bundle" \
+    endpoint_url="https://spire.prod.example.com:8443/bundle" \
+    endpoint_root_ca_truststore_pem=@/path/to/spire-ca.pem
+```
+
+Configure the `audience` field whenever you use JWT-SVIDs. Setting audience enforces that JWT-SVIDs presented to this mount were issued specifically for Vault, preventing token reuse from other systems.
+
+```shell-session
+$ vault write auth/spiffe/config \
+    trust_domain="prod.example.com" \
+    profile="https_web_bundle" \
+    endpoint_url="https://spire.prod.example.com:8443/bundle" \
+    endpoint_root_ca_truststore_pem=@/path/to/spire-ca.pem \
+    audience="vault.prod.example.com"
+```
+
+<Tip>
+
+Do not set `defer_bundle_fetch=true` in production. Deferring the initial bundle fetch means Vault cannot validate SVIDs until the first refresh cycle succeeds. Set `defer_bundle_fetch=false` (the default) to fail fast during configuration and catch connectivity issues immediately.
+
+</Tip>
+
+### Step 4: Create roles with workload ID patterns
+
+A SPIFFE auth role maps a SPIFFE ID pattern to a set of Vault token policies. Create one role per logical application boundary. Use the narrowest pattern that covers the workload's SPIFFE IDs.
+
+Wildcard characters in `workload_id_patterns`:
+
+- `*` matches any number of characters within a path segment or at the end of the pattern
+- `+` matches exactly one path segment
+
+```shell-session
+# Role for the payments API service on Kubernetes
+$ vault write auth/spiffe/role/payments-api \
+    workload_id_patterns="spiffe://prod.example.com/ns/payments/sa/api-server" \
+    token_ttl=1h \
+    token_max_ttl=4h \
+    token_policies="payments-api-policy"
+```
+
+```shell-session
+# Role for all services in the payments namespace (use with caution — review quarterly)
+$ vault write auth/spiffe/role/payments-namespace \
+    workload_id_patterns="spiffe://prod.example.com/ns/payments/sa/+" \
+    token_ttl=1h \
+    token_max_ttl=4h \
+    token_policies="payments-namespace-policy"
+```
+
+<Note>
+
+Providing the `role` parameter at login time is optional but strongly recommended in production. When `role` is omitted, Vault iterates through all configured roles to find a match, which adds latency and makes access control less predictable. Configure workloads to specify their role explicitly.
+
+</Note>
+
+Each Vault role corresponds to a SPIFFE ID that SPIRE must assign to the workload via a registration entry. Create the matching SPIRE registration entry for your workload's deployment type.
+
+#### On virtual machines
+
+On virtual machines, SPIRE Agent runs as a `systemd` service. The agent attests the node using a node attestor appropriate to your environment — for example, the AWS IMDSv2 attestor for EC2 instances or the X.509 attestor for on-premises hosts. After attestation, it exposes the Workload API on `/run/spire/sockets/agent.sock`. Applications retrieve their SVID from this socket using the go-spiffe client library or the `spire-agent api fetch` CLI.
+
+Create a registration entry for each VM workload using process-based selectors:
+
+```shell-session
+$ spire-server entry create \
+    -spiffeID spiffe://prod.example.com/app/payments-api \
+    -parentID spiffe://prod.example.com/node/worker-01 \
+    -selector unix:uid:1001
+```
+
+#### On Kubernetes
+
+On Kubernetes, deploy SPIRE Agent as a DaemonSet so that one agent pod runs on every node. The agent uses the Kubernetes workload attestor, which verifies workload identity using the pod's service account token, namespace, and labels.
+
+Create a registration entry for each Kubernetes workload using Kubernetes selectors:
+
+```shell-session
+$ spire-server entry create \
+    -spiffeID spiffe://prod.example.com/ns/payments/sa/api-server \
+    -parentID spiffe://prod.example.com/node/k8s-worker-01 \
+    -selector k8s:ns:payments \
+    -selector k8s:sa:api-server
+```
+
+For large Kubernetes clusters, use the <a href="https://github.com/spiffe/spire-controller-manager" target="_blank" rel="noopener">SPIRE Controller Manager</a> to automate registration entry creation via `ClusterSPIFFEID` custom resources, enabling GitOps-driven management of SPIFFE identities.
+
+### Step 5: Test the login
+
+Verify that a workload can authenticate before deploying at scale. Test both SVID types if you plan to use both.
+
+**Test with JWT-SVID:**
+
+On a node where SPIRE Agent is running, fetch a JWT-SVID from the Workload API and use it to authenticate to Vault.
+
+```shell-session
+# Retrieve a JWT-SVID from SPIRE Agent (requires spire-agent CLI or go-spiffe client library)
+$ JWT_SVID=$(spire-agent api fetch jwt \
+    -audience vault.prod.example.com \
+    -socketPath /run/spire/sockets/agent.sock \
+    | jq -r '.svids[0].svid')
+
+# Login to Vault with the JWT-SVID
+$ vault write auth/spiffe/login \
+    role=payments-api \
+    type=jwt \
+    -header="Authorization=Bearer ${JWT_SVID}"
+```
+
+A successful response returns a Vault token and confirms the attached policies match what you configured.
+
+**Test with X.509-SVID:**
+
+Fetch the X.509-SVID bundle from SPIRE Agent and use the certificate and private key to authenticate.
+
+```shell-session
+# Retrieve X.509 SVID files from SPIRE Agent
+$ spire-agent api fetch x509 \
+    -socketPath /run/spire/sockets/agent.sock \
+    -write /tmp/svid/
+
+# Login to Vault with the X.509 client certificate
+$ vault write auth/spiffe/login \
+    role=payments-api \
+    type=cert \
+    -client-cert=/tmp/svid/svid.0.pem \
+    -client-key=/tmp/svid/svid.0.key
+```
+
+<Note>
+
+X.509-SVID login requires that `tls_disable_client_certs = false` is set in the Vault TCP listener configuration. If Vault sits behind a load balancer that terminates TLS, configure the load balancer to forward the validated client certificate via a header and configure the Vault listener to accept it. Refer to the <a href="https://developer.hashicorp.com/vault/docs/configuration/listener/tcp" target="_blank" rel="noopener">Vault TCP listener configuration documentation</a> for details on `x_forwarded_for_authorized_addrs` and client certificate forwarding.
+
+</Note>
+
+## SPIFFE auth best practices
+
+### SPIFFE ID naming conventions
+
+Consistent naming makes role configuration, policy binding, and audit log correlation predictable at scale. Apply the following conventions across your organization.
+
+Use one trust domain per major environment boundary. Two trust domains are sufficient for most organizations: one for production and one for non-production.
+
+```text
+spiffe://prod.example.com        # Production workloads
+spiffe://nonprod.example.com     # Development, staging, and test workloads
+```
+
+Do not create per-team or per-application trust domains until you have demonstrated operational maturity managing two domains. Each additional trust domain multiplies the complexity of trust bundle management and cross-domain peering.
+
+| Platform | Convention | Example |
+| --- | --- | --- |
+| Kubernetes | `/ns/<namespace>/sa/<service-account>` | `spiffe://prod.example.com/ns/payments/sa/api-server` |
+| Virtual machines | `/app/<app-name>` | `spiffe://prod.example.com/app/payments-api` |
+| Multi-region VMs | `/region/<region>/app/<app-name>` | `spiffe://prod.example.com/region/us-east-1/app/payments-api` |
+| CI/CD pipelines | `/ci/<pipeline-name>` | `spiffe://nonprod.example.com/ci/payments-deploy` |
+| AI agents | `/agent/<agent-name>` | `spiffe://prod.example.com/agent/invoice-processor` |
+
+Establish naming conventions before onboarding the first workload. Renaming SPIFFE IDs after the fact requires updating SPIRE registration entries, Vault roles, and Vault policies simultaneously — a high-risk coordinated change.
+
+### Policy design
+
+Vault policies for SPIFFE workloads follow the same least-privilege principles as all Vault policies, but the SPIFFE ID structure enables fine-grained, template-based access control.
+
+**Bind policies to specific SPIFFE IDs:**
+
+Create one policy per application or service. Do not create a single policy that covers an entire trust domain or namespace.
+
+```hcl
+# payments-api-policy.hcl
+# Grants the payments API server access to its database credentials only
+path "database/creds/payments-api-role" {
+  capabilities = ["read"]
+}
+
+path "secret/data/payments/api-config" {
+  capabilities = ["read"]
+}
+```
+
+**Use workload ID patterns appropriately:**
+
+A narrow exact-match pattern is the safest default:
+
+```hcl
+# Recommended: exact match for a single service account
+workload_id_patterns = ["spiffe://prod.example.com/ns/payments/sa/api-server"]
+```
+
+A single-segment wildcard is acceptable for a service that runs across multiple replicas with different identities but the same access requirements:
+
+```hcl
+# Acceptable: all service accounts in the payments namespace
+workload_id_patterns = ["spiffe://prod.example.com/ns/payments/sa/+"]
+```
+
+Never create a trust-domain-wide wildcard policy:
+
+```hcl
+# Anti-pattern: grants any workload in the trust domain access to this role
+workload_id_patterns = ["spiffe://prod.example.com/*"]
+```
+
+Conduct quarterly reviews of all SPIFFE auth roles and their policies. Remove roles whose `workload_id_patterns` cover workloads that no longer exist, and narrow overly broad patterns to specific service identities.
+
+**Use policy templating for consistent access control:**
+
+If you have many services that follow the same secrets path structure, use Vault's [identity policy templating](https://developer.hashicorp.com/vault/docs/secrets/identity/identity-token#token-contents-and-templates) to parameterize access by SPIFFE ID path components. When a workload authenticates, Vault populates the entity and alias metadata from the auth method. You can use the [`alias_metadata`](https://developer.hashicorp.com/vault/api-docs/auth/approle#alias_metadata) field on auth method roles to expose SPIFFE ID components, then reference them in policy path templates. This reduces the number of unique policies to maintain and ensures new workloads automatically receive appropriately scoped access when they match the template pattern.
+
+### Operational considerations
+
+**Token and certificate TTLs:**
+
+Set SVID TTLs to between 4 and 12 hours for most production workloads. This provides frequent rotation while avoiding overwhelming SPIRE Server and its datastore with renewal requests.
+
+Set Vault token TTLs shorter than SVID TTLs: 1–4 hours is appropriate for most service-to-secrets access patterns. Short token TTLs reduce the blast radius if a token is compromised.
+
+```shell-session
+$ vault write auth/spiffe/role/payments-api \
+    workload_id_patterns="spiffe://prod.example.com/ns/payments/sa/api-server" \
+    token_ttl=1h \
+    token_max_ttl=4h \
+    token_policies="payments-api-policy"
+```
+
+Do not set token TTLs longer than 8 hours for workloads with access to sensitive secrets. Long-lived tokens extend the window of exposure if a workload is compromised.
+
+**Trust bundle rotation:**
+
+Vault caches the SPIRE trust bundle in memory and refreshes it on a schedule based on the SPIRE bundle's `refresh_hint` field (default 1 hour when using `https_web_bundle` or `https_spiffe_bundle` profiles). The active Vault cluster node handles refresh; Performance Replicas refresh independently.
+
+When SPIRE rotates its intermediate CA, the new trust bundle must be available at the federation endpoint before the old certificates expire. Coordinate trust bundle rotation with the following sequence:
+
+1. SPIRE Server generates a new intermediate CA certificate signed by Vault
+2. SPIRE Server publishes the updated trust bundle at its federation endpoint
+3. Vault fetches and caches the new bundle during its next refresh cycle (within `refresh_hint` duration)
+4. Old SVIDs signed by the previous intermediate CA continue to validate until they expire, providing a seamless transition
+
+For `static` bundle configurations, you must update the bundle manually. Automate this rotation using Terraform or a CI/CD pipeline that writes the updated bundle to `auth/spiffe/config`.
+
+**Monitoring:**
+
+Configure alerts for the following conditions:
+
+| Condition | Severity | Action |
+| --- | --- | --- |
+| SPIRE Server unavailable | Critical | Page on-call SRE; workloads cannot renew SVIDs |
+| Vault authentication failure rate > 1% | High | Investigate SPIFFE auth errors; check trust bundle validity |
+| Trust bundle mismatch errors | High | Verify SPIRE federation endpoint; refresh bundle manually if needed |
+| SVID issuance latency P95 > 100ms | Medium | Scale SPIRE Server nodes; tune concurrency settings |
+| Vault token issuance errors | High | Check Vault cluster health and SPIFFE auth role configuration |
+
+Export SPIRE metrics to Prometheus and build a dashboard tracking SVID issuance rate, issuance latency (P50/P95/P99), registration entry count, and error rates. Export Vault audit logs to your SIEM and create correlation rules that link SPIFFE IDs to specific authentication and secret-access events.
+
+<Note>
+
+The SPIFFE secrets engine (Vault Enterprise 2.0+) is a separate capability available in Vault Enterprise 2.0 and later. It allows Vault to mint JWT-SVIDs on demand for authenticated workloads, enabling Vault-to-Vault cross-cluster authentication using SPIFFE identities. It is distinct from the SPIFFE auth method described on this page.
+
+</Note>
+
+#### Reference material
+
+- <a href="https://developer.hashicorp.com/vault/docs/auth/spiffe" target="_blank" rel="noopener">SPIFFE auth method documentation</a>
+- <a href="https://developer.hashicorp.com/vault/api-docs/auth/spiffe" target="_blank" rel="noopener">SPIFFE auth method API</a>
+- <a href="https://developer.hashicorp.com/vault/docs/v1.21.x/updates/release-notes" target="_blank" rel="noopener">Vault Enterprise 1.21 release notes</a>
+- <a href="https://github.com/spiffe/spire/blob/main/doc/plugin_server_upstreamauthority_vault.md" target="_blank" rel="noopener">SPIRE Vault UpstreamAuthority plugin</a>
+- <a href="https://spiffe.io/docs/latest/spire-about/spire-concepts/" target="_blank" rel="noopener">SPIRE concepts</a>
+- <a href="https://github.com/spiffe/spire-controller-manager" target="_blank" rel="noopener">SPIRE Controller Manager</a>
+- <a href="https://developer.hashicorp.com/validated-designs/vault-operating-guides-scaling/pki-certificate-management" target="_blank" rel="noopener">PKI Certificate Management with Vault (Scaling Guide)</a>
