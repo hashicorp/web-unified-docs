@@ -105,9 +105,20 @@ export async function getProductPaths(
 			const stat = fs.statSync(itemPath)
 
 			if (stat.isDirectory()) {
+				// Skip the 'partials' directory
+				if (item === 'partials') {
+					return
+				}
 				traverseDirectory(itemPath, itemRelativePath)
 			} else {
-				const itemName = item.split('.')[0]
+				const itemName = path.parse(item).name
+				const extension = path.parse(item).ext
+
+				// Don't include non-MDX files in the path data
+				// This eliminates some errors in the sitemap
+				if (extension !== '.mdx') {
+					return
+				}
 
 				// Read frontmatter from the MDX file
 				let frontmatter = {}
@@ -126,6 +137,19 @@ export async function getProductPaths(
 					}
 				} catch (error) {
 					console.error(`Error reading frontmatter from ${itemPath}:`, error)
+				}
+
+				// Well architected framework has a different structure for its docs, so we need to adjust the relative path accordingly
+				if (productSlug === 'well-architected-framework') {
+					// If the relative path starts with 'templates', we skip it. This should not be included in sitemap
+					if (relativePath.startsWith('templates')) {
+						return
+					}
+
+					// remove the 'docs' part from the beginning of the relative path
+					if (relativePath.startsWith('docs')) {
+						relativePath = relativePath.slice(4)
+					}
 				}
 
 				if (itemName === 'index') {

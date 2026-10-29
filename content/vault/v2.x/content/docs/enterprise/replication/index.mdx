@@ -58,16 +58,6 @@ of relationships are either **disaster recovery** or
 
 ![](/img/replication-overview.png)
 
-The following table shows a capability comparison between Disaster Recovery
-and Performance Replication.
-
-| Capability                                                                                                           | Disaster Recovery | Performance Replication                                                                                                                                                                        |
-| -------------------------------------------------------------------------------------------------------------------- | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Mirrors the configuration of a primary cluster                                                                       | Yes               | Yes                                                                                                                                                                                |
-| Mirrors the configuration of a primary cluster’s backends (i.e., auth methods, secrets engines, audit devices, etc.) | Yes               | Yes                                                                                                                                                                                |
-| Mirrors the tokens and leases for applications and users interacting with the primary cluster                        | Yes               | No. Secondaries keep track of their own tokens and leases. When the secondary is promoted, applications must reauthenticate and obtain new leases from the newly-promoted primary. |
-| Allows the secondary cluster to handle client requests                                                               | No                | Yes                                            |
-
 Everything written to storage is classified into one of three categories:
 * `replicated` (or "shared"): all downstream clusters receive it
 * `local`: only downstream disaster recovery clusters receive it
@@ -92,6 +82,26 @@ Storage Autopilot configuration is an `ignored` storage entry, which allows for 
 secondaries to have a different configuration than their primary.  Tokens and leases are written to
 `local` storage entries.
 
+## Replication cluster capabilities
+
+Disaster recovery (DR) and performance replication both copy configuration from the
+primary cluster, but they serve different goals. DR replication keeps a warm
+standby that mirrors the primary, including tokens and leases, so you can
+promote it with minimal disruption to clients. Performance replication adds
+clusters that serve client requests locally to scale reads and reduce latency,
+while each secondary manages its own tokens and leases.
+
+Compare capabilities for each replication type:
+
+| Capability | DR Replication | Performance Replication |
+| --- | --- | --- |
+| Mirrors the configuration of a primary cluster | Yes | Yes |
+| Mirrors the configuration of a primary cluster's backends (i.e., auth methods, secrets engines, audit devices, etc.) | Yes | Yes |
+| Mirrors local mounts (secrets engines, auth methods, and audit devices) from the primary cluster | Yes | No. Local mounts on the primary aren't visible to performance secondaries. |
+| Mirrors the tokens and leases for applications and users interacting with the primary cluster | Yes | No. Secondaries keep track of their own tokens and leases. When the secondary is promoted, applications must reauthenticate and obtain new leases from the newly-promoted primary. |
+| Allows the secondary cluster to handle client requests | No | Yes |
+| Handles client requests while disconnected from the primary cluster | No | Partially. Refer to [Disconnected performance secondaries](#disconnected-performance-secondaries). |
+
 ## Performance replication
 
 @include 'alerts/enterprise-and-hcp.mdx'
@@ -107,6 +117,8 @@ in `transit`, etc.) can be satisfied by the local secondary, allowing Vault to s
 relatively horizontally with the number of secondaries rather than vertically as
 in the past.
 
+@include '../../../global/partials/alerts/vault-pr-dynamic-considerations.mdx'
+
 <Note title="Performance replication does not include automated integrated storage snapshots">
 
 Vault does not replicate automated integrated storage snapshots as a part of
@@ -116,6 +128,35 @@ You must explicitly configure each of the primary and secondary performance
 clusters to create individual automated snapshots replicas.
 
 </Note>
+
+### Disconnected performance secondaries
+
+If a performance secondary loses its connection to the primary cluster, it
+keeps serving any request it can complete with data from its own storage.
+Requests that write to replicated storage need primary cluster availability,
+so those writes fail until the connection returns.
+
+Reads of replicated data still succeed, but they return the data as of the last
+successful replication and could be stale. When the connection returns, the
+secondary automatically reconciles with the primary.
+
+As a general rule, reads succeed and writes fail. These are known exceptions
+and other behavior to plan for:
+
+| Operation | Behavior while disconnected |
+| --- | --- |
+| Read replicated data, such as KV secrets, policies, and mount configuration | Succeeds. Responses might be stale. |
+| Write replicated data, such as KV secrets, policies, roles, and mount configuration | Fails. The secondary can't forward the write to the primary. |
+| Encrypt or decrypt with `transit` | Succeeds. Transit uses the keys already replicated to the secondary. |
+| Read or write data on a [local mount](#paths-filter) created on the secondary | Succeeds. Local mount data lives only on the secondary. |
+| Issue a certificate with PKI | Succeeds. Issued certificates live in the secondary's local storage. |
+| Change PKI roles or issuers | Fails. Roles and issuers are replicated data. |
+| Revoke a PKI certificate that another cluster issued, by using [cross-cluster revocation](/vault/docs/secrets/pki/considerations#what-are-cross-cluster-crls) | Fails. Cross-cluster revocation requests write synchronously to the primary. |
+
+To check whether a secondary is connected, call the
+[replication status](/vault/api-docs/system/replication#check-status) endpoint
+on the secondary and look at `connection_status` and `last_heartbeat` for the
+primary.
 
 ### Paths filter
 
@@ -283,7 +324,7 @@ cluster port at a load balancer level.
 Refer to the following tutorials replication setup and best practices:
 
 - [Set up Performance Replication](/vault/tutorials/enterprise/performance-replication)
-- [Disaster Recovery Replication Setup](/vault/tutorials/enterprise/disaster-recovery)
+- [Disaster Recovery Replication Setup](/vault/tutorials/disaster-recovery)
 - [Monitoring Vault Replication](/vault/tutorials/monitoring/monitor-replication)
 
 ## API

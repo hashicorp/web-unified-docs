@@ -11,13 +11,13 @@ import { listFiles } from './list-files.mjs'
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
 
 /**
- * Check if a file is an image based on its extension.
+ * Check if a file is a supported asset based on its extension.
  */
-export function isFileAnImage(file) {
+export function isAssetFile(file) {
 	const fileExtension = path.extname(file).toLowerCase()
 
-	const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.svg']
-	return imageExtensions.includes(fileExtension)
+	const assetExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.pdf']
+	return assetExtensions.includes(fileExtension)
 }
 
 /**
@@ -31,7 +31,7 @@ export async function copyAssetFiles(sourceDir, destDir, changedFiles = null) {
 	const assetFiles = filesToCheck.filter((filePath) => {
 		const relativePath = path.relative(sourceDir, filePath)
 		const repoSlug = relativePath.split('/')[0]
-		return isFileAnImage(filePath) && repoSlug in PRODUCT_CONFIG
+		return isAssetFile(filePath) && repoSlug in PRODUCT_CONFIG
 	})
 
 	console.log(`\nCopying Assets from ${assetFiles.length} files...`)

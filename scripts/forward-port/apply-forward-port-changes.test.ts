@@ -44,10 +44,22 @@ describe('applyForwardPortChanges', () => {
 	})
 
 	it('applies added, modified, and removed files from source version into target version', () => {
-		writeRepoFile('content/terraform/v1.14.x/docs/new.mdx', 'new source content\n')
-		writeRepoFile('content/terraform/v1.14.x/docs/edited.mdx', 'edited source content\n')
-		writeRepoFile('content/terraform/v1.15.x/docs/edited.mdx', 'edited old target content\n')
-		writeRepoFile('content/terraform/v1.15.x/docs/deleted.mdx', 'deleted old target content\n')
+		writeRepoFile(
+			'content/terraform/v1.14.x/docs/new.mdx',
+			'new source content\n',
+		)
+		writeRepoFile(
+			'content/terraform/v1.14.x/docs/edited.mdx',
+			'edited source content\n',
+		)
+		writeRepoFile(
+			'content/terraform/v1.15.x/docs/edited.mdx',
+			'edited old target content\n',
+		)
+		writeRepoFile(
+			'content/terraform/v1.15.x/docs/deleted.mdx',
+			'deleted old target content\n',
+		)
 		writeChangesFile({
 			added: ['content/terraform/v1.14.x/docs/new.mdx'],
 			modified: ['content/terraform/v1.14.x/docs/edited.mdx'],
@@ -63,16 +75,28 @@ describe('applyForwardPortChanges', () => {
 
 		expect(error).toBeUndefined()
 		expect(result).toEqual({ applied: 2, deleted: 1, skipped: 0 })
-		expect(readRepoFile('content/terraform/v1.15.x/docs/new.mdx')).toBe('new source content\n')
-		expect(readRepoFile('content/terraform/v1.15.x/docs/edited.mdx')).toBe('edited source content\n')
-		expect(fs.existsSync('content/terraform/v1.15.x/docs/deleted.mdx')).toBe(false)
+		expect(readRepoFile('content/terraform/v1.15.x/docs/new.mdx')).toBe(
+			'new source content\n',
+		)
+		expect(readRepoFile('content/terraform/v1.15.x/docs/edited.mdx')).toBe(
+			'edited source content\n',
+		)
+		expect(fs.existsSync('content/terraform/v1.15.x/docs/deleted.mdx')).toBe(
+			false,
+		)
 	})
 
 	it('filters out files from other products in a multi-product changeset', () => {
 		// Terraform files (target product) — should be forward-ported
-		writeRepoFile('content/terraform/v1.14.x/docs/tf-file.mdx', 'terraform source content\n')
+		writeRepoFile(
+			'content/terraform/v1.14.x/docs/tf-file.mdx',
+			'terraform source content\n',
+		)
 		// Vault files (other product) — should be ignored
-		writeRepoFile('content/vault/v1.14.x/docs/vault-file.mdx', 'vault source content\n')
+		writeRepoFile(
+			'content/vault/v1.14.x/docs/vault-file.mdx',
+			'vault source content\n',
+		)
 		writeChangesFile({
 			added: [
 				'content/terraform/v1.14.x/docs/tf-file.mdx',
@@ -87,12 +111,19 @@ describe('applyForwardPortChanges', () => {
 			targetVersion: 'v1.15.x',
 		})
 
-		expect(fs.existsSync('content/terraform/v1.15.x/docs/tf-file.mdx')).toBe(true)
-		expect(fs.existsSync('content/vault/v1.15.x/docs/vault-file.mdx')).toBe(false)
+		expect(fs.existsSync('content/terraform/v1.15.x/docs/tf-file.mdx')).toBe(
+			true,
+		)
+		expect(fs.existsSync('content/vault/v1.15.x/docs/vault-file.mdx')).toBe(
+			false,
+		)
 	})
 
 	it('applies no changes and returns successfully when the target product has no matching files', () => {
-		writeRepoFile('content/vault/v1.14.x/docs/vault-file.mdx', 'vault content\n')
+		writeRepoFile(
+			'content/vault/v1.14.x/docs/vault-file.mdx',
+			'vault content\n',
+		)
 		writeChangesFile({
 			added: ['content/vault/v1.14.x/docs/vault-file.mdx'],
 		})
@@ -110,18 +141,26 @@ describe('applyForwardPortChanges', () => {
 
 		expect(error).toBeUndefined()
 		expect(result).toEqual({ applied: 0, deleted: 0, skipped: 0 })
-		expect(fs.existsSync('content/terraform/v1.15.x/docs/vault-file.mdx')).toBe(false)
+		expect(fs.existsSync('content/terraform/v1.15.x/docs/vault-file.mdx')).toBe(
+			false,
+		)
 	})
 
 	it('filters added, modified, and removed changes independently by target product', () => {
 		// Vault files (target product)
 		writeRepoFile('content/vault/v1.14.x/docs/new.mdx', 'vault new\n')
-		writeRepoFile('content/vault/v1.14.x/docs/edited.mdx', 'vault edited source\n')
+		writeRepoFile(
+			'content/vault/v1.14.x/docs/edited.mdx',
+			'vault edited source\n',
+		)
 		writeRepoFile('content/vault/v1.15.x/docs/edited.mdx', 'vault old target\n')
 		writeRepoFile('content/vault/v1.15.x/docs/deleted.mdx', 'vault to delete\n')
 		// Terraform files (other product — should remain untouched)
 		writeRepoFile('content/terraform/v1.14.x/docs/tf-added.mdx', 'tf content\n')
-		writeRepoFile('content/terraform/v1.15.x/docs/tf-removed.mdx', 'tf remove target\n')
+		writeRepoFile(
+			'content/terraform/v1.15.x/docs/tf-removed.mdx',
+			'tf remove target\n',
+		)
 		writeChangesFile({
 			added: [
 				'content/vault/v1.14.x/docs/new.mdx',
@@ -142,18 +181,32 @@ describe('applyForwardPortChanges', () => {
 		})
 
 		// Vault changes should be applied
-		expect(readRepoFile('content/vault/v1.15.x/docs/new.mdx')).toBe('vault new\n')
-		expect(readRepoFile('content/vault/v1.15.x/docs/edited.mdx')).toBe('vault edited source\n')
+		expect(readRepoFile('content/vault/v1.15.x/docs/new.mdx')).toBe(
+			'vault new\n',
+		)
+		expect(readRepoFile('content/vault/v1.15.x/docs/edited.mdx')).toBe(
+			'vault edited source\n',
+		)
 		expect(fs.existsSync('content/vault/v1.15.x/docs/deleted.mdx')).toBe(false)
 		// Terraform file should NOT be ported (it was in added but not for this product)
-		expect(fs.existsSync('content/terraform/v1.15.x/docs/tf-added.mdx')).toBe(false)
+		expect(fs.existsSync('content/terraform/v1.15.x/docs/tf-added.mdx')).toBe(
+			false,
+		)
 		// Terraform file should NOT be deleted (it was in removed but not for this product)
-		expect(fs.existsSync('content/terraform/v1.15.x/docs/tf-removed.mdx')).toBe(true)
+		expect(fs.existsSync('content/terraform/v1.15.x/docs/tf-removed.mdx')).toBe(
+			true,
+		)
 	})
 
 	it('does not apply terraform-enterprise files when target product is terraform', () => {
-		writeRepoFile('content/terraform/v1.14.x/docs/tf-file.mdx', 'terraform content\n')
-		writeRepoFile('content/terraform-enterprise/v1.14.x/docs/tfe-file.mdx', 'tfe content\n')
+		writeRepoFile(
+			'content/terraform/v1.14.x/docs/tf-file.mdx',
+			'terraform content\n',
+		)
+		writeRepoFile(
+			'content/terraform-enterprise/v1.14.x/docs/tfe-file.mdx',
+			'tfe content\n',
+		)
 		writeChangesFile({
 			added: [
 				'content/terraform/v1.14.x/docs/tf-file.mdx',
@@ -169,9 +222,13 @@ describe('applyForwardPortChanges', () => {
 		})
 
 		// terraform/ file should be ported
-		expect(fs.existsSync('content/terraform/v1.15.x/docs/tf-file.mdx')).toBe(true)
+		expect(fs.existsSync('content/terraform/v1.15.x/docs/tf-file.mdx')).toBe(
+			true,
+		)
 		// terraform-enterprise/ file should NOT be ported
-		expect(fs.existsSync('content/terraform-enterprise/v1.15.x/docs/tfe-file.mdx')).toBe(false)
+		expect(
+			fs.existsSync('content/terraform-enterprise/v1.15.x/docs/tfe-file.mdx'),
+		).toBe(false)
 	})
 
 	it('returns an error when the changes file is missing', () => {

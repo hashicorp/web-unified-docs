@@ -10,7 +10,7 @@ import { buildFileMdxTransforms } from './prebuild/mdx-transforms/build-mdx-tran
 import { copyNavDataFile } from '#scriptUtils/copy-nav-data-file.mjs'
 import { copySingleAssetFile } from '#scriptUtils/copy-asset-files.mjs'
 import { gatherVersionMetadata } from './prebuild/gather-version-metadata.mjs'
-import { isFileAnImage } from '#scriptUtils/copy-asset-files.mjs'
+import { isAssetFile } from '#scriptUtils/copy-asset-files.mjs'
 
 const contentDir = path.resolve('content')
 
@@ -95,7 +95,7 @@ fs.watch(contentDir, { recursive: true }, async (eventType, filename) => {
 		} catch (error) {
 			console.error(`Error processing file ${filePath}:`, error)
 		}
-	} else if (isFileAnImage(filename)) {
+	} else if (isAssetFile(filename)) {
 		const filePath = path.join(contentDir, filename)
 		console.log(`Asset file changed: ${filePath}`, eventType)
 		try {

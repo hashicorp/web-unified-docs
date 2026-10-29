@@ -1,0 +1,256 @@
+---
+page_title: Migrate workspaces to a Stack
+description: Use the terraform stacks migrate commands to migrate HCP Terraform or Terraform Enterprise workspaces into a Terraform Stack.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-05-14T10:57:55-05:00
+last_modified: 2026-05-14T20:00:46.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Migrate HCP Terraform workspaces to Terraform Stacks
+
+This topic describes how to use `terraform stacks migrate` commands to migrate multiple HCP Terraform or Terraform Enterprise workspaces into a single Stack. You can use this command to migrate one or more workspaces to a single Stack with a single component.
+
+@include '@global/terraform-stacks-migrate-experiment.mdx'
+
+## Overview
+
+Complete the following steps to migrate HCP Terraform workspaces to a Stack:
+
+1. Make a copy of your root module configuration in a separate directory so that you can stage it for migration. Refer to [Create the migration directory](#create-the-migration-directory) for more information. 
+1. Enable the migration CLI and use its dedicated commands to generate migration configuration. Refer to the following topics: 
+    - [Enable the experimental command group](#enable-the-experimental-command-group)
+    - [Prepare the migrate manifest](#prepare-the-migrate-manifest) 
+    - [Generate the Stack configuration](#generate-the-stack-configuration)
+1. Import the new Stack configuration and associated state to HCP Terraform. Refer to the following topics:
+    - [Upload the Stack configuration](#upload-the-stack-configuration)
+    - [Translate the workspace state files](#translate-the-workspace-state-files)
+    - [Import state and review deployment runs](#import-state-and-review-deployment-runs)
+
+After completing the migration, clean up by [removing migration settings](#remove-migration-settings).
+
+## Requirements
+
+Each workspace you want to migrate to a Stack must meet the following requirements:
+
+- The workspace must be locked. Refer to the [Workspace settings](/terraform/cloud-docs/workspaces/settings#locking) documentation for information on how to lock a workspace.
+- The workspace ID must start with the `ws-` prefix.
+- The latest run must have completed successfully.
+- Every workspace must use the same root module configuration.
+
+To use the `terraform stacks migrate` commands, you must authenticate your local Terraform CLI with HCP Terraform as a user that has permission to read the HCP Terraform workspace variables and state versions.
+
+## Create the migration directory
+
+To migrate workspaces to a Stack, create a directory to store your Terraform configuration and state.
+
+Create an empty directory for the migration and change to the new directory:
+
+```shell-session
+$ mkdir stacks-migration && cd stacks-migration
+```
+
+Clone or copy the workspace's Terraform configuration into a directory named `source-config`. Terraform requires the root module to be in this directory in later steps. Every workspace in the migration must use the same root configuration:
+
+```shell-session
+$ git clone <SOURCE_REPOSITORY_URL> source-config
+```
+
+
+
+Initialize the source configuration so that you can use the dependency lock file and provider cache in later migration steps. You must initialize your local configuration before you begin a migration:
+
+```shell-session
+$ terraform -chdir=./source-config init
+```
+
+## Enable the experimental command group
+
+Because the `terraform stacks migrate` command group is experimental, you must enable the feature by setting the `TF_STACKS_MIGRATE_EXPERIMENTAL` environment variable to `true`:
+
+```shell-session
+$ export TF_STACKS_MIGRATE_EXPERIMENTAL=true
+```
+
+Refer to the [Terraform CLI environment variables reference](/terraform/cli/config/environment-variables) for information about all available variables.
+
+## Prepare the migrate manifest
+
+Terraform creates a migrate manifest to configure how to run a Stack migration. Run the `prepare-manifest` command with the HCP Terraform workspace IDs you want to migrate to a Stack. The following example prepares to create one Stack with two deployments, one for each workspace:
+
+```shell-session
+$ terraform stacks migrate prepare-manifest ws-dev123 ws-test456
+```
+
+This command verifies each workspace, reads its resolved workspace variables, downloads
+its Terraform state, and generates a `migrate-manifest.json` file. It also creates empty `stack-config`, `tfstates`, and `tfstackstates` directories used as part of the migration.
+layout:
+
+```text
+stacks-migration/
+|-- migrate-manifest.json
+|-- source-config/
+|-- stack-config/
+|-- tfstates/
+`-- tfstackstates/
+```
+
+Review the `migrate-manifest.json` file and confirm that the deployments,
+configuration paths, and state paths match the workspaces you want to migrate.
+
+Next, use the `validate-manifest` command to validate the migrate manifest and the local files it references:
+
+```shell-session
+$ terraform stacks migrate validate-manifest
+```
+
+Review the output of this command and fix any manifest or source configuration errors before continuing.
+
+Refer to the [`prepare-manifest` reference documentation](/terraform/cli/commands/stacks/migrate/prepare-manifest) and [`validate-manifest` reference documentation](/terraform/cli/commands/stacks/migrate/validate-manifest) for more information about this command.
+
+## Generate the Stack configuration
+
+Run the `translate-config` command in the migration directory to generate the Stack configuration:
+
+```shell-session
+$ terraform stacks migrate translate-config
+```
+
+The command reads the `migrate-manifest.json` file, copies the root module into the
+Stack configuration, and writes the generated component and deployment configuration
+files to `stack-config`.
+
+Review the generated files and confirm that each generated deployment
+block includes the `migrate` setting:
+
+<CodeBlockConfig hideClipboard>
+
+```hcl
+migrate = true
+```
+
+</CodeBlockConfig>
+
+Review the contents of the generated configuration and verify that it meets your expectations:
+
+- Guidance comments for sensitive inputs and environment variables.
+- Inputs that need variable sets, `store` blocks, or manual cleanup.
+- Whether module definitions nested in the Terraform configuration should
+  become separate local or remote Stack components.
+- If you require an OIDC connection to authenticate providers in your Stack,
+  refer to [Dynamic provider credentials](/terraform/cloud-docs/dynamic-provider-credentials)
+  for more information.
+
+For more information on the `translate-config` command, refer to the [`translate-config` reference documentation](/terraform/cli/commands/stacks/migrate/translate-config). For information on the Terraform Stack configuration, refer to the [Define Stack configuration](/terraform/language/stacks/component/config) documentation.
+
+Next, initialize the generated Stack configuration:
+
+```shell-session
+$ terraform -chdir=./stack-config stacks init
+```
+
+Then, validate the Stack configuration:
+
+```shell-session
+$ terraform -chdir=./stack-config stacks validate
+```
+
+Terraform reports errors if your Stack configuration has missing information that it couldn't automatically generate. Fix any configuration, provider, or input errors before you continue.
+
+## Upload the Stack configuration
+
+You must create a Stack before you upload your generated Stack configuration and state. You can create a Stack in the HCP Terraform UI, with the HCP Terraform API, or the Terraform CLI. For more information on creating Stacks, refer to the [Create a Stack](/terraform/cloud-docs/stacks/create) documentation.
+
+The following command creates a target Stack with the Terraform CLI:
+
+```shell-session
+$ terraform stacks create \
+  -organization-name=<ORG> \
+  -project-name=<PROJECT> \
+  -stack-name=<STACK>
+```
+
+After Terraform creates the Stack, it outputs the Stack ID. You can also retrieve this ID from the Stack overview page in HCP Terraform. Note this ID and use it to upload the generated Stack configuration to the target Stack:
+
+```shell-session
+$ terraform -chdir=./stack-config stacks configuration upload -stack-id=<STACK_ID>
+```
+
+HCP Terraform creates deployment runs for the uploaded configuration. Deployments with
+the `migrate` setting enabled enter the Stack import workflow. If HCP Terraform reports
+errors with your configuration, resolve the issues and reupload the configuration.
+
+## Translate the workspace state files
+
+To migrate the workspace state files into the Stack state file format, run the `translate-state` command from the migration directory:
+
+```shell-session
+$ terraform stacks migrate translate-state
+```
+
+The command reads `migrate-manifest.json`, translates each deployment's `.tfstate` file,
+and writes the corresponding `.tfstackstate` files to the `tfstackstates` directory.
+
+State translation fails when Terraform cannot map resources from the traditional state
+file to the generated Stack configuration. This can happen when manual changes to the generated Stack
+configuration move resources into a component layout that no longer matches the source
+configuration close enough for Terraform to translate the state. If this command fails, follow the output
+from Terraform to resolve the affected resources.
+
+Refer to the [`translate-state` reference documentation](/terraform/cli/commands/stacks/migrate/translate-state) for more information about this command.
+
+## Import state and review deployment runs
+
+Complete the following steps to import your translated Stack state files:
+
+1. Open your Stack in HCP Terraform.
+1. Navigate to the uploaded configuration version.
+1. Complete the following steps for each deployment run:
+   - Approve the import step.
+   - Upload the `.tfstackstate` artifact that matches the deployment.
+   - Confirm that the plan and apply operations complete successfully.
+
+Each deployment has a corresponding `.tfstackstate` file named after the
+deployment. For example, upload `prod.tfstackstate` to the import step for the `prod`
+deployment run.
+
+If the plan includes changes, those changes affect live infrastructure when approved. Do not approve
+a plan that changes resources unless you intend to make those changes as part of the migration.
+If you do not want to make changes to your deployed infrastructure, cancel the deployment and review
+the generated Stack configuration and inputs. After you update the configuration, return to [Upload the Stack configuration](#upload-the-stack-configuration).
+
+After the imported state matches the Stack configuration, HCP Terraform creates an
+empty plan for that deployment. Deployment runs are isolated by deployment. If one
+deployment fails, you can cancel that deployment run and continue reviewing other
+deployments.
+
+## Remove migration settings
+
+After a deployment imports state and reaches the empty plan phase, open the `stack-config/deployments.tfdeploy.hcl` file and remove the `migrate = true` argument from every `deployment` block.
+
+Next, upload the final Stack configuration:
+
+```shell-session
+$ terraform -chdir=./stack-config stacks configuration upload -stack-id=<STACK_ID>
+```
+
+Confirm that each deployment reaches the empty plan phase. The Stack now manages
+the resources that the source workspaces managed before the migration.
+
+Since your workspaces and Stack both manage the same resources now, keep the 
+source workspaces locked after you complete the migration. If you unlock a 
+workspace after you migrate it to a Stack, you can introduce drift as they both
+can make changes to your resources. After you are confident that the Stack
+manages the resources, delete the source workspaces.
+
+## Next steps
+
+After you migrate your workspaces to a Stack, you can optionally commit your Stack configuration to source control and connect your Stack to the VCS repository. For more information, refer to the [Configure a Stack](/terraform/cloud-docs/stacks/configure#configure-a-stack-1) documentation.
+
+You can also refactor your Stack as needed. For example, you can create separate components for separate modules or split deployments into multiple Stacks. Refer to [Design a Stack](/terraform/language/stacks/design) for more information on how to refactor your migrated Stack. If your workspaces have cross-workspace dependencies, you may need to update your Stack configuration to publish outputs or consume upstream inputs. Refer to [Pass data from one Stack to another](/terraform/language/stacks/deploy/pass-data) for more information.
+
+Refer to the following resources to learn more about Stacks and the migration workflow:
+
+- Read the [Stacks documentation](/terraform/cloud-docs/stacks) to learn how to manage Stacks in HCP Terraform. 
+- Refer to the [terraform stacks reference documentation](/terraform/cli/commands/stacks) to learn how to manage Stacks with the Terraform CLI.
+- Refer to the [terraform stacks migrate reference documentation](/terraform/cli/commands/stacks/migrate) to learn more about the `terraform stacks migrate` command group.
