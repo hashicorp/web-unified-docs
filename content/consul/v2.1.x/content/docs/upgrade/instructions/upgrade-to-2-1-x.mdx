@@ -5,13 +5,33 @@ description: >-
   Upgrade Consul from v2.0.x to v2.1.x. Review API Gateway, multiport, feature-gate, and rollback requirements before you begin.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2026-10-19T16:30:10+05:30
-last_modified: 2026-10-29T12:22:53.000Z
+last_modified: 2026-10-30T05:22:56.000Z
 # END AUTO GENERATED METADATA
 ---
 
 # Upgrade Consul to v2.1.x
 
-Review the version-specific requirements for upgrading to Consul 2.1.x. Follow the [General Upgrade Process](/consul/docs/upgrade/instructions/general) for the standard server and client upgrade sequence.
+Review the version-specific requirements for upgrading to Consul 2.1.x. Follow the [General Upgrade Process](/consul/docs/upgrade/instructions/general) for the standard server and client upgrade sequence. On Kubernetes, also follow the [Kubernetes upgrade process](/consul/docs/upgrade/k8s).
+
+This page collects the upgrade notes for Consul 2.1.x. Each note in the following table links to a section with the required actions. The [version-specific upgrade details](/consul/docs/upgrade/version-specific#consul-2-1-x) page contains the full configuration examples and verification steps.
+
+## Upgrade notes at a glance
+
+New experimental features in Consul 2.1.x are controlled by [feature gates](/consul/docs/manage/feature-gates) and are disabled by default. Upgrading does not enable them. The following changes can affect an existing deployment without any configuration change.
+
+| Change | Who is affected | Action |
+| :----- | :-------------- | :----- |
+| [Hybrid post-quantum TLS](#hybrid-post-quantum-tls) is selected automatically when TLS 1.3 is the effective minimum and no key-exchange groups are set. | Deployments that set a TLS 1.3 minimum for mesh or agent TLS. | Verify that Envoy, Consul Dataplane, and agent clients support the groups, or set an explicit classical group list. |
+| [Transparent proxy uses nftables](#transparent-proxy-uses-nftables) instead of iptables. | Transparent proxy on VMs, Kubernetes, and ECS. | Install `nft`, use a supported kernel, and remove old iptables rules on existing hosts. |
+| [Proxies close established connections once](#proxies-close-established-connections-once) when Connect leaf certificates are delivered over SDS. | Services with long-lived connections. | Upgrade during a maintenance window and confirm clients reconnect. |
+| [API gateway `TLS.Enabled` terminates HTTPS](#api-gateway-tlsenabled-enables-https-termination). | API gateways that set `TLS.Enabled = true` on a listener without a certificate. | Remove `TLS.Enabled` or switch clients to HTTPS before upgrading. |
+| [API gateway upstream routing](#api-gateway-upstream-routing) is controlled by a feature gate for gateways that receive configuration directly from servers. | Agentless API gateways that route to services with service-router or service-resolver subsets. | Enable the `api-gateway-upstream-routing` gate after the upgrade. |
+| [API gateway options](#api-gateway-options-that-require-a-completed-upgrade) added in 2.1 are ignored or rejected by 2.0 components. | Deployments that use `http2` or `grpc` listeners, inverted header matches, or passive health checks. | Complete the upgrade of servers and gateway client agents before you use them. |
+| [Kubernetes Gateway API v1.6 CRDs](#kubernetes-gateway-api-v16-crds) for the Standard API gateway. | Kubernetes clusters that use API gateways, especially with `TCPRoute` or OpenShift. | Check `TCPRoute` use and the installed Gateway CRD version, then set the Helm values for your platform. |
+| [Kubernetes multiport registration](#enable-peered-multiport-routing) has a separate Helm switch. | Kubernetes Pods that expose more than one named port. | Set `connectInject.multiportServiceRegistration.enabled` and the `connect-service-port` annotation. |
+| [Multiple Kubernetes clusters on the same external servers](#kubernetes-clusters-that-share-external-servers) share auth method names by default. | Multiple Kubernetes clusters that connect to the same Consul servers and admin partition. | Set a unique `global.acls.authMethod.name` in each cluster. |
+| [Feature-gate job on Kubernetes](#kubernetes-feature-gate-job) runs after every install and upgrade. | Kubernetes with Vault as the secrets backend and ACLs managed by the chart. | Set `global.secretsBackend.vault.featureGateSetRole`. |
+| [OIDC IdP logout](#oidc-idp-logout) turns on automatically for supported providers. | `oidc` auth methods whose provider advertises an `https` `end_session_endpoint`. | Upgrade servers, client agents, and CLIs before you set the new auth method parameters. |
 
 ## From Consul 2.0.x to 2.1.x
 
@@ -27,6 +47,11 @@ Kubernetes multiport registration has a separate Helm chart switch. Set `connect
 1. For peered multiport routing, confirm that both clusters can run Consul Enterprise 2.1.0 or later on every server, mesh gateway, client agent, and sidecar proxy involved in the traffic path. The feature gate remains disabled until all servers in each cluster meet the minimum version.
 1. For Kubernetes workloads, set `connectInject.multiportServiceRegistration.enabled` to `true` in the Helm values before deploying Pods that register multiple ports. When a Pod exposes named ports across multiple containers, set `consul.hashicorp.com/connect-service-port` to a comma-separated list such as `http,metrics`. The injector derives its default from the first container only.
 1. If you run API gateways that receive their configuration directly from Consul servers (Consul Dataplane without a client agent) and route to services that use service-router or service-resolver subsets, plan to enable the `api-gateway-upstream-routing` feature gate after the upgrade. Refer to [API Gateway upstream routing](#api-gateway-upstream-routing).
+1. If you use hybrid post-quantum TLS settings or a TLS 1.3 minimum, review [Hybrid post-quantum TLS](#hybrid-post-quantum-tls).
+1. For transparent proxy on VMs, Kubernetes, or ECS, confirm that hosts meet the [nftables requirements](#transparent-proxy-uses-nftables).
+1. Identify services with long-lived connections and plan a maintenance window. Refer to [Proxies close established connections once](#proxies-close-established-connections-once).
+1. Find API gateways that set `TLS.Enabled`. Refer to [API gateway `TLS.Enabled` enables HTTPS termination](#api-gateway-tlsenabled-enables-https-termination).
+1. On Kubernetes with API gateways, check for `TCPRoute` resources and the installed Gateway CRD version. Refer to [Kubernetes Gateway API v1.6 CRDs](#kubernetes-gateway-api-v16-crds).
 
 ### Enable peered multiport routing
 
@@ -78,13 +103,36 @@ During validation, disabling the gate took about 5 seconds and enabling it took 
 
 ## From Consul 1.21.x to 2.1.x
 
-First, follow [Upgrade Consul to v2.0.x](/consul/docs/upgrade/instructions/upgrade-to-2-0-x). Then complete the applicable checks and upgrade steps in the [2.0.x to 2.1.x section](#from-consul-2-0-x-to-2-1-x).
+First, follow [Upgrade Consul to v2.0.x](/consul/docs/v2.0.x/upgrade/instructions/upgrade-to-2-0-x). The 2.0.x documentation also describes the [version-specific changes in 2.0.x](/consul/docs/v2.0.x/upgrade/version-specific#consul-2-0-x), including the IBM Consul Enterprise license prerequisite. Then complete the applicable checks and upgrade steps in the [2.0.x to 2.1.x section](#from-consul-2-0-x-to-2-1-x).
 
 ## Behavior changes
 
+### Feature gates
+
+Consul 2.1 adds a datacenter-wide [feature gate](/consul/docs/manage/feature-gates) framework for experimental features. All gates are disabled by default, so upgrading does not change behavior until you enable a gate. Gates are per datacenter, and a gate takes effect only after every server in the datacenter runs Consul 2.1.0 or later.
+
+| Gate | Controls |
+| :--- | :------- |
+| `api-gateway-upstream-routing` | Composition of backend service-router and service-resolver configuration into API gateway routes, for gateways that receive configuration directly from Consul servers. |
+| `consul-ai` | Services with an `ai` block and the features that depend on it. |
+| `localized-dns` | Inline virtual DNS and egress DNS listeners on transparent proxy sidecars that run with Consul Dataplane. |
+| `peering-multiport-upstreams` | Named-port routing to multiport services imported from cluster peers. |
+
+During a rolling server upgrade, the feature gate API reports that the policy is not initialized until the last server runs 2.1.0. The `consul operator feature get` command and the HTTP API return an error with status code 503, and `consul operator feature list` returns no gates. This is expected. Retry after the upgrade completes.
+
+On Kubernetes, the Helm chart runs a [feature-gate job](#kubernetes-feature-gate-job) after each install and upgrade that sets the gates your Helm values enable.
+
+For the CLI, API, and bootstrap configuration, refer to [`consul operator feature`](/consul/commands/operator/feature) and [Feature gates](/consul/docs/manage/feature-gates).
+
 ### Hybrid post-quantum TLS
 
-Consul 2.1 can automatically select hybrid key-exchange groups when TLS 1.3 is the effective minimum and the curve list is unset. Review your TLS settings and prepare compatible proxies and agents before upgrading. Follow [Migrate to post-quantum TLS](/consul/docs/secure/encryption/migrate-post-quantum) for staged adoption and [version-specific upgrade details](/consul/docs/upgrade/version-specific#hybrid-post-quantum-tls) for upgrade behavior.
+Consul 2.1 can automatically select hybrid key-exchange groups when TLS 1.3 is the effective minimum and the curve list is unset. A mesh direction with a minimum of TLS 1.3 and omitted or empty `ECDHCurves` selects `X25519MLKEM768` and `X25519`. Agent protocols with an effective minimum of TLS 1.3 and no explicit or inherited `tls_ecdh_curves` select the same pair. Hybrid key exchange can therefore become active during the upgrade without a separate opt-in change.
+
+Review your TLS settings and prepare compatible Envoy builds, Consul Dataplane images, and agent clients before you upgrade. On Kubernetes, also prepare the Helm chart, controller, and the installed `Mesh` CRD. A classical fallback group does not make an unsupported hybrid group acceptable to an older TLS provider. To defer hybrid negotiation, set an explicit classical group list instead of clearing the field.
+
+For mesh TLS, set both the minimum and maximum versions to TLS 1.3 when you enable hybrid negotiation. Consul does not promote an unspecified maximum, and setting only the maximum does not trigger automatic selection.
+
+Follow [Migrate to post-quantum TLS](/consul/docs/secure/encryption/migrate-post-quantum) for staged adoption and [Roll back post-quantum TLS](/consul/docs/secure/encryption/rollback-post-quantum) to return to classical key exchange. For upgrade behavior, refer to [version-specific upgrade details](/consul/docs/upgrade/version-specific#hybrid-post-quantum-tls).
 
 ### API Gateway upstream routing
 
@@ -120,11 +168,110 @@ The `feature_gates.bootstrap` server configuration sets initial gate state only 
 
 The `api-gateway-upstream-routing` gate is separate from the `peering-multiport-upstreams` feature gate. The latter controls named-port routing to services imported from cluster peers and does not affect API gateways.
 
-Consul 2.0 servers and client agents do not support API Gateway options added in 2.1, including `http2` and `grpc` listener protocols, inverted header matches, and passive health checks. Upgrade all servers and any client agents that run API gateways before you configure these options. For detailed behavior and validation steps, refer to [API Gateway features that require a completed upgrade](/consul/docs/upgrade/version-specific#api-gateway-features-that-require-a-completed-upgrade).
+### API gateway options that require a completed upgrade
 
-### Other version-specific changes
+Consul 2.0 servers and client agents do not recognize the following API gateway options added in 2.1. They reject the options, ignore them, or apply them incorrectly.
 
-Review the [version-specific upgrade details](/consul/docs/upgrade/version-specific) for changes to API Gateway TLS, proxy certificate delivery, and other Consul 2.1 behavior.
+| Option | Result on a Consul 2.0 server or client agent |
+| :----- | :-------------------------------------------- |
+| `Listeners[].Protocol` set to `http2` or `grpc` | The server rejects the `api-gateway` entry, or the route does not bind and the listener has no routes. |
+| `Rules[].Matches[].Headers[].Invert` in an `http-route` | Consul drops the field without an error and applies the header match without negation, which routes traffic to the wrong service. |
+| `PassiveHealthCheck` in API gateway upstream limits | Consul drops the field without an error, and the gateway does not eject failing service instances. |
+
+Before you use these options:
+
+1. Upgrade all Consul servers to 2.1.
+1. If your API gateways run with Consul client agents, upgrade the client agent on each node that runs an API gateway. Gateways that run with Consul Dataplane receive their configuration from the servers.
+1. Confirm that the `Build` column of `consul members` reports 2.1 for every server and gateway client agent.
+
+On Kubernetes, the corresponding resources and annotations have the same requirement: the `api-gateway.consul.hashicorp.com/listener-<sectionName>-protocol` annotation, the `RouteHeaderMatchInvertFilter` resource, and the `RouteUpstreamLimitsFilter` `passiveHealthCheck` field. Apply them only after you upgrade Consul.
+
+Before you downgrade, change `http2` and `grpc` listeners back to `http`, remove `Invert` from routes, and expect passive health checks to stop being applied. Circuit-breaker limits such as `MaxConnections` continue to apply. For configuration examples and verification steps, refer to the version-specific sections on [header match inversion](/consul/docs/upgrade/version-specific#header-match-inversion-in-http-routes), [HTTP/2 and gRPC listener protocols](/consul/docs/upgrade/version-specific#http2-and-grpc-listener-protocols), and [passive health checks](/consul/docs/upgrade/version-specific#passive-health-checks-for-api-gateway-routes).
+
+### API gateway `TLS.Enabled` enables HTTPS termination
+
+In Consul 2.0, `TLS.Enabled = true` in an `api-gateway` configuration entry has no effect unless a listener also references a certificate, an SDS certificate, or TLS parameters. The listener serves plain HTTP. In Consul 2.1, `TLS.Enabled = true` turns on TLS termination for every listener on the gateway, and listeners without a certificate terminate HTTPS with the gateway's service mesh leaf certificate.
+
+After the upgrade, a listener that sets `TLS.Enabled = true` without a certificate serves HTTPS instead of plain HTTP, and plain HTTP clients fail to connect. For listeners that reference certificates, TLS connections whose SNI matches none of the certificates now complete with the gateway leaf certificate instead of being rejected.
+
+Before you upgrade, find the gateways that set `TLS.Enabled`. For each one, either remove `TLS.Enabled` to keep plain HTTP, or keep it and prepare clients to connect over HTTPS and trust the Consul service mesh CA. On Kubernetes, only `Gateway` resources with the `consul.hashicorp.com/tls-enabled` annotation set `TLS.Enabled`. For the discovery command and examples, refer to [API gateway `TLS.Enabled` enables HTTPS termination](/consul/docs/upgrade/version-specific#api-gateway-tlsenabled-enables-https-termination).
+
+### Proxies close established connections once
+
+Consul 2.1 delivers the Connect leaf certificate and CA roots to sidecar proxies and terminating gateways over the Envoy secret discovery service (SDS) instead of in the listener configuration. API gateways with TLS listeners also receive a new leaf certificate that includes `*.api-gateway.<domain>` DNS names. Each affected proxy rebuilds its listener once when it first receives configuration from Consul 2.1. Envoy drains the old listener and closes the established connections on it when the drain time ends. Short-lived HTTP requests are not affected. Long-lived connections, such as AMQP, database, or gRPC streaming connections, close once and must reconnect.
+
+The change happens when you upgrade the client agent that a proxy started with `consul connect envoy` connects to, or when Consul Dataplane connects to an upgraded server. The drain time is 600 seconds for proxies that you start with `consul connect envoy`, and 30 seconds for Consul Dataplane, unless you override it. Schedule the upgrade for affected services in a maintenance window and confirm that their clients reconnect automatically.
+
+The `xds_fetch_timeout_ms` Envoy setting now also applies to SDS configuration. Consider a higher value if proxies with many upstreams time out while they wait for configuration. For verification steps, refer to [Proxies close established connections once during the upgrade](/consul/docs/upgrade/version-specific#proxies-close-established-connections-once-during-the-upgrade).
+
+### API gateway DNS registration
+
+Consul 2.1 registers each service that a bound route targets in Consul DNS at `<service>.api-gateway.<domain>`. No action is required. After you upgrade all servers, the leader reconciles existing API gateways and builds the gateway-services mapping that DNS lookups use. Refer to [API gateway service lookups](/consul/docs/discover/service/static#api-gateway-service-lookups).
+
+### Transparent proxy uses nftables
+
+Consul 2.1 redirects transparent proxy traffic with nftables instead of iptables and ip6tables. Consul does not fall back to iptables, so hosts that do not meet the following requirements fail to set up traffic redirection:
+
+- The `nft` binary is installed.
+- The Linux kernel supports stateful NAT in nftables `inet` chains. Upstream Linux provides this support starting with version 5.2, and some distributions backport it to earlier kernel versions, such as RHEL 8 and derivatives.
+- On Kubernetes, the `nft` and `nsenter` binaries are installed on every worker node, because the CNI plugin runs on the node rather than in a container.
+- On ECS, container instances run Linux kernel 5.2 or later, and custom images that bundle the `consul-ecs` binary include the `nftables` package.
+- Scripts that run `iptables` inside the official Consul container image use `nft` instead. The image includes `nftables` and no longer includes `iptables`.
+
+The `consul connect redirect-traffic` command does not remove iptables rules that earlier Consul versions created. Before you enable transparent proxy on an existing VM, remove those rules to avoid double NAT or inconsistent traffic redirection. Refer to [Transparent proxy on VMs](/consul/docs/connect/proxy/transparent-proxy/vm) for the cleanup script and [Transparent proxy on Kubernetes](/consul/docs/connect/proxy/transparent-proxy/k8s) for the Kubernetes requirements.
+
+### OIDC IdP logout
+
+Consul Enterprise 2.1 can end a user's session at the OIDC identity provider (IdP) when the user logs out of a token that an `oidc` auth method created. IdP logout turns on automatically, without a configuration change, for auth methods whose provider advertises an `https` `end_session_endpoint` in its discovery document. After the upgrade, logging out of the Consul UI also opens the provider logout page in a new browser tab, and `consul logout` prints the provider logout URL. Sessions that started before the upgrade are not affected.
+
+Consul 2.1 also adds the `OIDCLogoutURL` and `OIDCPostLogoutRedirectURIs` auth method parameters. Consul 2.0 servers do not recognize them and cannot load an auth method that sets them, so OIDC logins that use that auth method fail.
+
+1. Upgrade all Consul servers before you set `OIDCLogoutURL` or `OIDCPostLogoutRedirectURIs`.
+1. Upgrade the client agents that serve the Consul UI or that `consul login` connects to, and the `consul` CLI that users run. Consul 2.0 agents and CLIs do not return or save the provider logout URL, so logout destroys only the Consul token.
+1. Ask CLI users to log in again with `consul login -type=oidc`. Consul saves the provider logout URL only for logins made with a Consul 2.1 CLI.
+
+Before you downgrade to Consul 2.0, remove both parameters from your auth methods. Refer to [OIDC logout](/consul/docs/secure/acl/auth-method/oidc#oidc-logout).
+
+### Localized DNS
+
+The `localized-dns` feature gate lets Consul Dataplane and the Envoy sidecar resolve `*.virtual.consul` domains locally. It is disabled by default, and until you enable it all DNS queries resolve through Consul. The gate stays disabled on servers that run a version earlier than 2.1.0 even when you enable it.
+
+Upgrade the Consul servers before Consul Dataplane, and then roll out workloads with a standard rolling update. To roll back, roll back Consul Dataplane first and then the servers. Keep the servers on 2.1 until all Consul Dataplane instances are rolled back, because rolling back the servers first removes the listeners that Consul Dataplane routes to. Consul Dataplane falls back to the servers when a listener is absent. For requirements and steps, refer to [Localized virtual DNS resolution](/consul/docs/connect/proxy/transparent-proxy/localized-dns).
+
+### Kubernetes changes
+
+#### Kubernetes Gateway API v1.6 CRDs
+
+Starting in Consul 2.1, the Standard API gateway uses the Kubernetes Gateway API v1.6 CRDs in the `gateway.networking.k8s.io` API group, which include `TCPRoute`. Before you upgrade, check whether you use `TCPRoute` and which Gateway CRD version your cluster has:
+
+```shell-session
+$ kubectl get tcproutes -A
+$ kubectl get crd gateways.gateway.networking.k8s.io -o jsonpath='{.metadata.annotations.gateway\.networking\.k8s\.io/bundle-version}'
+```
+
+On OpenShift, use `oc` instead of `kubectl`. Then choose the flow for your platform:
+
+- If the platform manages Gateway CRDs v1.6.0 or later and you use `TCPRoute`, keep the Standard API gateway. Set `global.installK8sNetworkingCRDs` to `false` and keep `global.crds.enableTcpRoute` set to `true`.
+- If the platform manages Gateway CRDs earlier than v1.6.0 and you require `TCPRoute`, use the Consul API gateway in the `consul.hashicorp.com` API group. Set `global.installK8sNetworkingCRDs` and `global.crds.enableTcpRoute` to `false`, and `global.crds.consulapi.enabled` to `true`.
+- On OCP 4.19 and later, the Standard API gateway controller does not watch `TCPRoute` even when the platform provides v1.6 or later CRDs. Use the Consul API gateway if the cluster uses `TCPRoute`.
+
+The first `helm upgrade` in each flow sets `global.generateManifests` to `true`. After the manifests are generated and you back them up, set it to `false` for later upgrades. For the Helm values for every platform and OpenShift version combination, refer to [Upgrade Gateway resource types](/consul/docs/north-south/api-gateway/k8s/resource-upgrade).
+
+#### New route filter CRDs
+
+Consul on Kubernetes 2.1 adds the `RouteUpstreamLimitsFilter` and `RouteHeaderMatchInvertFilter` CRDs. When `connectInject.enabled` is `true`, the Helm chart installs and upgrades them. If you manage CRDs outside of the chart, install them before you create these resources. Verify the CRDs after the upgrade with `kubectl get crd routeupstreamlimitsfilters.consul.hashicorp.com routeheadermatchinvertfilters.consul.hashicorp.com`. Both filters require Consul and Consul Helm chart v2.1.0 or later.
+
+#### Multiport registration
+
+The Helm chart disables multiport service registration by default. Existing workloads that expose several container ports and do not set the `consul.hashicorp.com/connect-service-port` annotation keep running after the upgrade. When Kubernetes recreates their Pods, the injector rejects the new Pods. Refer to [Enable peered multiport routing](#enable-peered-multiport-routing) and [Convert multi-port workloads during an upgrade](/consul/docs/upgrade/k8s#convert-multi-port-workloads-during-an-upgrade).
+
+#### Kubernetes clusters that share external servers
+
+When `global.acls.manageSystemACLs` is `true`, the Helm chart creates Kubernetes auth methods on the Consul servers and updates them on every install and upgrade. If multiple Kubernetes clusters connect to the same Consul servers in the same admin partition and use the same auth method names, each Helm installation or upgrade overwrites the auth methods of the other clusters, including their Kubernetes API server address. consul-k8s components and service mesh workloads in the other clusters then cannot log in to Consul. Set `global.acls.authMethod.name` to a unique value in each cluster and set `externalServers.k8sAuthMethodHost` to that cluster's API server address. Refer to [Configure auth methods for multiple Kubernetes clusters](/consul/docs/deploy/server/k8s/external#configure-auth-methods-for-multiple-kubernetes-clusters).
+
+#### Kubernetes feature-gate job
+
+The Helm chart runs a feature-gate job after each install and upgrade. The job waits for a Consul leader and sets only the gates that your Helm values enable. When your values enable no gates, it exits without changes but still runs. When Vault is your secrets backend and you set `global.acls.manageSystemACLs` or `global.acls.bootstrapToken.secretName`, you must set `global.secretsBackend.vault.featureGateSetRole`. Without it, the chart fails to render. Refer to [Configure Vault access for the Consul feature-gate job](/consul/docs/deploy/server/k8s/vault/data/feature-gate-job).
 
 ## Rollback
 
@@ -133,3 +280,13 @@ When you disable peered multiport routing, disable `peering-multiport-upstreams`
 During validation, named-port requests failed for up to 35 seconds after disabling the gate and about 18 seconds after enabling it. Per-port route virtual hosts remained in the Envoy `config_dump` for about 30 seconds after disable, so an immediate configuration dump may still show them. The gate removes peering-specific per-port routing from mesh gateways; local `.internal.` per-port chains and clusters remain. Treat these timings and observations as approximate, not service-level guarantees.
 
 Disabling the gate does not immediately remove per-port virtual IP allocations or DNS answers. Connections to those addresses reset while the gate is off. Verify gate state in both clusters and test traffic before you conclude that a rollback or re-enable has completed.
+
+### Rollback checklist for other 2.1 changes
+
+Complete the applicable steps before you downgrade from Consul 2.1 to 2.0:
+
+- **Feature gates:** Disabling a gate stops new behavior but does not remove resources that were created while it was on. For example, services with an `ai` block stay registered. Gate state is preserved across a rolling server downgrade and returns when all servers run 2.1 again.
+- **API gateway options:** Change `http2` and `grpc` listeners back to `http`, and remove `Invert` and `PassiveHealthCheck` from your configuration entries. On Kubernetes, remove the listener protocol annotations, the `RouteHeaderMatchInvertFilter` references, and the `passiveHealthCheck` settings.
+- **OIDC:** Remove `OIDCLogoutURL` and `OIDCPostLogoutRedirectURIs` from your auth methods. Consul 2.0 servers cannot load an auth method that sets them.
+- **Localized DNS:** Roll back Consul Dataplane first and then the servers.
+- **Post-quantum TLS:** To return to classical key exchange without a binary downgrade, follow [Roll back post-quantum TLS](/consul/docs/secure/encryption/rollback-post-quantum) and use explicit classical group lists.
