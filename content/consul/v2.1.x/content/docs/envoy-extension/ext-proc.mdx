@@ -1,0 +1,567 @@
+---
+layout: docs
+page_title: Intercept and process HTTP traffic with the ext-proc Envoy extension
+description: Learn how to use the `ext-proc` Envoy extension to intercept HTTP requests and responses in the Envoy filter chain and forward them to a processing service for inspection and mutation, without modifying your applications.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-07-13T00:00:00.000Z
+last_modified: 2026-07-13T00:00:00.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Intercept and process HTTP traffic with the ext-proc Envoy extension
+
+@include 'alerts/enterprise-alert.mdx'
+
+This topic describes how to use the `ext-proc` Envoy extension to intercept HTTP requests and responses in the Envoy filter chain and forward them to a processing service. The processing service can inspect and mutate headers, bodies, and trailers, which lets you implement custom logic such as dynamic routing, header enrichment, and request transformation without modifying your applications.
+
+You can apply the extension to the inbound listener of a Consul API gateway or to the inbound or outbound listener of a sidecar proxy. This workflow applies to both virtual machine (VM) and Kubernetes deployments.
+
+## Workflow
+
+Complete the following steps to use the external processing extension:
+
+1. Deploy a processing service that implements the Envoy external processing API. The service communicates with Envoy over gRPC or HTTP.
+1. Configure an `EnvoyExtensions` block in a service defaults or proxy defaults configuration entry.
+1. Apply the configuration entry.
+1. On Kubernetes, optionally attach a `RouteExtProc` resource to an `HTTPRoute` to control external processing for specific routes.
+
+## Requirements
+
+- Consul Enterprise v2.0.0 or later.
+- The target proxy must use an HTTP-based protocol. Set the `Protocol` field to `http`, `http2`, or `grpc` in the service defaults configuration entry for the service or gateway.
+- The external processing service must implement the [Envoy external processing API](https://www.envoyproxy.io/docs/envoy/latest/api-v3/extensions/filters/http/ext_proc/v3/ext_proc.proto).
+- When you target a mesh service, you must create a [service intention](/consul/docs/reference/config-entry/service-intentions) that allows the proxy to reach the processing service.
+
+## Add the `EnvoyExtensions`
+
+Add Envoy extension configurations to a proxy defaults or service defaults configuration entry. Place the extension configuration in an `EnvoyExtensions` block in the configuration entry.
+
+- When you configure Envoy extensions on proxy defaults, they apply to every service in the datacenter.
+- When you configure Envoy extensions on service defaults, they apply only to the specific service or gateway named in the configuration entry.
+
+Consul applies extensions from proxy defaults first, then applies extensions from service defaults. When both define an `ext-proc` extension that targets the same proxy and listener, the service defaults extension is appended after the proxy defaults extension in the filter chain — it does not replace it. To control the insertion order relative to an existing filter, use the [`InsertOptions`](/consul/docs/reference/proxy/extensions/ext-proc#arguments-insertoptions) field.
+
+### API gateway
+
+The following example attaches an `ext-proc` extension to the inbound listener of an `api-gateway`. The gateway sends requests to the `ext-proc` service over gRPC. The `StatPrefix` field uniquely identifies the instance, and Consul clears the route cache so that header changes made by the processing service affect routing decisions.
+
+<CodeTabs tabs={[ "HCL", "JSON", "YAML" ]}>
+<CodeBlockConfig filename="api-gateway-ext-proc-service-defaults.hcl">
+
+```hcl
+Kind     = "service-defaults"
+Name     = "api-gateway"
+Protocol = "http"
+EnvoyExtensions = [
+  {
+    Name = "builtin/ext-proc"
+    Arguments = {
+      ProxyType    = "api-gateway"
+      ListenerType = "inbound"
+      Config = {
+        StatPrefix       = "route-decider"
+        RouteCacheAction = "CLEAR"
+        GrpcService = {
+          Target = {
+            Service = {
+              Name = "ext-proc"
+            }
+          }
+        }
+      }
+    }
+  }
+]
+```
+
+</CodeBlockConfig>
+<CodeBlockConfig filename="api-gateway-ext-proc-service-defaults.json">
+
+```json
+{
+  "Kind": "service-defaults",
+  "Name": "api-gateway",
+  "Protocol": "http",
+  "EnvoyExtensions": [{
+    "Name": "builtin/ext-proc",
+    "Arguments": {
+      "ProxyType": "api-gateway",
+      "ListenerType": "inbound",
+      "Config": {
+        "StatPrefix": "route-decider",
+        "RouteCacheAction": "CLEAR",
+        "GrpcService": {
+          "Target": {
+            "Service": {
+              "Name": "ext-proc"
+            }
+          }
+        }
+      }
+    }
+  }]
+}
+```
+
+</CodeBlockConfig>
+<CodeBlockConfig filename="api-gateway-ext-proc-service-defaults.yaml">
+
+```yaml
+apiVersion: consul.hashicorp.com/v1alpha1
+kind: ServiceDefaults
+metadata:
+  name: api-gateway
+spec:
+  protocol: http
+  envoyExtensions:
+    - name: builtin/ext-proc
+      required: true
+      arguments:
+        proxyType: api-gateway
+        listenerType: inbound
+        config:
+          statPrefix: route-decider
+          routeCacheAction: CLEAR
+          grpcService:
+            target:
+              service:
+                name: ext-proc
+```
+
+</CodeBlockConfig>
+</CodeTabs>
+
+### Sidecar proxy
+
+The following example attaches an `ext-proc` extension to the inbound listener of the `service-e` sidecar proxy. When another mesh service sends a request to `service-e`, the proxy sends the request to the `ext-proc-connect-proxy` service over gRPC.
+
+<CodeTabs tabs={[ "HCL", "JSON", "YAML" ]}>
+<CodeBlockConfig filename="service-e-ext-proc-service-defaults.hcl">
+
+```hcl
+Kind     = "service-defaults"
+Name     = "service-e"
+Protocol = "http"
+EnvoyExtensions = [
+  {
+    Name = "builtin/ext-proc"
+    Arguments = {
+      ProxyType    = "connect-proxy"
+      ListenerType = "inbound"
+      Config = {
+        RouteCacheAction = "CLEAR"
+        GrpcService = {
+          Target = {
+            Service = {
+              Name = "ext-proc-connect-proxy"
+            }
+          }
+        }
+      }
+    }
+  }
+]
+```
+
+</CodeBlockConfig>
+<CodeBlockConfig filename="service-e-ext-proc-service-defaults.json">
+
+```json
+{
+  "Kind": "service-defaults",
+  "Name": "service-e",
+  "Protocol": "http",
+  "EnvoyExtensions": [{
+    "Name": "builtin/ext-proc",
+    "Arguments": {
+      "ProxyType": "connect-proxy",
+      "ListenerType": "inbound",
+      "Config": {
+        "RouteCacheAction": "CLEAR",
+        "GrpcService": {
+          "Target": {
+            "Service": {
+              "Name": "ext-proc-connect-proxy"
+            }
+          }
+        }
+      }
+    }
+  }]
+}
+```
+
+</CodeBlockConfig>
+<CodeBlockConfig filename="service-e-ext-proc-service-defaults.yaml">
+
+```yaml
+apiVersion: consul.hashicorp.com/v1alpha1
+kind: ServiceDefaults
+metadata:
+  name: service-e
+spec:
+  protocol: http
+  envoyExtensions:
+    - name: builtin/ext-proc
+      required: true
+      arguments:
+        proxyType: connect-proxy
+        listenerType: inbound
+        config:
+          routeCacheAction: CLEAR
+          grpcService:
+            target:
+              service:
+                name: ext-proc-connect-proxy
+```
+
+</CodeBlockConfig>
+</CodeTabs>
+
+When the processing service runs alongside your service, such as a sidecar in the same pod, set the `URI` field to a local address instead of a mesh service name. The following example targets an HTTP processing service that listens on `localhost:9000`:
+
+<CodeTabs tabs={[ "HCL", "JSON", "YAML" ]}>
+<CodeBlockConfig filename="service-e1-ext-proc-service-defaults.hcl">
+
+```hcl
+Kind     = "service-defaults"
+Name     = "service-e1"
+Protocol = "http"
+EnvoyExtensions = [
+  {
+    Name = "builtin/ext-proc"
+    Arguments = {
+      ProxyType    = "connect-proxy"
+      ListenerType = "inbound"
+      Config = {
+        RouteCacheAction = "CLEAR"
+        HttpService = {
+          Target = {
+            URI = "127.0.0.1:9000"
+          }
+          Path = "/decide"
+        }
+      }
+    }
+  }
+]
+```
+
+</CodeBlockConfig>
+<CodeBlockConfig filename="service-e1-ext-proc-service-defaults.json">
+
+```json
+{
+  "Kind": "service-defaults",
+  "Name": "service-e1",
+  "Protocol": "http",
+  "EnvoyExtensions": [{
+    "Name": "builtin/ext-proc",
+    "Arguments": {
+      "ProxyType": "connect-proxy",
+      "ListenerType": "inbound",
+      "Config": {
+        "RouteCacheAction": "CLEAR",
+        "HttpService": {
+          "Target": {
+            "URI": "127.0.0.1:9000"
+          },
+          "Path": "/decide"
+        }
+      }
+    }
+  }]
+}
+```
+
+</CodeBlockConfig>
+<CodeBlockConfig filename="service-e1-ext-proc-service-defaults.yaml">
+
+```yaml
+apiVersion: consul.hashicorp.com/v1alpha1
+kind: ServiceDefaults
+metadata:
+  name: service-e1
+spec:
+  protocol: http
+  envoyExtensions:
+    - name: builtin/ext-proc
+      required: true
+      arguments:
+        proxyType: connect-proxy
+        listenerType: inbound
+        config:
+          routeCacheAction: CLEAR
+          httpService:
+            target:
+              uri: "127.0.0.1:9000"
+            path: /decide
+```
+
+</CodeBlockConfig>
+</CodeTabs>
+
+Refer to the [external processing extension configuration reference](/consul/docs/reference/proxy/extensions/ext-proc) for configuration details.
+
+Refer to the [proxy defaults configuration entry reference](/consul/docs/reference/config-entry/proxy-defaults) and [service defaults configuration entry reference](/consul/docs/reference/config-entry/service-defaults) for configuration entry details.
+
+<Warning>
+
+Configuring `EnvoyExtensions` in proxy defaults applies the extension to every service in the datacenter, including services that may not use an HTTP-based protocol. Applying an `ext-proc` extension to a non-HTTP service causes Envoy to reject the filter configuration, which can result in the proxy failing to start or dropping all traffic for that service. We recommend configuring `EnvoyExtensions` in service defaults configuration entries so the extension applies only to the intended service or gateway.
+
+</Warning>
+
+### Configure multiple instances
+
+You can attach more than one `ext-proc` extension to the same proxy listener. When you do, Envoy runs each filter **sequentially on every request** in the order the extensions are listed — there is no built-in dispatch that sends different requests to different processors. Each extension entry therefore represents one stage in a processing pipeline, not an alternative path.
+
+Set a unique `StatPrefix` for each instance. Consul uses the prefix to derive a unique Envoy filter name in the form `envoy.filters.http.ext_proc/<StatPrefix>`. When you omit the prefix, Consul uses the unsuffixed filter name `envoy.filters.http.ext_proc`, which you can use for a single always-on instance.
+
+The main use cases for multiple named instances are:
+
+- **Chained processing pipeline**: Run independent processing stages in sequence. For example, attach an authentication processor first and a header-enrichment processor second. Every request flows through both filters in order, and each processor sees the headers as modified by the previous one.
+- **Selective per-route control on Kubernetes**: Because each instance has a distinct filter name, you can use a `RouteExtProc` resource to disable or override *individual* stages for specific routes while leaving the others active. For example, disable the enrichment processor for an internal health-check route while keeping the authentication processor enabled.
+
+To run processing on both inbound traffic (requests arriving at the service) and outbound traffic (requests the service sends to upstreams), add two separate extension entries with different `ListenerType` values (`inbound` and `outbound`) rather than two entries on the same listener.
+
+The following example configures two chained `ext-proc` instances on an API gateway. The `auth-check` processor runs first and validates request credentials. The `header-enrichment` processor runs second and stamps a `x-request-id` header. A `RouteExtProc` resource is used later to disable the `header-enrichment` stage for a specific route without affecting the `auth-check` stage.
+
+<CodeTabs tabs={[ "HCL", "JSON", "YAML" ]}>
+<CodeBlockConfig filename="api-gateway-multi-ext-proc-service-defaults.hcl">
+
+```hcl
+Kind     = "service-defaults"
+Name     = "api-gateway"
+Protocol = "http"
+EnvoyExtensions = [
+  {
+    Name = "builtin/ext-proc"
+    Arguments = {
+      ProxyType    = "api-gateway"
+      ListenerType = "inbound"
+      Config = {
+        StatPrefix = "auth-check"
+        GrpcService = {
+          Target = {
+            Service = {
+              Name = "auth-processor"
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    Name = "builtin/ext-proc"
+    Arguments = {
+      ProxyType    = "api-gateway"
+      ListenerType = "inbound"
+      Config = {
+        StatPrefix = "header-enrichment"
+        GrpcService = {
+          Target = {
+            Service = {
+              Name = "enrichment-processor"
+            }
+          }
+        }
+      }
+    }
+  }
+]
+```
+
+</CodeBlockConfig>
+<CodeBlockConfig filename="api-gateway-multi-ext-proc-service-defaults.json">
+
+```json
+{
+  "Kind": "service-defaults",
+  "Name": "api-gateway",
+  "Protocol": "http",
+  "EnvoyExtensions": [
+    {
+      "Name": "builtin/ext-proc",
+      "Arguments": {
+        "ProxyType": "api-gateway",
+        "ListenerType": "inbound",
+        "Config": {
+          "StatPrefix": "auth-check",
+          "GrpcService": {
+            "Target": {
+              "Service": {
+                "Name": "auth-processor"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "Name": "builtin/ext-proc",
+      "Arguments": {
+        "ProxyType": "api-gateway",
+        "ListenerType": "inbound",
+        "Config": {
+          "StatPrefix": "header-enrichment",
+          "GrpcService": {
+            "Target": {
+              "Service": {
+                "Name": "enrichment-processor"
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}
+```
+
+</CodeBlockConfig>
+<CodeBlockConfig filename="api-gateway-multi-ext-proc-service-defaults.yaml">
+
+```yaml
+apiVersion: consul.hashicorp.com/v1alpha1
+kind: ServiceDefaults
+metadata:
+  name: api-gateway
+spec:
+  protocol: http
+  envoyExtensions:
+    - name: builtin/ext-proc
+      arguments:
+        proxyType: api-gateway
+        listenerType: inbound
+        config:
+          statPrefix: auth-check
+          grpcService:
+            target:
+              service:
+                name: auth-processor
+    - name: builtin/ext-proc
+      arguments:
+        proxyType: api-gateway
+        listenerType: inbound
+        config:
+          statPrefix: header-enrichment
+          grpcService:
+            target:
+              service:
+                name: enrichment-processor
+```
+
+</CodeBlockConfig>
+</CodeTabs>
+
+## Apply the configuration entry
+
+For VM deployments, run the `consul config write` command and specify the proxy defaults or service defaults configuration entry. For Kubernetes deployments, run `kubectl apply`. The following example applies the extension in a service defaults configuration entry.
+
+<CodeTabs tabs={[ "HCL", "JSON", "YAML" ]}>
+
+```shell-session
+$ consul config write api-gateway-ext-proc-service-defaults.hcl
+```
+
+```shell-session
+$ consul config write api-gateway-ext-proc-service-defaults.json
+```
+
+```shell-session
+$ kubectl apply -f api-gateway-ext-proc-service-defaults.yaml
+```
+
+</CodeTabs>
+
+## Control external processing for individual routes on Kubernetes
+
+On Kubernetes, you can control external processing for individual API gateway routes with the [`RouteExtProc`](/consul/docs/reference/k8s/api-gateway/routeextprocfilter) custom resource. Attach the resource to an [`HTTPRoute`](https://gateway-api.sigs.k8s.io/reference/spec/#gateway.networking.k8s.io/v1.HTTPRoute) with an `ExtensionRef` filter to disable or override the behavior of a targeted `ext-proc` instance for requests that match the route.
+
+The `RouteExtProc` resource supports the following modes:
+
+- `disabled`: Skips the targeted instance for requests that match the route.
+- `override`: Keeps the targeted instance on the route and applies the per-route settings in the `overrides` field.
+
+Set the `statPrefix` field to match the `StatPrefix` of the `ext-proc` instance you want to target. Omit the field to target the default instance whose filter name is `envoy.filters.http.ext_proc`.
+
+The following example disables the `ext-proc` instance identified by the `route-decider` prefix for requests that match the attached route:
+
+<CodeBlockConfig filename="disable-route-decider.yaml">
+
+```yaml
+apiVersion: consul.hashicorp.com/v1alpha1
+kind: RouteExtProc
+metadata:
+  name: disable-route-decider
+  namespace: default
+spec:
+  statPrefix: route-decider
+  mode: disabled
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: HTTPRoute
+metadata:
+  name: static-route
+  namespace: default
+spec:
+  parentRefs:
+    - name: api-gateway
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /static
+      filters:
+        - type: ExtensionRef
+          extensionRef:
+            group: consul.hashicorp.com
+            kind: RouteExtProc
+            name: disable-route-decider
+      backendRefs:
+        - kind: Service
+          name: service-a
+          namespace: default
+          port: 8080
+```
+
+</CodeBlockConfig>
+
+The following example uses `override` mode to keep the instance enabled on the route while sending request headers and the buffered request body to the processing service:
+
+<CodeBlockConfig filename="override-route-decider.yaml">
+
+```yaml
+apiVersion: consul.hashicorp.com/v1alpha1
+kind: RouteExtProc
+metadata:
+  name: override-route-decider
+  namespace: default
+spec:
+  statPrefix: route-decider
+  mode: override
+  overrides:
+    processing:
+      request:
+        headersMode: SEND
+        bodyMode: BUFFERED
+```
+
+</CodeBlockConfig>
+
+Run the following command to apply the resources:
+
+```shell-session
+$ kubectl apply -f disable-route-decider.yaml
+```
+
+Refer to the [`RouteExtProc` resource configuration reference](/consul/docs/reference/k8s/api-gateway/routeextprocfilter) for all available fields and defaults.
+
+Refer to the [`HTTPRoute` resource specification](https://gateway-api.sigs.k8s.io/reference/spec/#gateway.networking.k8s.io/v1.HTTPRoute) for details on attaching `ExtensionRef` filters to routes.
+
+## Next steps
+
+- Review the [ext-proc extension configuration reference](/consul/docs/reference/proxy/extensions/ext-proc) for all available fields and defaults.
+- Review the [`RouteExtProc` resource configuration reference](/consul/docs/reference/k8s/api-gateway/routeextprocfilter) for per-route control options.
+- Review the [proxy defaults configuration entry reference](/consul/docs/reference/config-entry/proxy-defaults) and [service defaults configuration entry reference](/consul/docs/reference/config-entry/service-defaults) to learn how to structure configuration entries.
+- Explore other [Envoy extensions](/consul/docs/envoy-extension) available in Consul.

@@ -1,0 +1,700 @@
+---
+layout: docs
+page_title: Generate mTLS Certificates for Consul with Vault and Consul Template
+description: >-
+  Use Vault and Consul Template to create and configure Vault-managed mTLS certificates for Consul's API and RPC traffic.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-03-31T20:44:28.000Z
+last_modified: 2026-03-31T20:44:28.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Generate mTLS Certificates for Consul with Vault and Consul Template
+
+This page describes how to use Vault's [PKI Secrets Engine](/vault/docs/secrets/pki) to generate and renew dynamic X.509 certificates, using [Consul Template](/consul/docs/automate/consul-template) to automatically rotate your certificates.
+
+This method enables each agent in the Consul datacenter to have a unique certificate, with a relatively short time-to-live (TTL), that is automatically rotated, which allows you to safely and securely scale your datacenter while using mutual TLS (mTLS).
+
+If you want to use Vault as Consul service mesh certification authority, refer to [Vault as Consul service mesh certification authority](/consul/tutorials/operate-consul/vault-pki-consul-connect-ca).
+
+## Prerequisites
+
+- **Consul:** you need at least one Consul server node and, ideally, a Consul client agent node. Follow [Deploy Consul on VMs](/consul/tutorials/get-started-vms/virtual-machine-gs-deploy) to learn how to deploy a Consul agent. This page will provide you with the necessary specific configuration to apply for the scenario.
+
+- **Vault:** you need a running Vault cluster in your network. You can use a [local Vault dev server](/vault/tutorials/get-started/setup#set-up-the-lab) or an existing Vault deployment. You also need to configure your terminal to interact with Vault cluster by setting `VAULT_ADDR`, `VAULT_CACERT`, and `VAULT_TOKEN`.
+
+- **Consul Template:** to automate certificate generation and distribution you need [the `consul-template` binary installed](/consul/docs/automate/consul-template/install) on the agent's node.
+
+The diagram below shows the minimal architecture needed to demonstrate the functionality.
+
+![Architectural diagram showing a Client server and a Vault server with an operator issuing a command to start an automation](/img/consul-template/consul-vault-tls.png)
+
+<Note>
+
+You can use the [Nomad sandbox](/nomad/sandbox) to follow along in a hosted terminal session in your browser. This sandbox includes pre-configured Consul and Vault deployments. To download Consul Template after the sandbox loads, run `sudo apt-get update && sudo apt-get install consul-template`.
+
+</Note>
+
+To configure Vault as Consul's certification authority you need to follow these steps:
+
+1. [Configure the root certification authority (CA)](#configure-the-root-certification-authority-ca)
+1. [Configure an intermediate CA](#configure-an-intermediate-ca)
+1. [Create a Vault role](#create-a-vault-role)
+1. [Generate certificates for Consul](#generate-certificates-for-consul)
+1. (Optional) [Automate certificate rotation with consul-template](#automate-certificate-rotation-with-consul-template)
+
+## Configure the root certification authority (CA)
+
+We recommend that you have a single mount point to act as the root CA. The root CA signs intermediate Certificate Signing Requests (CSRs) from other PKI secrets engines. This setup allows you to use an external CA, in case you already have one in your network, and to use Vault's PKI engine only as an intermediate CA.
+
+In these instructions, the `pki` path is the mount point for the root CA.
+
+Enable Vault's PKI secrets engine at the `pki` path.
+
+```shell-session
+$ vault secrets enable pki
+Success! Enabled the pki secrets engine at: pki/
+```
+
+Tune the PKI secrets engine to issue certificates with a maximum time-to-live (TTL) of `87600` hours (10 years).
+
+```shell-session
+$ vault secrets tune -max-lease-ttl=87600h pki
+Success! Tuned the secrets engine at: pki/
+```
+
+Generate the root certificate and save the certificate in `CA_cert.crt`.
+
+```shell-session
+$ vault write -field=certificate pki/root/generate/internal \
+    common_name="consul" \
+    issuer_name="root-CA" \
+    ttl=87600h > CA_cert.crt
+```
+
+This generates a new self-signed CA certificate and private key. Vault will automatically revoke the generated root at the end of its lease period (TTL); the CA certificate will sign its own Certificate Revocation List (CRL).
+
+<Tip title="Tuning configuration">
+
+You can adapt the TTL to comply with your internal policies on certificate lifecycle.
+
+</Tip>
+
+You can inspect the certificate created using `openssl x509 -text -noout -in CA_cert.crt`
+
+Configure the CA and CRL URLs.
+
+```shell-session
+$ vault write pki/config/urls \
+    issuing_certificates="${VAULT_ADDR}/v1/pki/ca" \
+    crl_distribution_points="${VAULT_ADDR}/v1/pki/crl"
+```
+
+Example output:
+
+<CodeBlockConfig hideClipboard>
+
+```plaintext
+Key                              Value
+---                              -----
+crl_distribution_points          [https://127.0.0.1:8200/v1/pki/crl]
+delta_crl_distribution_points    []
+enable_templating                false
+issuing_certificates             [https://127.0.0.1:8200/v1/pki/ca]
+ocsp_servers
+```
+
+</CodeBlockConfig>
+
+## Configure an intermediate CA
+
+You want the certificates signed by the intermediate CA to be signed by the root CA as well. 
+
+Generate a Certificate Signing Request (CSR) and sign it with the root CA to generate the intermediate CA certificate. This way, if a security breach occurs, you can revoke all certificates issued by the intermediate CA directly from the root CA.
+
+### Enable Vault secret engine for the intermediate CA
+
+Enable the PKI secrets engine at the `pki_int` path.
+
+```shell-session
+$ vault secrets enable -path=pki_int pki
+Success! Enabled the pki secrets engine at: pki_int/
+```
+
+Tune the `pki_int` secrets engine to issue certificates with a maximum time-to-live (TTL) of `43800` hours (5 years).
+
+```shell-session
+$ vault secrets tune -max-lease-ttl=43800h pki_int
+Success! Tuned the secrets engine at: pki_int/
+```
+
+<Tip title="Tuning configuration">
+
+You can adapt the TTL to comply with your internal policies on certificate lifecycle.
+
+</Tip>
+
+### Request a CSR for the intermediate CA
+
+Request a certificate signing request (CSR) for the intermediate CA and save request as `pki_intermediate.csr`.
+
+```shell-session
+$ vault write -format=json pki_int/intermediate/generate/internal \
+    common_name="dc1.consul Intermediate Authority" \
+    issuer_name="intermediate-CA" \
+    | jq -r '.data.csr' > pki_intermediate.csr
+```
+
+The command has no output.
+
+### Sign the CSR and import the certificate into Vault
+
+First, sign the CSR producing a a `pem` file.
+
+```shell-session
+$ vault write -format=json pki/root/sign-intermediate \
+    issuer_ref="root-CA" \
+    csr=@pki_intermediate.csr \
+    format=pem_bundle ttl="43800h" \
+    | jq -r '.data.certificate' > intermediate.cert.pem
+```
+
+The command has no output.
+
+Once the CSR is signed, and the root CA returns a certificate, import it back into Vault.
+
+```shell-session
+$ vault write pki_int/intermediate/set-signed certificate=@intermediate.cert.pem
+```
+
+Example output:
+
+<CodeBlockConfig hideClipboard>
+
+```plaintext
+Key                 Value
+---                 -----
+existing_issuers    <nil>
+existing_keys       <nil>
+imported_issuers    [44d38d6c-14f4-38f4-1a40-95cd8cc04815 09a129d4-b853-ff48-efe9-3700f6b941cf]
+imported_keys       <nil>
+mapping             map[09a129d4-b853-ff48-efe9-3700f6b941cf: 44d38d6c-14f4-38f4-1a40-95cd8cc04815:48418626-88f5-22f4-348c-1841be4b3cc4]
+```
+
+</CodeBlockConfig>
+
+## Create a Vault role
+
+A role is a logical name that maps to a policy used to generate credentials.
+
+```shell-session
+$ vault write pki_int/roles/consul-dc1 \
+  allowed_domains="dc1.consul" \
+  allow_subdomains=true \
+  generate_lease=true \
+  max_ttl="720h"
+```
+
+Example output:
+
+<CodeBlockConfig hideClipboard>
+
+```plaintext
+Key                                   Value
+---                                   -----
+allow_any_name                        false
+allow_bare_domains                    false
+allow_glob_domains                    false
+allow_ip_sans                         true
+allow_localhost                       true
+allow_subdomains                      true
+allow_token_displayname               false
+allow_wildcard_certificates           true
+allowed_domains                       [dc1.consul]
+allowed_domains_template              false
+allowed_other_sans                    []
+allowed_serial_numbers                []
+allowed_uri_sans                      []
+allowed_uri_sans_template             false
+allowed_user_ids                      []
+basic_constraints_valid_for_non_ca    false
+client_flag                           true
+cn_validations                        [email hostname]
+code_signing_flag                     false
+country                               []
+email_protection_flag                 false
+enforce_hostnames                     true
+ext_key_usage                         []
+ext_key_usage_oids                    []
+generate_lease                        true
+issuer_ref                            default
+key_bits                              2048
+key_type                              rsa
+key_usage                             [DigitalSignature KeyAgreement KeyEncipherment]
+locality                              []
+max_ttl                               720h
+no_store                              false
+not_after                             n/a
+not_before_duration                   30s
+organization                          []
+ou                                    []
+policy_identifiers                    []
+postal_code                           []
+province                              []
+require_cn                            true
+serial_number_source                  json-csr
+server_flag                           true
+signature_bits                        256
+street_address                        []
+ttl                                   0s
+use_csr_common_name                   true
+use_csr_sans                          true
+use_pss                               false
+```
+
+</CodeBlockConfig>
+
+You are using the following options for the role:
+
+- `allowed_domains`: Specifies the domains of the role. The command uses `dc1.consul` as the domain, which is the default configuration you are going to use for Consul.
+- `allow_subdomains`: Specifies if clients can request certificates with CNs that are subdomains of the CNs allowed by the other role options
+
+  <Note>
+
+  This includes wildcard subdomains.
+
+  </Note>
+
+- `generate_lease`: Specifies if certificates issued/signed against this role will have Vault leases attached to them. Certificates can be added to the CRL by Vault revoke `<lease_id>` when certificates are associated with leases.
+
+This completes the Vault configuration as a CA.
+
+## Generate certificates for Consul
+
+Test the `pki` engine configuration by generating your first certificate.
+
+```shell-session
+$ vault write pki_int/issue/consul-dc1 \
+    common_name="server.dc1.consul" \
+    ttl="24h" | tee certs.txt
+```
+
+<Note title="Certificate TTL tuning">
+
+The TTL for the certificate is being set to 24 hours in this guide, meaning that this certificate will be valid only for 24 hours before expiring. Try using a shorter TTL on a test environment to ensure certificates are revoked properly after TTL is expired.
+
+</Note>
+
+Example output:
+
+<CodeBlockConfig hideClipboard>
+
+```plaintext
+Key                 Value
+---                 -----
+lease_id            pki_int/issue/consul-dc1/Oip6uSVy9A4Y6RbPdEv7WuUf
+lease_duration      23h59m59s
+lease_renewable     false
+ca_chain            [-----BEGIN CERTIFICATE-----
+MIIDojCCAoqgAwIBAgIUBHQpzIb+3nN64cjTXhyHwTkz+G0wDQYJKoZIhvcNAQEL
+BQAwETEPMA0GA1UEAxMGY29uc3VsMB4XDTI1MTEyMDE0NTYyOVoXDTMwMTExOTE0
+NTY1OVowLDEqMCgGA1UEAxMhZGMxLmNvbnN1bCBJbnRlcm1lZGlhdGUgQXV0aG9y
+aXR5MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEApu82Atvb913IGMZM
+6vGu8ZkvqAVvGjqsj1/ciIyR55LSD6Wt9jknMWovX2YvIW5xN36ApEpWeQpccRzc
+## ...
+-----END CERTIFICATE----- -----BEGIN CERTIFICATE-----
+## ...
+-----END CERTIFICATE-----]
+certificate         -----BEGIN CERTIFICATE-----
+## ...
+-----END CERTIFICATE-----
+expiration          1763737500
+issuing_ca          -----BEGIN CERTIFICATE-----
+## ...
+-----END CERTIFICATE-----
+private_key         -----BEGIN RSA PRIVATE KEY-----
+## ...
+-----END RSA PRIVATE KEY-----
+private_key_type    rsa
+serial_number       48:91:a9:7b:d0:a6:10:93:98:0f:ca:dc:ea:83:14:42:8e:c8:ef:e0
+```
+
+</CodeBlockConfig>
+
+### Configure Consul
+
+Use the certificate to configure Consul agents.
+
+<Tabs>
+<Tab heading="Server">
+
+Configure Consul server TLS stanza using the following `tls` stanza:
+
+<CodeTabs>
+
+```hcl
+tls {
+  defaults {
+    verify_incoming = true
+    verify_outgoing = true
+    verify_server_hostname = true
+    ca_file = "/etc/consul.d/ca.crt"
+    cert_file = "/etc/consul.d/agent.crt"
+    key_file = "/etc/consul.d/agent.key"
+  }
+}
+
+auto_encrypt {
+  allow_tls = true
+}
+```
+
+```json
+{
+  "tls": {
+    "defaults": {
+      "verify_incoming": true,
+      "verify_outgoing": true,
+      "verify_server_hostname": true,
+      "ca_file": "/etc/consul.d/ca.crt",
+      "cert_file": "/etc/consul.d/agent.crt",
+      "key_file": "/etc/consul.d/agent.key"
+    }
+  },
+  "auto_encrypt": {
+      "allow_tls": true
+    }
+}
+```
+
+</CodeTabs>
+
+
+To configure TLS encryption for Consul servers, three files are required:
+
+- `ca_file` - CA (or intermediate) certificate to verify the identity of the other nodes.
+- `cert_file` - Consul agent public certificate
+- `key_file` - Consul agent private key
+
+For the first Consul startup, you will use the certificate generated earlier.
+
+Use the following commands to extract the two certificates and private key from the `certs.txt` and place them into the right file and location.
+
+Create the certificates folder.
+
+```shell-session
+$ mkdir -p /etc/consul.d
+```
+
+Extract the root CA certificate.
+
+```shell-session
+$ grep -Pzo "(?s)(?<=issuing_ca)[^\-]*.*?END CERTIFICATE[^\n]*\n" certs.txt | sed 's/^\s*-/-/g' > /etc/consul.d/ca.crt
+```
+
+Extract the agent certificate.
+
+```shell-session
+$ grep -Pzo "(?s)(?<=certificate)[^\-]*.*?END CERTIFICATE[^\n]*\n" certs.txt | sed 's/^\s*-/-/g' > /etc/consul.d/agent.crt
+```
+
+Extract the agent key.
+
+```shell-session
+$ grep -Pzo "(?s)(?<=private_key)[^\-]*.*?END RSA PRIVATE KEY[^\n]*\n" certs.txt | sed 's/^\s*-/-/g' > /etc/consul.d/agent.key
+```
+
+</Tab>
+<Tab heading="Client">
+
+<Note>
+
+This section describes the automated [client certificate deployment process](/consul/docs/reference/agent/configuration-file/encryption#auto_encrypt) available in Consul 1.5.2 and newer.
+
+</Note>
+
+With auto-encryption, you can configure the Consul servers to automatically distribute certificates to the clients. To use this feature, configure clients to automatically get the certificates from the server.
+
+Configure Consul client TLS using the following `tls` stanza:
+
+<CodeTabs>
+
+```hcl
+tls {
+  defaults {
+    verify_incoming = true
+    verify_outgoing = true
+    verify_server_hostname = true
+    ca_file = "/etc/consul.d/ca.crt"
+  }
+}
+
+auto_encrypt {
+  tls = true
+}
+```
+
+```json
+{
+  "tls": {
+    "defaults": {
+      "verify_incoming": true,
+      "verify_outgoing": true,
+      "verify_server_hostname": true,
+      "ca_file": "/etc/consul.d/ca.crt",
+    }
+  },
+  "auto_encrypt": {
+      "tls": true
+    }
+}
+```
+
+</CodeTabs>
+
+
+To configure TLS encryption for Consul clients only one file is required:
+
+- `ca_file` - CA (or intermediate) certificate to verify the identity of the other nodes.
+
+Use the following commands to extract the certificate from the `certs.txt` and place them into the right file and location.
+
+Create the certificates folder.
+
+```shell-session
+$ mkdir -p /etc/consul.d
+```
+
+Extract the root CA certificate.
+
+```shell-session
+$ grep -Pzo "(?s)(?<=certificate)[^\-]*.*?END CERTIFICATE[^\n]*\n" certs.txt | sed 's/^\s*-/-/g' > /etc/consul.d/agent.crt
+```
+
+</Tab>
+</Tabs>
+
+## Automate certificate rotation with consul-template
+
+The guide steps used `ttl="24h"` ad a parameter during certificate creation, meaning that this certificates will be valid only for 24 hours before expiring.
+
+Deciding the right trade-off for certificate lifespan is always a compromise between security and agility. A possible third way that does not require you to lower your security is to use Consul Template to automate certificate renewal for Consul when the TTL is expired.
+
+### Create template files
+
+Instruct Consul Template to generate and retrieve those files from Vault using the following templates:
+
+<CodeBlockConfig filename="agent.crt.tpl (server only)">
+
+```go
+{{ with secret "pki_int/issue/consul-dc1" "common_name=server.dc1.consul" "ttl=24h" "alt_names=localhost" "ip_sans=127.0.0.1"}}
+{{ .Data.certificate }}
+{{ end }}
+```
+
+</CodeBlockConfig>
+
+The template uses the `pki_int/issue/consul-dc1` endpoint that Vault exposes to generate new certificates. It also mentions the common name and alternate names for the certificate.
+
+<CodeBlockConfig filename="agent.key.tpl (server only)">
+
+```go
+{{ with secret "pki_int/issue/consul-dc1" "common_name=server.dc1.consul" "ttl=24h" "alt_names=localhost" "ip_sans=127.0.0.1"}}
+{{ .Data.private_key }}
+{{ end }}
+```
+
+</CodeBlockConfig>
+
+The same endpoint also exposes the CA certificate under the `.Data.issuing_ca` parameter.
+
+<CodeBlockConfig filename="ca.crt.tpl">
+
+```go
+{{ with secret "pki_int/issue/consul-dc1" "common_name=server.dc1.consul" "ttl=24h"}}
+{{ .Data.issuing_ca }}
+{{ end }}
+```
+
+</CodeBlockConfig>
+
+Copy the newly created files into `/opt/consul/templates`.
+
+```shell-session
+$ cp *.tpl /opt/consul-template/
+```
+
+### Create Consul Template configuration
+
+Create a configuration file, `consul_template.hcl`, that will instruct Consul Template to retrieve the files needed for the Consul agents, client and server, to configure TLS encryption.
+
+<Tabs>
+<Tab heading="Server">
+
+<CodeBlockConfig filename="consul_template.hcl">
+
+```hcl
+# This denotes the start of the configuration section for Vault. All values
+# contained in this section pertain to Vault.
+vault {
+  # This is the address of the Vault leader. The protocol (http(s)) portion
+  # of the address is required.
+  address      = "https://localhost:8200"
+
+  # This value can also be specified via the environment variable VAULT_TOKEN.
+  token        = "root"
+
+  unwrap_token = false
+
+  renew_token  = false
+}
+
+# This block defines the configuration for a template. Unlike other blocks,
+# this block may be specified multiple times to configure multiple templates.
+template {
+  # This is the source file on disk to use as the input template. This is often
+  # called the "consul-template template".
+  source      = "/opt/consul-template/agent.crt.tpl"
+
+  # This is the destination path on disk where the source template will render.
+  # If the parent directories do not exist, consul-template will attempt to
+  # create them, unless create_dest_dirs is false.
+  destination = "/etc/consul.d/agent.crt"
+
+  # This is the permission to render the file. If this option is left
+  # unspecified, consul-template will attempt to match the permissions of the
+  # file that already exists at the destination path. If no file exists at that
+  # path, the permissions are 0644.
+  perms       = 0700
+
+  # This is the optional command to run when the template is rendered. The
+  # command will only run if the resulting template changes.
+  command     = "sh -c 'date && consul reload'"
+}
+
+template {
+  source      = "/opt/consul-template/agent.key.tpl"
+  destination = "/etc/consul.d/agent.key"
+  perms       = 0700
+  command     = "sh -c 'date && consul reload'"
+}
+
+template {
+  source      = "/opt/consul-template/ca.crt.tpl"
+  destination = "/etc/consul.d/ca.crt"
+  command     = "sh -c 'date && consul reload'"
+}
+```
+
+</CodeBlockConfig>
+
+The configuration file for the server contains the information to retrieve the CA certificate as well as the certificate/key pair for the server agent.
+
+</Tab>
+
+<Tab heading="Client">
+
+<CodeBlockConfig filename="consul_template.hcl">
+
+```hcl
+# This denotes the start of the configuration section for Vault. All values
+# contained in this section pertain to Vault.
+vault {
+  # This is the address of the Vault leader. The protocol (http(s)) portion
+  # of the address is required.
+  address      = "https://localhost:8200"
+
+  # This value can also be specified via the environment variable VAULT_TOKEN.
+  token        = "root"
+
+  unwrap_token = false
+
+  renew_token  = false
+}
+
+template {
+  source      = "/opt/consul-template/ca.crt.tpl"
+  destination = "/etc/consul.d/ca.crt"
+  command     = "sh -c 'date && consul reload'"
+}
+```
+
+</CodeBlockConfig>
+
+The configuration file for the client contains the information to retrieve the CA certificate only, the certificates for client agents are automatically generated from Consul when using the `auto_encrypt` setting.
+
+</Tab>
+</Tabs>
+
+
+To allow Consul Template to communicate with Vault, define the following parameters:
+
+- `address` : the address of your Vault server. If Vault runs on the same node as Consul, you can use `http://localhost:8200`.
+
+- `token` : a valid Vault ACL token with appropriate permissions. You can use Vault root token for this example.
+
+<Warning title="Production check">
+
+The use of Vault root token is not recommended for production use; the recommended security approach is to create a new token based on a specific policy with limited privileges.
+
+</Warning>
+
+### Start Consul Template
+
+Start Consul Template using the `-config` parameter to provide the configuration file.
+
+```shell-session
+$ consul-template -config "consul_template.hcl"
+
+Configuration reload triggered
+```
+
+## Verify certificate rotation
+
+The certificate you created manually for the Consul server had a TTL of 24 hours.
+
+This means that after the certificate expires Vault will renew it and Consul Template will update the files on your agent it reload Consul configuration automatically to make it pick up the new files.
+
+Verify the rotation by checking that Consul Template keeps listing, every 24 hours, a timestamp and the log line:
+
+```plaintext hideClipboard
+Configuration reload triggered
+```
+
+Use `openssl` to verify the certificate content:
+
+```shell-session
+$ openssl x509 -text -noout -in /etc/consul.d/agent.crt
+```
+
+Verify in the output that the `Not Before` and `Not After` values are being updated to reflect the new certificate.
+
+<CodeBlockConfig hideClipboard highlight="9-10">
+
+```plaintext
+Certificate:
+    Data:
+        Version: 3 (0x2)
+        Serial Number:
+            0a:06:b2:62:56:d1:7d:e6:5c:67:f7:89:06:8a:3e:5b:f1:fa:7e:00
+        Signature Algorithm: sha256WithRSAEncryption
+        Issuer: CN=dc1.consul Intermediate Authority
+        Validity
+            Not Before: Nov 25 11:48:06 2025 GMT
+            Not After : Nov 25 12:48:06 2025 GMT
+        Subject: CN=server.dc1.consul
+## ...
+```
+
+</CodeBlockConfig>
+
+## Next steps
+
+In this page, you learned how to generate Consul TLS certificates using Vault's PKI secret engine and to automatically rotate them using Consul Template.
+
+If you want to automate Consul's gossip encryption using Vault and `consul-template` refer to [Generate and manage gossip encryption for Consul with Vault and Consul Template](/consul/docs/automate/consul-template/vault/gossip).
+
+To learn how to use Vault to generate and manage Consul's ACL tokens, refer to [Use Vault for ACL management with Consul on VMs](/consul/docs/secure/acl/vault/vm).
+
+If you are running Consul in Kubernetes, you can [use Vault for secrets management with Consul on Kubernetes](/consul/docs/integrate/vault/k8s).
+
