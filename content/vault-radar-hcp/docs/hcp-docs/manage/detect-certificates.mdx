@@ -1,19 +1,23 @@
 ---
-page_title: Detect certificates
+page_title: Detect certificates and public keys
 description: >-
-  Find PEM-encoded certificates with HCP Vault Radar, the risk level, and how severity is determined.
+  Find PEM-encoded certificates and public keys with HCP Vault Radar, the risk tags it assigns, and how severity is determined.
 ---
 
-# Detect certificates
+# Detect certificates and public keys
 
-@include 'beta-feature.mdx'
+Vault Radar scans for PEM-encoded certificates and for public keys in PEM, JSON
+Web Key (JWK), and OpenSSH formats. It evaluates their cryptographic properties
+to identify risky or misconfigured material. This page describes what Vault
+Radar detects, which risk tags it assigns, and how severity is determined.
 
-Vault Radar scans for PEM-encoded certificates and evaluates their cryptographic
-properties to identify risky or misconfigured certificates. This page describes
-what Vault Radar detects, which risk tags it assigns, and how severity is
-determined.
+Certificates and public keys are public artifacts by design, so their presence
+alone is not a finding. Vault Radar reports one only when it has at least one
+risk tag.
 
 ## What Vault Radar detects
+
+### Certificates
 
 Vault Radar identifies PEM blocks with the following headers:
 
@@ -29,14 +33,42 @@ suppressed.
 
 For X.509 certificate PEM blocks, Vault Radar parses the certificate and
 evaluates its signing algorithm, RSA key size, validity, and self-signed status.
-A valid X.509 certificate with no assigned risk tags is suppressed. Certificates
-are public artifacts by design, so their presence alone is not a finding.
+A valid X.509 certificate with no assigned risk tags is suppressed.
+
+Vault Radar reports X.509 certificate findings with the description
+**X.509 Certificate**. For expired and expiring-soon certificates, the finding
+description also includes the expiry date, for example
+**X.509 Certificate (Expired on 2024-01-02)** or
+**X.509 Certificate (Expiring on 2024-01-02)**. The date is the certificate
+`NotAfter` date in UTC.
 
 PKCS#7 bundles are detected but not parsed for X.509 risk tags. If a PKCS#7
-block passes detection validation, it is reported without certificate-risk tags.
-Because an untagged secret-category finding falls through to the default severity
-rule, it is displayed with **Medium** severity.
+block passes detection validation, it is reported with the description
+**PKCS#7 certificate bundle** and without certificate-risk tags. Because an
+untagged secret-category finding falls through to the default severity rule, it
+is displayed with **Medium** severity.
 
+### Public keys
+
+Vault Radar detects the following public key formats:
+
+| Format | What Vault Radar matches | Finding description |
+| --- | --- | --- |
+| PEM | `-----BEGIN PUBLIC KEY-----` (PKIX, any algorithm) and `-----BEGIN RSA PUBLIC KEY-----` (PKCS#1, RSA only). The key can span multiple lines or sit on a single line with JSON-escaped line breaks. | PEM public key |
+| JWK | A JSON Web Key object with a `kty` of `RSA`, `EC`, or `OKP`. A pretty-printed JWK that spans multiple lines is reconstructed from the surrounding lines. | JSON Web Key (JWK) |
+| SSH | OpenSSH public keys of type `ssh-rsa`, `ssh-dss`, `ssh-ed25519`, or `ecdsa-sha2-nistp256`, `ecdsa-sha2-nistp384`, and `ecdsa-sha2-nistp521`. | SSH public key |
+
+Vault Radar parses each candidate and evaluates its key type and key size.
+
+- A PEM public key requires a matching end boundary and a Base64 payload of at
+  least 60 characters. Quoted, malformed, truncated, or placeholder values are
+  suppressed.
+- For SSH public keys, the trailing comment (for example, `alice@example.com`)
+  is not part of the finding value. The same key is therefore reported once,
+  regardless of the comment attached to it.
+- A key that cannot be parsed, or that has no assigned risk tags, is suppressed.
+- A JWK that contains private key material (a `d` parameter) is not a public
+  key and is not reported under this detection.
 
 ## Certificate risk tags
 
@@ -49,31 +81,56 @@ observed in the parsed certificate.
 | `insecure_key_size` | The certificate contains an RSA public key smaller than 1024 bits. | The RSA key is critically weak. |
 | `weak_signing_algorithm` | The signature algorithm is `DSAWithSHA256`. | DSA is deprecated but not classified as an actively broken algorithm. |
 | `weak_key_size` | The certificate contains an RSA public key from 1024 through 2047 bits. | The RSA key is below the 2048-bit industry baseline. |
-| `expired_certificate` | The certificate is expired, or it expires in fewer than 30 whole days. | The certificate is no longer valid or needs prompt renewal. |
+| `expired_certificate` | The certificate `NotAfter` date is in the past. | The certificate is no longer valid. The expiry date is shown on the finding. |
+| `expiring_soon_certificate` | The certificate is not expired but expires in fewer than 30 whole days. | The certificate needs prompt renewal. The expiry date is shown on the finding. |
 | `self_signed_certificate` | The subject distinguished name equals the issuer distinguished name. | The certificate has no distinct issuing CA identity. |
 
+## Public key risk tags
+
+Vault Radar evaluates only the key type and size of a public key, so a public
+key receives at most one tag. The tags are the same key-size tags that apply to
+certificates.
+
+| Tag | Assigned when | Security meaning |
+| --- | --- | --- |
+| `insecure_key_size` | The key is an RSA key smaller than 1024 bits, an elliptic curve (EC) key on a curve smaller than 224 bits (for example, P-192), or any DSA key, regardless of size. | The key is critically weak. NIST deprecated DSA in 2023. |
+| `weak_key_size` | The key is an RSA key from 1024 through 2047 bits, or an EC key on a 224-bit curve (for example, P-224). | The key is below the current industry baseline of 2048-bit RSA or 256-bit EC. |
 
 ## Severity mapping
 
 Vault Radar derives one displayed severity from all tags on the finding. The
-highest applicable certificate severity wins.
+highest applicable severity wins, except that an expired certificate is always
+**Info**.
 
 | Displayed severity | Tags that cause it |
 | --- | --- |
 | Critical | `insecure_signing_algorithm`, `insecure_key_size` |
-| High | `weak_signing_algorithm`, `weak_key_size`, `expired_certificate` |
-| Medium | `self_signed_certificate` |
+| High | `weak_signing_algorithm`, `weak_key_size` |
+| Medium | `expiring_soon_certificate`, `self_signed_certificate` |
+| Info | `expired_certificate` |
+
+Public keys can only receive `insecure_key_size` or `weak_key_size`, so their
+findings are displayed as **Critical** or **High**.
 
 ### Examples
 
 - A SHA-1-signed certificate that is also expired receives `insecure_signing_algorithm`
-  and `expired_certificate`. Its displayed severity is **Critical**.
+  and `expired_certificate`. Its displayed severity is **Info**.
 - An expired self-signed certificate receives `expired_certificate` and
-  `self_signed_certificate`. Its displayed severity is **High**.
+  `self_signed_certificate`. Its displayed severity is **Info**.
+- A SHA-1-signed certificate that expires in 10 days receives
+  `insecure_signing_algorithm` and `expiring_soon_certificate`. Its displayed severity is **Critical**.
 - A self-signed certificate with no other risk tag has **Medium** severity.
+- A certificate that expires in fewer than 30 days with no other risk tag has **Medium** severity.
 - An RSA-2048 certificate using SHA-256, with more than 30 days remaining and a
   different subject and issuer, has no certificate-risk tags and is not reported
   as a finding.
+- A 512-bit RSA public key in a PEM, JWK, or SSH format receives
+  `insecure_key_size`. Its displayed severity is **Critical**.
+- A 1024-bit RSA public key receives `weak_key_size`. Its displayed severity is **High**.
+- An SSH DSA public key (`ssh-dss`) receives `insecure_key_size`. Its displayed severity is **Critical**.
+- A 2048-bit RSA public key, an Ed25519 key, or an EC key on the P-256, P-384, or
+  P-521 curve has no risk tags and is not reported as a finding.
 
 ## Severity precedence rules
 
@@ -82,20 +139,22 @@ evaluated in this order:
 
 1. `ignore_rule`, `inactive_secret`, and certain general suppression tags produce
    **Info** before certificate severity is evaluated.
-1. Critical certificate tags take precedence over High and Medium certificate tags.
-1. High certificate tags take precedence over the Medium self-signed tag.
-1. The self-signed tag produces Medium only when no higher-priority certificate tag applies.
-
-As a result, the expiry tag is not treated specially: it is one of the
-High-severity certificate tags, and any Critical tag wins over both High and Medium.
+1. `expired_certificate` produces **Info**, even when the certificate also has
+   insecure, weak, or self-signed tags. It takes precedence over all other certificate tags.
+1. Critical tags (`insecure_signing_algorithm`, `insecure_key_size`) take
+   precedence over High and Medium tags.
+1. High tags (`weak_signing_algorithm`, `weak_key_size`) take precedence over the Medium tags.
+1. `expiring_soon_certificate` and `self_signed_certificate` produce Medium only
+   when no higher-priority tag applies.
 
 ## Conditions that do not receive a risk tag
 
-The following certificate properties do not trigger a risk tag:
+The following properties do not trigger a risk tag:
 
-- RSA keys of 2048 bits or larger.
+- RSA keys of 2048 bits or larger, in certificates and in public keys.
+- EC public keys on the P-256, P-384, or P-521 curve.
+- Ed25519 keys, including `ssh-ed25519` keys and JWK keys with a `kty` of `OKP`.
 - `SHA256WithRSA`, `SHA384WithRSA`, and `ECDSAWithSHA256` signing algorithms.
 - `PureEd25519` signatures.
 - Certificates with 30 or more whole days until expiry.
 - Certificates whose subject and issuer distinguished names differ.
-
