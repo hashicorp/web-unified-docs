@@ -232,6 +232,99 @@ Initiate the server upgrade:
    `updatePartition` is `0`. At this point, you may remove the
    `updatePartition` configuration. Your server upgrade is complete.
 
+## Convert multi-port workloads during an upgrade
+
+By default, the Consul Helm chart disables multi-port service registration with the [`connectInject.multiportServiceRegistration.enabled`](/consul/docs/reference/k8s/helm#v-connectinject-multiportserviceregistration-enabled) value set to `false`. When registration is disabled, the service mesh injector rejects any Pod that would register more than one named port in a single Consul service, unless the `consul.hashicorp.com/connect-service-port` annotation selects exactly one port. Refer to [Configure multi-port services on Kubernetes](/consul/docs/connect/k8s/multiport) for more information.
+
+Existing workloads that expose several container ports and do not set that annotation keep running after the upgrade. When Kubernetes recreates their Pods, the injector rejects the new Pods. For StatefulSets, this leaves ordinals stranded, and for DaemonSets, new nodes receive no Pod.
+
+To avoid this outcome, Consul can run a conversion Job during `helm upgrade` that updates existing workloads before Kubernetes recreates their Pods. The conversion Job and the `conversionStrategy` Helm value are available in Consul on Kubernetes Helm chart version 2.0.4 and later.
+
+### Conversion strategies
+
+Set [`connectInject.multiportServiceRegistration.conversionStrategy`](/consul/docs/reference/k8s/helm#v-connectinject-multiportserviceregistration-conversionstrategy) to one of the following values:
+
+| Strategy | Behavior |
+| :------- | :------- |
+| `NONE` | Default. Consul does not create the conversion Job and leaves existing workloads untouched. |
+| `TRANSLATE` | For each eligible workload that selects more than one port, Consul sets `consul.hashicorp.com/connect-service-port` in the Pod template to a single port. Consul keeps the workload in the service mesh. |
+| `DECOMMISSION` | For each eligible workload, Consul sets `consul.hashicorp.com/connect-inject: "false"` in the Pod template. This setting removes the workload from the service mesh. Consul applies this strategy to every eligible mesh-injected workload, not only workloads that select multiple ports. |
+
+Both strategies modify the Pod template, so Kubernetes starts a rolling update for each workload that changes. The Job does not update workloads that already comply.
+
+The `TRANSLATE` strategy selects the port using the following rules:
+
+1. If the Pod template sets `consul.hashicorp.com/connect-service-default-port`, Consul selects that port. The value must match the name or number of one of the ports the workload would register. If it does not, the Job fails for that workload.
+1. Otherwise, Consul selects the first port that the workload would register.
+
+Consul does not convert workloads that use the legacy `consul.hashicorp.com/connect-service` annotation with several comma-separated service names. These workloads register one Consul service for each name and are not affected by the multi-port registration setting.
+
+### Job behavior
+
+Helm creates the Job as a post-upgrade hook in the release namespace. The Job runs the `consul-k8s-control-plane convert-multiport-services` command under the service account of the service mesh injector.
+
+The chart creates the Job when all of the following conditions are true:
+
+- You run `helm upgrade`. Helm does not create the Job during `helm install`.
+- `connectInject.enabled` is `true`.
+- `connectInject.multiportServiceRegistration.enabled` is `false`.
+- `connectInject.multiportServiceRegistration.conversionStrategy` is `TRANSLATE` or `DECOMMISSION`.
+
+The Job converts Deployments, StatefulSets, and DaemonSets. It evaluates a workload only when the workload is eligible for injection, which means one of the following is true:
+
+- The Pod template sets `consul.hashicorp.com/connect-inject: "true"`.
+- The Pod template does not set the annotation, and `connectInject.default` is `true`.
+
+The Job honors the same namespace scoping as the injector. A namespace is in scope when it passes the [`connectInject.k8sAllowNamespaces`](/consul/docs/reference/k8s/helm#v-connectinject-k8sallownamespaces), [`connectInject.k8sDenyNamespaces`](/consul/docs/reference/k8s/helm#v-connectinject-k8sdenynamespaces), and [`connectInject.namespaceSelector`](/consul/docs/reference/k8s/helm#v-connectinject-namespaceselector) filters. The Job always skips the `kube-system` and `kube-public` namespaces and the namespace that contains the Consul release. Skipping the release namespace prevents `DECOMMISSION` from restarting Consul components.
+
+The Job also scans in-scope Pods for workloads that it cannot rewrite, such as bare Pods and Pods owned by Argo Rollouts, OpenShift DeploymentConfigs, or operator-managed custom resources. If any of these Pods select more than one port, the Job fails and lists them. Set `consul.hashicorp.com/connect-service-port` to a single port on each listed workload, or remove the workload from the service mesh, and then run the upgrade again.
+
+The Job continues after a failure to convert one workload so that the log reports the state of every workload. The Job then exits with an error. Because the Job is a Helm hook, a failed Job fails the `helm upgrade` command. The Job retries up to three times.
+
+Helm deletes the Job after it succeeds and before it creates the Job for the next upgrade. A failed Job remains in the cluster so that you can inspect it.
+
+The chart validates the strategy when it renders. The `helm upgrade` command fails before Helm applies any change when `conversionStrategy` is not `NONE`, `TRANSLATE`, or `DECOMMISSION`. It also fails when you set `conversionStrategy` to `TRANSLATE` or `DECOMMISSION` while `multiportServiceRegistration.enabled` is `true`.
+
+### Run the conversion
+
+1. Set the conversion strategy in your Helm values file.
+
+   <CodeBlockConfig filename="values.yaml">
+
+   ```yaml
+   connectInject:
+     multiportServiceRegistration:
+       enabled: false
+       conversionStrategy: TRANSLATE
+   ```
+
+   </CodeBlockConfig>
+
+1. Upgrade the Helm release.
+
+   ```shell-session
+   $ helm upgrade consul hashicorp/consul --namespace consul --version <your-version> --values /path/to/your/values.yaml
+   ```
+
+   Helm waits for the conversion Job to complete before it marks the upgrade as successful.
+
+1. Verify the result. For a `TRANSLATE` conversion, check the Pod template annotations of a converted workload. The following example shows a Deployment named `web`.
+
+   ```shell-session
+   $ kubectl get deployment web --output jsonpath='{.spec.template.metadata.annotations}'
+   {"consul.hashicorp.com/connect-inject":"true","consul.hashicorp.com/connect-service-port":"api-port"}
+   ```
+
+1. If the upgrade fails, review the Job logs. The log line `multi-port conversion complete` reports the strategy and the number of workloads that Consul updated. Error lines list each workload that Consul could not convert.
+
+   ```shell-session
+   $ kubectl logs job/consul-connect-inject-multiport-conversion --namespace consul
+   ```
+
+After the conversion completes and Kubernetes finishes the rolling updates, you can set `conversionStrategy` back to `NONE`. The Job is idempotent, so running it again does not change workloads that already comply.
+
+If your workloads need multi-port registration and you run [Consul Enterprise](/consul/docs/enterprise), set `connectInject.multiportServiceRegistration.enabled` to `true` instead of converting the workloads. In this configuration, you must leave `conversionStrategy` set to `NONE`.
+
 ## Upgrading to Consul Dataplane
 
 In earlier versions, Consul on Kubernetes used client agents in its deployments. As of v1.14.0, Consul uses [Consul Dataplane](/consul/docs/connect/dataplane/) in Kubernetes deployments instead of client agents.
