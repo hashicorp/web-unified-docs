@@ -1,0 +1,321 @@
+---
+layout: docs
+page_title: Auto-instrumentation and KPI metrics
+description: >-
+  Learn how Consul Agentic Runtime Fabric automatically instruments model and tool traffic without application tracing SDKs and supplies evidence for operational metrics and business KPIs.
+---
+
+# Auto-instrumentation and KPI metrics
+
+Consul Agentic Runtime Fabric provides automatic instrumentation at the specialised
+sidecar proxy layer. The AI Inference Gateway and MCP sidecars are the specialised
+proxies that automatically instrument supported model and tool traffic as it
+passes through them. Their implementation combines Envoy with protocol-aware
+external processing to generate network and AI payload spans.
+Applications do not need to initialize an OpenTelemetry SDK, create spans, add
+tracing decorators, or instrument their business logic.
+
+These observations supply inputs for operational metrics and key performance
+indicators (KPIs). This page explains the automatic capture path, how to aggregate
+its evidence, and which measures require additional business-outcome data.
+
+@include '../../../global/partials/alerts/beta.mdx'
+
+## Introduction
+
+Network telemetry shows which services communicated and whether requests succeeded.
+AI observability also needs to identify the tool invoked, the arguments supplied,
+the model interaction, and the result returned. These details are carried in
+application protocols rather than ordinary network span attributes.
+
+The specialised sidecar layer combines Envoy's transport visibility with
+protocol-aware external processing. Once the infrastructure is configured,
+instrumentation happens automatically for supported traffic on the observed routes,
+without applications emitting telemetry themselves.
+
+The AI Inference Gateway acts as the specialised proxy for model traffic and
+automatically instruments supported model requests and responses. MCP
+sidecars automatically instrument supported tool calls, including tool identity,
+arguments, results, and errors, subject to content-capture policy. Neither requires
+application-level tracing instrumentation in agents or tool implementations.
+
+For example, an agent can repeatedly call the same tool with the same arguments
+while every HTTP request succeeds. The sidecar layer supplies the call and result
+evidence that Agentic Analytics can use to assess this repetition. Applications do
+not need to create custom tool-call spans for this analysis.
+
+Automatic instrumentation does not mean automatic visibility into every operation.
+Calls must traverse the configured proxies, and the processor must understand the
+protocol it observes. Local computation and traffic that bypasses the mesh remain
+outside this observation path.
+
+## How auto-instrumentation works
+
+### Network observation
+
+Envoy sidecars generate network spans for observed ingress and egress requests.
+These spans describe the service path, request timing, and transport outcomes.
+Consul supplies the proxy configuration and service connectivity needed for this
+observation path.
+
+Use HTTP-aware listeners for supported HTTP protocols. Opaque TCP forwarding does
+not provide the HTTP headers and bodies required for protocol-aware AI observation.
+
+### Protocol-aware observation
+
+Within the specialised proxy implementation, an external processor runs alongside
+Envoy and receives request and response headers and bodies through Envoy's
+`ext_proc` interface. It parses supported
+protocols and emits a separate payload span containing the observed AI interaction.
+This processor is infrastructure, not an instrumentation library imported by an
+agent or tool application.
+
+The reference implementation returns continuation responses without modifying the
+application payload. It exports the resulting span through a bounded background
+queue after the exchange, rather than waiting for trace storage before allowing
+the application to proceed.
+
+The external processor does not add payload attributes to Envoy's existing span.
+It creates its own correlated span. Because external processing runs before the
+router creates the egress span, the payload span and the egress span share the
+available parent context and appear as siblings in the trace.
+
+### Trace correlation without application instrumentation
+
+Establish W3C Trace Context and a sampling decision at the entry point. The reference
+deployment uses an infrastructure trace-root component before the API Gateway.
+Sidecars and external processors then use that context to correlate observations.
+
+Applications must preserve incoming context when making downstream calls. The
+reference applications forward an allowlist containing `traceparent`, `tracestate`,
+`baggage`, and `x-request-id`. This is header propagation, not application-level
+instrumentation: applications still create no spans and initialize no tracing SDK.
+
+A proxy cannot infer which incoming request caused an unrelated outgoing request
+inside an application. Without context propagation, observations cannot reliably
+form one end-to-end workflow trace. In the reference processor, a missing or invalid
+`traceparent`, or an unsampled context, prevents payload-span emission.
+
+## Automatically observed signals
+
+The following signals describe supported parsing in the reference implementation.
+Attribute availability depends on the protocol, visible request and response data,
+sampling, and configured size limits. Content-bearing attributes require the
+data-handling controls described below.
+
+| Interaction | Automatically observed evidence | Interpretation boundary |
+| --- | --- | --- |
+| MCP tool call | JSON-RPC method, tool name, arguments, result text, and protocol or tool errors. | HTTP success alone does not establish tool success. |
+| Model inference | Model identifier, visible prompt and completion content, offered tools, requested tool calls, and usage fields present in the response. | A requested tool call is not proof that the agent executed it; correlate it with the actual tool request. |
+| Agent-to-agent delegation | Supported A2A method and message content from the request and response. | A delegation response does not prove that the overall workflow completed successfully. |
+| Supported HTTP API call | Request method and path, response status, and supported JSON payload information. | Unsupported or opaque payloads cannot supply the same semantic detail. |
+| Mesh request | Service path, network timing, and transport outcomes. | Network timing and processor timing measure different parts of the exchange. |
+
+For MCP, example payload attributes include `mcp.tool`, `mcp.arguments`,
+`mcp.result.text`, and `mcp.is_error`. Inference payload spans use `gen_ai.*`
+attributes. Treat the emitted schema as version-specific; these examples do not
+establish that every attribute is available for every provider or protocol version.
+
+## KPI metrics
+
+Automatic instrumentation supplies observations, not a complete KPI calculation
+pipeline. Configure your metrics or analytics backend to aggregate the available
+evidence. The measures described here are calculation guidance, not built-in metric
+names or a claim that every deployment emits them directly.
+
+### Operational metrics
+
+Use supported request, response, and timing evidence to measure model and tool
+traffic without adding application tracing instrumentation.
+
+| Measure | Calculation inputs | Interpretation boundary |
+| --- | --- | --- |
+| Request rate | Count logical model requests or tool calls over a defined time window. | Count each exchange once, not every network, payload, and processor transport span. |
+| Protocol error rate | Divide failed observed exchanges by all observed exchanges in the same population and time window. | Include supported tool or JSON-RPC errors; HTTP success alone does not establish tool success. |
+| Request latency | Aggregate request durations into distributions or percentiles for a defined observation point. | Do not mix Envoy network timing with external-processor timing or sum sibling spans as sequential work. |
+| Token usage | Aggregate usage reported in model responses, with model and request attribution. | Missing usage is unknown, not zero; observing the same response on both sides of a gateway must not double-count usage. |
+
+Define the observation point, denominator, time window, and retry treatment before
+comparing results. Sampled or incomplete traces describe the observed population,
+not necessarily all traffic. Prefer complete request counters where available for
+traffic totals; do not present sampled span counts as exact totals.
+
+### Higher-order KPIs
+
+Business KPIs combine proxy observations with application semantics. Applications
+supply outcome evidence that network exchanges cannot establish; this does not
+require them to emit the proxy-generated tracing spans.
+
+| KPI | Required inputs | Interpretation limit |
+| --- | --- | --- |
+| Task completion rate | Application-defined task starts, terminal outcomes, and correlation across calls. | Successful HTTP requests or model responses do not prove task completion. |
+| Tool success rate | Tool protocol outcomes and application-defined business results. | A protocol success can still represent an unsuccessful business operation. |
+| Cost per successful task | Attributed usage, maintained provider pricing, and confirmed task outcomes. | Missing usage, retries, pricing changes, and incomplete tasks affect the result. |
+| Autonomous versus escalated outcomes | Application approval events and final task outcomes. | Avoid treating every approval request or timeout as a completed task. |
+| Model quality or routing effectiveness | Application evaluations and confirmed served-model attribution. | Latency, token counts, and availability are not quality measurements. |
+
+Define outcome criteria and the treatment of incomplete workflows before reporting
+these KPIs. Keep operational cost estimates separate from an authoritative invoice
+or financial ledger. For signal delivery, attribution, and audit boundaries, refer
+to [AI observability](/consul/docs/agentic-mesh/observability).
+
+## Collection and analytics
+
+| Component | Responsibility |
+| --- | --- |
+| Entry-point tracing | Establish or preserve trace context and the sampling decision. |
+| AI Inference Gateway | Act as the specialised proxy that automatically instruments supported model exchanges. |
+| MCP sidecars | Act as the specialised proxies that automatically instrument supported tool exchanges, without instrumentation in tool application code. |
+| Envoy within the specialised proxy | Generate network spans and deliver supported exchanges to the external processor. |
+| Protocol-aware external processor | Implement payload observation for the specialised proxy by parsing visible protocol data and generating correlated AI payload spans. |
+| OpenTelemetry Collector | Receive spans and export them to configured destinations. |
+| Trace backend | Store spans and make traces queryable for investigation and analysis. |
+| Span relay | Extract trace IDs from received spans and enqueue analysis triggers when analytics is enabled. |
+| Agentic Analytics | Retrieve trace evidence and evaluate workflow behavior, including unproductive repetition. |
+
+The reference deployment sends Envoy spans to the collector over OTLP/gRPC on port
+`4317` and processor spans over OTLP/HTTP at `/v1/traces` on port `4318`. The collector
+exports spans to Tempo and can independently send a copy to the span relay.
+The relay places trace IDs, not complete payloads, on a BullMQ queue. Analytics
+workers use those IDs to retrieve the growing trace from storage.
+
+[Cycle analysis](/consul/docs/agentic-mesh/circuit-breaker-cycle-detection) is asynchronous and separate from instrumentation. Automatically
+capturing repeated calls with the same arguments supplies evidence; it does not
+itself open a circuit. Behavior policy and protection-state enforcement complete
+that control path. Repeated arguments alone do not prove a lack of progress when
+the calls produce new results.
+
+Use these observations as inputs to the [KPI metrics](#kpi-metrics) calculations. Automatic instrumentation does not automatically produce task-completion or model-quality measures; those require application-defined outcomes and evaluation criteria.
+
+## Set up auto-instrumentation
+
+Configure the proxy observation path before enabling downstream analytics.
+
+### Prerequisites
+
+- Consul Enterprise with the license required for external processing, registered services, and configured mesh connectivity.
+- The AI Inference Gateway and MCP sidecars configured as the specialised auto-instrumenting proxies for model and tool traffic, with compatible Envoy and protocol-aware external-processing components.
+- An OpenTelemetry Collector and a supported trace backend reachable from the span emitters.
+- Agent, inference, and tool calls routed through the configured sidecar upstreams or gateways.
+- Trace-context propagation across downstream calls, without requiring application-generated spans.
+- Approved rules for content capture, redaction, access control, and telemetry retention.
+
+### Configure the specialised sidecar layer
+
+Use the deployment manifests and image versions supplied for your Agentic Runtime
+Fabric distribution. The following settings describe the reference integration;
+adapt addresses and service names to your deployment rather than treating them as
+universal defaults.
+
+| Configuration area | Required setup |
+| --- | --- |
+| Protocol and routes | Configure HTTP-aware proxy listeners and direct supported calls through registered mesh upstreams. |
+| Envoy tracing | Configure the OpenTelemetry tracer through `envoy_tracing_json`, with the service name and the collector cluster reference. |
+| Collector connectivity | Provide the collector cluster in proxy bootstrap configuration and enable HTTP/2 for OTLP/gRPC. |
+| External processing | Attach `builtin/ext-proc` to the observed outbound proxy listeners and configure request and response observation. |
+| Processor connection | In the reference topology, run the processor in the service's network namespace and bind its gRPC endpoint to `127.0.0.1:9000`. |
+| Payload processing | Configure buffered request and response bodies for the supported parsers, with explicit capacity limits. |
+| Processor export | Set `SERVICE_NAME` for the processor and `OTLP_ENDPOINT` to the collector's OTLP/HTTP `/v1/traces` endpoint. |
+| Parser selection | Match each observed upstream to its supported protocol. The reference implementation selects parsers using upstream bind-port groups. |
+| Trace context | Establish entry-point sampling and preserve context across downstream calls. |
+
+Keep the local external-processing endpoint private. In the reference topology,
+the loopback connection is plaintext and relies on network-namespace isolation;
+publishing it on a routable interface would expose an unauthenticated payload reader.
+
+Start the collector and trace backend before span emitters. Apply service and proxy
+configuration, then start the sidecars and their processors. Changes to the
+bootstrap collector cluster require recreating the affected proxies; writing a new
+Consul configuration entry alone does not replace a running proxy's bootstrap.
+
+Once these components are configured, supported calls generate spans automatically.
+Do not add an OpenTelemetry SDK or manual spans to applications merely to enable
+this sidecar-based observation path.
+
+### Enable downstream analytics
+
+For cycle analysis, deploy Agentic Analytics and the required relay and queue
+components in addition to the instrumentation path. Configure the collector's
+relay export, ensure producer and consumer queue settings agree, and provide the
+analytics worker with access to the trace backend.
+
+Use compatible `csl-ag-ana`, `csl-ig-pro`, and `csl-nod-rly` images supplied by your
+distribution. Pulling these images does not replace proxy tracing configuration,
+collector setup, or circuit-enforcement configuration.
+
+For image pull commands, queue configuration, and enforcement verification, refer to [Set up cycle detection](/consul/docs/agentic-mesh/circuit-breaker-cycle-detection#set-up-cycle-detection).
+
+### Verify the complete path
+
+1. Send a sampled request through the configured entry point to an agent that makes a model call and a tool call. Use synthetic, non-sensitive inputs.
+2. Confirm that the applications have no initialized tracing SDK or manual span emission. Verify that they preserve the required correlation headers on downstream calls.
+3. Inspect the active proxy configuration for the OpenTelemetry tracer and external-processing filter. Confirm that the processor receives exchanges; a successful application response alone does not establish instrumentation health.
+4. Retrieve the trace by ID and confirm that network spans and processor payload spans share the expected trace context. Expect separate processor service names and sibling payload and egress spans.
+5. Check that the tool name, approved arguments, result, model information, and protocol errors match the synthetic request and response where applicable.
+6. Confirm collector delivery to the trace backend. If analytics is enabled, verify relay delivery, queue consumption, and a detection pass for that exact trace separately.
+7. Test unsampled traffic, unsupported payloads, oversized bodies, and a collector outage. Check both application behavior and telemetry-loss indicators.
+
+## Operational limits
+
+Automatic instrumentation still requires operational monitoring. Check processor
+stream counts, skipped spans, export failures, dropped spans, collector queue
+failures, and backend availability. A collector acknowledgement does not prove
+that every configured destination persisted the span.
+
+Buffered body processing adds work to the request path and imposes size limits.
+Oversized requests can be rejected by Envoy before the processor receives them.
+Align listener buffers, processor gRPC limits, exporter capacity, and storage
+limits. Do not assume fail-open external processing bypasses Envoy's buffer limits.
+Validate streaming behavior separately; buffered JSON observation is not a
+guarantee of incremental streaming support.
+
+Sampling, truncation, unsupported protocols, missing context, and delivery loss can
+produce incomplete evidence. The reference parsers mark truncated attributes;
+truncated arguments or results must not be treated as complete comparison inputs.
+
+One logical call can produce network, payload, and external-processing transport
+spans. The same model exchange can also be observed on both sides of a gateway.
+Do not count every span as a distinct tool call, model request, or billable event.
+External processing observes the logical exchange, not every Envoy retry attempt.
+
+The proxy observes traffic only where its HTTP contents are accessible. Application
+TLS passed through as opaque traffic, calls bypassing the proxy, local tool
+execution, and operations inside an external provider are outside that visibility.
+
+## Privacy and content boundaries
+
+Automatic capture is not automatic redaction. The reference payload parsers can
+export prompt text, completions, tool arguments, tool results, and delegation
+messages. Do not interpret that capability as permission to collect sensitive
+production content, or assume these values have already been sanitized.
+
+Apply approved filtering or redaction before sensitive data reaches telemetry
+storage or analytics destinations. If the deployed path cannot enforce those
+controls, do not enable content-bearing capture for that workload. Keep credentials,
+tokens, and personal data out of telemetry, and restrict access and retention for
+the remaining evidence. Redaction can limit downstream semantic analysis.
+
+Use bounded dimensions for metrics. Do not promote trace IDs, arbitrary arguments,
+prompts, or result content into metric labels.
+
+## Dependencies and boundaries
+
+The specialised sidecar layer owns automatic observation of supported network
+interactions. Applications do not perform tracing instrumentation for these
+observations, but remain responsible for context propagation and routing calls
+through the mesh.
+
+The resulting traces support investigation and behavioral analytics. They do not
+reveal private model reasoning, prove task completion, establish model quality, or
+replace application authorization and validation. Business outcomes not represented
+in observed traffic require separate outcome evidence. Trace storage alone is not
+a complete audit ledger or an authoritative billing system.
+
+## Related documentation
+
+- [Consul Agentic Runtime Fabric](/consul/docs/agentic-mesh)
+- [AI observability](/consul/docs/agentic-mesh/observability)
+- [AI Inference Gateway](/consul/docs/agentic-mesh/inference-gateway)
+- [MCP sidecar](/consul/docs/agentic-mesh/mcp-sidecar)
+- [Identity plane](/consul/docs/agentic-mesh/identity)
+- [Circuit breaker cycle detection](/consul/docs/agentic-mesh/circuit-breaker-cycle-detection)
