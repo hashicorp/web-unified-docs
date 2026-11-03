@@ -4,8 +4,9 @@ page_title: TPM - Auth Methods
 description: >-
   Use the Vault Enterprise TPM auth method to authenticate machines using TLS
   client certificates cryptographically bound to Trusted Platform Module
-  (TPM) hardware, and understand the certificate enrollment protocol, login,
-  and renewal behavior.
+  (TPM) hardware, and understand the keys attestation creates, the state
+  directory it writes, the certificate enrollment protocol, login, and
+  renewal behavior.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2026-09-22T14:35:03-04:00
 last_modified: 2026-10-16T17:38:50.000Z
@@ -173,6 +174,96 @@ role:
 
 Vault verifies both values during `login`. A certificate issued for one role
 cannot authenticate against a different role.
+
+The client then saves the certificate and the wrapped TPM keys in the
+[attestation state directory](#attestation-state-directory).
+
+## Keys created in the TPM
+
+Attestation creates two keys in the TPM storage hierarchy, under the storage
+root key (SRK). It reads the endorsement key that is already on the TPM. It
+does not create the endorsement key, and it does not write a TPM
+authorization policy or NV index.
+
+What each key can do comes from its object attributes. `fixedTPM` and
+`fixedParent` keep the private half inside the TPM. Cryptographic operations
+run on the chip. A copy of the wrapped key blob is not enough to use the key
+on another machine.
+
+The keys are not persistent TPM handles. The TPM wraps each new key to the
+SRK, and the client stores that wrapped blob in the state directory. The next
+time the client needs the key, it loads the blob back into the TPM.
+
+### Endorsement key
+
+The endorsement key (EK) is created once, at manufacture or the first time a
+virtual TPM starts. It is unique to that TPM, restricted to decryption, and
+non-migratable. It cannot sign arbitrary data. It can only decrypt data
+encrypted to it, which is how credential activation proves the client holds
+this TPM.
+
+Attestation reads the EK public key and sends it to Vault. Vault hashes that
+key to produce the TPM ID. The EK itself is not written to the state
+directory.
+
+### Attestation key
+
+The attestation key (AK) is created in the storage hierarchy, under the SRK,
+at the start of attestation. It is a restricted signing key and
+non-migratable. It can sign TPM structures, including the certification of
+the application key. It cannot sign arbitrary application data.
+
+Vault uses the AK public parameters to build the activation challenge. Only
+the TPM that holds both this AK and the enrolled EK can decrypt that
+challenge.
+
+### Application key
+
+The application key is created in the storage hierarchy, under the SRK, and
+certified by the AK. Vault creates an ECDSA key on the P-256 curve. The key
+is non-restricted and non-migratable, so it can sign ordinary data. The
+client uses it to sign the certificate signing request, and later to sign the
+TLS handshake at login.
+
+The private key never leaves the TPM. The certificate Vault returns contains
+the matching public key.
+
+For how these objects are created and saved, see the
+[`sdk/helper/tpm`](https://github.com/hashicorp/vault/blob/main/sdk/helper/tpm)
+package. `Attest` creates the keys. `SaveToDirectory` writes the state
+directory described below.
+
+## Attestation state directory
+
+`vault tpm attest` and the Vault Agent [`tpm_cert`](/vault/docs/agent-and-proxy/agent/tpm_cert)
+stanza write a fixed set of files into a directory that already exists.
+Create the directory before you attest. Pass the same path to `vault login`
+with `-tpm-state-dir`, or set it as `destination.path` for Agent.
+
+`vault tpm attest` writes the key files as owner read/write (`0600`) and the
+certificate files as world-readable (`0644`). Agent applies
+`destination.umask`, which defaults to `077`, so every file is owner-only.
+
+`vault tpm cleanup` deletes the files in the table below and leaves the
+directory in place. Files that are not in this set are left alone.
+
+| File | Contents | Relationship |
+| :--- | :------- | :----------- |
+| `ak.blob` | Wrapped attestation key. The TPM that created it can load this blob. The private key is not in the file. | Created with the AK. Later reloads of the directory require this file. Login signs with the application key, not the AK. |
+| `app.blob` | Wrapped application key, in the same loadable form. | The TLS private key. Login loads this blob into the TPM and uses it to sign the handshake. Its public key is the public key in `client.crt`. |
+| `client.crt` | PEM client certificate Vault issued for the application key. | Presented at login. The certificate public key must match the key loaded from `app.blob`. |
+| `client-key.json` | JSON key reference. `type` is `tpm2`, `version` is `1`, and `public_key_sha256` is the hex SHA-256 of the application public key. | Names the key the blobs and the certificate belong to. The fingerprint is the SHA-256 of the PKIX encoding of the public key in `app.blob` and `client.crt`. |
+| `ca_chain.pem` | PEM chain of the TPM auth method CA that signed `client.crt`. | Written only when Vault returns a chain. Missing when the chain is empty. |
+
+`client-key.json` has this shape:
+
+```json
+{
+  "type": "tpm2",
+  "version": 1,
+  "public_key_sha256": "<64-character hex fingerprint>"
+}
+```
 
 ## Login token
 
