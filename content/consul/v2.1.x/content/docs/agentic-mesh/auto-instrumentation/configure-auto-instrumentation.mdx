@@ -5,7 +5,7 @@ description: >-
   Configure Consul Agentic Runtime Fabric proxies, an OpenTelemetry Collector, and trace context so AI model and MCP tool calls produce correlated spans.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2026-11-02T21:48:12.000Z
-last_modified: 2026-11-02T21:57:41.000Z
+last_modified: 2026-11-03T17:34:24.000Z
 # END AUTO GENERATED METADATA
 ---
 
@@ -23,15 +23,18 @@ To learn how auto-instrumentation works, refer to
 
 ## Requirements
 
-- Consul Enterprise with a valid license.
+- Consul Enterprise with a valid license for external processing, registered
+  services, and configured mesh connectivity.
 - The `consul-ai` [feature gate](/consul/docs/manage/feature-gates) enabled. On
   Kubernetes, set the `ai.enabled` Helm value to `true`.
-- The AI Inference Gateway and MCP sidecars deployed for the model and tool
+- The AI Inference Gateway and MCP sidecar deployed for the model and tool
   traffic you want to observe.
 - Agent, inference, and tool calls routed through the configured sidecar
   upstreams or gateways, on HTTP-aware listeners.
 - An OpenTelemetry Collector and a trace backend reachable from the proxies and
   processors.
+- An entry point that establishes trace context and a sampling decision for
+  each request. Without a sampled `traceparent`, payload spans can be missing.
 - Applications that forward trace context on downstream calls. Refer to [Trace
   context
   propagation](/consul/docs/agentic-mesh/auto-instrumentation#trace-context-propagation).
@@ -48,12 +51,12 @@ deployment.
 Inference gateway tracing is off by default. Enable it in the
 `Observability.Tracing` block of the `inference-gateway` configuration entry.
 
-| Field | Description |
-| --- | --- |
-| `Enabled` | Set to `true` to export traces. |
-| `OTLP.Endpoint` | The OpenTelemetry Protocol (OTLP) collector URL. |
-| `OTLP.Insecure` | Disables TLS verification when `true`. Use only in non-production environments. |
-| `SampleRatio` | Fraction of requests to trace, from `0` to `1`. |
+| Field           | Description                                                        |
+| --------------- | ------------------------------------------------------------------ |
+| `Enabled`       | Set to `true` to export traces.                                    |
+| `OTLP.Endpoint` | The OpenTelemetry Protocol (OTLP) collector URL.                   |
+| `OTLP.Insecure` | Sends OTLP without TLS when `true`. Use only in non-production environments. |
+| `SampleRatio`   | Fraction of requests to trace, from `0` to `1`.                    |
 
 When tracing is enabled, the gateway exports spans over OTLP and joins Envoy's
 trace through the inbound `traceparent` header.
@@ -69,14 +72,14 @@ tracing](/consul/docs/observe/distributed-tracing).
    over gRPC.
 1. Configure the OpenTelemetry tracer with `envoy_tracing_json`. Set the service
    name and reference the collector cluster.
-1. Recreate the affected proxies. Writing a new configuration entry does not
-   replace a running proxy's bootstrap configuration.
 
 ## Attach the payload processor
 
 Attach the protocol-aware external processor that generates payload spans.
 
-<!-- TODO: Confirm with engineering the processor's 127.0.0.1:9000 address, the SERVICE_NAME and OTLP_ENDPOINT settings, and parser selection by bind-port group. None appear in consul, consul-enterprise, or consul-k8s at v2.1.0. -->
+<!-- TODO: Confirm with engineering the SERVICE_NAME and OTLP_ENDPOINT settings and parser selection by bind-port group. None appear in consul, consul-enterprise, or consul-k8s at v2.1.0. -->
+
+<!-- TODO: Confirm with engineering whether Envoy dials the MCP interceptor over the sidecar's Unix domain socket on Kubernetes. consul-enterprise v2.1.0+ent agent/xds/egress_mcp_endpoint.go:75-83 configures a loopback port, and consul-k8s v2.1.0 annotations_and_labels.go:286 says the sidecar listens on a UDS by default. -->
 
 1. Attach the
    [`builtin/ext-proc`](/consul/docs/reference/proxy/extensions/ext-proc) Envoy
@@ -84,11 +87,15 @@ Attach the protocol-aware external processor that generates payload spans.
    request and response headers and bodies.
 1. Configure buffered request and response bodies for the supported parsers,
    with explicit size limits.
-1. Connect the processor to Envoy:
-   - On Kubernetes, the injected MCP sidecar listens on a Unix domain socket
-     that it shares with Envoy by default.
-   - In the reference topology, run the processor in the service's network
-     namespace and bind its gRPC endpoint to `127.0.0.1:9000`.
+1. Connect each processor to Envoy:
+   - AI Inference Gateway: Envoy reaches the processor through the local
+     `local_ext_proc` cluster. On Kubernetes, the processor listens on the Unix
+     domain socket `/run/consul/ext_proc.sock`, shared with Envoy.
+   - MCP sidecar: Envoy reaches the interceptor over loopback on port `21101` by
+     default. To change the port, set `port` in the service's `interceptor`
+     block. On Kubernetes, the sidecar listens on a Unix domain socket by
+     default. To use TCP instead, set the `consul.hashicorp.com/ai-agent-addr`
+     annotation to a port that matches the interceptor port.
 1. Set `SERVICE_NAME` for the processor.
 1. Set `OTLP_ENDPOINT` to the collector's OTLP over HTTP `/v1/traces` endpoint.
 1. Match each observed upstream to its protocol parser. The reference
@@ -96,9 +103,11 @@ Attach the protocol-aware external processor that generates payload spans.
 
 <Warning>
 
-Keep the external-processing endpoint private. In the reference topology, the
-loopback connection is plaintext and relies on network-namespace isolation.
-Publishing it on a routable interface exposes an unauthenticated payload reader.
+Keep the external-processing endpoint private. The loopback connection is
+plaintext and relies on network-namespace isolation. On Kubernetes, the AI
+Inference Gateway socket relies on file permissions instead, and Envoy must run
+as the same user as the processor. Publishing either endpoint on a routable
+interface exposes an unauthenticated payload reader.
 
 </Warning>
 
@@ -108,7 +117,9 @@ Start the components in order, so no spans are lost while the collector starts.
 
 1. Start the collector and the trace backend.
 1. Apply the service and proxy configuration.
-1. Start the sidecars and their processors.
+1. Start the sidecars and their processors. Recreate any proxy that is already
+   running. Writing a new configuration entry does not replace a running
+   proxy's bootstrap configuration.
 
 ## Verify spans reach the trace backend
 
@@ -120,13 +131,20 @@ Use synthetic, non-sensitive inputs for every step.
    OpenTelemetry tracer and the external-processing filter.
 1. Confirm that the processor receives exchanges. A successful application
    response does not show that instrumentation works.
+1. Confirm that the collector exports the spans to the trace backend. A
+   collector acknowledgement does not show that the backend stored them.
 1. Retrieve the trace by ID from the trace backend.
-1. Confirm that network spans and payload spans share the trace context. Payload
-   and egress spans appear as siblings, under separate processor service names.
+1. Confirm that network spans and payload spans share the trace context. Each
+   payload span appears as a sibling of its Envoy egress span.
+1. Confirm that payload spans carry the processor's service name, separate from
+   the Envoy service name.
 1. Confirm that the tool name, approved arguments, result, model information,
    and protocol errors match the synthetic request and response.
 1. Confirm that the applications initialize no tracing SDK and emit no manual
    spans.
+1. Confirm that the applications forward the trace context headers on
+   downstream calls. Without them, the proxy spans do not form one workflow
+   trace.
 1. Test unsampled traffic, unsupported payloads, oversized bodies, and a
    collector outage. Check application behavior and telemetry-loss indicators.
 

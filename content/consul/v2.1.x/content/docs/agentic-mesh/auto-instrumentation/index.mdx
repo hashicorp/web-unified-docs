@@ -5,22 +5,25 @@ description: >-
   Generate OpenTelemetry spans for AI model and MCP tool calls with Consul Agentic Runtime Fabric proxies, so applications need no tracing SDK or manual spans.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2026-11-02T21:48:13.000Z
-last_modified: 2026-11-02T21:57:43.000Z
+last_modified: 2026-11-03T17:34:26.000Z
 # END AUTO GENERATED METADATA
 ---
 
 # Auto-instrumentation for AI agents
 
-Consul Agentic Runtime Fabric automatically instruments AI agent traffic. The AI
-Inference Gateway and Model Context Protocol (MCP) sidecars are specialized
-proxies that combine Envoy with a protocol-aware external processor to generate
-OpenTelemetry spans for supported model and tool calls. Applications do not need
-a tracing SDK, manual spans, or tracing decorators. This approach is sometimes
-called zero-code instrumentation.
+Consul Agentic Runtime Fabric automatically instruments AI agent traffic. The
+[AI Inference Gateway](/consul/docs/agentic-mesh/inference-gateway) and [Model
+Context Protocol (MCP) sidecar](/consul/docs/agentic-mesh/mcp-gateway) are
+specialized proxies that combine Envoy with a protocol-aware external processor
+to generate OpenTelemetry spans for supported model and tool calls. Applications
+do not need a tracing SDK, manual spans, or tracing decorators. This approach is
+sometimes called zero-code instrumentation.
 
 @include '../../../global/partials/alerts/beta.mdx'
 
-To set it up, refer to [Configure auto-instrumentation](/consul/docs/agentic-mesh/auto-instrumentation/configure-auto-instrumentation).
+Refer to [Configure
+auto-instrumentation](/consul/docs/agentic-mesh/auto-instrumentation/configure-auto-instrumentation)
+for setup instructions.
 
 @include 'alerts/enterprise-alert.mdx'
 
@@ -37,15 +40,43 @@ The specialized proxies read those protocols as traffic passes through them:
 - MCP sidecars instrument supported tool calls, including tool identity,
   arguments, results, and errors, subject to content-capture policy.
 
+<!-- TODO: Confirm with engineering that the MCP sidecar processor emits payload spans. consul-enterprise v2.1.0+ent configures a mandatory ext_proc interceptor for MCP (agent/xds/egress_mcp_endpoint.go:75) but contains no tracing code for it. -->
+
 For example, an agent can call the same tool with the same arguments many times
 while every HTTP request succeeds. The proxy spans capture each call and its
-result, so [cycle detection](/consul/docs/agentic-mesh/cycle-detection) can
-assess the repetition without custom spans in the application.
+result, so the Agentic Analytics component can assess the repetition for
+[cycle detection](/consul/docs/agentic-mesh/cycle-detection) without custom
+spans in the application.
+
+Auto-instrumentation covers only traffic that passes through these proxies.
+Calls that bypass the mesh and local tool execution are not instrumented. For
+the full list, refer to [Limits](#limits).
 
 ## How auto-instrumentation works
 
 Each proxy produces two kinds of spans, and trace context ties them into one
 workflow trace.
+
+The following diagram shows one request through a proxy and the spans it
+produces.
+
+<CodeBlockConfig hideClipboard>
+
+```plaintext
+Agent ──traceparent──▶ [ Envoy ──ext_proc──▶ Processor ] ──▶ Model or tool
+                          │                    │
+                          ▼                    ▼
+Trace:   entry span
+         ├── egress span (Envoy)
+         └── payload span (processor)   ← siblings
+```
+
+</CodeBlockConfig>
+
+Envoy and the processor each emit a span. Both spans share the parent from the
+incoming `traceparent`, so they appear as siblings under the entry span.
+
+<!-- TODO: Confirm with engineering that the payload span and the Envoy egress span are siblings. consul-enterprise v2.1.0+ent places ext_proc ahead of the router (agent/xds/inference_gateway.go:207-208) and has the processor join Envoy's trace through traceparent (agent/structs/config_entry_inference_gateway.go:293-294), but the processor source is not in that repo. -->
 
 ### Network spans
 
@@ -63,7 +94,7 @@ headers and bodies through Envoy's `ext_proc` interface. It parses supported
 protocols and emits a payload span for each observed AI interaction. The
 processor is infrastructure, not a library that the agent or tool imports.
 
-<!-- TODO: Confirm with engineering that the shipped processors behave as the reference processor described in this section, or name the shipped component. -->
+<!-- TODO: Ask engineering what "reference" means in "reference processor", "reference deployment", "reference applications", and "reference parsers" on this page, and "reference implementation" on configure-auto-instrumentation.mdx. Define it once here, or link to it. No page in agentic-mesh defines it. -->
 
 The reference processor returns continuation responses without modifying the
 payload. It exports spans through a bounded background queue after the exchange,
@@ -112,8 +143,6 @@ MCP payload spans use attributes such as `mcp.tool`, `mcp.arguments`,
 attributes. The schema is version specific, and not every attribute is available
 for every provider or protocol version.
 
-<!-- TODO: Confirm the mcp.* and gen_ai.* attribute names with engineering. -->
-
 A requested tool call in a model response does not show that the agent ran the
 tool. Correlate it with the actual tool request. To turn these signals into
 metrics and key performance indicators (KPIs), refer to [Operational
@@ -121,11 +150,14 @@ metrics](/consul/docs/agentic-mesh/observability#operational-metrics).
 
 ## Telemetry pipeline components
 
+For where these components sit in a full deployment, refer to the
+[Agentic Runtime Fabric architecture diagram](/consul/docs/agentic-mesh#architecture).
+
 | Component | Responsibility |
 | --- | --- |
 | Entry-point tracing | Establish or preserve trace context and the sampling decision. |
 | AI Inference Gateway | Instrument supported model exchanges. |
-| MCP sidecars | Instrument supported tool exchanges. |
+| MCP sidecar | Instrument supported tool exchanges. |
 | Envoy | Generate network spans and deliver supported exchanges to the external processor. |
 | Protocol-aware external processor | Parse visible protocol data and generate correlated payload spans. |
 | OpenTelemetry Collector | Receive spans and export them to configured destinations. |
@@ -143,35 +175,51 @@ the IDs to retrieve the trace from storage.
 
 <!-- TODO: Confirm the ports, Tempo, the span relay, and BullMQ with engineering. -->
 
-## Limits
+## Limitations
 
-- **Coverage.** Proxies observe only traffic that passes through them with
+- Coverage. 
+
+  Proxies observe only traffic that passes through them with
   readable HTTP contents. They do not observe TLS passed through as opaque
   traffic, calls that bypass the mesh, local tool execution, or operations
   inside an external provider.
-- **Protocol support.** The processor must understand the protocol. Unsupported
+- Protocol support. 
+
+  The processor must understand the protocol. Unsupported
   or opaque payloads produce network spans only.
-- **Body size.** Buffered body processing adds work to the request path and
+- Body size. 
+
+  Buffered body processing adds work to the request path and
   imposes size limits. Envoy can reject oversized requests before the processor
   receives them, and fail-open external processing does not bypass Envoy's
   buffer limits. Align listener buffers, processor gRPC limits, exporter
   capacity, and storage limits.
-- **Streaming.** Buffered JSON observation does not guarantee incremental
+- Streaming. 
+
+  Buffered JSON observation does not guarantee incremental
   streaming support. Validate streaming behavior separately.
-- **Incomplete evidence.** Sampling, truncation, missing context, and delivery
+- Incomplete evidence.
+
+  Sampling, truncation, missing context, and delivery
   loss produce incomplete traces. The reference parsers mark truncated
   attributes. Do not use truncated arguments or results as complete comparison
   inputs.
-- **Double counting.** One logical call can produce network, payload, and
+- Double counting.
+
+  One logical call can produce network, payload, and
   external-processing transport spans, and a gateway can observe the same model
   exchange on both sides. Do not count every span as a distinct call or billable
   event. External processing observes the logical exchange, not each Envoy
   retry.
-- **Delivery.** A collector acknowledgement does not prove that every
+- Delivery.
+
+  A collector acknowledgement does not prove that every
   destination persisted the span. Monitor processor stream counts, skipped
   spans, export failures, dropped spans, collector queue failures, and backend
   availability.
-- **Scope of evidence.** Traces do not reveal private model reasoning, prove
+- Scope of evidence.
+
+  Traces do not reveal private model reasoning, prove
   task completion, establish model quality, or replace application
   authorization. Trace storage is not a complete audit ledger or a billing
   system.
