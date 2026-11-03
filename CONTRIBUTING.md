@@ -91,6 +91,11 @@ The workflow to follow depends on the product version of the content you want to
 - [Upcoming minor release](#upcoming-minor-release-documentation)
 - [Upcoming major release](#upcoming-major-release-documentation)
 
+> [!IMPORTANT]
+> Refer to the [Contribute to Terraform documentation
+> guide](./docs/workflows/infrastructure-group/contribute-terraform-docs.md) for
+> Terraform-specific workflows.
+
 ### Before you begin
 
 - Your Github username must be a member of the HashiCorp GitHub [core
@@ -133,7 +138,9 @@ before you start.
 
 ### Update existing documentation
 
-Use this workflow when you want to update existing documentation that is already published on [https://developer.hashicorp.com](https://developer.hashicorp.com).
+Use this generic workflow when you want to update existing documentation that is
+already published on
+[https://developer.hashicorp.com](https://developer.hashicorp.com).
 
 1. Clone the repo. To save space and speed up contributions, we recommend cloning only the `main` branch and not downloading the history of other branches. This method is ideal when you want to edit published content, although it prevents checking out other remote branches.
 
@@ -201,7 +208,7 @@ request is merged.
 
 ### Upcoming minor release documentation
 
-Use this workflow when you want to create or update content for an upcoming
+Use this generic workflow when you want to create or update content for an upcoming
 minor or patch release. You want to publish this content when the release is cut.
 
 Each product's tech writer team creates an assembly branch for the upcoming minor or patch release.
