@@ -1,0 +1,222 @@
+---
+layout: docs
+page_title: Deploy Consul to AWS Fargate
+description: >-
+  Install Consul on Amazon Web Services Fargate by using the Docker `consul-ecs` image to create task definitions that include required containers and run them via AWS ECS. Learn how to configure task definitions with example configurations.
+---
+
+# Deploy Consul to AWS Fargate
+
+This page describes the process to deploy Consul servers to Amazon Web Services Fargate to support Consul tasks in the AWS ECS runtime. To run Consul on ECS with Consul servers operating in a different runtime, refer to [Integrate your AWS ECS services into Consul service mesh](/consul/tutorials/connect-services/consul-ecs).
+
+For a functioning end-to-end example, refer to our [Consul on Fargate Github repository](https://github.com/hashicorp-education/learn-consul-fargate).
+
+## Overview
+
+AWS Fargate is a serverless compute engine that you can use to run Consul server agents as an ECS task. Fargate simplifies deployment and maintenance because the runtime environment is not managed by the practitioner. 
+
+When Consul runs on AWS Fargate, it is important for the Consul cluster to have a persistent storage. We recommend using the AWS Elastic File System (EFS). With a functional Consul server cluster, you can then run Consul dataplanes alongside ECS workloads for service discovery and service mesh. 
+
+## Workflow
+
+The process to deploy Consul servers on AWS Fargate consists of the following steps:
+
+1. Create an ECS cluster with Fargate enabled
+1. Create an ECS task definition for the Consul servers that is compatible with Fargate
+1. Create an ECS service for the Consul servers task that has a Fargate launch type 
+1. Create and attach an EFS persistant storage for the Consul tasks
+
+## Configure Consul servers to run on Fargate
+
+To run Consul servers on Fargate, first make sure to enable the `FARGATE` capacity provider in the target ECS cluster.
+
+<CodeBlockConfig filename="ecs-cluster.tf">
+
+```hcl
+resource "aws_ecs_cluster" "consul-ecs-cluster" {
+  name               = "consul-ecs"
+  capacity_providers = ["FARGATE"]
+}
+```
+
+</CodeBlockConfig>
+
+Next, create a task definition for the Consul server. To run Consul servers on Fargate, specify `FARGATE` in the `requires_compatibilities` field of the task definition. This field indicates that the task definition is compatible with the Fargate launch type.
+
+<CodeBlockConfig filename="consul-server-task.tf" highlight="3">
+
+```hcl
+resource "aws_ecs_task_definition" "consul-server-task" {
+  family                   = "consul-ecs-consul-server"
+  requires_compatibilities = ["EC2", "FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = 256
+  memory                   = 512
+  
+  # [...]
+}
+```
+
+</CodeBlockConfig>
+
+Finally, define an ECS service to run the Consul server task. Make sure to specify the launch type as `FARGATE` in the service definition. Make sure the `subnets` and `security_groups` parameters in the `network_configuration` block match the values in your environment.
+
+<CodeBlockConfig filename="consul-ecs-service.tf" highlight="11">
+
+```hcl
+resource "aws_ecs_service" "consul-ecs-service" {
+  name            = "consul-ecs-consul-server"
+  cluster         = aws_ecs_cluster.consul-ecs-cluster.arn
+  task_definition = aws_ecs_task_definition.consul-server-task.arn
+  desired_count   = 1
+  network_configuration {
+    subnets          = module.vpc.private_subnets
+    assign_public_ip = false
+    security_groups  = [aws_security_group.ecs_service.id]
+  }
+  launch_type = "FARGATE"
+  service_registries {
+    registry_arn   = aws_service_discovery_service.server.arn
+    container_name = "consul-server"
+  }
+  # [...]
+}
+```
+
+</CodeBlockConfig>
+
+## Configure Consul servers on Fargate to use persistant EFS storage
+
+We recommend using Amazon Elastic File System (EFS) when running Consul on Fargate. The EFS service provides a persistant and fully managed elastic NFS file system storage for your Consul compute instances on AWS Fargate. To learn more about using AWS EFS volumes on Fargate and ECS, refer to the related [AWS EFS documentation](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/efs-volumes.html), and to the [aws_efs_file_system resource in the Terraform Provider documentation](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/efs_file_system).
+
+To provide persistent storage for the Consul server container data directory, begin by defining the EFS resources you need in the Terraform files: 
+
+- a file system 
+- a mount target
+- an EFS access point 
+
+These resources allow the Consul server to persist its state across task restarts, rescheduling, and updates. The `subnet_id` and `security_groups` parameters may vary based on your environment.
+
+
+<CodeBlockConfig filename="aws-efs.tf">
+
+```hcl
+resource "aws_efs_file_system" "efs-consul-server" {
+    creation_token = "efs-example"
+    performance_mode = "generalPurpose"
+    throughput_mode = "bursting"
+    encrypted = "true"
+    tags = {
+        Name = "StorageConsulEFS"
+    }
+}
+
+resource "aws_efs_mount_target" "efs-mt-consul-server" {
+    file_system_id  = "${aws_efs_file_system.efs-consul-server.id}"
+    subnet_id = "${module.vpc.private_subnets[0]}"
+    security_groups = ["${data.aws_security_group.vpc_default.id}"]
+    depends_on = [ aws_efs_file_system.efs-consul-server ]
+}
+
+resource "aws_efs_access_point" "efs-consul-server-ap" {
+    file_system_id = aws_efs_file_system.efs-consul-server.id
+}
+```
+
+</CodeBlockConfig>
+
+Next, add a security group rule to allow the Consul server to access the EFS file system over the NFS protocol. The following example adds an ingress rule to the default security group of the VPC that allows TCP traffic on port 2049 from any source IP address. This security group rule definition has the `cidr_blocks` field open to any client. 
+
+In a production environment, you should restrict this security group rule to only allow traffic from trusted sources that are allowed to access the EFS file system.
+
+<CodeBlockConfig filename="networking.tf" highlight="3-6">
+
+```hcl
+resource "aws_security_group_rule" "consul_server_efs_storage" {
+  description              = "Access to EFS storage from Consul server"
+  type                     = "ingress"
+  from_port                = 2049
+  to_port                  = 2049
+  protocol                 = "tcp"
+  cidr_blocks              = [ "0.0.0.0/0" ]
+  security_group_id        = module.vpc.default_security_group_id
+}
+```
+
+</CodeBlockConfig>
+
+Then, configure your Consul server to use the EFS access point as the data directory. In the following Terraform code, the `local.consul_server_command` field of the Consul server container definition passes boot instructions for Consul to create a subfolder in the AWS Fargate mount path with its node name, and use that path for its data directory.
+
+<CodeBlockConfig filename="consul-server-task.tf" highlight="10">
+
+```hcl
+locals {
+  node_name = "consul-ecs-consul-server"
+  consul_server_command = <<EOF
+ECS_IPV4=$(curl -s $ECS_CONTAINER_METADATA_URI_V4 | jq -r '.Networks[0].IPv4Addresses[0]')
+exec consul agent -server \
+  -bootstrap \
+  -ui \
+  -advertise "$ECS_IPV4" \
+  -client 0.0.0.0 \
+  -data-dir '/consul/${local.node_name}/consul-data' \
+  -hcl 'node_name = "${local.node_name}"' \
+  -hcl 'datacenter = "dc1"' \
+  -hcl 'connect { enabled = true }' \
+  -hcl 'enable_central_service_config = true' \
+  -hcl='ports { grpc = 8502 }' \
+EOF
+}
+```
+
+</CodeBlockConfig>
+
+Finally, add the `volume` and `mountPoints` configuration to your Consul server ECS task resource definition. The `volume` block defines a volume named `consul-data` that uses the EFS file system created in the previous step. The `mountPoints` block mounts the `consul-data` volume to the `/consul` directory in the Consul server container, which is the default data directory for Consul server containers. 
+
+This configuration ensures that the Consul server can persist its data to the EFS file system, allowing for data durability and availability across task restarts and rescheduling.
+
+<CodeBlockConfig filename="consul-server-task.tf" highlight="5-10,21-26">
+
+```hcl
+resource "aws_ecs_task_definition" "consul-server-task" {
+  family                   = "consul-ecs-consul-server"
+  requires_compatibilities = ["EC2", "FARGATE"]
+  # [...]
+  volume {
+    name = "consul-data"
+    efs_volume_configuration {
+      file_system_id          = aws_efs_file_system.efs-consul-server.id
+    }
+  }
+  
+  container_definitions = jsonencode(
+    [
+      {
+        name      = "consul-server"
+        image     = "hashicorp/consul:1.22.0"
+        essential = true
+        # [...]
+        entryPoint       = ["/bin/sh", "-ec"]
+        command          = [replace(local.consul_server_command, "\r", "")]
+        mountPoints = [
+          {
+            sourceVolume  = "consul-data"
+            containerPath = "/consul"
+          }
+        ]
+        # [...]
+      }
+  ])
+}
+```
+
+</CodeBlockConfig>
+
+## Next steps
+
+After you deploy Consul servers on Fargate, you can deploy Consul dataplanes on ECS to enable service discovery and service mesh for your ECS workloads. Refer to the following documentation for more information about deploying Consul dataplanes on ECS:
+
+- [Consul dataplanes on AWS ECS](/consul/docs/deploy/workload/dataplane/ecs)
+- [Register services on ECS automatically with Terraform](/consul/docs/register/service/ecs/)
+- [Register existing ECS tasks with Terraform](/consul/docs/register/service/ecs/migrate)
+- [Register services on ECS manually](/consul/docs/register/service/ecs/manual)

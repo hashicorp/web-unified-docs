@@ -4,7 +4,7 @@ page_title: API gateway for Kubernetes technical specifications
 description: Learn about the requirements for installing and using the Consul API gateway for Kubernetes, including required ports, component version minimums, Consul Enterprise limitations, and compatible k8s cloud environments.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2025-11-05T11:02:51-05:00
-last_modified: 2025-11-06T13:56:17-08:00
+last_modified: 2026-07-29T11:33:34.000Z
 # END AUTO GENERATED METADATA
 ---
 
@@ -24,8 +24,9 @@ The following table describes the TCP port requirements for each component of th
 
 | Port | Description | Component |
 | ---- | ----------- | --------- |
-| 20000 | Kubernetes readiness probe | Gateway instance pod |
-| Configurable | Port for scraping Prometheus metrics. Disabled by default. | Gateway controller pod |
+| 21000 | Kubernetes readiness probe (`/ready` over HTTP) | Gateway instance pod |
+| 19000 | Envoy admin interface (localhost only) | Gateway instance pod |
+| 20200 | Prometheus metrics scraping. Configurable via annotation or `GatewayClassConfig`. Disabled by default. | Gateway instance pod |
 
 ## OpenShift requirements
 
@@ -152,3 +153,56 @@ The following resources are allocated for each component of the API gateway.
 
 - **CPU**: None. Either the namespace or cluster default is allocated, depending on the Kubernetes cluster configuration.
 - **Memory**: None. Either the namespace or cluster default is allocated, depending on the Kubernetes cluster configuration.
+
+
+## Gateway probe annotations
+
+Starting with Consul 1.22 (consul-k8s 1.8), you can configure Kubernetes health probes on API gateway pods using the following annotations on the `Gateway` resource.
+
+| Annotation | Probe type | Default |
+| --------- | ---------- | ------- |
+| `consul.hashicorp.com/liveness-probe` | Liveness | None (no liveness probe by default) |
+| `consul.hashicorp.com/readiness-probe` | Readiness | `httpGet /ready :21000`, `initialDelaySeconds: 1` |
+| `consul.hashicorp.com/startup-probe` | Startup | None (no startup probe by default) |
+
+Each annotation accepts a JSON object conforming to the [Kubernetes Probe specification](https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-v1/#Probe). 
+Refer to [Configure Liveness, Readiness and Startup Probes](https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/) in the Kubernetes documentation for additional information.
+
+Supported probe handlers are `httpGet`, `tcpSocket`, `exec`, and `grpc`. 
+Only one handler may be specified per probe. 
+Liveness and startup probes are automatically normalized to `successThreshold: 1` per Kubernetes requirements.
+
+### Example
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: my-gateway
+  annotations:
+    consul.hashicorp.com/liveness-probe: |
+      {"httpGet": {"path": "/ready", "port": 21000}, "initialDelaySeconds": 10, "periodSeconds": 10, "failureThreshold": 3}
+    consul.hashicorp.com/readiness-probe: |
+      {"httpGet": {"path": "/ready", "port": 21000}, "initialDelaySeconds": 5, "periodSeconds": 10, "failureThreshold": 3}
+    consul.hashicorp.com/startup-probe: |
+      {"httpGet": {"path": "/ready", "port": 21000}, "initialDelaySeconds": 1, "periodSeconds": 5, "failureThreshold": 30}
+spec:
+  # ...
+```
+
+<Warning>
+
+Do not change the `httpGet` probe path or port.
+
+The gateway pod runs a single container — `consul-dataplane` — which internally runs Envoy. 
+Envoy binds its health check listener exclusively to port `21000` and exposes only one valid HTTP endpoint: `/ready`. No other port or path is available for HTTP probes.
+
+Only the following timing fields are safe to customize: `initialDelaySeconds`, `periodSeconds`, `failureThreshold`, `timeoutSeconds`, and `successThreshold`.
+
+Overriding the path or port causes the probe to fail:
+- A different port has nothing listening → connection refused.
+- A different path on port `21000` is not recognized by Envoy → HTTP 404.
+
+Kubernetes treats both as probe failures, which prevents the pod from becoming ready or causes it to restart in a crash loop.
+
+</Warning>

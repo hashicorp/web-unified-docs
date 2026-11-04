@@ -13,8 +13,11 @@ import { PRODUCT_CONFIG } from '#productConfig.mjs'
  * Parameters expected by `GET` route handler
  */
 export type GetParams = ProductParam
-export async function GET(request: Request, { params }: { params: GetParams }) {
-	const { productSlug } = params
+export async function GET(
+	request: Request,
+	{ params }: { params: Promise<GetParams> },
+) {
+	const { productSlug } = await params
 
 	if (!Object.keys(PRODUCT_CONFIG).includes(productSlug)) {
 		console.error(
@@ -46,7 +49,7 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 		return new Response('Not found', { status: 404 })
 	}
 
-	const redirects = parseJsonc(readFileResult.value)
+	const redirects = parseJsonc(readFileResult.value.text)
 	if (!redirects.ok) {
 		console.error(
 			`API Error: Product, ${productSlug}, redirects.jsonc could not be parsed`,
@@ -58,6 +61,7 @@ export async function GET(request: Request, { params }: { params: GetParams }) {
 	return new Response(JSON.stringify(redirects.value), {
 		headers: {
 			'content-type': 'application/json',
+			'served-from': readFileResult.value.servedFrom,
 		},
 	})
 }

@@ -1,0 +1,228 @@
+---
+layout: docs
+page_title: PostgreSQL configuration
+description: >-
+  Configure Vault backend storage to use a PostgreSQL server or cluster.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-04-15T00:15:04.000Z
+last_modified: 2026-10-12T21:19:00.000Z
+# END AUTO GENERATED METADATA
+---
+
+# PostgreSQL  configuration for Vault backend storage
+
+The PostgreSQL storage backend is used to persist Vault's data in a
+[PostgreSQL][postgresql] server or cluster.
+
+- **High Availability** – the PostgreSQL storage backend supports
+  high availability. Requires PostgreSQL 9.5 or later.
+
+- **Community Supported** – the PostgreSQL storage backend is supported by the
+  community. While it has undergone review by HashiCorp employees, they may not
+  be as knowledgeable about the technology. If you encounter problems with them,
+  you may be referred to the original author.
+
+```hcl
+storage "postgresql" {
+  connection_url = "postgres://user123:secret123!@localhost:5432/vault"
+}
+```
+
+~> **Note:** The PostgreSQL storage backend plugin will attempt to use SSL
+when connecting to the database. If SSL is not enabled the `connection_url`
+will need to be configured to disable SSL. See the documentation below
+to disable SSL.
+
+The PostgreSQL storage backend does not automatically create the table. Here is
+some sample SQL to create the schema and indexes.
+
+```sql
+CREATE TABLE vault_kv_store (
+  parent_path TEXT COLLATE "C" NOT NULL,
+  path        TEXT COLLATE "C",
+  key         TEXT COLLATE "C",
+  value       BYTEA,
+  CONSTRAINT pkey PRIMARY KEY (path, key)
+);
+
+CREATE INDEX parent_path_idx ON vault_kv_store (parent_path);
+```
+
+Store for HAEnabled backend
+
+```sql
+CREATE TABLE vault_ha_locks (
+  ha_key                                      TEXT COLLATE "C" NOT NULL,
+  ha_identity                                 TEXT COLLATE "C" NOT NULL,
+  ha_value                                    TEXT COLLATE "C",
+  valid_until                                 TIMESTAMP WITH TIME ZONE NOT NULL,
+  CONSTRAINT ha_key PRIMARY KEY (ha_key)
+);
+```
+
+If you're using a version of PostgreSQL prior to 9.5, create the following function:
+
+```sql
+CREATE FUNCTION vault_kv_put(_parent_path TEXT, _path TEXT, _key TEXT, _value BYTEA) RETURNS VOID AS
+$$
+BEGIN
+    LOOP
+        -- first try to update the key
+        UPDATE vault_kv_store
+          SET (parent_path, path, key, value) = (_parent_path, _path, _key, _value)
+          WHERE _path = path AND key = _key;
+        IF found THEN
+            RETURN;
+        END IF;
+        -- not there, so try to insert the key
+        -- if someone else inserts the same key concurrently,
+        -- we could get a unique-key failure
+        BEGIN
+            INSERT INTO vault_kv_store (parent_path, path, key, value)
+              VALUES (_parent_path, _path, _key, _value);
+            RETURN;
+        EXCEPTION WHEN unique_violation THEN
+            -- Do nothing, and loop to try the UPDATE again.
+        END;
+    END LOOP;
+END;
+$$
+LANGUAGE plpgsql;
+```
+
+## `postgresql` parameters
+
+- `connection_url` `(string: <required>)` – Specifies the connection string to
+  use to authenticate and connect to PostgreSQL. The connection URL can also be
+  set using the `VAULT_PG_CONNECTION_URL` environment variable. A full list of supported
+  parameters can be found in the [pgx library][pgxlib] and [PostgreSQL connection string][pg_conn_docs]
+  documentation. For example connection string URLs, see the examples section below.
+
+- `table` `(string: "vault_kv_store")` – Specifies the name of the table in
+  which to write Vault data. This table must already exist (Vault will not
+  attempt to create it).
+
+- `max_idle_connections` `(int)` - Default not set. Sets the maximum number of
+  connections in the idle connection pool. See
+  [golang docs on SetMaxIdleConns][golang_setmaxidleconns] for more information.
+  Requires 1.2 or later.
+
+- `max_parallel` `(string: "128")` – Specifies the maximum number of concurrent
+  requests to PostgreSQL.
+
+- `ha_enabled` `(string: "true|false")` – Default not enabled, requires 9.5 or later.
+
+- `ha_table` `(string: "vault_ha_locks")` – Specifies the name of the table to use
+  for storing high availability information. This table must already exist (Vault
+  will not attempt to create it).
+
+- `auth_mode` `(string: "standard|aws_iam|azure|gcp_iam")` - Defaults to standard auth.
+   Vault accepts `azure_msi` as an alias for `azure`. Refer to the
+   [cloud authentication section](#authentication-in-cloud-via-cloud-identities) for mode details.
+
+
+- `aws_db_region` `(string: "")` -  Specifies the AWS region where DB is situated.
+  Required when `auth_mode` is set to `aws_iam`
+
+- `azure_client_id` `(string: "")` - Client ID of a user-assigned managed identity in Azure.
+  Vault uses the system-assigned managed identity if you do not set `azure_client_id` and
+  `auth_mode` is set to `azure`. The `azure_client_id` parameter applies only to managed
+  identity. Workload identity reads the client ID from the `AZURE_CLIENT_ID` environment variable.
+
+## `postgresql` examples
+
+### Custom SSL verification
+
+This example shows connecting to a PostgreSQL cluster using full SSL
+verification (recommended).
+
+```hcl
+storage "postgresql" {
+  connection_url = "postgres://user:pass@localhost:5432/database?sslmode=verify-full"
+}
+```
+
+To disable SSL verification (not recommended), replace `verify-full` with
+`disable`:
+
+```hcl
+storage "postgresql" {
+  connection_url = "postgres://user:pass@localhost:5432/database?sslmode=disable"
+}
+```
+
+## Authentication in cloud via cloud identities
+
+Vault can authenticate to cloud-hosted PostgreSQL instances using the cloud
+provider's native identity mechanisms. When you set the `auth_mode` parameter,
+Vault resolves credentials from the runtime environment, such as Identity and
+Access Management (IAM) credentials, managed identities, or workload identity federation.
+section for your cloud provider for the credential sources Vault checks and the
+order it checks them in.
+
+### AWS IAM
+You can authenticate to your DB instance using AWS Identity and Access Management (IAM) database authentication.
+Vault uses [AWS default credentials][aws_default_creds] for authentication, which means it automatically
+picks up IAM roles, instance profiles, or workload identity (such as [Amazon Elastic Kubernetes Service
+(EKS) Pod Identity][eks_pod_identity] or [IAM Roles for Service Accounts][irsa]) depending on your environment configuration.
+For more information on IAM database authentication, see the [AWS documentation][aws_iam].
+
+```hcl
+storage "postgresql" {
+  connection_url  = "postgres://iam_user@db.xx.us-west-2.rds.amazonaws.com:5432/database?sslmode=require"
+  auth_mode       = "aws_iam"
+  aws_db_region   = "us-west-2"
+}
+```
+
+### Azure
+You can use [workload identity federation][azure_wif] (such as on AKS), or system-assigned and
+user-assigned managed identities, to authenticate to Azure Database for PostgreSQL flexible server.
+Vault checks for credentials in the following order:
+
+1. Workload identity: Vault uses workload identity when the `AZURE_FEDERATED_TOKEN_FILE`,
+   `AZURE_CLIENT_ID`, and `AZURE_TENANT_ID` environment variables are present, for example, in an
+   AKS pod with workload identity enabled.
+1. Managed identity: Vault uses the user-assigned managed identity set by `azure_client_id`,
+   or the system-assigned managed identity if you do not set `azure_client_id`.
+
+If your environment provides a workload identity, Vault uses it even when a managed identity is
+also available. Grant the PostgreSQL role to the identity Vault resolves first.
+For more information on managed identity authentication, see the [Azure documentation][azure_msi].
+
+```hcl
+storage "postgresql" {
+  connection_url  = "postgres://msi_user@server.postgres.database.azure.com:5432/database?sslmode=require"
+  auth_mode       = "azure"
+}
+```
+
+### GCP IAM
+You can use Google Cloud Identity and Access Management (IAM) to authenticate with Cloud SQL resources.
+Vault uses [Application Default Credentials][google_default_creds] for authentication, which means it
+automatically picks up service account keys, attached service accounts, or
+[workload identity federation][gcp_wif] (such as on GKE) depending on your environment configuration.
+For more information on IAM authentication, see the [Google documentation][google_iam].
+
+```hcl
+storage "postgresql" {
+  connection_url    = "postgres://iam-sa@xxxx.iam@203.0.113.0:5432/database?sslmode=require"
+  auth_mode         = "gcp_iam"
+}
+```
+
+<!-- External links -->
+
+[golang_setmaxidleconns]: https://pkg.go.dev/database/sql#DB.SetMaxIdleConns
+[postgresql]: https://www.postgresql.org/
+[pgxlib]: https://pkg.go.dev/github.com/jackc/pgx/stdlib
+[pg_conn_docs]: https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNSTRING
+[aws_iam]: https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.IAMDBAuth.html
+[aws_default_creds]: https://docs.aws.amazon.com/sdk-for-go/v1/developer-guide/configuring-sdk.html#specifying-credentials
+[eks_pod_identity]: https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html
+[irsa]: https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html
+[azure_msi]: https://learn.microsoft.com/azure/postgresql/security/security-connect-with-managed-identity
+[azure_wif]: https://learn.microsoft.com/entra/workload-id/workload-identity-federation
+[google_iam]: https://docs.cloud.google.com/sql/docs/postgres/iam-authentication
+[google_default_creds]: https://docs.cloud.google.com/docs/authentication/provide-credentials-adc#how-to
+[gcp_wif]: https://docs.cloud.google.com/iam/docs/workload-identity-federation

@@ -3,11 +3,25 @@
  * SPDX-License-Identifier: MPL-2.0
  */
 
-import fs from 'node:fs'
+import fs from 'fs'
 import path from 'node:path'
 
 import remark from 'remark'
 import flatMap from 'unist-util-flatmap'
+import { PRODUCT_CONFIG } from '#productConfig.mjs'
+
+/**
+ * Magic configurable string tokens used to rewrite include paths to partials dirs.
+ *
+ * `@include`ing a path beginning with one of these will cause the loader to
+ * attempt to resolve the path using the corresponding partials directory.
+ *
+ * @example `@include "{{global}}/my-partial.mdx"` will cause the loader to try
+ * to attempt to resolve the path using the top-level global partials directory.
+ */
+export const PARTIALS_ALIAS = {
+	GLOBAL: '@global',
+}
 
 /**
  * A remark plugin that allows including "partials" into other files.
@@ -21,14 +35,30 @@ import flatMap from 'unist-util-flatmap'
  * - The path must include the file extension.
  * - There must be no other content or whitespace around the `@include`.
  * Example: `@include 'path/to/file.mdx'` or `@include "path/to/file.mdx"`
+ *
+ * You can also use the `{{global}}` alias to explicitly target the
+ * top-level partials directory (`content/global/partials`).
+ * Example: `@include "{{global}}/my-partial.mdx"`
  */
-export function remarkIncludePartialsPlugin({ partialsDir, filePath }) {
+export function remarkIncludePartialsPlugin({
+	partialsDir,
+	targetDir,
+	filePath,
+}) {
 	// If the partialsDir has not been provided, throw an error.
 	if (!partialsDir) {
 		throw new Error(
 			'Error in remarkIncludePartials: The partialsDir argument is required. Please provide the path to the partials directory.',
 		)
 	}
+
+	// Define the top-level partials directory
+	const topLevelPartialsDir = path.resolve(
+		process.cwd(),
+		'content',
+		'global',
+		'partials',
+	)
 	// Set up and return the transformer function to be used as a remark plugin
 	return function transformer(tree) {
 		/**
@@ -57,8 +87,59 @@ export function remarkIncludePartialsPlugin({ partialsDir, filePath }) {
 			 * should block our build from proceeding.
 			 */
 
-			const includePath = path.join(partialsDir, includeMatch[1])
-			let includeContents
+			const [, rawPath] = includeMatch
+			const globalPrefix = PARTIALS_ALIAS.GLOBAL + '/'
+			const isGlobalAlias = rawPath.startsWith(globalPrefix)
+			const resolvedPath = isGlobalAlias
+				? rawPath.slice(globalPrefix.length)
+				: rawPath
+			let includePath, includeContents
+
+			const isInternalProductAlias = rawPath.startsWith('@') && !isGlobalAlias
+
+			if (isGlobalAlias) {
+				// {{global}} paths resolve only against topLevelPartialsDir — no local fallback,
+				// to prevent name conflicts with product-specific partials.
+				includePath = path.join(topLevelPartialsDir, resolvedPath)
+			} else {
+				includePath = path.join(partialsDir, resolvedPath)
+			}
+
+			// Process internal product alias paths, which start with '@' but are not the global alias.
+			// These resolve based on the repo slug of the file including the partial, and the version being built.
+			if (isInternalProductAlias) {
+				const relativePath = path.relative(targetDir, filePath)
+				const [repoSlug, version] = relativePath.split('/')
+				const verifiedVersion = PRODUCT_CONFIG[repoSlug].versionedDocs
+					? version
+					: ''
+				const configFilePath = path.join(
+					targetDir,
+					repoSlug,
+					verifiedVersion,
+					'data',
+					'version-config.json',
+				)
+				const [alias, ...rest] = rawPath.split('/')
+				if (fs.existsSync(configFilePath)) {
+					const fileData = JSON.parse(fs.readFileSync(configFilePath, 'utf8'))
+					const imports = fileData.imports || []
+					const matchingImport = imports.find((importEntry) => {
+						return importEntry.slug === alias.slice(1) // remove the '@' from the alias to match against the slug
+					})
+					if (matchingImport) {
+						includePath = path.join(
+							targetDir,
+							matchingImport['content-root'],
+							matchingImport.version,
+							PRODUCT_CONFIG[matchingImport.slug].contentDir,
+							'partials',
+							...rest,
+						)
+					}
+				}
+			}
+
 			try {
 				includeContents = fs.readFileSync(includePath, 'utf8')
 			} catch {
@@ -79,7 +160,11 @@ export function remarkIncludePartialsPlugin({ partialsDir, filePath }) {
 			const isMarkdownOrMdx = includePath.match(/\.md(?:x)?$/)
 			if (isMarkdownOrMdx) {
 				const processor = remark()
-				processor.use(remarkIncludePartialsPlugin, { partialsDir })
+				processor.use(remarkIncludePartialsPlugin, {
+					partialsDir,
+					targetDir,
+					filePath,
+				})
 				const ast = processor.parse(includeContents)
 				return processor.runSync(ast, includeContents).children
 			} else {

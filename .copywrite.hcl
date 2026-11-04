@@ -13,6 +13,7 @@ project {
     "**/*.json",
     ".next/**",
     ".husky/**",
+    ".githooks/**",
     "next-env.d.ts",
     "Gemfile",
     "scripts/tfe-releases/tfe-releases-repos.yaml",

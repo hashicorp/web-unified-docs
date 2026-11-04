@@ -65,7 +65,7 @@ When necessary, direct users to the specific step instead of using directional o
 
 Avoid long, complex sentences. Instead, write multiple sentences that each contain a single idea. Frontload paragraphs with the most important information to make it easier to scan the page.
 
-Do not use dashes, semicolons, or other punctuation to merge several ideas into a single sentence. Refer to [Do not use en or em dashes to separate ideas or phrases](grammar.md#do-not-use-parentheses-en-dashes-or-em-dashes-to-separate-ideas-or-phrases) for additional guidance. 
+Do not use dashes, semicolons, or other punctuation to merge several ideas into a single sentence. Refer to [Do not use parentheses, en dashes, em dashes, colons, or semicolons to combine ideas or sentences](grammar.md#do-not-use-parentheses-en-dashes-em-dashes-colons-or-semicolons-to-combine-ideas-or-sentences) for additional guidance. 
 
 **Do:**
 

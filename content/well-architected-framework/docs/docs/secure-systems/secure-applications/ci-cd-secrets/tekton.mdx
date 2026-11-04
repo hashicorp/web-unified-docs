@@ -1,0 +1,448 @@
+---
+page_title: Secure Tekton CI/CD secrets with HashiCorp Vault
+description: Learn how to secure Tekton CI/CD secrets with HashiCorp Vault using Kubernetes service account auth, workload identity patterns, and task-scoped secret access.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-04-16T16:35:54-04:00
+last_modified: 2026-05-04T19:59:55.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Secure Tekton CI/CD secrets with HashiCorp Vault
+
+Tekton runs natively on Kubernetes, which changes the threat model compared
+to hosted CI/CD platforms. Pipelines execute as pods with service accounts —
+identities that already exist in the Kubernetes cluster and that Vault can
+verify without distributing long-lived credentials to pipeline workloads.
+Kubernetes auth is the natural fit for most Tekton deployments because it
+reduces bootstrap secret distribution and lets you bind Vault access directly
+to Kubernetes workload identity.
+
+<VideoEmbed url="https://www.youtube.com/watch?v=EltMXWz35RY"/>
+
+## Architecture
+
+Because Tekton pipelines run as Kubernetes pods, the recommended authentication
+path uses Kubernetes auth. Kubernetes automatically mounts a projected service
+account token into every pod, so no credential distribution is required before
+the pipeline can authenticate:
+
+1. Kubernetes mounts a projected service account token into the pipeline pod at startup
+1. A pipeline step reads the token and sends it to Vault along with the role name
+1. Vault calls the Kubernetes API to verify the token and confirms the service account and namespace match the bound values on the role
+1. Vault maps the verified identity to the role and issues a Vault token scoped to the role's policies
+1. The pipeline step uses the Vault token to read secrets for the duration of the task
+
+For pipelines that run outside the cluster boundary, or where Kubernetes auth is
+not available, [Authentication options](#authentication-options) covers JWT/OIDC,
+TLS cert, and AppRole.
+
+![Diagram showing authentication flow between Tekton CI/CD and Vault](/img/well-architected-framework/diagram-cicd-tekton-auth.png#light-theme-only)
+![Diagram showing authentication flow between Tekton CI/CD and Vault](/img/well-architected-framework/diagram-cicd-tekton-auth-dark.png#dark-theme-only)
+
+### Kubernetes platform and auth method selection
+
+Tekton always runs pipeline steps as Kubernetes pods, so the platform choice
+affects which identity source is available — not whether Kubernetes is involved.
+
+- **On-premises or generic Kubernetes** — Kubernetes auth is the only
+  platform-native option. Vault calls the cluster API to validate the pod's
+  projected service account token.
+- **Managed clusters (EKS, GKE, AKS)** — Kubernetes auth continues to work as
+  described earlier. JWT auth through the cluster's built-in OIDC provider is also
+  available as an alternative. Configuring Vault to trust the cluster OIDC
+  issuer removes the requirement for Vault to reach the Kubernetes API, which
+  can be useful in multi-cluster or network-restricted environments.
+- **All environments** — AppRole and TLS cert auth are available as fallbacks
+  when Vault cannot reach the Kubernetes API or the cluster's OIDC endpoint due
+  to network restrictions — for example, a private cluster with no external API
+  server access, or a Vault instance in a separate network zone with no route to
+  the cluster. In these cases, AppRole with response wrapping or TLS cert auth
+  for long-lived infrastructure are the remaining options.
+
+## Authentication options
+
+Because Tekton runs natively on Kubernetes, use the Kubernetes auth for
+pipelines running inside the same cluster as Vault or a cluster with network
+access to Vault. 
+
+- The pod's service account token is already available
+- The identity is verifiable by the Kubernetes API
+- No long-lived, static credentials needed for pipeline pod
+- Each pipeline can have its own service account, enabling per-pipeline secret scoping with no shared
+  credentials
+
+Depending on your use case, there are additional auth methods that may be
+appropriate for Tekton pipelines in your environment.
+
+| Auth method | Security posture | Credential lifecycle | Best suited for |
+|---|---|---|---|
+| Kubernetes | Highest for in-cluster | Short-lived projected service account token, auto-rotated by Kubernetes | Pipelines running in same cluster or trusted cluster with Vault access |
+| JWT / OIDC | High; identity federates across trust boundaries | Token issued per job or workload, typically short-lived | Clusters where Vault cannot reach the Kubernetes API, or managed clusters (EKS, GKE, AKS) using the built-in OIDC issuer |
+| TLS Certificate | High; mutual authentication | Certificate with defined expiry; requires rotation process | Long-lived node infrastructure where pods run on persistent hosts with a managed certificate lifecycle and mTLS is already part of the security posture |
+| AppRole | Moderate; requires secure secret ID delivery | Secret ID is single-use with response wrapping; RoleID is long-lived | Pipelines in environments where neither K8s nor JWT is available; legacy infrastructure integration |
+
+<Tabs>
+<Tab heading="Kubernetes">
+
+Vault validates the pipeline pod's projected service account token against the
+Kubernetes API.
+
+### Role configuration
+
+The role definition enforces which Kubernetes namespaces and service
+accounts Vault allows to authenticate, making this the primary control against
+one pipeline impersonating another.
+
+```shell
+# Vault role — binds to a specific service account and namespace
+# This is the critical security control: without bound_service_account_names
+# and bound_service_account_namespaces, any pod in the cluster can authenticate
+vault write auth/kubernetes/role/tekton-build \
+  bound_service_account_names=tekton-pipeline-sa \
+  bound_service_account_namespaces=tekton-pipelines \
+  token_policies=tekton-build-policy \
+  token_ttl=1h
+```
+
+### Workflow configuration
+
+The example assumes the `TaskRun` uses a dedicated Kubernetes service account
+and a step in the task logs in to Vault with the projected service account
+token.
+
+```yaml
+apiVersion: tekton.dev/v1
+kind: TaskRun
+metadata:
+  name: build-with-vault-kubernetes-auth
+spec:
+  serviceAccountName: tekton-pipeline-sa
+  taskSpec:
+    steps:
+      - name: read-secret
+        image: hashicorp/vault:1.19
+        script: |
+          #!/usr/bin/env sh
+          export VAULT_ADDR=https://vault.example.com
+          VAULT_TOKEN="$(vault write -field=token auth/kubernetes/login \
+            role=tekton-build \
+            jwt=@/var/run/secrets/kubernetes.io/serviceaccount/token)"
+          export VAULT_TOKEN
+          vault kv get -field=password secret/ci/build/registry > /workspace/registry-password
+```
+
+The task exchanges the projected Kubernetes service account token for a Vault
+token that is scoped to the `tekton-build` role. The step then reads only the
+registry credential required for the build.
+
+</Tab>
+<Tab heading="JWT / OIDC">
+
+JWT auth is the right choice when pipelines run outside the cluster boundary or
+when external systems other than the local Kubernetes API manage the workload
+identity.
+
+### Role configuration
+
+The security-critical configuration here is workload-specific role
+constraints. `bound_claims` is the most flexible option, but you can also use
+constraints such as `bound_audiences` and `bound_subject`. Without these
+restrictions, a broader set of issuer-valid JWTs may authenticate than you
+intend.
+
+```shell
+# Vault JWT role with bound_claims
+# Without bound_claims this role accepts any JWT from the issuer
+vault write auth/jwt/role/tekton-deploy \
+  role_type=jwt \
+  bound_audiences="https://vault.example.com" \
+  bound_claims='{"sub": "spiffe://example.com/ns/tekton-pipelines/sa/deploy-sa"}' \
+  user_claim=sub \
+  token_policies=tekton-deploy-policy \
+  token_ttl=15m
+```
+
+The example assumes the JWT contains SPIFFE-style claims. If your identity
+provider issues different claims, bind the role to the claim names and values
+that uniquely identify the pipeline workload in your environment.
+
+### Workflow configuration
+
+The example assumes another component writes a short-lived workload JWT to the
+task filesystem before the step that authenticates to Vault runs.
+
+```yaml
+apiVersion: tekton.dev/v1
+kind: TaskRun
+metadata:
+  name: deploy-with-vault-jwt-auth
+spec:
+  taskSpec:
+    volumes:
+      - name: workload-token
+        secret:
+          secretName: tekton-workload-jwt
+    steps:
+      - name: read-secret
+        image: hashicorp/vault:1.19
+        volumeMounts:
+          - name: workload-token
+            mountPath: /var/run/tekton/tokens
+            readOnly: true
+        script: |
+          #!/usr/bin/env sh
+          export VAULT_ADDR=https://vault.example.com
+          JWT="$(cat /var/run/tekton/tokens/token)"
+          VAULT_TOKEN="$(vault write -field=token auth/jwt/login role=tekton-deploy jwt="$JWT")"
+          export VAULT_TOKEN
+          vault kv get -field=key secret/ci/production/api > /workspace/api-key
+```
+
+The task reads the workload JWT from the mounted file, exchanges it for a short-
+lived Vault token, and retrieves the API key needed for the deployment. The role
+constraints determine which workload JWTs Vault accepts.
+
+</Tab>
+<Tab heading="TLS Certificate">
+
+TLS cert auth is appropriate when pipelines run on dedicated, long-lived build
+agents rather than ephemeral pods — for example, external build workers or
+build farm nodes integrated with Tekton where the agent infrastructure itself has a managed
+certificate lifecycle. Vault validates the client certificate presented during
+the TLS handshake. 
+
+### Role configuration
+
+Trust in the issuing CA is the primary control in cert auth. CN or SAN
+restrictions then narrow authentication to the specific certificate subjects
+you expect. In practice, this means you allow certificates issued by a specific
+CA and optionally restrict login to a defined naming pattern.
+
+```shell
+# Vault TLS cert role — restrict to certificates from the internal CA
+# with a CN matching the build agent naming pattern
+vault write auth/cert/certs/tekton-agent \
+  display_name=tekton-agent \
+  certificate=@/path/to/internal-ca.crt \
+  allowed_common_names="tekton-agent-*.infra.example.com" \
+  token_policies=tekton-agent-policy \
+  token_ttl=4h
+```
+
+### Workflow configuration
+
+The example assumes the task mounts a client certificate and key that were
+provisioned to the workload by your PKI workflow.
+
+```yaml
+apiVersion: tekton.dev/v1
+kind: TaskRun
+metadata:
+  name: build-with-vault-cert-auth
+spec:
+  taskSpec:
+    volumes:
+      - name: vault-client-cert
+        secret:
+          secretName: tekton-vault-client-cert
+    steps:
+      - name: read-secret
+        image: hashicorp/vault:1.19
+        volumeMounts:
+          - name: vault-client-cert
+            mountPath: /etc/vault/tls
+            readOnly: true
+        script: |
+          #!/usr/bin/env sh
+          export VAULT_ADDR=https://vault.example.com
+          VAULT_TOKEN="$(vault login -method=cert -token-only \
+            name=tekton-agent \
+            -client-cert=/etc/vault/tls/tls.crt \
+            -client-key=/etc/vault/tls/tls.key)"
+          export VAULT_TOKEN
+          vault kv get -field=key secret/ci/build/signing > /workspace/signing-key
+```
+
+The task authenticates to Vault with the mounted client certificate instead of a
+token issued by Kubernetes or an external identity provider. This pattern fits
+long-lived Tekton worker infrastructure that already participates in a managed
+PKI lifecycle.
+
+</Tab>
+<Tab heading="AppRole">
+
+AppRole is appropriate when neither Kubernetes nor JWT auth is available — for
+example, pipelines in air-gapped environments or integrations with legacy
+infrastructure that can't participate in token-based identity federation.
+
+### Role configuration
+
+The critical operational concern with AppRole is secure initial delivery of the
+secret_id. Always use response wrapping: Vault wraps the secret_id in a
+single-use token so the credential can only be unwrapped once.
+
+Without response wrapping, AppRole delivery in pipelines often degrades into
+manually distributed bootstrap secrets, even if the secret ID itself is short-
+lived. That weakens the security model and increases operational risk.
+
+```shell
+# Vault AppRole role — short TTL on secret_id, single use
+vault write auth/approle/role/tekton-pipeline \
+  secret_id_ttl=10m \
+  secret_id_num_uses=1 \
+  token_ttl=1h \
+  token_max_ttl=2h \
+  token_policies=tekton-pipeline-policy
+```
+
+### Workflow configuration
+
+The example assumes the `role_id` and single-use wrapping token are provided to
+the `TaskRun` as Kubernetes secrets and unwrapped at runtime.
+
+```yaml
+apiVersion: tekton.dev/v1
+kind: TaskRun
+metadata:
+  name: build-with-vault-approle
+spec:
+  taskSpec:
+    steps:
+      - name: read-secret
+        image: hashicorp/vault:1.19
+        env:
+          - name: VAULT_ROLE_ID
+            valueFrom:
+              secretKeyRef:
+                name: tekton-vault-approle
+                key: role_id
+          - name: VAULT_WRAP_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: tekton-vault-approle
+                key: wrapping_token
+        script: |
+          #!/usr/bin/env sh
+          export VAULT_ADDR=https://vault.example.com
+          SECRET_ID="$(VAULT_TOKEN="$VAULT_WRAP_TOKEN" vault unwrap -field=secret_id)"
+          VAULT_TOKEN="$(vault write -field=token auth/approle/login role_id="$VAULT_ROLE_ID" secret_id="$SECRET_ID")"
+          export VAULT_TOKEN
+          vault kv get -field=password secret/ci/build/registry > /workspace/registry-password
+```
+
+The task unwraps the single-use token to recover the `secret_id`, then exchanges
+the AppRole credentials for a Vault token at runtime. Response wrapping reduces
+the risk of exposing a reusable bootstrap credential in the Tekton definition.
+
+</Tab>
+</Tabs>
+
+## Policy
+
+The Vault policy for any role should follow least privilege. A pipeline that
+deploys to production should not be able to read staging secrets, and a staging
+pipeline should not be able to read production secrets.
+
+<VideoEmbed url="https://www.youtube.com/watch?v=Mmyvybxm30w"/>
+
+The following example Vault policy scopes a production deployment pipeline to the
+secret path it needs:
+
+```hcl
+# Vault policy: scope to exactly the paths this pipeline needs
+path "secret/data/ci/production/db" {
+  capabilities = ["read"]
+}
+
+# Deny access to everything else implicitly
+```
+
+The policy grants read access only to the production database secret path. Vault
+denies access to other paths unless another policy explicitly allows them.
+
+## Security considerations
+
+For Tekton, the primary security considerations are the Kubernetes identity and
+execution boundaries that Tekton uses for pipeline workloads:
+
+- **Service account and namespace bindings:** Tekton runs pipeline work as
+  Kubernetes pods, so the effective Vault identity is the service account and
+  namespace attached to the `TaskRun` or `PipelineRun`. Bind Vault Kubernetes
+  roles to the exact service accounts and namespaces that should authenticate,
+  and do not rely on a broad or default namespace service account for multiple
+  pipelines with different secret scopes.
+- **Secret handling across steps and workspaces:** Tekton steps in the same task
+  share the pod context and can read the same mounted volumes and workspaces. If
+  one step writes a secret to a shared workspace or file path, later steps in
+  that task can read it. Keep secret retrieval in the narrowest task boundary
+  possible and avoid persisting secret values in shared workspaces unless a
+  later step explicitly requires them.
+
+For a list of additional security considerations, refer to the [CI/CD security
+considerations](/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets/security-considerations)
+page.
+
+## Integrate HCP Vault Radar
+
+Before migrating to Vault-based secrets management, Vault Radar can scan
+existing Tekton pipeline definitions and connected repositories for
+credentials stored as hardcoded values. This is particularly important in
+organizations that have accumulated years of workflows with credentials stored
+across multiple environments, and repositories.
+
+After migration, Vault Radar can monitor your source code repositories
+continuously for new secret introductions — catching cases where developers
+hardcode credentials that should be going through Vault.
+
+Refer to the [HCP Vault Radar quick start
+tutorials](/hcp/tutorials/get-started-hcp-vault-radar) to learn about HCP Vault
+Radar.
+
+## HashiCorp resources
+
+### Vault
+
+- Read the [Auth methods](/vault/docs/auth) documentation to choose the right Vault authentication method for your Tekton environment.
+- Read the [Transit secrets engine](/vault/docs/secrets/transit) documentation to encrypt and decrypt data within Tekton pipelines.
+- Read the [Response wrapping](/vault/docs/concepts/response-wrapping) documentation to learn how to deliver single-use secret IDs securely.
+- Read [Vault Agent on Kubernetes](/vault/docs/deploy/kubernetes/helm/examples/injector-tls-cert-manager) to configure Vault Agent for automatic secret injection into Tekton task pods.
+
+### HCP Vault Radar
+
+- Read [What is HCP Vault Radar](/hcp/docs/vault-radar) for an overview of how Vault Radar scans for exposed secrets.
+- Read [Add an Azure DevOps data source](/hcp/docs/vault-radar/get-started/add-data-sources/azure-devops) to connect Vault Radar to Azure DevOps repositories.
+- Read [Add a Bitbucket data source](/hcp/docs/vault-radar/get-started/add-data-sources/bitbucket) to connect Vault Radar to Bitbucket repositories.
+- Read [Add a GitHub data source](/hcp/docs/vault-radar/get-started/add-data-sources/github) to connect Vault Radar to GitHub repositories.
+- Read [Add a GitLab data source](/hcp/docs/vault-radar/get-started/add-data-sources/gitlab) to connect Vault Radar to GitLab repositories.
+
+### Tutorials
+
+- Follow the [Get started with Vault](/vault/tutorials/get-started) tutorial to set up your first Vault cluster.
+- Follow the [Get started with HCP Vault Radar](/hcp/tutorials/get-started-hcp-vault-radar) tutorial to enable continuous scanning for your repositories.
+- Follow the [Vault Agent with Kubernetes](/vault/tutorials/kubernetes-introduction/agent-kubernetes) tutorial to deploy Vault Agent as a sidecar for Tekton task pods.
+- Follow the [Dynamic secrets: database credentials](/vault/tutorials/db-credentials) tutorials to generate short-lived database credentials from Vault.
+- Follow the [Generate cloud provider credentials with Vault](/vault/tutorials/secrets-management/azure-secrets) tutorial to issue temporary cloud provider credentials for pipeline tasks.
+
+### External resources
+
+- Read [Tekton Chains signing](https://tekton.dev/docs/chains/signed-provenance-tutorial/) to learn how to add signed supply chain provenance to Tekton pipelines.
+- Read [SPIFFE/SPIRE workload identity](https://spiffe.io/docs/latest/spire-about/spire-concepts/) to understand the SPIFFE workload identity standard used for Vault authentication.
+
+## Next steps
+
+In this section of [managing CI/CD
+secrets](/well-architected-framework/secure-systems/secure-applications/ci-cd-secrets),
+you learned how to map Tekton workload identity to Vault auth methods and how
+to scope secrets to individual pipelines. Secure Tekton CI/CD secrets with
+HashiCorp Vault is part of the [Secure systems
+pillar](/well-architected-framework/secure-systems).
+
+If your pipelines run across multiple clusters or cloud providers, review
+JWT/OIDC auth with JWT-based SPIFFE or other federated identity patterns that
+avoid sharing static credentials across trust boundaries.
+
+If supply chain compliance is a driver, review [Validate software
+integrity](/well-architected-framework/secure-systems/validate-software-integrity)
+to understand how Tekton Chains attestations fit into a broader software
+assurance posture. If you're assessing your current exposure before migration,
+start with HCP Vault Radar.

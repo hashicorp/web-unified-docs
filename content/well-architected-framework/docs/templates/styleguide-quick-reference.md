@@ -78,13 +78,13 @@
 - **Fix:** "use", "lets", "because"
 - **Example:** "Vault lets you" not "Vault enables you to"
 
-### 10. No Foreign/Jargon Words
+### 10. No Latin Phrases or Foreign Words
 - **Priority:** [IMPORTANT]
 - **Type:** [AUTO-FIX]
-- **Rule:** No Latin, French, scientific terms, jargon
-- **Detect:** "via", "etc.", "e.g.", "i.e.", "ergo", "vice versa", "carte blanche", "sanity check", "smoke test"
-- **Fix:** "using/through", "For example", "such as", "conversely", "verification", "preliminary test"
-- **Example:** "through SSH" not "via SSH"
+- **Rule:** Do not use Latin phrases, abbreviations, or foreign loan words. Use simple English words for global clarity.
+- **Detect:** "ad-hoc", "via", "etc.", "e.g.", "i.e.", "ergo", "vice versa", "per se", "status quo", "de facto", "in lieu of", "a priori", "post hoc", "verbatim", "carte blanche", "sanity check", "smoke test"
+- **Fix:** See replacements in table below
+- **Example:** "through SSH" not "via SSH", "improvised" not "ad-hoc", "for example" not "e.g."
 
 ### 11. No Adjacent Same Elements
 - **Priority:** [STANDARD]
@@ -450,19 +450,27 @@
 - **Detect:** "utilize", "utilization", "due to the fact that"
 - **Fix:** "use", "because"
 
-### No Foreign/Jargon Words
+### No Latin Phrases or Foreign Words
 - **Priority:** [CRITICAL]
 - **Type:** [AUTO-FIX]
 - **Table of replacements:**
 
 | Avoid | Use Instead | Reason |
 |-------|-------------|--------|
+| ad-hoc | improvised, unplanned, informal, spontaneous | Latin phrase |
 | via | through, using, by | Latin |
 | etc. | and other {entities} | Latin abbreviation |
-| e.g. | For example, such as | Latin abbreviation |
-| i.e. | that is | Latin abbreviation |
+| e.g. | for example, such as | Latin abbreviation |
+| i.e. | specifically, that is | Latin abbreviation |
 | ergo | therefore, as a result, so | Latin |
-| vice versa | conversely | Latin |
+| vice versa | conversely, the reverse | Latin phrase |
+| per se | by itself, inherently | Latin phrase |
+| status quo | current state, existing situation | Latin phrase |
+| de facto | in practice, actual | Latin phrase |
+| in lieu of | instead of, in place of | French/Latin |
+| a priori | beforehand, in advance | Latin phrase |
+| post hoc | after the fact, retrospective | Latin phrase |
+| verbatim | word for word, exactly | Latin |
 | carte blanche | full permission, admin access | French |
 | blast radius | affected scope | jargon |
 | sanity check | verification, preliminary check | jargon, ableist |

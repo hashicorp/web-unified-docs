@@ -1,5 +1,5 @@
 /**
- * Copyright (c) HashiCorp, Inc.
+ * Copyright IBM Corp. 2024, 2026
  * SPDX-License-Identifier: BUSL-1.1
  */
 
@@ -259,9 +259,9 @@ export async function main(
 			)
 
 			const destAbsolutePath = path.join(dest, relPath)
-			const directoryPath = path.dirname(destAbsolutePath);
+			const directoryPath = path.dirname(destAbsolutePath)
 
-			fs.mkdirSync(directoryPath, { recursive: true });
+			fs.mkdirSync(directoryPath, { recursive: true })
 			fs.writeFileSync(destAbsolutePath, contents)
 		}
 	}
