@@ -11,7 +11,7 @@ Render each variant with the Mermaid CLI, for example:
   mmdc -i <name>_dark.mmd -o <name>_dark.png -s 2 -b "#0d0e12"
 
 Run the same commands with an .svg output to refresh the SVG sources, then copy
-the PNGs to ../img/architecture/.
+the PNGs to ../img/agentic-mesh/.
 
 Usage: python3 build.py [name ...]   (default: every body in this directory)
 """
