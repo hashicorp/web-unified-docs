@@ -24,15 +24,13 @@ Operations Hub runs separately from your Consul server agents. Installing Operat
 Before you begin, prepare the following:
 
 - An existing Kubernetes cluster with `kubectl` access and Helm installed.
-- Consul installed in the Kubernetes cluster, with the service mesh injector and Consul API Gateway controller enabled. Refer to [Deploy Consul with Helm](/consul/docs/deploy/server/k8s/helm).
+- An existing Consul Enterprise installation in the Kubernetes cluster, with the service mesh injector, Consul namespaces (`global.enableConsulNamespaces: true`), and Consul API Gateway controller enabled. The Operations Hub chart does not install Consul. Refer to [Deploy Consul with Helm](/consul/docs/deploy/server/k8s/helm). The default installation in this guide assumes datacenter `dc1` and admin partition `default`. If your installation uses different values, add matching `--set-string 'connectInject.datacenter=CONSUL_DATACENTER'` and `--set-string 'connectInject.partition=CONSUL_PARTITION'` overrides to the Operations Hub Helm install command.
 - Access to the [Consul Operations Hub Helm chart on Artifact Hub](https://artifacthub.io/packages/helm/hashicorp/consul-ops-hub) and its container image. The examples install chart version `1.0.0` from HashiCorp's public Helm repository and use its default container image.
-- A running Neo4j database reachable from the Operations Hub pods. The installation example uses an external database rather than the bundled Neo4j subchart.
-- An OpenID Connect (OIDC) identity provider, an OIDC client, and permission to create Kubernetes Secrets. Register `https://HUB_HOST/oauth2/callback` as the client's redirect URI.
+- Permission to create Kubernetes Secrets and provision persistent volumes for the bundled Neo4j database and Keycloak identity provider.
 - Python 3 to generate a random session cookie secret.
-- A DNS hostname for Operations Hub and a TLS certificate for that hostname. Browsers and the Consul servers you attach must be able to reach the gateway at this address.
 - Consul Enterprise 2.1.x server agents for each cluster you attach, with access to their configuration files. Consul Community Edition does not support the global registry.
 
-The installation example uses an external identity provider and a trusted gateway certificate. Supply credentials directly in the Helm command or values YAML. The chart creates Kubernetes Secrets from these values. Do not rely on comments in the chart that describe development credential defaults.
+The installation example uses the chart's bundled Neo4j database and Keycloak identity provider. You do not need an external database, an external identity provider, or a values file.
 
 ## Install Operations Hub
 
@@ -55,11 +53,13 @@ Use the following steps to deploy Operations Hub into the Kubernetes namespace t
 
    | Credential | Helm value | Requirement |
    | --- | --- | --- |
-   | Neo4j password | `neo4j.password` | At least 8 characters. For an existing database, use its configured password, not a newly generated value. |
-   | OIDC client secret | `auth.oauth2proxy.clientSecret` | Obtain the secret for `auth.oauth2proxy.clientId` from your identity provider. A locally generated value does not replace the provider-issued secret. |
+   | Neo4j password | `neo4j.password` | Choose a strong password of at least 8 characters for the bundled database. |
+   | OAuth client secret | `auth.oauth2proxy.clientSecret` | Generate a random secret. The chart configures the bundled Keycloak client with this value. |
    | Session cookie secret | `auth.oauth2proxy.cookieSecret` | Exactly 16, 24, or 32 ASCII characters. Generate a random value for this installation. |
+   | Keycloak administrator username | `auth.keycloak.adminUsername` | Choose a username for the Keycloak administrator, such as `admin`. |
+   | Keycloak administrator password | `auth.keycloak.adminPassword` | Choose a strong password for the Keycloak administrator. |
 
-   Obtain the existing database's password and the client secret from your OIDC provider. Generate a 32-character cookie secret with the following command. Use the output as `COOKIE_SECRET` in the Helm command or values YAML.
+   Run the following command twice to generate separate 32-character values for `OAUTH_CLIENT_SECRET` and `COOKIE_SECRET`. Use different values for the client and cookie secrets.
 
    ```shell-session
    $ python3 -c "import secrets; print(secrets.token_hex(16))"
@@ -67,106 +67,23 @@ Use the following steps to deploy Operations Hub into the Kubernetes namespace t
 
    Keep the cookie secret stable across pod restarts and Helm upgrades. Replacing it invalidates existing sessions.
 
-1. Create the gateway certificate Secret.
+1. Install the chart with the five values you prepared. Replace the uppercase credential placeholders with your values, not file paths.
 
-   ```shell-session
-   $ kubectl create secret tls operations-hub-tls \
-       --namespace "$HUB_NAMESPACE" \
-       --cert=/PATH/TO/tls.crt \
-       --key=/PATH/TO/tls.key
-   ```
-
-   Create the Secret in the same Kubernetes namespace as Operations Hub. Include the certificate chain in `tls.crt` when your certificate authority requires it.
-
-1. Create `operations-hub-values.yaml` with the following configuration. Replace the hostname, database, Consul scope, identity provider, client ID, and allowed email domain placeholders. This file overrides the chart defaults; it does not need to repeat every setting. For the complete default configuration, refer to [Helm chart values](#helm-chart-values).
-
-   ```yaml
-   neo4j:
-     install:
-       enabled: false
-     uri: "bolt://NEO4J_HOST:7687"
-     database: "NEO4J_DATABASE"
-     username: "NEO4J_USERNAME"
-     existingSecret: ""
-
-   connectInject:
-     enabled: true
-     datacenter: "CONSUL_DATACENTER"
-     namespace: "CONSUL_NAMESPACE"
-     partition: "CONSUL_PARTITION"
-
-   consulGateway:
-     enabled: true
-     gateway:
-       listeners:
-         - name: https
-           protocol: HTTPS
-           port: 443
-           tls:
-             mode: Terminate
-             certificateRefs:
-               - group: ""
-                 kind: Secret
-                 name: operations-hub-tls
-     httpRoute:
-       hostnames:
-         - "HUB_HOST"
-       listenerName: "https"
-       ingestTimeout: "300s"
-
-   proxyDefaults:
-     enabled: false
-
-   auth:
-     enabled: true
-     publicUrl: "https://HUB_HOST"
-     keycloak:
-       enabled: false
-     oauth2proxy:
-       enabled: true
-       clientId: "OIDC_CLIENT_ID"
-       existingSecret: ""
-       oidc:
-         issuerUrl: "https://OIDC_ISSUER"
-       cookieSecure: true
-       whitelistDomain: "HUB_HOST"
-       allowedEmailDomains:
-         - "ALLOWED_EMAIL_DOMAIN"
-   ```
-
-   Set `connectInject.namespace` and `connectInject.partition` to `default` when you do not use Consul namespaces or admin partitions. These values refer to Consul scopes, not the Kubernetes namespace. Configure the Neo4j URI's scheme to match your database's TLS settings.
-
-   Restrict sign-in to the email domains or identity-provider groups that should access Operations Hub. Every admitted identity has the same access; these restrictions control who can use the UI.
-
-   This example disables creation of the mesh-wide `global` proxy defaults entry to avoid replacing configuration you already manage. In the `Config` map of your existing proxy defaults, set [`local_request_timeout_ms`](/consul/docs/reference/proxy/envoy#proxy-config-options) to at least `300000` so full snapshots can complete within the gateway's 300-second ingestion timeout. If you do not manage a `global` entry, you can set `proxyDefaults.enabled` to `true` to let the chart create one. The entry applies to all mesh services in the partition.
-
-1. Install the chart. Replace `NEO4J_PASSWORD`, `OIDC_CLIENT_SECRET`, and `COOKIE_SECRET` with the credential values, not file paths.
+   The chart creates the mesh-wide `global` proxy defaults entry by default. If you already manage this entry, add `--set proxyDefaults.enabled=false` to the following command. In your existing entry's `Config` map, set [`local_request_timeout_ms`](/consul/docs/reference/proxy/envoy#proxy-config-options) to at least `300000` so full snapshots can complete within the gateway's 300-second ingestion timeout. Preserve the entry's other settings.
 
    ```shell-session
    $ helm install operations-hub hashicorp/consul-ops-hub \
        --version 1.0.0 \
        --namespace "$HUB_NAMESPACE" \
-       --values operations-hub-values.yaml \
        --set-string 'neo4j.password=NEO4J_PASSWORD' \
-       --set-string 'auth.oauth2proxy.clientSecret=OIDC_CLIENT_SECRET' \
+       --set-string 'auth.oauth2proxy.clientSecret=OAUTH_CLIENT_SECRET' \
        --set-string 'auth.oauth2proxy.cookieSecret=COOKIE_SECRET' \
+       --set-string 'auth.keycloak.adminUsername=KEYCLOAK_ADMIN_USERNAME' \
+       --set-string 'auth.keycloak.adminPassword=KEYCLOAK_ADMIN_PASSWORD' \
        --wait \
        --timeout 10m
    ```
 
-   Alternatively, add the following credential fields to the existing `neo4j` and `auth.oauth2proxy` sections in `operations-hub-values.yaml`, then omit the three `--set-string` options. Replace the placeholders with your values. Do not append duplicate top-level sections.
-
-   ```yaml
-   neo4j:
-     password: "NEO4J_PASSWORD"
-
-   auth:
-     oauth2proxy:
-       clientSecret: "OIDC_CLIENT_SECRET"
-       cookieSecret: "COOKIE_SECRET"
-   ```
-
-   Credentials supplied directly on the command line can appear in shell history and process arguments. Values YAML stores them in plain text, and Helm also stores them in release data. Protect these locations, do not commit credentials, and restrict access to the resulting Kubernetes Secrets. For credentials containing commas, use the values YAML or escape commas as `\,` in Helm's `--set-string` arguments.
 
 1. Verify that the deployment is available and inspect the gateway and route status.
 
@@ -180,13 +97,13 @@ Use the following steps to deploy Operations Hub into the Kubernetes namespace t
        --namespace "$HUB_NAMESPACE"
    ```
 
-   The resource names assume the release name `operations-hub` and no chart name overrides. Confirm that the gateway has an address and that the route is accepted with resolved backend references. Configure DNS for `HUB_HOST` to reach the gateway, then open `https://HUB_HOST` in your browser and sign in with your identity provider. If you use bundled Keycloak, [create a Keycloak user](#create-a-keycloak-user) before signing in.
+   The resource names assume the release name `operations-hub` and no chart name overrides. Confirm that the gateway has an address and that the route is accepted with resolved backend references. [Create a Keycloak user](#create-a-keycloak-user) before signing in.
 
    If pods do not become ready, inspect their events and logs for database connectivity, image pull, or service mesh injection errors. If sign-in fails, verify the OIDC issuer, client credentials, and callback URI.
 
 ### Create a Keycloak user
 
-Complete these post-installation steps only when you use bundled Keycloak with `auth.keycloak.enabled: true` and have not already provisioned an application user. Skip this section when you use another OAuth or OIDC provider, including an existing Keycloak deployment. Use that provider's existing user-management and sign-in process instead. The installation example uses an external identity provider and disables bundled Keycloak.
+The installation enables bundled Keycloak. Complete these steps to create an application user before signing in to Operations Hub.
 
 The chart does not create application users by default. Before you can sign in to Operations Hub with a username and password, create a user in the `coh` realm and set that user's password. The Keycloak administrator credentials are separate from the Operations Hub user's credentials.
 
@@ -197,18 +114,11 @@ The chart does not create application users by default. Before you can sign in t
        svc/operations-hub-consul-ops-hub-keycloak 8080:8080
    ```
 
-   The service name assumes the release name `operations-hub` used in this guide. For a release named `coh` in the `default` namespace, use the following command instead.
-
-   ```shell-session
-   $ kubectl port-forward -n default \
-       svc/coh-consul-ops-hub-keycloak 8080:8080
-   ```
-
-1. Open `http://localhost:8080/admin/` and sign in with the Keycloak administrator username and password configured through `auth.keycloak.adminUsername` and `auth.keycloak.adminPassword`, or through `auth.keycloak.existingAdminSecret`.
+1. Open `http://localhost:8080/admin/` and sign in with the Keycloak administrator username and password you supplied in the Helm install command.
 1. Open the realm selector, click **Manage realms**, and select **coh**. If you changed `auth.keycloak.realm.name`, select that realm instead. Do not create the application user in the `master` realm.
 1. Open **Users**, then click **Add user**. Enter a **Username** and **Email**, then click **Create**. Use an email address permitted by `auth.oauth2proxy.allowedEmailDomains` and ensure the user meets any configured group restrictions.
 1. Open the user's **Credentials** tab and click **Set password**. Enter and confirm the password. Turn off **Temporary** to avoid requiring a password change at first sign-in, then save the password.
-1. Open `https://HUB_HOST` and sign in with the user's username or email address and the password you set. Do not use the Keycloak administrator account for this sign-in.
+1. Open the Operations Hub gateway address in your browser and sign in with the user's username or email address and the password you set. Do not use the Keycloak administrator account for this sign-in.
 1. Stop the port-forward command with `Ctrl+C` when you finish.
 
 ## Attach a Consul cluster
