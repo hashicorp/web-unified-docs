@@ -5,17 +5,17 @@ description: >-
   Learn how Consul Agentic Runtime Fabric layers, gateways, and processors govern model access, tool calls, delegated identity, and agent behavior.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2026-11-05T19:27:04.000Z
-last_modified: 2026-11-05T19:53:43.000Z
+last_modified: 2026-11-05T20:22:39.000Z
 # END AUTO GENERATED METADATA
 ---
 
 # Consul Agentic Runtime Fabric architecture
 
-This page describes the Consul Agentic Runtime Fabric architecture. It explains the architectural layers and how the components work together to govern model access, tool access, and delegated identity.
+This page describes the Consul Agentic Runtime Fabric architecture. It follows one request through the components, then explains the architectural layers and how the components govern model access, tool access, and delegated identity.
 
 @include '../../../global/partials/alerts/beta.mdx'
 
-For a summary of each component, refer to [Consul Agentic Runtime Fabric](/consul/docs/agentic-mesh).
+For a summary of each feature and component, refer to [Consul Agentic Runtime Fabric](/consul/docs/agentic-mesh).
 
 @include 'alerts/enterprise-alert.mdx'
 
@@ -23,74 +23,160 @@ For a summary of each component, refer to [Consul Agentic Runtime Fabric](/consu
 
 The following diagram illustrates a travel application with agent-to-agent, model, and tool request paths, alongside catalog registration and telemetry connections. Click the diagram to view it at full size.
 
-[![Consul Agentic Runtime Fabric architecture showing travel, booking, and
-weather agents connected to the AI Inference Gateway and MCP Sidecars, model
-providers, the Consul catalog, and an OpenTelemetry
-collector](/img/architecture/camp-architecture.png)](/img/architecture/camp-architecture.png)
+<!-- TODO: Replace camp-architecture.png with a version labeled with the product component names. Refer to the relabel request in the IPE-1908 plan. -->
 
-The named providers and telemetry integrations illustrate the topology rather than establish release support. Component availability and security boundaries follow the descriptions on this page and the linked component documentation.
+[![Consul Agentic Runtime Fabric architecture for a travel booking application.
+A traveler's request enters through an API gateway to a travel orchestrator
+agent, which calls booking and weather agents. Agents call a self-hosted model
+through the AI Inference Gateway and call MCP tool servers. A terminating
+gateway injects a Vault credential for an external MCP server. Traces flow to
+an OpenTelemetry Collector, a trace backend, and Agentic
+Analytics.](/img/architecture/camp-architecture.png)](/img/architecture/camp-architecture.png)
+
+The named providers and telemetry integrations illustrate the topology rather than establish release support.
+
+The diagram uses the following labels for Agentic Runtime Fabric components:
+
+| Diagram label | Component |
+| --- | --- |
+| `travel-igw`, Envoy + processor | [AI Inference Gateway](/consul/docs/agentic-mesh/inference-gateway) |
+| Agent + sidecars | AI agent with the [MCP Sidecar](/consul/docs/agentic-mesh/mcp-sidecar) |
+| MCP + Envoy | MCP server registered with the `mcp-server` role |
+| Terminating gateway, Credential injection | Terminating gateway with the [Credential Injection Processor](/consul/docs/agentic-mesh/credential-injection) |
+| IBM Verify, Identity / OBO | Identity provider for the [Identity Plane](/consul/docs/agentic-mesh/identity) |
+| INDIGO Analytic Engine, BullMQ queue, Span relay | [Agentic Analytics](/consul/docs/agentic-mesh/cycle-detection) |
+
+### Follow one request
+
+A traveler asks: "Check the weather in Paris for next Tuesday and find a flight from London under GBP 300." The following steps trace that request through the diagram. The forecast, price, and confirmation are illustrative.
+
+1. **Receive the request.** The API gateway routes the authenticated request to the travel orchestrator. The application keeps the user context and request correlation, and it owns the task.
+1. **Plan the work.** The orchestrator asks a model through the AI Inference Gateway, which applies data protection and translates the request for the provider. The model proposes checking the forecast and searching flights. A model response is guidance, not permission to run a tool or spend money.
+1. **Call the specialist agents.** The orchestrator calls the weather agent and the booking agent over the service mesh. Consul authenticates the workloads with mTLS and enforces service intentions. The Identity Plane exchanges the traveler's token for authority scoped to each agent, and each agent verifies it. These peer calls do not pass through the AI Inference Gateway.
+1. **Search for a flight.** The booking agent calls a flight search tool through its MCP Sidecar, which checks tool policy and the verified caller context. For an external MCP server, the terminating gateway adds the trusted credential and verifies external TLS. The agent never receives that credential.
+1. **Approve, then book.** The booking agent requests the purchase. Tool policy requires human approval, so the MCP Sidecar holds the call until the traveler approves the itinerary and price. The booking backend, not Consul, creates the reservation.
+1. **Return the result.** The confirmation returns to the booking agent, then to the orchestrator, which responds to the traveler. The booking confirmation establishes business success. A successful network response alone does not.
+
+While the request runs, the AI Inference Gateway and MCP Sidecars send trace spans to the OpenTelemetry Collector. Agentic Analytics evaluates the traces and can block an agent that repeats the same tool call without progress.
+
+If a step fails, the affected call stops. Denied identity or policy stops the call, missing approval prevents the purchase, and a missing external credential prevents forwarding. The application reports the blocked step.
 
 ### Architectural layers
 
-| Layer | Responsibility | Boundary |
-| --- | --- | --- |
-| Consul control plane | Maintain service and policy configuration and supply the resulting proxy configuration. | Does not execute agent workflows or issue user access tokens. |
-| Envoy data plane | Enforce configured mesh connectivity, forward requests, and perform configured routing and retries. | Network reachability does not replace tool policy or delegated-user authorization. |
-| Gateway and identity processors | Interpret supported protocols, transform payloads, and participate in policy and identity processing. | Processors operate within trusted proxy configuration rather than accepting caller-selected routes or credentials. |
-| External identity and credential systems | Customer identity and access management (IAM) issues delegated tokens. Vault supplies external provider credentials. | User delegation and provider authentication remain separate trust relationships. |
-| Observability and Agentic Analytics | Automatically capture supported proxy interactions, correlate operational evidence, and detect unproductive repetition. | Applications supply business outcomes; telemetry does not prove task success, and delayed analysis cannot prevent every unsafe first action. |
+| Layer | Components | Responsibility | Boundary |
+| --- | --- | --- | --- |
+| Consul control plane | Consul servers, catalog, service intentions | Maintain service and policy configuration and supply the resulting proxy configuration. | Does not execute agent workflows or issue user access tokens. |
+| Envoy data plane | Sidecar proxies, terminating gateways | Enforce configured mesh connectivity, forward requests, and perform configured routing and retries. | Network reachability does not replace tool policy or delegated-user authorization. |
+| Gateway and identity processors | AI Inference Gateway, MCP Sidecar, Credential Injection Processor | Interpret supported protocols, transform payloads, and apply policy and identity processing. | Processors operate within trusted proxy configuration. They do not accept caller-selected routes or credentials. |
+| External identity and credential systems | IBM Verify, Vault | The identity provider issues delegated tokens. Vault supplies external provider credentials. | User delegation and provider authentication remain separate trust relationships. |
+| Observability and Agentic Analytics | OpenTelemetry Collector, trace backend, Agentic Analytics | Capture supported proxy interactions, correlate operational evidence, and detect unproductive repetition. | Applications supply business outcomes. Telemetry does not prove task success, and delayed analysis cannot prevent every unsafe first action. |
 
 Consul and Envoy own mesh configuration and transport. Applications supply the workflow semantics that network components cannot infer.
 
 ## Workflows
 
-The following workflows show how the components work together to govern model access, tool access, and delegated identity, and to observe and contain agent behavior.
+The following workflows show how the components govern model access, tool access, and delegated identity, and how they observe and contain agent behavior.
 
 ### Govern model access
 
-An application sends a supported inference request through its mesh path to the [AI Inference Gateway](/consul/docs/agentic-mesh/inference-gateway). Processing before routing resolves workload identity, validates the request, and applies configured request-side data protection.
+An application sends a supported inference request through its mesh path to the [AI Inference Gateway](/consul/docs/agentic-mesh/inference-gateway). The gateway processes the request in two phases around the routing decision.
 
-Envoy selects an eligible backend using Consul-supplied configuration. Processing after routing translates the request for that provider, normalizes supported responses, and captures usage. The external processor does not independently choose routes or run the retry loop.
+<CodeBlockConfig hideClipboard>
 
-The Consul catalog and service intentions decide which models are eligible. When two or more models serve a capability, Envoy fails a request over across their priority tiers. For details, refer to [Model routing and failover](/consul/docs/agentic-mesh/inference-gateway#model-routing-and-failover).
+```plaintext
+Agent ──▶ [ AI Inference Gateway                                      ]
+          [ 1. Processor, before routing:                             ]
+          [    resolve workload identity, validate, redact PII        ]
+          [ 2. Envoy, routing:                                        ]
+          [    pick the capability's highest-priority tier            ]
+          [ 3. Processor, after routing:                              ]
+          [    translate the request for the selected provider        ]
+          [                                                           ]
+          [    tier 0 ──▶ model A ──✗ retriable failure               ]
+          [    tier 1 ──▶ model B ──▶ response                        ]
+          [ 4. Processor: normalize response, redact PII, record usage ]
+          ◀── response
+```
+
+</CodeBlockConfig>
+
+The Consul catalog and service intentions decide which models are eligible. When two or more models serve a capability, Envoy fails a request over across their priority tiers. The processor does not choose routes or run the retry loop. For details, refer to [Model routing and failover](/consul/docs/agentic-mesh/inference-gateway#model-routing-and-failover).
 
 ### Govern tool access
 
-The [MCP Sidecar](/consul/docs/agentic-mesh/mcp-sidecar) governs Model Context Protocol (MCP) discovery and invocation. Its enforcement path combines workload identity, delegated user authority when present, and tool policy. Catalog visibility does not grant invocation permission.
+The [MCP Sidecar](/consul/docs/agentic-mesh/mcp-sidecar) governs Model Context Protocol (MCP) discovery and invocation. It combines workload identity, delegated user authority when present, and tool policy. Catalog visibility does not grant permission to invoke a tool.
 
-When policy requires human approval, an application callback supplies a decision and a separate enforcement processor verifies evidence bound to the original action. Approval does not replace destination authorization. Backends retain ownership of tool business logic and side effects.
+<CodeBlockConfig hideClipboard>
 
-Approved in-mesh tool calls use configured mesh paths. External HTTP MCP calls use a terminating gateway with [external credential injection](/consul/docs/agentic-mesh/credential-injection). The matched route supplies a trusted credential binding, the local credential runtime supplies a usable Vault-backed credential, and the gateway verifies external TLS before forwarding.
+```plaintext
+Agent ──▶ [ MCP Sidecar                                ]
+          [ tool policy ──▶ human approval, if required ]
+              │
+              ├──▶ in-mesh MCP server
+              │
+              └──▶ [ Terminating gateway                    ]
+                   [ Credential Injection Processor adds    ]
+                   [ the credential from Vault or a Secret  ]
+                        │
+                        └── TLS ──▶ external MCP server
+```
 
-The route and its credential must both be usable. Callers cannot select secret locations, override destination bindings, or direct a provider credential to another host.
+</CodeBlockConfig>
+
+When tool policy requires human approval, the MCP Sidecar holds the call until the approval arrives or the approval timeout expires. Approval does not replace destination authorization. Backends own tool business logic and side effects.
+
+Approved in-mesh tool calls use configured mesh paths. External HTTP MCP calls go through a terminating gateway with [external credential injection](/consul/docs/agentic-mesh/credential-injection). The matched route supplies a credential binding, the Credential Injection Processor adds the bound credential, and the gateway verifies external TLS before it forwards the call. The gateway forwards the call only when both the route and its credential are usable. Callers cannot select secret locations, override destination bindings, or send a provider credential to another host.
 
 ### Delegate user identity
 
-[On-behalf-of (OBO) delegation](/consul/docs/agentic-mesh/identity) carries user authority alongside Consul workload identity. Customer IAM remains the token issuer.
+[On-behalf-of (OBO) delegation](/consul/docs/agentic-mesh/identity) carries user authority alongside Consul workload identity. The customer's identity provider remains the token issuer.
 
-The caller-side identity processor exchanges user context for authority scoped to the next destination. The destination-side processor verifies that authority before destination policy consumes its claims. A subsequent outgoing call requires authority appropriate to the next hop, not unrestricted reuse of the previous token.
+<!-- TODO: Add the OBO token exchange sequence diagram. Refer to the image brief in the IPE-1908 plan. -->
 
-Workload TLS credentials and OAuth signing credentials have separate lifecycles. Signing material stays isolated from application configuration. Neither OBO delegation nor external credential injection defines managed-model authentication.
+The caller-side identity processor exchanges user context for authority scoped to the next destination. The destination-side processor verifies that authority before destination policy uses its claims. A later outgoing call needs authority for the next hop, not reuse of the previous token.
 
-### Investigate operational outcomes
+Workload TLS credentials and OAuth signing credentials have separate lifecycles. Signing material stays isolated from application configuration. Neither OBO delegation nor external credential injection authenticates calls to managed model providers.
 
-[AI observability](/consul/docs/agentic-mesh/observability) connects operational signals across model and tool calls through trace correlation and model attribution. Metrics, traces, and audit evidence have distinct delivery and privacy requirements.
+### Observe model and tool calls
 
-### Trace calls and derive metrics
+The AI Inference Gateway and MCP Sidecars [automatically instrument supported model and tool exchanges](/consul/docs/agentic-mesh/auto-instrumentation). Applications do not initialize tracing SDKs or emit spans. They forward trace context across calls, so the proxy-generated spans form one workflow trace.
 
-The AI Inference Gateway and MCP Sidecars are the specialized proxies that [automatically instrument supported model and tool exchanges](/consul/docs/agentic-mesh/auto-instrumentation). Applications do not initialize tracing SDKs or emit spans for these observations. They preserve trace context across calls so the proxy-generated evidence forms a correlated workflow trace. Aggregate this evidence into operational metrics using defined populations and time windows. Higher-order key performance indicators (KPIs) also require application-defined outcomes. Content capture remains subject to privacy and retention controls. To set it up, refer to [Configure auto-instrumentation](/consul/docs/agentic-mesh/auto-instrumentation/configure-auto-instrumentation).
+[AI observability](/consul/docs/agentic-mesh/observability) describes the metrics and traces these components produce and how to aggregate them into operational metrics. Higher-order key performance indicators (KPIs) also need application-defined outcomes. Content capture remains subject to privacy and retention controls. To set it up, refer to [Configure auto-instrumentation](/consul/docs/agentic-mesh/auto-instrumentation/configure-auto-instrumentation).
 
 ### Contain unproductive repetition
 
-[Cycle detection](/consul/docs/agentic-mesh/cycle-detection) analyzes repeated workflow steps and their results. An agent repeatedly calling the same tool with the same arguments and unchanged results can produce a cycle finding. Consul uses the finding through behavior policy to open the affected agent's circuit and reject subsequent applicable requests. Analysis runs asynchronously and supplements synchronous authorization and usage controls. To set it up, refer to [Configure cycle detection](/consul/docs/agentic-mesh/cycle-detection/configure-cycle-detection).
+[Cycle detection](/consul/docs/agentic-mesh/cycle-detection) analyzes repeated workflow steps and their results. An agent that calls the same tool with the same arguments and gets unchanged results can produce a cycle finding. Analysis runs asynchronously, outside the request path.
+
+<CodeBlockConfig hideClipboard>
+
+```plaintext
+Agent ──▶ AI Inference Gateway / MCP Sidecar ──▶ model or tool
+                │ spans                    ▲
+                ▼                          │ 4. later request rejected
+     OpenTelemetry Collector               │    with HTTP 503
+          │            │                   │
+          ▼            ▼                   │
+   trace backend   span relay        enforcement
+          ▲            │ trace IDs          ▲
+          │            ▼                   │ reads
+          │      BullMQ queue              │
+          │            │                   │
+          │            ▼                   │
+          └──── Agentic Analytics ──▶ protection state
+          1. fetch trace   2. find cycle   3. open the agent's circuit
+```
+
+</CodeBlockConfig>
+
+Consul uses the finding through behavior policy to open the affected agent's circuit and reject that agent's later requests. Other agents that use the same upstream are not affected. Because detection follows execution, it cannot prevent a first action or undo a completed one. It supplements synchronous authorization and usage controls. To set it up, refer to [Configure cycle detection](/consul/docs/agentic-mesh/cycle-detection/configure-cycle-detection).
 
 ## Shared security boundaries
 
 - Authenticate workloads and validate delegated user authority separately. Their credentials, policies, and lifecycles are distinct.
 - Keep model-provider authentication separate from OBO delegation and external credential injection.
-- Bind human approval to the original action. Approval evidence does not replace destination authorization.
+- Bind human approval to the original action. Approval does not replace destination authorization.
 - Treat request identifiers as correlation values, not identities or authorization evidence.
-- Treat telemetry as operational evidence, not a durable audit store or billing ledger without additional delivery and retention controls.
+- Treat telemetry as operational evidence, not a durable audit store or billing ledger.
 
 ## Related documentation
 
