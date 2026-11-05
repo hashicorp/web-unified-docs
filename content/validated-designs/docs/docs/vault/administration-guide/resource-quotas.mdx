@@ -40,19 +40,18 @@ Before implementing resource quotas, confirm that you have:
 
 ## Choose the right quota type
 
-The most common source of confusion with Vault quotas is applying a rate limit
-quota to a lease count problem, or a lease count quota to a rate limit problem.
-The table below maps each quota type to the class of problem it addresses.
+Vault's resource quota types guard against different categories of operational risk. Select the quota type that matches the problem you are mitigating to protect the cluster effectively. The following table maps each quota type to the class of problem it addresses.
 
 | | Rate limit quota | Lease count quota |
 | --- | --- | --- |
 | **What it limits** | API requests per second | Total active leases |
-| **Protects against** | API flood, noisy-neighbor traffic | Lease explosion, storage degradation, memory pressure |
+| **Protects against** | API flood, denial-of-service, noisy-neighbor traffic | Lease explosion, storage degradation, memory pressure |
 | **Algorithm** | Token bucket (per unique client IP, per node) | Hard counter |
 | **Available in** | Community and Enterprise | Enterprise only |
-| **Scope** | Global, namespace, mount, path, role | Global, namespace, mount, role |
-| **Replicated** | No — enforced per-node | Yes — stored on primary cluster |
-| **Audit on rejection** | Off by default; opt-in per quota configuration | Always logged |
+| **Scope** | Global, namespace, mount, path, role | Global, namespace, mount, path, role |
+| **Quota definition** | Stored on the primary cluster and replicated to performance secondaries | Stored on the primary cluster and replicated to performance secondaries |
+| **Enforcement** | Per node — each node keeps its own token buckets | Cluster-wide — all nodes in a cluster share the lease counter; each performance replication cluster counts only its own leases |
+| **Audit on rejection** | Off by default; opt-in with `enable_rate_limit_audit_logging` | Always logged by enabled audit devices; no configuration required |
 
 **Use rate limit quotas** when the problem is high request volume — a
 misbehaving client hammering an endpoint, a burst in authentication requests, or
@@ -98,14 +97,11 @@ quotas match a request, the most specific one wins:
 
 Start with a modest global quota to establish a baseline, then add targeted
 mount or path quotas for mounts that carry disproportionate traffic or risk.
-Avoid writing highly granular path quotas at scale — they add operational
-overhead and can obscure the broader traffic picture.
+Avoid writing highly granular path quotas at scale. Each path quota is a separate rule to tune and maintain, and when traffic is split across many narrow quotas, quota metrics make it harder to tell whether a mount or namespace as a whole is approaching its limits.
 
 <Note>
 
-Create a rate limit quota only for a path that exists on the cluster
-where you are creating it. On Performance Replication setups, create quotas for
-local mounts on the cluster that hosts the mount, not on the primary.
+Create a quota only for a path that exists on the cluster where you are creating it. On Performance Replication setups, Vault stores quotas on the primary cluster and forwards all quota create, update, and delete requests to the primary. As a result, you cannot create a quota for a local mount on a performance secondary cluster.
 
 </Note>
 
@@ -182,9 +178,9 @@ Lease count quotas are a Vault Enterprise feature that cap the total number of
 active leases generated against a configured scope. When active leases reach the cap, new lease-generating requests — such as dynamic credential generation or token
 creation — fail until existing leases expire or operators revoke them.
 
-The primary cluster stores lease count quotas and replicates them to
-performance secondaries. This means they provide a genuine cluster-wide
-aggregate limit, unlike rate limit quotas.
+Like rate limit quotas, lease count quota definitions are stored on the primary cluster and replicated to performance secondaries. Unlike rate limit quotas, enforcement is not per node: all nodes in a cluster share the lease counter, so the limit is a cluster-wide aggregate regardless of which node receives the request.
+
+Performance secondaries keep track of their own tokens and leases, so each performance replication cluster enforces the quota against its own lease count. A quota with `max_leases=5000` allows up to 5,000 leases on the primary and up to 5,000 on each performance secondary. Size `max_leases` for each cluster, not for the replication set as a whole.
 
 ### Protecting against lease explosions
 
@@ -246,7 +242,7 @@ Success! Data written to: sys/quotas/config
 
 Disable it again after the investigation is complete if rejection volume is high.
 
-Lease count quota rejections are always logged. No additional configuration is necessary.
+Lease count quota rejections are always written to enabled audit devices. Vault checks lease count quotas after it audits the incoming request, so the rejection appears in the audit response entry with a `lease count quota exceeded` error. The `enable_rate_limit_audit_logging` setting applies only to rate limit quotas. Under heavy rejection volume, this extra audit logging can affect performance, so track `vault.quota.lease_count.violation` and act on violations promptly.
 
 ### Telemetry metrics
 
@@ -281,8 +277,8 @@ $ vault write sys/quotas/config enable_rate_limit_response_headers=true
 Success! Data written to: sys/quotas/config
 ```
 
-When enabled, responses include `X-RateLimit-Limit`, `X-RateLimit-Remaining`,
-and `X-RateLimit-Reset` headers. Enable this when client teams have the ability
+When enabled, responses include `X-Ratelimit-Limit`, `X-Ratelimit-Remaining`,
+and `X-Ratelimit-Reset` headers. Requests blocked by a rate limit quota also include a `Retry-After` header with the number of seconds until the quota resets. Enable this when client teams have the ability
 to consume and act on these headers. It reduces retry noise without changing
 the enforcement behavior.
 
@@ -344,8 +340,7 @@ traffic, apply a quota directly at that scope rather than raising or tightening
 the global limit. This limits the impact on other namespaces and preserves
 headroom for legitimate traffic elsewhere.
 
-On Vault Enterprise, use `inheritable=true` to apply the limit across all mounts
-within the namespace without having to create per-mount quotas:
+A namespace quota already applies to every mount within that namespace. On Vault Enterprise, also set `inheritable=true` to apply the same quota to all child namespaces without having to create a quota for each one:
 
 ```shell-session
 $ vault write sys/quotas/rate-limit/tenant-b-cap \
@@ -364,15 +359,15 @@ count, not the current inflated count:
 1. Assess the current active lease volume before setting a ceiling. Use the
    `vault.expire.num_leases` telemetry gauge in your monitoring system to
    observe the cluster-wide total lease count and its trend over time. To
-   enumerate leases tied specifically to the target mount, use the
-   `sys/leases/lookup` API with the mount prefix:
+   enumerate leases for a specific role on the target mount, use the
+   `sys/leases/lookup` API with the role prefix. This endpoint requires `sudo` capability:
 
    ```shell-session
-   vault list sys/leases/lookup/database/creds/
+   $ vault list sys/leases/lookup/database/creds/<role-name>/
    ```
 
    The number of lease IDs returned reflects the active lease count for that
-   credential path. Use this count together with the `vault.expire.num_leases`
+   role. Repeat for each role on the mount. Use this count together with the `vault.expire.num_leases`
    trend data to set a quota ceiling that matches the legitimate steady-state
    load rather than a current inflated count.
 
