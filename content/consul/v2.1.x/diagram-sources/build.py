@@ -44,7 +44,15 @@ def init_line(p):
         f'"primaryBorderColor":"{p["node_border"]}","primaryTextColor":"{p["text"]}",'
         f'"lineColor":"{p["line"]}","clusterBkg":"{p["cluster"]}",'
         f'"clusterBorder":"{p["cluster_border"]}","titleColor":"{p["text"]}",'
-        f'"edgeLabelBackground":"{p["bg"]}"}}}}}}%%\n'
+        f'"edgeLabelBackground":"{p["bg"]}",'
+        f'"actorBkg":"{p["node"]}","actorBorder":"{p["accent_border"]}",'
+        f'"actorTextColor":"{p["text"]}","actorLineColor":"{p["node_border"]}",'
+        f'"signalColor":"{p["line"]}","signalTextColor":"{p["text"]}",'
+        f'"noteBkgColor":"{p["cluster"]}","noteBorderColor":"{p["cluster_border"]}",'
+        f'"noteTextColor":"{p["text"]}","activationBkgColor":"{p["arf"]}",'
+        f'"activationBorderColor":"{p["arf_border"]}","sequenceNumberColor":"{p["bg"]}"}},'
+        '"sequence":{"mirrorActors":false,"width":220,"actorMargin":50,"messageMargin":50,'
+        '"boxMargin":10,"noteMargin":12,"wrap":true}}}%%\n'
     )
 
 
