@@ -1,0 +1,114 @@
+---
+layout: docs
+page_title: Configure external credential injection
+description: >-
+  Configure Consul terminating gateways to inject Vault-backed credentials into approved external HTTP calls, such as calls to external MCP servers and APIs.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-11-05T19:41:53.000Z
+last_modified: 2026-11-05T19:41:53.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Configure external credential injection
+
+This page describes how to configure a terminating gateway on Kubernetes to inject a credential into approved external HTTP calls. To learn how credential injection works, refer to [External credential injection](/consul/docs/agentic-mesh/credential-injection).
+
+@include '../../../global/partials/alerts/beta.mdx'
+
+@include 'alerts/enterprise-alert.mdx'
+
+## Requirements
+
+- Consul Agentic Runtime Fabric installed with `ai.enabled` set to `true`. Refer to [Install Consul Agentic Runtime Fabric](/consul/docs/agentic-mesh/install).
+- A terminating gateway with credential injection enabled in the Helm values.
+- Vault, reachable from the terminating gateway over HTTPS, when you use the default `vault` credential source.
+
+Credential injection is not supported on OpenShift.
+
+## Choose a credential source
+
+The [`terminatingGateways.defaults.credentialInjection.source`](/consul/docs/reference/k8s/helm#v-terminatinggateways-defaults-credentialinjection-source) Helm value selects how credentials reach the credential processor.
+
+| Source | How credentials arrive |
+| --- | --- |
+| `vault` | Default. A Vault Agent sidecar authenticates to Vault with the gateway's Kubernetes service account and renders each credential to a memory-backed volume that only the credential processor reads. |
+| `kubernetesSecret` | Consul mounts the Kubernetes Secret named in `secretName` read-only into the credential processor. Each data key in the Secret is a credential file for one binding. |
+
+Kubernetes Secrets are a weaker posture than Vault. They are base64-encoded at rest and readable through the Kubernetes API by anyone with RBAC access. Enable etcd encryption at rest and scope RBAC before you use the `kubernetesSecret` source.
+
+## Configure the gateway deployment
+
+Set the credential injection Helm values for the terminating gateway. The processor and Vault Agent read their configuration from ConfigMaps that you create in the gateway's namespace.
+
+<CodeBlockConfig filename="values.yaml">
+
+```yaml
+terminatingGateways:
+  enabled: true
+  defaults:
+    credentialInjection:
+      enabled: true
+      source: vault
+      processorImage: "<credential-injection-image>"
+      vaultAgentImage: "<vault-agent-image>"
+      processorConfigMap: "<processor-configmap-name>"
+      vaultAgentConfigMap: "<vault-agent-configmap-name>"
+      vaultAddress: "<vault-address>"
+      vaultCAConfigMap: "<vault-ca-configmap-name>"
+```
+
+</CodeBlockConfig>
+
+<!-- TODO: Document the contents of the processor and Vault Agent ConfigMaps, including how a binding ID maps to a Vault secret path. Source is not available in consul-k8s v2.1.0. -->
+
+For every setting, refer to [`terminatingGateways.defaults.credentialInjection`](/consul/docs/reference/k8s/helm#v-terminatinggateways-defaults-credentialinjection) in the Helm chart reference.
+
+## Store the credential
+
+Store each binding's credential in Vault as a KV secret. For the required fields and the rotation rules, refer to [Credential delivery](/consul/docs/agentic-mesh/credential-injection#credential-delivery).
+
+## Configure the terminating gateway routes
+
+Link each external service to the terminating gateway and set its credential policy.
+
+1. Enable credential injection routing in the terminating gateway configuration. The credential processor socket in a Kubernetes credential injection pod is `/consul/auth-socket/auth.sock`, which is the default.
+1. Set `credential.mode` on every linked service. Set `inject` to add a credential, or `none` to forward requests without one.
+1. For each service in `inject` mode, set a unique `bindingID`, a `caFile`, and a DNS name in `sni`. Consul rejects the configuration without them, so a credential is never sent over plaintext.
+
+<CodeBlockConfig filename="terminating-gateway.yaml">
+
+```yaml
+apiVersion: consul.hashicorp.com/v1alpha1
+kind: TerminatingGateway
+metadata:
+  name: terminating-gateway
+spec:
+  credentialInjection:
+    udsPath: /consul/auth-socket/auth.sock
+  services:
+    - name: external-mcp
+      caFile: /etc/ssl/certs/ca-certificates.crt
+      sni: mcp.example.com
+      credential:
+        mode: inject
+        bindingID: external-mcp
+```
+
+</CodeBlockConfig>
+
+Wildcard service names are not supported when you enable credential injection. For every field, refer to the [terminating gateway configuration entry reference](/consul/docs/reference/config-entry/terminating-gateway).
+
+Apply the resource:
+
+```shell-session
+$ kubectl apply --filename terminating-gateway.yaml
+```
+
+## Monitor credential health
+
+The credential processor logs a `credential_reload` event for each binding with the accepted `kv_version` and an outcome. It also periodically logs a `credential_status` event that reports whether each binding is usable. For details, refer to [Readiness and rotation](/consul/docs/agentic-mesh/credential-injection#readiness-and-rotation).
+
+## Next steps
+
+- [Configure the MCP sidecar](/consul/docs/agentic-mesh/mcp-sidecar/configure)
+- [Configure auto-instrumentation](/consul/docs/agentic-mesh/auto-instrumentation/configure-auto-instrumentation)
