@@ -2,16 +2,16 @@
 layout: docs
 page_title: Install Consul Agentic Runtime Fabric
 description: >-
-  Install Consul Agentic Runtime Fabric components. Enable the consul-ai feature gate, then deploy the AI Inference Gateway, MCP sidecar, and credential injection.
+  Install Consul Agentic Runtime Fabric on Kubernetes with Helm. Enable the consul-ai feature gate and deploy the AI Inference Gateway and MCP sidecar.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2026-11-05T19:27:08.000Z
-last_modified: 2026-11-05T19:27:08.000Z
+last_modified: 2026-11-05T19:31:26.000Z
 # END AUTO GENERATED METADATA
 ---
 
 # Install Consul Agentic Runtime Fabric
 
-This page describes how to enable Consul Agentic Runtime Fabric and deploy its components: the AI Inference Gateway, the MCP sidecar, and the external credential injection processor.
+This page describes how to enable Consul Agentic Runtime Fabric and deploy its components on Kubernetes with the Consul Helm chart.
 
 @include '../../../global/partials/alerts/beta.mdx'
 
@@ -21,61 +21,92 @@ To install the Agentic Analytics components for cycle detection, refer to [Confi
 
 ## Requirements
 
-- A valid Consul Enterprise license configured in your Consul deployment.
-- Envoy 1.38.2 or later for the AI Inference Gateway.
-- Access to the registry path supplied for your distribution.
+- Consul Enterprise 2.1 with a valid license.
+- The Consul Helm chart for Consul on Kubernetes 2.1, with `connectInject.enabled` set to `true`.
+- Envoy 1.38.2 or later for the AI Inference Gateway. Consul refuses to start an inference gateway with an older Envoy binary, because cross-provider failover crashes earlier Envoy versions.
+- Vault for external credential injection. Credential injection is not supported on OpenShift. The Helm chart fails to render when `global.openshift.enabled` is `true` and a terminating gateway enables credential injection.
 
-External credential injection is not supported on OpenShift.
+## Get the component images
 
-## Enable the feature gate
+Each component runs from its own image. The following table lists the HashiCorp release artifact and the Helm value that sets the image.
 
-Agentic Runtime Fabric features are behind the `consul-ai` [feature gate](/consul/docs/manage/feature-gates), which is disabled by default. Enable it with the following command:
+| Component | Release artifact | Helm value |
+| --- | --- | --- |
+| AI Inference Gateway | [`csl-inf-rt`](https://releases.hashicorp.com/csl-inf-rt/) | [`ai.inferenceGateway.image`](/consul/docs/reference/k8s/helm#v-ai-inferencegateway-image) |
+| MCP sidecar for AI agents, including the OBO identity processor | [`csl-mcp-sc`](https://releases.hashicorp.com/csl-mcp-sc/) | [`ai.agent.image`](/consul/docs/reference/k8s/helm#v-ai-agent-image) |
+| External credential injection processor | [`csl-au-inj`](https://releases.hashicorp.com/csl-au-inj/) | [`terminatingGateways.defaults.credentialInjection.processorImage`](/consul/docs/reference/k8s/helm#v-terminatinggateways-defaults-credentialinjection-processorimage) |
+| Vault Agent for credential injection | Vault | [`terminatingGateways.defaults.credentialInjection.vaultAgentImage`](/consul/docs/reference/k8s/helm#v-terminatinggateways-defaults-credentialinjection-vaultagentimage) |
 
-```shell-session
-$ consul operator feature set consul-ai enabled
-```
+<!-- TODO: Confirm with the product owner which container registry and image names customers use for csl-inf-rt, csl-mcp-sc, and csl-au-inj. releases.hashicorp.com publishes these as platform binaries, and the Helm chart defaults use hashicorp/consul-inference-gateway and hashicorp/consul-mcp-sc. -->
 
-On Kubernetes, set `ai.enabled` to `true` to enable the feature gate.
+Set every image value explicitly to an approved release tag or digest. The credential injection processor and Vault Agent images have no default.
 
-## Pull the component images
+## Enable Agentic Runtime Fabric with Helm
 
-Pull the image for each component you deploy. Replace `<registry>` with the registry path supplied for your distribution and `<version>` with a compatible release tag.
+1. Add the AI settings to your Helm values file. Setting `ai.enabled` to `true` enables the `consul-ai` [feature gate](/consul/docs/manage/feature-gates) on the Consul servers and installs the AI custom resource definitions.
 
-| Component | Image |
+   <CodeBlockConfig filename="values.yaml">
+
+   ```yaml
+   connectInject:
+     enabled: true
+   ai:
+     enabled: true
+     inferenceGateway:
+       enabled: true
+       image: "<inference-gateway-image>"
+     agent:
+       image: "<mcp-sidecar-image>"
+   ```
+
+   </CodeBlockConfig>
+
+   The `ai.inferenceGateway.enabled` value requires both `ai.enabled` and `connectInject.enabled`.
+
+1. To use external credential injection, enable it on your terminating gateways. Credential injection requires `ai.enabled` to be `true`.
+
+   <CodeBlockConfig filename="values.yaml">
+
+   ```yaml
+   terminatingGateways:
+     enabled: true
+     defaults:
+       credentialInjection:
+         enabled: true
+         processorImage: "<credential-injection-image>"
+         vaultAgentImage: "<vault-agent-image>"
+         vaultAddress: "<vault-address>"
+   ```
+
+   </CodeBlockConfig>
+
+   For every credential injection setting, refer to [`terminatingGateways.defaults.credentialInjection`](/consul/docs/reference/k8s/helm#v-terminatinggateways-defaults-credentialinjection) in the Helm chart reference.
+
+1. Install or upgrade Consul with your values file.
+
+   ```shell-session
+   $ helm upgrade --install consul hashicorp/consul --namespace consul --values values.yaml
+   ```
+
+1. Confirm that the feature gate is enabled.
+
+   ```shell-session
+   $ consul operator feature get consul-ai
+   ```
+
+## Register AI workloads
+
+Consul applies Agentic Runtime Fabric behavior to a pod based on its `consul.hashicorp.com/ai-role` annotation.
+
+| Annotation value | Result |
 | --- | --- |
-| AI Inference Gateway | `csl-inf-rt` |
-| MCP sidecar | `csl-mcp-sc` |
-| External credential injection processor | `csl-au-inj` |
+| `ai-agent` | Consul injects the MCP sidecar, which includes the OBO identity processor and the human approval server. |
+| `mcp-server` | Consul registers the service with the `mcp-server` role and adds an MCP router filter to the pod's inbound Envoy listener. |
+| `inference-model` | Consul registers the service with the `inference-model` role, so that AI Inference Gateways discover it as a model upstream. |
 
-For Docker, run the following command for each image:
+Outside Kubernetes, declare the role with the [`ai`](/consul/docs/reference/service#ai) block in the service definition. Consul rejects a service definition that contains `ai` until the `consul-ai` feature gate is enabled.
 
-```shell-session
-$ docker pull <registry>/<image>:<version>
-```
-
-For Podman, run the following command for each image:
-
-```shell-session
-$ podman pull <registry>/<image>:<version>
-```
-
-Authenticate to the registry when required and pin an approved release tag or digest in your deployment manifest.
-
-Pulling an image does not configure the component. The AI Inference Gateway still needs model backends, provider credentials, mesh routes, and gateway policy. The MCP sidecar still needs tool service registrations, mesh routes, and tool-access and human-approval policies. Credential injection still needs Vault access, credential bindings, approved routes, and external TLS.
-
-## Deploy on Kubernetes
-
-Set the Helm values for each component you deploy:
-
-| Component | Helm value |
-| --- | --- |
-| AI Inference Gateway | [`ai.inferenceGateway.image`](/consul/docs/reference/k8s/helm#v-ai-inferencegateway-image) |
-| MCP sidecar | [`ai.agent.image`](/consul/docs/reference/k8s/helm#v-ai-agent-image) |
-| External credential injection processor | [`terminatingGateways.defaults.credentialInjection.processorImage`](/consul/docs/reference/k8s/helm#v-terminatinggateways-defaults-credentialinjection-processorimage), which has no default |
-
-Consul injects the MCP sidecar into pods annotated with `consul.hashicorp.com/ai-role: ai-agent`.
-
-Deploy each image using the configuration supplied with that release.
+<!-- TODO: Confirm with the product owner whether non-Kubernetes deployments of the AI Inference Gateway and MCP sidecar are supported in Consul 2.1. The CLI includes consul connect envoy -gateway=inference and consul connect mcp-gateway. -->
 
 ## Next steps
 

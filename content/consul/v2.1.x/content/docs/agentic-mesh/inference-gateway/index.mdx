@@ -5,7 +5,7 @@ description: >-
   Learn how the Consul AI Inference Gateway governs agent access to large language models (LLMs) with routing, provider translation, and PII protection.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2026-10-15T16:34:33+05:30
-last_modified: 2026-11-05T19:27:08.000Z
+last_modified: 2026-11-05T19:31:24.000Z
 # END AUTO GENERATED METADATA
 ---
 
@@ -47,29 +47,31 @@ The inference path separates processing before and after Envoy selects an upstre
 
 The upstream processor uses information about the backend that Envoy selected. A retry against another backend must use that backend's adapter and model information rather than reuse an incompatible translated request.
 
-## Model selection and fallback
+## Model routing and failover
 
-Model selection has two distinct inputs: the caller's request and the operator's policy. The architecture requires the gateway to preserve an explicit model choice when policy permits it. Policy can reject a disallowed request. It must not silently substitute an unrelated model.
+The gateway routes each request in one of two modes. The `Processor.BodyModelRouting` field in the [`inference-gateway` configuration entry](/consul/docs/reference/config-entry/inference-gateway) selects the mode.
 
-Caller-approved fallback constrains which alternatives are acceptable. A routing policy's ability to reach another backend is not, by itself, permission to change the requested model. Treat retrying a request and changing models as separate decisions.
+| Mode | How the gateway routes | When it applies |
+| --- | --- | --- |
+| Capability routing | Routes on a capability that the caller sends in a request header. | Default, when `BodyModelRouting` is `false`. |
+| Body model routing | Routes on the model named in the request body. | When `BodyModelRouting` is `true`. |
 
-For requests that delegate model selection to the gateway, eligible providers and routing policy determine the selection. Provider translation changes the wire format. It does not establish that two models have the same capabilities, quality, or data-handling terms.
+The Consul catalog decides which models serve a capability and in what order. Each model service declares its capabilities and a priority for each one. Service intentions decide which models the gateway can reach.
 
-The requested model and the model that serves the request are separate attribution values. The architecture requires actual-model attribution to be available to authorized users, including when an approved fallback occurs.
+When two or more models serve a capability, Envoy fails a request over across their priority tiers. The `Failover` block controls which conditions trigger a retry, how many tiers one request can try, and the timeout for each attempt. `RequestTimeout` sets one deadline for the whole request across every attempt.
 
-## Usage controls
-
-<Note>
-Token metering does not imply token-aware rate-limit enforcement. The admission and settlement behavior described in this section is an architectural requirement, not a configuration procedure or a claim of release support.
-</Note>
-
-Token-aware usage controls govern admission and account for completed work. Admission can depend on estimated consumption because final provider usage is unavailable before a request completes. Usage accounting must distinguish estimates from reported consumption, including incomplete streams and retries.
-
-Keep rate-limit decisions, observed token usage, and financial accounting distinct. A token count is not a price, and gateway telemetry is not a billing ledger. Cost analysis requires a maintained pricing source and a defined policy for missing or estimated usage.
+Provider translation changes the wire format. It does not establish that two models have the same capabilities, quality, or data-handling terms.
 
 ## Data protection and streaming
 
 Personally identifiable information (PII) processing applies the configured detection and handling rules to request or response content. Request-side controls act before data reaches a provider. Response-side controls act before processed content returns to the caller.
+
+Configure detection in the `PII` block of the `inference-gateway` configuration entry:
+
+- **Detectors.** Use the built-in `api_key`, `credit_card`, `email`, and `ssn` detectors, or define a custom detector with an RE2 regular expression. The `credit_card` detector also checks the Luhn digit.
+- **Actions.** Each match is replaced with a placeholder, masked, blocked, or ignored. The actions are `placeholder`, `mask`, `block`, and `off`.
+- **Scope.** Apply detection to requests, responses, or both. The processor defaults to requests.
+- **Streaming.** `StreamHoldbackBytes` sets how much trailing content the gateway withholds from a streamed response, so that it catches a match split across chunks.
 
 Streaming introduces an additional boundary: content already delivered to the caller cannot be recalled. Validate detector coverage, buffering behavior, and supported stream formats for your deployment. Do not interpret configured PII controls as a guarantee that all sensitive content is detected.
 
@@ -85,11 +87,10 @@ Agentic Analytics can use the correlated evidence for [cycle detection](/consul/
 
 - Mesh identity and policy establish the workload's permitted network path to the gateway and its backends.
 - Provider adapters define supported request formats, response formats, streaming behavior, and translation limits.
-- Routing rules define eligible backends. Application consent and operator policy constrain model substitution.
-- Usage consumers require consistent attribution across admission, provider usage, and completion evidence.
+- The Consul catalog and service intentions define eligible model backends.
 - Managed-model authentication is separate from delegated user identity and external credential injection.
 
-The inference component owns adapter behavior, streaming, routing-rule integration, accounting, and PII processing. It does not own tool business logic or determine whether a model response satisfies the user's task.
+The inference component owns adapter behavior, streaming, routing-rule integration, and PII processing. It does not own tool business logic or determine whether a model response satisfies the user's task.
 
 ## Related documentation
 
