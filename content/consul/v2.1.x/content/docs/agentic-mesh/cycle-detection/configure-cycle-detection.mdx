@@ -1,0 +1,176 @@
+---
+layout: docs
+page_title: Configure cycle detection
+description: >-
+  Deploy the Agentic Analytics component for Consul Agentic Runtime Fabric, connect traces to the analysis queue, and enforce agent-scoped circuits for agents stuck in loops.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-11-02T21:48:15.000Z
+last_modified: 2026-11-04T19:10:54.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Configure cycle detection
+
+Deploy the Agentic Analytics component and connect it to Consul Agentic Runtime
+Fabric to contain AI agents stuck in tool-call loops. When you finish, a
+repeated tool call with unchanged results opens the agent's circuit, and Consul
+rejects that agent's later requests.
+
+@include '../../../global/partials/alerts/beta.mdx'
+
+To learn how detection works, refer to [Cycle detection](/consul/docs/agentic-mesh/cycle-detection).
+
+## Requirements
+
+- Consul Enterprise with a valid license for external processing, and the
+  `consul-ai` [feature gate](/consul/docs/manage/feature-gates) enabled.
+- A Consul Agentic Runtime Fabric deployment with agent services and Envoy data
+  plane proxies.
+- The AI Inference Gateway and MCP sidecar on the model and tool paths your
+  application uses, plus the identity and credential integrations it needs.
+- [Auto-instrumentation](/consul/docs/agentic-mesh/auto-instrumentation/configure-auto-instrumentation)
+  configured, with trace context propagation, an OpenTelemetry collection path,
+  and a trace backend that your analytics release supports.
+- A BullMQ-compatible Redis or Valkey deployment for the analysis queue.
+- A protection-state store.
+- IBM Container Registry (ICR) access to the `csl-ag-ana`, `csl-ig-pro`, and
+  `csl-nod-rly` images, and versions of the other Agentic Runtime Fabric
+  components that are compatible with your analytics release.
+- A behavior policy that defines agent scope, detection thresholds, circuit
+  validity, recovery, and dependency-failure handling.
+
+## Pull the Agentic Analytics images
+
+Agentic Analytics needs the `csl-ag-ana`, `csl-ig-pro`, and `csl-nod-rly`
+images, which are in the IBM Container Registry. 
+
+Replace `<registry>` with the registry path supplied for your distribution and
+`<version>` with the analytics release tag.
+
+For Docker, run:
+
+```shell-session
+$ docker pull <registry>/csl-ag-ana:<version>
+$ docker pull <registry>/csl-ig-pro:latest
+$ docker pull <registry>/csl-nod-rly:latest
+```
+
+For Podman, run:
+
+```shell-session
+$ podman pull <registry>/csl-ag-ana:<version>
+$ podman pull <registry>/csl-ig-pro:latest
+$ podman pull <registry>/csl-nod-rly:latest
+```
+
+Authenticate to the registry with your container runtime's credential mechanism
+when required. The dependency commands use the `latest` tag. For reproducible
+deployments, pin approved release tags or digests in your deployment manifest.
+Do not assume that an unqualified image name resolves to the intended registry.
+
+Pulling the images does not connect them. The following sections configure the
+trace, analysis, and enforcement paths.
+
+## Connect traces to the analysis queue
+
+1. Extend trace context propagation to delegation calls between agents.
+1. Include a stable, trusted agent identity in the trace that enforcement can
+   also resolve.
+1. Retrieve a workflow's spans by trace ID to confirm that storage works.
+1. Configure the trace producer to queue trace IDs as evidence arrives. The
+   local integration uses a span relay. An inference-path producer must also
+   trigger analysis for later workflow activity.
+1. Set the same queue backend, queue name, and prefix on the producer and the
+   Agentic Analytics consumer. A mismatch leaves both services running with no
+   analysis work delivered.
+1. Configure the analytics worker's trace-query endpoint and credentials.
+1. Confirm that the worker reaches the trace backend from its own network, not
+   only from your machine.
+
+Configure the queue backend for reliable delivery:
+
+- Use the `noeviction` memory policy on the BullMQ backend, so queue data is not
+  evicted.
+- Configure persistence and capacity for your delivery guarantees. An in-memory
+  development queue loses pending analysis triggers on restart.
+
+Agentic Analytics cycle detector needs tool identity and comparable argument
+and output values in the correlated workflow evidence. Use only representations
+that the analytics component supports and your data-handling policy approves. Do
+not enable unrestricted capture of prompts, arguments, results, credentials, or
+personal data to feed the detector. Missing or redacted evidence can prevent the
+argument comparison or limit findings.
+
+## Configure analytics and circuit enforcement
+
+Use the configuration schema and deployment manifest supplied with your
+`csl-ag-ana` release. The following table lists the inputs to configure. The
+names describe each input and are not literal configuration keys.
+
+| Input | What to configure |
+| --- | --- |
+| Analytics image | The fully qualified `csl-ag-ana` image you pulled. |
+| Dependency images | The `csl-ig-pro` and `csl-nod-rly` images, or approved pinned versions, in their deployment services. |
+| Queue connection | Backend endpoint, authentication, queue name, and prefix shared with the producer. |
+| Trace source | The trace backend's query endpoint and access credentials. |
+| Cycle detector | Enable cycle analysis, and set the minimum repetition count and semantic similarity threshold. |
+| Analysis scheduling | Bound concurrent traces and indexing waits, and keep passes for each trace serial. |
+| Agent attribution | Map findings and requests to the same trusted agent identity and policy scope. |
+| Circuit policy | When a finding opens a circuit, the reason recorded, and the validity and recovery rules. |
+| Protection-state connection | Write access for the decision publisher and read access for enforcement processors. |
+| Dependency failures | Handling for unavailable queues, missing traces, stale state, and failed state reads or writes. |
+
+Start and connect the components:
+
+1. Connect the analytics decision path to protection-state publication.
+1. Configure the agent enforcement processors to read protection state before
+   they forward requests.
+1. Start the queue and state services, the trace backend, and the collection
+   path.
+1. Deploy the analytics service with the configured image, network access, and
+   credentials.
+1. Start the trace producer.
+1. Confirm that the cycle detector is enabled and consuming the expected queue.
+
+Detection logs alone do not show that Consul can open or enforce a circuit. Keep
+storage and analytics endpoints private, and grant each component only the
+access it needs.
+
+## Verify detection and enforcement
+
+Use a non-production agent workflow, and a test model or a bounded usage budget.
+
+1. Run any workflow. Confirm that the trace producer queues its trace ID and
+   that an Agentic Analytics worker consumes it. If no analysis runs, check this
+   handoff first.
+1. Run a workflow that calls the same tool with different arguments, such as
+   successive `page` values, and receives new results. Confirm that the trace is
+   analyzed and produces no finding.
+1. Run a workflow that calls a tool with unchanged arguments and receives
+   changing results. Confirm that it produces no finding.
+1. Run a workflow in which one agent repeatedly calls `query_records` with
+   `{"filter":"status:active","page":1}` and receives unchanged results. Exceed
+   the repetition threshold. If the workflow summarizes between calls, keep the
+   summaries unchanged too.
+1. Confirm a finding for that trace and agent.
+1. Confirm that behavior policy publishes an open circuit for the agent, with a
+   reason and a validity period.
+1. Send another request from the agent through the protected route. Confirm an
+   HTTP `503` response, and confirm that the request does not reach the
+   upstream.
+1. Send a request from an unaffected agent to the same backend. Confirm that it
+   succeeds.
+1. Run the expiry or reset procedure. Confirm that Consul admits the agent's
+   requests again.
+1. Make analytics or protection-state storage unavailable. Confirm that the
+   behavior matches your dependency-failure policy.
+
+Inspect worker activity as well as queue state. An empty queue does not mean
+that every scheduled pass finished, and a finding does not mean that enforcement
+consumed the new state.
+
+## Next steps
+
+- [Cycle detection limits](/consul/docs/agentic-mesh/cycle-detection#limits)
+- [Protection state and recovery](/consul/docs/agentic-mesh/cycle-detection#protection-state-and-recovery)
+- [AI observability](/consul/docs/agentic-mesh/observability)
