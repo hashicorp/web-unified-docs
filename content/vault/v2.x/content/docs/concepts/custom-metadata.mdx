@@ -1,0 +1,144 @@
+---
+layout: docs
+page_title: Custom metadata for secrets engine objects
+description: >-
+  Attach user-defined key/value metadata to roles, keys, and other objects in
+  supported secrets engines.
+---
+
+# Custom metadata for secrets engine objects
+
+<EnterpriseAlert product="vault" />
+
+Vault Enterprise 2.3.0 and later lets you attach user-defined key/value metadata
+to objects in some secrets engines, for example to record which team owns a role.
+You set and read the metadata through the object's existing endpoint, using a
+`metadata` parameter. Vault stores it separately from the engine's own data, so
+the engine's behavior does not change.
+
+## Supported objects
+
+| Secrets engine                                                          | Objects                                                  |
+| ----------------------------------------------------------------------- | -------------------------------------------------------- |
+| [AliCloud](/vault/api-docs/secret/alicloud)                             | Roles                                                    |
+| [AWS](/vault/api-docs/secret/aws)                                       | Roles, static roles                                      |
+| [Consul](/vault/api-docs/secret/consul)                                 | Roles                                                    |
+| [Databases](/vault/api-docs/secret/databases)                           | Connections, roles, static roles                         |
+| [GCP](/vault/api-docs/secret/gcp)                                       | Rolesets, static accounts                                |
+| [Key Management](/vault/api-docs/secret/key-management)                 | Keys (`key/:name`). KMS provider configurations are not supported. |
+| [Kubernetes](/vault/api-docs/secret/kubernetes)                         | Roles                                                    |
+| [LDAP](/vault/api-docs/secret/ldap) and OpenLDAP                        | Roles, static roles                                      |
+| [MongoDB Atlas](/vault/api-docs/secret/mongodbatlas)                    | Roles                                                    |
+| [Nomad](/vault/api-docs/secret/nomad)                                   | Roles                                                    |
+| [RabbitMQ](/vault/api-docs/secret/rabbitmq)                             | Roles                                                    |
+| [HCP Terraform](/vault/api-docs/secret/terraform)                       | Roles                                                    |
+
+Credential, rotation, and list paths do not take metadata. Auth methods and
+engines that already have their own metadata, such as KV v2, PKI, and Azure, are
+not affected. On a mount that runs an externally registered plugin, Vault does not
+store metadata, and a successful write that includes it returns a warning.
+
+## Set and read metadata
+
+Send `metadata` as a map of string keys and values in the same request that
+creates or updates the object:
+
+```shell-session
+$ echo '{"consul_policies": ["readonly"], "metadata": {"owner": "platform-team", "env": "production"}}' | vault write consul/roles/my-role -
+```
+
+A read of the object returns the map in `data.metadata`. The field is left out
+when no metadata has been set, and is an empty map after the metadata is cleared.
+
+```shell-session
+$ vault read -field=metadata consul/roles/my-role
+map[env:production owner:platform-team]
+```
+
+Metadata uses the same permissions as the object's endpoint. Writing it needs
+write access to the object, and reading it needs read access.
+
+## Update and clear metadata
+
+- A map you supply **replaces** the stored map. Keys you leave out are removed.
+- Leaving `metadata` out of a request **keeps** the stored map.
+- An empty map (`{"metadata": {}}`) or `null` **clears** it.
+- A request that contains **only** `metadata` changes only the metadata. Vault
+  does not run the engine's own write, so nothing else about the object changes,
+  and the response is `204`. The object must already exist. (For Key Management,
+  a metadata-only write to a key that does not exist creates the key with default
+  settings.)
+
+```shell-session
+$ echo '{"metadata": {"owner": "security-team"}}' | vault write consul/roles/my-role -
+```
+
+## Limits
+
+- At most 64 keys.
+- Keys are 1 to 128 bytes. Values are 1 to 512 bytes.
+- Keys and values contain only printable characters.
+
+The limits count bytes, not characters, so a character outside ASCII uses 2 to 4
+bytes. A request that breaks a limit is rejected with a `400` that names the
+limit, and nothing changes.
+
+Values must be strings. Numbers and booleans are converted to strings, so `true`
+is stored as `"1"`. Nested objects and lists are rejected.
+
+## Pass metadata from the CLI
+
+`metadata` must be a map, and `vault write` cannot build a map from `key=value`
+arguments. An argument such as `metadata=owner=platform-team` is sent as a string
+and rejected with a `400`. Pass the request as JSON from standard input (`-`) or a
+file (`@file.json`) instead. You can still give the object's other fields as
+`key=value` arguments in the same command:
+
+```shell-session
+$ echo '{"metadata": {"owner": "platform-team"}}' | vault write consul/roles/my-role consul_policies=readonly -
+```
+
+To clear the metadata:
+
+```shell-session
+$ echo '{"metadata": {}}' | vault write consul/roles/my-role -
+```
+
+## If saving the metadata fails
+
+Vault runs the engine's write first, then saves the metadata. If saving fails,
+the engine's change has already happened. Vault returns `200` with a warning
+such as `the request succeeded, but custom metadata could not be saved`, and the
+metadata keeps its previous value. A failed delete of the metadata also returns a
+warning.
+
+Vault does not undo the engine's write or anything it did in an external system,
+such as rotating a database password. Retry the request to save the metadata. The
+Vault Terraform provider shows the warning as a Terraform warning.
+
+A metadata-only update that fails to save returns a `500`, and nothing changes.
+
+## Audit
+
+The audit log records the `metadata` you submit, including for requests Vault
+rejects. Values are HMAC'd as usual, but keys are recorded in plain text, so do
+not put secrets in metadata keys.
+
+## Upgrades and rollback
+
+Vault does not support automatic rollback. To roll back an upgrade, restore the
+snapshot you took before upgrading, which restores objects and their metadata
+together.
+
+Running an older Vault version on upgraded data is not supported. The older
+version ignores metadata, so edits made there are lost, and an object that is
+deleted and recreated there can show old metadata again. In a cluster that mixes
+versions, nodes that predate metadata omit or drop it. Do not rely on metadata
+until every node is upgraded.
+
+## Terraform
+
+The Vault Terraform provider's resources for these objects accept a `metadata`
+argument. The configuration is the source of truth: removing the argument, or
+setting `metadata = {}`, clears the stored metadata. See the resource
+documentation in the Terraform Registry for each resource.
