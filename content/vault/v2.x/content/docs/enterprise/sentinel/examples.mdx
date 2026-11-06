@@ -17,7 +17,11 @@ Following are some examples that help to introduce concepts. If you are
 unfamiliar with writing Sentinel policies in Vault, please read through to
 understand some best practices.
 
-Additional examples can be found [here](https://github.com/hashicorp/vault-guides/tree/master/governance).
+Refer to the
+[vault-guides governance directory](https://github.com/hashicorp/vault-guides/tree/master/governance)
+and the
+[learn-vault-sentinel-examples repository](https://github.com/hashicorp-education/learn-vault-sentinel-examples)
+for additional examples.
 
 ## MFA and CIDR check on login
 
@@ -156,5 +160,521 @@ precond = rule {
 
 main = rule when precond {
     strings.has_prefix(request.path, "sys/policies/egp/teama-") and data_match()
+}
+```
+
+## Validate ZIP code format
+
+The following EGP rejects writes to KV secrets engines where the secret
+contains a key named `zipcode`, `zip_code`, or `zip-code` with a value that
+does not match the U.S. five-digit ZIP code format. The policy handles both
+KV v1 (fields in `request.data`) and KV v2 (fields nested under
+`request.data.data`).
+
+Print statements in Sentinel policies are only emitted when policy evaluation
+fails, making them useful for debugging without producing noise on successful
+requests.
+
+```python
+# Policy that requires keys of secrets with name "zipcode", "zip-code", or
+# "zip_code" to be a valid 5-digit U.S. zipcode
+# For use with Vault KV v1 and v2 secrets engines
+
+# Function that validates zip codes
+validate_zip_codes = func() {
+
+  # Print some information about the request
+  # Note that these messages will only be printed when the policy is violated
+  print("Namespace path:", namespace.path)
+  print("Request path:", request.path)
+  print("Request data:", request.data)
+
+  # Test for request.data for kv v1
+
+  # Test for "zipcode" key
+  if "zipcode" in keys(request.data) {
+    if request.data.zipcode not matches "^[0-9]{5}$" {
+      print("Invalid zip code")
+      return false
+    }
+  }
+
+  # Test for "zip_code" key
+  if "zip_code" in keys(request.data) {
+    if request.data.zip_code not matches "^[0-9]{5}$" {
+      print("Invalid zip code")
+      return false
+    }
+  }
+
+  # Test for "zip-code" key
+  if "zip-code" in keys(request.data) {
+    # Using `request.data.zip-code` gives error
+    if request.data["zip-code"] not matches "^[0-9]{5}$" {
+      print("Invalid zip code")
+      return false
+    }
+  }
+
+  # Test for request.data.data for kv v2
+
+  # Test for "zipcode" key
+  if "data" in keys(request.data) and "zipcode" in keys(request.data.data) {
+    if request.data.data.zipcode not matches "^[0-9]{5}$" {
+      print("Invalid zip code")
+      return false
+    }
+  }
+
+  # Test for "zip_code" key
+  if "data" in keys(request.data) and "zip_code" in keys(request.data.data) {
+    if request.data.data.zip_code not matches "^[0-9]{5}$" {
+      print("Invalid zip code")
+      return false
+    }
+  }
+
+  # Test for "zip-code" key
+  if "data" in keys(request.data) and "zip-code" in keys(request.data.data) {
+    if request.data.data["zip-code"] not matches "^[0-9]{5}$" {
+      print("Invalid zip code")
+      return false
+    }
+  }
+
+  return true
+
+}
+
+# Main Rule
+zip_codes_validated = validate_zip_codes()
+main = rule {
+  zip_codes_validated
+}
+```
+
+## Enforce KV v2 version deletion window
+
+The following EGP enforces that the `delete_version_after` setting on KV v2
+secret metadata paths is less than 30 days (720 hours). It targets paths
+matching the pattern `<path>/metadata/<secret>` and ignores requests that do
+not include a `delete_version_after` key.
+
+The policy uses the `strings` import to parse the duration string (which can
+include hours, minutes, and seconds) into a comparable numeric value.
+
+```python
+# Policy that validates that delete_version_after less than 30 days (720 hours)
+
+# This is intended to be used against paths of form <path>/metadata/<secret>
+# for the KV v2 secrets engine
+
+import "strings"
+
+parse_duration = func(duration) {
+
+  # Process hours
+  hours_segment = strings.split(duration, "h")
+  if hours_segment[0] matches "^[0-9]+$" {
+    # Hours were specified
+    hours = int(hours_segment[0])
+    if length(hours_segment) == 1 {
+      # Minutes and seconds were not specified
+      minutes_segment = ""
+    } else {
+      # Minutes and/or seconds were specified
+      minutes_segment = hours_segment[1]
+    }
+  } else {
+    # Hours were not specified
+    # hours_segment will then be list with single element
+    # equal to original duration
+    hours = 0
+    minutes_segment = hours_segment[0]
+  }
+
+  # Process minutes
+  minutes_segment = strings.split(minutes_segment, "m")
+  if minutes_segment[0] matches "^[0-9]+$" {
+    # Minutes were specified
+    minutes = int(minutes_segment[0])
+    if length(minutes_segment) == 1 {
+      # Seconds were not specified
+      seconds_segment = ""
+    } else {
+      # Seconds were specified
+      seconds_segment = minutes_segment[1]
+    }
+  } else {
+    # Minutes were not specified
+    # minutes_segment will then be list with single element
+    # equal to hours_segment
+    minutes = 0
+    seconds_segment = minutes_segment[0]
+  }
+
+  # Process seconds
+  seconds_segment = strings.split(seconds_segment, "s")
+  if seconds_segment[0] matches "^[0-9]+$" {
+    # Seconds were specified
+    seconds = int(seconds_segment[0])
+  } else {
+    # Seconds were not specified
+    seconds = 0
+  }
+
+  # Roll seconds into minutes
+  if seconds >= 60 {
+    minutes_from_seconds = seconds / 60
+    minutes = minutes + minutes_from_seconds
+    seconds = seconds % 60
+  }
+
+  # Roll minutes into hours
+  if minutes >= 60 {
+    hours_from_minutes = minutes / 60
+    hours = hours + hours_from_minutes
+    minutes = minutes % 60
+  }
+
+  print("hours:", hours)
+  print("minutes:", minutes)
+  print("seconds:", seconds)
+
+  return {"hours": hours, "minutes": minutes, "seconds": seconds}
+
+}
+
+# Function that validates delete_version_after less than 30 days
+validate_delete_version_after_setting = func() {
+
+  # Print some information about the request
+  # Note that these messages will only be printed when the policy is violated
+  print("Namespace path:", namespace.path)
+  print("Request path:", request.path)
+  print("Request data:", request.data)
+
+  # Only validate against paths of form <segment>/metadata/<segments>
+  if request.path matches "^(.*)\\/metadata\\/(.*)$" and "delete_version_after" in keys(request.data) {
+    parsed_duration = parse_duration(request.data.delete_version_after)
+    hours = parsed_duration["hours"]
+    print("hours in validation:", hours)
+    if hours >= 720 {
+      print("Invalid value of delete_version_after")
+      print("It must be under 720 hours")
+      return false
+    }
+  }
+
+  return true
+
+}
+
+# Main Rule
+delete_version_after_setting_validated = validate_delete_version_after_setting()
+main = rule {
+  delete_version_after_setting_validated
+}
+```
+
+## Validate AWS IAM key format
+
+The following EGP validates that AWS IAM access keys and secret keys conform
+to the expected formats when both keys are present in a request. This is useful
+for paths such as `<path>/config/root` (AWS secrets engine) or
+`auth/<path>/config/client` (AWS auth method). Because EGP paths only support
+a wildcard (`*`) at the end, the policy applies globally and checks for the
+presence of both `access_key` and `secret_key` fields before validating.
+
+```python
+# Policy that validates AWS keys provided to AWS secrets engine and auth method
+# For use with Vault KV v1 and v2 secrets engines
+
+# This is intended to be used against paths of form <path>/config/root or
+# auth/<path>/config/client where <path> is the path selected for the AWS
+# secrets engine or auth method respectively.
+
+# However, because EGP policies can only use wildcard (*) at the end of paths,
+# we apply this policy to all paths that have both the access_key and secret_key
+# keys
+
+# Function that validates AWS keys
+validate_aws_keys = func() {
+
+  # Booleans indicating whether keys are valid
+  access_key = true
+  secret_key = true
+
+  # Print some information about the request
+  # Note that these messages will only be printed when the policy is violated
+  print("Namespace path:", namespace.path)
+  print("Request path:", request.path)
+  print("Request data:", request.data)
+
+  # Validate keys of all secrets that have both access_key and secret_key
+
+  # Test for KV v1 (using request.data)
+  if "access_key" in keys(request.data) and "secret_key" in keys(request.data) {
+    if request.data.access_key not matches "^[A-Z0-9]{20}$" {
+      print("Invalid AWS access key")
+      access_key = false
+    }
+    if request.data.secret_key not matches "^[A-Za-z0-9/+=]{40}$" {
+      print("Invalid AWS secret key")
+      secret_key = false
+    }
+  }
+
+  # Test for KV v2 (using request.data.data)
+  if "data" in keys(request.data) and
+     "access_key" in keys(request.data.data) and
+     "secret_key" in keys(request.data.data) {
+    if request.data.data.access_key not matches "^[A-Z0-9]{20}$" {
+      print("Invalid AWS access key")
+      access_key = false
+    }
+    if request.data.data.secret_key not matches "^[A-Za-z0-9/+=]{40}$" {
+      print("Invalid AWS secret key")
+      secret_key = false
+    }
+  }
+
+  # Return combined booleans
+  return access_key and secret_key
+
+}
+
+# Main Rule
+aws_keys_validated = validate_aws_keys()
+main = rule {
+  aws_keys_validated
+}
+```
+
+## Validate Azure credential format
+
+The following EGP validates that Azure credentials — `tenant_id`, `client_id`,
+and `client_secret` — conform to UUID format when all three are present in a
+request. If `subscription_id` is also present, it is validated as well. This
+covers both the Azure secrets engine (`<path>/config`) and the Azure auth
+method (`auth/<path>/config`).
+
+```python
+# Policy that validates Azure credentials
+# provided to Azure secrets engine and auth method
+# For use with Vault KV v1 and v2 secrets engines
+
+# This is intended to be used against paths of form <path>/config or
+# auth/<path>/config where <path> is the path selected for the Azure secrets
+# engine or auth method respectively.
+
+# However, because EGP policies can only use wildcard (*) at the end of paths,
+# we apply this policy to all paths that have the tenant_id, client_id, and
+# client_secret keys which are all used by both the Azure secrets engine and
+# auth method. If all 3 are present, we also check whether subscription_id is
+# present and then validate it since it is used by the Azure secrets engine.
+
+# Function that validates Azure credentials
+validate_azure_creds = func() {
+
+  # Booleans indicating whether credentials are valid
+  subscription_id = true
+  tenant_id = true
+  client_id = true
+  client_secret = true
+
+  # Print some information about the request
+  # Note that these messages will only be printed when the policy is violated
+  print("Namespace path:", namespace.path)
+  print("Request path:", request.path)
+  print("Request data:", request.data)
+
+  # Validate Azure credential keys of secrets
+
+  # Test for KV v1 (using request.data)
+  if "tenant_id" in keys(request.data) and "client_id" in keys(request.data) and
+     "client_secret" in keys(request.data) {
+    if "subscription_id" in keys(request.data) {
+      if request.data.subscription_id not matches "^[0-9a-z]{8}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{12}$" {
+        print("Invalid Azure subscription ID")
+        subscription_id = false
+      }
+    }
+    if request.data.tenant_id not matches "^[0-9a-z]{8}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{12}$" {
+      print("Invalid Azure tenant ID")
+      tenant_id = false
+    }
+    if request.data.client_id not matches "^[0-9a-z]{8}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{12}$" {
+      print("Invalid Azure client ID")
+      client_id = false
+    }
+    if request.data.client_secret not matches "^[0-9a-z]{8}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{12}$" {
+      print("Invalid Azure client secret")
+      client_secret = false
+    }
+  }
+
+  # Test for KV v2 (using request.data.data)
+  if "data" in keys(request.data) and
+     "tenant_id" in keys(request.data.data) and
+     "client_id" in keys(request.data.data) and
+     "client_secret" in keys(request.data.data) {
+    if "subscription_id" in keys(request.data.data) {
+      if request.data.data.subscription_id not matches "^[0-9a-z]{8}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{12}$" {
+        print("Invalid Azure subscription ID")
+        subscription_id = false
+      }
+    }
+    if request.data.data.tenant_id not matches "^[0-9a-z]{8}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{12}$" {
+      print("Invalid Azure tenant ID")
+      tenant_id = false
+    }
+    if request.data.data.client_id not matches "^[0-9a-z]{8}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{12}$" {
+      print("Invalid Azure client ID")
+      client_id = false
+    }
+    if request.data.data.client_secret not matches "^[0-9a-z]{8}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{12}$" {
+      print("Invalid Azure client secret")
+      client_secret = false
+    }
+  }
+
+  # Return combined booleans
+  return subscription_id and tenant_id and client_id and client_secret
+
+}
+
+# Main Rule
+azure_creds_validated = validate_azure_creds()
+main = rule {
+  azure_creds_validated
+}
+```
+
+## Validate U.S. state codes
+
+The following EGP rejects writes to KV secrets that include a `state` key with
+a value that is not a valid U.S. state or territory code. The policy applies to
+both KV v1 and KV v2 secrets engines.
+
+```python
+# Policy that requires keys of secrets with name "state"
+# to be a valid U.S. state code
+# For use with Vault KV v1 and v2 secrets engines
+
+# Function that validates states
+validate_state_codes = func() {
+
+  # Print some information about the request
+  # Note that these messages will only be printed when the policy is violated
+  print("Namespace path:", namespace.path)
+  print("Request path:", request.path)
+  print("Request data:", request.data)
+
+  valid_states = [
+    "AK","AL","AR","AS","AZ","CA","CO","CT","DC","DE","FL","GA","GU","HI","IA","ID","IL","IN",
+    "KS","KY","LA","MA","MD","ME","MI","MN","MO","MS","MT","NC","ND","NE","NH","NJ","NM","NV",
+    "NY","OH","OK","OR","PA","PR","RI","SC","SD","TN","TX","UT","VA","VI","VT","WA","WI","WV",
+    "WY"]
+
+  # Test for "state" key in request.data for kv v1
+  if "state" in keys(request.data) {
+    if request.data.state not in valid_states {
+      print("Invalid state code")
+      return false
+    }
+  }
+
+  # Test for "state" key in request.data.data for kv v2
+  # after first checking for "data" key in request.data
+  if "data" in keys(request.data) and "state" in keys(request.data.data) {
+    if request.data.data.state not in valid_states {
+      print("Invalid state code")
+      return false
+    }
+  }
+
+  return true
+
+}
+
+# Main Rule
+state_key_validated = validate_state_codes()
+main = rule {
+  state_key_validated
+}
+```
+
+## Restrict Azure auth to approved tenants
+
+The following EGP limits `create` and `update` operations on Azure-related auth
+method configuration paths (`/config`) to a list of approved Azure tenant IDs.
+It handles both the Azure auth method (which uses `tenant_id` directly) and
+OIDC discovery URLs for Azure (which encode the tenant ID in the URL path).
+
+Update the `approved_azure_tenants` list with your organization's approved
+tenant IDs before applying this policy.
+
+```python
+import "strings"
+
+# Add list of approved Azure tenants here
+approved_azure_tenants = ["0f682354-0991-4d4e-b12e-aaaaaaaaaaaa"]
+
+# Regular Expression to match Azure OIDC discovery URL
+azure_oidc_regex = "^https://login.microsoftonline.com/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/v2.0$"
+
+# Check that data is populated and the auth request references an Azure tenant
+is_azure_auth = func() {
+    # Verify data is populated
+    if length(request.data else 0) is 0 {
+        return false
+    }
+
+    # Verify Azure type auth method with tenant specification
+    return is_azure_oidc_tenant() or is_azure_tenant()
+}
+
+# Check if request is for Azure OIDC auth
+is_azure_oidc_tenant = func() {
+    if "oidc_discovery_url" in keys(request.data) and
+        request.data.oidc_discovery_url matches azure_oidc_regex {
+        return true
+    }
+    return false
+}
+
+# Check if request is Azure auth
+is_azure_tenant = func() {
+    if "tenant_id" in keys(request.data) {
+        return true
+    }
+    return false
+}
+
+# Return Azure tenant ID
+azure_tenant = func() {
+    if is_azure_oidc_tenant() {
+        azure_tenant_id = strings.split(request.data.oidc_discovery_url, "/")[3]
+        return azure_tenant_id
+    }
+
+    if is_azure_tenant() {
+        return request.data.tenant_id
+    }
+
+    error("False Azure tenant determination logic")
+}
+
+# Only execute on 'create', 'update', and on '/config' paths. Also verify request is for an Azure related auth method.
+precond = rule {
+        request.operation in ["create", "update"] and
+        strings.has_suffix(request.path, "/config") and
+        is_azure_auth()
+}
+
+# Check that the requested Azure tenant is in the list of approved Azure tenants.
+main = rule when precond {
+    azure_tenant() in approved_azure_tenants
 }
 ```
