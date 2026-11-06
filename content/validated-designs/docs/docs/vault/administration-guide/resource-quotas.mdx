@@ -97,7 +97,7 @@ quotas match a request, the most specific one wins:
 
 Start with a modest global quota to establish a baseline, then add targeted
 mount or path quotas for mounts that carry disproportionate traffic or risk.
-Avoid writing highly granular path quotas at scale. Each path quota is a separate rule to tune and maintain, and when traffic is split across many narrow quotas, quota metrics make it harder to tell whether a mount or namespace as a whole is approaching its limits.
+Avoid writing highly granular path quotas at scale. Each path quota is a separate rule to tune and maintain, and when you split traffic across many narrow quotas, quota metrics make it harder to tell whether a mount or namespace as a whole is approaching its limits. Vault also evaluates quota rules on every request, so a large number of rules adds compute overhead.
 
 <Note>
 
@@ -178,7 +178,7 @@ Lease count quotas are a Vault Enterprise feature that cap the total number of
 active leases generated against a configured scope. When active leases reach the cap, new lease-generating requests — such as dynamic credential generation or token
 creation — fail until existing leases expire or operators revoke them.
 
-Like rate limit quotas, lease count quota definitions are stored on the primary cluster and replicated to performance secondaries. Unlike rate limit quotas, enforcement is not per node: all nodes in a cluster share the lease counter, so the limit is a cluster-wide aggregate regardless of which node receives the request.
+Like rate limit quotas, the primary cluster stores lease count quota definitions and replicates them to performance secondaries. Unlike rate limit quotas, enforcement is not per node. All nodes in a cluster share the lease counter, so the limit is a cluster-wide aggregate regardless of which node receives the request.
 
 Performance secondaries keep track of their own tokens and leases, so each performance replication cluster enforces the quota against its own lease count. A quota with `max_leases=5000` allows up to 5,000 leases on the primary and up to 5,000 on each performance secondary. Size `max_leases` for each cluster, not for the replication set as a whole.
 
@@ -196,15 +196,19 @@ accumulate tens of thousands of leases undetected.
 Use the following checklist when designing lease count quotas for a shared Vault
 platform:
 
-- **Set a global quota as a backstop.** A global lease count quota with a
-  conservative ceiling (for example, 300,000 leases for most enterprise
-  deployments) prevents any single runaway mount from consuming all available
-  lease capacity. New Vault Enterprise installations (1.16 and later) receive a
-  default global lease count quota of 300,000 leases automatically.
-- **Add per-mount quotas for high-velocity secret engines.** Dynamic secret
-  mounts (database, AWS, PKI) are the most common sources of lease growth.
-  Set targeted per-mount quotas that reflect the expected steady-state lease
-  count for each mount, plus a reasonable burst headroom.
+- **Use targeted quotas and keep a global quota as a backstop.** Most
+  organizations get more value from mount- and role-level quotas than from a
+  single global ceiling. New Vault Enterprise installations (1.16 and later)
+  include a [default global lease count quota](https://developer.hashicorp.com/vault/docs/enterprise/lease-count-quotas#default-lease-count-quota) of 300,000 leases. Keep it in
+  place as a backstop, and lower it if your cluster has a history of lease
+  explosions, so that a runaway mount cannot take the cluster down.
+- **Add targeted quotas where lease growth is most likely.** AppRole auth
+  mounts are the most common source of uncontrolled lease growth, followed by
+  service tokens in general and PKI roles that issue certificates with leases.
+  Apply quotas at the auth mount or role level for AppRole. For PKI, leave
+  `generate_lease` at its default of `false` unless you need to revoke
+  certificates by lease ID. Set each quota to the expected steady-state lease
+  count for that mount, plus burst headroom.
 - **Pair quotas with short TTL values.** A quota does not replace proper TTL
   configuration — it is a safety net. A database mount with a 24-hour default
   credential TTL hits its lease count ceiling much sooner than one with a
@@ -265,6 +269,9 @@ Alert on:
   `vault.quota.lease_count.max` — this is the early warning signal for lease
   growth before a violation. See the
   [preceding telemetry table](#telemetry-metrics) for metric names.
+  Lease explosions are sudden. A mount can move from moderate
+  use to its limit within minutes. Pair the utilization threshold with an alert on the rate of change of `vault.quota.lease_count.counter` so
+  alerting triggers while there is still time to act.
 
 ### Response headers
 
@@ -314,7 +321,10 @@ mount for all other consumers.
 
 Apply a rate limit quota at the mount level with a `block_interval` to
 discourage aggressive retry behavior. Set the rate based on your observed
-peak-legitimate RPS from telemetry, with 20 – 30% headroom:
+peak-legitimate RPS from telemetry, with 20 – 30% headroom, provided your
+cluster can comfortably sustain that peak. Revisit the limit whenever request
+volume changes significantly — for example, after onboarding a new client
+application:
 
 ```shell-session
 $ vault write sys/quotas/rate-limit/approle-global \
