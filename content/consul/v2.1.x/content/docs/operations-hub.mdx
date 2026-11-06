@@ -1,0 +1,535 @@
+---
+layout: docs
+page_title: Install and set up Consul Operations Hub
+description: >-
+  Install the Consul Operations Hub on Kubernetes with Helm, attach Consul Enterprise datacenters through the global registry, and explore services and topology.
+---
+
+# Install and set up Consul Operations Hub
+
+Consul Operations Hub gives you one view of the datacenters, services, gateways, and service mesh across your Consul Enterprise clusters. Install Operations Hub on Kubernetes with Helm, connect each Consul datacenter through its global registry configuration, then use the web UI to inspect health, topology, and security posture.
+
+@include 'alerts/enterprise-alert.mdx'
+
+@include '../../../global/partials/alerts/beta.mdx'
+
+## Introduction
+
+Consul Operations Hub provides a centralized view of your Consul datacenters, services, gateways, and service mesh. Consul servers publish snapshots and incremental updates to its global registry. Operations Hub stores the data in a Neo4j graph database and exposes it through an API and web UI.
+
+Operations Hub runs separately from your Consul server agents. Installing Operations Hub does not attach your clusters automatically. Register each datacenter in the UI, then configure its Consul servers to publish data with the generated cluster ID and ingestion token.
+
+## Requirements
+
+Before you begin, prepare the following:
+
+- An existing Kubernetes cluster with `kubectl` access and Helm installed.
+- An existing Consul Enterprise installation in the Kubernetes cluster, with the service mesh injector, Consul namespaces (`global.enableConsulNamespaces: true`), and Consul API Gateway controller enabled. The Operations Hub chart does not install Consul. Refer to [Deploy Consul with Helm](/consul/docs/deploy/server/k8s/helm). The default installation in this guide assumes datacenter `dc1` and admin partition `default`. If your installation uses different values, add matching `--set-string 'connectInject.datacenter=CONSUL_DATACENTER'` and `--set-string 'connectInject.partition=CONSUL_PARTITION'` overrides to the Operations Hub Helm install command.
+- Access to the [Consul Operations Hub Helm chart on Artifact Hub](https://artifacthub.io/packages/helm/hashicorp/consul-ops-hub) and its container image. The examples install chart version `1.0.0` from HashiCorp's public Helm repository and use its default container image.
+- Permission to create Kubernetes Secrets and provision persistent volumes for the bundled Neo4j database and Keycloak identity provider.
+- Python 3 to generate a random session cookie secret.
+- Consul Enterprise 2.1.x server agents for each cluster you attach, with access to their configuration files. Consul Community Edition does not support the global registry.
+
+The installation example uses the chart's bundled Neo4j database and Keycloak identity provider. You do not need an external database, an external identity provider, or a values file.
+
+## Install Operations Hub
+
+Use the following steps to deploy Operations Hub into the Kubernetes namespace that contains your Consul installation.
+
+1. Set the Kubernetes namespace that contains your Consul installation. Replace the placeholder with your value.
+
+   ```shell-session
+   $ export HUB_NAMESPACE="CONSUL_KUBERNETES_NAMESPACE"
+   ```
+
+1. Add HashiCorp's Helm repository and update its chart index.
+
+   ```shell-session
+   $ helm repo add hashicorp https://helm.releases.hashicorp.com
+   $ helm repo update hashicorp
+   ```
+
+1. Prepare the following credentials. Do not commit values containing credentials to source control.
+
+   | Credential | Helm value | Requirement |
+   | --- | --- | --- |
+   | Neo4j password | `neo4j.password` | Choose a strong password of at least 8 characters for the bundled database. |
+   | OAuth client secret | `auth.oauth2proxy.clientSecret` | Generate a random secret. The chart configures the bundled Keycloak client with this value. |
+   | Session cookie secret | `auth.oauth2proxy.cookieSecret` | Exactly 16, 24, or 32 ASCII characters. Generate a random value for this installation. |
+   | Keycloak administrator username | `auth.keycloak.adminUsername` | Choose a username for the Keycloak administrator, such as `admin`. |
+   | Keycloak administrator password | `auth.keycloak.adminPassword` | Choose a strong password for the Keycloak administrator. |
+
+   Run the following command twice to generate separate 32-character values for `OAUTH_CLIENT_SECRET` and `COOKIE_SECRET`. Use different values for the client and cookie secrets.
+
+   ```shell-session
+   $ python3 -c "import secrets; print(secrets.token_hex(16))"
+   ```
+
+   Keep the cookie secret stable across pod restarts and Helm upgrades. Replacing it invalidates existing sessions.
+
+1. Install the chart with the five values you prepared. Replace the uppercase credential placeholders with your values, not file paths.
+
+   The chart creates the mesh-wide `global` proxy defaults entry by default. If you already manage this entry, add `--set proxyDefaults.enabled=false` to the following command. In your existing entry's `Config` map, set [`local_request_timeout_ms`](/consul/docs/reference/proxy/envoy#proxy-config-options) to at least `300000` so full snapshots can complete within the gateway's 300-second ingestion timeout. Preserve the entry's other settings.
+
+   ```shell-session
+   $ helm install operations-hub hashicorp/consul-ops-hub \
+       --version 1.0.0 \
+       --namespace "$HUB_NAMESPACE" \
+       --set-string 'neo4j.password=NEO4J_PASSWORD' \
+       --set-string 'auth.oauth2proxy.clientSecret=OAUTH_CLIENT_SECRET' \
+       --set-string 'auth.oauth2proxy.cookieSecret=COOKIE_SECRET' \
+       --set-string 'auth.keycloak.adminUsername=KEYCLOAK_ADMIN_USERNAME' \
+       --set-string 'auth.keycloak.adminPassword=KEYCLOAK_ADMIN_PASSWORD' \
+       --wait \
+       --timeout 10m
+   ```
+
+
+1. Verify that the deployment is available and inspect the gateway and route status.
+
+   ```shell-session
+   $ kubectl rollout status deployment/operations-hub-consul-ops-hub \
+       --namespace "$HUB_NAMESPACE" \
+       --timeout=10m
+   $ kubectl get gateway operations-hub-consul-ops-hub-gateway \
+       --namespace "$HUB_NAMESPACE"
+   $ kubectl describe httproute operations-hub-consul-ops-hub-route \
+       --namespace "$HUB_NAMESPACE"
+   ```
+
+   The resource names assume the release name `operations-hub` and no chart name overrides. Confirm that the gateway has an address and that the route is accepted with resolved backend references. [Create a Keycloak user](#create-a-keycloak-user) before signing in.
+
+   If pods do not become ready, inspect their events and logs for database connectivity, image pull, or service mesh injection errors. If sign-in fails, verify the OIDC issuer, client credentials, and callback URI.
+
+### Create a Keycloak user
+
+The installation enables bundled Keycloak. Complete these steps to create an application user before signing in to Operations Hub.
+
+The chart does not create application users by default. Before you can sign in to Operations Hub with a username and password, create a user in the `coh` realm and set that user's password. The Keycloak administrator credentials are separate from the Operations Hub user's credentials.
+
+1. Forward the Keycloak service port to your local machine. Keep this command running while you configure the user.
+
+   ```shell-session
+   $ kubectl port-forward --namespace "$HUB_NAMESPACE" \
+       svc/operations-hub-consul-ops-hub-keycloak 8080:8080
+   ```
+
+1. Open `http://localhost:8080/admin/` and sign in with the Keycloak administrator username and password you supplied in the Helm install command.
+1. Open the realm selector, click **Manage realms**, and select **coh**. If you changed `auth.keycloak.realm.name`, select that realm instead. Do not create the application user in the `master` realm.
+1. Open **Users**, then click **Add user**. Enter a **Username** and **Email**, then click **Create**. Use an email address permitted by `auth.oauth2proxy.allowedEmailDomains` and ensure the user meets any configured group restrictions.
+1. Open the user's **Credentials** tab and click **Set password**. Enter and confirm the password. Turn off **Temporary** to avoid requiring a password change at first sign-in, then save the password.
+1. Open the Operations Hub gateway address in your browser and sign in with the user's username or email address and the password you set. Do not use the Keycloak administrator account for this sign-in.
+1. Stop the port-forward command with `Ctrl+C` when you finish.
+
+## Attach a Consul cluster
+
+Use the **Datacenters** section to register the cluster and obtain its global registry credentials. Registration creates an Operations Hub record; data appears only after the Consul servers begin publishing.
+
+1. Open **Datacenters**, then click **Add datacenter**.
+1. In **Identity**, enter a **Datacenter name** and select an **Environment**, then click **Next**. Use a name that identifies the datacenter within your Operations Hub.
+1. In **Platform & Ownership**, optionally enter **Region**, **Availability zone**, **Platform / Runtime**, and **Ownership - team/business unit**, then click **Next**.
+1. In **Configure**, click **Generate token**. Copy the token and the cluster ID from the generated HCL configuration. Store the token securely before clicking **Close**.
+
+   <Warning>
+
+   Operations Hub displays the ingestion token only once. You cannot recover it after you leave the result screen. The token authenticates registry ingestion; it is not a Consul access control list (ACL) token or your UI sign-in credential.
+
+   </Warning>
+
+1. Store the token in a file readable by the Consul process on each server agent, such as `/PATH/TO/token.txt`. Restrict access to the file to the account that runs Consul.
+
+   ```shell-session
+   $ umask 077 && printf '%s' 'GENERATED_CLUSTER_TOKEN' > /PATH/TO/token.txt
+   ```
+
+1. Add the `global_registry` block to each server agent's configuration. Use the cluster ID generated in **Configure**, not a separately generated UUID. Use the Operations Hub gateway's base URL as `address`, without a trailing slash or `/api/v1/registry/ingest`.
+
+   <CodeTabs>
+
+   ```hcl
+   global_registry {
+     enabled    = true
+     address    = "https://HUB_HOST"
+     cluster_id = "GENERATED_CLUSTER_UUID"
+     token_file = "/PATH/TO/token.txt"
+   }
+   ```
+
+   ```json
+   {
+     "global_registry": {
+       "enabled": true,
+       "address": "https://HUB_HOST",
+       "cluster_id": "GENERATED_CLUSTER_UUID",
+       "token_file": "/PATH/TO/token.txt"
+     }
+   }
+   ```
+
+   </CodeTabs>
+
+   Refer to the [global registry configuration reference](/consul/docs/reference/agent/configuration-file/global-registry) for all fields, token source precedence, and TLS settings. When the gateway certificate uses a private certificate authority, configure `ca_file` on each server. Leave `tls_skip_verify` set to `false`.
+
+   For Consul on Kubernetes, configure the global registry with the Consul Helm chart instead of editing server configuration files. Store the token in a Kubernetes Secret in the Consul namespace, then set `global.globalRegistry.enabled`, `address`, `clusterId`, `tokenSecretName`, and `tokenSecretKey` in your Consul Helm values and run `helm upgrade`.
+
+   ```shell-session
+   $ kubectl create secret generic global-registry-token \
+       --namespace CONSUL_KUBERNETES_NAMESPACE \
+       --from-literal=token='GENERATED_CLUSTER_TOKEN'
+   ```
+
+   ```yaml
+   global:
+     globalRegistry:
+       enabled: true
+       address: "https://HUB_HOST"
+       clusterId: "GENERATED_CLUSTER_UUID"
+       tokenSecretName: "global-registry-token"
+       tokenSecretKey: "token"
+   ```
+
+1. Run [`consul reload`](/consul/commands/reload) for each server agent to load the configuration without restarting it. The leader publishes data, and configuring every server allows publishing to continue after a leadership change.
+1. Return to **Datacenters** and open the registered datacenter. Verify that **Last sync** updates and that the **Services** and **Nodes** tabs contain the expected cluster data.
+
+   If the datacenter does not synchronize, check the leader's logs, connectivity to the gateway, and certificate trust. Verify that `cluster_id` and the token belong to the same registration. Also check for environment variables or inline tokens that override your `token_file`.
+
+Repeat this procedure for each cluster you attach. Use the credentials from that cluster's registration rather than reusing another cluster's ID and token.
+
+## Explore the UI sections and tabs
+
+The sidebar provides the following sections. Operations Hub displays data received through the global registry, so check the last synchronization time when assessing the data.
+
+| Section | Purpose |
+| --- | --- |
+| **Operations Hub Dashboard** | View datacenter health, service and gateway counts, and warnings about stale data. |
+| **Datacenters** | View registered datacenters, health, inventory counts, version, and last synchronization time. Use **Add datacenter** to [attach a cluster](#attach-a-consul-cluster) and configure its [global registry connection](/consul/docs/reference/agent/configuration-file/global-registry). |
+| **Services** | Browse services across datacenters and inspect service health, mesh status, partition, namespace, and source. |
+| **Gateways** | Browse gateways and inspect their type, health, metadata, and connections. |
+| **Topology** | Explore connectivity and dependencies in the global view or a selected datacenter. |
+| **Security** | Inspect service mesh, ACL, and certificate posture across datacenters. |
+
+### Datacenter detail tabs
+
+Select a datacenter from **Datacenters** to inspect its inventory.
+
+| Tab | Purpose |
+| --- | --- |
+| **Peers** | View peers, connection status, and imported and exported service counts. |
+| **Gateways** | View gateways associated with the datacenter. |
+| **Services** | View the datacenter's registered services. |
+| **Nodes** | View the datacenter's registered nodes and addresses. |
+
+The **Peers** and **Gateways** tabs appear for datacenters classified as federated. Standalone datacenters show **Services** and **Nodes**.
+
+### Service detail tabs
+
+Select a service from **Services** to inspect its instances and relationships.
+
+| Tab | Purpose |
+| --- | --- |
+| **Instances** | View service instances, addresses, health, and service mesh status. |
+| **Intentions** | View the source, destination, permissions, and type of service intentions. |
+| **Tags** | View tags associated with the service. |
+| **Topology** | View the service's upstream and downstream relationships. |
+
+### Security tabs
+
+Open **Security** to compare security posture across datacenters.
+
+| Tab | Purpose |
+| --- | --- |
+| **Mesh Overview** | View mesh health, mutual TLS (mTLS) status, mesh service counts, and sidecar proxy counts. |
+| **ACL Posture** | View whether ACLs are enabled and counts of authentication methods, policies, tokens, and roles. |
+| **Certificates & mTLS** | View mTLS status, certificate authority provider, certificate expiry, root rotation, and trust domain. |
+
+## Helm chart values
+
+The following configuration reproduces every value in the published `consul-ops-hub` chart's `values.yaml` for chart version `1.0.0`, with comments omitted.
+
+To save the defaults directly from HashiCorp's Helm repository, run the following command after adding the repository:
+
+```shell-session
+$ helm show values hashicorp/consul-ops-hub --version 1.0.0 > values.yaml
+```
+
+These are chart defaults, not a ready-to-install production configuration. The defaults enable bundled Neo4j and Keycloak, leave credentials and the public URL empty, and do not restrict email domains. Use the overrides and credential setup in [Install Operations Hub](#install-operations-hub). For an external identity provider, disable bundled Keycloak and configure the issuer URL. Do not disable authentication to work around missing credentials.
+
+When you use both files, pass the defaults first and your overrides second: `--values values.yaml --values operations-hub-values.yaml`. Supply credentials directly with `--set-string` or in your override values YAML as shown in the installation procedure.
+
+<details>
+<summary>Complete Helm values configuration</summary>
+
+```yaml
+# Copyright IBM Corp. 2026
+# SPDX-License-Identifier: BUSL-1.1
+
+nameOverride: ""
+fullnameOverride: ""
+imagePullSecrets: []
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+image:
+  repository: hashicorp/csl-ops-hub
+  pullPolicy: IfNotPresent
+  tag: ""
+
+replicaCount: 1
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+config:
+  bindAddr: "0.0.0.0"
+  bindPort: "8080"
+  logLevel: "INFO"
+  mcp:
+    enabled: false
+    bindAddr: "0.0.0.0"
+    bindPort: "9090"
+
+neo4j:
+  install:
+    enabled: true
+  uri: ""
+  database: "neo4j"
+  username: "neo4j"
+  password: ""
+  existingSecret: ""
+
+neo4j-db:
+  disableLookups: true
+  podSpec:
+    annotations:
+      consul.hashicorp.com/connect-inject: "false"
+  services:
+    neo4j:
+      spec:
+        type: ClusterIP
+  neo4j:
+    name: "coh-neo4j"
+    edition: "community"
+    passwordFromSecret: '{{ .Release.Name }}-neo4j-auth'
+    resources:
+      requests:
+        cpu: "500m"
+        memory: "2Gi"
+      limits:
+        cpu: "1000m"
+        memory: "4Gi"
+  volumes:
+    data:
+      mode: "defaultStorageClass"
+      defaultStorageClass:
+        requests:
+          storage: "100Gi"
+
+connectInject:
+  enabled: true
+  datacenter: "dc1"
+  namespace: ""
+  partition: "default"
+  transparentProxy: false
+  upstreams: []
+
+service:
+  type: ClusterIP
+  port: 8080
+  nodePort: 0
+  mcpPort: 9090
+  annotations: {}
+
+consulGateway:
+  enabled: true
+  gateway:
+    name: ""
+    gatewayClassName: "consul"
+    listeners:
+      - name: https
+        protocol: HTTPS
+        port: 443
+        tls:
+          mode: Terminate
+          certificateRefs: []
+  tls:
+    days: 10000
+    additionalDNSSANs: []
+    additionalIPSANs: []
+    resources:
+      requests:
+        cpu: "50m"
+        memory: "50Mi"
+      limits:
+        cpu: "100m"
+        memory: "100Mi"
+  httpRoute:
+    name: ""
+    hostnames: []
+    listenerName: "https"
+    ingestTimeout: "300s"
+  serviceDefaults:
+    enabled: true
+  serviceIntentions:
+    enabled: true
+
+proxyDefaults:
+  enabled: true
+  localRequestTimeoutMs: 300000
+
+livenessProbe:
+  httpGet:
+    path: /api/v1/version
+    port: http
+  initialDelaySeconds: 15
+  periodSeconds: 30
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /api/v1/version
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+resources:
+  requests:
+    cpu: "100m"
+    memory: "128Mi"
+  limits:
+    cpu: "500m"
+    memory: "512Mi"
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: 0
+
+updateStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxUnavailable: 0
+    maxSurge: 1
+
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+
+extraVolumes: []
+extraVolumeMounts: []
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+auth:
+  enabled: true
+  publicUrl: ""
+  extAuthz:
+    timeout: "5s"
+  keycloak:
+    enabled: true
+    image:
+      repository: quay.io/keycloak/keycloak
+      tag: "26.2.5"
+      pullPolicy: IfNotPresent
+    devMode: false
+    cookieSecure: false
+    port: 8080
+    nodePort: 0
+    meshUpstreamPort: 8180
+    adminUsername: ""
+    adminPassword: ""
+    existingAdminSecret: ""
+    nodeSelector: {}
+    persistence:
+      enabled: true
+      storageClassName: ""
+      accessMode: ReadWriteOnce
+      size: "10Gi"
+      mountPath: /opt/keycloak/data
+    resources:
+      requests:
+        cpu: "200m"
+        memory: "512Mi"
+      limits:
+        cpu: "1000m"
+        memory: "1Gi"
+    configJob:
+      resources:
+        requests:
+          cpu: "200m"
+          memory: "256Mi"
+        limits:
+          cpu: "2"
+          memory: "512Mi"
+    readinessProbe:
+      initialDelaySeconds: 45
+    livenessProbe:
+      initialDelaySeconds: 60
+    javaOpts: "-Xms256m -Xmx512m"
+    realm:
+      name: "coh"
+      sslRequired: "none"
+      directAccessGrantsEnabled: true
+      users: []
+  oauth2proxy:
+    enabled: true
+    image:
+      repository: quay.io/oauth2-proxy/oauth2-proxy
+      tag: "v7.9.0"
+      pullPolicy: IfNotPresent
+    port: 4180
+    clientId: "oauth2-proxy"
+    clientSecret: ""
+    oidc:
+      issuerUrl: ""
+      loginUrl: ""
+      redeemUrl: ""
+      jwksUrl: ""
+      profileUrl: ""
+      logoutUrl: ""
+    cookieSecret: ""
+    existingSecret: ""
+    nodeSelector: {}
+    cookieName: "_coh_oauth2"
+    allowedEmailDomains:
+      - "*"
+    allowedGroups: []
+    allowAnyAuthenticatedUser: false
+    cookieSecure: false
+    whitelistDomain: ""
+    extraRedirectUris: []
+    resources:
+      requests:
+        cpu: "50m"
+        memory: "64Mi"
+      limits:
+        cpu: "200m"
+        memory: "256Mi"
+
+startupProbe:
+  httpGet:
+    path: /api/v1/version
+    port: http
+  failureThreshold: 20
+  periodSeconds: 5
+```
+
+</details>

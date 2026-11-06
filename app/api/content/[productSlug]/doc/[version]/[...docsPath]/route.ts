@@ -7,12 +7,14 @@ import {
 	findFileWithMetadata,
 	joinFilePath,
 	parseMarkdownFrontMatter,
+	resolveCdnUrl,
 } from '#utils/file'
 import { getProductVersionMetadata } from '#utils/contentVersions'
 import { errorResultToString } from '#utils/result'
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
 import docsPathsAllVersions from '#api/docsPathsAllVersions.json'
 import { VersionedProduct } from '#api/types'
+import grayMatter from 'gray-matter'
 
 /**
  * Parameters expected by `GET` route handler
@@ -135,10 +137,18 @@ export async function GET(
 		return new Response('Not found', { status: 404 })
 	}
 
-	const { metadata, markdownSource } = markdownFrontMatterResult.value
+	const { metadata, markdownSource: rawMarkdownSource } =
+		markdownFrontMatterResult.value
+
+	const markdownSource = resolveCdnUrl(
+		rawMarkdownSource,
+		productSlug,
+		versionMetadata.version,
+	)
 
 	if (mdOnly) {
-		return new Response(markdownSource, {
+		const response = grayMatter.stringify(markdownSource, metadata)
+		return new Response(response, {
 			headers: {
 				'content-type': 'text/markdown',
 				'served-from': servedFrom,

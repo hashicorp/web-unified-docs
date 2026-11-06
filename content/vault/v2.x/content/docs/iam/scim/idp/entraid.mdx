@@ -1,0 +1,292 @@
+---
+layout: docs
+page_title: Configure Microsoft Entra ID for SCIM with Vault
+description: >-
+  Configure Microsoft Entra ID as a SCIM client for Vault Enterprise: create the OIDC and SCIM applications, enable provisioning, and verify the result.
+---
+
+# Configure Microsoft Entra ID for SCIM with Vault
+
+@include 'alerts/enterprise-only.mdx'
+
+Microsoft Entra ID can connect to Vault with OIDC or SAML. With SAML, one enterprise application can handle both login and provisioning, or you can use two separate applications. With OIDC, Entra ID always uses two applications: an OpenID Connect (OIDC) application authenticates your users to Vault, and a SCIM application provisions those users into Vault as [entities](/vault/docs/concepts/identity#entities-and-aliases). This guide covers the OIDC workflow.
+
+Follow the instructions to configure example Entra ID applications that provision a test user and group into a Vault SCIM server.
+
+Each application depends on values from the other product, so the workflow alternates between the Entra ID Admin Console and Vault:
+
+1. Create the Entra ID OIDC application and the SCIM provisioning application.
+1. Configure Vault with the OIDC application credentials, then create the SCIM client and its token.
+1. Configure provisioning on the SCIM application with that token, then provision your test user and group.
+
+## Before you start
+
+- **Get a Microsoft Azure subscription**. Use an existing subscription or
+  [sign up for a free account](https://azure.microsoft.com/en-us/pricing/purchase-options/azure-account?icid=azurefreeaccount).
+
+- **Create a Microsoft Entra tenant**. Follow the
+  [Create a new tenant](https://learn.microsoft.com/en-us/entra/identity-platform/quickstart-create-new-tenant)
+  quickstart and note the **Tenant ID**.
+
+- **Run a Vault Enterprise cluster that Entra ID can reach**. Entra ID sends
+  SCIM requests from its own network, so the Vault API address must accept those
+  requests.
+
+- **Configure the `vault` CLI**. Export `VAULT_ADDR`, `VAULT_NAMESPACE` when
+  your cluster uses namespaces, and a `VAULT_TOKEN` with administrative access.
+
+- **Check your permissions**. You must be able to:
+    - Create and configure app registrations in the Entra ID Admin Console.
+    - Create groups and users in Microsoft Entra ID.
+    - Configure provisioning for an enterprise application.
+    - Create policies, entities, and SCIM clients in Vault.
+
+## Supported integration architectures
+
+Microsoft Entra ID supports different application models depending on your chosen authentication protocol:
+
+- **OIDC with SCIM (Two applications — covered in this guide):** Entra ID requires two separate applications for OIDC-based setups. An **App Registration** handles OIDC authentication to Vault, and a non-gallery **Enterprise Application** handles SCIM user and group provisioning. Entra ID does not support combining OIDC SSO and SCIM outbound provisioning into a single application.
+- **SAML with SCIM (Single application):** A single non-gallery Enterprise Application can handle both SAML 2.0 single sign-on and SCIM provisioning.
+- **SAML with SCIM (Two applications):** Two separate Enterprise Applications can be used if your organization prefers to decouple SAML authentication from SCIM identity lifecycle management.
+
+## Create the Entra ID SCIM provisioning application, group, and user
+
+The provisioning application handles SCIM user and group sync. Create it before
+you configure the OIDC application.
+
+1. Use the Entra ID Admin Console to
+   [create a new enterprise application](https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/add-application-portal).
+   On the **Browse Microsoft Entra Gallery** page, select **Create your own
+   application** and select **Integrate any other application you don't find in
+   the gallery**.
+
+1. Do not configure single sign-on for this application. Leave SSO as
+   **Disabled**.
+
+1. [Create a group](https://learn.microsoft.com/en-us/entra/fundamentals/how-to-manage-groups),
+   named for example: `scim-test-group`.
+
+1. [Create a user and assign them to the application](https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/add-application-portal-assign-users#assign-a-user-account-to-an-enterprise-application).
+   Use a valid test email address, for example:
+   `scim-test-user@example.onmicrosoft.com`.
+
+## Create the Entra ID OIDC application
+
+The SCIM application handles provisioning. Authentication requires a second,
+separate application registered under **App registrations**.
+
+1. In the Entra ID Admin Console, go to **App registrations → New registration** and
+   [register a new application](https://learn.microsoft.com/en-us/entra/identity-platform/quickstart-register-app).
+
+1. After creating the application, navigate to **App registrations → your app →
+   Authentication** and add redirect URIs.
+
+   Configure the OIDC application with the following settings and replace the
+   example values with your own values.
+
+   | Configuration setting | Value                                                       |
+   |-----------------------|-------------------------------------------------------------|
+   | Web Redirect URI      | `https://vault-cluster-public-url:8200/v1/admin/auth/oidc/callback`     |
+   | Web Redirect URI      | `https://vault-cluster-public-url:8200/ui/vault/auth/oidc/oidc/callback` |
+   | Web Redirect URI      | `http://localhost:8250/oidc/callback`                       |
+
+   Configuration requires all three redirect URIs.
+   
+   The first is for CLI login, the second for Vault UI login, and the third for local browser callback during CLI OIDC flow. Missing any of them causes "Missing auth_url" errors.
+
+1. Navigate to **Certificates & secrets → New client secret**. Copy both the **Value** and the **Application (client) ID**. This is your only opportunity to copy the **Value**.
+
+1. From the application overview, copy the **Application (client) ID** and the **Directory (tenant) ID**.
+
+1. Navigate to **Token configuration → Add optional claim**. Set **Token type**
+   to **ID** and select **email**. If prompted to enable the OpenID Connect
+   permission, select **Add**.
+
+1. Navigate to **API permissions → Add a permission → Microsoft Graph →
+   Delegated permissions**. Add `openid`, `email`, and `profile`. Then select
+   **Grant admin consent → Yes**.
+
+Do not enable provisioning on the OIDC application. Provisioning runs through the
+separate SCIM application you created earlier.
+
+## Get values and export environment variables
+
+You must capture some values from Entra ID and export them as environment
+variables to use when you set up the Vault SCIM server.
+
+- Record the **Directory (tenant) ID** from the Entra ID Admin Console. Refer to
+  [Find your Microsoft Entra tenant](https://learn.microsoft.com/en-us/azure/azure-portal/get-subscription-tenant-id#find-your-microsoft-entra-tenant).
+- Record the **Application (client) ID** and client secret **Value** from
+  [Create the Entra ID OIDC application](#create-the-entra-id-oidc-application).
+
+Use the values you captured in the shell session where you plan to set up Vault for SCIM.
+
+```shell-session
+$ export ENTRA_TENANT_ID="<directory-tenant-id>" \
+    ENTRA_CLIENT_ID="<application-client-id>" \
+    ENTRA_CLIENT_SECRET="<client-secret-value>"
+```
+
+## Configure Vault for Entra ID
+
+Vault needs the OIDC application credentials before your users can log in, and the Entra ID SCIM application needs a Vault token before it can provision
+anyone. 
+ 
+Complete [Set up a Vault SCIM server](/vault/docs/iam/scim/setup) from [Enable and configure OIDC auth method](/vault/docs/iam/scim/setup#enable-and-configure-oidc-auth-method) through [Send SCIM requests](/vault/docs/iam/scim/setup#send-scim-requests). Skip “Enable and configure SAML auth method”. Use these Entra ID values in place of the Okta examples:
+
+   - `oidc_discovery_url`: `https://login.microsoftonline.com/${ENTRA_TENANT_ID}/v2.0`
+   - `oidc_client_id` and bound_audiences: `$ENTRA_CLIENT_ID`
+   - `oidc_client_secret`: `$ENTRA_CLIENT_SECRET`
+   - `allowed_redirect_uris`: all three redirect URIs from **Create the Entra ID OIDC application**
+   - `user_claim`: email
+   - `token_policies`: default
+ 
+When you create the SCIM client, bind it to the OIDC mount by setting `alias_mount_accessor` to the `oidc/ `accessor:
+
+   ```shell-session
+   $ OIDC_ACCESSOR=$(vault auth list -format=json | jq -r '."oidc/".accessor')
+   ```
+
+When you finish, you have:
+
+   - An OIDC role that your users authenticate with, for example `vault-role-entra-default`.
+   - A SCIM client bound to an access grant principal and the `oidc/` auth mount.
+   - A SCIM token that begins with `scm`.
+
+<Warning title='Do not log in with OIDC'>
+
+   Do not log in to Vault through OIDC yet. A login before provisioning creates an entity that the SCIM client does not own.
+
+</Warning>
+
+## Configure the provisioning connection
+ 
+Connect the SCIM provisioning application to Vault with the SCIM token you created in [Set up a Vault SCIM server](/vault/docs/iam/scim/setup).
+ 
+1. Navigate to **Enterprise apps → your provisioning app → Overview** and create a new provisioning configuration.
+ 
+1. Configure the provisioning connection with the following settings and replace the example values with your own values.
+ 
+   | Configuration setting | Value |
+   | --- | --- |
+   | Tenant URL | `https://vault-cluster-public-url:8200/v1/admin/identity/scim/v2?aadOptscim062020` |
+   | Secret Token | The Vault SCIM token for your SCIM client, which begins with `scm.` |
+ 
+   The `admin` segment of the example tenant URL is a namespace, not a literal path. Vault servers without namespaces use `/v1/identity/scim/v2`.
+
+<Note title="Use the aadOptscim062020 flag">
+
+The `?aadOptscim062020` query parameter aligns Entra ID's SCIM behavior with the SCIM 2.0 standard. Always include this flag. Without it, Entra ID sends `active` as a string instead of a boolean, and Vault rejects the request. Refer to the [Entra ID documentation](https://learn.microsoft.com/en-us/entra/identity/app-provisioning/application-provisioning-config-problem-scim-compatibility#flags-to-alter-the-scim-behavior) for details.
+
+</Note> 
+
+1. Select **Test Connection** to confirm the configuration. If the test succeeds, select **Create**.
+ 
+Do not start provisioning yet. You turn it on in the next step [Enable provisioning to Vault](#enable-provisioning-to-vault).
+
+## Enable provisioning to Vault
+
+Navigate to **Enterprise apps → your provisioning app → Provisioning →
+Provisioning Status** and toggle the status to **On**, then save.
+
+Wait about five minutes for the **Users and groups**, **Attribute
+mappings**, and **Provisioning logs** sections to become active.
+
+Entra ID sends a default set of attributes that includes attributes Vault does not support. Trim the default mappings to the attributes Vault supports.
+
+Navigate to **Provisioning → Mappings** and edit each mapping set.
+
+Keep only the following user and group attribute mappings.
+
+   - users: delete all attributes except `userName`, `active`, `externalId`.
+   - groups: delete all attributes except `displayName`, `members`.
+
+Navigate to **Provisioning → Mappings → Provision Microsoft Entra ID Groups**, set **Enabled** to **Yes**, and save.
+
+## Assign the test user to the group
+
+Add your test user to your test group (for example scim-test-group), then [assign the group to the provisioning application](https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/add-application-portal-assign-users#assign-a-user-account-to-an-enterprise-application).
+
+The OIDC application grants Vault login and the SCIM application provisions the
+entity, so your test user needs an assignment to both applications.
+
+## Push groups to Vault
+
+You already [Enabled provisioning to Vault](#enable-provisioning-to-vault), but Vault creates a group only after Entra ID pushes it. Use [on-demand provisioning](https://learn.microsoft.com/en-us/entra/identity/app-provisioning/provision-on-demand?pivots=app-provisioning#how-to-use-on-demand-provisioning) to push your test group immediately.
+
+Navigate to **Provisioning → Provision on demand**, select your test group (for example `scim-test-group`), and select **Provision**. Confirm that the action creates the group in Vault.
+
+Entra ID then pushes the membership of that group for the users you assign to the application.
+
+## Verify provisioning
+
+Confirm that Vault created the entity for your test user. Use a terminal
+session with the `vault` CLI to confirm.
+
+List all entity names to confirm your test user appears in the output.
+
+```shell-session
+$ vault list identity/entity/name
+```
+
+Read the entity to confirm creation by SCIM provisioning. The output includes the entity's aliases, metadata, and the `scim_client_id` that identifies which SCIM client owns it.
+
+```shell-session
+$ vault read identity/entity/name/<user-name>
+```
+
+List all group names to confirm Vault created a group matching your Entra ID group (for example `scim-test-group`).
+
+```shell-session
+$ vault list identity/group/name
+```
+
+Read the group to confirm it contains your test user as a member. The output lists the group's `member_entity_ids` and its `metadata`.
+
+```shell-session
+$ vault read identity/group/name/scim-test-group
+```
+
+## Log in to Vault through Entra ID
+
+Your users authenticate to Vault through the Entra ID OIDC browser flow, and the
+Entra ID identity becomes a Vault entity. Log in now to confirm that the OIDC
+configuration works.
+
+The SCIM client authenticates with its own token and its own entity, so the
+entity from this login does not act as the SCIM client.
+
+1. Open your browser and go to `https://vault-cluster-public-url:8200/ui`.
+
+1. If your cluster uses namespaces, enter your namespace (for example admin) in the Namespace field.
+
+1. Select **OIDC** from the **Method** dropdown.
+
+1. Log in as the test user you created in [Create the Entra ID SCIM provisioning application](#create-the-entra-id-scim-provisioning-application-group-and-user).
+
+1. Verify that the Vault entity matches the Entra ID user name.
+
+   ```shell-session
+   $ vault read identity/entity/name/<user-name> | grep -E "scim_client_id|name|aliases" 
+   ```
+
+## Regenerate the SCIM token
+
+Every token you issue counts against the `max_active_tokens` value on the SCIM
+client. When you reach the limit, revoke a token you no longer use before you
+issue a replacement.
+
+```shell-session
+$ vault token revoke <old-scim-token>
+```
+
+Issue the replacement token with the same procedure you used for the first
+token in [Set up a bearer-token workflow](/vault/docs/iam/scim/setup#set-up-a-bearer-token-workflow). Paste the new value into the **Secret Token** field under **Provisioning → Edit provisioning** and save the application.
+
+## Related documentation
+
+- [Configure Okta for SCIM with Vault](/vault/docs/iam/scim/idp/okta)
+- [Configure SailPoint for SCIM with Vault](/vault/docs/iam/scim/idp/sailpoint)
+- [Provision Vault identities with SCIM](/vault/docs/iam/scim)
+- [Set up a Vault SCIM server](/vault/docs/iam/scim/setup)
+- [SCIM API](/vault/api-docs/secret/identity/scim)

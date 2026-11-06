@@ -81,6 +81,7 @@ export const PRODUCT_CONFIG = {
 		semverCoerce: semver.coerce,
 		versionedDocs: true,
 		websiteDir: 'website',
+		supportsExclusionDirectives: true,
 	},
 	consul: {
 		/**
@@ -116,6 +117,33 @@ export const PRODUCT_CONFIG = {
 		semverCoerce: semver.coerce,
 		versionedDocs: false,
 		websiteDir: '.',
+	},
+	'boundary-hcp': {
+		assetDir: 'img',
+		contentDir: 'docs',
+		dataDir: 'data',
+		productSlug: 'boundary',
+		semverCoerce: semver.coerce,
+		versionedDocs: false,
+		websiteDir: 'website',
+	},
+	'vault-hcp': {
+		assetDir: 'img',
+		contentDir: 'docs',
+		dataDir: 'data',
+		productSlug: 'vault',
+		semverCoerce: semver.coerce,
+		versionedDocs: false,
+		websiteDir: 'website',
+	},
+	'vault-radar-hcp': {
+		assetDir: 'img',
+		contentDir: 'docs',
+		dataDir: 'data',
+		productSlug: 'vault-radar',
+		semverCoerce: semver.coerce,
+		versionedDocs: false,
+		websiteDir: 'website',
 	},
 	nomad: {
 		/**
