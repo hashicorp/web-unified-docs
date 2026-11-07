@@ -23,11 +23,11 @@ Deploying infrastructure atomically addresses the following operational and secu
 
 **Accelerate deployment velocity:** Monolithic deployments require coordination across teams and force all changes to deploy together on the same schedule. Atomic deployments enable teams to deploy their infrastructure components independently, removing coordination bottlenecks and allowing faster iteration on specific components.
 
-## Organize Terraform modules for atomic deployments
+## Organize Terraform configurations for atomic deployments
 
-Structure your Terraform code into independent modules that define logical deployment boundaries. Each module manages a specific infrastructure component with its own lifecycle, enabling teams to deploy, test, and rollback components independently.
+Structure your Terraform code into independent root configurations that define logical deployment boundaries. Each root configuration has its own state file and manages a specific infrastructure component with its own lifecycle, so teams can deploy, test, and roll back components independently. Each configuration can call shared [modules](/well-architected-framework/define-and-automate-processes/define/modules) to standardize the resources it creates.
 
-Use separate modules when infrastructure components have different deployment schedules, ownership by different teams, or different rates of change. For example, networking infrastructure changes less frequently than application infrastructure, so separating them into different modules allows application teams to deploy without touching networking.
+Use separate root configurations when infrastructure components have different deployment schedules, ownership by different teams, or different rates of change. For example, networking infrastructure changes less frequently than application infrastructure, so separating them into different configurations lets application teams deploy without touching networking.
 
 The following example shows a Terraform directory structure organized for atomic deployments:
 
@@ -51,13 +51,13 @@ infrastructure/
     └── outputs.tf
 ```
 
-The directory structure creates four atomic deployment units. The networking team can deploy VPC changes independently, database administrators can deploy RDS updates separately, and application teams can deploy compute resources without coordinating with other teams. Each module contains only the resources it manages, creating clear boundaries.
+The directory structure creates four atomic deployment units. The networking team can deploy VPC changes independently, database administrators can deploy RDS updates separately, and application teams can deploy compute resources without coordinating with other teams. Each configuration has its own state file and contains only the resources it manages, creating clear boundaries.
 
 ## Automate atomic deployments with CI/CD
 
-Integrate atomic deployments into CI/CD pipelines to automate testing and deployment of individual infrastructure components. Configure pipelines to detect changes in specific module directories and deploy only the affected modules, reducing deployment time and risk.
+Integrate atomic deployments into CI/CD pipelines to automate testing and deployment of individual infrastructure components. Configure pipelines to detect changes in specific configuration directories and deploy only the affected configurations, reducing deployment time and risk.
 
-The following example shows a GitHub Actions workflow that deploys atomic modules based on changed files:
+The following example shows a GitHub Actions workflow that deploys atomic configurations based on changed files:
 
 ```yaml
 name: Deploy Infrastructure
@@ -74,8 +74,8 @@ jobs:
       database: ${{ steps.changes.outputs.database }}
       application: ${{ steps.changes.outputs.application }}
     steps:
-      - uses: actions/checkout@v3
-      - uses: dorny/paths-filter@v2
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v4
         id: changes
         with:
           filters: |
@@ -90,43 +90,53 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.networking == 'true'
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infrastructure/networking
     steps:
-      - uses: actions/checkout@v3
-      - name: Deploy networking
-        run: |
-          cd infrastructure/networking
-          terraform init
-          terraform plan
-          terraform apply -auto-approve
+      - uses: actions/checkout@v6
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+      - run: terraform init
+      - run: terraform plan -out=tfplan
+      - run: terraform apply tfplan
 
   deploy-database:
     needs: [detect-changes, deploy-networking]
-    if: needs.detect-changes.outputs.database == 'true'
+    # Run even when the networking job is skipped, but not when it fails
+    if: ${{ !failure() && !cancelled() && needs.detect-changes.outputs.database == 'true' }}
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infrastructure/database
     steps:
-      - uses: actions/checkout@v3
-      - name: Deploy database
-        run: |
-          cd infrastructure/database
-          terraform init
-          terraform plan
-          terraform apply -auto-approve
+      - uses: actions/checkout@v6
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+      - run: terraform init
+      - run: terraform plan -out=tfplan
+      - run: terraform apply tfplan
 
   deploy-application:
     needs: [detect-changes, deploy-networking, deploy-database]
-    if: needs.detect-changes.outputs.application == 'true'
+    if: ${{ !failure() && !cancelled() && needs.detect-changes.outputs.application == 'true' }}
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infrastructure/application
     steps:
-      - uses: actions/checkout@v3
-      - name: Deploy application
-        run: |
-          cd infrastructure/application
-          terraform init
-          terraform plan
-          terraform apply -auto-approve
+      - uses: actions/checkout@v6
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+      - run: terraform init
+      - run: terraform plan -out=tfplan
+      - run: terraform apply tfplan
 ```
 
-The GitHub Actions workflow detects which modules changed and deploys only the affected components. If only application code changes, the pipeline deploys only the application module, skipping networking and database. Deploying only changed modules reduces deployment time and limits the scope of changes in each deployment.
+The GitHub Actions workflow detects which configurations changed and deploys only the affected components. If only application code changes, the pipeline deploys only the application configuration, skipping networking and database. The `!failure()` condition lets a downstream job run when an upstream job is skipped, while still stopping the pipeline when an upstream deployment fails. The example assumes each configuration uses HCP Terraform for remote state and runs, authenticated with the `TF_API_TOKEN` secret. Deploying only changed modules reduces deployment time and limits the scope of changes in each deployment.
 
 ## Identify atomic deployment boundaries
 
@@ -134,13 +144,13 @@ Define atomic deployment boundaries based on infrastructure component lifecycles
 
 Use the following criteria to identify atomic boundaries:
 
-**Separate modules when:**
+**Separate configurations when:**
 - Different teams own and maintain the infrastructure components
 - Components have different deployment schedules or change frequencies
 - Rollback of one component should not affect others
 - Components have different compliance or security requirements
 
-**Keep modules together when:**
+**Keep resources in the same configuration when:**
 - Resources have tight coupling and always change together
 - Components share the same lifecycle and deployment schedule
 - Separating them creates excessive orchestration complexity
@@ -148,7 +158,7 @@ Use the following criteria to identify atomic boundaries:
 
 For example, separate networking infrastructure like VPCs, subnets, and routing, from application infrastructure like EC2 instances and load balancers, because they change at different frequencies and have different owners. Keep an EC2 instance and its security group together because they are tightly coupled and always deploy together.
 
-Avoid using the Terraform `-target` flag to deploy individual resources within a module, as this breaks dependency tracking and can create inconsistent state. Instead, organize resources into appropriately-sized modules that define your atomic boundaries.
+Avoid using the Terraform `-target` flag to routinely deploy individual resources within a configuration, as Terraform then plans only part of your infrastructure and can leave the rest out of sync with your code. Instead, organize resources into appropriately sized configurations that define your atomic boundaries.
 
 ## HashiCorp resources
 

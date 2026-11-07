@@ -35,7 +35,7 @@ Packer builds an AMI with filesystem hardening, secure logging, SSH restrictions
 
 The build process applies security controls before any application deployment, reducing the attack surface from the moment instances start. Teams can version and test security baselines independently from application code, maintaining separation of concerns between security and application teams.
 
-The following Packer configuration builds a hardened Ubuntu image with CIS Level 1 controls:
+The following Packer configuration builds a hardened Ubuntu 24.04 image with a subset of CIS Level 1 controls. Use the complete CIS benchmark for your operating system version, or a maintained hardening tool, to apply the full set of controls:
 
 ```hcl
 packer {
@@ -48,12 +48,12 @@ packer {
 }
 
 source "amazon-ebs" "ubuntu_cis" {
-  ami_name      = "ubuntu-22-04-cis-level1-{{timestamp}}"
+  ami_name      = "ubuntu-24-04-cis-level1-{{timestamp}}"
   instance_type = "t3.micro"
   region        = "us-west-2"
   source_ami_filter {
     filters = {
-      name                = "ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"
+      name                = "ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*"
       root-device-type    = "ebs"
       virtualization-type = "hvm"
     }
@@ -62,7 +62,7 @@ source "amazon-ebs" "ubuntu_cis" {
   }
   ssh_username = "ubuntu"
   tags = {
-    Name       = "Ubuntu 22.04 CIS Level 1"
+    Name       = "Ubuntu 24.04 CIS Level 1"
     CIS_Level  = "1"
     Compliance = "CIS"
     Built_With = "Packer"
@@ -76,22 +76,17 @@ build {
   provisioner "shell" {
     inline = [
       "sudo apt-get update",
-      "sudo apt-get install -y aide aide-common",
-      "sudo aideinit",
+      "sudo DEBIAN_FRONTEND=noninteractive apt-get install -y aide aide-common",
+      "sudo aideinit -y -f",
       # Disable unnecessary filesystems
-      "echo 'install cramfs /bin/true' | sudo tee -a /etc/modprobe.d/CIS.conf",
-      "echo 'install freevxfs /bin/true' | sudo tee -a /etc/modprobe.d/CIS.conf",
-      "echo 'install jffs2 /bin/true' | sudo tee -a /etc/modprobe.d/CIS.conf",
-      "echo 'install hfs /bin/true' | sudo tee -a /etc/modprobe.d/CIS.conf",
-      "echo 'install hfsplus /bin/true' | sudo tee -a /etc/modprobe.d/CIS.conf",
-      "echo 'install udf /bin/true' | sudo tee -a /etc/modprobe.d/CIS.conf",
+      "for fs in cramfs freevxfs jffs2 hfs hfsplus udf; do printf 'install %s /bin/false\\nblacklist %s\\n' $fs $fs | sudo tee -a /etc/modprobe.d/CIS.conf; done",
     ]
   }
 
   # Configure secure logging
   provisioner "shell" {
     inline = [
-      "sudo apt-get install -y rsyslog",
+      "sudo DEBIAN_FRONTEND=noninteractive apt-get install -y rsyslog",
       "sudo systemctl enable rsyslog",
       "sudo systemctl start rsyslog",
       # Configure log file permissions
@@ -99,30 +94,27 @@ build {
     ]
   }
 
-  # Harden SSH configuration
+  # Harden SSH configuration with a drop-in file, which takes precedence
+  # over the defaults in /etc/ssh/sshd_config
   provisioner "shell" {
     inline = [
-      "sudo sed -i 's/#PermitRootLogin yes/PermitRootLogin no/' /etc/ssh/sshd_config",
-      "sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config",
-      "sudo sed -i 's/#PermitEmptyPasswords no/PermitEmptyPasswords no/' /etc/ssh/sshd_config",
-      "sudo sed -i 's/#MaxAuthTries 6/MaxAuthTries 4/' /etc/ssh/sshd_config",
-      "echo 'ClientAliveInterval 300' | sudo tee -a /etc/ssh/sshd_config",
-      "echo 'ClientAliveCountMax 0' | sudo tee -a /etc/ssh/sshd_config",
+      "printf '%s\\n' 'PermitRootLogin no' 'PasswordAuthentication no' 'PermitEmptyPasswords no' 'MaxAuthTries 4' 'ClientAliveInterval 15' 'ClientAliveCountMax 3' | sudo tee /etc/ssh/sshd_config.d/50-cis.conf",
+      "sudo sshd -t",
     ]
   }
 
   # Enable automatic security updates
   provisioner "shell" {
     inline = [
-      "sudo apt-get install -y unattended-upgrades",
-      "sudo dpkg-reconfigure -plow unattended-upgrades",
+      "sudo DEBIAN_FRONTEND=noninteractive apt-get install -y unattended-upgrades",
+      "sudo dpkg-reconfigure -f noninteractive -plow unattended-upgrades",
     ]
   }
 
-  # Set file integrity monitoring
+  # Schedule daily file integrity checks with the timer that aide-common provides
   provisioner "shell" {
     inline = [
-      "sudo systemctl enable aide.timer",
+      "sudo systemctl enable dailyaidecheck.timer",
     ]
   }
 }
@@ -139,7 +131,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0"
+      version = "~> 6.0"
     }
   }
 }
@@ -172,7 +164,7 @@ data "aws_ami" "cis_ubuntu" {
 
   filter {
     name   = "name"
-    values = ["ubuntu-22-04-cis-level1-*"]
+    values = ["ubuntu-24-04-cis-level1-*"]
   }
 
   filter {
@@ -293,7 +285,7 @@ resource "aws_cloudwatch_log_group" "instance_logs" {
 
 Terraform uses a data source to query the latest CIS-hardened AMI built by Packer, eliminating hard-coded AMI IDs. The configuration enforces encrypted EBS volumes with KMS, restricts network access through security groups, requires IMDSv2 for metadata access, and enables detailed monitoring with CloudWatch.
 
-Running `terraform apply` creates infrastructure that meets CIS benchmark requirements for encryption, logging, and access control. Terraform state tracks all security configurations, making it straightforward to demonstrate compliance during audits. Teams can review infrastructure changes through version control before applying them to production, ensuring security controls remain consistent.
+Running `terraform apply` creates infrastructure that applies the CIS controls shown for encryption, logging, and access control. Your version-controlled configuration and HCP Terraform run history document how you configured these controls, which supports compliance audits. Use a compliance scanner to verify the running systems against the full benchmark. Teams can review infrastructure changes through version control before applying them to production, ensuring security controls remain consistent.
 
 ## HashiCorp resources
 
@@ -321,7 +313,7 @@ Running `terraform apply` creates infrastructure that meets CIS benchmark requir
 
 - Learn about [Packer provisioners](/packer/docs/provisioners) to configure operating
   systems during image builds with shell scripts, Ansible, or Chef
-- Read the [Packer Amazon EBS builder documentation](/packer/plugins/builders/amazon/ebs)
+- Read the [Packer Amazon EBS builder documentation](/packer/integrations/hashicorp/amazon/latest/components/builder/ebs)
   to understand AMI creation options, instance configuration, and tagging strategies
 - Explore [HCP Packer](/hcp/docs/packer) to version and track machine images across
   your organization with automated compliance validation
@@ -330,13 +322,13 @@ Running `terraform apply` creates infrastructure that meets CIS benchmark requir
 
 - Learn how to [implement policy as code](/well-architected-framework/secure-systems/compliance-and-governance/policy-as-code)
   to validate that infrastructure changes meet CIS requirements before deployment
-- Review [immutable infrastructure patterns](/well-architected-framework/secure-systems/infrastructure-reliability/immutable-infrastructure)
+- Review [immutable infrastructure patterns](/well-architected-framework/define-and-automate-processes/define/immutable-infrastructure)
   to prevent configuration drift by replacing instances rather than modifying them
 - Implement [Sentinel policy as code](/sentinel/docs) to validate infrastructure
   changes before deployment and enforce CIS benchmark compliance
 - Learn the [Sentinel language syntax](/sentinel/docs/language) to write custom
   policies that check encryption, network rules, and access controls
-- Review [Terraform Cloud policy enforcement](/terraform/cloud-docs/policy-enforcement)
+- Review [HCP Terraform policy enforcement](/terraform/cloud-docs/policy-enforcement)
   to understand policy sets, enforcement levels, and compliance reporting
 
 ## External resources
@@ -344,11 +336,11 @@ Running `terraform apply` creates infrastructure that meets CIS benchmark requir
 - [CIS Benchmarks](https://www.cisecurity.org/cis-benchmarks) for security configuration standards
 - [NIST 800-53 Security Controls](https://csrc.nist.gov/publications/detail/sp/800-53/rev-5/final) for federal security control catalog
 - [AWS CIS Foundations Benchmark](https://docs.aws.amazon.com/securityhub/latest/userguide/cis-aws-foundations-benchmark.html) for AWS-specific controls
-- [Azure CIS Benchmark](https://learn.microsoft.com/en-us/azure/governance/policy/samples/cis-azure-1-4-0) for Azure security baseline
+- [Azure CIS Benchmark](https://learn.microsoft.com/en-us/azure/governance/policy/samples/cis-azure-2-0-0) for Azure security baseline
 - [GCP CIS Benchmark](https://cloud.google.com/security/compliance/cis-benchmark) for Google Cloud security standards
 
 ## Next steps
 
 In this section of Secure systems, you learned how to enforce CIS benchmarks by building security into machine images with Packer and applying infrastructure controls with Terraform. Automated enforcement reduces manual configuration errors and accelerates compliance audits.
 
-After establishing security baselines, implement [policy as code](/well-architected-framework/security/policy-as-code) with Sentinel to validate that all infrastructure changes meet your security requirements before deployment. Use [immutable infrastructure](/well-architected-framework/security/immutable-infrastructure) practices to prevent configuration drift by replacing instances rather than modifying them. Learn about [secrets management](/well-architected-framework/security/secrets-management) with Vault to protect sensitive credentials and encryption keys.
+After establishing security baselines, implement [policy as code](/well-architected-framework/secure-systems/compliance-and-governance/policy-as-code) with Sentinel to validate that all infrastructure changes meet your security requirements before deployment. Use [immutable infrastructure](/well-architected-framework/define-and-automate-processes/define/immutable-infrastructure) practices to prevent configuration drift by replacing instances rather than modifying them. Learn about [secrets management](/well-architected-framework/secure-systems/secrets/store-static-secrets) with Vault to protect sensitive credentials and encryption keys.
