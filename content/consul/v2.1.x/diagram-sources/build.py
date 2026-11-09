@@ -3,7 +3,9 @@
 
 Each diagram has one editable body, <name>.mmd, in this directory. A body
 refers to theme colors with tokens such as $line and $node in its style lines.
-This script writes <name>_light.mmd and <name>_dark.mmd for every body.
+This script writes <name>_light.mmd and <name>_dark.mmd for every body, both
+here and in ../img/agentic-mesh/mermaid-markup/ so the renderable markup sits
+next to the published images.
 
 Render each variant with the Mermaid CLI, for example:
 
@@ -21,6 +23,7 @@ import sys
 from string import Template
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+MARKUP = os.path.join(HERE, "..", "img", "agentic-mesh", "mermaid-markup")
 
 PALETTES = {
     "light": dict(bg="#ffffff", node="#ffffff", node_border="#80848d", text="#0c0c0e",
@@ -68,8 +71,11 @@ def bodies(names):
 for path in bodies(sys.argv[1:]):
     base = os.path.splitext(os.path.basename(path))[0]
     body = Template(open(path).read())
+    os.makedirs(MARKUP, exist_ok=True)
     for name, p in PALETTES.items():
-        out = os.path.join(HERE, f"{base}_{name}.mmd")
-        with open(out, "w") as f:
-            f.write(init_line(p) + body.substitute(p))
-        print(out)
+        text = init_line(p) + body.substitute(p)
+        for d in (HERE, MARKUP):
+            out = os.path.join(d, f"{base}_{name}.mmd")
+            with open(out, "w") as f:
+                f.write(text)
+            print(os.path.normpath(out))
