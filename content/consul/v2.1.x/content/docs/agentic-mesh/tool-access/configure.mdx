@@ -5,13 +5,13 @@ description: >-
   Configure the Consul MCP Sidecar on Kubernetes. Register AI agents and MCP servers, set sidecar defaults, and route tool calls through the service mesh.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2026-11-05T19:41:57.000Z
-last_modified: 2026-11-09T21:01:01.000Z
+last_modified: 2026-11-09T21:08:38.000Z
 # END AUTO GENERATED METADATA
 ---
 
 # Configure the MCP Sidecar
 
-This page describes how to configure the MCP Sidecar on Kubernetes. You register AI agents and Model Context Protocol (MCP) servers so that agent tool calls travel through the sidecar. To learn how the sidecar governs tool calls, refer to [Govern tool access with the MCP Sidecar](/consul/docs/agentic-mesh/tool-access).
+This page describes how to configure the MCP Sidecar on Kubernetes. You register AI agents and Model Context Protocol (MCP) servers, define which tools each agent can call, and set up human approval. To learn how the sidecar governs tool calls, refer to [Govern tool access with the MCP Sidecar](/consul/docs/agentic-mesh/tool-access).
 
 @include '../../../global/partials/alerts/beta.mdx'
 
@@ -23,14 +23,15 @@ Complete the following steps:
 
 1. Register AI agents.
 1. Register MCP servers.
-1. Connect agents to MCP servers.
 1. Send tool calls through the sidecar.
+1. Define tool policy.
 1. Configure human approval.
 1. Verify the configuration.
 
 ## Requirements
 
 - Consul Agentic Runtime Fabric installed with the [`ai.agent.image`](/consul/docs/reference/k8s/helm#v-ai-agent-image) Helm value set. Refer to [Install Consul Agentic Runtime Fabric](/consul/docs/agentic-mesh/install).
+- [Transparent proxy](/consul/docs/connect/proxy/transparent-proxy/k8s) mode for AI agent pods. Consul rejects the agent's proxy configuration in any other mode. The Helm chart enables transparent proxy by default, so do not set `consul.hashicorp.com/transparent-proxy` to `false` on agent pods.
 - An AI agent that uses an MCP client.
 - One or more MCP servers that use a supported transport. In-mesh servers run in the service mesh. External servers need a terminating gateway.
 
@@ -55,9 +56,9 @@ The sidecar uses the defaults in the [`AgentConfig`](/consul/docs/reference/k8s/
 | Setting | Purpose | Default | Annotation |
 | --- | --- | --- | --- |
 | MCP connectivity port | The loopback port the agent sends tool calls to, at `/mcp` | `15101` | `consul.hashicorp.com/ai-agent-mcp-port` |
-| Agent interceptor port | The loopback port of the MCP Sidecar interceptor | `21101` | `consul.hashicorp.com/ai-agent-interceptor-port` |
-| Human approval server port | The loopback port that receives approval requests | `16101` | `consul.hashicorp.com/ai-agent-hitl-port` |
-| Human approval timeout | How long the interceptor waits for a verdict before it rejects the call | `60s` | `consul.hashicorp.com/ai-agent-hitl-approval-timeout` |
+| Agent interceptor port | The loopback port of the governance interceptor in the MCP Sidecar. Consul rejects every tool call when nothing listens on it. | `21101` | `consul.hashicorp.com/ai-agent-interceptor-port` |
+| Human approval server port | The loopback port of the approval server that receives approval requests | `16101` | `consul.hashicorp.com/ai-agent-hitl-port` |
+| Human approval timeout | How long Consul waits for a verdict before it rejects the call | `60s` | `consul.hashicorp.com/ai-agent-hitl-approval-timeout` |
 
 The sidecar listens on a Unix domain socket by default. In local development, or where a shared socket volume is unavailable, set `consul.hashicorp.com/ai-agent-addr` to switch the listener to TCP. Refer to [Kubernetes annotations and labels](/consul/docs/reference/k8s/annotation-label) for details.
 
@@ -87,67 +88,125 @@ The registration uses the defaults in the [`McpServerConfig`](/consul/docs/refer
 
 The `McpServerConfig` resource also sets `interceptorPort`, the TCP port the MCP server container listens on inside the pod. It defaults to `21102`.
 
-## Connect agents to MCP servers
-
-1. Add each MCP server as an explicit upstream of the agent. Consul also uses the agent's explicit upstreams to decide the audiences for on-behalf-of token exchange.
-
-   ```yaml
-   template:
-     metadata:
-       annotations:
-         consul.hashicorp.com/connect-service-upstreams: "<mcp-server>:<local-port>"
-   ```
-
-   <!-- TODO: Confirm how the explicit upstream relates to the MCP listener on port 15101. Does the agent call the upstream's local port, or only localhost:15101/mcp with the listener selecting the server? -->
-
-1. Allow the agent to call each MCP server with a service intention.
-
-   <CodeBlockConfig filename="mcp-intentions.yaml">
-
-   ```yaml
-   apiVersion: consul.hashicorp.com/v1alpha1
-   kind: ServiceIntentions
-   metadata:
-     name: <mcp-server>
-   spec:
-     destination:
-       name: <mcp-server>
-     sources:
-       - name: <agent-service>
-         action: allow
-   ```
-
-   </CodeBlockConfig>
-
-   ```shell-session
-   $ kubectl apply --filename mcp-intentions.yaml
-   ```
-
-To reach an MCP server outside the mesh, route the call through a terminating gateway. Refer to [Configure external credential injection](/consul/docs/agentic-mesh/credential-injection/configure). To carry the user's identity to the MCP server, refer to [Configure OAuth clients for AI agents and MCP servers](/consul/docs/agentic-mesh/identity/configure-oauth-clients).
+To reach an MCP server outside the mesh, route the call through a terminating gateway. Refer to [Configure external credential injection](/consul/docs/agentic-mesh/credential-injection/configure).
 
 ## Send tool calls through the sidecar
 
-Configure the agent's MCP client to send requests to the MCP listener on loopback:
+Configure the agent's MCP client to send every tool request to the MCP listener on loopback:
 
 ```plaintext
 http://localhost:15101/mcp
 ```
 
-If you changed the MCP connectivity port, use that port instead.
+If you changed the MCP connectivity port, use that port instead. The agent does not call MCP servers directly. Service intentions decide which server and tool each call can reach.
+
+A tool name with a `<server>__<tool>` prefix names the MCP server. Without that prefix, the server is the destination of the intention that allows the call.
+
+To carry the user's identity to an MCP server, also add the server as an explicit upstream of the agent. Upstreams decide the on-behalf-of token audiences. They do not authorize tool calls. Refer to [On-behalf-of token audiences](/consul/docs/agentic-mesh/identity/configure-oauth-clients#on-behalf-of-token-audiences).
+
+## Define tool policy
+
+Allow each tool call with a service intention. The intention names the MCP server as the destination and the agent as the source. Its allow permission must set the HTTP path to exactly `/mcp` and match the `x-mcp-tool` header, whose value is the tool name. Consul ignores permissions that use a different path or that omit an `x-mcp-tool` match.
+
+1. Set the MCP server's protocol to `http`. The default protocol is `tcp`, and Consul rejects a layer 7 (L7) permission for a TCP destination. Refer to [service defaults](/consul/docs/reference/config-entry/service-defaults).
+1. Create the intention.
+
+The following example allows `billing-agent` to call the `billing.lookup` tool on `billing-tools`:
+
+<Tabs>
+<Tab heading="Kubernetes">
+
+<CodeBlockConfig filename="billing-tools.yaml">
+
+```yaml
+apiVersion: consul.hashicorp.com/v1alpha1
+kind: ServiceDefaults
+metadata:
+  name: billing-tools
+spec:
+  protocol: http
+---
+apiVersion: consul.hashicorp.com/v1alpha1
+kind: ServiceIntentions
+metadata:
+  name: billing-tools
+spec:
+  destination:
+    name: billing-tools
+  sources:
+    - name: billing-agent
+      permissions:
+        - action: allow
+          http:
+            pathExact: /mcp
+            header:
+              - name: x-mcp-tool
+                exact: billing.lookup
+```
+
+</CodeBlockConfig>
+
+```shell-session
+$ kubectl apply --filename billing-tools.yaml
+```
+
+</Tab>
+<Tab heading="HCL">
+
+```hcl
+Kind = "service-defaults"
+Name = "billing-tools"
+Protocol = "http"
+```
+
+```hcl
+Kind = "service-intentions"
+Name = "billing-tools"
+Sources = [
+  {
+    Name = "billing-agent"
+    Permissions = [
+      {
+        Action = "allow"
+        HTTP = {
+          PathExact = "/mcp"
+          Header = [
+            {
+              Name  = "x-mcp-tool"
+              Exact = "billing.lookup"
+            }
+          ]
+        }
+      }
+    ]
+  }
+]
+```
+
+</Tab>
+</Tabs>
+
+To allow several tools in one permission, match `x-mcp-tool` with `Regex`. A `Regex` match is not a general regular expression. Consul expands only one anchored alternation of literal tool names, such as `^(hotel\.search|flight\.search)$`. Any other pattern is one literal tool name, so `^billing\..*$` matches a tool named `billing..*`.
 
 ## Configure human approval
 
-The interceptor sends an approval request for each protected tool to the approval server on port `16101` and waits for a verdict. If no verdict arrives before the approval timeout, the interceptor rejects the call.
+On Kubernetes, Consul installs the human approval filter on every AI agent. Approval runs only for tool requests that include the `x-mcp-hitl` header. Requests without the header skip approval.
+
+For a request that needs approval, Consul sends an approval request to the approval server on port `16101` and waits for a verdict. Consul rejects the call in either of the following cases:
+
+- No verdict arrives before the approval timeout, which defaults to `60s`.
+- The approval server is missing or unreachable.
 
 To change the timeout for every agent, set `spec.defaults.hitl.approvalTimeout` in the `AgentConfig` resource. To change it for one pod, set the `consul.hashicorp.com/ai-agent-hitl-approval-timeout` annotation.
 
-<!-- TODO: Document how operators mark a tool as protected and define per-tool access policy, and the approval server's request and response format. Confirm whether the agent application or the MCP Sidecar runs the approval server. The MCP Sidecar processor source, csl-mcp-sc, is not in consul-enterprise v2.1.0+ent or consul-k8s v2.1.0. -->
+<!-- TODO: Confirm which component sets the x-mcp-hitl header, the agent or the interceptor. If the agent sets it, state that approval is opt-in per request. Document the approval server's request and response format, and whether the agent application or the MCP Sidecar runs the server. The service definition reference calls it "the agent's human-in-the-loop approval server". -->
 
 ## Verify the configuration
 
 1. Send a tool discovery request from the agent to `localhost:15101/mcp`, and confirm that the response lists the tools the agent is allowed to see.
-1. Call a tool, and confirm that the MCP server receives the request.
-1. Call a protected tool without approving it, and confirm that the sidecar rejects the call after the approval timeout.
+1. Call an allowed tool, and confirm that the MCP server receives the request.
+1. Call a tool that no intention allows, and confirm that Consul rejects the call.
+1. Call a tool with the `x-mcp-hitl` header and no approval, and confirm that Consul rejects the call after the approval timeout.
 
 <!-- TODO: Add exact commands and expected output for each check from a test run. -->
 

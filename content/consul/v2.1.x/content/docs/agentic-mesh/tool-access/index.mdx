@@ -5,7 +5,7 @@ description: >-
   Learn how the Consul MCP Sidecar governs AI agent tool calls with per-tool policy, human-in-the-loop approval, and routing to in-mesh and external MCP servers.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2026-11-02T17:11:37+05:30
-last_modified: 2026-11-09T21:01:02.000Z
+last_modified: 2026-11-09T21:08:40.000Z
 # END AUTO GENERATED METADATA
 ---
 
@@ -29,17 +29,18 @@ When you annotate an agent pod with the `ai-agent` role, Consul injects the MCP 
 | --- | --- | --- |
 | Envoy sidecar proxy | Carries mesh traffic and routes approved tool calls | `20000` |
 | MCP listener | Receives the agent's tool calls on loopback at `/mcp` | `15101` |
-| MCP Sidecar interceptor | Reads each JSON-RPC request, applies tool policy, and requests approval for protected tools | `21101`, loopback |
+| MCP Sidecar governance interceptor | The first filter on the MCP listener. Consul rejects every tool call when nothing listens on its port. | `21101`, loopback |
 | On-behalf-of identity processor | Exchanges the user's token for a token scoped to the MCP server. Runs in the MCP Sidecar. | — |
-| Approval server | Receives approval requests from the interceptor and returns a verdict, over plain HTTP on loopback | `16101` |
+| Approval server | Receives approval requests and returns a verdict, over plain HTTP on loopback | `16101` |
 
-<!-- TODO: Confirm who runs the approval server. The install and configure pages say the MCP Sidecar runs it, from the ai.agent.image Helm value description in consul-k8s v2.1.0. consul-enterprise v2.1.0+ent agent/structs/service_ai.go line 150 says "The agent runs a plain-HTTP server on the loopback Port". If the agent application implements it, document the request and response format. -->
+<!-- TODO: Confirm who runs the approval server. The install page says the MCP Sidecar includes it. The ai.agent.image Helm value in consul-k8s v2.1.0 describes the sidecar as "MCP + OBO in one container". The service definition reference calls it "the agent's human-in-the-loop approval server", and consul-enterprise v2.1.0+ent agent/structs/service_ai.go line 150 says "The agent runs a plain-HTTP server on the loopback Port". If the agent application implements it, document the request and response format. -->
 
 ## How it works
 
 1. The agent sends an MCP request, such as a tool discovery request or a tool call, to the MCP listener at `localhost:15101/mcp`.
-1. The MCP Sidecar interceptor evaluates the request. It considers the authenticated workload, delegated user authority when the request carries user context, and the requested MCP method and tool.
-1. If policy requires a human decision for the tool, the interceptor sends an approval request to the approval server and holds the call until it receives a verdict.
+1. The governance interceptor, the first filter on the listener, processes the request.
+1. If the request includes the `x-mcp-hitl` header, Consul sends an approval request to the approval server and holds the call until it receives a verdict.
+1. Consul allows the call only if a service intention allows this agent to call this tool on the MCP server.
 1. When the call carries user context, the on-behalf-of identity processor exchanges the user's token for a token scoped to the MCP server. Refer to [On-behalf-of delegation](/consul/docs/agentic-mesh/identity).
 1. Envoy routes the approved call to the MCP server. An in-mesh server receives it over the service mesh. An external server receives it through a terminating gateway.
 1. The MCP server applies its own identity and tool policy, then runs the tool.
@@ -52,15 +53,16 @@ The sidecar returns a catalog of the tools the agent is allowed to see. A discov
 
 The sidecar bases its decisions on validated request content and trusted configuration only. It does not accept caller-supplied headers as proof of authorization or human approval.
 
-<!-- TODO: Document how operators define per-tool access policy, including which tools require human approval. The policy format lives in the csl-mcp-sc processor codebase, which is not in consul-enterprise v2.1.0+ent or consul-k8s v2.1.0. -->
+You define tool policy with service intentions. Each allow permission names the MCP server as the destination, the agent as the source, the HTTP path `/mcp`, and the tool name in the `x-mcp-tool` header. A call that no intention allows is rejected. Refer to [Define tool policy](/consul/docs/agentic-mesh/tool-access/configure#define-tool-policy).
 
 ## Human approval
 
-For a protected tool, the interceptor sends an approval request to the approval server in the agent pod and blocks the call until it receives a verdict. Your application owns the human interaction, such as showing the request to a person and collecting a decision.
+Human approval runs for tool requests that include the `x-mcp-hitl` header. Requests without the header skip approval. For a request that needs approval, Consul sends an approval request to the approval server in the agent pod and blocks the call until it receives a verdict. Your application owns the human interaction, such as showing the request to a person and collecting a decision.
 
 The approval is bound to the exact action: the operation, destination, arguments, and request challenge. The sidecar rejects the call in the following cases:
 
 - No verdict arrives before the approval timeout, which defaults to `60s`.
+- The approval server is missing or unreachable.
 - The verdict is a rejection.
 - The approval is for a different tool, different arguments, or a different destination.
 
@@ -87,6 +89,7 @@ Sidecar traces also feed [cycle detection](/consul/docs/agentic-mesh/cycle-detec
 - If the agent disconnects, an action that a backend already ran is not cancelled.
 - Cycle detection runs asynchronously. It does not replace tool policy or human approval.
 - Session handling and catalog aggregation can differ between topologies.
+- Consul stores per-agent tool-call rate limits that you set on the service definition, but the sidecar proxy does not enforce them.
 
 <!-- TODO: Name the supported MCP topologies and their session and catalog aggregation behavior. The original page said only that they differ. -->
 
