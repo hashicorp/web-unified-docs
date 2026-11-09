@@ -1,0 +1,343 @@
+---
+layout: docs
+page_title: Get started with Consul Agentic Runtime Fabric
+description: >-
+  Route your first AI agent request through the Consul AI Inference Gateway. Register a model, deploy a gateway, send a request, and confirm the gateway routed it.
+---
+
+<!--
+DRAFT FOR A COLLEAGUE TO FINISH. Read these notes before you edit.
+
+Status: Structure and most steps are written. Open items are marked with TODO
+comments. Do not publish while any TODO in a procedure step remains.
+
+Content type: Usage, from docs/content-guide/templates/usage.mdx. This page is a
+single procedure that starts after installation. A full tutorial that also
+creates the cluster belongs to the Education team in hashicorp/tutorials.
+
+Scope: One model, one AI Inference Gateway, one test client. Model access only.
+MCP Sidecar, OBO delegation, credential injection, and tracing are out of scope
+and appear in Next steps.
+
+To publish:
+1. Resolve every TODO and test every command on a Consul 2.1 cluster.
+2. Rename this file to get-started.mdx.
+3. Add a nav entry to data/docs-nav-data.json directly after Install:
+   { "title": "Get started", "path": "agentic-mesh/get-started" }
+4. Link to this page from the Get started section of agentic-mesh/index.mdx and
+   from Next steps in agentic-mesh/install.mdx.
+5. Run the docs-write-review linter and /quick-style-guide on this file.
+
+Sources for the facts on this page:
+- Model annotations, the openai protocol, the /v1 base path, model_family and
+  the auto model, InferencePoolConfig, InferenceGateway, intentions, and
+  capability routing: agentic-mesh/inference-gateway/configure.mdx.
+- Gateway Consul service name equals the InferenceGateway metadata.name:
+  consul-k8s v2.1.0, control-plane/connect-inject/controllers/ai/inferencegateway_controller.go,
+  func inferenceGatewayName, lines 378 to 380.
+- Gateway service port defaults to 8443, overridden by spec.service.ports[0]:
+  same file, lines 52 to 55 and 805 to 812.
+- Gateway metrics port 9090: same file, lines 57 to 59 and 1304.
+- Routes match path prefix / plus the x-inference-specialization header. A
+  request with no matching capability gets HTTP 503, fail closed:
+  consul-enterprise v2.1.0+ent, agent/xds/inference_gateway.go, lines 54, 870,
+  and 997 to 1005.
+- Requirements and image values: agentic-mesh/install.mdx.
+-->
+
+# Get started with Consul Agentic Runtime Fabric
+
+This page describes how to route your first model request through the [AI Inference Gateway](/consul/docs/agentic-mesh/inference-gateway). You register one model, deploy one gateway, and send a request from a test client in the service mesh. Then you confirm that the gateway routed the request and that it rejects a request it cannot route.
+
+@include '../../../global/partials/alerts/beta.mdx'
+
+@include 'alerts/enterprise-alert.mdx'
+
+## Overview
+
+You complete the following steps:
+
+1. Deploy a model service and register it with Consul.
+1. Define an inference pool and deploy an AI Inference Gateway.
+1. Deploy a test client.
+1. Authorize the client to call the gateway and the gateway to call the model.
+1. Send a request and confirm the result.
+
+This page uses the following names. Replace them to match your environment.
+
+| Object | Name |
+| --- | --- |
+| Model service | `demo-model` |
+| `InferencePoolConfig` | `demo-pool` |
+| `InferenceGateway` and its Consul service | `demo-inference` |
+| Test client | `demo-client` |
+| Kubernetes namespace | `default` |
+
+## Requirements
+
+- Consul Agentic Runtime Fabric installed with `ai.enabled` and `ai.inferenceGateway.enabled` set to `true`. Refer to [Install Consul Agentic Runtime Fabric](/consul/docs/agentic-mesh/install).
+- `kubectl` access to the cluster.
+- A model server that exposes an OpenAI-compatible API, or permission to run one in the cluster.
+
+<!-- TODO: Install page TODO blocks this page. Confirm with the product owner which container registry and image names customers use for the AI Inference Gateway image. Readers cannot complete installation without it. -->
+
+## Deploy and register a model service
+
+Deploy a model server in the mesh and annotate its pod template so that Consul registers it as a model upstream. The following example runs a self-hosted model server that serves an OpenAI-compatible API under `/v1`.
+
+<!-- TODO: Confirm that a self-hosted Ollama server works as a model backend in Consul 2.1, or replace it with a server the product team tests. Ollama serves an OpenAI-compatible API under /v1 on port 11434, which matches the openai protocol and /v1 path defaults. Confirm the image tag, the model name, the resource requests, and how the model gets pulled into the pod. -->
+
+<CodeBlockConfig filename="demo-model.yaml" highlight="31-37">
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: demo-model
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo-model
+spec:
+  selector:
+    app: demo-model
+  ports:
+    - port: 11434
+      targetPort: 11434
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-model
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: demo-model
+  template:
+    metadata:
+      labels:
+        app: demo-model
+      annotations:
+        consul.hashicorp.com/connect-inject: "true"
+        consul.hashicorp.com/ai-role: inference-model
+        consul.hashicorp.com/ai-inference-model-protocol: openai
+        consul.hashicorp.com/ai-inference-model-path: /v1
+        consul.hashicorp.com/service-meta-capabilities: "chat"
+        consul.hashicorp.com/service-meta-priority_chat: "0"
+        consul.hashicorp.com/service-meta-model_family: "<model-name>"
+    spec:
+      serviceAccountName: demo-model
+      containers:
+        - name: demo-model
+          image: "<model-server-image>"
+          ports:
+            - containerPort: 11434
+```
+
+</CodeBlockConfig>
+
+The annotations register the service with the `inference-model` role, declare that it serves the `chat` capability as the primary tier, and name the concrete model. The gateway applies the `model_family` value to any request whose model is `auto`. For every model annotation, refer to [Register model services](/consul/docs/agentic-mesh/inference-gateway/configure#register-model-services).
+
+Apply the manifest:
+
+```shell-session
+$ kubectl apply --filename demo-model.yaml
+```
+
+<!-- TODO: Add a command that confirms Consul registered demo-model with the inference-model role, and show its expected output. Candidates: consul catalog services, or the Consul UI. Confirm which shows the AI role. -->
+
+## Deploy the AI Inference Gateway
+
+Create an inference pool and a gateway that references it. This minimal pool sets the processor to fail closed and does not configure failover, PII protection, or telemetry.
+
+<CodeBlockConfig filename="demo-gateway.yaml">
+
+```yaml
+apiVersion: consul.hashicorp.com/v1alpha1
+kind: InferencePoolConfig
+metadata:
+  name: demo-pool
+  namespace: default
+spec:
+  enabled: true
+  parentRefs:
+    - kind: InferenceGateway
+      name: demo-inference
+  processor:
+    failureMode: closed
+---
+apiVersion: consul.hashicorp.com/v1alpha1
+kind: InferenceGateway
+metadata:
+  name: demo-inference
+  namespace: default
+spec:
+  poolRef:
+    name: demo-pool
+```
+
+</CodeBlockConfig>
+
+Apply the manifest:
+
+```shell-session
+$ kubectl apply --filename demo-gateway.yaml
+```
+
+The controller creates a Deployment, a Service, and an `inference-gateway` configuration entry. Consul registers the gateway under the `InferenceGateway` name, `demo-inference`, on port `8443` by default.
+
+<!-- TODO: Add a command that confirms the gateway is ready, with expected output. Candidates: kubectl get inferencegateway demo-inference, and kubectl rollout status deployment for the gateway. Confirm the Deployment name the controller creates and which status condition means ready. The controller sets a PoolResolved reason, per inferencegateway_controller.go line 50. -->
+
+## Deploy a test client
+
+Deploy a client in the mesh that declares the gateway as an upstream. The client reaches the gateway on a local port, `8080` in this example.
+
+<!-- TODO: Verify that the connect-service-upstreams annotation is the supported way for a workload to reach an AI Inference Gateway. The configure page says agents send requests "over their mesh upstream". Confirm the annotation format for this gateway kind. -->
+
+<CodeBlockConfig filename="demo-client.yaml" highlight="30-31">
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: demo-client
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo-client
+spec:
+  selector:
+    app: demo-client
+  ports:
+    - port: 80
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-client
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: demo-client
+  template:
+    metadata:
+      labels:
+        app: demo-client
+      annotations:
+        consul.hashicorp.com/connect-inject: "true"
+        consul.hashicorp.com/connect-service-upstreams: "demo-inference:8080"
+    spec:
+      serviceAccountName: demo-client
+      containers:
+        - name: demo-client
+          image: curlimages/curl:latest
+          command: ["sleep", "infinity"]
+```
+
+</CodeBlockConfig>
+
+<!-- TODO: Pin the curl image to a specific tag before publishing. Fix the highlight line numbers if the manifest changes. -->
+
+Apply the manifest:
+
+```shell-session
+$ kubectl apply --filename demo-client.yaml
+```
+
+## Authorize traffic
+
+Service intentions decide which workloads can call the gateway and which models the gateway can reach. Allow the client to call the gateway and the gateway to call the model.
+
+<CodeBlockConfig filename="demo-intentions.yaml">
+
+```yaml
+apiVersion: consul.hashicorp.com/v1alpha1
+kind: ServiceIntentions
+metadata:
+  name: demo-inference
+spec:
+  destination:
+    name: demo-inference
+  sources:
+    - name: demo-client
+      action: allow
+---
+apiVersion: consul.hashicorp.com/v1alpha1
+kind: ServiceIntentions
+metadata:
+  name: demo-model
+spec:
+  destination:
+    name: demo-model
+  sources:
+    - name: demo-inference
+      action: allow
+```
+
+</CodeBlockConfig>
+
+Apply the manifest:
+
+```shell-session
+$ kubectl apply --filename demo-intentions.yaml
+```
+
+For more information, refer to [Service intentions](/consul/docs/reference/config-entry/service-intentions).
+
+## Send a request
+
+Send an OpenAI-compatible chat request from the client. The `x-inference-specialization` header names the capability, and the gateway routes the request to the highest-priority model that serves it. The `auto` model tells the gateway to use the model's `model_family` value.
+
+<!-- TODO: Confirm the request path a client sends to the gateway. The processor lives in a separate codebase (consul-ai-apps), not in consul-enterprise or consul-k8s. Envoy matches path prefix / on the gateway, and the model is registered with base path /v1, so /v1/chat/completions is the expected path. Confirm whether the client sends /v1/chat/completions or /chat/completions. -->
+
+```shell-session
+$ kubectl exec deploy/demo-client --container demo-client -- \
+    curl --silent --show-error http://localhost:8080/v1/chat/completions \
+    --header "Content-Type: application/json" \
+    --header "x-inference-specialization: chat" \
+    --data '{"model": "auto", "messages": [{"role": "user", "content": "Say hello in one sentence."}]}'
+```
+
+The gateway returns the model's response in the OpenAI chat completion format.
+
+<!-- TODO: Paste real output from a test run here, trimmed to the fields a reader needs, such as choices[0].message.content and model. Confirm whether the response or its headers identify the model that served the request. -->
+
+## Confirm that the gateway enforces routing
+
+Send the same request without the capability header. The gateway has no route for it and fails closed.
+
+```shell-session
+$ kubectl exec deploy/demo-client --container demo-client -- \
+    curl --silent --output /dev/null --write-out "%{http_code}\n" \
+    http://localhost:8080/v1/chat/completions \
+    --header "Content-Type: application/json" \
+    --data '{"model": "auto", "messages": [{"role": "user", "content": "Say hello in one sentence."}]}'
+```
+
+```plaintext hideClipboard
+503
+```
+
+A request that names a capability no registered model serves also returns `503`.
+
+<!-- TODO: Optionally add a metrics check. The gateway serves Prometheus metrics on port 9090 at /metrics, per inferencegateway_controller.go lines 57 to 59. Metric names come from the processor codebase, consul-ai-apps. Add a port-forward command and name one request counter to look for. -->
+
+## Clean up
+
+Delete the resources you created:
+
+```shell-session
+$ kubectl delete --filename demo-intentions.yaml --filename demo-client.yaml \
+    --filename demo-gateway.yaml --filename demo-model.yaml
+```
+
+## Next steps
+
+- [Configure the AI Inference Gateway](/consul/docs/agentic-mesh/inference-gateway/configure) to add failover tiers, PII protection, and telemetry.
+- [Configure the MCP Sidecar](/consul/docs/agentic-mesh/mcp-sidecar/configure) to govern agent tool calls.
+- [Configure auto-instrumentation](/consul/docs/agentic-mesh/observability/configure-auto-instrumentation) to trace model and tool calls.
+- [Configure cycle detection](/consul/docs/agentic-mesh/cycle-detection/configure) to block agents stuck in loops.
