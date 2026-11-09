@@ -1,0 +1,267 @@
+---
+layout: docs
+page_title: Boundary worker Helm chart examples
+description: >-
+ Configure common Boundary worker deployment scenarios with the Helm chart,
+ including ingress, intermediate, and egress topologies, DNS, and
+ registration.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-06-04T16:48:09-04:00
+last_modified: 2026-08-10T22:18:12.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Worker Helm chart examples
+
+Use these worker configuration variations: ingress, intermediate, and egress topologies, DNS-based addressing, and registration methods, to adapt a worker to your network position. They assume a Boundary controller or HCP Boundary cluster already exists.
+
+Create the namespace once before you install any of the examples:
+
+```shell-session
+$ kubectl create namespace boundary
+```
+
+The chart enables TLS for the operations listener by default. Create the default TLS Secret before you install a worker. Replace the placeholders with paths to a certificate and private key that are valid for the worker operations endpoint:
+
+```shell-session
+$ kubectl create secret tls boundary-worker-tls \
+  --namespace boundary \
+  --cert=<path-to-tls.crt> \
+  --key=<path-to-tls.key>
+```
+
+The examples keep operations TLS enabled and use the chart's `tls.ops.disabled` and `tls.mountPath` values in the HCL. If you change `tls.secretName`, create the TLS Secret with the same name.
+
+<Warning>
+
+The inline AEAD (Authenticated Encryption with Associated Data) worker-auth configuration in these examples is for development and testing only. The worker-auth trust configuration must match the controllers. Use an external KMS for production deployments.
+
+</Warning>
+
+| Topology | Accepts connections from | Typical Service type | Needs `public_addr` |
+| --- | --- | --- | --- |
+| Ingress | Downstream workers and clients | `LoadBalancer` | Yes |
+| Intermediate | Upstream and downstream workers | `LoadBalancer` | Yes |
+| Egress | Upstream or intermediate workers. Connects to targets | `ClusterIP` | No |
+
+## Worker with ingress capabilities
+
+An ingress worker accepts connections from downstream workers and clients. It commonly uses the controller cluster as its upstream and exposes the proxy listener publicly through a `LoadBalancer` Service.
+
+Save the following complete HCL and values as `ingress-values.yaml`:
+
+@include 'helm/worker-ingress-topology.mdx'
+
+Install the worker Helm chart:
+
+```shell-session
+$ helm install boundary-worker hashicorp/boundary-worker \
+  --namespace boundary \
+  --values ingress-values.yaml \
+  --wait
+```
+
+If you do not know the `public_addr` until the load balancer is created, wait for the external address:
+
+```shell-session
+$ kubectl get svc boundary-worker-proxy --namespace boundary --watch
+```
+
+Example output:
+
+<CodeBlockConfig hideClipboard>
+
+```
+NAME                     TYPE           CLUSTER-IP     EXTERNAL-IP     PORT(S)          AGE
+boundary-worker-proxy    LoadBalancer   10.0.0.30      <pending>       9202:31600/TCP   10s
+boundary-worker-proxy    LoadBalancer   10.0.0.30      203.0.113.20    9202:31600/TCP   45s
+```
+
+</CodeBlockConfig>
+
+Update `public_addr` in `ingress-values.yaml`, and then upgrade with the same values file:
+
+```shell-session
+$ helm upgrade boundary-worker hashicorp/boundary-worker \
+  --namespace boundary \
+  --values ingress-values.yaml \
+  --rollback-on-failure \
+  --wait
+```
+
+## Worker with intermediate capabilities
+
+A worker with intermediate capabilities relays traffic between upstream and downstream workers. It requires both `initial_upstreams` and `public_addr`.
+
+Save the following complete HCL and values as `intermediate-values.yaml`:
+
+@include 'helm/worker-intermediate-topology.mdx'
+
+Install the worker Helm chart:
+
+```shell-session
+$ helm install boundary-worker hashicorp/boundary-worker \
+  --namespace boundary \
+  --values intermediate-values.yaml \
+  --wait
+```
+
+If you do not know the `public_addr` until the load balancer is created, wait for the external address (refer to the example output shown in [Worker with ingress capabilities](#worker-with-ingress-capabilities)):
+
+```shell-session
+$ kubectl get svc boundary-worker-proxy --namespace boundary --watch
+```
+
+Update `public_addr` in `intermediate-values.yaml`, then upgrade with the same values file:
+
+```shell-session
+$ helm upgrade boundary-worker hashicorp/boundary-worker \
+  --namespace boundary \
+  --values intermediate-values.yaml \
+  --rollback-on-failure \
+  --wait
+```
+
+## Worker with egress capabilities
+
+A worker with egress capabilities connects to target systems and is usually the final hop before a target. It often does not need a `public_addr`.
+
+@include 'helm/worker-egress-values.mdx'
+
+## Worker with a pre-configured DNS address
+
+If you already control the DNS name for the worker, set `public_addr` during installation. The address must use `host:port` format without a URL scheme. Save the following complete HCL and values as `ingress-values.yaml`:
+
+@include 'helm/worker-ingress-topology.mdx'
+
+Install the worker Helm chart:
+
+```shell-session
+$ helm install boundary-worker hashicorp/boundary-worker \
+  --namespace boundary \
+  --values ingress-values.yaml \
+  --wait
+```
+
+After the Service receives an external address, point the DNS record to that address. This avoids changing the worker HCL after installation, but you remain responsible for ensuring that DNS resolves to the reachable worker endpoint.
+
+## Worker-led registration
+
+@include 'helm/worker-led-registration.mdx'
+
+View logs:
+
+```shell-session
+$ kubectl logs --namespace boundary deployment/boundary-worker-deployment
+```
+
+Keep auth storage enabled for worker-led registration so the generated worker identity persists across pod replacement. When `worker.persistence.authStorage.enabled` is `false`, the chart mounts an `emptyDir` at `/var/lib/boundary`, and the identity does not persist when Kubernetes replaces the pod.
+
+## Controller-led registration
+
+@include 'helm/worker-controller-led-tokens.mdx'
+
+### Token from a Kubernetes Secret
+
+Store the activation token in a Kubernetes Secret and reference it using `secretRefs`. The chart injects the Secret value as the `BOUNDARY_WORKER_CONTROLLER_GENERATED_ACTIVATION_TOKEN` environment variable, which Boundary reads at startup via the `env://` prefix.
+
+Create the Secret before installing the chart:
+
+```shell-session
+$ kubectl create secret generic boundary-worker-secrets \
+  --namespace boundary \
+  --from-literal=worker-controller-generated-activation-token='<activation-token>'
+```
+
+@include 'helm/worker-controller-led-secretrefs.mdx'
+
+Keep auth storage enabled at `/var/lib/boundary` for every controller-led token method so registered credentials persist across pod replacement. When `worker.persistence.authStorage.enabled` is `false`, the chart mounts an `emptyDir` at that path, and the credentials do not persist when Kubernetes replaces the pod.
+
+## KMS (key management system)-backed worker authentication
+
+@include 'helm/worker-kms-auth.mdx'
+
+KMS authentication does not require persistent local auth material. When `worker.persistence.authStorage.enabled` is `false`, the chart mounts an `emptyDir` at `/var/lib/boundary` instead of creating a PVC. Data in that volume does not persist when Kubernetes replaces the pod.
+
+## Enable session recording storage
+
+@include 'helm/worker-recording-storage.mdx'
+
+## Change service ports
+
+You can change the proxy listener port when the HCL listener address and `worker.service.proxy.targetPort` match. Save the following complete HCL and values as `worker-values.yaml`:
+
+```yaml
+worker:
+  config: |
+    disable_mlock = true
+
+    listener "tcp" {
+      address = "0.0.0.0:9222"
+      purpose = "proxy"
+    }
+
+    listener "tcp" {
+      address       = "0.0.0.0:9203"
+      purpose       = "ops"
+      tls_disable   = "{{ .Values.tls.ops.disabled }}"
+      tls_cert_file = "{{ .Values.tls.mountPath }}/tls.crt"
+      tls_key_file  = "{{ .Values.tls.mountPath }}/tls.key"
+    }
+
+    worker {
+      name              = "boundary-worker"
+      public_addr       = "boundary-worker.example.com:9222"
+      initial_upstreams = ["boundary-controller-cluster:9201"]
+
+      tags {
+        type = ["worker", "ingress"]
+      }
+    }
+
+    kms "aead" {
+      purpose   = "worker-auth"
+      aead_type = "aes-gcm"
+      key       = "<base64-encoded-32-byte-key>"
+      key_id    = "<worker-auth-key-id>"
+    }
+
+    events {
+      audit_enabled        = true
+      sysevents_enabled    = true
+      observations_enabled = true
+      sink "stderr" {
+        name        = "all-events"
+        event_types = ["*"]
+        format      = "cloudevents-json"
+      }
+    }
+  service:
+    proxy:
+      port: 9222
+      targetPort: 9222
+    ops:
+      port: 9443
+      targetPort: 9203
+```
+
+Install the worker Helm chart:
+
+```shell-session
+$ helm install boundary-worker hashicorp/boundary-worker \
+  --namespace boundary \
+  --values worker-values.yaml \
+  --wait
+```
+
+The chart does not synchronize proxy settings automatically. The operations listener and `worker.service.ops.targetPort` must remain `9203` because the Deployment's named operations container port and health probes are hardcoded to 9203. You can change the Service-facing `worker.service.ops.port`, as the example shows.
+
+## Troubleshooting
+
+### Session recordings fail to export
+
+If session recording exports fail, confirm that the worker environment provides FFmpeg 5.1.0 or later and the `libsvtav1` codec, as described in [Enable session recording storage](#enable-session-recording-storage).
+
+## More information
+
+To view supported Helm values so that you can configure or update workers, refer to [Worker values](/boundary/docs/deploy/helm-chart/worker-values).

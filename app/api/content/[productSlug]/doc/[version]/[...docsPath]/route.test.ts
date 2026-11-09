@@ -235,7 +235,7 @@ describe('GET /[productSlug]/[version]/[...docsPath]', () => {
 			isLatest: false,
 			releaseStage: 'stable',
 		}
-		const markdownSource = '# Hello World'
+		const markdownSource = '# Hello World\n'
 
 		// Force the version(real-ish) to exist
 		vi.mocked(getProductVersionMetadata).mockReturnValue(Ok(metadata))

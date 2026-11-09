@@ -3,10 +3,18 @@
  * SPDX-License-Identifier: BUSL-1.1
  */
 
+data "github_repository" "public_repository" {
+  name = var.github_repository
+}
+
+data "github_repository" "internal_repository" {
+  name = "${var.github_repository}-internal"
+}
+
 locals {
   repositories = toset([
-    var.github_repository,
-    "${var.github_repository}-internal",
+    data.github_repository.public_repository.name,
+    data.github_repository.internal_repository.name,
   ])
 
   secrets = {
