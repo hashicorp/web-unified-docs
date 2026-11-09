@@ -1,0 +1,205 @@
+---
+layout: docs
+page_title: Tune replication
+description: >-
+  Tune Vault Enterprise replication to keep secondaries streaming write-ahead
+  logs and to reduce Merkle syncs, including hardware, the log shipper buffer,
+  and client behavior.
+---
+
+# Tune replication
+
+@include 'alerts/enterprise-and-hcp.mdx'
+
+Tuning replication means keeping secondaries in the `stream-wals` state and
+reducing how often they fall back to a Merkle sync. The guidance on this page
+assumes that your primary cluster is stable and does not change its active node
+often. If you use integrated storage, refer to the
+[`performance_multiplier`](/vault/docs/configuration/storage/raft) parameter to
+tune leader elections.
+
+To see whether a secondary needs tuning, check its [replication
+status](/vault/docs/enterprise/replication/monitor). A secondary that often
+enters `merkle-diff` or `merkle-sync` is a candidate.
+
+## Check the hardware
+
+Use the same server hardware for the primary and secondary clusters.
+
+Performance secondaries do not receive tokens and leases from the primary, so
+the amount of data that replication ships to them depends mostly on the number
+of secrets engines and namespaces on the primary.
+
+### Disk
+
+Replication depends on disks that can write changes and serve other requests,
+such as reads, at the same time. No baseline IOPS value fits every deployment,
+because the baseline depends on how you use Vault. Refer to [Increase
+IOPS](/vault/docs/internals/recommended-patterns#increase-iops).
+
+Use the following metrics to see how storage performs:
+
+- [`vault.wal.flushReady`](/vault/docs/internals/telemetry/metrics/all#vault-wal-flushready)
+  and
+  [`vault.wal.persistWALs`](/vault/docs/internals/telemetry/metrics/all#vault-wal-persistwals)
+  show back pressure from slow storage. Refer to the [key
+  metrics](/vault/docs/internals/telemetry/key-metrics#replication-metrics) page
+  for the recommended alert thresholds.
+- The storage backend metrics show how fast storage handles reads and writes.
+  Aim to keep the following under 50 milliseconds:
+
+  | Storage backend | Metrics |
+  | --- | --- |
+  | Integrated storage | `vault.raft-storage.transaction`, `vault.raft-storage.get`, `vault.raft.fsm.applyBatch` |
+  | Consul | `vault.consul.transaction`, `vault.consul.get` |
+
+Compare these metrics with the disk metrics from your infrastructure provider.
+In the cloud, choose a disk type with guaranteed performance. Some disk types
+throttle performance after a burst.
+
+### Network
+
+Replication runs over the network between clusters, so latency affects it in
+several ways:
+
+- Latency limits how fast WAL entries stream between clusters.
+- A Merkle diff takes several round trips while the secondary finds the
+  conflicting keys.
+- Forwarded write requests from performance secondaries wait on the round trip
+  to the primary.
+
+Low latency is not always possible, especially across large distances. In that
+case, tune the log shipper.
+
+## Tune the log shipper
+
+The log shipper ships WAL entries from the primary to its secondaries. Vault
+runs two log shippers, one for DR secondaries and one for performance
+secondaries.
+
+Each log shipper is an in-memory buffer. It holds the latest WAL entries, each
+with the hash of the Merkle tree root before Vault applied that entry. A WAL
+entry can batch up to 62 changes. When the buffer is full, Vault removes the
+oldest entry as it adds a new one.
+
+When replication works, WAL entries stream to the secondary and Vault applies
+them in near real time. If a secondary falls behind, it can request an entry for
+a Merkle root that is no longer in the buffer. The secondary then enters
+`merkle-diff` to find the keys that differ, enters `merkle-sync` to fetch and
+apply them, and returns to `stream-wals` after it resolves all conflicting keys.
+
+Two parameters in the [`replication` stanza](/vault/docs/configuration/replication)
+control the buffer:
+
+| Parameter | Default | Controls |
+| --- | --- | --- |
+| `logshipper_buffer_length` | 16384 entries | The number of WAL entries that the buffer can hold. |
+| `logshipper_buffer_size` | 10% of the host memory, or 1 GB if Vault cannot read the host memory | The maximum memory that the log shippers can use. The two log shippers share this size. |
+
+Set both values on each node that ships WAL entries. Each change needs a restart
+of the Vault servers in the cluster.
+
+### Tune the buffer length
+
+Set `logshipper_buffer_length` above the number of conflicting keys that a
+Merkle sync resolves. To find that number:
+
+1. Set the [`log_level`](/vault/docs/configuration#log_level) to `debug` on the
+   secondary cluster. Debug logs have more replication entries. The logs from
+   the secondary are the most useful, although the primary logs help too.
+1. Search the secondary logs for Merkle sync entries that contain
+   `num_conflict_keys`. Several entries can appear, depending on how often
+   Merkle syncs run.
+
+   <CodeBlockConfig hideClipboard>
+
+   ```plaintext
+   [DEBUG] replication: starting merkle sync: num_conflict_keys=129387
+   ```
+
+   </CodeBlockConfig>
+
+1. Use the largest value as a starting point for `logshipper_buffer_length`.
+
+   ```hcl
+   replication {
+     logshipper_buffer_length = 130000
+   }
+   ```
+
+You can also set `logshipper_buffer_length` to a high value, such as one
+million. `logshipper_buffer_size` caps the memory that the buffer uses. If
+replication improves, lower the value in steps until you find the right length.
+
+### Tune the buffer size
+
+`logshipper_buffer_size` stops an over-tuned buffer length from running a server
+out of memory. Most deployments do not need to change it.
+
+### Monitor the log shipper
+
+The following metrics show how the log shipper performs:
+
+| Metric | Description |
+| --- | --- |
+| [`vault.logshipper.streamWALs.missing_guard`](/vault/docs/internals/telemetry/metrics/availability#vault-logshipper-streamwals-missing_guard) | Counts how often Vault began streaming WAL entries without finding a starting index in the Merkle tree. A rising count means secondaries request entries that the buffer no longer holds, so `logshipper_buffer_length` might need to increase. |
+| [`vault.logshipper.streamWALs.guard_found`](/vault/docs/internals/telemetry/metrics/availability#vault-logshipper-streamwals-guard_found) | Counts how often Vault began streaming WAL entries and found a starting index. |
+| [`vault.logshipper.streamWALs.scanned_entries`](/vault/docs/internals/telemetry/metrics/availability#vault-logshipper-streamwals-scanned_entries) | Number of buffer entries that Vault scanned to find the correct entry. It shows how far behind a secondary is on average. |
+| [`vault.logshipper.buffer.length`](/vault/docs/internals/telemetry/metrics/availability#vault-logshipper-buffer-length) | Current length of the buffer, in entries. |
+| [`vault.logshipper.buffer.max_length`](/vault/docs/internals/telemetry/metrics/availability#vault-logshipper-buffer-max_length) | Largest buffer length seen so far, in entries. |
+| [`vault.logshipper.buffer.size`](/vault/docs/internals/telemetry/metrics/availability#vault-logshipper-buffer-size) | Current size of the buffer, in bytes. |
+| [`vault.logshipper.buffer.max_size`](/vault/docs/internals/telemetry/metrics/availability#vault-logshipper-buffer-max_size) | Maximum allowed size of the buffer, in bytes. |
+
+## Reduce the volume of replicated changes
+
+Some client behavior produces a lot of WAL entries. The secondary then lags
+until it needs a Merkle sync. Changing how clients use Vault reduces the amount
+that replication has to ship.
+
+### Renew tokens instead of creating new ones
+
+DR secondaries replicate tokens and leases. A client that creates tokens often,
+for example several times a second, causes many replicated changes. Every token
+has a lease, and each lease renewal or expiry changes the Merkle tree again. An
+expired lease also revokes the token, which adds more changes.
+
+When possible, have clients create a token once and renew its
+[lease](/vault/docs/concepts/lease). As a rule, renew a lease at about 80% of its
+time to live (TTL).
+
+### Use local mounts and path filters
+
+A local mount does not replicate to performance secondaries. If performance
+secondaries do not need every secrets engine, mark the ones they do not need as
+local, or use a [path
+filter](/vault/docs/enterprise/replication/performance#path-filters), to reduce
+the WAL entries that Vault ships to them. Local mounts still replicate to DR
+secondaries.
+
+Auth methods store little replicated data, so marking an auth method as local is
+unlikely to change replication performance. Token creation and leases have a
+much larger effect.
+
+### Limit rapid key updates
+
+If a key changes several times a second, the Merkle trees on the primary and
+the secondary keep changing, and a Merkle sync might never finish. Frequent
+updates include the following:
+
+- Updating values in a KV secret.
+- Adding users to or removing users from auth method roles.
+- Changing values in plugin configurations.
+- Updating identity entities to add or remove users.
+
+Undo logs make log shipping more resilient and help prevent repeated Merkle
+syncs that rapid key changes cause. Vault enables undo logs by default on
+integrated storage. Consul storage needs Consul 1.14 or later. The
+[`vault.core.replication.write_undo_logs`](/vault/docs/internals/telemetry/metrics/all#vault-core-replication-write_undo_logs)
+metric shows whether Vault generates undo logs. A value of `1` means it does.
+
+## Related
+
+- [Monitor replication](/vault/docs/enterprise/replication/monitor)
+- [Troubleshoot Merkle sync loops](/vault/docs/enterprise/replication/troubleshoot/merkle-sync)
+- [`replication` configuration stanza](/vault/docs/configuration/replication)
+- [Well-Architected Framework: Scale and tune performance](/well-architected-framework/design-resilient-systems/scale-and-tune-performance)
