@@ -5,97 +5,110 @@ description: >-
   Learn how the Consul AI Inference Gateway governs agent access to large language models (LLMs) with routing, provider translation, and PII protection.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2026-10-15T16:34:33+05:30
-last_modified: 2026-11-09T20:38:02.000Z
+last_modified: 2026-11-09T20:53:39.000Z
 # END AUTO GENERATED METADATA
 ---
 
 # Govern model access with the AI Inference Gateway
 
-The AI Inference Gateway governs agent access to large language models (LLMs) in
-Consul Agentic Runtime Fabric. It provides a supported inference interface between
-applications and model providers, with policy controls for routing, usage, and
-sensitive data.
+The AI Inference Gateway governs agent access to large language models (LLMs) in Consul Agentic Runtime Fabric. Agents send requests to one gateway instead of to each provider. The gateway routes each request to a model registered in the Consul catalog and applies policy for failover and sensitive data.
 
 @include '../../../global/partials/alerts/beta.mdx'
 
-Agents reach the gateway over their Consul service mesh path. The gateway
-forwards each request to a model registered in the Consul catalog. To learn how
-model, tool, and identity paths fit together, refer to the [Consul Agentic
-Runtime Fabric architecture](/consul/docs/agentic-mesh/architecture).
+To deploy a gateway, refer to [Configure the AI Inference Gateway](/consul/docs/agentic-mesh/model-access/configure).
 
 @include 'alerts/enterprise-alert.mdx'
 
 ## Introduction
 
-Applications send inference requests to a gateway instead of integrating network policy separately for each provider. The gateway accepts an OpenAI-compatible request format and translates supported operations to the selected provider's format. Interface compatibility does not imply support for every provider feature or equivalent behavior between models.
+The gateway accepts OpenAI-compatible requests and translates supported operations to the selected provider's format. Agents reach the gateway over the Consul service mesh, so mesh identity and service intentions control which agents can call it and which models it can reach.
 
-Consul supplies gateway configuration and eligible backend information. Envoy enforces mesh connectivity policy and performs routing and retries. The external processor validates and transforms requests and responses. It does not independently select routes or run a retry loop.
+Three parts of the gateway share the work:
 
-## Deployment prerequisites
-
-To install and enable the AI Inference Gateway, refer to [Install Consul Agentic Runtime Fabric](/consul/docs/agentic-mesh/install). To register models and deploy a gateway, refer to [Configure the AI Inference Gateway](/consul/docs/agentic-mesh/model-access/configure).
-
-## Request processing
-
-The inference path separates processing before and after Envoy selects an upstream:
-
-| Phase | Responsibility |
+| Part | Role |
 | --- | --- |
-| Before routing | Resolve caller workload identity, validate the canonical request, and apply configured request-side data protection. Provide request information used by configured routing policy. |
-| After routing | Translate the request for the selected provider and rewrite the provider request path. |
-| Provider response | Normalize supported responses, process streamed output where supported, apply configured response-side data protection, and capture usage. |
+| Consul | Supplies the gateway configuration and the models eligible for each capability, from the catalog. |
+| Envoy | Enforces mesh policy, selects the upstream model, and retries across failover tiers. |
+| External processor | Validates and transforms requests and responses, applies PII protection, and records usage. It does not select routes or retry. |
 
-The upstream processor uses information about the backend that Envoy selected. A retry against another backend must use that backend's adapter and model information rather than reuse an incompatible translated request.
+## How it works
+
+1. An agent sends an OpenAI-compatible request to the gateway over its mesh upstream.
+1. **Before routing**, the processor resolves the caller's workload identity, validates the request, and applies request-side PII protection.
+1. **Envoy routes** the request to the highest-priority tier of models that serve the requested capability.
+1. **After routing**, the processor translates the request for the selected model's provider and rewrites the provider path.
+1. If the attempt fails with a retriable error, Envoy retries the next tier. The processor translates the request again for that tier's model.
+1. **On the response**, the processor normalizes supported responses, applies response-side PII protection, and records usage before the response returns to the agent.
+
+The [Govern model access](/consul/docs/agentic-mesh/architecture#govern-model-access) diagram on the architecture page shows this flow.
 
 ## Model routing and failover
 
-The gateway routes each request in one of two modes. The `Processor.BodyModelRouting` field in the [`inference-gateway` configuration entry](/consul/docs/reference/config-entry/inference-gateway) selects the mode.
+The gateway routes each request in one of two modes:
 
 | Mode | How the gateway routes | When it applies |
 | --- | --- | --- |
-| Capability routing | Routes on a capability that the caller sends in a request header. | Default, when `BodyModelRouting` is `false`. |
-| Body model routing | Routes on the model named in the request body. | When `BodyModelRouting` is `true`. |
+| Capability routing | On the capability named in the `x-inference-specialization` request header | Default |
+| Body model routing | On the model named in the request body | When body model routing is turned on |
 
-The Consul catalog decides which models serve a capability and in what order. Each model service declares its capabilities and a priority for each one. Service intentions decide which models the gateway can reach.
+The Consul catalog decides which models serve a capability and in what order. Each model service declares its capabilities and a priority for each one. Models with the same priority form a tier and share load. A request whose capability no model serves fails closed.
 
-When two or more models serve a capability, Envoy fails a request over across their priority tiers. The `Failover` block controls which conditions trigger a retry, how many tiers one request can try, and the timeout for each attempt. `RequestTimeout` sets one deadline for the whole request across every attempt.
+When two or more tiers serve a capability, Envoy fails a request over from one tier to the next. You control which errors trigger a retry, how many tiers one request can try, and the timeout for each attempt.
 
-Provider translation changes the wire format. It does not establish that two models have the same capabilities, quality, or data-handling terms.
+Provider translation changes the request format. It does not make two models equivalent in capability, quality, or data-handling terms.
+
+### Supported model protocols
+
+Each model service declares the API dialect it serves: `openai`, `anthropic`, or `passthrough`. The default is `openai`.
+
+<!-- TODO: Describe what the passthrough protocol does, for example whether the gateway forwards requests without translation. Consul source only validates the value, per consul-enterprise v2.1.0+ent agent/structs/service_ai.go line 235. The behavior lives in the processor codebase. -->
+
+To declare the protocol, refer to [Register model services](/consul/docs/agentic-mesh/model-access/configure#register-model-services).
 
 ## Data protection and streaming
 
-Personally identifiable information (PII) processing applies the configured detection and handling rules to request or response content. Request-side controls act before data reaches a provider. Response-side controls act before processed content returns to the caller.
-
-Configure detection in the `PII` block of the `inference-gateway` configuration entry:
+The gateway detects personally identifiable information (PII) in request and response content and handles each match according to your policy. Request-side protection acts before data reaches a provider. Response-side protection acts before content returns to the agent.
 
 - **Detectors.** Use the built-in `api_key`, `credit_card`, `email`, and `ssn` detectors, or define a custom detector with an RE2 regular expression. The `credit_card` detector also checks the Luhn digit.
-- **Actions.** Each match is replaced with a placeholder, masked, blocked, or ignored. The actions are `placeholder`, `mask`, `block`, and `off`.
-- **Scope.** Apply detection to requests, responses, or both. The processor defaults to requests.
-- **Streaming.** `StreamHoldbackBytes` sets how much trailing content the gateway withholds from a streamed response, so that it catches a match split across chunks.
+- **Actions.** Replace each match with a placeholder, mask it, block the request, or ignore it. The actions are `placeholder`, `mask`, `block`, and `off`.
+- **Scope.** Scan requests, responses, or both. The default is requests.
+- **Streaming.** The gateway withholds a configurable number of trailing bytes from a streamed response, so that it catches a match split across chunks.
 
-Streaming introduces an additional boundary: content already delivered to the caller cannot be recalled. Validate detector coverage, buffering behavior, and supported stream formats for your deployment. Do not interpret configured PII controls as a guarantee that all sensitive content is detected.
+Metrics and decision logs record bounded metadata only. They never include prompts, responses, detected PII values, credentials, or provider error text that can contain request content. Payload traces that carry content need separate approval and redaction. Refer to the [auto-instrumentation privacy controls](/consul/docs/agentic-mesh/observability/auto-instrumentation#payload-span-sensitive-data-security).
 
-Operational metrics and decision logs record bounded metadata, not prompts, responses, detected PII values, credentials, or provider error text that can contain request content. Content-bearing payload traces require separate approval and filtering or redaction under the [auto-instrumentation privacy controls](/consul/docs/agentic-mesh/observability/auto-instrumentation#payload-span-sensitive-data-security).
+## Configuration fields
 
-## Automatic instrumentation
+On Kubernetes, you configure a gateway with an `InferencePoolConfig` resource. The controller writes the supported fields to the gateway's [`inference-gateway` configuration entry](/consul/docs/reference/config-entry/inference-gateway).
 
-The AI Inference Gateway is a specialized proxy that [automatically instruments supported model exchanges](/consul/docs/agentic-mesh/observability/auto-instrumentation). Gateway tracing is off by default. Enable it with the `Observability.Tracing` block in the `inference-gateway` configuration entry, as described in [Configure auto-instrumentation](/consul/docs/agentic-mesh/observability/configure-auto-instrumentation#enable-inference-gateway-tracing). Its Envoy and protocol-aware external-processing components generate network and AI payload spans without application tracing SDKs or manual spans. Applications preserve trace context across calls; model usage and responses do not establish business-level task completion.
+| Setting | `InferencePoolConfig` field | Configuration entry field |
+| --- | --- | --- |
+| Processor failure mode. The controller defaults it to `closed`. | `processor.failureMode` | `Processor.FailureMode` |
+| Body model routing | `processor.bodyModelRouting` | `Processor.BodyModelRouting` |
+| Failover tiers, retry conditions, and per-attempt timeout | `routing.fallback` | `Failover` |
+| PII detection, actions, scope, and stream holdback | `policy.pii` | `PII` |
+| Metrics and tracing | `observability` | `Observability` |
+| Deadline for the whole request across every attempt | None in Consul 2.1 | `RequestTimeout` |
 
-Agentic Analytics can use the correlated evidence for [cycle detection](/consul/docs/agentic-mesh/cycle-detection). Detection and agent-scoped enforcement require the analytics, policy, and protection-state path in addition to gateway tracing.
+In Consul 2.1, the controller ignores other `InferencePoolConfig` fields, including `routing.timeout` and `rateLimit`. Refer to the [`InferencePoolConfig` reference](/consul/docs/reference/k8s/ai/inferencepoolconfig).
 
-## Dependencies and boundaries
+## Observability
 
-- Mesh identity and policy establish the workload's permitted network path to the gateway and its backends.
-- Provider adapters define supported request formats, response formats, streaming behavior, and translation limits.
-- The Consul catalog and service intentions define eligible model backends.
-- Managed-model authentication is separate from delegated user identity and external credential injection.
+The gateway [automatically instruments supported model exchanges](/consul/docs/agentic-mesh/observability/auto-instrumentation), so applications do not need tracing SDKs. Tracing is off by default. To turn it on, refer to [Enable AI Inference Gateway tracing](/consul/docs/agentic-mesh/observability/configure-auto-instrumentation#enable-ai-inference-gateway-tracing).
 
-The inference component owns adapter behavior, streaming, routing-rule integration, and PII processing. It does not own tool business logic or determine whether a model response satisfies the user's task.
+Gateway traces also feed [cycle detection](/consul/docs/agentic-mesh/cycle-detection), which needs Agentic Analytics in addition to tracing.
+
+## Limitations
+
+- OpenAI compatibility does not mean every provider feature works, or that models behave the same.
+- PII detection covers the configured detectors only. It does not guarantee that all sensitive content is found. Validate detector coverage and streaming behavior for your deployment.
+- Content already streamed to the agent cannot be recalled.
+- Authentication to managed model providers is separate from on-behalf-of delegation and external credential injection.
+- The gateway does not run tool logic or judge whether a model response completes the user's task.
 
 ## Related documentation
 
+- [Configure the AI Inference Gateway](/consul/docs/agentic-mesh/model-access/configure)
+- [`InferencePoolConfig` reference](/consul/docs/reference/k8s/ai/inferencepoolconfig)
+- [`inference-gateway` configuration entry reference](/consul/docs/reference/config-entry/inference-gateway)
 - [Observability for AI agents](/consul/docs/agentic-mesh/observability)
-- [External credential injection](/consul/docs/agentic-mesh/credential-injection)
-- [On-behalf-of delegation](/consul/docs/agentic-mesh/identity)
-- [Auto-instrumentation](/consul/docs/agentic-mesh/observability/auto-instrumentation)
 - [Cycle detection](/consul/docs/agentic-mesh/cycle-detection)

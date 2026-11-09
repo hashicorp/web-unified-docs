@@ -5,13 +5,13 @@ description: >-
   Configure the Consul AI Inference Gateway on Kubernetes. Register model services, define an inference pool, deploy the gateway, and route by capability.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2026-11-05T19:41:55.000Z
-last_modified: 2026-11-09T20:38:02.000Z
+last_modified: 2026-11-09T20:53:37.000Z
 # END AUTO GENERATED METADATA
 ---
 
 # Configure the AI Inference Gateway
 
-This page describes how to configure the [AI Inference Gateway](/consul/docs/agentic-mesh/model-access) on Kubernetes. You register model services, define an inference pool, and deploy a gateway that routes agent requests to those models.
+This page describes how to configure the AI Inference Gateway on Kubernetes. You register model services, define an inference pool, and deploy a gateway that routes agent requests to those models. To learn how the gateway works, refer to [Govern model access with the AI Inference Gateway](/consul/docs/agentic-mesh/model-access).
 
 @include '../../../global/partials/alerts/beta.mdx'
 
@@ -27,11 +27,26 @@ An AI Inference Gateway on Kubernetes uses three kinds of objects:
 | [`InferencePoolConfig`](/consul/docs/reference/k8s/ai/inferencepoolconfig) | Defines the gateway's processor, failover, PII, and telemetry settings. |
 | [`InferenceGateway`](/consul/docs/reference/k8s/ai/inferencegateway) | Deploys the gateway. It references one `InferencePoolConfig`. |
 
-For each `InferenceGateway`, the controller creates a Deployment, a Service, and an [`inference-gateway` configuration entry](/consul/docs/reference/config-entry/inference-gateway) from the referenced pool.
+For each `InferenceGateway`, the controller creates a Deployment, a Service, and an [`inference-gateway` configuration entry](/consul/docs/reference/config-entry/inference-gateway) from the referenced pool. Consul registers the gateway under the `InferenceGateway` name.
+
+## Workflow
+
+Complete the following steps:
+
+1. Register model services.
+1. Define an inference pool.
+1. Deploy the gateway.
+1. Authorize traffic.
+1. Connect agents to the gateway.
+1. Verify routing.
+
+You can add failover, PII protection, and tracing to the pool at any time. Refer to [Add optional pool settings](#add-optional-pool-settings).
 
 ## Requirements
 
 - Consul Agentic Runtime Fabric installed with `ai.enabled` and `ai.inferenceGateway.enabled` set to `true`. Refer to [Install Consul Agentic Runtime Fabric](/consul/docs/agentic-mesh/install).
+- Envoy 1.38.2 or later. Consul refuses to start an AI Inference Gateway with an older Envoy binary.
+- One or more model services that serve an API in a supported protocol.
 
 ## Register model services
 
@@ -64,7 +79,7 @@ You can also set `consul.hashicorp.com/service-meta-model_family` to name the co
 
 ## Define the inference pool
 
-Create an `InferencePoolConfig` that attaches to the gateway with `parentRefs`. The following example fails over across up to two tiers, masks email addresses in requests and responses, and exports traces.
+Create an `InferencePoolConfig` that attaches to the gateway with `parentRefs`. The following minimal pool sets the processor to fail closed, which is also the default.
 
 <CodeBlockConfig filename="inference-pool.yaml">
 
@@ -81,66 +96,161 @@ spec:
       name: travel-inference
   processor:
     failureMode: closed
-  routing:
-    fallback:
-      retryOn: ["5xx", "connect-failure"]
-      maxTiers: 2
-      perTryTimeout: 30s
-  policy:
-    pii:
-      scope: both
-      defaultAction: mask
-      detectors:
-        - name: email
-  observability:
-    tracing:
-      enabled: true
-      sampleRatio: 1
-      otlp:
-        endpoint: otel-collector:4318
 ```
 
 </CodeBlockConfig>
 
-In Consul 2.1, the controller applies only the `processor`, `routing.fallback`, `policy.pii`, and `observability` fields. Refer to the [`InferencePoolConfig` reference](/consul/docs/reference/k8s/ai/inferencepoolconfig) for the fields that have no effect.
+In Consul 2.1, the controller applies only the `processor`, `routing.fallback`, `policy.pii`, and `observability` fields. Other fields, including `routing.timeout` and `rateLimit`, have no effect. Refer to the [`InferencePoolConfig` reference](/consul/docs/reference/k8s/ai/inferencepoolconfig).
 
 ## Deploy the gateway
 
-Create an `InferenceGateway` that references the pool.
+1. Create an `InferenceGateway` that references the pool.
 
-<CodeBlockConfig filename="inference-gateway.yaml">
+   <CodeBlockConfig filename="inference-gateway.yaml">
+
+   ```yaml
+   apiVersion: consul.hashicorp.com/v1alpha1
+   kind: InferenceGateway
+   metadata:
+     name: travel-inference
+     namespace: default
+   spec:
+     poolRef:
+       name: travel-pool
+   ```
+
+   </CodeBlockConfig>
+
+   The gateway listens on port `8443` by default. To use a different port, set `spec.service.ports`. The first port carries inference traffic.
+
+1. Apply both resources.
+
+   ```shell-session
+   $ kubectl apply --filename inference-pool.yaml --filename inference-gateway.yaml
+   ```
+
+You can also create gateways from Helm with the [`ai.inferenceGateway.gateways`](/consul/docs/reference/k8s/helm#v-ai-inferencegateway-gateways) value. The chart renders one `InferenceGateway` for each entry.
+
+<!-- TODO: Add a command that confirms the gateway is ready, with expected output, such as kubectl get inferencegateway travel-inference. The controller reports a PoolResolved reason when the pool resolves. -->
+
+## Authorize traffic
+
+Service intentions decide which agents can call the gateway and which models the gateway can reach. Create one intention that allows each agent to call the gateway, and one that allows the gateway to call each model service.
+
+<CodeBlockConfig filename="inference-intentions.yaml">
 
 ```yaml
 apiVersion: consul.hashicorp.com/v1alpha1
-kind: InferenceGateway
+kind: ServiceIntentions
 metadata:
   name: travel-inference
-  namespace: default
 spec:
-  poolRef:
-    name: travel-pool
+  destination:
+    name: travel-inference
+  sources:
+    - name: <agent-service>
+      action: allow
+---
+apiVersion: consul.hashicorp.com/v1alpha1
+kind: ServiceIntentions
+metadata:
+  name: <model-service>
+spec:
+  destination:
+    name: <model-service>
+  sources:
+    - name: travel-inference
+      action: allow
 ```
 
 </CodeBlockConfig>
 
-Apply both resources:
-
 ```shell-session
-$ kubectl apply --filename inference-pool.yaml --filename inference-gateway.yaml
+$ kubectl apply --filename inference-intentions.yaml
 ```
 
-You can also create gateways from Helm with the [`ai.inferenceGateway.gateways`](/consul/docs/reference/k8s/helm#v-ai-inferencegateway-gateways) value. The chart renders one `InferenceGateway` for each entry.
+For more information, refer to [Service intentions](/consul/docs/reference/config-entry/service-intentions).
 
-## Authorize traffic
+## Connect agents to the gateway
 
-Service intentions decide which agents can call the gateway and which models the gateway can reach. Create intentions that allow each agent to call the gateway service and allow the gateway service to call each model service. Refer to [Service intentions](/consul/docs/reference/config-entry/service-intentions).
+Agents send OpenAI-compatible requests to the gateway over a mesh upstream. Declare the gateway as an upstream on each agent's pod template, using the `InferenceGateway` name and a local port.
 
-## Route requests
+```yaml
+template:
+  metadata:
+    annotations:
+      consul.hashicorp.com/connect-service-upstreams: "travel-inference:8080"
+```
 
-Agents send OpenAI-compatible requests to the gateway over their mesh upstream. The gateway routes each request in one of two modes:
+<!-- TODO: Verify that the connect-service-upstreams annotation is the supported way for a workload to reach an AI Inference Gateway, and confirm the request path an agent sends, such as /v1/chat/completions. The processor lives in the consul-ai-apps codebase. -->
 
-- **Capability routing.** The default. The caller sets the `x-inference-specialization` request header to a capability, and the gateway sends the request to the highest-priority tier of models that serve that capability.
+The gateway routes each request in one of two modes:
+
+- **Capability routing.** The default. The agent sets the `x-inference-specialization` request header to a capability. The gateway sends the request to the highest-priority tier of models that serve that capability.
 - **Body model routing.** Set `processor.bodyModelRouting` to `true` in the pool. The gateway routes on the model named in the request body.
+
+## Verify routing
+
+1. From an agent pod, send a request with a capability header.
+
+   ```shell-session
+   $ curl --silent http://localhost:8080/v1/chat/completions \
+       --header "Content-Type: application/json" \
+       --header "x-inference-specialization: chat" \
+       --data '{"model": "auto", "messages": [{"role": "user", "content": "Say hello."}]}'
+   ```
+
+   The gateway returns the model's response.
+
+1. Send the same request without the header. The gateway has no route for it and fails closed with HTTP `503`. A request for a capability that no model serves also returns `503`.
+
+<!-- TODO: Paste trimmed output from a test run for both requests. -->
+
+## Add optional pool settings
+
+Add any of the following blocks to the `InferencePoolConfig` `spec`, then apply the pool again.
+
+### Fail over across model tiers
+
+Retry a failed request on the next priority tier. This example retries on server errors and connection failures, tries at most two tiers, and limits each attempt to 30 seconds.
+
+```yaml
+routing:
+  fallback:
+    retryOn: ["5xx", "connect-failure"]
+    maxTiers: 2
+    perTryTimeout: 30s
+```
+
+### Protect PII
+
+Detect and handle personally identifiable information. This example masks email addresses in requests and responses.
+
+```yaml
+policy:
+  pii:
+    scope: both
+    defaultAction: mask
+    detectors:
+      - name: email
+```
+
+For detectors, actions, and streaming settings, refer to [Data protection and streaming](/consul/docs/agentic-mesh/model-access#data-protection-and-streaming).
+
+### Export traces
+
+Send gateway traces to an OpenTelemetry Collector.
+
+```yaml
+observability:
+  tracing:
+    enabled: true
+    sampleRatio: 1
+    otlp:
+      endpoint: otel-collector:4318
+```
+
+For the full setup, refer to [Configure auto-instrumentation](/consul/docs/agentic-mesh/observability/configure-auto-instrumentation).
 
 ## Next steps
 
