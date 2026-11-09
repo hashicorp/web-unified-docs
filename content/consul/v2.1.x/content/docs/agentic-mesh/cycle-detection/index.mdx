@@ -5,17 +5,13 @@ description: >-
   Detect AI agents stuck in tool-call loops with Consul Agentic Runtime Fabric cycle detection, then open an agent-scoped circuit to block unproductive requests.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2026-11-02T21:48:16.000Z
-last_modified: 2026-11-09T20:37:58.000Z
+last_modified: 2026-11-09T21:20:36.000Z
 # END AUTO GENERATED METADATA
 ---
 
 # Cycle detection for AI agents
 
-AI agents can get stuck in loops, calling the same tool with the same arguments
-and getting the same results while every request succeeds. Cycle detection, part
-of Agentic Analytics in Consul Agentic Runtime Fabric, finds these unproductive
-loops so that Consul can then open the affected agent's circuit according to
-behavior policy.
+AI agents can get stuck in loops, calling the same tool with the same arguments and getting the same results while every request succeeds. Cycle detection finds these unproductive loops so that Consul can open the affected agent's circuit and reject its later requests. Agentic Analytics implements cycle detection in Consul Agentic Runtime Fabric.
 
 @include '../../../global/partials/alerts/beta.mdx'
 
@@ -25,150 +21,84 @@ To set it up, refer to [Configure cycle detection](/consul/docs/agentic-mesh/cyc
 
 ## Introduction
 
-Mesh resilience features, such as [circuit
-breaking](/consul/docs/reference/proxy/envoy#proxy-upstream-config-options),
-cannot detect when an agent gets stuck in an unproductive loop because the
-upstream services stay available and responsive. 
+Mesh resilience features, such as [circuit breaking](/consul/docs/reference/proxy/envoy#proxy-upstream-config-options), cannot detect a stuck agent, because the upstream services stay available and responsive. Turning on mesh circuit breaking does not turn on cycle detection.
 
-For example, an agent repeatedly invokes `query_records` with
-`{"filter":"status:active","page":1}` and receives the same records each time.
-Summarizing unchanged results does not advance its task. Cycle detection
-analyzes the workflow's steps and results to find this repetition.
+For example, an agent calls `query_records` with `{"filter":"status:active","page":1}` again and again, and receives the same records each time. Summarizing unchanged results does not move its task forward. Cycle detection analyzes the workflow's steps and results to find this repetition.
 
-The circuit is agent scoped. It contains the affected agent without blocking
-other agents that use the same upstream service.
+The circuit is agent scoped. It stops the affected agent without blocking other agents that use the same upstream service.
 
-Analysis runs asynchronously. Agentic Analytics evaluates trace evidence, and
-Consul's enforcement path checks the resulting protection state before it allows
-later requests.
+## How it works
 
-Note that enabling mesh circuit breaking does not enable cycle detection.
+1. The AI Inference Gateway and MCP Sidecars emit correlated spans that record each tool call's name, arguments, and results, within your content-capture policy. Refer to [Auto-instrumentation for AI agents](/consul/docs/agentic-mesh/observability/auto-instrumentation).
+1. A trace producer, such as a span relay, puts each trace ID on a BullMQ queue as evidence arrives. The same trace ID can be queued several times as the workflow grows.
+1. Agentic Analytics takes trace IDs from the queue, retrieves the spans from the trace backend, and runs the structural and semantic checks. It analyzes an incomplete trace again on a later pass.
+1. Behavior policy evaluates each finding and decides whether to open the agent's circuit.
+1. The decision is published to protection-state storage, with the agent's identity, the policy context, the reason, and how long the decision is valid.
+1. The AI Inference Gateway or MCP Sidecar checks the protection state before it forwards the agent's later requests. While the circuit is open, it rejects them with HTTP `503`.
+
+Analysis runs asynchronously. It never holds the original request open while it waits for evidence. Agentic Analytics runs the passes for one trace one at a time, and analyzes different traces concurrently, up to a configured limit.
+
+The [Contain unproductive repetition](/consul/docs/agentic-mesh/architecture#contain-unproductive-repetition) diagram on the architecture page shows this flow.
+
+<!-- TODO: Map each Agentic Analytics image to its role: csl-ag-ana, csl-ig-pro, and csl-nod-rly. For example, which image is the analytics worker, the span relay, and the decision publisher. -->
 
 ## How cycles are detected
 
-A finding requires both a repeated structure and repeated results. Agentic
-Analytics' cycle detector looks for the same agent repeating a tool call with
-the same argument values within a workflow. It does not only count calls to a
-tool.
+A finding requires both a repeated structure and repeated results. The cycle detector looks for the same agent repeating a tool call with the same argument values within a workflow. It does not just count calls to a tool.
 
 ### Structural check
 
-Agentic Analytics cycle detector reduces the trace to an ordered sequence of
-workflow steps, such as tool calls, delegations, and summaries. It finds maximal
-runs of a repeating unit and collapses duplicate matches. Runs that meet the
-configured minimum repetition count go to the semantic check.
+The detector reduces the trace to an ordered sequence of workflow steps, such as tool calls, delegations, and summaries. It finds the longest runs of a repeating unit and collapses duplicate matches. Runs that meet the configured minimum repetition count go to the semantic check.
 
-A repeating unit can be one step, such as `query_records` with the same filter
-and page values. It can also be two steps, such as a call followed by a summary.
-For a multi-step unit, the detector compares each tool call's arguments with the
-same call in the other repetitions.
+A repeating unit can be one step, such as `query_records` with the same filter and page values. It can also be several steps, such as a call followed by a summary. For a multi-step unit, the detector compares each tool call's arguments with the same call in the other repetitions.
 
 ### Semantic check
 
-Agentic Analytics cycle detector compares outputs at the same position across
-repetitions. Each retrieval result is compared with the other retrieval results,
-and each summary with the other summaries. A retrieval result is never compared
-with a summary.
+The detector compares outputs at the same position across repetitions. It compares each retrieval result with the other retrieval results, and each summary with the other summaries. It never compares a retrieval result with a summary.
 
-Outputs are reduced to their values before comparison, so shared field names
-alone do not make different results match. Identical outputs match directly.
-Otherwise, Agentic Analytics cycle detector compares text embeddings against a
-configurable similarity threshold.
+The detector reduces outputs to their values before comparing them, so shared field names alone do not make different results match. Identical outputs match directly. Otherwise, the detector compares text embeddings against a configurable similarity threshold.
 
-Agentic Analytics cycle detector reports a candidate as unproductive when at
-least one position repeats the same or a sufficiently similar result across
-passes. Not every position has to stay unchanged. Review this behavior for
-workflows with deliberately stable intermediate results.
+The detector reports a run as unproductive when at least one position repeats the same or a sufficiently similar result across passes. Not every position has to stay unchanged. Review this behavior for workflows with intentionally stable intermediate results.
 
 ### What is not a cycle
 
-- An agent that changes the `page` argument and retrieves new records makes
-  progress, even though it repeats the tool name.
-- A call with unchanged arguments can return new data when the underlying state
-  changes.
-- A structural match alone does not open the circuit. The semantic check must
-  also match.
+- An agent that changes the `page` argument and retrieves new records makes progress, even though it repeats the tool name.
+- A call with unchanged arguments can return new data when the underlying state changes.
+- A structural match alone does not open the circuit. The semantic check must also match.
 
-A finding is evidence for behavior policy. It does not prove that the whole task
-failed or that all repeated work was unnecessary.
-
-## How detection and enforcement work
-
-| Stage | Responsibility |
-| --- | --- |
-| Proxy auto-instrumentation | The AI Inference Gateway and MCP Sidecars emit correlated spans with tool identity and approved argument and result evidence. |
-| Trace producer | Queue trace IDs on a BullMQ queue as workflow evidence arrives. |
-| Trace backend | Store spans and make them queryable. |
-| Agentic Analytics | Consume queued trace IDs, fetch spans, and run the structural and semantic checks. |
-| Behavior policy | Evaluate findings and decide whether to open the agent's circuit. |
-| Protection-state storage | Publish the agent-scoped circuit state, its reason, and its validity period. |
-| Enforcement processor | Check applicable state before forwarding a later request through the Consul data plane. |
-
-The queue carries trace IDs, and the worker retrieves spans from the trace
-backend. A trace ID can be queued several times as the workflow grows. Agentic
-Analytics' cycle detector runs single traces serially and different traces run
-concurrently up to the configured limit.
-
-Analysis does not hold the original application request open while it waits
-for evidence. When a trace is not yet complete, Agentic
-Analytics cycle detector analyzes it again during a later pass.
-
-When the circuit is open, the enforcement processor rejects later applicable
-requests from the agent with HTTP `503`. It does not cancel calls that already
-passed enforcement or reverse completed tool actions.
-
-Agentic Analytics cycle detector depends on
-[auto-instrumentation](/consul/docs/agentic-mesh/observability/auto-instrumentation) for its
-evidence. Applications preserve trace context across calls and supply business
-outcomes that the proxies cannot see. Missing context or unsupported traffic
-limits what the detector can assess.
+A finding is evidence for behavior policy. It does not prove that the whole task failed or that all repeated work was unnecessary.
 
 ## Protection state and recovery
 
 | State | Behavior |
 | --- | --- |
-| Closed | Requests proceed when they satisfy the other applicable controls. |
-| Open | Requests from the affected agent are rejected. |
+| Closed | The agent's requests proceed when they pass the other controls. |
+| Open | The gateway or sidecar rejects the agent's requests with HTTP `503`. |
 
-Store the agent identity, policy context, reason, and validity period with each
-decision, so enforcement can tell applicable protection from stale state.
+Each published decision records the agent's identity, the policy context, the reason, and a validity period, so that enforcement can tell current protection from stale state.
 
-Recovery follows the configured expiry or reset rules. A time-to-live (TTL)
-expires the state automatically, and an operator reset is a separate action.
-Neither shows that the agent's behavior is fixed. Do not assume a half-open
-probe state unless the deployed component supports it.
+A circuit closes again in one of two ways:
+
+- **Expiry.** A time-to-live (TTL) closes it automatically.
+- **Reset.** An operator resets it.
+
+Neither shows that the agent's behavior is fixed. Opening the circuit does not cancel calls that already passed enforcement or reverse completed tool actions.
+
+<!-- TODO: Confirm whether circuits support a half-open state that admits probe requests. The original page said not to assume one "unless the deployed component supports it". Document the reset procedure. -->
 
 ## Limitations
 
-- **Delay**. Detection follows execution, trace export, indexing, analysis, and
-  state publication. The agent can act again before enforcement sees an open
-  circuit. Cycle detection cannot prevent a first unsafe action, recall an
-  in-flight call, or undo a completed side effect.
-- **Missing evidence**. Missing spans, sampling, unavailable output, redaction,
-  and analysis backlog can prevent or delay a finding. Trace export and indexing
-  can lag behind queue delivery. An empty trace or the absence of a finding does
-  not show that a workflow is healthy. Monitor analysis lag, failed jobs, trace
-  availability, state freshness, circuit transitions, and enforcement
-  rejections.
-- **Dependency failures**. No universal fail-open or fail-closed choice exists
-  for unavailable analytics or state storage. Define the behavior for each
-  workload.
-- **Scope**. Agentic Analytics owns cycle analysis, and Consul acts on its
-  findings through behavior policy and agent-scoped enforcement. Cycle detection
-  supplements synchronous authorization, usage limits, human approval, and
-  application validation. It does not replace them, and it does not prove model
-  quality or task completion.
-- **Application responsibility**. Applications own planning, tool business
-  logic, and recovery from side effects.
-- **Privacy**. Trace evidence, comparison inputs, and findings stay subject to
-  telemetry privacy, access control, and retention requirements. Do not copy
-  sensitive comparison values into circuit reasons, metrics, or logs.
+- **Delay.** Detection follows execution, trace export, indexing, analysis, and state publication. The agent can act again before enforcement sees an open circuit. Cycle detection cannot prevent a first unsafe action, recall an in-flight call, or undo a completed side effect.
+- **Missing evidence.** Missing spans, sampling, unavailable output, redaction, and analysis backlog can prevent or delay a finding. Trace export and indexing can lag behind the queue. An empty trace, or no finding, does not show that a workflow is healthy. Monitor analysis lag, failed jobs, trace availability, state freshness, circuit transitions, and enforcement rejections.
+- **Dependency failures.** No single fail-open or fail-closed choice fits every workload when analytics or state storage is unavailable. Choose the behavior for each workload.
+- **Scope.** Cycle detection adds to synchronous authorization, usage limits, human approval, and application validation. It does not replace them, and it does not measure model quality or task completion.
+- **Application responsibility.** Applications own planning, tool business logic, and recovery from side effects. Applications must also forward trace context, or the detector cannot connect a workflow's steps.
+- **Privacy.** Trace evidence, comparison inputs, and findings are subject to your telemetry privacy, access control, and retention rules. Do not copy sensitive comparison values into circuit reasons, metrics, or logs.
 
 ## Related documentation
 
 - [Configure cycle detection](/consul/docs/agentic-mesh/cycle-detection/configure)
-- [Auto-instrumentation](/consul/docs/agentic-mesh/observability/auto-instrumentation)
+- [Auto-instrumentation for AI agents](/consul/docs/agentic-mesh/observability/auto-instrumentation)
 - [Observability for AI agents](/consul/docs/agentic-mesh/observability)
-- [MCP Sidecar](/consul/docs/agentic-mesh/tool-access)
-- [AI Inference Gateway](/consul/docs/agentic-mesh/model-access)
-- [Consul Agentic Runtime Fabric](/consul/docs/agentic-mesh)
+- [Govern tool access with the MCP Sidecar](/consul/docs/agentic-mesh/tool-access)
+- [Govern model access with the AI Inference Gateway](/consul/docs/agentic-mesh/model-access)
