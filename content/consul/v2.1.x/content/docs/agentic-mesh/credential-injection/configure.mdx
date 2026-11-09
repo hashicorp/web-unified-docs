@@ -2,24 +2,45 @@
 layout: docs
 page_title: Configure external credential injection
 description: >-
-  Configure Consul terminating gateways to inject Vault-backed credentials into approved external HTTP calls, such as calls to external MCP servers and APIs.
+  Configure Consul terminating gateways to inject credentials from Vault or a Kubernetes Secret into approved external HTTP calls to MCP servers and APIs.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2026-11-05T19:41:53.000Z
-last_modified: 2026-11-09T20:37:54.000Z
+last_modified: 2026-11-09T20:47:09.000Z
 # END AUTO GENERATED METADATA
 ---
 
 # Configure external credential injection
 
-This page describes how to configure a terminating gateway on Kubernetes to inject a credential into approved external HTTP calls. To learn how credential injection works, refer to [External credential injection](/consul/docs/agentic-mesh/credential-injection).
+This page describes how to configure a terminating gateway on Kubernetes to inject a credential into approved external HTTP calls. To learn how credential injection works, refer to [Inject external credentials with the Credential Injection Processor](/consul/docs/agentic-mesh/credential-injection).
 
 @include '../../../global/partials/alerts/beta.mdx'
 
 @include 'alerts/enterprise-alert.mdx'
 
+## Workflow
+
+Complete the following steps:
+
+1. Choose a credential source.
+1. Configure the gateway deployment.
+1. Store each credential.
+1. Register the external service.
+1. Configure the terminating gateway routes.
+1. Authorize callers.
+1. Verify the configuration.
+
 ## Requirements
 
 - Consul Agentic Runtime Fabric installed with `ai.enabled` set to `true` and credential injection enabled on a terminating gateway. Refer to [Install Consul Agentic Runtime Fabric](/consul/docs/agentic-mesh/install).
+- A cluster that is not OpenShift. The Helm chart fails to render credential injection when `global.openshift.enabled` is `true`.
+- An external service that serves HTTP over TLS, and its CA certificate.
+- For the Vault source:
+  - Vault reachable from the terminating gateway over HTTPS.
+  - A KV secrets engine for the credentials.
+  - Vault Kubernetes authentication configured so that the terminating gateway's service account can log in. The Vault Agent presents a projected service account token with the audience set by `credentialInjection.tokenAudience`, which defaults to `vault`.
+- For the Kubernetes Secret source, permission to create a Secret in the terminating gateway's namespace.
+
+<!-- TODO: Add the Vault policy the gateway's Vault role needs, for example read access on the credential paths. Confirm with the product owner. -->
 
 ## Choose a credential source
 
@@ -30,38 +51,106 @@ The [`terminatingGateways.defaults.credentialInjection.source`](/consul/docs/ref
 | `vault` | Default. A Vault Agent sidecar authenticates to Vault with the gateway's Kubernetes service account and renders each credential to a memory-backed volume that only the Credential Injection Processor reads. |
 | `kubernetesSecret` | Consul mounts the Kubernetes Secret named in `secretName` read-only into the Credential Injection Processor. Each data key in the Secret is a credential file for one binding. |
 
+<Warning>
+
 Kubernetes Secrets are a weaker posture than Vault. They are base64-encoded at rest and readable through the Kubernetes API by anyone with RBAC access. Enable etcd encryption at rest and scope RBAC before you use the `kubernetesSecret` source.
+
+</Warning>
 
 ## Configure the gateway deployment
 
-Set the credential injection Helm values for the terminating gateway. The processor and Vault Agent read their configuration from ConfigMaps that you create in the gateway's namespace.
+1. Set the credential injection Helm values for the terminating gateway. The following example uses the Vault source.
 
-<CodeBlockConfig filename="values.yaml">
+   <CodeBlockConfig filename="values.yaml">
 
-```yaml
-terminatingGateways:
-  enabled: true
-  defaults:
-    credentialInjection:
-      enabled: true
-      source: vault
-      processorImage: "<credential-injection-image>"
-      vaultAgentImage: "<vault-agent-image>"
-      processorConfigMap: "<processor-configmap-name>"
-      vaultAgentConfigMap: "<vault-agent-configmap-name>"
-      vaultAddress: "<vault-address>"
-      vaultCAConfigMap: "<vault-ca-configmap-name>"
-```
+   ```yaml
+   terminatingGateways:
+     enabled: true
+     defaults:
+       credentialInjection:
+         enabled: true
+         source: vault
+         processorImage: "<credential-injection-image>"
+         vaultAgentImage: "<vault-agent-image>"
+         processorConfigMap: "<processor-configmap-name>"
+         vaultAgentConfigMap: "<vault-agent-configmap-name>"
+         vaultAddress: "<vault-address>"
+         vaultCAConfigMap: "<vault-ca-configmap-name>"
+   ```
 
-</CodeBlockConfig>
+   </CodeBlockConfig>
 
-<!-- TODO: Document the contents of the processor and Vault Agent ConfigMaps, including how a binding ID maps to a Vault secret path. Source is not available in consul-k8s v2.1.0. -->
+   For the Kubernetes Secret source, set `source: kubernetesSecret` and `secretName` to the name of your Secret, and omit the Vault values. For every setting, refer to [`terminatingGateways.defaults.credentialInjection`](/consul/docs/reference/k8s/helm#v-terminatinggateways-defaults-credentialinjection) in the Helm chart reference.
 
-For every setting, refer to [`terminatingGateways.defaults.credentialInjection`](/consul/docs/reference/k8s/helm#v-terminatinggateways-defaults-credentialinjection) in the Helm chart reference.
+1. Create the ConfigMaps in the terminating gateway's namespace. The chart mounts each one into the gateway pod.
+
+   | ConfigMap | Helm value | Source | Mounted at | Required key |
+   | --- | --- | --- | --- | --- |
+   | Processor configuration | `processorConfigMap` | Both | `/consul/processor-config` in the `camp-auth-processor` container | `config.json`, which the processor reads at startup |
+   | Vault Agent configuration | `vaultAgentConfigMap` | `vault` | `/consul/vault-agent-config` in the Vault Agent containers | Your Vault Agent configuration |
+   | Vault CA certificate | `vaultCAConfigMap` | `vault` | `/consul/vault-ca` | `ca.crt` |
+
+   The Vault Agent reads its Kubernetes service account token from `/consul/vault-token/token` and renders credentials to `/consul/vault-rendered`. The processor reads credentials from `/consul/vault-rendered`. With the Kubernetes Secret source, Consul mounts the Secret at that same path.
+
+   <!-- TODO: Document the processor config.json schema, including how each binding ID maps to a credential file and its authentication header. Add a complete Vault Agent configuration example that renders each binding's credential to /consul/vault-rendered. The schema lives in the csl-au-inj processor codebase, which is not in consul-k8s v2.1.0. -->
+
+1. Install or upgrade Consul with your values file.
+
+   ```shell-session
+   $ helm upgrade --install consul hashicorp/consul --namespace consul --values values.yaml
+   ```
 
 ## Store the credential
 
-Store each binding's credential in Vault as a KV secret. For the required fields and the rotation rules, refer to [Credential delivery](/consul/docs/agentic-mesh/credential-injection#credential-delivery).
+<Tabs>
+<Tab heading="Vault">
+
+Store each binding's credential as a Vault KV secret with the following fields:
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `value` | Yes | The provider credential. It must be non-empty and must not contain whitespace or control characters. |
+| `rotation_deadline` | Yes | UTC timestamp in RFC 3339 format, ending in `Z`, by which you must rotate the credential. |
+| `expires_at` | No | UTC timestamp in RFC 3339 format, ending in `Z`, when the provider credential expires. |
+
+```shell-session
+$ vault kv put <kv-mount>/<credential-path> \
+    value="<credential>" \
+    rotation_deadline="2027-01-31T00:00:00Z"
+```
+
+<!-- TODO: Replace <kv-mount>/<credential-path> with the path convention the Vault Agent template uses for a binding, once the ConfigMap schema is documented. -->
+
+Each write to the secret creates a new KV version, which the processor treats as a new credential generation. To rotate the credential, write the secret again with the new value and a new rotation deadline. The processor picks up the change without a gateway restart.
+
+</Tab>
+<Tab heading="Kubernetes Secret">
+
+Create a Secret in the terminating gateway's namespace with one data key for each binding.
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: <secret-name>
+type: Opaque
+stringData:
+  <credential-file-name>: <credential-file-contents>
+```
+
+<!-- TODO: Document the credential file name for a binding and the file format, including how to supply rotation_deadline and expires_at. Confirm how rotation works when you update the Secret. The format lives in the csl-au-inj processor codebase. -->
+
+</Tab>
+</Tabs>
+
+## Register the external service
+
+Register the external service in the Consul catalog so that the terminating gateway can route to it. If ACLs are enabled, update the terminating gateway's ACL role so that it can write to the service. Refer to the following sections of [Terminating gateways on Kubernetes](/consul/docs/register/external/terminating-gateway/k8s):
+
+- [Register external services with Consul](/consul/docs/register/external/terminating-gateway/k8s#register-external-services-with-consul)
+- [Update terminating gateway ACL role if ACLs are enabled](/consul/docs/register/external/terminating-gateway/k8s#update-terminating-gateway-acl-role-if-acls-are-enabled)
+
+The external service must use an HTTP-based protocol. Set the protocol in a [service defaults configuration entry](/consul/docs/reference/config-entry/service-defaults).
 
 ## Configure the terminating gateway routes
 
@@ -100,9 +189,53 @@ Apply the resource:
 $ kubectl apply --filename terminating-gateway.yaml
 ```
 
-## Monitor credential health
+## Authorize callers
 
-The Credential Injection Processor logs a `credential_reload` event for each binding with the accepted `kv_version` and an outcome. It also periodically logs a `credential_status` event that reports whether each binding is usable. For details, refer to [Readiness and rotation](/consul/docs/agentic-mesh/credential-injection#readiness-and-rotation).
+1. Allow each caller to reach the external service with a service intention. For an MCP tool call, the caller is the AI agent service whose MCP Sidecar routes the request.
+
+   <CodeBlockConfig filename="external-mcp-intentions.yaml">
+
+   ```yaml
+   apiVersion: consul.hashicorp.com/v1alpha1
+   kind: ServiceIntentions
+   metadata:
+     name: external-mcp
+   spec:
+     destination:
+       name: external-mcp
+     sources:
+       - name: <caller-service>
+         action: allow
+   ```
+
+   </CodeBlockConfig>
+
+   ```shell-session
+   $ kubectl apply --filename external-mcp-intentions.yaml
+   ```
+
+1. Define the external service as an upstream for each caller. Refer to [Define the external services as upstreams for services in the mesh](/consul/docs/register/external/terminating-gateway/k8s#define-the-external-services-as-upstreams-for-services-in-the-mesh).
+
+## Verify the configuration
+
+1. Check that each binding has a usable credential. The terminating gateway Deployment is named `<release-name>-<gateway-name>`, such as `consul-terminating-gateway`.
+
+   ```shell-session
+   $ kubectl logs deployment/consul-terminating-gateway --container camp-auth-processor --namespace consul
+   ```
+
+   The processor logs the following events without secret values:
+
+   | Event | When | What to check |
+   | --- | --- | --- |
+   | `credential_reload` | Each time a binding's credential changes | The accepted `kv_version` and an outcome of `accepted`. Other outcomes are `unavailable`, `expired`, and `rejected`. |
+   | `credential_status` | Periodically | Whether each binding is usable and how many seconds of validity remain |
+
+   <!-- TODO: Paste a sample credential_status log line from a test run, with the binding ID and fields a reader should check. -->
+
+1. Send a request from a caller to the external service through its upstream. The external service receives the configured authentication header. If the binding has no usable credential, the gateway fails the call closed.
+
+Monitor the `credential_status` event to rotate each credential before its deadline.
 
 ## Next steps
 

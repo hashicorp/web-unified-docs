@@ -1,52 +1,52 @@
 ---
 layout: docs
-page_title: External credential injection
+page_title: Inject credentials with the Credential Injection Processor
 description: >-
-  Learn how a Consul terminating gateway injects Vault-backed credentials into approved external HTTP MCP and API calls, with trusted bindings and required TLS.
+  Learn how a Consul terminating gateway adds a credential from Vault or a Kubernetes Secret to approved external MCP and API calls, so agents never hold secrets.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2026-10-15T16:34:33+05:30
-last_modified: 2026-11-09T20:37:56.000Z
+last_modified: 2026-11-09T20:47:11.000Z
 # END AUTO GENERATED METADATA
 ---
 
-# External credential injection
+# Inject external credentials with the Credential Injection Processor
 
-External credential injection authenticates approved external HTTP calls at a Consul terminating gateway. External Model Context Protocol (MCP) servers are the primary use case, and the same mechanism applies to other approved external HTTP APIs that accept a bearer token or API key, such as a hosted model inference API. Provider credentials remain at the egress point that needs them instead of being distributed to agent applications.
+External credential injection authenticates approved external HTTP calls at a Consul terminating gateway. Provider credentials stay at the gateway that needs them instead of being distributed to agent applications. External Model Context Protocol (MCP) servers are the primary use case. The same mechanism works for other external HTTP APIs that accept a bearer token or API key, such as a hosted model inference API.
 
 @include '../../../global/partials/alerts/beta.mdx'
 
-You enable credential injection in a terminating gateway configuration entry. A Vault Agent sidecar delivers each credential to the gateway's local Credential Injection Processor. To learn how model, tool, and identity paths fit together, refer to the [Consul Agentic Runtime Fabric architecture](/consul/docs/agentic-mesh/architecture).
+The Credential Injection Processor implements this feature. It runs as a sidecar on the terminating gateway and receives credentials from a Vault Agent sidecar or a Kubernetes Secret. To configure it, refer to [Configure external credential injection](/consul/docs/agentic-mesh/credential-injection/configure).
 
 @include 'alerts/enterprise-alert.mdx'
 
 ## Introduction
 
-External MCP services and APIs can require a bearer token or API-key header even when callers already have Consul workload identities. These credentials solve a different problem from mesh authorization: they authenticate the gateway to the external provider.
+External MCP servers and APIs often require a bearer token or API key, even when the caller already has a Consul workload identity. Mesh authorization and provider credentials solve different problems. Mesh authorization decides which workloads can call the external service. The provider credential authenticates the gateway to the external provider.
 
-The architecture separates two inputs:
+Consul and the credential source each supply part of the request:
 
-| Input | Owner | Information supplied |
-| --- | --- | --- |
-| Route and authorization | Consul configuration plane | Approved destination, mesh policy, external TLS settings, and a non-secret credential-binding identifier. |
-| Credential delivery | Vault and the gateway-local credential runtime | Credential material for the fixed binding, with validity and rotation information. |
+| Supplier | What it provides |
+| --- | --- |
+| Consul configuration | The approved destination, mesh policy, external TLS settings, and a non-secret credential-binding identifier |
+| Vault or a Kubernetes Secret | The credential for each binding, with its rotation deadline and expiry |
 
-Consul does not fetch the provider credential from Vault for inclusion in proxy configuration. Vault does not publish provider secrets into Consul. A gateway-local Credential Injection Processor connects the trusted route binding to the delivered credential.
+Consul never stores provider credentials in its configuration, and Vault never publishes them to Consul. The Credential Injection Processor joins the binding from Consul with the credential from the source at the moment of the call.
 
-## Deployment prerequisites
+## How it works
 
-To install and enable external credential injection, refer to [Install Consul Agentic Runtime Fabric](/consul/docs/agentic-mesh/install). To configure gateway routes and credentials, refer to [Configure external credential injection](/consul/docs/agentic-mesh/credential-injection/configure).
+1. An in-mesh caller sends a request to the external service through a configured upstream. The caller can be the MCP Sidecar routing an approved tool call, or an agent workload calling an external API.
+1. The service mesh carries the request to the terminating gateway. Workload authentication and service intentions apply before any credential is added.
+1. Consul writes the credential-binding identifier into the gateway's route configuration. Envoy passes the identifier to the local Credential Injection Processor.
+1. The processor removes any authentication or binding headers the caller sent, then sets the one authentication header configured for the binding. Envoy rejects any other change from the processor, so the processor cannot alter the destination, path, or route.
+1. The gateway connects to the external service over TLS and verifies its certificate against the configured CA and server name. The gateway forwards the request only when both the route and its credential are usable.
 
-## Authorized request path
+The [Govern tool access](/consul/docs/agentic-mesh/architecture#govern-tool-access) diagram on the architecture page shows this path for an MCP tool call.
 
-An in-mesh caller, such as the MCP Sidecar routing an approved tool request or an agent workload calling an external API, reaches the external service through a configured upstream. Mesh connectivity carries the call to the terminating gateway, where workload authentication and applicable intentions precede credential injection.
+### Requirements for each external service
 
-Consul writes the credential-binding identifier into the terminating gateway's route configuration, and Envoy passes it to the local Credential Injection Processor. The processor removes any authentication or binding headers that the caller sent, then sets only the configured authentication header. Envoy rejects any other header mutation from the processor, so the processor cannot change the destination, path, or route.
-
-The terminating gateway connects to the external service over TLS and verifies the server certificate against the configured CA and server name. TLS is required: Consul rejects a terminating-gateway configuration that enables credential injection for a service without a CA file and a DNS server name (SNI), so a provider credential is never sent over plaintext. The external service must also use an HTTP-based protocol. The gateway forwards the authenticated request only when both the route and its credential are usable.
-
-### Supported authentication headers
-
-Each binding injects exactly one of the following headers:
+- **TLS.** Consul rejects a terminating gateway configuration that enables credential injection for a service without a CA file and a DNS server name (SNI). A provider credential is never sent over plaintext.
+- **HTTP.** The external service must use an HTTP-based protocol.
+- **One supported header.** Each binding injects exactly one of the following headers:
 
 | Header | Value sent to the external service |
 | --- | --- |
@@ -56,58 +56,61 @@ Each binding injects exactly one of the following headers:
 | `x-goog-api-key` | `<credential>` |
 | `api-key` | `<credential>` |
 
-## Trusted bindings
+## What operators control
 
-Operators bind a logical destination to an approved external endpoint, authentication-header policy, and credential source. A caller cannot select a Vault path, provider account, credential-binding identifier, header name, or external TLS server name.
+Operators bind each logical destination to an approved external endpoint, an authentication header, and a credential. Callers control none of it. A caller cannot select a Vault path, provider account, credential-binding identifier, header name, or external TLS server name.
 
-Binding metadata comes only from Consul configuration. Binding headers sent by a caller are removed before the request leaves the gateway, so credential injection cannot send an approved provider credential to a host that the caller selects.
+Binding settings come only from Consul configuration. The gateway removes binding headers that a caller sends, so a caller cannot redirect an approved credential to a host of its choosing.
 
-Only the processes that need credential material can read it. Applications and the MCP Sidecar never receive provider secrets. The Credential Injection Processor can read rendered credentials but not the Vault Agent's authentication token.
+Only the processes that need a credential can read it:
 
-## Credential delivery
+- Applications and the MCP Sidecar never receive provider credentials.
+- The Credential Injection Processor reads rendered credentials, but not the Vault Agent's authentication token.
 
-A Vault Agent sidecar on the terminating gateway authenticates to Vault with the gateway's Kubernetes service account and renders each binding's credential to a memory-backed volume that only the Credential Injection Processor reads. Credentials are never written to persistent storage. The Vault Agent connects to Vault over HTTPS and verifies the Vault server certificate against a configured CA.
+## Credential sources
 
-On Kubernetes, you can instead mount credentials read-only from a Kubernetes Secret. Refer to [Choose a credential source](/consul/docs/agentic-mesh/credential-injection/configure#choose-a-credential-source).
+| Source | How credentials arrive |
+| --- | --- |
+| Vault | Default. A Vault Agent sidecar authenticates to Vault with the gateway's Kubernetes service account. It renders each credential to a memory-backed volume that only the Credential Injection Processor reads. Credentials are never written to persistent storage. The Vault Agent connects to Vault over HTTPS and verifies the server certificate against a configured CA. |
+| Kubernetes Secret | Consul mounts a Kubernetes Secret read-only into the Credential Injection Processor. This source is weaker than Vault. |
 
-Store each binding's credential as a Vault KV secret with the following fields:
+To choose a source and store credentials, refer to [Choose a credential source](/consul/docs/agentic-mesh/credential-injection/configure#choose-a-credential-source).
 
-| Field | Required | Description |
-| --- | --- | --- |
-| `value` | Yes | The provider credential. It must be non-empty and must not contain whitespace or control characters. |
-| `rotation_deadline` | Yes | UTC timestamp in RFC 3339 format, ending in `Z`, by which you must rotate the credential. |
-| `expires_at` | No | UTC timestamp in RFC 3339 format, ending in `Z`, when the provider credential expires. |
+## Rotation and expiry
 
-The Vault KV version identifies the credential generation, so each write to the secret creates a new generation. A credential stops being usable shortly before the earlier of `rotation_deadline` and `expires_at`, even if Vault is unavailable and no newer credential arrives.
+To rotate a credential in Vault, write a new version of its secret. The Credential Injection Processor picks up the new version without a gateway restart. It validates each update and swaps the active credential without exposing a partly written value. An older version never replaces a newer accepted one.
 
-## Readiness and rotation
+Each credential has a rotation deadline and an optional expiry. A credential stops being usable shortly before the earlier of the two, even if Vault is unavailable and no newer credential arrives. A Vault outage does not extend how long the gateway uses a cached credential.
 
-Processor readiness and destination credential readiness are distinct. A running processor does not establish that every binding has a usable credential. A missing, invalid, or expired credential must fail the affected call closed rather than forward it without authentication.
+When a binding has no usable credential because it is missing, invalid, or expired, the gateway fails that call closed instead of forwarding it without authentication. A problem with one binding does not affect other bindings.
 
-To rotate a credential, write a new version of its Vault KV secret. The Vault Agent renders the update and the Credential Injection Processor picks it up without restarting the gateway. The credential runtime validates each update and replaces the active credential without exposing partially written values. An older generation never overwrites a newer accepted credential.
+A running processor does not mean that every binding has a usable credential. Monitor each binding through the processor's logs. Refer to [Verify the configuration](/consul/docs/agentic-mesh/credential-injection/configure#verify-the-configuration).
 
-An outage does not authorize indefinite use of cached credentials. The last valid credential remains usable only until its rotation deadline or expiry, as described in [Credential delivery](#credential-delivery). A problem with one binding does not prevent unrelated, valid bindings from serving requests.
-
-Observe binding health independently of the overall gateway process health. The Credential Injection Processor logs a `credential_reload` event for each binding with the accepted `kv_version` and an outcome such as `accepted`, `unavailable`, `expired`, or `rejected`. It also periodically logs a `credential_status` event that reports whether each binding is usable and how many seconds of validity remain.
-
-## Security guarantees
+## Security
 
 - Provider credentials and Vault tokens stay out of agent configuration, Consul configuration, proxy configuration snapshots, logs, traces, and error messages.
-- Credential mutations are limited to the configured authentication header. They cannot change the route or disable external TLS verification.
+- The processor can change only the configured authentication header. It cannot change the route or turn off external TLS verification.
 - Binding status, policy outcomes, and rotation failures are logged without secret values.
-- Caller authorization checks still apply when a provider credential is available.
+- Caller authorization still applies when a credential is available.
 
-## Dependencies and boundaries
+## Limitations
 
-External credential injection covers external HTTP services, including MCP servers and other APIs, that use one of the [supported authentication headers](#supported-authentication-headers) with a credential backed by Vault. It depends on an approved terminating-gateway route, protected credential delivery, a local Credential Injection Processor, and verified external TLS.
+External credential injection covers external HTTP services, including MCP servers and other APIs, that use a [supported authentication header](#requirements-for-each-external-service) with a credential from Vault or a Kubernetes Secret.
 
-This component owns credential delivery, injection, readiness, and rotation for that scope. It does not define managed-model authentication, OAuth delegation, request signing, client-certificate authentication, arbitrary secret managers, or non-HTTP MCP transports.
+It does not cover the following:
+
+- Authentication to managed model providers
+- OAuth delegation. For user delegation, refer to [On-behalf-of delegation](/consul/docs/agentic-mesh/identity).
+- Request signing or client-certificate authentication
+- Secret managers other than Vault
+- Non-HTTP MCP transports
+- Wildcard service names in the terminating gateway configuration
+- OpenShift
 
 ## Related documentation
 
-- [MCP Sidecar](/consul/docs/agentic-mesh/tool-access)
+- [Govern tool access with the MCP Sidecar](/consul/docs/agentic-mesh/tool-access)
 - [On-behalf-of delegation](/consul/docs/agentic-mesh/identity)
 - [Terminating gateway configuration entry reference](/consul/docs/reference/config-entry/terminating-gateway)
-- [Service defaults configuration entry reference](/consul/docs/reference/config-entry/service-defaults)
-- [Helm Chart Reference](/consul/docs/reference/k8s/helm)
-- [Auto-instrumentation](/consul/docs/agentic-mesh/observability/auto-instrumentation)
+- [Terminating gateways on Kubernetes](/consul/docs/register/external/terminating-gateway/k8s)
+- [Helm chart reference](/consul/docs/reference/k8s/helm#v-terminatinggateways-defaults-credentialinjection)
