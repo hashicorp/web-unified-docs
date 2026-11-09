@@ -1,87 +1,100 @@
 ---
 layout: docs
-page_title: Govern tool access with the MCP Sidecar
+page_title: Govern tool access
 description: >-
   Learn how the Consul MCP Sidecar governs AI agent tool calls with per-tool policy, human-in-the-loop approval, and routing to in-mesh and external MCP servers.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2026-11-02T17:11:37+05:30
-last_modified: 2026-11-09T20:38:07.000Z
+last_modified: 2026-11-09T21:01:02.000Z
 # END AUTO GENERATED METADATA
 ---
 
-# Govern tool access with the MCP Sidecar
+# Govern tool access
 
-The Model Context Protocol (MCP) Sidecar governs tool discovery and invocation in Consul Agentic Runtime Fabric. It applies policy to tool access while backend services retain responsibility for tool business logic.
+The Model Context Protocol (MCP) Sidecar governs which tools an AI agent can discover and call in Consul Agentic Runtime Fabric. It applies per-tool policy and holds protected calls for human approval before Envoy routes them to an MCP server. Tool servers keep responsibility for what each tool does.
 
 @include '../../../global/partials/alerts/beta.mdx'
 
-The MCP Sidecar is the specialized proxy on the agent's tool-call path. Its Envoy external processor implements tool-access policy. The sidecar reads each JSON-RPC request, applies per-tool policy, and marks calls that need human approval before Envoy routes them to the tool server. To learn how model, tool, and identity paths fit together, refer to the [Consul Agentic Runtime Fabric architecture](/consul/docs/agentic-mesh/architecture).
+To set up the MCP Sidecar, refer to [Configure the MCP Sidecar](/consul/docs/agentic-mesh/tool-access/configure).
 
 @include 'alerts/enterprise-alert.mdx'
 
 ## Introduction
 
-An agent can discover a tool without having permission to invoke every operation that the tool exposes. Consul Agentic Runtime Fabric separates catalog visibility, network connectivity, delegated user authority, tool-level policy, and human approval. A successful decision at one layer does not bypass the others.
+An agent can see a tool without having permission to run every operation it exposes. Consul Agentic Runtime Fabric checks each layer separately: catalog visibility, network connectivity, delegated user authority, tool policy, and human approval. Passing one check does not skip the others.
 
-Consul configures the mesh data plane. Envoy forwards approved requests through the configured mesh path.
+When you annotate an agent pod with the `ai-agent` role, Consul injects the MCP Sidecar. The agent pod then contains the following parts:
 
-## Deployment prerequisites
+| Part | Role | Default port |
+| --- | --- | --- |
+| Envoy sidecar proxy | Carries mesh traffic and routes approved tool calls | `20000` |
+| MCP listener | Receives the agent's tool calls on loopback at `/mcp` | `15101` |
+| MCP Sidecar interceptor | Reads each JSON-RPC request, applies tool policy, and requests approval for protected tools | `21101`, loopback |
+| On-behalf-of identity processor | Exchanges the user's token for a token scoped to the MCP server. Runs in the MCP Sidecar. | — |
+| Approval server | Receives approval requests from the interceptor and returns a verdict, over plain HTTP on loopback | `16101` |
 
-To install and enable the MCP Sidecar, refer to [Install Consul Agentic Runtime Fabric](/consul/docs/agentic-mesh/install). To register agents and MCP servers, refer to [Configure the MCP Sidecar](/consul/docs/agentic-mesh/tool-access/configure).
+<!-- TODO: Confirm who runs the approval server. The install and configure pages say the MCP Sidecar runs it, from the ai.agent.image Helm value description in consul-k8s v2.1.0. consul-enterprise v2.1.0+ent agent/structs/service_ai.go line 150 says "The agent runs a plain-HTTP server on the loopback Port". If the agent application implements it, document the request and response format. -->
+
+## How it works
+
+1. The agent sends an MCP request, such as a tool discovery request or a tool call, to the MCP listener at `localhost:15101/mcp`.
+1. The MCP Sidecar interceptor evaluates the request. It considers the authenticated workload, delegated user authority when the request carries user context, and the requested MCP method and tool.
+1. If policy requires a human decision for the tool, the interceptor sends an approval request to the approval server and holds the call until it receives a verdict.
+1. When the call carries user context, the on-behalf-of identity processor exchanges the user's token for a token scoped to the MCP server. Refer to [On-behalf-of delegation](/consul/docs/agentic-mesh/identity).
+1. Envoy routes the approved call to the MCP server. An in-mesh server receives it over the service mesh. An external server receives it through a terminating gateway.
+1. The MCP server applies its own identity and tool policy, then runs the tool.
+
+The [Govern tool access](/consul/docs/agentic-mesh/architecture#govern-tool-access) diagram on the architecture page shows this flow.
 
 ## Discovery and invocation
 
-The sidecar exposes an authorized tool catalog and evaluates invocation independently. Discovery responses describe available tools. They are not credentials or durable authorization decisions. Policy can change between discovery and invocation.
+The sidecar returns a catalog of the tools the agent is allowed to see. A discovery response is not a credential or a lasting authorization. Policy can change between discovery and a call, so the sidecar evaluates every call when it happens.
 
-For a tool call, the enforcement path considers:
+The sidecar bases its decisions on validated request content and trusted configuration only. It does not accept caller-supplied headers as proof of authorization or human approval.
 
-- The authenticated workload making the request.
-- Delegated user authority when the operation carries user context.
-- The requested MCP method, tool, and applicable tool policy.
-- Verified approval evidence when policy requires a human decision.
-
-Routing and decision metadata must derive from validated request content and trusted configuration. Caller-supplied headers must not be accepted as proof of authorization or human approval.
+<!-- TODO: Document how operators define per-tool access policy, including which tools require human approval. The policy format lives in the csl-mcp-sc processor codebase, which is not in consul-enterprise v2.1.0+ent or consul-k8s v2.1.0. -->
 
 ## Human approval
 
-For a protected operation, an application approval workflow supplies a decision to an enforcement processor. The processor must verify evidence bound to the original action before allowing the request to proceed. Relevant bindings include the operation, destination, arguments, and request challenge.
+For a protected tool, the interceptor sends an approval request to the approval server in the agent pod and blocks the call until it receives a verdict. Your application owns the human interaction, such as showing the request to a person and collecting a decision.
 
-A missing, expired, rejected, or mismatched approval does not authorize execution. An approval for one action must not authorize a different tool, changed arguments, or a different destination. Destination policy still applies after approval.
+The approval is bound to the exact action: the operation, destination, arguments, and request challenge. The sidecar rejects the call in the following cases:
 
-The application owns the human interaction. The sidecar owns enforcement on the tool-call path. It does not determine whether a human's business decision is correct.
+- No verdict arrives before the approval timeout, which defaults to `60s`.
+- The verdict is a rejection.
+- The approval is for a different tool, different arguments, or a different destination.
+
+Destination policy still applies after approval. The sidecar enforces the decision but does not judge whether the person's decision is correct.
 
 ## Backend connectivity
 
-| Backend | Governed path | Additional responsibility |
+| Backend | Path | What else applies |
 | --- | --- | --- |
-| In-mesh MCP service | Approved mesh route to the tool service. | The destination enforces its applicable identity and tool policy. |
-| External HTTP MCP service | Approved route through a terminating gateway. | The terminating gateway uses trusted credential bindings and validates external TLS. |
+| In-mesh MCP server | Mesh route to the server. Consul adds an MCP router filter to the server pod's inbound Envoy listener. | The server applies its own identity and tool policy. |
+| External HTTP MCP server | Route through a terminating gateway | The gateway adds a trusted credential and verifies external TLS. Refer to [External credential injection](/consul/docs/agentic-mesh/credential-injection). |
 
-External credential injection is distinct from delegated user authorization. A provider credential proves the terminating gateway's authority to authenticate to the external service. It does not replace the caller's permission to invoke the tool.
+A provider credential authenticates the terminating gateway to the external server. It does not replace the caller's permission to call the tool.
 
-## Operational evidence
+## Observability
 
-Correlate discovery, invocation, policy decisions, approval outcomes, and backend results using request and trace context where available. Record bounded decision metadata without logging tool arguments, tool results, credentials, or approval tokens.
+MCP Sidecars [automatically instrument supported tool exchanges](/consul/docs/agentic-mesh/observability/auto-instrumentation), so agents and tool servers do not need tracing SDKs. Decision logs record bounded metadata, never tool arguments, tool results, credentials, or approval tokens. Payload traces that capture arguments or results need the [payload-trace privacy controls](/consul/docs/agentic-mesh/observability/auto-instrumentation#payload-span-sensitive-data-security).
 
-MCP Sidecars [automatically instrument supported tool exchanges](/consul/docs/agentic-mesh/observability/auto-instrumentation) without tracing SDKs or manual spans in agents or tool implementations. Applications preserve trace context across calls. Capture tool identity, argument and result evidence, and protocol errors only under the documented payload-trace privacy controls. Automatic instrumentation is not automatic redaction.
+Sidecar traces also feed [cycle detection](/consul/docs/agentic-mesh/cycle-detection), which finds agents that repeat the same tool call with the same arguments and unchanged results.
 
-These observations support [cycle detection](/consul/docs/agentic-mesh/cycle-detection), including repeated calls to the same tool with the same arguments and unchanged results. Asynchronous containment does not replace tool authorization or human approval.
+## Limitations
 
-A successful HTTP or MCP response establishes a protocol outcome, not completion of the user's workflow. Applications supply the task outcome needed for business-level analysis.
+- A successful HTTP or MCP response means the protocol exchange succeeded, not that the user's task is complete.
+- If the agent disconnects, an action that a backend already ran is not cancelled.
+- Cycle detection runs asynchronously. It does not replace tool policy or human approval.
+- Session handling and catalog aggregation can differ between topologies.
 
-## Dependencies and boundaries
-
-- Consul and Envoy own configured connectivity and mesh enforcement.
-- Participating identity processors validate delegated authority separately from workload identity.
-- Applications explicitly integrate human-approval callbacks when required.
-- Backend services implement tools and their business-side effects.
-
-The MCP component owns supported topologies, sessions, protocol handling, processor ordering, and catalog aggregation behavior. Do not assume that every topology supports the same session or aggregation behavior, or that a disconnected client cancels an action already executed by a backend.
+<!-- TODO: Name the supported MCP topologies and their session and catalog aggregation behavior. The original page said only that they differ. -->
 
 ## Related documentation
 
+- [Configure the MCP Sidecar](/consul/docs/agentic-mesh/tool-access/configure)
+- [`AgentConfig` reference](/consul/docs/reference/k8s/ai/agentconfig)
+- [`McpServerConfig` reference](/consul/docs/reference/k8s/ai/mcpserverconfig)
 - [On-behalf-of delegation](/consul/docs/agentic-mesh/identity)
 - [External credential injection](/consul/docs/agentic-mesh/credential-injection)
 - [Observability for AI agents](/consul/docs/agentic-mesh/observability)
-- [Auto-instrumentation](/consul/docs/agentic-mesh/observability/auto-instrumentation)
-- [Cycle detection](/consul/docs/agentic-mesh/cycle-detection)

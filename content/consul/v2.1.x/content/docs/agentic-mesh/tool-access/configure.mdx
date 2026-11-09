@@ -5,25 +5,38 @@ description: >-
   Configure the Consul MCP Sidecar on Kubernetes. Register AI agents and MCP servers, set sidecar defaults, and route tool calls through the service mesh.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2026-11-05T19:41:57.000Z
-last_modified: 2026-11-09T20:38:07.000Z
+last_modified: 2026-11-09T21:01:01.000Z
 # END AUTO GENERATED METADATA
 ---
 
 # Configure the MCP Sidecar
 
-This page describes how to configure the [MCP Sidecar](/consul/docs/agentic-mesh/tool-access) on Kubernetes. You register AI agents and Model Context Protocol (MCP) servers so that agent tool calls travel through the sidecar.
+This page describes how to configure the MCP Sidecar on Kubernetes. You register AI agents and Model Context Protocol (MCP) servers so that agent tool calls travel through the sidecar. To learn how the sidecar governs tool calls, refer to [Govern tool access with the MCP Sidecar](/consul/docs/agentic-mesh/tool-access).
 
 @include '../../../global/partials/alerts/beta.mdx'
 
 @include 'alerts/enterprise-alert.mdx'
 
+## Workflow
+
+Complete the following steps:
+
+1. Register AI agents.
+1. Register MCP servers.
+1. Connect agents to MCP servers.
+1. Send tool calls through the sidecar.
+1. Configure human approval.
+1. Verify the configuration.
+
 ## Requirements
 
 - Consul Agentic Runtime Fabric installed with the [`ai.agent.image`](/consul/docs/reference/k8s/helm#v-ai-agent-image) Helm value set. Refer to [Install Consul Agentic Runtime Fabric](/consul/docs/agentic-mesh/install).
+- An AI agent that uses an MCP client.
+- One or more MCP servers that use a supported transport. In-mesh servers run in the service mesh. External servers need a terminating gateway.
 
 ## Register AI agents
 
-Annotate the pod template of each AI agent with the `ai-agent` role. Consul injects the MCP Sidecar into the pod. The sidecar also runs the on-behalf-of identity processor and the human approval server.
+Annotate the pod template of each AI agent with the `ai-agent` role. Consul injects the MCP Sidecar into the pod.
 
 <CodeBlockConfig highlight="5">
 
@@ -37,14 +50,14 @@ template:
 
 </CodeBlockConfig>
 
-The sidecar uses the defaults in the [`AgentConfig`](/consul/docs/reference/k8s/ai/agentconfig) resource. The following table lists the defaults and the annotations that override them for one pod.
+The sidecar uses the defaults in the [`AgentConfig`](/consul/docs/reference/k8s/ai/agentconfig) resource. Use the annotations to override a default for one pod. Each port must not conflict with the application port or the Envoy proxy port, `20000`.
 
-| Setting | Default | Annotation |
-| --- | --- | --- |
-| Agent interceptor port | `21101` | `consul.hashicorp.com/ai-agent-interceptor-port` |
-| MCP connectivity port | `15101` | `consul.hashicorp.com/ai-agent-mcp-port` |
-| Human approval server port | `16101` | `consul.hashicorp.com/ai-agent-hitl-port` |
-| Human approval timeout | `60s` | `consul.hashicorp.com/ai-agent-hitl-approval-timeout` |
+| Setting | Purpose | Default | Annotation |
+| --- | --- | --- | --- |
+| MCP connectivity port | The loopback port the agent sends tool calls to, at `/mcp` | `15101` | `consul.hashicorp.com/ai-agent-mcp-port` |
+| Agent interceptor port | The loopback port of the MCP Sidecar interceptor | `21101` | `consul.hashicorp.com/ai-agent-interceptor-port` |
+| Human approval server port | The loopback port that receives approval requests | `16101` | `consul.hashicorp.com/ai-agent-hitl-port` |
+| Human approval timeout | How long the interceptor waits for a verdict before it rejects the call | `60s` | `consul.hashicorp.com/ai-agent-hitl-approval-timeout` |
 
 The sidecar listens on a Unix domain socket by default. In local development, or where a shared socket volume is unavailable, set `consul.hashicorp.com/ai-agent-addr` to switch the listener to TCP. Refer to [Kubernetes annotations and labels](/consul/docs/reference/k8s/annotation-label) for details.
 
@@ -64,7 +77,7 @@ template:
 
 </CodeBlockConfig>
 
-The registration uses the defaults in the [`McpServerConfig`](/consul/docs/reference/k8s/ai/mcpserverconfig) resource. The following table lists the defaults and the annotations that override them for one pod.
+The registration uses the defaults in the [`McpServerConfig`](/consul/docs/reference/k8s/ai/mcpserverconfig) resource. Use the annotations to override a default for one pod.
 
 | Setting | Default | Annotation |
 | --- | --- | --- |
@@ -72,19 +85,74 @@ The registration uses the defaults in the [`McpServerConfig`](/consul/docs/refer
 | MCP path | `/mcp` | `consul.hashicorp.com/ai-mcp-server-path` |
 | MCP protocol version | `2025-03-26` | `consul.hashicorp.com/ai-mcp-server-protocol-version` |
 
+The `McpServerConfig` resource also sets `interceptorPort`, the TCP port the MCP server container listens on inside the pod. It defaults to `21102`.
+
 ## Connect agents to MCP servers
 
-Add each MCP server as an explicit upstream of the agent, and create a service intention that allows the agent to call the server. Consul also uses the agent's explicit upstreams to decide the audiences for on-behalf-of token exchange. Refer to [Configure OAuth clients for AI agents and MCP servers](/consul/docs/agentic-mesh/identity/configure-oauth-clients).
+1. Add each MCP server as an explicit upstream of the agent. Consul also uses the agent's explicit upstreams to decide the audiences for on-behalf-of token exchange.
 
-To reach an MCP server outside the mesh, route the call through a terminating gateway. Refer to [Configure external credential injection](/consul/docs/agentic-mesh/credential-injection/configure).
+   ```yaml
+   template:
+     metadata:
+       annotations:
+         consul.hashicorp.com/connect-service-upstreams: "<mcp-server>:<local-port>"
+   ```
 
-## Configure tool access and human approval
+   <!-- TODO: Confirm how the explicit upstream relates to the MCP listener on port 15101. Does the agent call the upstream's local port, or only localhost:15101/mcp with the listener selecting the server? -->
 
-<!-- TODO: Document how operators define per-tool access policy and which tool calls require human approval. The MCP Sidecar processor source is not in consul-enterprise v2.1.0+ent or consul-k8s v2.1.0. -->
+1. Allow the agent to call each MCP server with a service intention.
 
-The MCP Sidecar applies per-tool policy and holds protected tool calls for human approval. For how the sidecar evaluates tool calls and approvals, refer to [MCP Sidecar](/consul/docs/agentic-mesh/tool-access#discovery-and-invocation).
+   <CodeBlockConfig filename="mcp-intentions.yaml">
+
+   ```yaml
+   apiVersion: consul.hashicorp.com/v1alpha1
+   kind: ServiceIntentions
+   metadata:
+     name: <mcp-server>
+   spec:
+     destination:
+       name: <mcp-server>
+     sources:
+       - name: <agent-service>
+         action: allow
+   ```
+
+   </CodeBlockConfig>
+
+   ```shell-session
+   $ kubectl apply --filename mcp-intentions.yaml
+   ```
+
+To reach an MCP server outside the mesh, route the call through a terminating gateway. Refer to [Configure external credential injection](/consul/docs/agentic-mesh/credential-injection/configure). To carry the user's identity to the MCP server, refer to [Configure OAuth clients for AI agents and MCP servers](/consul/docs/agentic-mesh/identity/configure-oauth-clients).
+
+## Send tool calls through the sidecar
+
+Configure the agent's MCP client to send requests to the MCP listener on loopback:
+
+```plaintext
+http://localhost:15101/mcp
+```
+
+If you changed the MCP connectivity port, use that port instead.
+
+## Configure human approval
+
+The interceptor sends an approval request for each protected tool to the approval server on port `16101` and waits for a verdict. If no verdict arrives before the approval timeout, the interceptor rejects the call.
+
+To change the timeout for every agent, set `spec.defaults.hitl.approvalTimeout` in the `AgentConfig` resource. To change it for one pod, set the `consul.hashicorp.com/ai-agent-hitl-approval-timeout` annotation.
+
+<!-- TODO: Document how operators mark a tool as protected and define per-tool access policy, and the approval server's request and response format. Confirm whether the agent application or the MCP Sidecar runs the approval server. The MCP Sidecar processor source, csl-mcp-sc, is not in consul-enterprise v2.1.0+ent or consul-k8s v2.1.0. -->
+
+## Verify the configuration
+
+1. Send a tool discovery request from the agent to `localhost:15101/mcp`, and confirm that the response lists the tools the agent is allowed to see.
+1. Call a tool, and confirm that the MCP server receives the request.
+1. Call a protected tool without approving it, and confirm that the sidecar rejects the call after the approval timeout.
+
+<!-- TODO: Add exact commands and expected output for each check from a test run. -->
 
 ## Next steps
 
 - [Configure OAuth clients for AI agents and MCP servers](/consul/docs/agentic-mesh/identity/configure-oauth-clients)
+- [Configure external credential injection](/consul/docs/agentic-mesh/credential-injection/configure)
 - [Configure auto-instrumentation](/consul/docs/agentic-mesh/observability/configure-auto-instrumentation)
