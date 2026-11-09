@@ -23,13 +23,13 @@ from string import Template
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 PALETTES = {
-    "light": dict(bg="#ffffff", node="#ffffff", node_border="#c2c5cb", text="#0c0c0e",
-                  cluster="#f4f5f7", cluster_border="#c2c5cb", arf="#fdf2f6",
-                  arf_border="#e5a3bd", line="#8c9099", model="#3b3d45",
+    "light": dict(bg="#ffffff", node="#ffffff", node_border="#80848d", text="#0c0c0e",
+                  cluster="#f4f5f7", cluster_border="#80848d", arf="#fdf2f6",
+                  arf_border="#c1527f", line="#656a73", model="#3b3d45",
                   accent_border="#ca2171"),
-    "dark": dict(bg="#0d0e12", node="#1d1e23", node_border="#4a4c55", text="#efeff1",
-                 cluster="#16171c", cluster_border="#4a4c55", arf="#24131b",
-                 arf_border="#7a2e50", line="#9b9ea6", model="#d0d2d8",
+    "dark": dict(bg="#0d0e12", node="#1d1e23", node_border="#7d808a", text="#efeff1",
+                 cluster="#16171c", cluster_border="#7d808a", arf="#24131b",
+                 arf_border="#b5527f", line="#9b9ea6", model="#d0d2d8",
                  accent_border="#e8578f"),
 }
 
