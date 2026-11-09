@@ -7,13 +7,17 @@ This script writes <name>_light.mmd and <name>_dark.mmd for every body, both
 here and in ../img/agentic-mesh/mermaid-markup/ so the renderable markup sits
 next to the published images.
 
-Render each variant with the Mermaid CLI, for example:
+Render each variant with the Mermaid CLI. Render the SVG first, then render the
+PNG at the SVG's natural width (the max-width value in the SVG). Without -w,
+mmdc squeezes wide diagrams into an 800px viewport and shrinks the text.
 
-  mmdc -i <name>_light.mmd -o <name>_light.png -s 2 -b "#ffffff"
-  mmdc -i <name>_dark.mmd -o <name>_dark.png -s 2 -b "#0d0e12"
+  mmdc -i <name>_light.mmd -o <name>_light.svg -b "#ffffff"
+  mmdc -i <name>_light.mmd -o ../img/agentic-mesh/<name>_light.png -s 2 -w <width> -b "#ffffff"
 
-Run the same commands with an .svg output to refresh the SVG sources, then copy
-the PNGs to ../img/agentic-mesh/.
+Repeat for the dark variant with -b "#0d0e12".
+
+Design diagrams to fit the docs content column, about 730px wide, so text
+renders near full size on the page.
 
 Usage: python3 build.py [name ...]   (default: every body in this directory)
 """
@@ -54,8 +58,9 @@ def init_line(p):
         f'"noteBkgColor":"{p["cluster"]}","noteBorderColor":"{p["cluster_border"]}",'
         f'"noteTextColor":"{p["text"]}","activationBkgColor":"{p["arf"]}",'
         f'"activationBorderColor":"{p["arf_border"]}","sequenceNumberColor":"{p["bg"]}"}},'
-        '"sequence":{"mirrorActors":false,"width":220,"actorMargin":50,"messageMargin":50,'
-        '"boxMargin":10,"noteMargin":12,"wrap":true}}}%%\n'
+        '"sequence":{"mirrorActors":false,"width":130,"actorMargin":20,"messageMargin":45,'
+        '"boxMargin":10,"noteMargin":12,"wrap":true,"actorFontSize":15,'
+        '"messageFontSize":15}}}%%\n'
     )
 
 
