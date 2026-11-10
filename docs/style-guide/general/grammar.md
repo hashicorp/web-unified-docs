@@ -116,13 +116,13 @@ You can configure the following types of gateways:
 - **keywords**: grammar, punctuation, parentheses, dashes, colons, semicolons  
 - **content sets**: docs, WAF, tutorials, certifications
 
-Don't use specialized punctuation to combine ideas or sentences. Use commas to separate phrases and periods to separate ideas. Refer to [Write sentences that contain a single idea](content-organization#write-simple-sentences-that-contain-a-single-idea) for more information.
+Don't use specialized punctuation to combine ideas or sentences. Use commas to separate phrases and periods to separate ideas. Refer to [Write simple sentences that contain a single idea](content-organization.md#write-simple-sentences-that-contain-a-single-idea) for more information.
 
-Only use en dashes to represent a range. Refer to guidance in [Words as numbers](numbers-dates-time/words-as-numbers) for more information.
+Only use en dashes to represent a range. Refer to guidance in [Words as numbers](../numbers-dates-time/words-as-numbers.md) for more information.
 
 Only use colons to introduce other constructions. Refer to [Use colons to introduce lists, tables, and visual aids](#use-colons-to-introduce-lists-tables-and-visual-aids) for more information.
 
-Only use parentheses to introduce acronyms or as characters in code samples. Refer to [Spell out a phrase and place the acronym form in parentheses on first use](language#spell-out-a-phrase-and-place-the-acronym-form-in-parentheses-on-first-use)
+Only use parentheses to introduce acronyms or as characters in code samples. Refer to [Spell out a phrase and place the acronym form in parentheses on first use](language.md#spell-out-a-phrase-and-place-the-acronym-form-in-parentheses-on-first-use)
 
 
 ### Examples
