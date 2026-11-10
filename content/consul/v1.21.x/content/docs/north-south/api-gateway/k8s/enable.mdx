@@ -294,6 +294,240 @@ metadata:
 </CodeBlockConfig>
 
 
+## Use multiple gateway classes
+
+Every API gateway sets the required `spec.gatewayClassName` field to select a gateway class. The gateway class points to a `GatewayClassConfig` that defines deployment settings such as the number of gateway instances, CPU and memory resources, and the Kubernetes service type. Gateways that use the same gateway class share the same `GatewayClassConfig`.
+
+When you install Consul with Helm, Consul creates one default gateway class and one default `GatewayClassConfig` for each API gateway implementation that you enable:
+
+| API gateway implementation | Default gateway class | Default `GatewayClassConfig` |
+| --- | --- | --- |
+| Standard API gateway | `GatewayClass` named `consul` | `consul-api-gateway` |
+| Consul API gateway | `CustomGatewayClass` named `consul-custom-class` | `consul-api-gateway-custom` |
+
+The Consul API gateway defaults are created when you set `global.crds.consulapi.enabled` to `true`. The Consul API gateway requires consul-k8s 1.8.14 or later.
+
+To change the number of instances, resources, or other deployment settings for an individual gateway without affecting other gateways, create an additional gateway class and `GatewayClassConfig`, and then set the gateway's `spec.gatewayClassName` field to the new gateway class.
+
+### Gateway class relationships
+
+The following resources determine how a gateway is deployed:
+
+| Resource | Description |
+| --- | --- |
+| [`Gateway`](/consul/docs/reference/k8s/api-gateway/gateway) | Declares the gateway and its listeners. The `spec.gatewayClassName` field references a gateway class. |
+| [`GatewayClass`](/consul/docs/reference/k8s/api-gateway/gatewayclass) or `CustomGatewayClass` | Selects the controller that manages the gateway with the `spec.controllerName` field. The `spec.parametersRef` field references a `GatewayClassConfig`. |
+| [`GatewayClassConfig`](/consul/docs/reference/k8s/api-gateway/gatewayclassconfig) | Defines the deployment settings for gateways that use the gateway class. This cluster-scoped resource is the same for both API gateway implementations. |
+
+The gateway class resource type and the controller name must match the API gateway implementation:
+
+| API gateway implementation | Gateway class resource | `controllerName` |
+| --- | --- | --- |
+| Standard API gateway | `GatewayClass` in `gateway.networking.k8s.io` | `consul.hashicorp.com/gateway-controller` |
+| Consul API gateway | `CustomGatewayClass` in `consul.hashicorp.com` | `consul.hashicorp.com/gateway-controller-consul` |
+
+~> **Warning:** Each controller reconciles only its own gateway class resource type. A `GatewayClass` that specifies the `consul.hashicorp.com/gateway-controller-consul` controller is never accepted, and Consul does not deploy gateways that reference it.
+
+### Create a GatewayClassConfig
+
+Create a `GatewayClassConfig` that defines the settings for your gateway. The following example runs two instances of each gateway that uses it and sets the CPU and memory resources.
+
+<CodeBlockConfig filename="gatewayclassconfig-app1.yaml">
+
+```yaml
+apiVersion: consul.hashicorp.com/v1alpha1
+kind: GatewayClassConfig
+metadata:
+  name: consul-api-gateway-app1
+spec:
+  deployment:
+    defaultInstances: 2
+    minInstances: 1
+    maxInstances: 4
+    resources:
+      requests:
+        cpu: 200m
+        memory: 200Mi
+      limits:
+        cpu: 200m
+        memory: 200Mi
+  serviceType: LoadBalancer
+```
+
+</CodeBlockConfig>
+
+The `deployment` block configures the following settings:
+
+- `defaultInstances`: Specifies the number of instances that Consul deploys when it creates the gateway.
+- `minInstances` and `maxInstances`: Specify the lower and upper limits for the number of instances. Consul raises or lowers the number of instances to stay within these limits.
+- `resources`: Specifies the CPU and memory requests and limits for each gateway instance.
+
+### Create a gateway class
+
+Create a gateway class that references the `GatewayClassConfig` in `spec.parametersRef`.
+
+<Tabs>
+
+  <Tab heading="Standard API gateway">
+
+  <CodeBlockConfig filename="gatewayclass-app1.yaml">
+
+  ```yaml
+  apiVersion: gateway.networking.k8s.io/v1beta1
+  kind: GatewayClass
+  metadata:
+    name: consul-app1
+  spec:
+    controllerName: consul.hashicorp.com/gateway-controller
+    parametersRef:
+      group: consul.hashicorp.com
+      kind: GatewayClassConfig
+      name: consul-api-gateway-app1
+  ```
+
+  </CodeBlockConfig>
+
+  </Tab>
+
+  <Tab heading="Consul API gateway">
+
+  <CodeBlockConfig filename="customgatewayclass-app1.yaml">
+
+  ```yaml
+  apiVersion: consul.hashicorp.com/v1beta1
+  kind: CustomGatewayClass
+  metadata:
+    name: consul-app1
+  spec:
+    controllerName: consul.hashicorp.com/gateway-controller-consul
+    parametersRef:
+      group: consul.hashicorp.com
+      kind: GatewayClassConfig
+      name: consul-api-gateway-app1
+  ```
+
+  </CodeBlockConfig>
+
+  </Tab>
+
+</Tabs>
+
+Apply the `GatewayClassConfig` and the gateway class to your cluster.
+
+```shell-session
+$ kubectl apply -f gatewayclassconfig-app1.yaml
+$ kubectl apply -f gatewayclass-app1.yaml
+```
+
+For the Consul API gateway, apply `customgatewayclass-app1.yaml` instead of `gatewayclass-app1.yaml`.
+
+### Create a gateway that uses the gateway class
+
+Set `spec.gatewayClassName` to the name of the gateway class. Gateways that set `spec.gatewayClassName` to a different gateway class, such as the default class, are not affected.
+
+<Tabs>
+
+  <Tab heading="Standard API gateway">
+
+  <CodeBlockConfig filename="gateway-app1.yaml">
+
+  ```yaml
+  apiVersion: gateway.networking.k8s.io/v1beta1
+  kind: Gateway
+  metadata:
+    name: api-gateway-app1
+    namespace: app1
+    labels:
+      component: api-gateway
+  spec:
+    gatewayClassName: consul-app1
+    listeners:
+      - protocol: HTTP
+        port: 80
+        name: http
+        allowedRoutes:
+          namespaces:
+            from: All
+      - protocol: TCP
+        port: 8090
+        name: tcp-8090
+        allowedRoutes:
+          namespaces:
+            from: All
+  ```
+
+  </CodeBlockConfig>
+
+  </Tab>
+
+  <Tab heading="Consul API gateway">
+
+  <CodeBlockConfig filename="gateway-app1.yaml">
+
+  ```yaml
+  apiVersion: consul.hashicorp.com/v1beta1
+  kind: Gateway
+  metadata:
+    name: api-gateway-app1
+    namespace: app1
+    labels:
+      component: api-gateway-consul
+  spec:
+    gatewayClassName: consul-app1
+    listeners:
+      - protocol: HTTP
+        port: 80
+        name: http
+        allowedRoutes:
+          namespaces:
+            from: All
+  ```
+
+  </CodeBlockConfig>
+
+  </Tab>
+
+</Tabs>
+
+Create the `app1` namespace if it does not already exist, and then apply the gateway.
+
+```shell-session
+$ kubectl create namespace app1
+$ kubectl apply -f gateway-app1.yaml
+```
+
+### Verify the gateway class
+
+Verify that Consul accepted the gateway class. The `ACCEPTED` column must show `True`.
+
+<Tabs>
+
+  <Tab heading="Standard API gateway">
+
+  ```shell-session
+  $ kubectl get gatewayclass consul-app1
+  ```
+
+  </Tab>
+
+  <Tab heading="Consul API gateway">
+
+  ```shell-session
+  $ kubectl get customgatewayclass consul-app1
+  ```
+
+  </Tab>
+
+</Tabs>
+
+Verify that the gateway deployment uses the instance count and resources from the `GatewayClassConfig`.
+
+```shell-session
+$ kubectl get deployment api-gateway-app1 --namespace app1 --output jsonpath='{.spec.replicas}{"\n"}{.spec.template.spec.containers[0].resources}{"\n"}'
+```
+
+Repeat these steps to create additional gateway classes and `GatewayClassConfig` resources for other gateways.
+
 <!--
 ****** KEEP ALL PAGE CONTENT ABOVE THIS LINE *******
 Only Reference style links should be added below this comment

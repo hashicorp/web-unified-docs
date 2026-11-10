@@ -1,0 +1,117 @@
+---
+page_title: Modify node configuration
+description: >-
+  Use tfectl node config-reload to update specific configuration values on a running Terraform Enterprise node without restarting it. Learn supported keys, rollback behavior, and how to operate safely in active-active deployments.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-07-31T00:00:00Z
+last_modified: 2026-07-31T00:00:00Z
+# END AUTO GENERATED METADATA
+---
+
+# Modify node configuration of a running node
+
+This topic describes how to update specific configuration values on a running Terraform Enterprise node without restarting it.
+
+## Introduction
+
+You can update select runtime configuration values on a running node without restarting the TFE process.
+
+Most configuration changes in Terraform Enterprise require a full process restart to take effect. For a targeted subset of values, however, operators can apply updates while the node continues serving traffic.
+
+**Key properties of this command:**
+
+- **Ephemeral.** Updated values exist only in the running node's memory. They are not written to the startup configuration file and do not survive a node restart.
+- **Single node target.** Each invocation targets the specific node on which the command was run. There is no option to run this on all nodes at once.
+- **Not persistent.** If a node is restarted after a configuration reload, it starts with the original values from its environment variables or startup configuration.
+
+## Supported keys
+
+The following configuration keys can be updated with `tfectl node config-reload`.
+
+| Key | Description |
+|-----|-------------|
+| `TFE_RUN_PIPELINE_IMAGE` | Container image used for Terraform runs. Required if any run pipeline key is set. |
+| `TFE_RUN_PIPELINE_DOCKER_REGISTRY_USERNAME` | Username for the private Docker registry used to pull the run pipeline image. Must be supplied together with `TFE_RUN_PIPELINE_DOCKER_REGISTRY_PASSWORD`. |
+| `TFE_RUN_PIPELINE_DOCKER_REGISTRY_PASSWORD` | Password for the private Docker registry. Must be supplied together with `TFE_RUN_PIPELINE_DOCKER_REGISTRY_USERNAME`. |
+| `TFE_RUN_PIPELINE_KUBERNETES_IMAGE_PULL_SECRET_NAME` | Name of the Kubernetes image pull secret for the run pipeline image. |
+| `TFE_OBJECT_STORAGE_S3_ACCESS_KEY_ID` | AWS S3 access key ID. Must be supplied together with `TFE_OBJECT_STORAGE_S3_SECRET_ACCESS_KEY`. |
+| `TFE_OBJECT_STORAGE_S3_SECRET_ACCESS_KEY` | AWS S3 secret access key. Must be supplied together with `TFE_OBJECT_STORAGE_S3_ACCESS_KEY_ID`. |
+
+<Note>
+
+Sensitive values — passwords, secret keys — are never echoed in command output or logs.
+
+</Note>
+
+## Validation rules
+
+All key-value pairs are validated before any configuration is mutated. If validation fails, the command returns an error and makes no changes.
+
+- **Docker registry credentials** — `TFE_RUN_PIPELINE_DOCKER_REGISTRY_USERNAME` and `TFE_RUN_PIPELINE_DOCKER_REGISTRY_PASSWORD` must be supplied together. Providing only one is rejected. Omitting both preserves the existing registry credentials.
+- **S3 credentials** — `TFE_OBJECT_STORAGE_S3_ACCESS_KEY_ID` and `TFE_OBJECT_STORAGE_S3_SECRET_ACCESS_KEY` must be supplied together. Providing only one is rejected.
+- **Unknown keys** — Any key not in the supported keys table causes the entire invocation to be rejected immediately.
+
+## Usage examples
+
+### Rotate S3 credentials on a specific node
+
+Use this when rotating AWS credentials for object storage. Both the access key ID and the secret access key must be provided in the same command.
+
+```shell-session
+$ tfectl node config-reload \
+  --set TFE_OBJECT_STORAGE_S3_ACCESS_KEY_ID=ACCESS_KEY_ID \
+  --set TFE_OBJECT_STORAGE_S3_SECRET_ACCESS_KEY=SECRET_ACCESS_KEY
+```
+
+### Update the run pipeline image and registry credentials
+
+Use this when updating the container image used for Terraform runs or rotating private registry credentials.
+
+```shell-session
+$ tfectl node config-reload \
+  --set TFE_RUN_PIPELINE_IMAGE=registry.example.com/tfe-agent:v1.2.3 \
+  --set TFE_RUN_PIPELINE_DOCKER_REGISTRY_USERNAME=myuser \
+  --set TFE_RUN_PIPELINE_DOCKER_REGISTRY_PASSWORD=s3cr3t
+```
+
+## Rollback behavior
+
+~> **Important:** There is no automatic rollback. Read this section before running `tfectl node config-reload` in production.
+
+**To recover, choose one of the following options:**
+
+- **Re-run with corrected values.** Run `tfectl node config-reload` again with the correct key-value pairs.
+
+  ```shell-session
+  $ tfectl node config-reload \
+    --set TFE_OBJECT_STORAGE_S3_ACCESS_KEY_ID=CORRECTED_ACCESS_KEY_ID \
+    --set TFE_OBJECT_STORAGE_S3_SECRET_ACCESS_KEY=CORRECTED_SECRET_ACCESS_KEY
+  ```
+
+- **Restart the node.** A node restart discards all in-memory mutations and restores the original startup configuration from environment variables. Use this option if the in-memory state has diverged in a way that cannot be corrected by re-running the command.
+
+After recovery, verify the node is healthy using `tfectl app health readiness` and `tfectl app diagnostics`. For active-active deployments, check all nodes after a recovery operation.
+
+## Verify the reload
+
+To verify that the running configuration reflects the updated values, run `tfectl app config` on the target node:
+
+```shell-session
+$ tfectl app config
+```
+
+Sensitive values are redacted by default. Use `--unredacted` only in secure contexts.
+
+## Service action behavior
+
+The underlying action taken after a reload depends on which keys you set.
+
+### Image and registry credential updates
+
+**For operators on the Docker driver:** tasks that are already dispatching when the reload occurs complete against the pre-reload configuration. Tasks dispatched after the reload use the new image and registry credentials. There is no interruption to in-progress runs.
+
+**For operators on the Kubernetes driver:** `TFE_RUN_PIPELINE_KUBERNETES_IMAGE_PULL_SECRET_NAME` updates the secret name that task-worker passes when scheduling future run pods. Existing pods are not evicted or restarted. The new secret takes effect for the next task dispatch after the signal is processed.
+
+### S3 credential rotation
+
+When you rotate S3 credentials (`TFE_OBJECT_STORAGE_S3_ACCESS_KEY_ID` / `TFE_OBJECT_STORAGE_S3_SECRET_ACCESS_KEY`), the object storage service (on the target node) is stopped and restarted to pick up the new credentials. The restart typically completes in under a second. During this window, in-flight S3 operations from dependent services may fail transiently. Those services have retry logic and will recover automatically without operator intervention. All other nodes continue serving S3 operations without interruption throughout the credential rotation.
