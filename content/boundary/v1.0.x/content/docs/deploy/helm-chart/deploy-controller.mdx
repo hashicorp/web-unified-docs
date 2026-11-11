@@ -10,21 +10,22 @@ description: >-
 
 @include 'helm/controller-chart.mdx'
 
-Deploying the Boundary controller Helm chart gives you a running Boundary control plane backed by PostgreSQL, ready to accept worker registrations and API traffic. This page covers installing the controller chart only. To add data-plane capacity, refer to [Deploy workers using a Helm chart](/boundary/docs/deploy/helm-chart/deploy-worker).
+The Boundary controller Helm chart deploys a Boundary control plane backed by PostgreSQL. This page covers the controller chart only. To add data plane capacity, refer to [Deploy workers using a Helm chart](/boundary/docs/deploy/helm-chart/deploy-worker).
+
+For Red Hat OpenShift-specific requirements and Routes, refer to [Deploy Boundary on OpenShift](/boundary/docs/deploy/openshift).
 
 ## Prerequisites
 
 Before installing the controller Helm chart, make sure the following are available:
 
-- A Kubernetes cluster running version 1.34 or later.
-- Helm 3 or later configured with access to the target Kubernetes cluster.
-- A reachable PostgreSQL 15 or later database for Boundary controller state.
+- A Kubernetes cluster and `kubectl` access with permission to create namespaces, Secrets, Deployments, Services, ConfigMaps, Jobs, and PodDisruptionBudgets.
+- Helm 3 or later configured to access the cluster.
+- A reachable PostgreSQL database for Boundary controller pods.
 - A valid Boundary controller HCL configuration.
-- KMS (key management system) configuration for the `root`, `recovery`, and `worker-auth` purposes.
-- A Boundary Enterprise license and database URL.
-- An existing Kubernetes Secret containing `admin-username` and `admin-password` when `bootstrapAdmin.enabled=true`.
-- A Kubernetes TLS Secret containing `tls.crt` and `tls.key` when `tls.disabled=false`.
-- A ServiceAccount that the controller deployment and hook Jobs can use.
+- Key management system (KMS) configuration for the `root`, `recovery`, and `worker-auth` purposes.
+- The database URL, [Boundary Enterprise license](/boundary/docs/enterprise/licensing), and bootstrap administrator credentials used to create the controller Secret. The bootstrap administrator Job is enabled by default.
+- A TLS certificate and private key used to create a Kubernetes TLS Secret when TLS is enabled for either the API or operations listener. TLS is enabled for both listeners by default.
+- An existing ServiceAccount only when you set `serviceAccount.name`. When the value is empty, Kubernetes assigns the namespace's default ServiceAccount.
 
 The controller chart deploys a stateless Boundary control plane. PostgreSQL stores the persistent controller state, not the controller pods.
 
@@ -32,48 +33,33 @@ Complete the following steps to deploy a controller using the Helm chart.
 
 ## Add the HashiCorp Helm repository
 
-Add the Helm repository and confirm the chart is visible:
+Add the Helm repository, update its index, and list the available chart versions:
 
 ```shell-session
-$ helm repo add hashicorp https://helm.releases.hashicorp.com; \
-  helm repo update; \
-  helm search repo hashicorp/boundary-controller
+$ helm repo add hashicorp https://helm.releases.hashicorp.com
+$ helm repo update
+$ helm search repo hashicorp/boundary-controller --versions
 ```
 
-Example output:
+Refer to the [Boundary controller chart on Artifact Hub](https://artifacthub.io/packages/helm/hashicorp/boundary-controller/) for official releases and [default chart values](https://artifacthub.io/packages/helm/hashicorp/boundary-controller/?modal=values). Choose a chart version that contains the Boundary version you want to deploy. To pin that version, add `--version <chart-version>` to the `helm install` and `helm upgrade` commands.
 
-<CodeBlockConfig hideClipboard>
+## Create the namespace
 
+Create the namespace before you create the Secrets that the chart uses:
+
+```shell-session
+$ kubectl create namespace boundary
 ```
-NAME                          CHART VERSION   APP VERSION   DESCRIPTION
-hashicorp/boundary-controller 0.1.0           1.0.0         Official HashiCorp Boundary Controller Helm Chart
-```
 
-</CodeBlockConfig>
+If the namespace already exists, continue to the next step. Use this same namespace for the Secrets and Helm release throughout this guide.
 
 ## Create the controller Secret
 
-The chart reads sensitive values from an existing Kubernetes Secret referenced by `secretRefs.secretName`. At a minimum, create a Secret with the database URL and Boundary Enterprise license. Include the bootstrap admin credentials when `bootstrapAdmin.enabled=true`.
-
-Refer to the [Kubernetes Secrets documentation](https://kubernetes.io/docs/concepts/configuration/secret/) for instructions on creating Secrets.
-
-Set `secretRefs.keys.*` to match the key names you used in your Secret. If your `controller.config` uses `migration_url = "env://BOUNDARY_PG_MIGRATION_URL"`, also include the migration URL key referenced by `secretRefs.keys.migrationUrl`.
+@include 'helm/controller-secret.mdx'
 
 ## Create the TLS Secret when TLS is enabled
 
-If `tls.disabled=false`, create a Kubernetes TLS Secret before installation. Refer to the [Kubernetes Secrets documentation](https://kubernetes.io/docs/concepts/configuration/secret/) for instructions. The Secret must contain `tls.crt` and `tls.key` entries, and its name must match `tls.secretName` (default: `boundary-controller-tls`).
-
-<Note>
-
-When `bootstrapAdmin.enabled=true`, the bootstrap admin Job connects to the controller API Service and verifies the TLS certificate. The certificate must include the following SAN (Subject Alternative Name) (adjust if `nameOverride` or `fullnameOverride` is set):
-
-- `DNS:<fullname>-api` (for example, `boundary-controller-api`)
-
-The Job will time out if this SAN is missing.
-
-</Note>
-
-When TLS is disabled, the chart does not mount this Secret.
+@include 'helm/controller-tls-secret.mdx'
 
 ## Prepare the controller configuration
 
@@ -86,114 +72,39 @@ A usable controller configuration includes:
 - An API listener
 - A cluster listener
 - An operations listener
-- A `controller` block with `license` and `database.url`
+- A `controller` block with Secret-backed `license` and `database.url` settings
 - A `public_cluster_addr` so workers can reach the cluster listener
 - KMS stanzas for `root`, `recovery`, and `worker-auth`
 
-Refer to the following example controller configuration using AWS KMS:
+The complete baseline HCL appears once in the installation values below. The chart renders `controller.config` as a Helm template, so expressions that reference `.Values` are evaluated during rendering.
 
-```hcl
-disable_mlock = true
+Set `public_cluster_addr` to the stable address that workers use to reach the controller cluster listener. For workers outside the Kubernetes cluster, expose the listener through a TCP-capable load balancer or ingress path that preserves Boundary mutual TLS. Do not use an HTTP-only ingress path unless it supports TCP and TLS passthrough.
 
-listener "tcp" {
-  address       = "0.0.0.0:9200"
-  purpose       = "api"
-  tls_disable   = false
-  tls_cert_file = "/etc/boundary/tls/tls.crt"
-  tls_key_file  = "/etc/boundary/tls/tls.key"
-}
+<Warning>
 
-listener "tcp" {
-  address = "0.0.0.0:9201"
-  purpose = "cluster"
-}
+The inline AEAD KMS blocks in this example are for development and testing only. Boundary does not support `env://BOUNDARY_KMS_*` references in AEAD `key` fields, and the chart rejects them. Configure an external KMS provider for production as described in [Configure KMS](/boundary/docs/configuration/kms).
 
-listener "tcp" {
-  address       = "0.0.0.0:9203"
-  purpose       = "ops"
-  tls_disable   = false
-  tls_cert_file = "/etc/boundary/tls/tls.crt"
-  tls_key_file  = "/etc/boundary/tls/tls.key"
-}
+</Warning>
 
-controller {
-  name                = "boundary-controller"
-  description         = "Boundary controller running in Kubernetes"
-  public_cluster_addr = "boundary-controller-cluster.boundary.svc.cluster.local:9201"
-  license             = "<your-license-here>"
-
-  database {
-    url = "postgres://<user>:<password>@<host>:5432/<dbname>?sslmode=require"
-  }
-}
-
-kms "aead" {
-  purpose   = "root"
-  aead_type = "aes-gcm"
-  key       = "sP1fnF5Xz85RrXyELHFeZg9Ad2qt4Z4bgNHVGtD6sFo="
-  key_id    = "global_root"
-}
-
-kms "aead" {
-  purpose   = "recovery"
-  aead_type = "aes-gcm"
-  key       = "8fZBjCUfN0TzjEGLQldGY4+iE9AkOvCfjh7+p0GtRBQ="
-  key_id    = "global_recovery"
-}
-
-kms "aead" {
-  purpose   = "worker-auth"
-  aead_type = "aes-gcm"
-  key       = "ATTK2pMjMTEJGlAkUJAePnFMlNLQaXBnhSqJHVlJeKQ="
-  key_id    = "global_worker-auth"
-}
-
-events {
-  audit_enabled        = true
-  sysevents_enabled    = true
-  observations_enabled = true
-  sink "stderr" {
-    name        = "all-events"
-    description = "All events sent to stderr"
-    event_types = ["*"]
-    format      = "hclog-text"
-  }
-}
-```
-
-<Note>
-
-These inline AEAD KMS examples are suitable for development or testing. The keys are stored in plaintext and are visible to anyone who can read the configuration. For production deployments, use an external KMS provider as described in [Configure KMS](/boundary/docs/configuration/kms).
-
-</Note>
-
-<Note>
-
-  We do not recommend changing `disable_mlock = true` from the chart default. The containers run without the elevated privileges required for memory locking.
-
-</Note>
-
-## List available chart versions
-
-Use the following command to see any available published versions of the controller chart:
-
-```shell-session
-$ helm search repo hashicorp/boundary-controller --versions
-```
+We do not recommend changing `disable_mlock = true` from the chart default. The containers run without the elevated privileges required for memory locking.
 
 ## Install a Boundary controller
 
-Create a values file that contains `controller.config` and the Kubernetes overrides you need:
+Create `controller-values.yaml` containing the settings required for your environment. Update the example KMS blocks before production use, and update `public_cluster_addr` if workers will not run in the `boundary` namespace. The following baseline reads the database URL and license from the Secrets created earlier:
 
 ```yaml
 secretRefs:
   secretName: boundary-controller-secrets
+  validateExisting: true
 
 serviceAccount:
-  name: default
+  name: ""
 
 tls:
-  disabled: false
+  api:
+    disabled: false
+  ops:
+    disabled: false
 
 controller:
   config: |
@@ -202,9 +113,9 @@ controller:
     listener "tcp" {
       address       = "0.0.0.0:9200"
       purpose       = "api"
-      tls_disable   = false
-      tls_cert_file = "/etc/boundary/tls/tls.crt"
-      tls_key_file  = "/etc/boundary/tls/tls.key"
+      tls_disable   = "{{ .Values.tls.api.disabled }}"
+      tls_cert_file = "{{ .Values.tls.mountPath }}/tls.crt"
+      tls_key_file  = "{{ .Values.tls.mountPath }}/tls.key"
     }
 
     listener "tcp" {
@@ -215,20 +126,21 @@ controller:
     listener "tcp" {
       address       = "0.0.0.0:9203"
       purpose       = "ops"
-      tls_disable   = false
-      tls_cert_file = "/etc/boundary/tls/tls.crt"
-      tls_key_file  = "/etc/boundary/tls/tls.key"
+      tls_disable   = "{{ .Values.tls.ops.disabled }}"
+      tls_cert_file = "{{ .Values.tls.mountPath }}/tls.crt"
+      tls_key_file  = "{{ .Values.tls.mountPath }}/tls.key"
     }
 
     controller {
-      name                = "boundary-controller"
-      description         = "Boundary controller running in Kubernetes"
-      public_cluster_addr = "boundary-controller-cluster.boundary.svc.cluster.local:9201"
-      license             = "<your-license-here>"
+      name = "boundary-controller"
+      public_cluster_addr = "{{ (printf "%s:9201" (include "boundary.controller.clusterServiceName" .)) }}"
+      license = "env://BOUNDARY_LICENSE"
 
       database {
-        url = "postgres://<user>:<password>@<host>:5432/<dbname>?sslmode=require"
+        url = "env://BOUNDARY_PG_URL"
       }
+
+      graceful_shutdown_wait_duration = "10s"
     }
 
     kms "aead" {
@@ -257,10 +169,10 @@ controller:
       sysevents_enabled    = true
       observations_enabled = true
       sink "stderr" {
-        name        = "all-events"
+        name = "all-events"
         description = "All events sent to stderr"
         event_types = ["*"]
-        format      = "hclog-text"
+        format = "hclog-text"
       }
     }
 
@@ -273,16 +185,12 @@ controller:
       type: ClusterIP
 ```
 
-Run the following command to install the release, initialize the database schema, and create the bootstrap admin:
+Run the following command to install the release. `database.init.enabled` and `bootstrapAdmin.enabled` both default to `true`, so the install initializes the database and creates the bootstrap administrator:
 
 ```shell-session
 $ helm install boundary-controller hashicorp/boundary-controller \
-  --version 0.1.0 \
   --namespace boundary \
-  --create-namespace \
-  --values my-values.yaml \
-  --set database.init.enabled=true \
-  --set bootstrapAdmin.enabled=true \
+  --values controller-values.yaml \
   --wait
 ```
 
@@ -300,24 +208,13 @@ REVISION: 1
 
 </CodeBlockConfig>
 
-Or, to install without database initialization and bootstrap admin creation:
-
-```shell-session
-$ helm install boundary-controller hashicorp/boundary-controller \
-  --version 0.1.0 \
-  --namespace boundary \
-  --create-namespace \
-  --values my-values.yaml \
-  --wait
-```
-
 ## Verify the deployment
 
-Check the rendered resources after installation:
+Check the release resources after installation:
 
 ```shell-session
-$ kubectl get deployment,pods,svc,jobs,pdb --namespace boundary; \
-  kubectl logs --namespace boundary deployment/boundary-controller
+$ kubectl get deployment,pods,services,jobs,pdb --namespace boundary
+$ kubectl logs --namespace boundary deployment/boundary-controller
 ```
 
 Example output:
@@ -325,10 +222,14 @@ Example output:
 <CodeBlockConfig hideClipboard>
 
 ```
-NAME                                    READY   STATUS      RESTARTS   AGE
-pod/boundary-controller-0               1/1     Running     0          2m
-pod/boundary-controller-1               1/1     Running     0          2m
-pod/boundary-controller-db-init-abcde   0/1     Completed   0          2m
+NAME                                                READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/boundary-controller                 2/2     2            2           2m
+
+NAME                                                     READY   STATUS      RESTARTS   AGE
+pod/boundary-controller-7b8f7d6f9d-abcde                 1/1     Running     0          2m
+pod/boundary-controller-7b8f7d6f9d-fghij                 1/1     Running     0          2m
+pod/boundary-controller-init-db-klmno                     0/1     Completed   0          2m
+pod/boundary-controller-bootstrap-admin-pqrst             0/1     Completed   0          1m
 
 NAME                                     TYPE           CLUSTER-IP     EXTERNAL-IP   PORT(S)          AGE
 service/boundary-controller-api          LoadBalancer   10.0.0.10      203.0.113.5   9200:31000/TCP   2m
@@ -338,14 +239,18 @@ service/boundary-controller-ops          ClusterIP      10.0.0.12      <none>   
 
 </CodeBlockConfig>
 
+Kubernetes generates the controller pod suffixes. Hook Jobs and their pods expire 10 minutes after completion, so they may no longer appear in this output.
+
 Confirm that:
 
-- The database initialization job completes successfully when `database.init.enabled=true`.
-- The bootstrap admin job completes successfully when `bootstrapAdmin.enabled=true`.
+- The database initialization Job completes successfully when `database.init.enabled=true`.
+- The bootstrap administrator Job completes successfully when `bootstrapAdmin.enabled=true`.
 - The controller pods become Ready.
 - The API, cluster, and ops services match your intended exposure model.
 - Boundary API requests succeed against the controller API listener.
 - Workers can reach `public_cluster_addr` and register successfully.
+
+The bootstrap Job creates the password auth method and administrator account from the credentials in `boundary-controller-secrets`. Before you use the Boundary CLI to authorize workers, connect the CLI to the API Service, retrieve the generated auth method ID from Boundary, and authenticate with the bootstrap administrator credentials. Refer to [Password authentication](/boundary/docs/authentication/password) for the CLI authentication workflow.
 
 ## Upgrade the controller
 
@@ -353,14 +258,13 @@ To upgrade the controller deployment, run:
 
 ```shell-session
 $ helm upgrade boundary-controller hashicorp/boundary-controller \
-  --version 0.1.0 \
   --namespace boundary \
-  --values my-values.yaml \
+  --values controller-values.yaml \
   --rollback-on-failure \
   --wait
 ```
 
-For database migration scenarios, refer to [Controller Helm chart examples](/boundary/docs/deploy/helm-chart/controller-examples#controlled-database-migration).
+For upgrades that require a database migration, follow [Migrate the database during an upgrade](/boundary/docs/deploy/helm-chart/controller-examples#migrate-the-database-during-an-upgrade).
 
 ## Uninstall the controller
 
@@ -369,12 +273,6 @@ To remove the controller Helm release and its associated Kubernetes resources, r
 ```shell-session
 $ helm uninstall boundary-controller --namespace boundary
 ```
-
-## Troubleshooting
-
-### Bootstrap admin Job times out
-
-If the bootstrap admin Job times out while connecting to the controller API Service, confirm that the TLS certificate in the TLS Secret includes the required SAN (`DNS:<fullname>-api`, for example `boundary-controller-api`), as described in [Create the TLS Secret when TLS is enabled](#create-the-tls-secret-when-tls-is-enabled). A missing or mismatched SAN causes the Job to fail certificate verification and time out.
 
 ## Next steps
 
