@@ -7,6 +7,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { exec } from 'node:child_process'
 import { promisify } from 'node:util'
+import grayMatter from 'gray-matter'
 
 import { PRODUCT_CONFIG } from '#productConfig.mjs'
 
@@ -124,17 +125,7 @@ export async function getProductPaths(
 				let frontmatter = {}
 				try {
 					const fileContent = fs.readFileSync(itemPath, 'utf-8')
-					const frontmatterMatch = fileContent.match(/^---\n([\s\S]*?)\n---/)
-					if (frontmatterMatch) {
-						const frontmatterText = frontmatterMatch[1]
-						frontmatterText.split('\n').forEach((line) => {
-							const [key, ...valueParts] = line.split(':')
-							if (key && valueParts.length > 0) {
-								const value = valueParts.join(':').trim()
-								frontmatter[key.trim()] = value
-							}
-						})
-					}
+					frontmatter = grayMatter(fileContent).data
 				} catch (error) {
 					console.error(`Error reading frontmatter from ${itemPath}:`, error)
 				}
@@ -159,6 +150,8 @@ export async function getProductPaths(
 						// add date metadata from frontmatter if it exists
 						created_at: frontmatter.created_at || null,
 						last_modified: frontmatter.last_modified || null,
+						title: frontmatter.page_title || null,
+						description: frontmatter.description || null,
 					})
 					return
 				}
@@ -169,6 +162,8 @@ export async function getProductPaths(
 					// add date metadata from frontmatter if it exists
 					created_at: frontmatter.created_at || null,
 					last_modified: frontmatter.last_modified || null,
+					title: frontmatter.page_title || null,
+					description: frontmatter.description || null,
 				})
 			}
 		})
