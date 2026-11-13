@@ -49,6 +49,8 @@ Writing in a consistent style and voice makes the HashiCorp brand strong and vib
 - Never use a metaphor, simile, or other figure of speech even if you are used to seeing it in print.
 - Never use a long word where a short one will do.
 - If it is possible to cut a word out, always cut it out.
+- Never cut a required technical detail, warning, or fact to make content shorter.
+- Lead with the point. Readers skim, so put the answer or action first.
 - Never use the passive voice where you can use the active voice.
 - Never use a foreign phrase, a scientific word, or a jargon word if you can think of an everyday English equivalent.
 - If adhering to any of the guidelines does more harm than good, break the rule. 
