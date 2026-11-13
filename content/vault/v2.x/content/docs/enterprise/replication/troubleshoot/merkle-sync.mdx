@@ -1,0 +1,157 @@
+---
+layout: docs
+page_title: Troubleshoot Merkle sync loops
+description: >-
+  Fix Vault Enterprise replication secondaries that stay in merkle-sync or cycle
+  between merkle-diff, merkle-sync, and stream-wals, and learn when and how to
+  reindex replication.
+---
+
+# Troubleshoot Merkle sync loops
+
+@include 'alerts/enterprise-and-hcp.mdx'
+
+A secondary enters `merkle-diff` and `merkle-sync` when it falls too far behind
+the primary to use write-ahead log (WAL) streaming. After it resolves the
+conflicting keys, it returns to `stream-wals`. A secondary that keeps returning
+to Merkle syncs never stays in sync with its primary.
+
+## A secondary keeps running Merkle syncs
+
+### Problem
+
+The [replication status](/vault/docs/enterprise/replication/monitor) on the
+secondary shows one of the following patterns:
+
+- `state` stays `merkle-sync` for a long time. Check `sync_progress` against
+  `sync_total_keys` to see whether the sync advances.
+- `state` cycles between `merkle-diff`, `merkle-sync`, and `stream-wals`.
+- The log repeats `non-matching guard, exiting` and `no matching WALs
+  available`, followed by `starting merkle diff`.
+
+### Cause
+
+The secondary asks the primary for WAL entries that follow its own Merkle root.
+If the primary's log shipper buffer no longer holds those entries, the secondary
+must run a Merkle sync again. The pattern usually has one of the following
+causes:
+
+- The log shipper buffer is too small for the volume of changes.
+- Clients change keys faster than replication can apply them.
+- The Merkle tree is corrupted.
+
+### Solution
+
+Work through the causes in order:
+
+1. Tune the log shipper buffer. Refer to [Tune the log
+   shipper](/vault/docs/enterprise/replication/troubleshoot/tune#tune-the-log-shipper).
+1. Reduce the rate of changes from clients. Refer to [Reduce the volume of
+   replicated
+   changes](/vault/docs/enterprise/replication/troubleshoot/tune#reduce-the-volume-of-replicated-changes).
+1. Check for Merkle tree corruption. Refer to [Merkle tree
+   corruption](/vault/docs/enterprise/replication/troubleshoot/merkle-tree-corruption).
+   If the check finds corruption, reindex. Refer to [Reindex
+   replication](#reindex-replication).
+
+### Measure Merkle diffs and syncs
+
+The following metrics time each stage of a Merkle sync. They appear in
+telemetry only when replication is unhealthy, so any value means a secondary
+fell behind at that time. Track how often they appear and how long each stage
+takes:
+
+| Metric | Description |
+| --- | --- |
+| [`vault.replication.fetchRemoteKeys`](/vault/docs/internals/telemetry/metrics/all#vault-replication-fetchremotekeys) | Time, in milliseconds, to fetch keys from the remote cluster before Vault builds the Merkle tree delta. |
+| [`vault.replication.merkleDiff`](/vault/docs/internals/telemetry/metrics/all#vault-replication-merklediff) | Time, in milliseconds, to compare Merkle trees and build the delta between the clusters. |
+| [`vault.replication.merkleSync`](/vault/docs/internals/telemetry/metrics/all#vault-replication-merklesync) | Time, in milliseconds, to apply the most recent delta. |
+
+## Reindex replication
+
+Vault keeps the Merkle trees that track replicated data consistent between
+clusters. If replication is in a bad state, or something removed data from
+storage without Vault's knowledge, a reindex rebuilds the Merkle tree from
+storage so that it matches the stored data.
+
+### When to reindex
+
+Reindex when one of the following is true:
+
+- The [Merkle check](/vault/docs/enterprise/replication/troubleshoot/merkle-tree-corruption)
+  reports corruption.
+- The operational log suggests a reindex, as in the following example. In this
+  case, reindex the primary cluster.
+
+  <CodeBlockConfig hideClipboard>
+
+  ```plaintext
+  [ERROR] replication: encountered error, applying backoff: backoff=2s error="state is still irreconcilable after reindex, try reindexing primary cluster"
+  ```
+
+  </CodeBlockConfig>
+
+Run the Merkle check first. A reindex can take a long time, depending on the
+number and size of objects in storage, and the cluster can block requests
+while it runs.
+
+### Effect on requests
+
+Vault replays the WAL when it starts and at the end of a reindex. A WAL replay
+at startup blocks reads and writes until it finishes.
+
+A reindex that you start replays the WAL at the end. During that final replay,
+the cluster blocks writes and continues to serve reads. A reindex that Vault
+runs at startup, for example after it finds lost index records, blocks reads and
+writes until it finishes.
+
+### Run a reindex
+
+On a primary or a performance secondary, call the
+[`/sys/replication/reindex`](/vault/api-docs/system/replication#reindex-replication)
+endpoint. It requires `sudo` capability.
+
+<Tabs>
+
+<Tab heading="CLI" group="cli">
+
+```shell-session
+$ vault write -force sys/replication/reindex
+```
+
+</Tab>
+
+<Tab heading="API" group="api">
+
+```shell-session
+$ curl \
+    --header "X-Vault-Token: $VAULT_TOKEN" \
+    --request POST \
+    $VAULT_ADDR/v1/sys/replication/reindex
+```
+
+</Tab>
+
+</Tabs>
+
+On a DR secondary, call the [DR reindex
+endpoint](/vault/api-docs/system/replication/replication-dr#reindex-replication),
+`/sys/replication/dr/secondary/reindex`, with a [DR operation
+token](/vault/docs/enterprise/replication/disaster-recovery/operation-token) in
+the `dr_operation_token` parameter.
+
+Both endpoints accept the following parameters:
+
+- `diff` `(bool: false)`: Runs a slower reindex that checks each key to diagnose
+  problems.
+- `force` `(bool: false)`: Runs a complete reindex that scans only the data in
+  storage.
+- `skip_flush` `(bool: false)`: Skips the tree flush stage to shorten the time
+  the tree stays locked. If the node stops before the tree finishes flushing,
+  the reindex might not apply fully, and you need to run it again.
+
+## Related
+
+- [Merkle tree corruption](/vault/docs/enterprise/replication/troubleshoot/merkle-tree-corruption)
+- [Tune replication](/vault/docs/enterprise/replication/troubleshoot/tune)
+- [Replication internals](/vault/docs/internals/replication#implementation-details)

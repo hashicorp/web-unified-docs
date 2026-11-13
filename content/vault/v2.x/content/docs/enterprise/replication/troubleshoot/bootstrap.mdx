@@ -1,0 +1,230 @@
+---
+layout: docs
+page_title: Troubleshoot bootstrap and token errors
+description: >-
+  Fix Vault Enterprise replication bootstrap and token errors, including tls
+  internal error, tls handshake failure, error unwrapping secondary token, and
+  rejected activation tokens.
+---
+
+# Troubleshoot bootstrap and token errors
+
+@include 'alerts/enterprise-and-hcp.mdx'
+
+Bootstrapping connects a new secondary to its primary when you enable the
+secondary or update its primary. The secondary unwraps the activation token
+over the primary's API port, unless you [activate with a public
+key](/vault/docs/enterprise/replication#activate-with-a-public-key), then
+fetches a bootstrap package over RPC on the primary's cluster port. Errors on
+this page come from one of those calls, or from the tokens that authorize them.
+
+## Bootstrap fails with tls internal error
+
+### Problem
+
+Enabling the secondary or updating its primary fails with an error like the
+following:
+
+<CodeBlockConfig hideClipboard>
+
+```plaintext
+error fetching secondary bootstrap package:
+error authing for bootstrap:
+rpc error: code = Unavailable desc = all SubConns are in TransientFailure,
+latest connection error: connection error:
+desc = "transport: Error while dialing remote error: tls: internal error"
+```
+
+</CodeBlockConfig>
+
+### Cause
+
+`primary_cluster_addr` is the address of a load balancer that routes requests to
+any node of the primary cluster. Standby nodes serve API requests, so this setup
+works for the API. Bootstrapping uses RPC on the cluster port, and a standby
+node does not forward bootstrap requests to the active node, so the bootstrap
+fails with this TLS error.
+
+### Solution
+
+1. Deploy a separate load balancer for cross-cluster RPC traffic that forwards
+   requests only to the active node of the primary cluster. Configure its health
+   check to call the [`/sys/health`](/vault/api-docs/system/health) endpoint and
+   treat a `200` response as healthy. By default, `200` means the node is
+   initialized, unsealed, and active.
+1. Set `primary_cluster_addr` to that load balancer when you enable replication
+   on the primary, with the
+   [DR](/vault/api-docs/system/replication/replication-dr#enable-dr-primary-replication)
+   or
+   [performance](/vault/api-docs/system/replication/replication-performance#enable-performance-primary-replication)
+   enable primary endpoint.
+
+Changing `primary_cluster_addr` on an existing primary can require you to
+disable replication and generate a new activation token for the secondary.
+
+## Bootstrap fails with tls handshake failure
+
+### Problem
+
+Enabling the secondary or updating its primary fails with an error like the
+following:
+
+<CodeBlockConfig hideClipboard>
+
+```plaintext
+error fetching secondary bootstrap package:
+error authing for bootstrap:
+rpc error: code = Unavailable desc = connection error:
+desc = "transport: Error while dialing remote error: tls: handshake failure"
+```
+
+</CodeBlockConfig>
+
+### Cause
+
+The RPC connection between the secondary and the primary fails when it starts a
+mutual TLS (mTLS) session. The server logs have more detail. The error usually
+has one of the following causes:
+
+- A load balancer forwards the cluster port, 8201 by default, to the API port,
+  8200 by default. The protocols do not match.
+- An application-level (layer 7) load balancer handles the cluster port. The
+  protocols do not match.
+- A load balancer presents its own certificate on the cluster port, as it does
+  with TLS termination. Its certificate conflicts with the certificates that
+  Vault generates for cluster traffic.
+
+### Solution
+
+Make sure every load balancer on the cross-cluster path does the following:
+
+- Forwards RPC connections to the port where Vault listens for cluster traffic.
+- Works at the network level (layer 4), not the application level.
+- Passes TLS through and does not present its own certificate.
+
+## Error unwrapping secondary token
+
+### Problem
+
+Enabling the secondary or updating its primary fails with `error unwrapping
+secondary token`, followed by the address the secondary tried to reach.
+
+### Cause
+
+The secondary could not complete the unwrap call to the primary's API. Vault
+writes the primary's API address into the activation token. If the secondary
+cannot reach that address, for example because a load balancer or network
+address translation sits in front of the primary, the call fails. If the address
+is reachable but the secondary does not trust the primary's certificate, the
+error includes a certificate error. Refer to [Certificate signed by unknown
+authority](#certificate-signed-by-unknown-authority).
+
+### Solution
+
+Use one of the following options:
+
+- Set `primary_api_addr` to an API address of the primary that the secondary can
+  reach, on the [DR
+  enable](/vault/api-docs/system/replication/replication-dr#enable-dr-secondary),
+  [DR update
+  primary](/vault/api-docs/system/replication/replication-dr#update-dr-secondary-s-primary),
+  [performance
+  enable](/vault/api-docs/system/replication/replication-performance#enable-performance-secondary),
+  or [performance update
+  primary](/vault/api-docs/system/replication/replication-performance#update-performance-secondary-s-primary)
+  call.
+- Activate with a public key, so the secondary makes no API call to the primary.
+  Refer to [Activate with a public
+  key](/vault/docs/enterprise/replication#activate-with-a-public-key).
+
+## Certificate signed by unknown authority
+
+### Problem
+
+Enabling the secondary or updating its primary fails with an error like the
+following:
+
+<CodeBlockConfig hideClipboard>
+
+```plaintext
+error unwrapping secondary token: Post "https://<primary-api-address>/v1/sys/wrapping/unwrap": tls: failed to verify certificate: x509: certificate signed by unknown authority
+```
+
+</CodeBlockConfig>
+
+### Cause
+
+The secondary does not trust the certificate authority (CA) that signed the
+primary's API certificate. By default, the secondary uses the system CA roots
+for the unwrap call.
+
+### Solution
+
+Use one of the following options:
+
+- Pass the CA to the enable or update primary call with the `ca_file` parameter,
+  a path to a PEM-format CA file, or the `ca_path` parameter, a path to a
+  directory of PEM-format files. The parameter name is `ca_file`, not
+  `primary_ca_file`.
+- Add the CA certificate, and any intermediate CA certificates, to the system
+  trust store on every node that takes part in replication.
+- Activate with a public key, so the secondary makes no API call to the primary.
+
+To isolate the cause, test the TLS connection to the primary's API address
+outside Vault, for example with the `openssl s_client` command.
+
+## The secondary activation token is rejected
+
+### Problem
+
+Enabling the secondary or updating its primary fails with `Bad Request` or an
+error that the token is invalid or expired.
+
+### Cause
+
+Activation tokens have the following limits:
+
+- A token works only with the primary that generated it.
+- A token expires after its TTL, 30 minutes by default. An expired token returns
+  `Bad Request`.
+- A token works once.
+- Only a token with `sudo` capability on the `secondary-token` endpoint can
+  generate an activation token.
+
+### Solution
+
+Generate a new activation token on the correct primary with the
+[DR](/vault/api-docs/system/replication/replication-dr#generate-dr-secondary-token)
+or
+[performance](/vault/api-docs/system/replication/replication-performance#generate-performance-secondary-token)
+secondary token endpoint, and use it before it expires. To allow more time, set
+the `ttl` parameter.
+
+## A DR secondary operation rejects the token
+
+### Problem
+
+A promote, update primary, disable, reindex, or Merkle check call on a DR
+secondary fails, or only partly completes, when you authenticate with a root
+token.
+
+### Cause
+
+These DR secondary endpoints need a DR operation token in the
+`dr_operation_token` parameter. A root token does not authorize them.
+
+### Solution
+
+Generate a DR operation token on the DR secondary and pass it in the
+`dr_operation_token` parameter. Refer to [DR operation
+tokens](/vault/docs/enterprise/replication/disaster-recovery/operation-token).
+
+On Vault 2.0.0 and later, generating the DR operation token also needs a valid
+Vault token. If you have none, refer to [Generate a token without
+authentication](/vault/docs/enterprise/replication/disaster-recovery/operation-token#generate-a-token-without-authentication).
+
+## Related
+
+- [Troubleshoot replication connections](/vault/docs/enterprise/replication/troubleshoot/connection)
+- [Shared design considerations](/vault/docs/enterprise/replication#shared-design-considerations)
+- [Replication API](/vault/api-docs/system/replication)
