@@ -95,8 +95,8 @@ rules. Examples for each rule are in
   sources](../docs/content-guide/content-types/visual-aids.md#commit-the-diagram-sources).
 - **Always use HTML comment syntax**, `<!-- ... -->`, for every comment you
   create in an MDX file, including TODOs and notes to maintainers. Never use
-  `{/* ... */}` because the dev portal platform throws a runtime error on that
-  syntax and does not render the page contents.
+  `{/* ... */}`. The dev portal renders that syntax as
+  visible text on the published page.
 
 ## Product-local instructions
 
