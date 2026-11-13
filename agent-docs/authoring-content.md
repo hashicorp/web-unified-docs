@@ -51,6 +51,26 @@ If the person still wants one pull request, write it, but organize it for
 review: one commit per product or section, and a description that tells each
 reviewer which commit is theirs.
 
+## Write for engineers who skim
+
+Readers are software engineers who skim and want the answer fast. Apply these
+rules when you create or revise content.
+
+- Lead with the point. Put the key takeaway or action first and context after.
+- Be concise. Cut filler, hedging, and repeated points.
+- Keep sentences short with one idea per sentence.
+- Keep paragraphs to one to three sentences.
+- Prefer lists, tables, and scannable structure over long prose.
+- Use descriptive headings and front-load the important words.
+- Put steps in numbered lists with one action per step.
+- Remove content that does not help the reader act or understand.
+
+**Never drop required technical details, warnings, or accuracy to be shorter.**
+
+The [style guide](../docs/style-guide/index.md) and the product's templates
+take precedence on structure and terminology when they conflict with these
+rules.
+
 ## Mechanics that are easy to get wrong
 
 - **Do not write the date metadata block.** `created_at` and `last_modified` are
@@ -65,7 +85,12 @@ reviewer which commit is theirs.
   `diagram-sources` directory. When you create, update, or rebuild a diagram,
   edit the SVG sources — or create them if they do not exist yet — and commit
   them with the PNGs, even if the request only names the PNGs. Refer to
-  [Commit the diagram sources](../docs/content-guide/content-types/visual-aids.md#commit-the-diagram-sources).
+  [Commit the diagram
+  sources](../docs/content-guide/content-types/visual-aids.md#commit-the-diagram-sources).
+- **Always use HTML comment syntax**, `<!-- ... -->`, for every comment you
+  create in an MDX file, including TODOs and notes to maintainers. Never use
+  `{/* ... */}` because the dev portal platform throws a runtime error on that
+  syntax and does not render the page contents.
 
 ## Product-local instructions
 
