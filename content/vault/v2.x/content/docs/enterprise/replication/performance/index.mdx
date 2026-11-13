@@ -1,0 +1,227 @@
+---
+layout: docs
+page_title: Performance replication
+description: >-
+  Performance replication adds Vault Enterprise clusters that serve client
+  requests close to clients. Learn the use cases, how secondaries handle
+  requests, and what to plan before you set it up.
+---
+
+# Performance replication
+
+@include 'alerts/enterprise-and-hcp.mdx'
+
+Performance replication adds Vault Enterprise clusters that serve client
+requests. A performance secondary receives configuration, policies, and secrets
+from its primary, answers reads and other requests locally, and forwards writes
+to replicated data to the primary. Each performance secondary issues and manages
+its own tokens and leases.
+
+To compare performance replication with disaster recovery (DR) replication,
+refer to [Vault Enterprise replication](/vault/docs/enterprise/replication). To
+set it up, refer to [Enable performance
+replication](/vault/docs/enterprise/replication/performance/enable).
+
+## Introduction
+
+A performance secondary shares the primary's configuration, policies, and
+supporting secrets, such as KV values and `transit` encryption keys. Clients
+connect to the secondary as they would to any Vault cluster. When a request
+would change replicated state, the secondary forwards it to the primary. The
+forwarding is transparent to the client. Most high-volume work, such as KV reads
+and `transit` encrypt and decrypt operations, completes on the secondary, so
+throughput scales with the number of secondaries.
+
+Tokens and leases stay on the cluster that issued them. A client that
+authenticates to one cluster cannot use that token on another cluster. Changes
+reach secondaries asynchronously, so a read on a secondary can briefly return
+data older than the primary. Refer to [Eventual consistency in Vault
+replication](/vault/docs/enterprise/consistency#performance-replication).
+
+## Use cases
+
+Use performance replication for the following:
+
+- **Regional latency:** Run a secondary close to clients in each region so that
+  reads and cryptographic operations do not cross regions.
+- **Throughput:** Spread high-volume workloads, such as `transit` encryption as a
+  service, across several clusters.
+- **Data locality:** Keep selected mounts and namespaces out of a region with
+  [path filters](#path-filters), for example to meet data residency rules.
+- **Regional resilience for reads:** A secondary keeps answering most reads
+  while its connection to the primary is down. Refer to [Disconnected
+  performance secondaries](#disconnected-performance-secondaries).
+
+Performance replication is not a disaster recovery solution. Secondaries do not
+receive tokens, leases, or local mounts from the primary. To protect each
+performance cluster, add a [DR
+secondary](/vault/docs/enterprise/replication/disaster-recovery) to it.
+
+## Request handling
+
+A performance secondary handles requests in the following ways:
+
+| Request | Handled by |
+| --- | --- |
+| Read replicated data, such as KV secrets and policies | Secondary |
+| `transit` encrypt, decrypt, sign, and verify | Secondary |
+| Authenticate and create tokens | Secondary. The token works only on that cluster. |
+| Create, renew, and revoke leases for dynamic secrets | Secondary |
+| Issue PKI certificates | Secondary. Refer to [PKI considerations](/vault/docs/secrets/pki/considerations). |
+| Write replicated data, such as KV secrets, policies, roles, and mounts | Forwarded to the primary |
+| Read and write data on a local mount of the secondary | Secondary |
+
+### Disconnected performance secondaries
+
+If a performance secondary loses its connection to the primary cluster, it
+keeps serving any request it can complete with data from its own storage.
+Requests that write to replicated storage need the primary, so those writes
+fail until the connection returns.
+
+Reads of replicated data still succeed, but they return the data as of the last
+successful replication and can be stale. When the connection returns, the
+secondary reconciles with the primary.
+
+As a general rule, reads succeed and writes fail. The following table lists
+known exceptions and other behavior to plan for:
+
+| Operation | Behavior while disconnected |
+| --- | --- |
+| Read replicated data, such as KV secrets, policies, and mount configuration | Succeeds. Responses might be stale. |
+| Write replicated data, such as KV secrets, policies, roles, and mount configuration | Fails. The secondary cannot forward the write to the primary. |
+| Encrypt or decrypt with `transit` | Succeeds. Transit uses the keys already replicated to the secondary. |
+| Read or write data on a [local mount](#local-mounts) created on the secondary | Succeeds. Local mount data lives only on the secondary. |
+| Issue a certificate with PKI | Succeeds. Issued certificates live in the secondary's local storage. |
+| Change PKI roles or issuers | Fails. Roles and issuers are replicated data. |
+| Revoke a PKI certificate that another cluster issued, by using [cross-cluster revocation](/vault/docs/secrets/pki/considerations#what-are-cross-cluster-crls) | Fails. Cross-cluster revocation requests write synchronously to the primary. |
+
+To check whether a secondary is connected, read its [replication
+status](/vault/docs/enterprise/replication/monitor).
+
+## Control what replicates
+
+Performance replication copies every shared mount by default. Use path filters
+and local mounts to keep data out of secondaries.
+
+### Path filters
+
+A path filter limits the mounts and namespaces that replicate to one
+performance secondary. You set it on the primary for each secondary:
+
+- **Allow mode** replicates only the listed mount and namespace paths.
+- **Deny mode** replicates everything except the listed paths.
+
+Vault applies a filter to data that already replicated, so adding a deny entry
+removes that mount from the secondary. Each filter belongs to one secondary,
+identified by the `secondary_id` value in the secondary's replication status.
+When you generate a new activation token for a secondary and call update
+primary, re-create its path filter.
+
+Manage filters with the [paths filter
+endpoints](/vault/api-docs/system/replication/replication-performance#create-paths-filter).
+
+### Local mounts
+
+A local mount does not replicate to performance secondaries. It still
+replicates to DR secondaries. You can create local mounts on the primary, to
+keep their data off performance secondaries, or on a secondary, to store data
+only in that cluster. Set the mount as local when you create it, with the
+`-local` flag on [`vault secrets
+enable`](/vault/docs/commands/secrets/enable) or [`vault auth
+enable`](/vault/docs/commands/auth/enable). To change a mount between local and
+shared, disable it and mount it again.
+
+Give local mounts paths that no shared mount uses. If the primary has a shared
+mount at the same path as a local mount on a secondary, replication stops on
+that secondary. Refer to [Troubleshoot mount
+conflicts](/vault/docs/enterprise/replication/troubleshoot/connection#a-shared-mount-conflicts-with-a-local-mount).
+
+## Design considerations
+
+Plan the following before you enable performance replication. The [shared
+design
+considerations](/vault/docs/enterprise/replication#shared-design-considerations)
+for both replication types also apply.
+
+### Placement and capacity
+
+Place each secondary near the clients it serves. Size each secondary for the
+load of its own clients, including the tokens and leases they create, because
+the secondary stores those locally. Latency between the secondary and the
+primary affects forwarded writes and how fast changes arrive. Refer to [Tune
+replication](/vault/docs/enterprise/replication/troubleshoot/tune).
+
+### Client routing
+
+Route each client to one cluster and keep it there. A client that moves to
+another cluster must authenticate again, because tokens and leases do not
+replicate between performance clusters. Do not load balance a single client
+across clusters.
+
+### Activation method
+
+Choose how the secondary receives the activation token: a wrapping token, which
+needs the primary's API port, or a public key, which does not. Refer to
+[Activation methods](/vault/docs/enterprise/replication#activation-methods).
+
+### Mount strategy
+
+Decide which mounts each region needs before you enable the secondary. Plan
+local mount paths so they never collide with shared mount paths. Plan path
+filters for data that must stay out of a region.
+
+### Audit devices
+
+Audit device configuration replicates to performance secondaries unless the
+device is local. Every secondary must be able to write to each replicated audit
+device. Refer to [Audit devices](/vault/docs/audit).
+
+### Dynamic secrets
+
+@include '../../../global/partials/alerts/vault-pr-dynamic-considerations.mdx'
+
+### Snapshots
+
+Vault does not replicate automated integrated storage snapshots as part of
+performance replication. Configure automated snapshots on each primary and
+secondary performance cluster.
+
+### One performance primary
+
+Only one performance primary can be active at a time. Performance replication
+does not support active-active writes. Two primaries can cause data loss when
+the clusters reconnect. When you promote a performance secondary, demote the
+original primary first. After a promotion, clients must authenticate again on
+the new primary.
+
+### Disaster recovery
+
+Add a DR secondary to the performance primary and to each performance secondary
+that serves clients. Set up performance replication first, then the DR
+secondaries. Refer to [Combine DR and performance
+replication](/vault/docs/enterprise/replication/disaster-recovery/failover#combine-dr-and-performance-replication).
+
+## Guidance
+
+Use the following resources to set up and operate performance replication.
+
+### Tutorials
+
+- [Enable performance replication](/vault/tutorials/enterprise/performance-replication)
+
+### Documentation
+
+- [Enable performance replication](/vault/docs/enterprise/replication/performance/enable)
+- [Eventual consistency in Vault replication](/vault/docs/enterprise/consistency)
+- [Monitor replication](/vault/docs/enterprise/replication/monitor)
+- [Troubleshoot replication](/vault/docs/enterprise/replication/troubleshoot)
+
+### Architecture
+
+- [HashiCorp Validated Design: Performance replication architecture and setup](/validated-designs/vault/installation-guide/vms/performance-replication-architecture-and-setup)
+- [HashiCorp Validated Design: Performance replication operations](/validated-designs/vault/administration-guide/performance-replication-operations)
+- [Well-Architected Framework: Scale and tune performance](/well-architected-framework/design-resilient-systems/scale-and-tune-performance)
+
+### Reference
+
+- [Performance replication API](/vault/api-docs/system/replication/replication-performance)
