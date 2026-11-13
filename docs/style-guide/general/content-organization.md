@@ -2,14 +2,14 @@
 
 These guidelines are intended to help you organize information within a page in a consistent manner.
 
-## Do not implement frequently-asked-question (FAQ) sections 
+## Do not implement frequently-asked-question (FAQ) sections
 
 - **keywords**: writing, faq  
 - **content sets**: docs, cert, tutorials
 
 If the information has gaps, redesign your content around use cases that would otherwise be filled with FAQs.
 
-## Organize content so that it flows in a single direction from beginning to end 
+## Organize content so that it flows in a single direction from beginning to end
 
 - **keywords**: writing, flow  
 - **content sets**: docs, WAF, tutorials
@@ -58,6 +58,27 @@ When necessary, direct users to the specific step instead of using directional o
 - `See above for supported versions.`
 - `The example above shows . . .`
 
+## Lead with the most important information
+
+- **keywords**: writing, flow, organization, scanning  
+- **content sets**: docs, WAF, cert, tutorials
+
+Readers skim to find the answer to their question. Put the key takeaway, result, or action at the start of each page, section, and paragraph. Add context and explanation after it.
+
+### Examples
+
+**Do:**
+
+```markdown
+Run `vault operator unseal` three times to unseal Vault. Each run requires a different unseal key. Vault starts sealed to protect the encryption key that decrypts stored data.
+```
+
+**Don't:**
+
+```markdown
+Vault starts sealed to protect the encryption key that decrypts stored data. Because of this, before you can use Vault, you must unseal it by running `vault operator unseal` three times, each with a different unseal key.
+```
+
 ## Write simple sentences that contain a single idea
 
 - **keywords**: writing, flow, organization  
@@ -77,6 +98,110 @@ Terraform processes the `import` block during the planning stage. Terraform list
 
 ```markdown
 The `import` block, like all Terraform configuration blocks, is processed during the `terraform plan` operation, which outputs a list of changes Terraform will make if you proceed to apply.
+```
+
+## Keep paragraphs short
+
+- **keywords**: writing, paragraphs, scanning  
+- **content sets**: docs, WAF, cert, tutorials
+
+Limit paragraphs to one to three sentences. Short paragraphs are easier to scan and translate. When a paragraph grows longer, split it where the idea changes or format parallel items as a list.
+
+### Examples
+
+**Do:**
+
+```markdown
+Terraform stores state in a local file named `terraform.tfstate` by default.
+
+Use HCP Terraform when multiple people work on the same configuration. HCP Terraform stores state remotely and locks it during runs so that only one run can modify it at a time.
+```
+
+**Don't:**
+
+```markdown
+Terraform stores state in a local file named `terraform.tfstate` by default, but when multiple people work on the same configuration, a local file can cause problems. HCP Terraform is one way to address this. It stores state remotely. It also locks state during runs. Locking ensures that only one run can modify state at a time, which prevents conflicts between team members.
+```
+
+## Use lists and tables for discrete, parallel items
+
+- **keywords**: writing, organization, lists, tables, scanning  
+- **content sets**: docs, WAF, cert, tutorials
+
+When a sentence describes three or more parallel items, such as actions, requirements, or supported platforms, format them as a list. Use a table when each item has the same set of attributes, such as a name, type, and default value.
+
+Keep each list item short. If items need multiple sentences or paragraphs, use prose or subheadings instead. Refer to [Do not format multiple paragraphs of text into lists](#do-not-format-multiple-paragraphs-of-text-into-lists) for additional guidance.
+
+### Examples
+
+**Do:**
+
+```markdown
+The `terraform init` command performs the following actions:
+
+- Initializes the backend.
+- Downloads provider plugins.
+- Downloads modules that the configuration references.
+```
+
+**Don't:**
+
+```markdown
+The `terraform init` command initializes the backend, downloads provider plugins, and downloads modules that the configuration references.
+```
+
+## Write one action per step
+
+- **keywords**: writing, procedures, steps, ordered lists  
+- **content sets**: docs, WAF, cert, tutorials
+
+Format procedures as ordered lists. Each step contains one action the reader performs. When an action produces a result the reader needs to verify, describe the result after the action in the same step.
+
+Refer to [Use `1.` for every item in an ordered list](../markdown/fonts-and-formats.md#use-1-for-every-item-in-an-ordered-list) for formatting guidance.
+
+### Examples
+
+**Do:**
+
+```markdown
+1. Run `terraform init` to initialize the working directory.
+1. Run `terraform plan` to preview the changes.
+1. Run `terraform apply` to apply the changes. Terraform prompts you to confirm.
+```
+
+**Don't:**
+
+```markdown
+1. Run `terraform init` to initialize the working directory, then run `terraform plan` to preview the changes and `terraform apply` to apply them.
+```
+
+## Remove content that does not help readers act or understand
+
+- **keywords**: writing, concision, scanning  
+- **content sets**: docs, WAF, cert, tutorials
+
+Every sentence should help readers complete a task or understand a concept. Remove introductions that restate the heading, summaries that repeat the section, and background that readers do not need for the task. State each point once and link to it instead of repeating it.
+
+Do not remove required technical details, warnings, prerequisites, or facts to make content shorter.
+
+Refer to [Avoid unnecessary words](language.md#avoid-unnecessary-words) for guidance on filler words and phrases within sentences.
+
+### Examples
+
+**Do:**
+
+```markdown
+## Configure the backend
+
+Add a `backend` block to the `terraform` block in your configuration.
+```
+
+**Don't:**
+
+```markdown
+## Configure the backend
+
+In this section, you configure the backend. Configuring the backend is an important step. To configure the backend, add a `backend` block to the `terraform` block in your configuration.
 ```
 
 ## Do not format multiple paragraphs of text into lists 
