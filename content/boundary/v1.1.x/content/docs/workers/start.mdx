@@ -1,0 +1,187 @@
+---
+layout: docs
+page_title: Start and verify a worker
+description: >-
+  Start a Boundary worker in the foreground, as a systemd service, or in a container. Verify that the worker connects to its upstream and reports status.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-08-10T22:18:19.000Z
+last_modified: 2026-08-10T22:18:19.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Start and verify a worker
+
+A Boundary worker starts with the `boundary server` command, and you can run it in the foreground, as a systemd service, or in a container.
+After it starts, the worker connects to its upstream and reports status to a controller, which you confirm with the `boundary workers list` command.
+
+## Requirements
+
+Before you start a worker, you must have:
+
+- A worker configuration file. Refer to [Create the worker configuration](/boundary/docs/workers/create).
+- Network access from the worker to its upstream on port `9201`.
+- Write access to the `auth_storage_path` directory, if you use the controller-led or worker-led registration method.
+- A host that meets the worker hardware requirements. Refer to [System requirements](/boundary/docs/architecture/system-requirements#hardware-sizing-for-boundary-servers).
+
+## Start the worker
+
+Select the method that matches how you deploy the Boundary worker:
+
+<Tabs>
+<Tab heading="Foreground" group="foreground">
+
+Run the worker in the foreground to confirm that the configuration is valid.
+This method is useful when you first bring a worker online, because Boundary streams events to the terminal.
+
+Pass the full path to the worker configuration file:
+
+```shell-session
+$ boundary server -config=/etc/boundary.d/egress-worker.hcl
+```
+
+Boundary prints a startup summary, then streams events:
+
+<CodeBlockConfig hideClipboard>
+
+```plaintext
+==> Boundary server configuration:
+
+                               Cgo: disabled
+                        Listener 1: tcp (addr: "0.0.0.0:9202", max_request_duration: "1m30s", purpose: "proxy")
+                         Log Level: info
+                             Mlock: supported: true, enabled: false
+                           Version: Boundary v1.0.0+ent
+        Worker Auth Current Key Id: provable-jumbo-copy-annually-naming-skydiver-handwoven-dyslexic
+  Worker Auth Registration Request: GzusqckarbczHoLGQ4UA25uSQhnZ1cxNFiDqWNng6k4gsK2NZCwET4nFBF8jMGMDEj1quqY7T6kFtWH1BJBs
+          Worker Auth Storage Path: /var/lib/boundary
+          Worker Public Proxy Addr: 10.0.0.10:9202
+
+==> Boundary server started! Log data will stream in below:
+```
+
+</CodeBlockConfig>
+
+The summary confirms the values Boundary read from the configuration file.
+Check that the `Listener 1` address and the `Worker Public Proxy Addr` values match what you expect.
+
+</Tab>
+<Tab heading="systemd" group="systemd">
+
+@include '/workers/systemd-service.mdx'
+
+</Tab>
+<Tab heading="Container" group="container">
+
+Run the worker in a container by mounting a volume for the worker's storage, mounting the configuration file, and passing the configuration path to the `server` command.
+
+The container image runs Boundary as the `boundary` user.
+Its entry point adds the `boundary` command in front of the arguments you pass, so you pass `server` rather than `boundary server`.
+
+The following example runs a worker using the Boundary Enterprise image:
+
+```shell-session
+$ docker run \
+  --name boundary-worker \
+  --detach \
+  -p 9202:9202 \
+  -v boundary-worker-data:/boundary \
+  -v /etc/boundary.d/egress-worker.hcl:/boundary/worker.hcl:ro \
+  -e BOUNDARY_LICENSE=file:///boundary/license.hclic \
+  hashicorp/boundary-enterprise:latest \
+  server -config=/boundary/worker.hcl
+```
+
+Set `auth_storage_path` to `/boundary` in the worker configuration file so that the worker writes its credentials to the mounted volume.
+
+<Warning>
+
+  Mount the volume at `/boundary` rather than at a directory beneath it.
+  The `boundary` user owns the `/boundary` directory in the image, so a volume that you mount at that path inherits the correct ownership.
+  A volume that you mount at a nested path such as `/boundary/data` belongs to `root`.
+  The worker then fails to start with a `permission denied` error when it tries to create the `nodecreds` directory.
+
+</Warning>
+
+Mount the storage directory on a volume that persists across container restarts.
+If you do not, the worker generates new credentials each time it starts, and you have to register it again.
+
+Set `public_addr` in the configuration file to an address that clients and downstream workers can reach.
+Other hosts cannot reach the container's internal address.
+
+To run workers on Kubernetes, use the Boundary worker Helm chart instead of running the container directly.
+Refer to [Deploy workers using a Helm chart](/boundary/docs/deploy/helm-chart/deploy-worker).
+
+</Tab>
+</Tabs>
+
+This page describes how to start an individual worker.
+  To deploy a full self-managed environment, refer to [Deploy workers](/boundary/docs/deploy/self-managed/deploy-workers).
+  To deploy workers on Kubernetes, refer to the [Boundary Helm charts](/boundary/docs/deploy/helm-chart).
+
+## Register the worker
+
+A worker cannot proxy sessions until it registers with a controller.
+If you have not registered this worker, refer to [Register workers](/boundary/docs/workers/registration) and complete the registration method you chose.
+
+Until the worker registers, it logs that it is not authenticated to an upstream.
+You can ignore these messages until you complete the registration.
+
+## Verify the worker
+
+@include '/workers/verify-worker.mdx'
+
+## Verify a multi-hop chain
+
+In a [multi-hop deployment](/boundary/docs/workers/multi-hop), the `Directly Connected Downstream Workers` field shows which workers connect through each worker.
+Use this field to confirm the shape of the chain.
+
+Read the worker at the top of the chain:
+
+```shell-session
+$ boundary workers read -id w_UJ3Qq63Jx0
+```
+
+The output lists the worker directly below it:
+
+<CodeBlockConfig hideClipboard highlight="9-10">
+
+```plaintext
+Worker information:
+  Address:                   10.0.0.10:9202
+  ID:                        w_UJ3Qq63Jx0
+  Last Status Time:          2026-08-07 19:45:22.616245 +0000 UTC
+  Local Storage State:       not configured
+  Release Version:           Boundary v1.0.0+ent
+  Type:                      pki
+
+  Directly Connected Downstream Workers:
+    w_GHBqIeHMyR
+```
+
+</CodeBlockConfig>
+
+Repeat this command for each worker in the chain.
+The worker at the end of the chain has no downstream workers.
+
+## Confirm the proxy listener
+
+From a host that reaches the worker, confirm that the worker accepts connections on its proxy port:
+
+```shell-session
+$ nc -vz 10.0.0.10 9202
+```
+
+If the connection fails, check that the `listener` stanza binds an address the client can reach, and that your firewall rules allow inbound traffic on the proxy port.
+
+## Next steps
+
+If you have not registered the worker yet, [register it with a controller](/boundary/docs/workers/registration).
+A worker cannot proxy sessions until it registers.
+
+After you register and verify the worker, you can:
+
+- [Add worker tags](/boundary/docs/workers/worker-tags) to control which sessions the worker proxies.
+- [Manage workers](/boundary/docs/workers/manage) to update, reload, or decommission the worker.
+- [Configure multi-hop sessions](/boundary/docs/workers/multi-hop) to chain workers across networks.
+
+If the worker does not report status, refer to [Troubleshoot workers](/boundary/docs/workers/troubleshoot).
