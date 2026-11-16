@@ -3,54 +3,46 @@ layout: docs
 page_title: Deploy Boundary workers using a Helm chart
 description: >-
  Deploy Boundary workers on Kubernetes using the Boundary worker Helm chart,
- including configuration, registration, installation, and public address
- updates.
+ including configuration, registration, installation, and validation.
 ---
 
 # Deploy workers using a Helm chart
 
 @include 'helm/worker-chart.mdx'
 
-Deploying the Boundary worker Helm chart gives you a running data-plane worker that registers with a controller or HCP (HashiCorp Cloud Platform) Boundary and is ready to proxy session traffic to your targets. This page covers installing the worker chart only. To stand up the control plane first, refer to [Deploy controllers using a Helm chart](/boundary/docs/deploy/helm-chart/deploy-controller).
+Deploying the Boundary worker Helm chart gives you a running data plane worker that registers with a controller or HCP (HashiCorp Cloud Platform) Boundary and is ready to proxy session traffic to your targets. The baseline configuration on this page deploys a KMS-authenticated worker for a self-managed Boundary control plane. This page covers installing the worker chart only. To stand up the control plane first, refer to [Deploy controllers using a Helm chart](/boundary/docs/deploy/helm-chart/deploy-controller).
 
 ## Prerequisites
 
 Before installing the worker Helm chart, make sure the following are available:
 
-- A Kubernetes cluster running version 1.34 or later with a default StorageClass or pre-provisioned PersistentVolumes.
+- A Kubernetes cluster running version 1.34 or later.
 - Helm 3 or later configured with access to the target Kubernetes cluster.
 - Network connectivity from the worker pod to the HCP (HashiCorp Cloud Platform) Boundary cluster or self-managed Boundary upstream workers.
 - A valid Boundary worker HCL configuration.
+- A TLS certificate and private key for the operations listener.
+- A default StorageClass or pre-provisioned PersistentVolumes when you enable persistent auth storage or session recording storage.
 - A registration model selected before installation:
 
 | Registration model | Requires | Best for |
 | --- | --- | --- |
-| Controller-led registration | A controller-generated activation token | Environments where the controller operator issues tokens to workers before they start |
-| Worker-led registration | The token emitted in pod logs during the first startup | Environments where the worker starts first and an operator retrieves the token from logs to complete registration |
+| Controller-led registration | A controller-generated activation token and persistent auth storage | Environments where the controller operator issues tokens to workers before they start |
+| Worker-led registration | The token emitted in pod logs during the first startup and persistent auth storage | Environments where the worker starts first and an operator retrieves the token from logs to complete registration |
 | KMS-backed worker authentication | A self-managed Boundary deployment configured for KMS (key management system) worker auth | Self-managed deployments that already use a shared KMS key for worker authentication |
 
-Intermediate workers may also require a reachable endpoint for the proxy listener and cluster support for the selected Service type, such as `LoadBalancer`.
+Token-based registration requires persistent auth storage so that the worker retains its credentials across pod restarts. KMS-backed worker authentication does not require persistent auth storage. Intermediate workers may also require a reachable endpoint for the proxy listener and cluster support for the selected Service type, such as `LoadBalancer`.
 
 ## Add the HashiCorp Helm repository
 
 Add the Helm repository and confirm the chart is visible:
 
 ```shell-session
-$ helm repo add hashicorp https://helm.releases.hashicorp.com; \
-  helm search repo hashicorp/boundary-worker
+$ helm repo add hashicorp https://helm.releases.hashicorp.com
+$ helm repo update
+$ helm search repo hashicorp/boundary-worker --versions
 ```
 
-Example output:
-
-<CodeBlockConfig hideClipboard>
-
-```
-NAME                      CHART VERSION   APP VERSION   DESCRIPTION
-hashicorp/boundary-worker 0.1.0           1.0.0         Official HashiCorp Boundary Worker Helm Chart
-
-```
-
-</CodeBlockConfig>
+Refer to the [Boundary worker chart on Artifact Hub](https://artifacthub.io/packages/helm/hashicorp/boundary-worker/) for official releases and [default chart values](https://artifacthub.io/packages/helm/hashicorp/boundary-worker/?modal=values). Choose a chart version compatible with your HCP Boundary or self-managed control plane. Refer to [Control plane and worker compatibility](/boundary/docs/enterprise/supported-versions#control-plane-and-worker-compatibility). To pin the chart version, add `--version <chart-version>` to the `helm install` and `helm upgrade` commands.
 
 ## Prepare the worker configuration
 
@@ -68,7 +60,11 @@ A usable worker configuration includes:
 - A `recording_storage_path` when session recording persistence is enabled
 - A `public_addr` when other clients or workers must connect to this worker
 
-Refer to the following example HCP Boundary worker configuration:
+The chart enables TLS for the operations listener by default with `tls.ops.disabled=false`. It mounts the existing `boundary-worker-tls` Secret at `tls.mountPath`. The HCL must use the templated TLS value and certificate paths shown in the following example. Chart validation rejects `tls_disable=true` unless you also set `tls.ops.disabled=true`.
+
+The proxy and operations Services always render. By default, the proxy Service uses `LoadBalancer`, and the operations Service uses `ClusterIP`. Keep the operations listener and Service target port at `9203` because the deployment uses the named `ops` container port for health probes.
+
+Refer to the following example self-managed KMS worker configuration:
 
 ```hcl
 disable_mlock = true
@@ -79,9 +75,11 @@ listener "tcp" {
 }
 
 listener "tcp" {
-  address     = "0.0.0.0:9203"
-  purpose     = "ops"
-  tls_disable = true
+  address       = "0.0.0.0:9203"
+  purpose       = "ops"
+  tls_disable   = "{{ .Values.tls.ops.disabled }}"
+  tls_cert_file = "{{ .Values.tls.mountPath }}/tls.crt"
+  tls_key_file  = "{{ .Values.tls.mountPath }}/tls.key"
 }
 
 worker {
@@ -90,21 +88,21 @@ worker {
   initial_upstreams = ["boundary-controller-cluster:9201"]
 
   tags {
-    type = ["worker", "kled", "tests"]
+    type = ["worker", "egress"]
   }
 }
 
 kms "aead" {
   purpose = "worker-auth"
   aead_type = "aes-gcm"
-  key = "ATTK2pMjMTEJGlAkUJAePnFMlNLQaXBnhSqJHVlJeKQ="
+  key = "REPLACE_WITH_BASE64_ENCODED_32_BYTE_KEY"
   key_id = "global_worker-auth"
 }
 
 events {
   audit_enabled       = true
   sysevents_enabled   = true
-  observations_enable = true
+  observations_enabled = true
   sink "stderr" {
     name        = "all-events"
     description = "All events sent to stderr"
@@ -116,25 +114,23 @@ events {
 
 <Note>
 
-  This inline AEAD KMS example is suitable for development or testing. The key is visible to anyone who can read the configuration file. For production use, use an external KMS as described in [Configure KMS](https://developer.hashicorp.com/boundary/docs/configuration/kms).
+  This inline AEAD KMS example is suitable for development or testing. Replace `REPLACE_WITH_BASE64_ENCODED_32_BYTE_KEY` with a valid key. The worker-auth key and `key_id` must match the controller configuration so that the controller trusts the worker. The key is visible to anyone who can read the configuration file. For production use, use an external KMS as described in [Configure KMS](/boundary/docs/configuration/kms).
 
   We do not recommend changing `disable_mlock = true` from the chart default. The containers run without the elevated privileges required for memory locking.
 
 </Note>
 
-## List available chart versions
-
-Use the following command to see any available published versions of the worker chart:
-
-```shell-session
-$ helm search repo hashicorp/boundary-worker --versions
-```
-
 ## Install a Boundary worker
 
-Create a values file that contains `worker.config` and any Kubernetes overrides:
+Create a file named `worker-values.yaml` that contains `worker.config` and any Kubernetes overrides. Replace `REPLACE_WITH_BASE64_ENCODED_32_BYTE_KEY` with the worker-auth key configured on your controllers:
 
 ```yaml
+tls:
+  ops:
+    disabled: false
+  secretName: boundary-worker-tls
+  mountPath: /etc/boundary/tls
+
 worker:
   config: |
     disable_mlock = true
@@ -145,9 +141,11 @@ worker:
     }
 
     listener "tcp" {
-      address     = "0.0.0.0:9203"
-      purpose     = "ops"
-      tls_disable = true
+      address       = "0.0.0.0:9203"
+      purpose       = "ops"
+      tls_disable   = "{{ .Values.tls.ops.disabled }}"
+      tls_cert_file = "{{ .Values.tls.mountPath }}/tls.crt"
+      tls_key_file  = "{{ .Values.tls.mountPath }}/tls.key"
     }
 
     worker {
@@ -156,33 +154,46 @@ worker:
       initial_upstreams = ["boundary-controller-cluster:9201"]
 
       tags {
-        type = ["worker", "kled", "tests"]
+        type = ["worker", "egress"]
       }
     }
 
     kms "aead" {
       purpose = "worker-auth"
       aead_type = "aes-gcm"
-      key = "ATTK2pMjMTEJGlAkUJAePnFMlNLQaXBnhSqJHVlJeKQ="
+      key = "REPLACE_WITH_BASE64_ENCODED_32_BYTE_KEY"
       key_id = "global_worker-auth"
     }
 
-  persistence:
-    authStorage:
-      storageClass: ""
-    recording:
-      enabled: true
-      storageClass: ""
+    events {
+      audit_enabled        = true
+      sysevents_enabled    = true
+      observations_enabled = true
+      sink "stderr" {
+        name        = "all-events"
+        description = "All events sent to stderr"
+        event_types = ["*"]
+        format      = "cloudevents-json"
+      }
+    }
+```
+
+Create the namespace and the TLS Secret before you install the release. The certificate must be valid for the address clients use to reach the operations listener:
+
+```shell-session
+$ kubectl create namespace boundary
+$ kubectl create secret tls boundary-worker-tls \
+  --namespace boundary \
+  --cert=worker.crt \
+  --key=worker.key
 ```
 
 Run the following command to install the release:
 
 ```shell-session
 $ helm install boundary-worker hashicorp/boundary-worker \
-  --version 0.1.0 \
   --namespace boundary \
-  --create-namespace \
-  --values my-values.yaml \
+  --values worker-values.yaml \
   --wait
 ```
 
@@ -205,7 +216,7 @@ REVISION: 1
 Check the rendered resources after installation:
 
 ```shell-session
-$ kubectl get deployment,pods,svc,pvc --namespace boundary; \
+$ kubectl get deployment,pods,svc --namespace boundary; \
   kubectl logs --namespace boundary deployment/boundary-worker-deployment
 ```
 
@@ -220,9 +231,6 @@ pod/boundary-worker-deployment-abcde          1/1     Running   0          2m
 NAME                            TYPE           CLUSTER-IP   EXTERNAL-IP   PORT(S)          AGE
 service/boundary-worker-proxy   LoadBalancer   10.0.0.20    203.0.113.9   9202:31500/TCP   2m
 service/boundary-worker-ops     ClusterIP      10.0.0.21    <none>        9203/TCP         2m
-
-NAME                                      STATUS   VOLUME     CAPACITY   ACCESS MODES   AGE
-persistentvolumeclaim/boundary-worker-pvc Bound     pvc-1234   1Gi        RWO            2m
 ```
 
 </CodeBlockConfig>
@@ -230,10 +238,11 @@ persistentvolumeclaim/boundary-worker-pvc Bound     pvc-1234   1Gi        RWO   
 Confirm that:
 
 - The pod becomes Ready.
-- Enabled PVCs are Bound.
 - The proxy and ops Services match your intended exposure model.
 - Worker logs show successful registration or authentication.
 - The worker appears as active in Boundary and is eligible for session assignment.
+
+The baseline KMS configuration does not enable auth or recording persistence, so it does not create PersistentVolumeClaims. When you enable auth or recording persistence, confirm that the `boundary-worker-auth-storage` or `boundary-worker-recording-storage` claim is Bound.
 
 ## Update `public_addr` for workers
 
@@ -249,9 +258,8 @@ If the worker HCL needs the final address, update the `public_addr` field in `wo
 
 ```shell-session
 $ helm upgrade boundary-worker hashicorp/boundary-worker \
-  --version 0.1.0 \
   --namespace boundary \
-  --values my-values.yaml \
+  --values worker-values.yaml \
   --rollback-on-failure \
   --wait
 ```

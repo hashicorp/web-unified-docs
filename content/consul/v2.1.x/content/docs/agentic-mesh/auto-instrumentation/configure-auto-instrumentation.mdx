@@ -1,0 +1,155 @@
+---
+layout: docs
+page_title: Configure auto-instrumentation
+description: >-
+  Configure Consul Agentic Runtime Fabric proxies, an OpenTelemetry Collector, and trace context so AI model and MCP tool calls produce correlated spans.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-11-02T21:48:12.000Z
+last_modified: 2026-11-04T19:10:49.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Configure auto-instrumentation
+
+Configure Consul Agentic Runtime Fabric proxies to generate OpenTelemetry spans
+for AI model and Model Context Protocol (MCP) tool calls. When you finish,
+supported calls produce correlated network and payload spans in your trace
+backend, with no tracing SDK in your applications.
+
+@include '../../../global/partials/alerts/beta.mdx'
+
+To learn how auto-instrumentation works, refer to
+[Auto-instrumentation](/consul/docs/agentic-mesh/auto-instrumentation).
+
+## Requirements
+
+- Consul Enterprise with a valid license for external processing, registered
+  services, and configured mesh connectivity.
+- The `consul-ai` [feature gate](/consul/docs/manage/feature-gates) enabled. On
+  Kubernetes, set the [`ai.enabled` Helm value](/consul/docs/reference/k8s/helm#v-ai-enabled) to `true`.
+- The AI Inference Gateway and MCP sidecar deployed for the model and tool
+  traffic you want to observe.
+- Agent, inference, and tool calls must route through the configured sidecar
+  upstreams or gateways, on HTTP-aware listeners.
+- An [OpenTelemetry Collector](https://opentelemetry.io/docs/collector/) and a
+  trace backend reachable from the proxies and processors.
+- An entry point that establishes trace context and a sampling decision for
+  each request. Without a sampled `traceparent`, payload spans can be missing
+  in your trace backend. Refer to [Trace context
+  propagation](/consul/docs/agentic-mesh/auto-instrumentation#trace-context-propagation)
+  for more details.
+- Applications that forward trace context on downstream calls. Refer to [Trace
+  context
+  propagation](/consul/docs/agentic-mesh/auto-instrumentation#trace-context-propagation).
+- Approved rules for content capture, redaction, access control, and retention.
+  Refer to [Privacy and content
+  boundaries](/consul/docs/agentic-mesh/auto-instrumentation#privacy-and-content-boundaries).
+
+Use the deployment manifests and image versions supplied with your Consul
+Agentic Runtime Fabric distribution. Adapt addresses and service names to your
+deployment.
+
+## Enable AI Inference Gateway tracing
+
+AI Inference Gateway tracing is off by default. Enable it in the
+`Observability.Tracing` block of the `inference-gateway` configuration entry.
+
+| Field           | Description                                                        |
+| --------------- | ------------------------------------------------------------------ |
+| `Enabled`       | Set to `true` to export traces.                                    |
+| `OTLP.Endpoint` | The OpenTelemetry Protocol (OTLP) collector URL.                   |
+| `OTLP.Insecure` | Sends OTLP without TLS when `true`. Use only in non-production environments. |
+| `SampleRatio`   | Fraction of requests to trace, from `0` to `1`.                    |
+
+When tracing is enabled, the gateway exports spans over OTLP and joins Envoy's
+trace through the inbound `traceparent` header.
+
+## Configure Envoy tracing
+
+Configure the Envoy proxies on the observed paths to send network spans to the
+collector. For example configurations, refer to [Distributed
+tracing](/consul/docs/observe/distributed-tracing).
+
+1. Add the collector cluster to the proxy bootstrap configuration with
+   `envoy_extra_static_clusters_json`. Enable HTTP/2 on the cluster for OTLP
+   over gRPC.
+1. Configure the OpenTelemetry tracer with `envoy_tracing_json`. Set the service
+   name and reference the collector cluster.
+
+## Attach the payload processor
+
+Attach the protocol-aware external processor that generates payload spans.
+
+1. Attach the
+   [`builtin/ext-proc`](/consul/docs/reference/proxy/extensions/ext-proc) Envoy
+   extension to the observed outbound proxy listeners. Configure it to send
+   request and response headers and bodies.
+1. Configure buffered request and response bodies for the supported parsers,
+   with explicit size limits.
+1. Connect each processor to Envoy:
+   - AI Inference Gateway: Envoy reaches the processor through the local
+     `local_ext_proc` cluster. On Kubernetes, the processor listens on the Unix
+     domain socket `/run/consul/ext_proc.sock` shared with Envoy.
+   - MCP sidecar: Envoy reaches the interceptor over loopback on port `21101` by
+     default. To change the port, set `port` in the service's `interceptor`
+     block. On Kubernetes, the sidecar listens on a Unix domain socket by
+     default. To use TCP instead, set the `consul.hashicorp.com/ai-agent-addr`
+     annotation to a port that matches the interceptor port.
+1. Set `SERVICE_NAME` for the processor.
+1. Set `OTLP_ENDPOINT` to the collector's OTLP over HTTP `/v1/traces` endpoint.
+1. Match each observed upstream to its protocol parser. The reference
+   implementation selects parsers by upstream bind-port group.
+
+<Warning>
+
+Keep the external-processing endpoint private. The loopback connection is
+plaintext and relies on network-namespace isolation. On Kubernetes, the AI
+Inference Gateway socket relies on file permissions instead, and Envoy must run
+as the same user as the processor. Publishing either endpoint on a routable
+interface exposes an unauthenticated payload reader.
+
+</Warning>
+
+## Start the components
+
+Launch the components sequentially so that no spans are lost while the collector
+initializes.
+
+1. Start the collector and the trace backend.
+1. Apply the service and proxy configuration.
+1. Start the sidecars and their processors. Recreate any proxy that is already
+   running. Writing a new configuration entry does not replace a running
+   proxy's bootstrap configuration.
+
+## Verify spans reach the trace backend
+
+Use synthetic, non-sensitive inputs for every step.
+
+1. Send a sampled request through the entry point to an agent that makes one
+   model call and one tool call.
+1. Inspect the active proxy configuration. Confirm that it contains the
+   OpenTelemetry tracer and the external-processing filter.
+1. Confirm that the processor receives exchanges. A successful application
+   response does not show that instrumentation works.
+1. Confirm that the collector exports the spans to the trace backend. A
+   collector acknowledgement does not show that the backend stored them.
+1. Retrieve the trace by ID from the trace backend.
+1. Confirm that network spans and payload spans share the trace context. Each
+   payload span appears as a sibling of its Envoy egress span.
+1. Confirm that payload spans carry the processor's service name, separate from
+   the Envoy service name.
+1. Confirm that the tool name, approved arguments, result, model information,
+   and protocol errors match the synthetic request and response.
+1. Confirm that the applications initialize no tracing SDK and emit no manual
+   spans.
+1. Confirm that the applications forward the trace context headers on
+   downstream calls. Without them, the proxy spans do not form one workflow
+   trace.
+1. Test unsampled traffic, unsupported payloads, oversized bodies, and a
+   collector outage. Check application behavior and telemetry-loss indicators.
+
+## Next steps
+
+- [Configure cycle detection](/consul/docs/agentic-mesh/cycle-detection/configure-cycle-detection)
+- [Calculate operational metrics and KPIs](/consul/docs/agentic-mesh/observability#operational-metrics)
+- [Auto-instrumentation limits](/consul/docs/agentic-mesh/auto-instrumentation#limits)
