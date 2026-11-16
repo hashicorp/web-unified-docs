@@ -1,0 +1,349 @@
+---
+layout: docs
+page_title: Boundary controller OpenShift Helm chart examples
+description: >-
+ Configure common Boundary controller deployment scenarios for RedHat OpenShift with the Helm chart, including TLS setup, database migration, and cluster exposure.
+---
+
+# Controller OpenShift Helm chart examples
+
+Use these controller configuration variations (TLS setup, database migration, bootstrap admin creation, and cluster service exposure) to adapt the baseline controller installation in [Deploy controllers](/boundary/docs/deploy/openshift/deploy-controller) to your environment. They assume PostgreSQL and KMS (key management system) access already exist.
+
+If you enable session recording, add a KMS stanza with `purpose = "bsr"` to the controller configuration. The `bsr` key encrypts recording data and verifies its integrity.
+
+Every example assumes `openshift.enabled=true` and chart `0.2.0` or later. Merge only the required overlay into `openshift-controller-values.yaml` from [Deploy controllers on OpenShift](/boundary/docs/deploy/openshift/deploy-controller#install-a-boundary-controller-on-openshift). The snippets are not standalone values files.
+
+## Create the controller Secret
+
+The chart reads sensitive values from the Secret referenced by `secretRefs.secretName`. Create the default Secret before installation:
+
+```shell-session
+$ oc create secret generic boundary-controller-secrets \
+  --namespace boundary \
+  --from-literal=database-url='postgres://<user>:<password>@<host>:5432/<database>?sslmode=require' \
+  --from-literal=license='<boundary-enterprise-license>' \
+  --from-literal=admin-username='<admin-username>' \
+  --from-literal=admin-password='<admin-password>'
+```
+
+Set `secretRefs.keys.*` to match the key names you used in your Secret. Add `migration-url` only when the controller HCL references `env://BOUNDARY_PG_MIGRATION_URL`. The key name must match `secretRefs.keys.migrationUrl`.
+
+## Create the TLS Secret
+
+@include 'helm/controller-openshift-tls-secret.mdx'
+
+## Pull the controller image from the Red Hat registry
+
+@include 'helm/controller-openshift-registry-access.mdx'
+
+Set `image.repository` and `image.tag` explicitly only when you mirror the image to another registry or an OpenShift ImageStream.
+
+## Enable database initialization
+
+`database.init.enabled` defaults to `true`. Keep the default for the first installation against an empty PostgreSQL database. Set it to `false` when another workflow initializes the schema or the database is already initialized.
+
+## Enable bootstrap admin creation
+
+`bootstrapAdmin.enabled` defaults to `true` and creates the initial global password auth method, user, account, and role. Set it to `false` if another workflow manages the initial administrator resources.
+
+The bootstrap admin Job connects to the controller API Service inside the project, not through the API Route. It runs with the same OpenShift security context as the controller pods, so it does not require a custom SCC (security context constraint).
+
+## Controller with TLS enabled
+
+Enable TLS when you want encrypted API and ops traffic from the controller listeners. Provide a TLS Secret. The chart derives HTTPS probes from `tls.ops.disabled=false`. The chart uses the per-listener `tls.api.disabled` and `tls.ops.disabled` values, which both default to `false`. On OpenShift, TLS must stay enabled for each Route that uses `reencrypt` termination because the router re-encrypts traffic to that listener.
+
+<Note>
+
+Issue the controller certificate for the names used by its TLS clients. If you set a custom `openshift.route.api.host`, include that hostname as a subject alternative name (SAN) so external API clients can verify the connection. For `reencrypt` termination, also configure `openshift.route.api.tls.destinationCACertificate` with the CA that issued the backend certificate.
+
+</Note>
+
+Example values:
+
+```yaml
+controller:
+  service:
+    api:
+      type: ClusterIP
+
+tls:
+  api:
+    disabled: false
+  ops:
+    disabled: false
+  secretName: boundary-controller-tls
+  mountPath: /etc/boundary/tls
+
+openshift:
+  enabled: true
+  route:
+    api:
+      enabled: true
+      host: boundary-api.example.com
+      tls:
+        termination: reencrypt
+        insecureEdgeTerminationPolicy: Redirect
+        key: |
+          -----BEGIN PRIVATE KEY-----
+          <private key for the API Route certificate>
+          -----END PRIVATE KEY-----
+        certificate: |
+          -----BEGIN CERTIFICATE-----
+          <certificate for the API Route hostname>
+          -----END CERTIFICATE-----
+        caCertificate: |
+          -----BEGIN CERTIFICATE-----
+          <CA chain for the API Route certificate>
+          -----END CERTIFICATE-----
+        destinationCACertificate: |
+          -----BEGIN CERTIFICATE-----
+          <CA certificate that issued the controller TLS certificate>
+          -----END CERTIFICATE-----
+    cluster:
+      enabled: false
+    ops:
+      enabled: false
+```
+
+@include 'helm/controller-tls-listener-hcl.mdx'
+
+For API and ops Routes with `reencrypt` or `edge` termination, `key`, `certificate`, and `caCertificate` are client-facing router certificate fields. The example uses the known `boundary-api.example.com` host, and the supplied `certificate` must cover that host. The `key` must be the private key that matches `certificate`. The `caCertificate` value is optional and supplies the certificate chain when clients need it. Leave all three values empty to use the ingress controller's default certificate. `destinationCACertificate` has a separate purpose: the chart renders it only for `reencrypt` when the corresponding listener TLS is enabled and the value is not empty, and the router uses it to verify the backend listener certificate.
+
+## Controller with TLS disabled
+
+On OpenShift, disable TLS independently for a listener when its Route uses `edge` termination, or when in-cluster encryption for that listener is not required.
+
+Example values:
+
+```yaml
+controller:
+  service:
+    api:
+      type: ClusterIP
+
+tls:
+  api:
+    disabled: true
+  ops:
+    disabled: true
+
+openshift:
+  enabled: true
+  route:
+    api:
+      enabled: true
+      tls:
+        termination: edge
+        insecureEdgeTerminationPolicy: Redirect
+    cluster:
+      enabled: false
+    ops:
+      enabled: false
+```
+
+The complete values file uses the following templated listener settings. They render `tls_disable = true` for this overlay, so chart validation and the listener configuration stay aligned. These HCL blocks are fragments that show the API and ops listeners. Merge equivalent settings into a complete controller configuration as the entire `controller.config` value rather than using the fragments.
+
+```hcl
+listener "tcp" {
+  address     = "0.0.0.0:9200"
+  purpose     = "api"
+  tls_disable = "{{ .Values.tls.api.disabled }}"
+}
+
+listener "tcp" {
+  address     = "0.0.0.0:9203"
+  purpose     = "ops"
+  tls_disable = "{{ .Values.tls.ops.disabled }}"
+}
+```
+
+When `tls.api.disabled=true` and `tls.ops.disabled=true`, the chart does not mount the TLS Secret and probe schemes default to `HTTP`. This example disables the cluster and ops Routes because the focused example only exposes the API Route. You can instead keep the ops Route enabled and set its termination to `edge`.
+
+An edge API or ops Route may set `key`, `certificate`, and `caCertificate` to serve a custom client-facing certificate. When they are empty, Boundary uses the ingress controller's default certificate. Edge termination has no backend TLS, so do not set `destinationCACertificate`.
+
+<Warning>
+
+With `edge` termination, traffic between the OpenShift router and the controller pods is unencrypted. Do not combine `tls.api.disabled=true` with `reencrypt` termination on the API Route (or `tls.ops.disabled=true` with `reencrypt` termination on the ops Route). The router cannot establish a TLS connection to a listener that serves plain HTTP, and the Route fails to serve traffic.
+
+</Warning>
+
+## Controller with passthrough termination
+
+Use the listener configuration in [Controller with TLS enabled](#controller-with-tls-enabled). Set `tls.api.disabled=false` when you want the API Route to use `passthrough` termination and forward the client's TLS connection straight to the controller pod without decrypting and re-encrypting it. Unlike `reencrypt`, the router never inspects the connection, so `destinationCACertificate` does not apply.
+
+<Note>
+
+Because the router never terminates the client's TLS session, the controller's own certificate must be valid for the hostname clients use to reach it (typically the API Route hostname) rather than the internal Service name. Update the API listener certificate's SAN entries accordingly.
+
+</Note>
+
+Example values:
+
+```yaml
+controller:
+  service:
+    api:
+      type: ClusterIP
+
+tls:
+  api:
+    disabled: false
+  ops:
+    disabled: false
+  secretName: boundary-controller-tls
+  mountPath: /etc/boundary/tls
+
+openshift:
+  enabled: true
+  route:
+    api:
+      enabled: true
+      host: boundary-api.example.com
+      tls:
+        termination: passthrough
+        insecureEdgeTerminationPolicy: Redirect
+    cluster:
+      enabled: false
+    ops:
+      enabled: false
+```
+
+Passthrough termination omits all router certificate fields: `key`, `certificate`, `caCertificate`, and `destinationCACertificate`. The router never terminates the client connection or establishes a separate TLS connection to the backend.
+
+## Internal-only cluster listener
+
+The baseline deployment already keeps the cluster listener internal: `controller.service.cluster.type=ClusterIP`, `openshift.route.cluster.enabled=false`, and `public_cluster_addr` points to the cluster Service. No additional overlay is required when workers can reach that Service.
+
+## Externally accessible cluster listener
+
+When workers run outside the OpenShift cluster, the cluster Service is not reachable. Enable the cluster Route so those workers can connect to `public_cluster_addr`. Workers in another project can use the Service's fully qualified cluster DNS name when cluster networking and NetworkPolicies permit cross-project traffic.
+
+Example values:
+
+```yaml
+controller:
+  service:
+    cluster:
+      type: ClusterIP
+      port: 9201
+      targetPort: 9201
+
+openshift:
+  enabled: true
+  route:
+    api:
+      enabled: false
+    cluster:
+      enabled: true
+      host: ""
+    ops:
+      enabled: false
+```
+
+The cluster Route always uses `passthrough` termination, and the chart does not expose a `tls` value group for it. The cluster listener carries Boundary's own mTLS over raw TCP, so `edge` or `reencrypt` termination breaks worker-to-controller communication.
+
+Get the generated Route hostname after installation:
+
+```shell-session
+$ oc get route boundary-controller-cluster-route --namespace boundary
+```
+
+Example output:
+
+```plaintext
+NAME                                HOST/PORT                                          PATH   SERVICES                      PORT      TERMINATION   WILDCARD
+boundary-controller-cluster-route   boundary-controller-cluster-boundary.apps.example.com      boundary-controller-cluster   cluster   passthrough   None
+```
+
+Update `public_cluster_addr` in the existing `controller` stanza. A Route terminates on the router's HTTPS port, so use port `443`, not `9201`:
+
+```hcl
+controller {
+  public_cluster_addr = "boundary-controller-cluster-boundary.apps.example.com:443"
+}
+```
+
+Update `public_cluster_addr` in `controller.config` with the Route hostname, then upgrade:
+
+```shell-session
+$ helm upgrade boundary-controller hashicorp/boundary-controller \
+  --namespace boundary \
+  --values openshift-controller-values.yaml \
+  --rollback-on-failure \
+  --wait
+```
+
+## Register an external worker with the controller
+
+A worker outside the OpenShift cluster cannot reach the cluster Service. First configure the controller by following [Externally accessible cluster listener](#externally-accessible-cluster-listener).
+
+On the external worker, set `initial_upstreams` in `worker.config` to that same Route hostname and port `443` so the worker dials the controller through the router instead of the in-cluster Service address:
+
+```hcl
+worker {
+  initial_upstreams = ["boundary-controller-cluster-boundary.apps.example.com:443"]
+}
+```
+
+The cluster Route always uses `passthrough` termination, so the router forwards Boundary's mTLS connection between the external worker and the controller's cluster listener unchanged. If the worker does not appear as active in Boundary after installation, confirm that `initial_upstreams` points to the controller's cluster Route hostname and port `443`, not to the internal `boundary-controller-cluster:9201` Service address.
+
+## Controller with a pre-configured Route hostname
+
+If you already control the DNS name for the controller's cluster listener, set `openshift.route.cluster.host` and `public_cluster_addr` to that hostname before installation. Setting the hostname lets you avoid changing the controller HCL after installation.
+
+Example values:
+
+```yaml
+openshift:
+  enabled: true
+  route:
+    cluster:
+      enabled: true
+      host: boundary-cluster.example.com
+```
+
+Update the existing `controller` stanza:
+
+```hcl
+controller {
+  public_cluster_addr = "boundary-cluster.example.com:443"
+}
+```
+
+A custom hostname must resolve to the cluster's ingress router, and the OpenShift ingress controller must admit the hostname. If the router rejects it, the Route stays in a `HostAlreadyClaimed` or `RouteNotAdmitted` state. Check the Route status using `oc describe route boundary-controller-cluster-route --namespace boundary`.
+
+The cluster Route uses passthrough termination, so the controller cluster listener handles TLS. If you also configure a custom API Route hostname, follow [Controller with TLS enabled](#controller-with-tls-enabled) for its client-facing certificate.
+
+## Configure migration URL
+
+@include 'helm/controller-migration-url.mdx'
+
+## Migrate the database during an upgrade
+
+@include 'helm/controller-migrate-database.mdx'
+
+While the controllers are scaled to zero, the Routes remain admitted but have no available backend pods, so the router returns a 503 response for API requests until the controllers are restored.
+
+## Change service ports
+
+@include 'helm/controller-service-ports.mdx'
+
+Routes target the Service by its named port (`api`, `cluster`, and `ops`), so you do not need to update the Route when you change a port number. External clients continue to reach the Route on the router's standard `443` port.
+
+## Troubleshooting
+
+### Migration Job fails
+
+If the migration Job started by `database.migrate.enabled=true` fails, the controller pods remain scaled to zero until the migration succeeds. Refer to the PostgreSQL backup you took before running migrations or repairs to restore the database, then correct the underlying issue (for example, an invalid `database.repair.version`) before setting `database.migrate.enabled=true` again and re-running `helm upgrade`. Routes remain admitted while controllers are scaled to zero, but return `503` until backend pods are available.
+
+### Pods fail to pull the controller image
+
+If the controller pods or hook Jobs report `ImagePullBackOff`, the project cannot authenticate to `registry.connect.redhat.com`. Confirm that the pull Secret exists, that it is referenced in `imagePullSecrets` or linked to the ServiceAccount, and that the resolved tag exists in the Red Hat registry. Inspect the failure using `oc describe pod <pod-name> --namespace boundary`.
+
+### Route returns a 503 response
+
+If a Route returns a 503 response, the router cannot reach a ready backend pod. Confirm that the controller pods are Ready, that `controller.replicas` is greater than `0`, and that the listener port in `controller.config` matches the Service `targetPort`.
+
+## More information
+
+To view all shared and OpenShift-specific Helm values, refer to [Controller OpenShift values](/boundary/docs/deploy/openshift/controller-values#openshift-values).
