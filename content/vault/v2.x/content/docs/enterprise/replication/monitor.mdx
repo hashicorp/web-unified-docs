@@ -1,0 +1,289 @@
+---
+layout: docs
+page_title: Monitor replication
+description: >-
+  Monitor Vault Enterprise replication with the status endpoints and telemetry.
+  Check connection health, WAL streaming, and whether DR and performance
+  secondaries are in sync.
+---
+
+# Monitor replication
+
+@include 'alerts/enterprise-and-hcp.mdx'
+
+Monitor Vault Enterprise replication to confirm that each secondary is
+connected to its primary and receives changes in near real time. The
+replication status shows whether a cluster is a primary or a secondary, whether
+a secondary streams write-ahead log (WAL) entries or catches up with a Merkle
+sync, and whether the connection is healthy. Telemetry metrics show the same
+signals over time, so you can alert on them.
+
+Check both clusters in each replication pair. For how WAL streaming and Merkle
+syncs work, refer to [Replication
+internals](/vault/docs/internals/replication#implementation-details).
+
+## Check the replication status
+
+Vault provides one status endpoint for each replication type and one that
+reports both:
+
+| Replication type | Endpoint |
+| --- | --- |
+| Both | [`/sys/replication/status`](/vault/api-docs/system/replication#check-status) |
+| Disaster recovery (DR) | [`/sys/replication/dr/status`](/vault/api-docs/system/replication/replication-dr#check-dr-status) |
+| Performance | [`/sys/replication/performance/status`](/vault/api-docs/system/replication/replication-performance#check-performance-status) |
+
+The status endpoints do not need a token, so a monitoring system can poll them
+without credentials. The combined endpoint returns a `dr` object and a
+`performance` object. The `mode` of a type that the cluster does not use is
+`disabled`.
+
+The following examples show how to request replication status from the combined status endpoint with the Vault CLI and curl:
+
+<Tabs>
+
+<Tab heading="CLI" group="cli">
+
+```shell-session
+$ vault read -format=json sys/replication/status
+```
+
+</Tab>
+
+<Tab heading="API" group="api">
+
+```shell-session
+$ curl $VAULT_ADDR/v1/sys/replication/status
+```
+
+</Tab>
+
+</Tabs>
+
+The web UI shows the same information under **Replication**, with separate
+views for DR and performance replication.
+
+## Primary status fields
+
+The following fields appear in the status of a primary cluster:
+
+| Field | Description |
+| --- | --- |
+| `mode` | `primary`. |
+| `state` | `running` is healthy. `idle` means replication has a problem to investigate. |
+| `cluster_id` | ID of the replication set. It matches on the primary and its secondaries. A cluster that is both a DR primary and a performance primary has a separate `cluster_id` and `merkle_root` for each type. |
+| `known_secondaries` | IDs of all secondary activation tokens that this primary created and did not revoke. An ID appears whether or not its token activated a secondary. |
+| `secondaries` | One entry for each connected secondary, with its `connection_status` (`connected` or `disconnected`) and `last_heartbeat`. |
+| `last_wal` | Index of the last WAL entry written to local storage. Vault creates a WAL entry for every storage write. |
+| `last_dr_wal` | Index of the last WAL entry for DR replication. |
+| `last_performance_wal` | Index of the last WAL entry that the primary shipped to performance secondaries. |
+| `merkle_root` | Hash of the Merkle tree root. It changes on every storage update. |
+| `corrupted_merkle_tree` | `true` when Vault detects Merkle tree corruption. Refer to [Merkle tree corruption](/vault/docs/enterprise/replication/troubleshoot/merkle-tree-corruption). |
+| `primary_cluster_addr` | Appears only if you set `primary_cluster_addr` when you enabled replication. A blank value is normal. |
+
+## Secondary status fields
+
+The following fields appear in the status of a secondary cluster:
+
+| Field | Description |
+| --- | --- |
+| `mode` | `secondary`. |
+| `state` | Replication state. Refer to [Secondary states](#secondary-states). |
+| `connection_state` | State of the connection to the primary. Refer to [Connection states](#connection-states). |
+| `cluster_id` | ID of the replication set. It matches on the primary and its secondaries. |
+| `secondary_id` | ID of the secondary activation token that enabled replication on this secondary. |
+| `primaries` | Address information for the primary, with its `connection_status` and `last_heartbeat`. |
+| `known_primary_cluster_addrs` | The `cluster_addr` value of each node in the primary cluster. This list updates every 5 seconds. The secondary uses it to find the active node after the primary changes leader. |
+| `primary_cluster_addr` | First address the secondary used to contact the primary after you enabled replication. It might not be current. Check `known_primary_cluster_addrs` instead. |
+| `last_remote_wal` | Index of the last WAL entry that the secondary received from the primary through WAL streaming. |
+| `merkle_root` | Hash of the Merkle tree root. It changes on every storage update. |
+| `sync_progress` | During `merkle-sync`, the number of conflicting keys resolved so far. |
+| `sync_total_keys` | During `merkle-sync`, the total number of conflicting keys to resolve before WAL streaming resumes. |
+
+The `primaries` and `secondaries` entries also include `clock_skew_ms`,
+`last_heartbeat_duration_ms`, and `replication_primary_canary_age_ms`, which
+estimate clock differences and replication lag between the clusters. Refer to
+[Clock skew and replication
+lag](/vault/docs/enterprise/consistency#clock-skew-and-replication-lag).
+
+### Secondary states
+
+The `state` field on a secondary has one of the following values:
+
+| State | Meaning |
+| --- | --- |
+| `stream-wals` | Normal operation. The secondary receives and applies WAL entries in near real time. |
+| `merkle-diff` | The secondary compares Merkle trees with the primary to find the keys that differ. |
+| `merkle-sync` | The secondary is too far behind the primary for WAL streaming, so it fetches the conflicting keys. It returns to `stream-wals` after all keys resolve. |
+| `idle` | Replication has a problem. Refer to [Troubleshoot replication](/vault/docs/enterprise/replication/troubleshoot). |
+
+When you troubleshoot replication, check `state` first. It is the quickest clue
+to whether the primary and secondary are in sync.
+
+### Connection states
+
+The `connection_state` field on a secondary shows the state of its connection to
+the primary:
+
+| State | Meaning |
+| --- | --- |
+| `ready` | Normal operation. The secondary has a working connection to the primary. |
+| `connecting` | The secondary is trying to connect to the primary. It is resolving the address, opening the TCP connection, or completing the TLS handshake. |
+| `transient_failure` | A connection attempt failed, for example a TCP timeout or a socket error. The secondary retries, and waits longer after each repeated failure. Refer to [Troubleshoot replication connections](/vault/docs/enterprise/replication/troubleshoot/connection). |
+| `idle` | The secondary has no connection open and is not trying to connect. |
+| `shutdown` | The connection is closing and does not recover. Replication on this connection has stopped. |
+
+Use this field to detect connection failures between a secondary and its
+primary.
+
+## Check whether clusters are in sync
+
+The checks differ by replication type, because DR replication copies all data
+and performance replication copies a subset.
+
+### DR clusters
+
+DR secondaries replicate all data. When the clusters are in sync:
+
+- `state` on the secondary is `stream-wals`.
+- `merkle_root` on the primary and the secondary match.
+- `last_remote_wal` on the secondary is at or close to `last_dr_wal` on the
+  primary.
+
+### Performance clusters
+
+Performance replication copies only replicated data. The primary also writes WAL
+entries for data it does not ship, such as tokens, so `last_wal` and
+`last_remote_wal` are not always equal. When the clusters are in sync:
+
+- `state` on the secondary is `stream-wals`.
+- `merkle_root` on the primary and the secondary match. The value changes on
+  every update, so compare it at a quiet moment.
+- `last_remote_wal` on the secondary is at or close to `last_performance_wal`
+  on the primary.
+
+To test a performance pair, write a piece of replicated data on the primary.
+For a short time afterward, `last_remote_wal` on the secondary matches
+`last_wal` on the primary.
+
+### New secondaries
+
+`last_remote_wal` on a new secondary is `0` until the primary ships a new
+replicated write. The initial data copy happens through a Merkle sync, not
+through WAL streaming. After the secondary enters `stream-wals`, the next
+replicated write moves `last_remote_wal` off `0`.
+
+### Persistent differences
+
+A WAL difference between a primary and a secondary that does not close has
+several possible causes:
+
+- Network problems between the clusters.
+- Resource limits on the primary or the secondary.
+- Problems with specific keys. The Vault operational and storage logs name the
+  keys.
+
+Refer to [Troubleshoot replication](/vault/docs/enterprise/replication/troubleshoot)
+to find the cause.
+
+## Status examples
+
+The following examples show only the fields to read. The [API
+documentation](/vault/api-docs/system/replication#check-status) has full sample
+responses.
+
+### DR secondary in sync
+
+`connection_state` is `ready`, `state` is `stream-wals`, and
+`known_primary_cluster_addrs` lists the cluster address of the primary.
+
+<CodeBlockConfig hideClipboard>
+
+```json
+{
+  "dr": {
+    "cluster_id": "d62cd840-8429-308a-6ff2-34c57f0c99bf",
+    "connection_state": "ready",
+    "known_primary_cluster_addrs": ["https://10.1.1.150:8201"],
+    "last_remote_wal": 511,
+    "merkle_root": "080c01d50875a1d1943451d8a24ef570b2ff41e1",
+    "mode": "secondary",
+    "primary_cluster_addr": "https://10.1.1.150:8201",
+    "secondary_id": "dr-secondary",
+    "state": "stream-wals"
+  },
+  "performance": {
+    "mode": "disabled"
+  }
+}
+```
+
+</CodeBlockConfig>
+
+### DR secondary catching up
+
+`state` is `merkle-sync`. `sync_progress` and `sync_total_keys` show that the
+secondary resolved 512 of 740 conflicting keys. Its `merkle_root` does not match
+the primary until the sync finishes. When all keys resolve, the secondary
+returns to `stream-wals`.
+
+<CodeBlockConfig hideClipboard>
+
+```json
+{
+  "dr": {
+    "last_remote_wal": 180,
+    "mode": "secondary",
+    "state": "merkle-sync",
+    "sync_progress": 512,
+    "sync_total_keys": 740
+  }
+}
+```
+
+</CodeBlockConfig>
+
+## Monitor with telemetry
+
+Enable the [`telemetry` stanza](/vault/docs/configuration/telemetry) on every
+node to collect replication metrics. The following metrics cover the main
+replication signals:
+
+| Metric | Use it to |
+| --- | --- |
+| [`vault.replication.wal.last_wal`](/vault/docs/internals/telemetry/metrics/availability#vault-replication-wal-last_wal) | Track the last WAL index on the primary. |
+| [`vault.replication.wal.last_dr_wal`](/vault/docs/internals/telemetry/metrics/availability#vault-replication-wal-last_dr_wal) | Track the last DR WAL index on the primary. |
+| [`vault.replication.wal.last_performance_wal`](/vault/docs/internals/telemetry/metrics/availability#vault-replication-wal-last_performance_wal) | Track the last performance WAL index on the primary. |
+| [`vault.replication.fsm.last_remote_wal`](/vault/docs/internals/telemetry/metrics/availability#vault-replication-fsm-last_remote_wal) | Track the last WAL index a secondary received. Compare it with the primary's index. |
+| [`vault.replication.rpc.server.last_heartbeat`](/vault/docs/internals/telemetry/metrics/availability#vault-replication-rpc-server-last_heartbeat) | Detect a connected cluster that stops sending heartbeats. |
+| [`vault.replication.merkleDiff`](/vault/docs/internals/telemetry/metrics/availability#vault-replication-merklediff) and [`vault.replication.merkleSync`](/vault/docs/internals/telemetry/metrics/availability#vault-replication-merklesync) | Detect Merkle diffs and syncs. These metrics appear only when replication is unhealthy. |
+| [`vault.wal.flushReady`](/vault/docs/internals/telemetry/metrics/all#vault-wal-flushready) and [`vault.wal.persistWALs`](/vault/docs/internals/telemetry/metrics/all#vault-wal-persistwals) | Detect back pressure from slow storage. |
+| [`vault.logshipper.streamWALs.missing_guard`](/vault/docs/internals/telemetry/metrics/availability#vault-logshipper-streamwals-missing_guard) | Detect secondaries that ask for WAL entries the primary no longer holds. Refer to [Tune the log shipper](/vault/docs/enterprise/replication/troubleshoot/tune#tune-the-log-shipper). |
+
+The [key metrics](/vault/docs/internals/telemetry/key-metrics#replication-metrics)
+page has the recommended alert thresholds. The [metrics
+reference](/vault/docs/internals/telemetry/metrics/all) lists every metric.
+
+### Alert conditions
+
+Alert on the following conditions:
+
+- `state` on a primary or a secondary is `idle`.
+- `connection_state` on a secondary is not `ready` for longer than a short
+  grace period.
+- A secondary stays in `merkle-diff` or `merkle-sync`, or cycles between those
+  states and `stream-wals`.
+- The gap between the primary's last WAL index and the secondary's
+  `last_remote_wal` keeps growing.
+- `corrupted_merkle_tree` is `true`.
+- WAL flush or persist times exceed the thresholds on the key metrics page.
+
+For a monitoring architecture, refer to the [HashiCorp Validated Design for
+monitoring and
+observability](/validated-designs/vault/administration-guide/monitoring-and-observability).
+
+## Next steps
+
+- [Troubleshoot replication](/vault/docs/enterprise/replication/troubleshoot)
+- [Tune replication](/vault/docs/enterprise/replication/troubleshoot/tune)
+- [Replication API](/vault/api-docs/system/replication)
