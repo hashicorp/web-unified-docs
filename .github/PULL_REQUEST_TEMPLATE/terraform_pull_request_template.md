@@ -14,6 +14,7 @@ _If items do not apply to your changes, add (N/A) and mark them as complete._
 
 #### Pull Request
 - [ ] Description links to related pull requests or issues, if any.
+- [ ] The PR covers one docs set and does not combine moved or renamed pages with rewrites, or the description explains why it can't be split. Refer to [Keep changes reviewable](https://github.com/hashicorp/web-unified-docs/blob/main/CONTRIBUTING.md#keep-changes-reviewable).
 
 #### Content
 - [ ] You added redirects to `content/terraform-docs-common/redirects.jsonc` for moved, renamed, or deleted pages **across all affected versions**. Refer to [Redirects](https://github.com/hashicorp/web-unified-docs/blob/main/docs/content-guide/redirects.md#example-redirects) for examples and guidance. 
