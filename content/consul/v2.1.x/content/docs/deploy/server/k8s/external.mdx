@@ -1,0 +1,293 @@
+---
+layout: docs
+page_title: Join Kubernetes Clusters to external Consul Servers
+description: >-
+  Kubernetes clusters can be joined to existing Consul clusters in a much simpler way with the introduction of Consul Dataplane. Learn how to add Kubernetes Clusters into an existing Consul cluster and bootstrap ACLs by configuring the Helm chart.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-03-31T20:44:41.000Z
+last_modified: 2026-03-31T20:44:41.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Join Kubernetes Clusters to external Consul Servers
+
+If you have a Consul cluster already running, you can configure your
+Consul on Kubernetes installation to join this existing cluster.
+
+The below `values.yaml` file shows how to configure the Helm chart to install
+Consul so that it joins an existing Consul server cluster.
+
+The `global.enabled` value first disables all chart components by default
+so that each component is opt-in.
+
+Next, configure `externalServers` to point it to Consul servers.
+The `externalServers.hosts` value must be provided and should be set to a DNS, an IP,
+or an `exec=` string with a command returning Consul IPs. Please see [this documentation](https://github.com/hashicorp/go-netaddrs)
+on how the `exec=` string works.
+For example, to specify multiple static IPs, use the `exec=` string:
+
+<CodeBlockConfig filename="values.yaml">
+
+```yaml
+externalServers:
+  hosts: ["exec=echo 192.0.2.10 192.0.2.11 192.0.2.12"]
+```
+
+</CodeBlockConfig>
+
+Other values in the `externalServers` section are optional. Please refer to
+[Helm Chart configuration](/consul/docs/reference/k8s/helm#h-externalservers) for more details.
+
+<CodeBlockConfig filename="values.yaml">
+
+```yaml
+global:
+  enabled: false
+
+externalServers:
+  hosts: [<consul server DNS, IP or exec= string>]
+```
+
+</CodeBlockConfig>
+
+With the introduction of [Consul Dataplane](/consul/docs/connect/dataplane#what-is-consul-dataplane), Consul installation on Kubernetes is simplified by removing the Consul Client agents.
+This requires the Helm installation and rest of the consul-k8s components installed on Kubernetes to talk to Consul Servers directly on various ports.
+Before starting the installation, ensure that the Consul Servers are configured to have the gRPC port enabled `8502/tcp` using the [`ports.grpc = 8502`](/consul/docs/reference/agent/configuration-file/general#grpc) configuration option.
+
+
+## Configuring TLS
+
+-> **Note:** Consul on Kubernetes currently does not support external servers that require mutual authentication
+for the HTTPS clients of the Consul servers, that is when servers have either
+`tls.defaults.verify_incoming` or `tls.https.verify_incoming` set to `true`.
+As noted in the [Security Model](/consul/docs/security#secure-configuration),
+that setting isn't strictly necessary to support Consul's threat model as it is recommended that
+all requests contain a valid ACL token.
+
+If the Consul server has TLS enabled, you need to provide the CA certificate so that Consul on Kubernetes can communicate with the server. Save the certificate in a Kubernetes secret and then provide it in your Helm values, as demonstrated in the following example:
+
+<CodeBlockConfig filename="values.yaml" highlight="2-8">
+
+```yaml
+global:
+  tls:
+    enabled: true
+    caCert:
+      secretName: <CA certificate secret name>
+      secretKey: <CA Certificate secret key>
+externalServers:
+  enabled: true
+  hosts: [<consul server DNS, IP or exec= string>]
+```
+
+</CodeBlockConfig>
+
+If your HTTPS port is different from Consul's default `8501`, you must also set
+`externalServers.httpsPort`. If the Consul servers are not running TLS enabled, use this config to set the HTTP port the servers are configured with (default `8500`).
+
+## Configuring ACLs
+
+If you are running external servers with ACLs enabled, there are a couple of ways to configure the Helm chart
+to help initialize ACL tokens for Consul clients and consul-k8s components for you.
+
+### Manually Bootstrapping ACLs
+
+If you would like to call the [ACL bootstrapping API](/consul/api-docs/acl#bootstrap-acls) yourself or if your cluster has already been bootstrapped with ACLs,
+you can provide the bootstrap token to the Helm chart. The Helm chart will then use this token to configure ACLs
+for Consul clients and any consul-k8s components you are enabling.
+
+First, create a Kubernetes secret containing your bootstrap token:
+
+```shell
+kubectl create secret generic bootstrap-token --from-literal='token=<your bootstrap token>'
+```
+
+Then provide that secret to the Helm chart:
+
+<CodeBlockConfig filename="values.yaml" highlight="4-6">
+
+```yaml
+global:
+  acls:
+    manageSystemACLs: true
+    bootstrapToken:
+      secretName: bootstrap-token
+      secretKey: token
+```
+
+</CodeBlockConfig>
+
+The bootstrap token requires the following minimal permissions:
+
+- `acl:write`
+- `operator:write` if enabling Consul namespaces
+- `agent:read` if using WAN federation over mesh gateways
+
+Next, configure external servers. The Helm chart will use this configuration to talk to the Consul server's API
+to create policies, tokens, and an auth method. If you are [enabling Consul service mesh](/consul/docs/k8s/connect),
+`k8sAuthMethodHost` should be set to the address of your Kubernetes API server
+so that the Consul servers can validate a Kubernetes service account token when using the [Kubernetes auth method](/consul/docs/secure/acl/auth-method/k8s)
+with `consul login`.
+
+-> **Note:** If `externalServers.k8sAuthMethodHost` is set and you are also using WAN federation
+(`global.federation.enabled` is set to `true`), ensure that `global.federation.k8sAuthMethodHost` is set to the same
+value as `externalServers.k8sAuthMethodHost`.
+
+<CodeBlockConfig filename="values.yaml">
+
+```yaml
+externalServers:
+  enabled: true
+  hosts: [<consul server DNS, IP or exec= string>]
+  k8sAuthMethodHost: 'https://kubernetes.example.com:443'
+```
+
+</CodeBlockConfig>
+
+Your resulting Helm configuration will end up looking similar to this:
+
+<CodeBlockConfig filename="values.yaml">
+
+```yaml
+global:
+  enabled: false
+  acls:
+    manageSystemACLs: true
+    bootstrapToken:
+      secretName: bootstrap-token
+      secretKey: token
+externalServers:
+  enabled: true
+  hosts: [<consul server DNS, IP or exec= string>]
+  k8sAuthMethodHost: 'https://kubernetes.example.com:443'
+```
+
+</CodeBlockConfig>
+
+### Bootstrapping ACLs via the Helm chart
+
+If you would like the Helm chart to call the bootstrapping API and set the server tokens for you, then the steps are similar.
+The only difference is that you don't need to set the bootstrap token. The Helm chart will save the bootstrap token as a Kubernetes secret.
+
+<CodeBlockConfig filename="values.yaml">
+
+```yaml
+global:
+  enabled: false
+  acls:
+    manageSystemACLs: true
+externalServers:
+  enabled: true
+  hosts: [<consul server DNS, IP or exec= string>]
+  k8sAuthMethodHost: 'https://kubernetes.example.com:443'
+```
+
+</CodeBlockConfig>
+
+### Configure auth methods for multiple Kubernetes clusters
+
+When `global.acls.manageSystemACLs` is `true`, the Helm chart creates [Kubernetes auth methods](/consul/docs/secure/acl/auth-method/k8s) on the Consul servers. The auth methods let consul-k8s components and service mesh workloads log in to Consul with their Kubernetes service account tokens. Each auth method contains the address of the Kubernetes API server that the Consul servers use to validate these tokens.
+
+By default, the Helm chart prefixes the auth method names with the value of [`global.name`](/consul/docs/reference/k8s/helm#v-global-name). If you do not set `global.name`, the prefix is `<helm release name>-consul`.
+
+When you connect multiple Kubernetes clusters to the same Consul servers in the same admin partition, each cluster must use its own auth methods. If the clusters use the same auth method names, each Helm installation or upgrade overwrites the auth methods of the other clusters, including their Kubernetes API server address. As a result, consul-k8s components and service mesh workloads in the other clusters cannot log in to Consul.
+
+To create separate auth methods for each cluster, set [`global.acls.authMethod.name`](/consul/docs/reference/k8s/helm#v-global-acls-authmethod-name) to a unique value in each cluster. The Helm chart derives the following auth method names from this value:
+
+- `<name>-k8s-component-auth-method` for consul-k8s components.
+- `<name>-k8s-auth-method` for service mesh workloads, if you enable Consul service mesh.
+- `<name>-k8s-component-auth-method-<global.datacenter>` for consul-k8s components that need global tokens in a secondary datacenter, if you enable WAN federation. The Helm chart creates this auth method in the primary datacenter.
+
+In each cluster, set `externalServers.k8sAuthMethodHost` to the address of that cluster's Kubernetes API server. The Consul servers use this address to validate service account tokens from the cluster, so the address must be reachable from the Consul servers.
+
+The following example configures a Kubernetes cluster to use auth methods named `cluster2-k8s-component-auth-method` and `cluster2-k8s-auth-method`:
+
+<CodeBlockConfig filename="values.yaml" highlight="8-9">
+
+```yaml
+global:
+  enabled: false
+  acls:
+    manageSystemACLs: true
+    bootstrapToken:
+      secretName: bootstrap-token
+      secretKey: token
+    authMethod:
+      name: cluster2
+externalServers:
+  enabled: true
+  hosts: [<consul server DNS, IP or exec= string>]
+  k8sAuthMethodHost: 'https://kubernetes.example.com:443'
+connectInject:
+  enabled: true
+```
+
+</CodeBlockConfig>
+
+The `global.acls.authMethod.name` value changes only the auth method names. The Helm chart still derives the names of other ACL resources, such as ACL roles, from `global.name`. To keep these resources separate for each cluster, set a unique `global.name` in each cluster as well.
+
+If `global.acls.manageSystemACLs` is `true`, do not set [`connectInject.overrideAuthMethodName`](/consul/docs/reference/k8s/helm#v-connectinject-overrideauthmethodname) and `global.acls.authMethod.name` at the same time. The Helm chart derives the service mesh auth method name from `global.acls.authMethod.name` and manages the binding rules for that auth method. If you set both values, Helm returns an error.
+
+### Use pre-configured auth methods
+
+By default, the Helm chart creates the auth methods and updates their configuration when you install or upgrade the chart. To create and manage the auth methods yourself, set [`global.acls.authMethod.create`](/consul/docs/reference/k8s/helm#v-global-acls-authmethod-create) to `false`. The Helm chart then uses the existing auth methods and does not change them. The chart creates the ACL policies, roles, and binding rules required by consul-k8s components and service mesh workloads.
+
+Before you install the Helm chart, create the auth methods on the Consul servers:
+
+- The Helm chart derives the auth method names using the `global.acls.authMethod.name` prefix. Refer to [Configure auth methods for multiple Kubernetes clusters](#configure-auth-methods-for-multiple-kubernetes-clusters) for the list of names. We recommend that you set `global.acls.authMethod.name` so that the auth method names do not depend on `global.name` or the Helm release name.
+- Create each auth method with the `kubernetes` type. Configure it with the Kubernetes API server address, the API server's CA certificate, and a token for a service account that has the required [RBAC permissions](/consul/docs/secure/acl/auth-method/k8s#rbac). The address must be reachable from the Consul servers.
+- If the Kubernetes cluster is in a secondary datacenter with WAN federation enabled, create the `<name>-k8s-component-auth-method-<global.datacenter>` auth method in the primary datacenter and set its token locality to `global`.
+
+The following example creates the auth method for consul-k8s components. The `kubernetes-ca.crt` file contains the CA certificate of the Kubernetes API server.
+
+```shell-session
+$ consul acl auth-method create \
+    -name cluster2-k8s-component-auth-method \
+    -type kubernetes \
+    -kubernetes-host 'https://kubernetes.example.com:443' \
+    -kubernetes-ca-cert '@kubernetes-ca.crt' \
+    -kubernetes-service-account-jwt '<service account token>'
+```
+
+In this example, the auth method name prefix is `cluster2`, while the full auth method name is `cluster2-k8s-component-auth-method`.
+
+If you want to enable Consul service mesh, you will also need to create the auth method for service mesh workloads. 
+
+```shell-session
+$ consul acl auth-method create \
+    -name cluster2-k8s-auth-method \
+    -type kubernetes \
+    -kubernetes-host 'https://kubernetes.example.com:443' \
+    -kubernetes-ca-cert '@kubernetes-ca.crt' \
+    -kubernetes-service-account-jwt '<service account token>'
+```
+
+Similar to the previous example, the auth method name prefix here is `cluster2`, and the full auth method name is `cluster2-k8s-auth-method`.
+
+Then configure the Helm chart to use the auth methods that you created by specifying the auth method name prefix, which is `cluster2`.
+
+<CodeBlockConfig filename="values.yaml" highlight="8-10">
+
+```yaml
+global:
+  enabled: false
+  acls:
+    manageSystemACLs: true
+    bootstrapToken:
+      secretName: bootstrap-token
+      secretKey: token
+    authMethod:
+      name: cluster2
+      create: false
+externalServers:
+  enabled: true
+  hosts: [<consul server DNS, IP or exec= string>]
+connectInject:
+  enabled: true
+```
+
+</CodeBlockConfig>
+
+The example does not set `externalServers.k8sAuthMethodHost` because the auth methods that you create already contain the Kubernetes API server address.
+
+If an auth method does not exist, the `server-acl-init` job fails and logs the name of the missing auth method. To resolve such an issue, either create the auth method manually, or set `global.acls.authMethod.create` to `true` so that the Helm chart creates it.

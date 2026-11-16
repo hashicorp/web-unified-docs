@@ -25,9 +25,9 @@ locals {
 }
 
 resource "instana_application_alert_config" "repo_sync_failed_alert" {
-  name            = "${var.github_repository} repo-sync failed"
+  name            = "${data.github_repository.public_repository.name} repo-sync failed"
   tag_filter      = "endpoint.name@dest EQUALS 'repo-sync-failed'"
-  description     = "A ${var.github_repository}-internal repo sync failed: https://github.com/hashicorp/${var.github_repository}-internal/actions/workflows/repo-sync.yml."
+  description     = "A ${data.github_repository.internal_repository.name} repo sync failed: ${data.github_repository.internal_repository.html_url}/actions/workflows/repo-sync.yml."
   evaluation_type = "PER_AP"
   application     = local.application
   alert_channels  = local.application_alert_channels

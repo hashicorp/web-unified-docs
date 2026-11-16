@@ -1,0 +1,290 @@
+---
+layout: docs
+page_title: Configure SailPoint for SCIM with Vault
+description: >-
+  Learn how to configure SailPoint IdentityIQ as a SCIM client for Vault
+  Enterprise to provision entities and govern group membership as entitlements.
+---
+
+# Configure SailPoint for SCIM with Vault
+
+@include 'alerts/enterprise-only.mdx'
+
+SailPoint IdentityIQ (IIQ) connects to Vault with its SCIM 2.0 connector.
+Once connected, SailPoint provisions Vault
+[entities](/vault/docs/concepts/identity#entities-and-aliases) as accounts and
+governs membership of Vault
+[internal identity groups](/vault/docs/concepts/identity#external-vs-internal-groups)
+as entitlements.
+
+## Before you start
+
+- **[Set up a Vault SCIM server](/vault/docs/iam/scim/setup)**. The SailPoint
+  connector authenticates with a static bearer token, so create the SCIM client
+  and its token before you configure SailPoint.
+
+- **Make Vault reachable from SailPoint**. SailPoint IdentityIQ calls the Vault
+  SCIM API directly, so the Vault address must be reachable from the SailPoint
+  environment, for example through a public cluster endpoint.
+
+- **Prepare the Vault groups you want SailPoint to govern**. SailPoint imports
+  existing Vault groups as entitlements rather than creating them. Groups that
+  you create outside SCIM with the
+  [`identity/group` endpoint](/vault/api-docs/secret/identity/group), including
+  groups that already have policies attached, are visible to the SCIM connector
+  with no separate adoption or link step.
+
+- **Check your permissions**. You must be able to:
+    - create an application in SailPoint IdentityIQ
+    - edit the application account and group schemas
+    - run aggregation tasks and request access for an identity
+## Set the Vault namespace
+
+The examples on this page use the `admin` namespace, the default on HCP Vault
+Dedicated. Replace it with the namespace that holds your SCIM client. Keep the
+SCIM client, the connector entity, and the connector token in the same
+namespace.
+
+```shell-session
+$ export VAULT_ADDR="https://<your-cluster>:8200" \
+    VAULT_NAMESPACE="admin"                       \
+    VAULT_TOKEN="<admin_token>"
+```
+
+## Create the connector token
+
+SailPoint authenticates with a static bearer token that must resolve to the
+entity set as the SCIM client's `access_grant_principal`. The connector accepts
+either token type:
+
+- a service token that begins with `hvs.`
+- a SCIM token that begins with `scm.`
+
+Both token types use the entity alias and token role from
+[Set up a bearer-token workflow](/vault/docs/iam/scim/setup#set-up-a-bearer-token-workflow).
+A SCIM token is non-renewable, always an orphan, and limited per SCIM client in
+both lifetime and number of active tokens.
+
+The connector holds one static token, so provisioning stops when that token
+expires. The following steps mint a long-lived SCIM token. The examples use a
+SCIM client named `sailpoint-iiq`, an entity alias named `sailpoint-iiq`, a
+token role named `sailpoint-iiq-scim`, and a policy named
+`sailpoint-scim-client`.
+
+1. Set the token limits on the SCIM client. The following example allows a
+   two-year token. A new SCIM client defaults to a `max_active_tokens` value of
+   `2` and a `max_token_ttl` value of `0`.
+
+    ```shell-session
+    $ vault write identity/scim/client/sailpoint-iiq \
+        access_grant_principal="<entity_id>" \
+        max_active_tokens=3 \
+        max_token_ttl="17520h"
+    ```
+
+1. Raise the maximum lease TTL on the token auth mount. Vault caps a SCIM token
+   time to live (TTL) at the lesser of `max_token_ttl` and the `max_lease_ttl`
+   value on the token mount. Without the tune, Vault caps the token at the mount
+   maximum rather than the lifetime you request.
+
+    ```shell-session
+    $ vault auth tune -max-lease-ttl=17520h token
+    ```
+
+1. Create the SCIM token through the token role with `renewable` set to
+   `false`. The token role makes tokens renewable by default, and Vault rejects
+   a renewable SCIM token with the error `SCIM tokens cannot be renewable`.
+
+    ```shell-session
+    $ curl \
+         --header "X-Vault-Token: ${VAULT_TOKEN}" \
+         --header "X-Vault-Namespace: admin" \
+
+        --request POST \
+        --data '{"type":"scim","entity_alias":"sailpoint-iiq","policies":["sailpoint-scim-client"],"no_default_policy":true,"renewable":false,"ttl":"17520h"}' \
+        ${VAULT_ADDR}/v1/auth/token/create/sailpoint-iiq-scim
+    ```
+
+    The `auth.client_token` value in the response is the token you give
+    SailPoint.
+
+## Create the SailPoint application
+
+In SailPoint IdentityIQ, create an application that uses the SCIM 2.0 connector
+and point it at your Vault SCIM server. Save each IdentityIQ screen before you
+leave it, or IdentityIQ discards your changes.
+
+| Configuration setting | Value                                                  |
+|-----------------------|--------------------------------------------------------|
+| Application Type      | **SCIM 2.0**                                           |
+| Non-compliant Server  | Selected                                               |
+| Base URL              | Your Vault address followed by `/v1/admin/identity/scim/v2` |
+| Auth method           | **API Token**                                          |
+| API Token             | The connector token for your SCIM client               |
+
+The `admin` segment of the base URL is the namespace that holds the
+SCIM client. Keep the SCIM client, the connector entity, and the connector
+token in the same namespace.
+
+Select **Test Connection** before you continue. The test calls the `/Users`
+endpoint. A successful test confirms that the token reaches Vault and resolves
+to the SCIM client.
+
+## Review the account schema
+
+SailPoint schema discovery reads the Vault `/Schemas` endpoint. For the account
+object type, discovery returns the core SCIM User attributes `userName`,
+`externalId`, `active`, and `groups`, and the attributes `entityName`,
+`aliases`, and `metadata` from the
+`urn:ietf:params:scim:schemas:extension:vault:2.2:User` extension. The
+`groups` attribute is read-only, so Vault does not change group membership
+through the account. Govern membership through the group entitlement instead.
+
+1. In the account object type, run **Discover Schema Attributes**.
+
+1. If discovery returns the `items` attribute, remove it. The `items`
+   attribute belongs to the deprecated
+   `urn:ietf:params:scim:schemas:extension:vault:2.0:Metadata` extension, and
+   Vault rejects a request that includes both the 2.0 and 2.2 extensions.
+
+1. Set the account schema identifiers.
+
+    | Schema setting       | Value      |
+    |----------------------|------------|
+    | Native Object Type   | `User`     |
+    | Identity Attribute   | `id`       |
+    | Display Attribute    | `userName` |
+
+1. In the group object type, run **Discover Schema Attributes**. Discovery
+   returns the core SCIM Group attributes `displayName` and `members`, and the
+   `metadata` attribute from the
+   `urn:ietf:params:scim:schemas:extension:vault:2.2:Group` extension.
+
+## Create the provisioning policies
+
+In the application, open **Provisioning Policies** and create one policy for
+each operation on the account object type.
+
+| Operation | Fields                                                                            |
+|-----------|-----------------------------------------------------------------------------------|
+| Create    | `externalId` and `userName`                                                       |
+| Update    | `externalId` and `userName`                                                       |
+| Delete    | None                                                                              |
+| Enable    | `active` with the value `true`, plus `externalId` and `userName`                  |
+| Disable   | `active` with the value `false`, plus `externalId` and `userName`                 |
+
+Set `externalId` and `userName` as required fields, and populate each from an
+identity attribute with a rule. For example, set `externalId` from the
+`employeeId` attribute and `userName` from the `email` attribute. When the SCIM
+client has no `alias_mount_accessor` value, Vault uses `userName` as the entity
+name.
+
+To request Vault accounts directly, add the application to **Applications that
+support account only requests** in the Lifecycle Manager configuration.
+
+## Configure the group entitlement schema
+
+SailPoint treats an imported group as an assignable account group only when the
+account schema carries an entitlement attribute that references the group object
+type. Schema discovery leaves the account `groups` attribute as a plain string,
+which gives SailPoint no link between an account and a group.
+
+Imported groups then arrive inert: SailPoint shows no **Requestable** checkbox
+and no **Members** tab, and you cannot request the groups for an identity.
+
+Configure both schemas to establish the link.
+
+1. In the account schema, set the `groups` attribute **Type** to the group
+   object type, then select **Managed**, **Entitlement**, and **Multi-Valued**.
+
+1. In the group schema, set the **Identity Attribute** to `id` and the
+   **Display Attribute** to `displayName`.
+
+1. Confirm that the object type name referenced by the account `groups`
+   attribute matches the group schema object type name exactly.
+
+## Aggregate Vault groups and assign membership
+
+1. Run a **Group Aggregation** task against the application, then an **Account
+   Aggregation** task, so SailPoint rebuilds correlation between accounts and
+   groups. Run them in that order.
+
+    Imported groups appear in the Entitlement Catalog as account group
+    entitlements. The entitlement **Value** is the Vault group ID.
+
+1. Mark the imported entitlements **Requestable** in the Entitlement Catalog.
+   Aggregated entitlements are not requestable by default, so they stay hidden
+   from the access request interface until you flag them.
+
+1. Assign a group to an identity through **Manage User Access**. Filter by the
+   application, then request the **Entitlement** rather than a Role. Vault
+   groups import as entitlements, so a filter scoped to roles returns nothing.
+
+## Verify membership in Vault
+
+Confirm that the assignment reached Vault. Vault keys group membership by entity
+ID, so the group members list holds the entity ID of the provisioned user rather
+than the user name.
+
+Read the group through the SCIM API and check its members:
+
+```shell-session
+$ curl \
+    --header "X-Vault-Token: ${VAULT_TOKEN}" \
+    --header "Content-Type: application/scim+json" \
+    ${VAULT_ADDR}/v1/identity/scim/v2/Groups/<group_id>
+```
+
+The `members` array contains the entity ID of the user you assigned. Reading the
+user shows the same relationship from the other side. The `groups` array lists
+the group with a `type` of `direct` and a `display` value matching the group
+name.
+
+<Note>
+
+When SailPoint manages membership on a group, Vault marks that group as owned by
+the SCIM client and blocks membership changes through the identity API. A write
+to `member_entity_ids` on an owned group fails with an error stating that you
+cannot modify SCIM-managed fields through the API.
+
+The lock covers only the SCIM-managed fields, so administrators keep control of
+group policies. Vault scopes group listings the same way. A SCIM client lists
+unowned groups and the groups it owns, and does not list groups that belong to
+a different SCIM client.
+
+</Note>
+
+## Troubleshoot SailPoint provisioning
+
+The following problems can arise when you change the schema after a first
+aggregation run.
+
+### Aggregation fails with a constraint violation
+
+Re-running aggregation after you change the account `groups` attribute can fail
+with a `ConstraintViolationException` from SailPoint. An aggregation you ran
+before the schema change already created entitlement objects for those group
+values, and re-aggregating under the new entitlement attribute collides with
+them.
+
+To recover:
+
+1. Delete the stale entitlements for those groups from the Entitlement Catalog.
+
+1. Verify the group schema **Identity Attribute** and **Display Attribute**
+   values, and confirm the account `groups` attribute references the group
+   schema object type name exactly.
+
+1. Re-run Group Aggregation and Account Aggregation against the clean catalog.
+
+When the SailPoint entitlement deletion workflow does not clear the stale
+entries, recreate the groups in Vault so they get new IDs. Aggregation then
+imports them as fresh entitlements that cannot collide with the stale rows.
+
+## Related documentation
+
+- [Provision Vault identities with SCIM](/vault/docs/iam/scim)
+- [SCIM API](/vault/api-docs/secret/identity/scim)
+- [Set up a Vault SCIM server](/vault/docs/iam/scim/setup)
+- [Configure Microsoft Entra ID for SCIM with Vault](/vault/docs/iam/scim/idp/entraid)
+- [Configure Okta for SCIM with Vault](/vault/docs/iam/scim/idp/okta)
