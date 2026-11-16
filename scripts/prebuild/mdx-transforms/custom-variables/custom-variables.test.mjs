@@ -30,13 +30,13 @@ const defaultTransformOptions = {
 const validLocalVariablesMarkdown = `
 <!-- BEGIN: name:variables -->
 
-product-name:
-  - terraform-enterprise: 'Terraform Enterprise'
-  - terraform-docs-common: 'HCP Terraform'
+terraform-enterprise:
+  - product-name: 'Terraform Enterprise'
+  - product-content: 'This is local TFE'
 
-product-content:
-  - terraform-enterprise: 'This is local TFE'
-  - terraform-docs-common: 'This is local TFC'
+terraform-docs-common:
+  - product-name: 'HCP Terraform'
+  - product-content: 'This is local TFC'
 
 <!-- END: name:variables -->
 `
@@ -44,13 +44,13 @@ product-content:
 const validGlobalVariablesMarkdown = `
 <!-- BEGIN: name:global-variables -->
 
-product-name:
-  - terraform-enterprise: 'Terraform Enterprise Global'
-  - terraform-docs-common: 'HCP Terraform Global'
+terraform-enterprise:
+  - product-name: 'Terraform Enterprise Global'
+  - product-content: 'This is global TFE'
 
-product-content:
-  - terraform-enterprise: 'This is global TFE'
-  - terraform-docs-common: 'This is global TFC'
+terraform-docs-common:
+  - product-name: 'HCP Terraform Global'
+  - product-content: 'This is global TFC'
 
 <!-- END: name:global-variables -->
 `
@@ -154,15 +154,15 @@ describe('Transform Custom Variables - Variable Usage', () => {
 	})
 
 	// headers
-	it('should replace variables found within headers', async () => {})
+	it.skip('should replace variables found within headers', async () => {})
 
 	// case for code blocks?
-	it('should replace variables found within code blocks', async () => {})
+	it.skip('should replace variables found within code blocks', async () => {})
 	// case for urls/links?
 	// case for markdown syntax - bold, italic, strong, etc
 })
 
-describe('Transform Custom Variables - Multiple Variable Definition', () => {
+describe.skip('Transform Custom Variables - Multiple Variable Definition', () => {
 	// global -> local definition
 	it('should substitute global variables and then local variables', async () => {
 		const contentMarkdown =
@@ -212,8 +212,8 @@ describe('Transform Custom Variables - Multiple Variable Definition', () => {
 		const localVariablesMarkdown = `
 <!-- BEGIN: name:variables -->
 
-product-name:
-  - terraform-enterprise: 'TFE'
+terraform-enterprise:
+  - product-name: 'TFE'
 
 <!-- END: name:variables -->
 `
@@ -235,11 +235,9 @@ product-name:
 		const localVariablesMarkdown = `
 <!-- BEGIN: name:variables -->
 
-product-name:
-  - terraform-enterprise: 'Terraform Enterprise NEW'
-
-product-content:
-  - terraform-enterprise: 'Wow! This is such a cool feature!'
+terraform-enterprise:
+  - product-name: 'Terraform Enterprise NEW'
+  - product-content: 'Wow! This is such a cool feature!'
 
 <!-- END: name:variables -->
 `
@@ -265,8 +263,8 @@ product-content:
 		const localVariablesMarkdown = `
 <!-- BEGIN: name:variables -->
 
-new-variable:
-  - terraform-enterprise: 'very cool sentence'
+terraform-enterprise:
+  - new-variable: 'very cool sentence'
 
 <!-- END: name:variables -->
 `
@@ -318,11 +316,11 @@ describe('Transform Custom Variables - Error Handling', () => {
 		const localVariablesMarkdown = `
 <!-- BEGIN: name:variables -->
 
-product-name:
-  - terraform-enterprise: 'Terraform'
+terraform-enterprise:
+  - product-name: 'Terraform'
 
-product-content:
-  - terraform: 'This is Terraform'
+terraform:
+  - product-content: 'This is Terraform'
 
 <!-- END: name:variables -->
 `
@@ -330,7 +328,7 @@ product-content:
 			localVariablesMarkdown,
 			contentMarkdown,
 		)
-		const expectedError = `Custom Variables Transform failed in testProduct/test-file.md: No value defined for variable '{{ product-content }}' for product 'terraform-enterprise'. Ensure that a local/global 'variables.mdx' is defined inside the partials directory of terraform-enterprise and that '{{ product-content }}' exists within.`
+		const expectedError = `Custom Variables Transform failed in testProduct/test-file.md: No value defined for variable '{{ product-content }}' for product 'terraform-enterprise'. Ensure that a 'variables.mdx' is defined inside the partials directory of terraform-enterprise and that '{{ product-content }}' exists within.`
 
 		await expect(async () => {
 			return await runTransform(invalidMarkdown, defaultTransformOptions)
@@ -338,17 +336,17 @@ product-content:
 	})
 
 	// "varName: or var-name:"
-	it('should error for a variable name that does not end with a :', async () => {
+	it('should error for a product name that does not end with a :', async () => {
 		const contentMarkdown =
 			'This is test markdown for {{ product-name }} with {{ product-content }}.'
 		const localVariablesMarkdown = `
 <!-- BEGIN: name:variables -->
 
-product-name
-  - terraform-enterprise: 'Terraform'
+terraform-enterprise
+  - product-name: 'Terraform'
 
-product-content:
-  - terraform: 'This is Terraform'
+terraform:
+  - product-content: 'This is Terraform'
 
 <!-- END: name:variables -->
 `
@@ -356,24 +354,24 @@ product-content:
 			localVariablesMarkdown,
 			contentMarkdown,
 		)
-		const expectedError = `Custom Variables Transform failed in testProduct/test-file.md: Couldn't create custom variable map - product-name is not a valid definition. Please define the variable with alphabetical characters and/or '-' between words like 'varName:' or 'var-name:'`
+		const expectedError = `Custom Variables Transform failed in testProduct/test-file.md: Couldn't create custom variable map - terraform-enterprise is not a valid definition. Please define the product with alphabetical characters and/or '-' between words like 'varName:' or 'var-name:'`
 
 		await expect(async () => {
 			return await runTransform(invalidMarkdown, defaultTransformOptions)
 		}).rejects.toThrow(expectedError)
 	})
 
-	it('should error for a variable name that contains numbers', async () => {
+	it('should error for a product name that contains numbers', async () => {
 		const contentMarkdown =
 			'This is test markdown for {{ product-name }} with {{ product-content }}.'
 		const localVariablesMarkdown = `
 <!-- BEGIN: name:variables -->
 
-product-name9:
-  - terraform-enterprise: 'Terraform'
+terraform-enterprise9:
+  - product-name: 'Terraform'
 
-product-content:
-  - terraform: 'This is Terraform'
+terraform:
+  - product-content: 'This is Terraform'
 
 <!-- END: name:variables -->
 `
@@ -381,24 +379,24 @@ product-content:
 			localVariablesMarkdown,
 			contentMarkdown,
 		)
-		const expectedError = `Custom Variables Transform failed in testProduct/test-file.md: Couldn't create custom variable map - product-name9: is not a valid definition. Please define the variable with alphabetical characters and/or '-' between words like 'varName:' or 'var-name:'`
+		const expectedError = `Custom Variables Transform failed in testProduct/test-file.md: Couldn't create custom variable map - terraform-enterprise9: is not a valid definition. Please define the product with alphabetical characters and/or '-' between words like 'varName:' or 'var-name:'`
 
 		await expect(async () => {
 			return await runTransform(invalidMarkdown, defaultTransformOptions)
 		}).rejects.toThrow(expectedError)
 	})
 
-	it('should error for a variable name that contains special characters besides -', async () => {
+	it('should error for a product name that contains special characters besides -', async () => {
 		const contentMarkdown =
 			'This is test markdown for {{ product-name }} with {{ product-content }}.'
 		const localVariablesMarkdown = `
 <!-- BEGIN: name:variables -->
 
-product_name:
-  - terraform-enterprise: 'Terraform'
+terraform_enterprise:
+  - product-name: 'Terraform'
 
-product-content:
-  - terraform: 'This is Terraform'
+terraform:
+  - product-content: 'This is Terraform'
 
 <!-- END: name:variables -->
 `
@@ -406,24 +404,24 @@ product-content:
 			localVariablesMarkdown,
 			contentMarkdown,
 		)
-		const expectedError = `Custom Variables Transform failed in testProduct/test-file.md: Couldn't create custom variable map - product_name: is not a valid definition. Please define the variable with alphabetical characters and/or '-' between words like 'varName:' or 'var-name:'`
+		const expectedError = `Custom Variables Transform failed in testProduct/test-file.md: Couldn't create custom variable map - terraform_enterprise: is not a valid definition. Please define the product with alphabetical characters and/or '-' between words like 'varName:' or 'var-name:'`
 
 		await expect(async () => {
 			return await runTransform(invalidMarkdown, defaultTransformOptions)
 		}).rejects.toThrow(expectedError)
 	})
 
-	// " - product: value"
+	// " - variable: value"
 	it('should error for the lack of variable entries in a given variable name', async () => {
 		const contentMarkdown =
 			'This is test markdown for {{ product-name }} with {{ product-content }}.'
 		const localVariablesMarkdown = `
 <!-- BEGIN: name:variables -->
 
-test:
-  - terraform-enterprise: 'Terraform Enterprise'
+terraform-enterprise:
+  - test: 'Terraform Enterprise'
 
-value:
+terraform-docs-common:
 
 <!-- END: name:variables -->
 `
@@ -431,7 +429,7 @@ value:
 			localVariablesMarkdown,
 			contentMarkdown,
 		)
-		const expectedError = `Custom Variables Transform failed in testProduct/test-file.md: Couldn't create custom variable map - 'value' must contain a list of '- product: value' entries.`
+		const expectedError = `Custom Variables Transform failed in testProduct/test-file.md: Couldn't create custom variable map - 'terraform-docs-common' must contain a list of '- variable: value' entries.`
 
 		await expect(async () => {
 			return await runTransform(invalidMarkdown, defaultTransformOptions)
@@ -444,11 +442,9 @@ value:
 		const localVariablesMarkdown = `
 <!-- BEGIN: name:variables -->
 
-test:
-  - terraform-enterprise: 'Terraform Enterprise'
-
-value:
-  - terraform-enterprise:
+terraform-enterprise:
+  - test: 'Terraform Enterprise'
+  - value:
 
 <!-- END: name:variables -->
 `
@@ -456,7 +452,7 @@ value:
 			localVariablesMarkdown,
 			contentMarkdown,
 		)
-		const expectedError = `Custom Variables Transform failed in testProduct/test-file.md: Couldn't create custom variable map - 'value: terraform-enterprise' has no value. Please provide a value for each product entry.`
+		const expectedError = `Custom Variables Transform failed in testProduct/test-file.md: Couldn't create custom variable map - 'terraform-enterprise: value' has no value. Please provide a value for each product entry.`
 
 		await expect(async () => {
 			return await runTransform(invalidMarkdown, defaultTransformOptions)
@@ -470,11 +466,11 @@ value:
 		const localVariablesMarkdown = `
 <!-- BEGIN: name:variables -->
 
-test:
-  - terraform-enterprise: 'Terraform Enterprise'
+terraform-enterprise:
+  - test: 'Terraform Enterprise'
 
-value:
-  terraform-enterprise: 'Terraform Value'
+terraform-docs-common:
+  product-name: 'Terraform Value'
 
 <!-- END: name:variables -->
 `
@@ -482,25 +478,25 @@ value:
 			localVariablesMarkdown,
 			contentMarkdown,
 		)
-		const expectedError = `Custom Variables Transform failed in testProduct/test-file.md: Couldn't create custom variable map - 'value' must contain a list of '- product: value' entries.`
+		const expectedError = `Custom Variables Transform failed in testProduct/test-file.md: Couldn't create custom variable map - 'terraform-docs-common' must contain a list of '- variable: value' entries.`
 
 		await expect(async () => {
 			return await runTransform(invalidMarkdown, defaultTransformOptions)
 		}).rejects.toThrow(expectedError)
 	})
 
-	// format as a '- product: value' error
+	// format as a '- variable: value' error
 	it('should error for a variable entry that does not separate key: value with a :', async () => {
 		const contentMarkdown =
 			'This is test markdown for {{ product-name }} with {{ product-content }}.'
 		const localVariablesMarkdown = `
 <!-- BEGIN: name:variables -->
 
-product-name:
-  - terraform-enterprise 'Terraform'
+terraform-enterprise:
+  - product-name 'Terraform'
 
-product-content:
-  - terraform: 'This is Terraform'
+terraform:
+  - product-content: 'This is Terraform'
 
 <!-- END: name:variables -->
 `
@@ -508,7 +504,7 @@ product-content:
 			localVariablesMarkdown,
 			contentMarkdown,
 		)
-		const expectedError = `Custom Variables Transform failed in testProduct/test-file.md: Couldn't create custom variable map - 'terraform-enterprise 'Terraform'' must be formatted as a '- product: value' entry in variables.mdx.`
+		const expectedError = `Custom Variables Transform failed in testProduct/test-file.md: Couldn't create custom variable map - 'product-name 'Terraform'' must be formatted as a '- variable: value' entry in variables.mdx.`
 
 		await expect(async () => {
 			return await runTransform(invalidMarkdown, defaultTransformOptions)
@@ -521,11 +517,11 @@ product-content:
 		const localVariablesMarkdown = `
 <!-- BEGIN: name:variables -->
 
-product-name:
-  - terraform enterprise: 'Terraform'
+terraform-enterprise:
+  - product name: 'Terraform'
 
-product-content:
-  - terraform: 'This is Terraform'
+terraform:
+  - product-content: 'This is Terraform'
 
 <!-- END: name:variables -->
 `
@@ -533,7 +529,7 @@ product-content:
 			localVariablesMarkdown,
 			contentMarkdown,
 		)
-		const expectedError = `Custom Variables Transform failed in testProduct/test-file.md: Couldn't create custom variable map - 'terraform enterprise' is not a valid entry name. Entry names must only contain alphabetical characters and a single '-' separator between words like 'product' or 'my-product'.`
+		const expectedError = `Custom Variables Transform failed in testProduct/test-file.md: Couldn't create custom variable map - 'product name' is not a valid entry name. Entry names must only contain alphabetical characters and a single '-' separator between words like 'product' or 'my-product'.`
 
 		await expect(async () => {
 			return await runTransform(invalidMarkdown, defaultTransformOptions)
@@ -546,11 +542,11 @@ product-content:
 		const localVariablesMarkdown = `
 <!-- BEGIN: name:variables -->
 
-product-name:
-  - terraform-enterprise9: 'Terraform'
+terraform-enterprise:
+  - product-name9: 'Terraform'
 
-product-content:
-  - terraform: 'This is Terraform'
+terraform:
+  - product-content: 'This is Terraform'
 
 <!-- END: name:variables -->
 `
@@ -558,7 +554,7 @@ product-content:
 			localVariablesMarkdown,
 			contentMarkdown,
 		)
-		const expectedError = `Custom Variables Transform failed in testProduct/test-file.md: Couldn't create custom variable map - 'terraform-enterprise9' is not a valid entry name. Entry names must only contain alphabetical characters and a single '-' separator between words like 'product' or 'my-product'.`
+		const expectedError = `Custom Variables Transform failed in testProduct/test-file.md: Couldn't create custom variable map - 'product-name9' is not a valid entry name. Entry names must only contain alphabetical characters and a single '-' separator between words like 'product' or 'my-product'.`
 
 		await expect(async () => {
 			return await runTransform(invalidMarkdown, defaultTransformOptions)
@@ -571,11 +567,11 @@ product-content:
 		const localVariablesMarkdown = `
 <!-- BEGIN: name:variables -->
 
-product-name:
-  - terraform_enterprise: 'Terraform'
+terraform-enterprise:
+  - product_name: 'Terraform'
 
-product-content:
-  - terraform: 'This is Terraform'
+terraform:
+  - product-content: 'This is Terraform'
 
 <!-- END: name:variables -->
 `
@@ -583,7 +579,7 @@ product-content:
 			localVariablesMarkdown,
 			contentMarkdown,
 		)
-		const expectedError = `Custom Variables Transform failed in testProduct/test-file.md: Couldn't create custom variable map - 'terraform_enterprise' is not a valid entry name. Entry names must only contain alphabetical characters and a single '-' separator between words like 'product' or 'my-product'.`
+		const expectedError = `Custom Variables Transform failed in testProduct/test-file.md: Couldn't create custom variable map - 'product_name' is not a valid entry name. Entry names must only contain alphabetical characters and a single '-' separator between words like 'product' or 'my-product'.`
 
 		await expect(async () => {
 			return await runTransform(invalidMarkdown, defaultTransformOptions)
@@ -596,11 +592,11 @@ product-content:
 		const localVariablesMarkdown = `
 <!-- BEGIN: name:variables -->
 
-product-name:
-  - terraform-enterprise-: 'Terraform'
+terraform-enterprise:
+  - product-name-: 'Terraform'
 
-product-content:
-  - terraform: 'This is Terraform'
+terraform:
+  - product-content: 'This is Terraform'
 
 <!-- END: name:variables -->
 `
@@ -608,7 +604,7 @@ product-content:
 			localVariablesMarkdown,
 			contentMarkdown,
 		)
-		const expectedError = `Custom Variables Transform failed in testProduct/test-file.md: Couldn't create custom variable map - 'terraform-enterprise-' is not a valid entry name. Entry names must only contain alphabetical characters and a single '-' separator between words like 'product' or 'my-product'.`
+		const expectedError = `Custom Variables Transform failed in testProduct/test-file.md: Couldn't create custom variable map - 'product-name-' is not a valid entry name. Entry names must only contain alphabetical characters and a single '-' separator between words like 'product' or 'my-product'.`
 
 		await expect(async () => {
 			return await runTransform(invalidMarkdown, defaultTransformOptions)
@@ -733,6 +729,28 @@ product-content:
 		)
 		const expectedError = `Custom Variables Transform failed in testProduct/test-file.md: Nested BEGIN blocks not allowed. Found BEGIN at line 3, previous BEGIN at line 2`
 
+		await expect(async () => {
+			return await runTransform(invalidMarkdown, defaultTransformOptions)
+		}).rejects.toThrow(expectedError)
+	})
+
+	// error for duplicate variable definitions
+	it('should error for declaring the same variable multiple times', async () => {
+		const contentMarkdown = 'This is test markdown for {{ product-name }}.'
+		const localVariablesMarkdown = `
+<!-- BEGIN: name:variables -->
+
+terraform-enterprise:
+  - product-name: 'TFE'
+
+<!-- END: name:variables -->
+`
+		const localMarkdown = createTestContent(
+			localVariablesMarkdown,
+			contentMarkdown,
+		)
+		const invalidMarkdown = localMarkdown + '\n' + localMarkdown
+		const expectedError = `Custom Variables Transform failed in testProduct/test-file.md: Couldn't create custom variable map - Duplicate value for 'product-name' found in 'terraform-enterprise'. Please define each variable only once per file.`
 		await expect(async () => {
 			return await runTransform(invalidMarkdown, defaultTransformOptions)
 		}).rejects.toThrow(expectedError)

@@ -10,7 +10,7 @@ import { load } from 'js-yaml'
 
 // The block name as it appears in a BEGIN/END comment. Single source of truth
 // for the three regexes below
-const VARIABLE_BLOCK_NAME = 'name:(?:global-)?variables'
+const VARIABLE_BLOCK_NAME = 'name:variables'
 
 // Matches the content of a parsed directive block (see parseDirectiveBlocks),
 // e.g. 'name:variables'. Anchored so product-tagged blocks such as
@@ -70,9 +70,8 @@ function parseVariableContent(content) {
 	let document = {}
 	try {
 		// { json: true } enables the parser to override duplicates and replace earlier definitions
-		document = load(content, { json: true })
+		document = load(content)
 	} catch (e) {
-		console.log(e)
 		// Catch all for any malformed structuring in variables.mdx
 		throw new Error(
 			`Couldn't create custom variable map - ${e.reason}. Make sure the variables and content inside variables.mdx is not empty and follow proper partials & YAML formatting.`,
@@ -86,42 +85,35 @@ function parseVariableContent(content) {
 function extractVariableMapEntriesFromDocument(document, definedVariables) {
 	const variableMapEntries = []
 
-	// Iterating through the JSON document to extract & store necessary info for the variable map
-	const variableObjectEntries = Object.entries(document)
-	for (const [variableName, variableEntries] of variableObjectEntries) {
-		// Enforcing the "- product: value" syntax
-		if (!Array.isArray(variableEntries) || variableEntries === null) {
+	// Top-level keys are products; each product holds a list of '- variable: value' entries
+	for (const [product, productEntries] of Object.entries(document)) {
+		if (!Array.isArray(productEntries)) {
 			throw new Error(
-				`Couldn't create custom variable map - '${variableName}' must contain a list of '- product: value' entries.`,
+				`Couldn't create custom variable map - '${product}' must contain a list of '- variable: value' entries.`,
 			)
 		}
 
-		// Check if each variableEntry is a proper object of { product: content },
-		// then push into the map. Also guard against null values (e.g. '- product:' with no value).
-		for (const entry of variableEntries) {
+		for (const entry of productEntries) {
 			if (typeof entry !== 'object') {
 				throw new Error(
-					`Couldn't create custom variable map - '${entry}' must be formatted as a '- product: value' entry in variables.mdx.`,
+					`Couldn't create custom variable map - '${entry}' must be formatted as a '- variable: value' entry in variables.mdx.`,
 				)
 			}
-			const productEntries = Object.entries(entry)
-			for (const [product, content] of productEntries) {
-				if (!VARIABLE_ENTRY_NAME_REGEX.test(product)) {
+			for (const [variableName, content] of Object.entries(entry)) {
+				if (!VARIABLE_ENTRY_NAME_REGEX.test(variableName)) {
 					throw new Error(
-						`Couldn't create custom variable map - '${product}' is not a valid entry name. Entry names must only contain alphabetical characters and a single '-' separator between words like 'product' or 'my-product'.`,
+						`Couldn't create custom variable map - '${variableName}' is not a valid entry name. Entry names must only contain alphabetical characters and a single '-' separator between words like 'product' or 'my-product'.`,
 					)
 				}
 				if (content === null) {
 					throw new Error(
-						`Couldn't create custom variable map - '${variableName}: ${product}' has no value. Please provide a value for each product entry.`,
+						`Couldn't create custom variable map - '${product}: ${variableName}' has no value. Please provide a value for each product entry.`,
 					)
 				}
 				variableMapEntries.push([variableName, product, String(content)])
+				definedVariables.add(variableName)
 			}
 		}
-
-		// Parsed properly, so we can store the variable name as defined
-		definedVariables.add(variableName)
 	}
 
 	return variableMapEntries
@@ -180,10 +172,16 @@ export function replaceCustomVariables(
 	// Go through variablesToReplace to reconstruct the content string
 	for (let i = 0; i < variablesToReplace.length; i++) {
 		const [varName, startIndex, endIndex] = variablesToReplace[i]
-		const variableContent = variableMap[varName]?.[repoSlug]
+		if (!variableMap[repoSlug]) {
+			throw new Error(
+				`No variables defined for '${repoSlug}'. Define/import the variables you intend to use for '${repoSlug}'.`,
+			)
+		}
+
+		const variableContent = variableMap[repoSlug]?.[varName]
 		if (variableContent === undefined) {
 			throw new Error(
-				`No value defined for variable '{{ ${varName} }}' for product '${repoSlug}'. Ensure that a local/global 'variables.mdx' is defined inside the partials directory of ${repoSlug} and that '{{ ${varName} }}' exists within.`,
+				`No value defined for variable '{{ ${varName} }}' for product '${repoSlug}'. Ensure that a 'variables.mdx' is defined inside the partials directory of ${repoSlug} and that '{{ ${varName} }}' exists within.`,
 			)
 		}
 
@@ -218,12 +216,8 @@ export function findAndReplaceCustomVariables(
 	const variableMap = {}
 	let variablesContent = ''
 	let readVariables = false
-	let isGlobal = false
 
-	// CAUTION: WHAT IF THERE ISN'T A CORRESPONDING BEGIN/END TAG
-	// error: consider start block w/o end block
-	// error: consider end block w/o start block
-	// done to check if the variables directive is structured properly
+	// Check if the variables directive block is structured properly
 	// If we decide to go with a different variables.mdx structure, we should remove this
 	if (!directivePairingValidated) {
 		parseDirectiveBlocks(tree)
@@ -235,13 +229,8 @@ export function findAndReplaceCustomVariables(
 		const value = node?.value
 
 		// starting indicator of custom variables
-		// should check for global variables here
 		if (isVariableStartDeclarative(value, type)) {
 			readVariables = true
-
-			// set isGlobal to true if 'global' is found
-			isGlobal = value.includes('global')
-			// console.log(isGlobal)
 			return
 		}
 
@@ -254,7 +243,7 @@ export function findAndReplaceCustomVariables(
 			// REGEX to check if a variable name is valid
 			if (!VARIABLE_NAME_REGEX.test(variableName)) {
 				throw new Error(
-					`Couldn't create custom variable map - ${variableName.trim()} is not a valid definition. Please define the variable with alphabetical characters and/or '-' between words like 'varName:' or 'var-name:'`,
+					`Couldn't create custom variable map - ${variableName.trim()} is not a valid definition. Please define the product with alphabetical characters and/or '-' between words like 'varName:' or 'var-name:'`,
 				)
 			}
 			variablesContent += variableName
@@ -291,31 +280,35 @@ export function findAndReplaceCustomVariables(
 			// update the variable map
 			for (const [varName, product, content] of variableMapEntries) {
 				// first definition of a variable - setup object
-				if (!variableMap[varName]) {
-					variableMap[varName] = {}
+				if (!variableMap[product]) {
+					variableMap[product] = {}
 				}
 
-				// for global - only update if there isn't a value already
-				if (isGlobal && variableMap[varName][product]) {
-					continue
+				// error out of the variable is already defined and value is not the same
+				if (
+					variableMap[product][varName] &&
+					variableMap[product][varName] !== content
+				) {
+					throw new Error(
+						`Couldn't create custom variable map - Duplicate value for '${varName}' found in '${product}'. Please define each variable only once per file.`,
+					)
 				}
 
 				// add or update the entry
-				variableMap[varName][product] = content
+				variableMap[product][varName] = content
 			}
 
 			// console.log('=== Updated Variable Map ===')
 			// console.log(variableMap)
 
 			readVariables = false
-			isGlobal = false
 			return
 		}
 
 		// check if current content contains any variables
 		// {{ vars }} can be found in text/code; Should we ignore in code?
 		// how do we handle URLs?
-		if (type === 'text' || type === 'code') {
+		if (type === 'text') {
 			const containsOneOrMoreVariables = VARIABLE_USAGE_SYNTAX_REGEX.test(value)
 			VARIABLE_USAGE_SYNTAX_REGEX.lastIndex = 0 // need to reset index as it moves after testing
 			if (containsOneOrMoreVariables) {

@@ -62,7 +62,7 @@ export function transformExcludeContent(options = {}) {
  * Route directive blocks to the generic processors based on the directive shape
  */
 function routeAndProcessBlock(block, tree, options) {
-	// Custom variables blocks (name:variables / name:global-variables) share the
+	// Custom variables blocks (name:variables) share the
 	// BEGIN/END comment syntax but are handled by transformCustomVariables
 	if (VARIABLE_BLOCK_CONTENT_REGEX.test(block.content)) {
 		return
