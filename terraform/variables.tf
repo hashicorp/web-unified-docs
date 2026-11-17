@@ -23,7 +23,7 @@ variable "slack_alerting_channel_id" {
 
 variable "instana_dashboard_prefix" {
   description = "Used as the prefix to all of our resources and dashboards in Instana to make it easier to find things that we own"
-  type = string
+  type        = string
 }
 
 variable "instana_agent_key" {
