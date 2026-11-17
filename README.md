@@ -10,7 +10,7 @@ For full details on contributing documentation content, refer to the [Contribute
 
 We welcome contributions to our documentation. Feel free to open issues or pull requests like any normal GitHub project. Detailed information about the repository structure, workflows, and local preview are available in the [Contribute to HashiCorp documentation](CONTRIBUTING.md) guide.
 
-Documentation content is located in the `content` directory, with subdirectories organized by product.
+Documentation content is located in the `content` directory, with subdirectories organized by product. test
 
 Please refer to and follow our [documentation style guide](docs/style-guide/).
 
