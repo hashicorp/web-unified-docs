@@ -39,9 +39,3 @@ resource "vercel_project_environment_variable" "sensitive" {
   sensitive  = each.value.sensitive
   comment    = trimspace("${try(each.value.comment, "")} ${format("Managed by Terraform workspace %s. Do not edit manually.", terraform.workspace)}")
 }
-
-
-resource "vercel_user_token" "this" {
-  for_each = local.repositories
-  name     = "GitHub Repo: ${each.value} - TF Workspace: ${terraform.workspace}"
-}
