@@ -180,7 +180,7 @@ Refer to [Use `1.` for every item in an ordered list](../markdown/fonts-and-form
 - **keywords**: writing, concision, scanning  
 - **content sets**: docs, WAF, cert, tutorials
 
-Every sentence should help readers complete a task or understand a concept. Remove introductions that restate the heading, summaries that repeat the section, and background that readers do not need for the task. State each point once and link to it instead of repeating it.
+Every sentence should help readers complete a task or understand a concept. Remove introductions that restate the heading, summaries that repeat the section, sentences after a code example that repeat what the introduction already said, and background that readers do not need for the task. State each point once and link to it instead of repeating it.
 
 Do not remove required technical details, warnings, prerequisites, or facts to make content shorter.
 
@@ -203,6 +203,28 @@ Add a `backend` block to the `terraform` block in your configuration.
 
 In this section, you configure the backend. Configuring the backend is an important step. To configure the backend, add a `backend` block to the `terraform` block in your configuration.
 ```
+
+**Do:**
+
+````markdown
+Run `vault operator seal` to seal Vault:
+
+```shell-session
+$ vault operator seal
+```
+````
+
+**Don't:**
+
+````markdown
+Run `vault operator seal` to seal Vault:
+
+```shell-session
+$ vault operator seal
+```
+
+Vault seals itself and then returns a success message or an error.
+````
 
 ## Do not format multiple paragraphs of text into lists 
 
@@ -327,6 +349,8 @@ It helps to consider the following types of personas when managing the security 
 - **content sets**: docs, WAF, tutorials
 
 Introduce diagrams, tables, and example code blocks with a statement that describes its purpose. If you need to provide additional clarity, do so after the page element.
+
+Text after the element must add new information, such as a non-obvious side effect or what to check in the output. Do not repeat what the introduction already said. Refer to [Remove content that does not help readers act or understand](#remove-content-that-does-not-help-readers-act-or-understand) for additional guidance.
 
 Do not describe code examples using comments embedded in the code. 
 

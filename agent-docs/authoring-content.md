@@ -63,16 +63,18 @@ rules when you create or revise content.
 - Prefer scannable structure over long prose.
 - Use lists for three or more parallel items and tables for items with shared
   attributes. Keep list items short.
-- Use descriptive headings and front-load the important words.
+- Use short, descriptive headings and front-load the important words. Write
+  headings as phrases, not full sentences.
 - Put steps in numbered lists with one action per step.
 - Remove content that does not help the reader act or understand, such as
-  intros that restate the heading or repeated points.
+  intros that restate the heading, repeated points, or a sentence after a code
+  example that restates what the example does.
 
 **Never drop required technical details, warnings, or accuracy to be shorter.**
 
-The [style guide](../docs/style-guide/index.md) and the product's templates
-take precedence on structure and terminology when they conflict with these
-rules. Examples for each rule are in
+The [style guide](../docs/style-guide/index.md) and the product-specific
+templates take precedence on structure and terminology when they conflict with
+these rules. Examples for each rule are in
 [content-organization.md](../docs/style-guide/general/content-organization.md),
 [language.md](../docs/style-guide/general/language.md), and
 [titles-and-headings.md](../docs/style-guide/general/titles-and-headings.md).

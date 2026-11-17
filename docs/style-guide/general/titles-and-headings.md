@@ -77,12 +77,14 @@ Verify that your system meets the following requirements.
  . . .
 ```
 
-## Front-load headings with the most important words
+## Write short headings that front-load the most important words
 
 - **keywords**: writing, headings, scanning
 - **content sets**: docs, tutorials, WAF, certifications
 
 Readers scan headings to find the section they need. Start each heading with the words that identify its topic, such as the task, feature, or component. Do not start headings with generic words, such as "How to", "About", or "Overview of".
+
+Keep headings short. Write them as phrases, not full sentences.
 
 ### Examples
 
@@ -104,4 +106,8 @@ Readers scan headings to find the section they need. Start each heading with the
 
 ```
 ## Information about the requirements for audit devices
+```
+
+```
+## You can rotate encryption keys to limit the impact of a compromised key
 ```
