@@ -40,7 +40,12 @@ locals {
   repo_secret_bindings = {
     for binding in flatten([
       for repo in local.repositories : [
-        for secret_name, secret_value in local.secrets : {
+        for secret_name, secret_value in merge(
+          local.secrets,
+          {
+            VERCEL_TOKEN = vercel_user_token.this[repo].bearer_token
+          }
+          ) : {
           key        = "${repo}:${secret_name}"
           repository = repo
           name       = secret_name
