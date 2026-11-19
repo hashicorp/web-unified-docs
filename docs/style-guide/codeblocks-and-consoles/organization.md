@@ -71,6 +71,8 @@ EOH
 
 In documentation, describe an action and provide example configurations and commands whenever possible. Introduce examples by describing the actions the configuration or command represents.
 
+Do not add a sentence after the example that restates what the introduction already said. Refer to [Remove content that does not help readers act or understand](../general/content-organization.md#remove-content-that-does-not-help-readers-act-or-understand) for additional guidance.
+
 ### Example 
 
 ````
