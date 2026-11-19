@@ -1,0 +1,403 @@
+---
+layout: docs
+page_title: Manage performance replication
+description: >-
+  Manage Vault Enterprise performance replication after setup. Promote and
+  demote performance clusters, revoke secondaries, change path filters, and
+  point secondaries at a new primary.
+---
+
+# Manage performance replication
+
+@include 'alerts/enterprise-and-hcp.mdx'
+
+Manage a running performance replication set: promote a performance secondary,
+revoke a secondary, change path filters, and point a secondary at a new
+primary. To set up performance replication, refer to [Enable performance
+replication](/vault/docs/enterprise/replication/performance/enable).
+
+Performance replication operations use a normal Vault token. They do not need a
+DR operation token.
+
+## Before you start
+
+- **Check your permissions**. Run every command from the root namespace, with a
+  token whose policy grants the endpoint you call. The secondary token endpoint
+  also needs `sudo`.
+
+- **Check the replication status**. Read
+  `sys/replication/performance/status` on each cluster before and after each
+  change. Refer to [Monitor
+  replication](/vault/docs/enterprise/replication/monitor).
+
+## Promote a performance secondary
+
+Promote a performance secondary when you need it to replace the performance
+primary, for example to retire the primary's site.
+
+<Warning>
+
+Only one performance primary can be active at a time. Two active primaries
+can cause data loss. Demote or disable the original primary before you promote.
+
+</Warning>
+
+Clients do not keep their tokens and leases across a promotion. Each
+performance cluster issues its own tokens and leases, so clients must
+authenticate again on the new primary.
+
+If the performance primary failed and has a DR secondary, promote the DR
+secondary instead. A DR secondary keeps the primary's tokens and leases. Refer
+to [DR failover](/vault/docs/enterprise/replication/disaster-recovery/failover#combine-dr-and-performance-replication).
+
+### Step 1: Demote the original primary
+
+Run the following command on the original performance primary. The cluster
+becomes a performance secondary that does not connect to any primary. It keeps
+its cluster ID, so you can reconnect it later without wiping its storage.
+
+<Tabs>
+<Tab heading="CLI" group="cli">
+
+```shell-session
+$ vault write -force sys/replication/performance/primary/demote
+```
+
+</Tab>
+<Tab heading="API" group="api">
+
+```shell-session
+$ curl \
+    --header "X-Vault-Token: $VAULT_TOKEN" \
+    --request POST \
+    $VAULT_ADDR/v1/sys/replication/performance/primary/demote
+```
+
+</Tab>
+</Tabs>
+
+Refer to [Demote performance
+primary](/vault/api-docs/system/replication/replication-performance#demote-performance-primary).
+
+### Step 2: Promote the secondary
+
+Run the following command on the performance secondary you want to promote:
+
+<Tabs>
+<Tab heading="CLI" group="cli">
+
+```shell-session
+$ vault write -force sys/replication/performance/secondary/promote
+```
+
+</Tab>
+<Tab heading="API" group="api">
+
+```shell-session
+$ curl \
+    --header "X-Vault-Token: $VAULT_TOKEN" \
+    --request POST \
+    --data '{}' \
+    $VAULT_ADDR/v1/sys/replication/performance/secondary/promote
+```
+
+</Tab>
+</Tabs>
+
+Parameters:
+
+- `primary_cluster_addr` `(string: "")`: The cluster address that the new
+  primary gives to secondaries. Set it when a load balancer fronts the cluster
+  port.
+- `force` `(bool: false)`: Promotes the cluster even if it fails safety checks.
+
+<Warning>
+
+Do not set `force` unless you accept data loss. A forced promotion skips
+safety checks, and the promoted cluster loses any data that did not replicate.
+
+</Warning>
+
+Refer to [Promote performance
+secondary](/vault/api-docs/system/replication/replication-performance#promote-performance-secondary).
+
+### Step 3: Reconnect the other clusters
+
+For data safety and security, the other clusters need new secondary activation
+tokens from the new primary. For each cluster that you want in the replication
+set, including the demoted original primary:
+
+1. On the new primary, generate a secondary activation token. Refer to [Step 2:
+   Generate a secondary activation
+   token](/vault/docs/enterprise/replication/performance/enable#step-2-generate-a-secondary-activation-token).
+
+1. On the cluster, update its primary with the token. Refer to [Update a
+   secondary's primary](#update-a-secondary-s-primary).
+
+1. Re-create the cluster's path filter on the new primary, if it had one. Refer
+   to [Change a path filter](#change-a-path-filter).
+
+### Step 4: Update clients
+
+Point clients that used the original primary at the new primary. Clients must
+authenticate again and request new leases.
+
+## Update a secondary's primary
+
+Update a performance secondary's primary to point it at a new primary, or to
+help it find the primary's active node after a leader change. The update does
+not wipe data on the secondary.
+
+Choose one of two methods. You cannot use both in one call.
+
+- **Activation token:** Pass a new secondary activation token from the primary
+  in the `token` parameter. Use this method when the secondary connects to a
+  different primary.
+- **Cluster addresses:** Pass a list of the primary's cluster addresses in the
+  `update_primary_addrs` parameter. Vault tries each address in order and uses
+  the first one that responds. Use this method when the secondary cannot find
+  the active node of its current primary. It disrupts replication less than a
+  new activation token.
+
+Run one of the following commands on the performance secondary:
+
+<Tabs>
+<Tab heading="Activation token" group="token">
+
+<Tabs>
+<Tab heading="CLI" group="cli">
+
+```shell-session
+$ vault write sys/replication/performance/secondary/update-primary \
+    token="<activation-token>"
+```
+
+</Tab>
+<Tab heading="API" group="api">
+
+```shell-session
+$ curl \
+    --header "X-Vault-Token: $VAULT_TOKEN" \
+    --request POST \
+    --data '{"token": "<activation-token>"}' \
+    $VAULT_ADDR/v1/sys/replication/performance/secondary/update-primary
+```
+
+</Tab>
+</Tabs>
+
+</Tab>
+<Tab heading="Cluster addresses" group="addresses">
+
+<Tabs>
+<Tab heading="CLI" group="cli">
+
+```shell-session
+$ vault write sys/replication/performance/secondary/update-primary \
+    update_primary_addrs="<primary-cluster-address>:8201"
+```
+
+</Tab>
+<Tab heading="API" group="api">
+
+```shell-session
+$ curl \
+    --header "X-Vault-Token: $VAULT_TOKEN" \
+    --request POST \
+    --data '{"update_primary_addrs": ["<primary-cluster-address>:8201"]}' \
+    $VAULT_ADDR/v1/sys/replication/performance/secondary/update-primary
+```
+
+</Tab>
+</Tabs>
+
+</Tab>
+</Tabs>
+
+Parameters:
+
+- `token` `(string)`: A secondary activation token from the primary. An empty
+  value keeps the cluster a secondary but clears its knowledge of any previous
+  primary, so it stops trying to reconnect.
+- `update_primary_addrs` `(array: [])`: Cluster addresses of the primary to try
+  in order.
+- `primary_api_addr` `(string)`: The primary's API address. Set it when the
+  address in the token is not reachable from the secondary.
+- `ca_file` `(string: "")` and `ca_path` `(string: "")`: The CA file or
+  directory that the secondary uses to verify the primary's API certificate when
+  it unwraps the token.
+
+When you update a secondary with a new activation token, re-create its path
+filter on the primary.
+
+After a DR failover of the performance primary, check each performance
+secondary. Refer to [Combine DR and performance
+replication](/vault/docs/enterprise/replication/disaster-recovery/failover#combine-dr-and-performance-replication).
+
+Refer to [Update performance secondary's
+primary](/vault/api-docs/system/replication/replication-performance#update-performance-secondary-s-primary).
+
+## Change a path filter
+ 
+A path filter controls which mounts and namespaces replicate to one
+performance secondary. Identify the secondary by the `secondary_id` value in its
+replication status. Run every command in this section on the primary.
+ 
+### Read the filter
+ 
+Read the filter's mode and paths:
+ 
+<Tabs>
+<Tab heading="CLI" group="cli">
+
+```shell-session
+$ vault read sys/replication/performance/primary/paths-filter/<secondary-id>
+```
+ 
+</Tab>
+<Tab heading="API" group="api">
+
+```shell-session
+$ curl \
+    --header "X-Vault-Token: $VAULT_TOKEN" \
+    $VAULT_ADDR/v1/sys/replication/performance/primary/paths-filter/<secondary-id>
+```
+ 
+</Tab>
+</Tabs>
+
+To see the namespace and mount paths that Vault filters dynamically for the
+secondary, read the [dynamically generated
+filter](/vault/api-docs/system/replication/replication-performance#read-dynamically-generated-filter-primary):
+ 
+<Tabs>
+<Tab heading="CLI" group="cli">
+
+```shell-session
+$ vault read sys/replication/performance/primary/dynamic-filter/<secondary-id>
+```
+ 
+</Tab>
+<Tab heading="API" group="api">
+
+```shell-session
+$ curl \
+    --header "X-Vault-Token: $VAULT_TOKEN" \
+    $VAULT_ADDR/v1/sys/replication/performance/primary/dynamic-filter/<secondary-id>
+```
+ 
+</Tab>
+</Tabs>
+
+### Replace the filter
+ 
+Write the filter with every path you want filtered, not only the new ones. The
+`paths` parameter is a list, so the CLI command passes the request as JSON on
+`stdin`:
+ 
+<Tabs>
+<Tab heading="CLI" group="cli">
+
+```shell-session
+$ echo -n '{"mode": "deny", "paths": ["<mount-path>", "<namespace-path>"]}' \
+    | vault write sys/replication/performance/primary/paths-filter/<secondary-id> -
+```
+
+</Tab>
+<Tab heading="API" group="api">
+
+```shell-session
+$ curl \
+    --header "X-Vault-Token: $VAULT_TOKEN" \
+    --request POST \
+    --data '{"mode": "deny", "paths": ["<mount-path>", "<namespace-path>"]}' \
+    $VAULT_ADDR/v1/sys/replication/performance/primary/paths-filter/<secondary-id>
+```
+ 
+</Tab>
+</Tabs>
+
+Parameters:
+ 
+- `mode` `(string: "allow")`: `allow` replicates only the listed paths. `deny`
+  replicates everything except the listed paths.
+- `paths` `(array: [])`: The mount and namespace paths to filter.
+
+### Remove the filter
+ 
+Delete the filter for the secondary:
+ 
+<Tabs>
+<Tab heading="CLI" group="cli">
+
+```shell-session
+$ vault delete sys/replication/performance/primary/paths-filter/<secondary-id>
+```
+ 
+</Tab>
+<Tab heading="API" group="api">
+
+```shell-session
+$ curl \
+    --header "X-Vault-Token: $VAULT_TOKEN" \
+    --request DELETE \
+    $VAULT_ADDR/v1/sys/replication/performance/primary/paths-filter/<secondary-id>
+```
+ 
+</Tab>
+</Tabs>
+
+Refer to the [paths filter
+endpoints](/vault/api-docs/system/replication/replication-performance#create-paths-filter).
+
+
+## Revoke a secondary
+
+Revoke a secondary to disconnect it from the primary immediately. The secondary
+cannot reconnect unless you give it a new activation token. Use the `id` value
+you set when you generated the secondary's activation token.
+
+Run the following command on the primary:
+
+<Tabs>
+<Tab heading="CLI" group="cli">
+
+```shell-session
+$ vault write sys/replication/performance/primary/revoke-secondary \
+    id="<secondary-id>"
+```
+
+</Tab>
+<Tab heading="API" group="api">
+
+```shell-session
+$ curl \
+    --header "X-Vault-Token: $VAULT_TOKEN" \
+    --request POST \
+    --data '{"id": "<secondary-id>"}' \
+    $VAULT_ADDR/v1/sys/replication/performance/primary/revoke-secondary
+```
+
+</Tab>
+</Tabs>
+
+To remove a cluster from performance replication entirely, disable performance
+replication on it. Refer to [Disable performance
+secondary](/vault/api-docs/system/replication/replication-performance#disable-performance-secondary).
+
+<Warning>
+
+Disabling replication changes a cluster's ID. To connect the cluster to a
+replication set again, you must wipe its storage.
+
+</Warning>
+
+Refer to [Revoke performance secondary
+token](/vault/api-docs/system/replication/replication-performance#revoke-performance-secondary-token).
+
+## Reference
+
+- [Performance replication](/vault/docs/enterprise/replication/performance)
+- [Enable performance replication](/vault/docs/enterprise/replication/performance/enable)
+- [Performance replication API](/vault/api-docs/system/replication/replication-performance)
+- [HashiCorp Validated Design: Performance replication operations](/validated-designs/vault/administration-guide/performance-replication-operations)
