@@ -85,6 +85,13 @@ The Vault Secrets Operator only processes `CertificateRequest` resources whose
 `spec.issuerRef.group` is `secrets.hashicorp.com`. It ignores requests for
 other issuers.
 
+The issuer references a `VaultAuth`, which identifies the Vault credentials and
+connection used for signing. The Kubernetes API server stores the
+`CertificateRequest` and TLS Secret in etcd; workloads can then use the Secret.
+The CSR, signed certificate, and CA chain are not secret, but the private key
+in the TLS Secret is sensitive and never passes through the Vault Secrets
+Operator or Vault.
+
 ## Issuer types
 
 The Vault Secrets Operator provides a namespaced issuer and a cluster-scoped
@@ -166,6 +173,8 @@ PKI role for each unit of trust. A shared `VaultClusterIssuer` lets every
 allowed namespace request any name permitted by its Vault PKI role;
 `allowedNamespaces` does not restrict certificate names. Only share an issuer
 and role when every allowed namespace may legitimately request the same names.
+Sharing a `VaultAuth` with other operator resources also extends its Vault
+permissions to those resources.
 
 Restrict who can create or modify `VaultIssuer` and `VaultClusterIssuer`
 resources and the `VaultAuth`, `VaultAuthGlobal`, `VaultConnection`, and CA
@@ -183,7 +192,9 @@ cert-manager requires every `CertificateRequest` to be approved before an issuer
 signs it. cert-manager's built-in approver only approves requests for external
 issuers when its service account has the `approve` verb on the issuer's signer
 resources. cert-manager does not grant this permission for the
-`secrets.hashicorp.com` API group.
+`secrets.hashicorp.com` API group. cert-manager prevents changes to a
+`CertificateRequest` specification after creation, so the approved request is
+the request that the Vault Secrets Operator signs.
 
 You can approve requests for the Vault Secrets Operator issuers in the following
 ways:
@@ -194,9 +205,9 @@ ways:
   `vaultissuers.secrets.hashicorp.com/*` and
   `vaultclusterissuers.secrets.hashicorp.com/*` signers. cert-manager then
   approves every request for these issuers, and your Kubernetes RBAC rules for
-  `Certificate` resources and your Vault PKI role constraints are the only
-  limits on what cert-manager requests. In multi-tenant clusters, leave this
-  setting disabled and use policy-based approval instead.
+  `Certificate` and `CertificateRequest` resources and your Vault PKI role
+  constraints are the remaining limits on issuance. In multi-tenant clusters,
+  leave this setting disabled and use policy-based approval instead.
 - **Policy-based approval**: Install
   [approver-policy](https://cert-manager.io/docs/policy/approval/approver-policy/)
   and grant its service account `approve` on the same signers. Use
@@ -209,6 +220,84 @@ ways:
 When an approver denies a request, the Vault Secrets Operator marks the
 `CertificateRequest` as failed with the `Denied` reason and does not contact
 Vault.
+
+## Security considerations
+
+The ability to obtain a certificate for a trusted name or workload identity is
+a security-sensitive permission. Consider the following threats and controls
+when you configure the cert-manager issuer. For general operator risks, refer
+to the
+[Vault Secrets Operator threat model](https://github.com/hashicorp/vault-secrets-operator/blob/main/docs/threat-model/README.md).
+This guidance covers cert-manager's interaction with the operator, not the
+security of cert-manager itself.
+
+### Vault connection and trust anchors
+
+An attacker who can impersonate Vault or modify traffic between Vault and the
+operator can substitute a certificate and CA chain. cert-manager may place the
+returned CA in the Secret's `ca.crt`, where a workload could use it as a trust
+anchor.
+
+Use TLS and verify the Vault server's certificate. Do not set `skipTLSVerify`
+on the `VaultConnection`. For a private CA, configure `caCertSecretRef` and,
+when needed, `tlsServerName`. Distribute workload trust anchors independently,
+for example with [trust-manager](https://cert-manager.io/docs/trust/trust-manager/),
+instead of trusting the `ca.crt` in each issued Secret.
+
+### Signing permissions and shared issuers
+
+An overly permissive PKI role can allow an approved requester to obtain
+certificates for names or URI identities belonging to another tenant, even
+when the `VaultAuth` namespace access is correctly scoped. The operator does not
+restrict names based on the requesting namespace.
+
+Configure each PKI role for its unit of trust, including `allowed_domains`,
+`allowed_uri_sans`, `allow_ip_sans`, `enforce_hostnames`, and `max_ttl` as
+appropriate. Grant its dedicated Vault policy access only to the required PKI
+signing paths and `read` on `sys/license/status`. Set the issuer's `issuerRef`
+to a Vault PKI issuer ID so that a change to the mount's default issuer does
+not change the signing CA. Refer to the
+[PKI API](/vault/api-docs/secret/pki) and
+[PKI considerations](/vault/docs/secrets/pki/considerations).
+
+Vault logs requests under the issuer's Vault identity, which can be shared by
+multiple namespaces. Enable Kubernetes and Vault audit logging and correlate
+Vault audit entries with the requester recorded on the `CertificateRequest`.
+
+### Kubernetes access and private keys
+
+A requester with `CertificateRequest` create access can submit a CSR for a
+private key they already hold; they do not need access to a Kubernetes Secret.
+A requester with `Certificate` create access can cause cert-manager to store a
+private key in a Secret they can access directly or indirectly, for example by
+creating a Pod that mounts it. Restrict create access to these resources and
+grant `CertificateRequest` create access only to cert-manager and identities
+that need to submit their own CSRs.
+
+Encrypt etcd at rest using a key management service (KMS) provider and restrict
+direct access to the database. Encryption at rest does not replace Kubernetes
+RBAC: authorized API clients can still read Secrets. Limit both direct Secret
+access and indirect access through Pods or `pods/exec`.
+
+### Operator and issuer resource access
+
+A compromised operator service account can update `CertificateRequest` status
+across namespaces and could write forged certificates without calling Vault.
+Run the operator in its own namespace, limit access to its Pods and service
+account tokens, and monitor Kubernetes and Vault audit logs.
+
+An attacker who can change a `VaultClusterIssuer`'s `VaultAuth`,
+`VaultAuthGlobal`, `VaultConnection`, or CA certificate Secret can redirect or
+disrupt issuance for all namespaces using it. A malicious server can return a
+certificate and CA of its choosing; the Vault Enterprise license check does not
+authenticate the server. Keep shared issuer dependencies in the operator
+namespace, restrict write access to cluster administrators, and audit changes.
+
+Issuer resources expose Vault namespaces, PKI mounts, roles, and issuer
+identifiers, and issuer metrics include PKI mount and role labels. Restrict
+read access to these resources and `get` access to `/metrics`. A cluster-wide
+binding that grants read access to `VaultClusterIssuer` resources exposes every
+cluster issuer, not only those used by one namespace.
 
 ## Certificate parameters
 
