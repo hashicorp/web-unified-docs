@@ -1,4 +1,4 @@
-# Tech writer processes
+# Web Unified Docs content-related processes
 
 > [!NOTE]
 > Click the GitHub UI's **Outline** button, which is next to the **Edit this file** button,
@@ -10,19 +10,24 @@
   - [Code](https://github.com/hashicorp/web-unified-docs/blob/main/.github/workflows/label-content-prs.yml) by Sarah Chavis  
   - Automatic labeling when PR created  
 - Issue form and labeler  
-  - [Code](https://github.com/hashicorp/web-unified-docs/blob/main/.github/workflows/label-issues.yml) by Aimee Ukasick. Lengthly explanation in the [merged PR description](https://github.com/hashicorp/web-unified-docs/pull/1028). 
+  - [Code](https://github.com/hashicorp/web-unified-docs/blob/main/.github/workflows/label-issues.yml) by Aimee Ukasick. Lengthly explanation in the [merged PR description](https://github.com/hashicorp/web-unified-docs/pull/1028).
 - Create release PR  
   - [Code](https://github.com/hashicorp/web-unified-docs/blob/main/.github/workflows/create-release-pr.yml) by Sarah Chavis  
   - From Sarah: The action creates a PR to merge the release branch into main, but having a robot create the PR means you can (hopefully) create and approve the publication PR on your own the same way we used to approve backports in the product repos. It's a strictly manual workflow, so you need to open it on the actions page to run it.
 - Preview to GA toggle (folder rename) action by Sarah Chavis
   - [Code](https://github.com/hashicorp/web-unified-docs/actions/workflows/create-ga-pr.yml)
-- Sync GA to RC branch script by Sarah Chavis
-  - [Script folder](https://github.com/hashicorp/web-unified-docs/tree/main/scripts/sync-ga-to-rc)
-  - Lengthly explanation in the folder README
+- Forward port workflow
+  - [Workflow file](https://github.com/hashicorp/web-unified-docs/blob/main/.github/workflows/forward-port-pr.yml)
+  - Replaces the old Sync GA to RC branch script. When a merged PR carries a
+    `forward-port:<slug>` label, the workflow automatically opens a PR that
+    copies the changed files from the source version folder into a target
+    version folder, such as an upcoming RC or beta release folder. You can also
+    manually trigger the forward port workflow from the GitHub Actions UI.
+  - Full setup and usage instructions are in the [forward-port-README](https://github.com/hashicorp/web-unified-docs/blob/main/scripts/forward-port/forward-port-README.md)
 - Broken link monitoring system  
   - [BROKEN_LINK_MONITORING.md](./BROKEN_LINK_MONITORING.md)  
 - How to use redirects  
-  - [redirects.md](./redirects.md)  
+  - [redirects.md](./content-guide/redirects.md)  
 - PR templates  
   - Jonathan Frappier created the PR template links.  
   - You may create product-based PR templates. Refer to the [PULL_REQUEST_TEMPLATE folder](https://github.com/hashicorp/web-unified-docs/tree/main/.github/PULL_REQUEST_TEMPLATE) for examples.
@@ -33,9 +38,9 @@
 - Each documentation project has its own directory.  
   - For products other than HCP, published versions are in directories, not
     branches. Published version folder name has a specific format.  
-    - GA: `<version>`  such as v1.10.x, v1.11.x, v2.0.x  
-    - beta: `<version>` (beta) such as v2.0.x (beta)  
-    - RC: `<version>` (RC) such as v2.0.x (RC)  
+    - GA: `<version>`  such as v1.10.x, v1.11.x, v2.1.x  
+    - beta: `<version>` (beta) such as v2.1.x (beta)  
+    - RC: `<version>` (RC) such as v2.1.x (RC)  
   - Folders that do not have the specific name format are not published, such as Vault’s global/partials folder.  
   - If we no longer want to publish an older version but keep the content in the repo, we change the folder name to something that does not fit the published version naming convention, such as `v1.0.x-archive`.  
 - Branch naming conventions  
@@ -48,22 +53,38 @@
     - Vault creates minor release branches by YYYYMM. For example: `vault/202509`  
     - Nomad creates minor release branches using the release number. For example: `nomad/1.11.1`  
 
-## Tech writer workflows
+## Workflows
 
-These are generic workflows for major and minor releases. 
+These are generic workflows for major and minor releases.
 
 ### Upcoming major release
 
 1. Major release branch and release folder. As close in time to when the content will be created:  
    - Create the upcoming major release branch. Use the
      `<product_name>/<release_number_exact>` naming convention. For example,
-     `nomad/2.0.0`.
-   - Immediately after you create the upcoming release branch, create a release folder in that branch. Use the `<release_number>.x (beta)` convention. For example, if your upcoming release is 2.0.0:  
-     - branch name: `nomad/2.0.0`  
-     - folder name: `v2.0.x (beta)` → your team may use (RC) instead of (beta).  UDR will publish this as a new version after you merge your release branch to main.  
-2. Recurring tasks  
-   - Merge main into the release branch at least weekly. Sarah created a script for this. Make sure branch permissions are such that TW can merge from main without a PR.  
-   - Manually compare current release folder with upcoming release folder and copy new current release content to upcoming release folder so you do not lose current release content updates that were made after you created the release branch (remember that the upcoming release folder does not exist in `main`).  
+     `nomad/2.1.0`.
+   - Immediately after you create the upcoming release branch, create a release
+     folder in that branch. Use the `<release_number>.x (beta)` convention if
+     you plan to publish beta docs. For
+     example, if your upcoming release is 2.1.0:  
+     - branch name: `nomad/2.1.0`  
+     - folder name: `v2.1.x (beta)` → your team may use (RC) instead of (beta).
+       Web unified docs will publish this as a new version after you merge your release
+       branch to main.  If you do not plan to publish beta or RC docs, use a
+       folder name that reflects the upcoming release. For example, `v2.1.x`.
+2. Forward port PRs from current main to the upcoming release branch.
+   - Follow the forward port process when open, current version PRs meet the following
+     conditions:
+
+     1. The PR will merge to `main`.
+     2. The PR content should be copied from the current version folder to the
+        upcoming major release branch's next version folder. For example, from
+        `main` branch `nomad/v2.0.x` folder to `nomad/2.1.0` branch
+        `nomad/v2.1.x` folder.
+
+     Refer to the
+     [forward-port-README](../scripts/forward-port/forward-port-README.md) for setup and usage.  
+
 3. Release process  
    - A day before or the same day that Eng cuts the beta  
      - Merge from `main` to ensure the release branch is current.  
@@ -81,8 +102,8 @@ These are generic workflows for major and minor releases.
 1. Create minor release branch as close in time to when the content will be created.  
    1. Nomad example: `nomad/1.11.1`  
    2. Vault example: `vault/202512`  
-2. Recurring tasks  
-   1. Merge main into the release branch at least weekly. Sarah created a script for this. Make sure branch permissions are such that TW can merge from `main` without a PR.  
+2. Forward port: If there is an active upcoming major release branch, be sure to follow the
+   forward port PRs process in the [Upcoming major release section](#upcoming-major-release).
 3. Release process  
    1. A day before or the same day that Eng cuts the minor release  
       - Merge from `main` to ensure the release branch is current.  
