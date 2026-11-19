@@ -88,7 +88,7 @@ Each `.mdx` file passes through a chain of remark plugins in [`scripts/prebuild/
 | Plugin | Effect |
 |---|---|
 | `remarkIncludePartialsPlugin` | Inlines `@include 'path/to/partial.mdx'` statements. Supports `@global` alias pointing to `content/global/partials/`. |
-| `transformExcludeContent` | Strips blocks tagged with `<!-- BEGIN_TFC_ONLY -->` / `<!-- END_TFC_ONLY -->` based on the product's `supportsExclusionDirectives` flag. |
+| `transformExcludeContent` | For products with the `supportsExclusionDirectives` flag, strips or keeps blocks wrapped in exclusion directives such as `<!-- BEGIN: TFC:only -->` and `<!-- END: TFC:only -->`, `TFEnterprise:only`, and version directives such as `TFEnterprise:>=v2.2.x`. |
 | `paragraphCustomAlertsPlugin` | Converts `> [!NOTE]` / `> [!WARNING]` paragraph syntax into custom alert MDX components. |
 | `rewriteInternalRedirectsPlugin` | Rewrites internal links that have been redirected (according to the product's `redirects.jsonc`) so old URLs aren't dead in rendered content. |
 | `rewriteInternalLinksPlugin` | Prepends version prefix to intra-product links so versioned pages link to the correct version. |
@@ -145,7 +145,7 @@ public/content/terraform/v1.14.x/docs/language/index.mdx   ← named file
 public/content/terraform/v1.14.x/docs/language/index/index.mdx  ← directory index
 ```
 
-The `contentDir` value from `productConfig.mjs` (`docs` for `terraform`) provides the middle path segment. For `terraform-enterprise`, `contentDir` is also `docs` but the version segment looks like `v202507-1`.
+The `contentDir` value from `productConfig.mjs` (`docs` for `terraform`) provides the middle path segment. For `terraform-enterprise`, `contentDir` is also `docs`, but the version segment has no `v` prefix, for example `2.1.x`. Releases before 1.0.0 use date strings such as `v202507-1`.
 
 ---
 
@@ -263,7 +263,7 @@ sequenceDiagram
     { "version": "v1.13.x", "releaseStage": "stable", "isLatest": false }
   ],
   "terraform-enterprise": [
-    { "version": "v202507-1", "releaseStage": "stable", "isLatest": true }
+    { "version": "2.1.x", "releaseStage": "stable", "isLatest": true }
   ],
   "terraform-docs-common": [
     { "version": "v0.0.x", "releaseStage": "stable", "isLatest": true }
@@ -379,7 +379,7 @@ the page exists.
 
 ### Terraform Enterprise: special versioning
 
-As of the 1.0.0 release in 2025, `terraform-enterprise` uses semantic version strings (`v1.2.x`, `v2.0.x`, and so on). Refer to [The complete guide to publishing TFE docs](./publish-tfe-docs.md#release-versioning) for the current `MILESTONE.MAJOR.PATCH` scheme and the release process.
+As of the 1.0.0 release in 2025, `terraform-enterprise` uses semantic version strings with no `v` prefix, such as `1.2.x` and `2.0.x`. Refer to [The complete guide to publishing TFE docs](./publish-tfe-docs.md#release-versioning) for the current `VERSION.RELEASE.FIXES` scheme and the release process.
 
 Before that switch, `terraform-enterprise` used calendar-date version strings (`v202507-1`, `v202504-2`, and so on). `productConfig.mjs` still carries a custom `semverCoerce` function that converts those legacy date-based versions to sortable semver, purely so older versions continue to sort correctly alongside current semver versions:
 
@@ -394,7 +394,7 @@ semverCoerce: (versionString) => {
 This function only matters for content published under the old naming scheme.
 Most people working with current Terraform Enterprise docs won't encounter it.
 
-`terraform-enterprise` also has `supportsExclusionDirectives: true`, enabling `<!-- BEGIN_TFC_ONLY -->` / `<!-- END_TFC_ONLY -->` content exclusion markers in MDX.
+`terraform-enterprise` also has `supportsExclusionDirectives: true`, enabling exclusion directives such as `<!-- BEGIN: TFC:only -->` and `<!-- END: TFC:only -->` in MDX. Refer to [Exclusion tags](./contribute-terraform-docs.md#appendix-use-exclusion-tags) for the syntax.
 
 #### Shared content with HCP Terraform
 

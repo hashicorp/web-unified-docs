@@ -19,7 +19,7 @@ The `content/` directory in `web-unified-docs` contains 13 subdirectories whose 
 | `content/terraform/` | `terraform` | `cli`, `internals`, `intro`, `language` | ✅ |
 | `content/terraform-docs-common/` | `terraform-docs-common` | `cloud-docs`, `docs`, `plugin`, `registry` | ❌ (always `v0.0.x`) |
 | `content/terraform-docs-agents/` | `terraform-docs-agents` | `cloud-docs/agents` | ✅ |
-| `content/terraform-enterprise/` | `terraform-enterprise` | `enterprise` | ✅ (date-versioned, for example `v202507-1`) |
+| `content/terraform-enterprise/` | `terraform-enterprise` | `enterprise` | ✅ semver, for example `2.1.x`. Releases before 1.0.0 use dates, for example `v202507-1`. |
 | `content/terraform-cdk/` | `terraform-cdk` | `cdktf` | ✅ |
 | `content/terraform-plugin-framework/` | `terraform-plugin-framework` | `plugin/framework` | ✅ |
 | `content/terraform-plugin-sdk/` | `terraform-plugin-sdk` | `plugin/sdkv2` | ✅ |
@@ -184,22 +184,22 @@ API slug: `terraform-docs-agents` · Versioned: yes (semver, for example `v1.25.
 
 ### `content/terraform-enterprise/`: Terraform Enterprise
 
-API slug: `terraform-enterprise` · Versioned: yes (semver, for example `v2.0.x`)
+API slug: `terraform-enterprise` · Versioned: yes, semver with no `v` prefix, for example `2.1.x`
 
 | URL path | Source file | Nav-data file |
 |---|---|---|
 | `/terraform/enterprise[/<v>]/...` | `content/terraform-enterprise/<v>/docs/enterprise/...mdx` | `content/terraform-enterprise/<v>/data/enterprise-nav-data.json` |
 
 **Example:** `https://developer.hashicorp.com/terraform/enterprise`
-→ `content/terraform-enterprise/v202507-1/docs/enterprise/index.mdx`
+→ `content/terraform-enterprise/2.1.x/docs/enterprise/index.mdx`
 
 **Example (versioned):** `https://developer.hashicorp.com/terraform/enterprise/v202504-1/deploy`
 → `content/terraform-enterprise/v202504-1/docs/enterprise/deploy/index.mdx`
 
 > Before August 11, 2025, Terraform Enterprise used calendar-date versions (`v202507-1`) rather than
 > semver. Refer to [Terraform Enterprise: Special
-> Versioning](#terraform-enterprise-special-versioning) for the custom sort
-> logic.
+> Versioning](terraform-docs-rendering-architecture.md#terraform-enterprise-special-versioning)
+> for the custom sort logic.
 
 ---
 
