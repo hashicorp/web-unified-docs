@@ -135,9 +135,10 @@ manager.
 Because most HCP Terraform content flows into TFE, verify
 whether your change also applies to the next Enterprise release and whether the
 **app deadline** milestone has already passed. App deadline is when the
-release engineer runs the job that generates documentation artifacts for the
-upcoming Enterprise release. Refer to [The Terraform Enterprise release
-cycle](#the-terraform-enterprise-release-cycle) for more detail.
+release engineer runs the final sync of HCP Terraform content for the
+upcoming Enterprise release and generates its release notes. Refer to [The
+Terraform Enterprise release cycle](#the-terraform-enterprise-release-cycle)
+for more detail.
 
 ```mermaid
 flowchart TD
@@ -206,15 +207,17 @@ full release process, including exact branch and PR names.
 
 ### App deadline and content drift
 
-App deadline is the point in the cycle when the release engineer's job copies a
-snapshot of `terraform-docs-common` into the new Enterprise version folder.
-Merging your HCP Terraform changes before app deadline ensures they land in the
-new TFE version folder automatically.
+At the start of each release cycle, the release engineer copies a snapshot of
+`terraform-docs-common` into the new Enterprise version folder. Later syncs
+refresh that snapshot until app deadline, when the final sync runs. Merge your
+HCP Terraform changes before app deadline so automation carries them into the
+new TFE version folder.
 
 The copied content is a snapshot, not a live link. **If you update a page in the
 new TFE version folder after app deadline and its frontmatter
 shows `source: terraform-docs-common`, you must also update the file in
-`terraform-docs-common`. Otherwise, the next sync overwrites your change.**
+`terraform-docs-common`. Otherwise, the next sync or the next release's copy
+overwrites your change.**
 
 Check the `#proj-tfe-releases` channel for the TFE upcoming
 release app deadline.
