@@ -1,0 +1,180 @@
+---
+page_title: Blue-Green Upgrades
+description: Learn how to perform blue-green upgrades of Terraform Enterprise.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-05-08T14:11:48-04:00
+last_modified: 2026-05-08T15:04:05-04:00
+# END AUTO GENERATED METADATA
+---
+
+# Blue-Green Upgrades
+
+<Note>
+
+Blue-green upgrades are in beta. During the beta, run them only in pre-production environments.
+
+</Note>
+
+A release series is certified as blue-green compatible when the Terraform Enterprise team has tested that both versions can run interoperably during the upgrade process and that deployments can be rolled back without major issues.
+
+## Prerequisites
+
+Before you plan a blue-green upgrade, ensure you meet all prerequisites:
+
+1. Terraform Enterprise is running in an active-active configuration with at least two instances.
+1. Terraform Enterprise is not running on Nomad.
+1. You are an advanced Terraform Enterprise operator who is confident with the primitives of your autoscaling group, load balancer, and deployment runtime.
+1. (Kubernetes/OpenShift) Graceful draining is enabled as a pre-stop lifecycle method. Enabling it requires one-time downtime for a Terraform Enterprise deployment.
+
+## (Kubernetes/OpenShift) Enable graceful draining as a pre-stop lifecycle method
+
+This requires version 2.2.1 or later of the Helm chart.
+
+Update your `values.yaml` file with settings to enable graceful draining:
+```yaml
+waitForDrain:
+  enabled: true
+```
+After you set this, you must conduct a Helm upgrade because changes to lifecycle hooks do not apply to existing pods. Existing pods will not wait gracefully for draining, so this requires taking the full cluster offline first. You do not need to conduct the upgrade at the same time as this. So long as this remains in your `values.yaml` file, this should be a one-time instance of downtime.
+
+Whenever a pod stops, it will automatically trigger a node drain and then wait until tasks are finished. This can take up to 24 hours, but is often faster, especially if stuck tasks are investigated.
+
+Skipping this step will mean that following the steps below with the Helm chart will ungracefully terminate pods, which can lead to unexpected errors.
+
+You can confirm that pre-stop is enabled on a Kubernetes pod:
+
+```shell-session
+$ kubectl get pod <POD_NAME> -n <NAMESPACE> -o yaml
+```
+
+Under `spec.containers`, find the Terraform Enterprise container and confirm that its `lifecycle.preStop` hook contains the configured pre-stop command. Also confirm that `spec.terminationGracePeriodSeconds` is set to `86400`, which is 24 hours.
+
+
+## Blue-green planning checklist
+
+To conduct a rolling, blue-green, zero-downtime upgrade, follow this checklist and the steps in the following sections.
+
+<Note>
+
+Blue-green upgrades are supported only on select incremental patch releases. Terraform Enterprise deployed on Nomad does not support blue-green upgrades.
+
+</Note>
+
+- [ ] Select a target version and confirm its compatibility with your environments and with blue-green upgrades.
+- [ ] Take a live backup of PostgreSQL and Redis (blob storage is not required)
+- [ ] Download the container images for the target release
+- [ ] Run the [pre-upgrade checks](/terraform/enterprise/deploy/manage/upgrade/pre-checks) for your runtime and resolve any failures or warnings
+- [ ] Define rollback criteria and rehearse the rollback procedure
+- [ ] Upgrade Terraform Enterprise
+
+## Select a target version
+
+Complete the following tasks before you begin your upgrade:
+
+1. **Confirm compatibility**: Identify the Terraform Enterprise version you plan to install. Check the release notes for the target version to confirm that it supports a blue-green upgrade from your current version. Compare the supported platforms and dependency versions in the [release tables](/terraform/enterprise/releases) with your current infrastructure. Review the release notes for the target version and every intermediate version for breaking changes, deprecations, and new requirements.
+
+1. **Stage release artifacts**: Download the Terraform Enterprise container images for every release in your upgrade path. Import the images into internal registries or hosts that cannot reach the public registry so you can update configuration files without extending downtime. Prune unused local images or volumes to free capacity where needed.
+
+@include 'software-compatibility-report.mdx'
+
+## Take a live backup of PostgreSQL and Redis
+
+Blue-green compatible releases have been tested to not mutate the state of Redis or the database. In the event of unexpected issues, take a live backup of your PostgreSQL database and Redis cache. A live backup is a backup of a datastore taken while the application is still running. The blob store is skipped because data stored in it is immutable. Use native primitives, such as `pg_dump` or the AWS Backup tool, to conduct these backups.
+
+## Conduct the blue-green upgrade
+
+After you capture backups, apply the target release. Use the artifacts you staged during planning so you can complete these steps within the maintenance window.
+
+1. Update your configuration to reference the staged Terraform Enterprise image for the target [release](/terraform/enterprise/releases): `images.releases.hashicorp.com/hashicorp/terraform-enterprise:x.y.z`.
+
+<Tabs>
+<Tab heading="Docker & Podman" group="first">
+
+Podman Kube and Docker Compose do not explicitly support zero-downtime upgrades. However, if you used a HashiCorp Validated Design to deploy Terraform Enterprise on virtual machines in AWS, GCP, or Azure, you can perform a zero-downtime upgrade with the following steps.
+
+First, update the deployment configuration to use the target image tag without starting an automatic rollout:
+
+- **AWS Auto Scaling group (ASG)**: Update the launch template version used by the group. Do not start an instance refresh before draining the instances.
+- **GCP Managed Instance Group (MIG)**: Update the instance template used by the group and select an opportunistic update policy. See Google's docs about [opportunistic updates](https://docs.cloud.google.com/compute/docs/instance-groups/updating-migs#set_up_a_proactive_or_an_opportunistic_update).
+- **Azure Virtual Machine Scale Set (VMSS)**: Set the upgrade policy to manual before updating the scale set model. See Azure's docs about [manual upgrade policy mode](https://learn.microsoft.com/en-us/azure/virtual-machine-scale-sets/virtual-machine-scale-sets-upgrade-policy#manual-upgrade-policy-mode).
+
+Then follow these steps for one instance at a time. Keep the other instances running and confirm they have enough capacity to handle the workload:
+
+1. Connect to the Terraform Enterprise container on the instance you plan to replace and drain that node:
+
+    ```shell-session
+    $ tfectl node drain
+    ```
+
+    Wait for the node to be ready to be terminated (status can be checked with the `tfectl node tasks` command on the instance).  Do not use `--all`, which drains every node, which could cause downtime. Refer to [Gracefully stop work on a node](/terraform/enterprise/deploy/reference/cli#gracefully-stop-work-on-a-node) for more information.
+
+1. Remove the drained instance from the load balancer and wait for any in-flight requests to finish.
+
+1. Replace or update only the drained instance using the target configuration:
+   - **AWS**: Terminate the instance without decreasing the group's desired capacity so the ASG creates a replacement.
+   - **GCP**: Use the MIG's recreate operation for the instance rather than deleting it from the group.
+   - **Azure**: Manually apply the updated scale set model to the selected instance. Reimage it if the configuration change requires it. Do not assume deleting an instance automatically creates a replacement.
+
+1. Confirm that the updated or replacement instance runs the target Terraform Enterprise version and passes the startup and readiness checks in [Validate the blue-green upgrade](#validate-the-blue-green-upgrade).
+
+1. Return the healthy instance to the load balancer. If registration is automatic, ensure the load balancer sends traffic only after the instance passes its health checks.
+
+1. Confirm that the instance serves traffic successfully before moving to the next one. If validation fails, stop the rollout and follow your rollback criteria.
+
+If you are not running Terraform Enterprise behind an autoscaling group, follow the same drain, remove, replace, and validate sequence, but create the replacement instance manually. The specifics vary based on your deployment configuration.
+
+</Tab>
+<Tab heading="Helm Chart" group="second">
+
+Update your existing `values.yaml` file with the new image tag and rollout strategy. Keep the top-level `replicaCount` at your current value of at least two, and keep `waitForDrain.enabled` set to `true`:
+
+```yaml
+image:
+  repository: images.releases.hashicorp.com
+  name: hashicorp/terraform-enterprise
+  tag: <TARGET_VERSION>
+```
+
+Then conduct a Helm rolling upgrade. Replace `<HELM_CHART_VERSION>` with the same chart version you configured for graceful draining:
+
+```shell-session
+$ helm -n <TFE_NAMESPACE> upgrade --version=<HELM_CHART_VERSION> --values=<OVERRIDES_FILE> terraform-enterprise hashicorp/terraform-enterprise --wait --timeout Xh
+```
+Optionally, set `maxSurge` and `maxUnavailable` under `strategy.rollingUpdate` in your values file, or as Helm command-line flags. This will control the rollout behavior. The default field for strategy.type is 'RollingUpdate', do not change this.
+
+Depending on the size of your cluster and how long tasks take to finish on drained pods, this can take a maximum of 24 hours multiplied by the number of pods. Monitor tasks running on a given pod using the `tfectl node tasks` command, and manually terminate tasks that are hung to speed up the process, set a timeout here with that in mind.  Depending on your `maxSurge` and `maxUnavailable` this can take a maximum of 24 hours * the number of TFE instances (1 day for 1 instance, 2 days for 2 instances, etc).  These are worst case scenario, and monitoring tasks on upgrading nodes for stuck runs can avoid lengthy delays in upgrades.
+
+</Tab>
+<Tab heading="Nomad" group="fourth">
+
+Terraform Enterprise running on Nomad does not support blue-green upgrades with a graceful shutdown currently.
+
+</Tab>
+</Tabs>
+
+## Validate the blue-green upgrade
+
+Perform these checks during the upgrade, after it, or both.
+
+1. **Verify startup checks passed**. Use the Terraform Enterprise CLI to trigger and review startup checks. Refer to [Trigger startup checks](/terraform/enterprise/deploy/reference/cli#trigger-startup-checks) for instructions on running the checks and [Startup checks reference](/terraform/enterprise/deploy/reference/startup-checks) for details about each check and common failure scenarios.
+
+1. **Check application health**. Query the [readiness endpoint](/terraform/enterprise/api-docs/readiness) to verify the application responds correctly. The endpoint returns `200 OK` when the node is ready to accept requests. The readiness endpoint reports the status of a single node, so in multi-node deployments query each node directly rather than through a load balancer, which may route the request to any node. Refer to [Perform diagnostics](/terraform/enterprise/deploy/troubleshoot/perform-diagnostics#check-node-readiness) for additional information about checking node readiness.
+
+   ```shell-session
+   $ curl https://<TFE_HOSTNAME>/api/v1/health/readiness
+   ```
+
+1. **Perform a test run**. Execute a test Terraform plan and apply in a non-production workspace to confirm core functionality.
+
+1. **Verify release-specific features**. Confirm that features or fixes from the target release appear as expected. Consult the release notes for validation steps.
+
+1. **Document the upgrade**. Record the upgrade path, any issues encountered, and resolution steps for future reference.
+
+## Troubleshoot blue-green upgrades
+
+If a validation step fails or the application does not stabilize:
+
+1. Pause the rollout so no additional instances or pods are replaced.
+1. Review application logs for migration errors or dependency mismatches. Refer to [Access the Terraform Enterprise CLI](/terraform/enterprise/deploy/manage/access-cli) for instructions on accessing logs in your environment. You can also download logs through the [Admin Console](/terraform/enterprise/deploy/manage/access-admin-console) or the [System API](/terraform/enterprise/api-docs/support-bundle).
+1. Roll back with zero downtime by repeating the upgrade steps one instance or pod at a time with the previous image tag.
+1. Contact [HashiCorp Support](https://www.ibm.com/mysupport) with collected logs, the upgrade path attempted, and error messages for assistance.
