@@ -1,0 +1,165 @@
+---
+layout: docs
+page_title: DR operation tokens
+description: >-
+  A Vault Enterprise DR operation token authorizes promote and other operations
+  on a DR secondary. Learn which tokens a DR secondary accepts and how to
+  generate and delete one.
+---
+
+# DR operation tokens
+
+@include 'alerts/enterprise-and-hcp.mdx'
+
+A DR operation token authorizes disaster recovery (DR) operations on a DR
+secondary cluster, such as promoting the cluster or changing its primary. You
+generate it on the DR secondary from a quorum of unseal or recovery keys, the
+same way you generate a root token. Treat it like a root token: generate it when
+you need it, and delete it soon after.
+
+For a hands-on walkthrough, complete the [Prepare for DR
+failover](/vault/tutorials/disaster-recovery/prepare-dr-failover) tutorial.
+
+## Key holders
+
+The key shares come from the primary cluster. When you enable replication,
+Vault replaces the secondary's seal or recovery configuration and keys with the
+primary's. Clusters that use auto-unseal have recovery keys instead of unseal
+keys. Refer to [Seals and key
+holders](/vault/docs/enterprise/replication#seals-and-key-holders).
+
+## Operations that need a DR operation token
+
+The following DR secondary endpoints take a `dr_operation_token` parameter:
+
+| Endpoint | API reference |
+| --- | --- |
+| `/sys/replication/dr/secondary/promote` | [Promote DR secondary](/vault/api-docs/system/replication/replication-dr#promote-dr-secondary) |
+| `/sys/replication/dr/secondary/update-primary` | [Update DR secondary's primary](/vault/api-docs/system/replication/replication-dr#update-dr-secondary-s-primary) |
+| `/sys/replication/dr/secondary/disable` | [Disable DR secondary](/vault/api-docs/system/replication/replication-dr#disable-dr-secondary) |
+| `/sys/replication/dr/secondary/reindex` | [Reindex replication](/vault/api-docs/system/replication/replication-dr#reindex-replication) |
+| `/sys/replication/dr/secondary/merkle-check` | [Merkle check](/vault/api-docs/system/replication/replication-dr#sys-replication-dr-secondary-merkle-check) |
+| `/sys/replication/dr/secondary/operation-token/delete` | [Delete DR operation token](/vault/api-docs/system/replication/replication-dr#delete-dr-operation-token) |
+
+## Tokens for DR operation token generation
+
+You generate a DR operation token with the `generate-operation-token`
+endpoints. Generation requires two credentials:
+
+- **Key shares** from the primary's unseal or recovery key holders, up to the
+  threshold. The key shares let you generate the DR operation token.
+- **A valid Vault token**, on Vault 2.0.0 and later. Vault authenticates each
+  request to the endpoints with this token. The token does not let you generate
+  a DR operation token without the key shares.
+
+On Vault 2.0.0 and later, every call must include the Vault token: starting an
+attempt, reading progress, canceling, and submitting each key share. Each key
+holder who submits a share must provide one. Refer to
+[Previously unauthenticated endpoints require
+authentication notice](/vault/docs/updates/important-changes#sys-endpoint-auth).
+
+A DR secondary accepts only the following tokens on these endpoints:
+
+| Token | Where you create it |
+| --- | --- |
+| Batch token | On the primary cluster. |
+| DR operation token | On the DR secondary, with the `generate-operation-token` endpoints. |
+| Root token | On the primary cluster. Vault 2.0.0 and later accept it on a DR secondary. Refer to [DR secondaries now accept root tokens from the primary notice](/vault/docs/updates/important-changes#root-token-secondary). |
+
+## Prepare before a failover
+
+Each request to generate a DR operation token must include a Vault token that
+the DR secondary accepts. You usually fail over when the primary is down, so
+create that Vault token on the primary ahead of time:
+
+- **Policy:** Write a policy on the primary that grants the
+  `generate-operation-token` endpoints that the token holders need to call.
+- **Batch token:** Create a [batch token](/vault/docs/concepts/tokens#batch-tokens)
+  with that policy on the primary. The DR secondary accepts it, including when
+  the primary is down.
+- **TTL:** Set a TTL long enough to last until you replace the token, and
+  replace it before it expires. You cannot renew a batch token.
+- **Exposure:** You also cannot revoke a batch token. If it leaks, it stays
+  valid until its TTL ends. Balance a long TTL against that exposure, and
+  restrict the policy to the generation endpoints.
+- **Storage:** Store the token where the people who run a failover can reach it
+  during an outage.
+
+If no valid Vault token is available during an outage, refer to [Generate a
+token without authentication](#generate-a-token-without-authentication).
+
+## Generate a DR operation token
+
+Call the endpoints from the root namespace.
+
+| Action | API |
+| --- | --- |
+| Start an attempt | [`POST /sys/replication/dr/secondary/generate-operation-token/attempt`](/vault/api-docs/system/replication/replication-dr#start-token-generation) |
+| Read progress | [`GET /sys/replication/dr/secondary/generate-operation-token/attempt`](/vault/api-docs/system/replication/replication-dr#read-generation-progress) |
+| Cancel the attempt | [`DELETE /sys/replication/dr/secondary/generate-operation-token/attempt`](/vault/api-docs/system/replication/replication-dr#cancel-generation) |
+| Submit a key share | [`POST /sys/replication/dr/secondary/generate-operation-token/update`](/vault/api-docs/system/replication/replication-dr#provide-key-share-to-generate-token) |
+
+The [`vault operator generate-root`](/vault/docs/commands/operator/generate-root)
+command with the `-dr-token` flag runs the same process. Use `-init` to start,
+`-nonce` to submit a share, and `-decode` with `-otp` to decode the final token.
+
+Each attempt has a nonce and a one-time password (OTP):
+
+- **Nonce:** Share the nonce with every key holder. Each holder submits a key
+  share with it.
+- **OTP:** Keep the OTP with the person who started the attempt. Vault returns
+  the final token encoded with the OTP, and only the OTP decodes it. If you
+  provide a PGP key instead, Vault encrypts the token with it.
+
+Only one attempt can run at a time. Cancel the current attempt before you start
+another with a different OTP or PGP key.
+
+For step-by-step instructions, refer to [Regenerate a Vault root
+token](/vault/docs/troubleshoot/generate-root-token), which uses the same
+process for root tokens.
+
+## Delete a DR operation token
+
+A DR operation token has no TTL and stays valid until you delete it. Delete it
+as soon as you finish the operation, with the [delete DR operation
+token](/vault/api-docs/system/replication/replication-dr#delete-dr-operation-token)
+endpoint. Pass the token to delete in the `dr_operation_token` parameter. On
+Vault 2.0.0 and later, the request must also include a Vault token that the DR
+secondary accepts. Refer to [Tokens for DR operation token
+generation](#tokens-for-dr-operation-token-generation).
+
+## Generate a token without authentication
+
+If no valid token is available, you can allow unauthenticated access to the
+`generate-operation-token` endpoints. Use this option only as a last resort.
+
+Add `generate-operation-token` to the
+[`enable_unauthenticated_access`](/vault/docs/configuration#enable_unauthenticated_access)
+parameter in the Vault server configuration:
+
+```hcl
+enable_unauthenticated_access = ["generate-operation-token"]
+```
+
+Vault reloads this parameter when it receives a `SIGHUP` signal, so you do not
+need to restart the server. After you generate the token, remove the parameter
+and send `SIGHUP` again.
+
+<Warning>
+
+Unauthenticated access reopens the exposure that Vault 2.0.0 closed. Anyone who
+can reach the endpoints can send bogus key shares and block a legitimate
+attempt. Keep the window as short as possible: enable, generate, remove, and
+reload.
+
+</Warning>
+
+For a walkthrough, complete the [Perform a break glass DR
+promotion](/vault/tutorials/disaster-recovery/break-glass-failover) tutorial.
+
+## Reference
+
+- [DR failover](/vault/docs/enterprise/replication/disaster-recovery/failover)
+- [DR replication API](/vault/api-docs/system/replication/replication-dr)
+- [`operator generate-root` command](/vault/docs/commands/operator/generate-root)
+- [Important changes in Vault 2.0](/vault/docs/updates/important-changes)
