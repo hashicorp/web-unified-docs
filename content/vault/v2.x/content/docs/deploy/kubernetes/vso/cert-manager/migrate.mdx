@@ -162,7 +162,7 @@ where needed:
    | Issuer | Service account namespace |
    | --- | --- |
    | `VaultIssuer` | The issuer's namespace, for example `app`. |
-   | `VaultClusterIssuer` | The `VaultAuth` namespace; `vault-secrets-operator` for the Helm-created `default` auth. |
+   | `VaultClusterIssuer` | The `VaultAuth` namespace, for example `vault-secrets-operator`. |
 
    If you reuse an auth role, add the policy without replacing its existing
    policies. All consumers of that role gain signing access; prefer a
@@ -185,6 +185,10 @@ Choose the path for an existing or new operator installation.
        --namespace vault-secrets-operator --output yaml > values.yaml
    ```
 
+   In a multi-tenant cluster, ensure `certManager.approverRBAC.enabled` is
+   `false` in `values.yaml` before upgrading. Configure approver-policy for
+   certificate requests.
+
 1. Check CRD upgrades. CRDs update automatically when enabling 
    `hooks.upgradeCRDs.enabled=true` and Helm hooks. Otherwise,
    apply the target chart's CRDs **before** upgrading:
@@ -196,14 +200,13 @@ Choose the path for an existing or new operator installation.
    $ kubectl apply --filename vso-crds.yaml
    ```
 
-1. Preview the upgrade with your current values and approval permission:
+1. Preview the upgrade with your current values:
 
    ```shell-session
    $ helm upgrade vault-secrets-operator hashicorp/vault-secrets-operator \
        --version <VSO_VERSION> \
        --namespace vault-secrets-operator \
        --values values.yaml \
-       --set certManager.approverRBAC.enabled=true \
        --dry-run
    ```
 
@@ -221,8 +224,8 @@ Choose the path for an existing or new operator installation.
 
 <Tab heading="New installation" group="new">
 
-The Helm chart creates a `VaultConnection` and `VaultAuth`, both named
-`default`, in the operator namespace.
+The Helm chart creates a `VaultConnection` named `default` in the operator
+namespace. Create a dedicated `VaultAuth` for the issuer after installation.
 
 1. Map your existing issuer settings to chart values:
 
@@ -231,12 +234,10 @@ The Helm chart creates a `VaultConnection` and `VaultAuth`, both named
    | `spec.vault.server` | `defaultVaultConnection.address` |
    | `spec.vault.serverName` | `defaultVaultConnection.tlsServerName` |
    | `spec.vault.caBundle` or `spec.vault.caBundleSecretRef` | `defaultVaultConnection.caCertSecret`, which you create in a following step. |
-   | `spec.vault.namespace` | `defaultAuthMethod.namespace` |
-   | `spec.vault.auth.kubernetes.mountPath` | `defaultAuthMethod.mount`; remove `/v1/auth/`. |
-   | Auth role from Step 3 | `defaultAuthMethod.kubernetes.role` |
 
-   For other supported auth methods, refer to
-   [`defaultAuthMethod`](/vault/docs/deploy/kubernetes/vso/helm#h-defaultauthmethod).
+   Configure the Vault namespace, auth mount, and auth role on the dedicated
+   `VaultAuth` after installation. Remove `/v1/auth/` from
+   `spec.vault.auth.kubernetes.mountPath` when setting the auth mount.
 
 1. Add the repository and create the operator namespace:
 
@@ -281,7 +282,7 @@ The Helm chart creates a `VaultConnection` and `VaultAuth`, both named
    If Vault uses a publicly trusted certificate, skip this step and omit
    `defaultVaultConnection.caCertSecret` from the install command.
 
-1. Install with the mapped connection and auth settings:
+1. Install with the mapped connection settings:
 
    ```shell-session
    $ helm install vault-secrets-operator hashicorp/vault-secrets-operator \
@@ -290,16 +291,19 @@ The Helm chart creates a `VaultConnection` and `VaultAuth`, both named
        --set defaultVaultConnection.enabled=true \
        --set defaultVaultConnection.address=https://vault.example.com:8200 \
        --set defaultVaultConnection.caCertSecret=vault-ca \
-       --set defaultVaultConnection.tlsServerName=vault.example.com \
-       --set defaultAuthMethod.enabled=true \
-       --set defaultAuthMethod.kubernetes.role=pki-issuer \
-       --set defaultAuthMethod.kubernetes.serviceAccount=pki-issuer \
-       --set 'defaultAuthMethod.kubernetes.tokenAudiences={vault}' \
-       --set certManager.approverRBAC.enabled=true
+       --set defaultVaultConnection.tlsServerName=vault.example.com
    ```
 
    Set `defaultVaultConnection.tlsServerName` to the `serverName` of your
    existing issuer. Omit it when your issuer does not set `serverName`.
+
+1. Create a dedicated `VaultAuth` named `pki-issuer` in the namespace of the
+   service account. Set its `vaultConnectionRef` to
+   `vault-secrets-operator/default`, and configure its Vault namespace, auth
+   mount, and role from your existing issuer. For an example, refer to
+   [Create the connection and auth resources](/vault/docs/deploy/kubernetes/vso/cert-manager/setup#step-4-create-the-connection-and-auth-resources).
+   For a `VaultClusterIssuer`, list the permitted request namespaces in
+   `allowedNamespaces`.
 
 </Tab>
 
@@ -314,10 +318,13 @@ $ kubectl get crd vaultissuers.secrets.hashicorp.com \
 $ kubectl get vaultconnection,vaultauth --all-namespaces
 ```
 
-The approval setting lets cert-manager approve every request for these issuers.
-For policy-based approval, leave it disabled and configure
+The built-in approval setting lets cert-manager approve every request for these
+issuers. In multi-tenant clusters, keep `certManager.approverRBAC.enabled`
+disabled, including when it was enabled in an existing release, and configure
 [approver-policy](/vault/docs/deploy/kubernetes/vso/cert-manager#certificate-request-approval)
-instead. If cert-manager uses a non-default controller service account, set
+instead. For a single-tenant cluster, you can explicitly enable the setting if
+every eligible request may be approved automatically. If you enable it and
+cert-manager uses a non-default controller service account, set
 `certManager.approverRBAC.serviceAccountName` and
 `certManager.approverRBAC.serviceAccountNamespace`.
 
@@ -330,7 +337,7 @@ Map the signing path and authentication reference:
 | `pki/sign/example-dot-com` | `mount: pki`, `role: example-dot-com` |
 | `pki/issuer/example-issuer/sign/example-dot-com` | Also set `issuerRef: example-issuer`. |
 | `spec.vault.namespace` | `spec.namespace`; omit to inherit from `VaultAuth`. |
-| Dedicated `VaultAuth` | Set `vaultAuthRef` to `name` or `namespace/name`; omit for the operator namespace's `default` auth. |
+| Dedicated `VaultAuth` | Set `vaultAuthRef` to `name` or `namespace/name`. |
 
 When you set `issuerRef`, the Vault Secrets Operator signs certificates with the
 `<mount>/issuer/<issuerRef>/sign/<role>` path, for example
@@ -338,8 +345,8 @@ When you set `issuerRef`, the Vault Secrets Operator signs certificates with the
 [Step 3](#step-3-grant-access-to-vault) grants that path. Otherwise, Vault
 returns a `403` error and the certificate request fails.
 
-Save the matching resource as `vso-issuer.yaml`. These examples use the
-Helm-created `default` auth; set `vaultAuthRef` if you created a dedicated auth.
+Save the matching resource as `vso-issuer.yaml`. These examples reference the
+dedicated `pki-issuer` auth.
 
 <Tabs>
 
@@ -352,6 +359,7 @@ metadata:
   name: vso-issuer
   namespace: app
 spec:
+  vaultAuthRef: pki-issuer
   mount: pki
   role: example-dot-com
 ```
@@ -366,6 +374,7 @@ kind: VaultClusterIssuer
 metadata:
   name: vso-cluster-issuer
 spec:
+  vaultAuthRef: vault-secrets-operator/pki-issuer
   mount: pki
   role: example-dot-com
 ```
@@ -374,8 +383,9 @@ spec:
 
 </Tabs>
 
-The operator namespace's `default` auth allows all namespaces. For a dedicated
-auth, configure `allowedNamespaces` for the namespaces requesting certificates.
+The operator namespace's `default` auth allows all namespaces, so do not grant
+it PKI signing permissions. For a dedicated cluster issuer auth, configure
+`allowedNamespaces` for the namespaces requesting certificates.
 Refer to [namespace access](/vault/docs/deploy/kubernetes/vso/cert-manager#vault-authentication-and-namespace-access).
 
 Apply the resource and confirm that the matching issuer's `READY` column is
