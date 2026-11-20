@@ -2,37 +2,600 @@
 page_title: Configure custom domains
 sidebar_title: Configure custom domains
 description: >-
-  TODO: one-sentence summary of using a custom domain with HCP Vault Dedicated.
+  Reach your HCP Vault Dedicated cluster at a domain name you own, such as vault.example.com, by creating two CNAME records and enabling a custom domain with the HCP API.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2026-11-20T04:01:14.000Z
-last_modified: 2026-11-20T04:01:14.000Z
+last_modified: 2026-11-20T06:18:42.000Z
 # END AUTO GENERATED METADATA
 ---
 
 # Configure custom domains
 
-{/* TODO: Overview. What a custom domain is for, and which HCP Vault Dedicated tiers support it. */}
+A custom domain lets you reach your HCP Vault Dedicated cluster at a hostname
+you own, such as `vault.example.com`, instead of the default `*.hashicorp.cloud`
+address. HCP issues and renews a TLS certificate that includes your custom
+domain, so clients can connect over HTTPS without certificate warnings. Your
+cluster stays reachable on its default HCP address while the custom domain is
+enabled.
+
+Custom domains support publicly and privately accessible AWS and Azure clusters
+in all HCP Vault Dedicated tiers. You enable, update, and disable a custom
+domain with the HCP API. Your DNS records stay in your own DNS provider. The
+examples on this page use Amazon Route 53.
+
+@include 'private-beta-feature.mdx'
+
+## How it works
+
+1. You create two CNAME records in the public DNS zone for your domain. The
+   first routes traffic for your custom domain to your cluster. The second,
+   `_acme-challenge`, lets HCP prove that you control the domain so it can
+   issue a certificate from Let's Encrypt.
+1. You send a `PATCH` request to the HCP API to enable the custom domain on
+   your cluster.
+1. HCP checks that both CNAME records exist and point to the right place, then
+   creates the certificate. Certificate creation is asynchronous. The API
+   returns an operation in the `PENDING` state and the operation takes about 10
+   to 15 minutes to reach `DONE`.
 
 ## Prerequisites
 
-{/* TODO: Required permissions, DNS access, certificate requirements, cluster tier and version. */}
+- An HCP organization and project with an existing HCP Vault Dedicated cluster,
+  and permission to update that cluster. You can only configure a custom domain
+  on a cluster that already exists.
+- Your HCP organization enrolled in the Custom Domains private beta. If it is
+  not, the API returns `403`. Contact HashiCorp to request access.
+- A domain you own, with a **public** DNS zone and permission to create and
+  delete records in it. For Route 53, this is a public hosted zone.
+- The [HCP CLI](/hcp/docs/cli/install) (`hcp`), `curl`, `jq`, `dig`, and
+  `openssl` on macOS or Linux. On Windows, use WSL.
+
+### Limitations
+
+- You can configure one custom domain per cluster.
+- After a successful change, you cannot change the custom domain again for 24
+  hours. Refer to [Throttling](#throttling).
+- HCP issues and manages the certificate. You cannot provide your own
+  certificate.
+- Wildcard domains, such as `*.example.com`, are not supported.
+- Private-only DNS is not supported. The `_acme-challenge` CNAME record must be
+  publicly resolvable, or certificate issuance fails. If you use split-horizon
+  DNS, create the `_acme-challenge` record in your public zone and keep
+  traffic routing in your private zone.
+- You configure custom domains through the HCP API only. The HCP Portal does
+  not support them yet.
+
+<Note title="Subject to change">
+
+Request fields, behavior, and limits can change before general availability.
+
+</Note>
 
 ## Configure a custom domain
 
-{/* TODO: Step-by-step procedure (UI, CLI, API or Terraform as applicable). */}
+### Set environment variables
+
+Collect the following values and export them in the terminal you use for the
+rest of this page.
+
+| Variable | Description |
+|---|---|
+| `HCP_ORGANIZATION_ID` | Your HCP organization ID. Run `hcp organizations list`. |
+| `HCP_PROJECT_ID` | The ID of the project that contains your cluster. Run `hcp projects list`. |
+| `HCP_VAULT_ID` | Your cluster ID, which is the cluster name. For example, `my-vault-cluster`. |
+| `HCP_CLUSTER_DNS` | The host name of your cluster URL, without `https://` and without the port. For example, `my-vault-cluster-public-vault-1a2b3c4d.5e6f7a8b.z1.hashicorp.cloud`. |
+| `HCP_PROVIDER_NAME` | The cloud provider of your cluster, `aws` or `azure`. |
+| `HCP_REGION_NAME` | The region of your cluster. For example, `us-west-2`. |
+| `HCP_CUSTOM_DOMAIN` | The domain you want to use, in the form `<subdomain>.<primary-domain>`. For example, `vault.example.com`. |
+
+1. Sign in to HCP.
+
+   ```shell-session
+   $ hcp auth login
+   ```
+
+1. Export the variables.
+
+   ```shell-session
+   $ export HCP_API_ADDRESS="api.cloud.hashicorp.com" \
+       HCP_ORGANIZATION_ID="<HCP_ORGANIZATION_ID>" \
+       HCP_PROJECT_ID="<HCP_PROJECT_ID>" \
+       HCP_VAULT_ID="<HCP_VAULT_ID>" \
+       HCP_CLUSTER_DNS="<HCP_CLUSTER_DNS>" \
+       HCP_PROVIDER_NAME="<aws-or-azure>" \
+       HCP_REGION_NAME="<HCP_REGION_NAME>" \
+       HCP_CUSTOM_DOMAIN="<subdomain>.<primary-domain>" \
+       HCP_API_TOKEN="$(hcp auth print-access-token)"
+   ```
+
+   <Warning>
+
+   The access token is a credential. Do not paste it into tickets, chat, or
+   shared documents. It is short lived. If an API call returns `401`, run
+   `hcp auth login` again and refresh `HCP_API_TOKEN`.
+
+   </Warning>
+
+### Create the CNAME records
+
+Create the following two records in the public DNS zone for your primary domain
+**before** you call the HCP API. If the records are missing or have not
+propagated, the API call fails.
+
+| | Record 1: custom domain | Record 2: ACME challenge |
+|---|---|---|
+| **Name** | `vault` | `_acme-challenge.vault` |
+| **Type** | `CNAME` | `CNAME` |
+| **Value** | Your cluster DNS name (`HCP_CLUSTER_DNS`) | `_acme-challenge.` followed by your cluster DNS name |
+| **TTL** | `300` | `300` |
+
+For the custom domain `vault.example.com`, the records look like this:
+
+<CodeBlockConfig hideClipboard>
+
+```text
+vault.example.com                   CNAME  my-vault-cluster-public-vault-1a2b3c4d.5e6f7a8b.z1.hashicorp.cloud
+_acme-challenge.vault.example.com   CNAME  _acme-challenge.my-vault-cluster-public-vault-1a2b3c4d.5e6f7a8b.z1.hashicorp.cloud
+```
+
+</CodeBlockConfig>
+
+To create the records in Route 53:
+
+1. Sign in to the AWS Management Console and open **Route 53**.
+
+1. In the left navigation, select **Hosted zones**.
+
+1. Select the hosted zone for your primary domain. Its type must be **Public**.
+
+1. On the **Records** tab, select **Create record**.
+
+1. Enter the values for Record 1. Set **Record type** to `CNAME`, **TTL** to
+   `300`, and **Routing policy** to **Simple routing**.
+
+1. Select **Add another record** and enter the values for Record 2.
+
+1. Select **Create records**, then confirm both records appear on the
+   **Records** tab with the values you entered.
+
+### Verify DNS
+
+DNS propagation can take a few minutes. Query both records from your own
+network.
+
+```shell-session
+$ dig +short CNAME "${HCP_CUSTOM_DOMAIN}"
+$ dig +short CNAME "_acme-challenge.${HCP_CUSTOM_DOMAIN}"
+```
+
+Each command must print the matching HCP name, ending in a dot.
+
+<CodeBlockConfig hideClipboard>
+
+```text
+my-vault-cluster-public-vault-1a2b3c4d.5e6f7a8b.z1.hashicorp.cloud.
+_acme-challenge.my-vault-cluster-public-vault-1a2b3c4d.5e6f7a8b.z1.hashicorp.cloud.
+```
+
+</CodeBlockConfig>
+
+<Warning title="Wait for both records">
+
+Do not call the HCP API until both commands return the expected value. If you
+do, the request fails with `Failed to lookup CNAME record`.
+
+</Warning>
+
+### Enable the custom domain
+
+Send a `PATCH` request to the cluster resource with `is_enabled` set to `true`.
+
+```shell-session
+$ curl --silent --show-error --request PATCH \
+    "https://${HCP_API_ADDRESS}/vault/2020-11-25/organizations/${HCP_ORGANIZATION_ID}/projects/${HCP_PROJECT_ID}/clusters/${HCP_VAULT_ID}" \
+    --header "Content-Type: application/json" \
+    --header "Authorization: Bearer ${HCP_API_TOKEN}" \
+    --data @- <<EOF | jq
+{
+  "id": "${HCP_VAULT_ID}",
+  "location": {
+    "organization_id": "${HCP_ORGANIZATION_ID}",
+    "project_id": "${HCP_PROJECT_ID}",
+    "region": {
+      "provider": "${HCP_PROVIDER_NAME}",
+      "region": "${HCP_REGION_NAME}"
+    }
+  },
+  "config": {
+    "network_config": {
+      "custom_domain_config": {
+        "is_enabled": true,
+        "custom_domain": "${HCP_CUSTOM_DOMAIN}"
+      }
+    }
+  }
+}
+EOF
+```
+
+A successful request returns HTTP `200` and an operation in the `PENDING`
+state. `PENDING` means HCP accepted the request, not that the domain is live.
+
+<CodeBlockConfig hideClipboard>
+
+```json
+{
+  "operation": {
+    "id": "00000000-0000-0000-0000-000000000000",
+    "state": "PENDING",
+    "location": {
+      "organization_id": "<HCP_ORGANIZATION_ID>",
+      "project_id": "<HCP_PROJECT_ID>",
+      "region": {
+        "provider": "aws",
+        "region": "us-west-2"
+      }
+    },
+    "link": {
+      "type": "hashicorp.vault.cluster",
+      "id": "my-vault-cluster"
+    },
+    "created_at": "2026-11-03T10:15:30.123456Z",
+    "updated_at": "2026-11-03T10:15:30.123456Z",
+    "visibility": "EXPOSED"
+  }
+}
+```
+
+</CodeBlockConfig>
+
+The sample omits some internal fields. If the request is rejected, refer to
+[Errors](#errors).
+
+### Track the operation
+
+Optionally, track the operation until it finishes. Set the operation ID from the
+`operation.id` field of the response, then read the operation state.
+
+```shell-session
+$ export HCP_OPERATION_ID="<operation.id>"
+$ curl --silent --show-error \
+    "https://${HCP_API_ADDRESS}/operation/2020-05-05/organizations/${HCP_ORGANIZATION_ID}/projects/${HCP_PROJECT_ID}/operations/${HCP_OPERATION_ID}" \
+    --header "Authorization: Bearer ${HCP_API_TOKEN}" | jq '.operation.state'
+```
+
+The state is `"PENDING"` while HCP works on the change. Repeat the call every
+few minutes. The operation is finished when it prints `"DONE"`.
 
 ## Verify the configuration
 
-{/* TODO: How to confirm DNS resolution and TLS for the custom domain. */}
+After the operation reaches `DONE`, confirm the custom domain is active.
+
+1. Check the cluster configuration.
+
+   ```shell-session
+   $ curl --silent --show-error \
+       "https://${HCP_API_ADDRESS}/vault/2020-11-25/organizations/${HCP_ORGANIZATION_ID}/projects/${HCP_PROJECT_ID}/clusters/${HCP_VAULT_ID}" \
+       --header "Authorization: Bearer ${HCP_API_TOKEN}" | jq '.cluster.config.network_config.custom_domain_config'
+   ```
+
+   <CodeBlockConfig hideClipboard>
+
+   ```json
+   {
+     "is_enabled": true,
+     "custom_domain": "vault.example.com"
+   }
+   ```
+
+   </CodeBlockConfig>
+
+1. Check that the certificate covers your custom domain.
+
+   ```shell-session
+   $ openssl s_client -connect "${HCP_CUSTOM_DOMAIN}:8200" -servername "${HCP_CUSTOM_DOMAIN}" </dev/null 2>/dev/null \
+       | openssl x509 -noout -text | grep -E "Subject:|DNS:"
+   ```
+
+   The output includes your custom domain, for example `DNS:vault.example.com`.
+
+1. Check that Vault answers on your custom domain.
+
+   ```shell-session
+   $ curl --silent --show-error "https://${HCP_CUSTOM_DOMAIN}:8200/v1/sys/health" | jq
+   ```
+
+   A healthy, unsealed cluster reports `"initialized": true` and
+   `"sealed": false`.
+
+<Note>
+
+Steps 2 and 3 use port `8200`. If you changed the
+[cluster port](/hcp/docs/vault/get-started/configure-cluster-port), use that
+port instead. Run these checks from a network that can reach your cluster. A
+privately accessible cluster is reachable only from networks connected to it.
+
+</Note>
+
+HCP renews the certificate automatically and re-validates it against your
+existing CNAME records, so keep both records in place for as long as the custom
+domain is enabled.
 
 ## Update or remove a custom domain
 
-{/* TODO: Rotation, change, and removal steps, and the effect on existing clients. */}
+### Update a custom domain
+
+To change the custom domain, for example from `vault.example.com` to
+`vault.secrets.com`, use the same request as [Enable the custom
+domain](#enable-the-custom-domain) with the new name.
+
+<Warning title="24-hour limit">
+
+After a successful change, you cannot modify the custom domain again for 24
+hours. Confirm the new name before you send the request.
+
+</Warning>
+
+1. Create the two CNAME records for the new name in the public DNS zone for its
+   primary domain, as described in [Create the CNAME records](#create-the-cname-records).
+
+1. Set the new name and verify both records.
+
+   ```shell-session
+   $ export HCP_CUSTOM_DOMAIN="vault.secrets.com"
+   $ dig +short CNAME "${HCP_CUSTOM_DOMAIN}"
+   $ dig +short CNAME "_acme-challenge.${HCP_CUSTOM_DOMAIN}"
+   ```
+
+1. When both records return the expected value, send the `PATCH` request from
+   [Enable the custom domain](#enable-the-custom-domain).
+
+1. After the operation reaches `DONE`, run the checks in
+   [Verify the configuration](#verify-the-configuration). The `custom_domain`
+   value must be the new name, and the certificate must list it in the
+   subject alternative names (SANs).
+
+Once you no longer use the old name, delete its two CNAME records by following
+[Clean up DNS records](#clean-up-dns-records).
+
+### Disable a custom domain
+
+Disabling the custom domain turns it off. Your cluster stays reachable on its
+default HCP address.
+
+1. Send a `PATCH` request with `is_enabled` set to `false`. You do not need to
+   send `custom_domain`.
+
+   ```shell-session
+   $ curl --silent --show-error --request PATCH \
+       "https://${HCP_API_ADDRESS}/vault/2020-11-25/organizations/${HCP_ORGANIZATION_ID}/projects/${HCP_PROJECT_ID}/clusters/${HCP_VAULT_ID}" \
+       --header "Content-Type: application/json" \
+       --header "Authorization: Bearer ${HCP_API_TOKEN}" \
+       --data @- <<EOF | jq
+   {
+     "id": "${HCP_VAULT_ID}",
+     "location": {
+       "organization_id": "${HCP_ORGANIZATION_ID}",
+       "project_id": "${HCP_PROJECT_ID}",
+       "region": {
+         "provider": "${HCP_PROVIDER_NAME}",
+         "region": "${HCP_REGION_NAME}"
+       }
+     },
+     "config": {
+       "network_config": {
+         "custom_domain_config": {
+           "is_enabled": false
+         }
+       }
+     }
+   }
+   EOF
+   ```
+
+   A successful request returns HTTP `200` and a `PENDING` operation, as it does
+   when you enable a custom domain.
+
+1. After the operation reaches `DONE`, check that the cluster shows the custom
+   domain as disabled and that Vault still answers on the default address.
+
+   ```shell-session
+   $ curl --silent --show-error \
+       "https://${HCP_API_ADDRESS}/vault/2020-11-25/organizations/${HCP_ORGANIZATION_ID}/projects/${HCP_PROJECT_ID}/clusters/${HCP_VAULT_ID}" \
+       --header "Authorization: Bearer ${HCP_API_TOKEN}" | jq '.cluster.config.network_config.custom_domain_config'
+   $ curl --silent --show-error "https://${HCP_CLUSTER_DNS}:8200/v1/sys/health" | jq
+   ```
+
+   The first command reports `"is_enabled": false`. The second reports
+   `"initialized": true` and `"sealed": false`.
+
+### Clean up DNS records
+
+After you disable the custom domain, or after you change to a new name and stop
+using the old one, remove the two CNAME records for the name you no longer use.
+
+<Warning>
+
+Do not delete the records before you disable or change the custom domain.
+Clients that still use the custom name stop resolving as soon as the records are
+gone.
+
+</Warning>
+
+1. In Route 53, open your public hosted zone.
+
+1. Select the check boxes next to the two records, for example
+   `vault.example.com` and `_acme-challenge.vault.example.com`, then select
+   **Delete records** and confirm.
+
+1. Confirm the records are gone. Both commands print nothing. Resolvers can
+   cache the old answer for up to the 300-second TTL, so wait about five minutes
+   if you still see a value.
+
+   ```shell-session
+   $ dig +short CNAME "${HCP_CUSTOM_DOMAIN}"
+   $ dig +short CNAME "_acme-challenge.${HCP_CUSTOM_DOMAIN}"
+   ```
+
+## API reference
+
+You manage custom domains through the existing HCP Vault Dedicated cluster
+update endpoint. No separate endpoint exists for custom domains.
+
+### Update cluster
+
+`PATCH` `/vault/2020-11-25/organizations/{organization_id}/projects/{project_id}/clusters/{cluster_id}`
+
+#### Request
+
+The custom domain settings are in the `config.network_config.custom_domain_config`
+object of the request body.
+
+```json
+{
+  "id": "<cluster_id>",
+  "location": {
+    "organization_id": "<organization_id>",
+    "project_id": "<project_id>",
+    "region": {
+      "provider": "<aws|azure>",
+      "region": "<region>"
+    }
+  },
+  "config": {
+    "network_config": {
+      "custom_domain_config": {
+        "is_enabled": true,
+        "custom_domain": "<subdomain>.<primary-domain>"
+      }
+    }
+  }
+}
+```
+
+#### Field validation
+
+| Field | Type | Required | Validation rules |
+|---|---|---|---|
+| `custom_domain_config.is_enabled` | boolean | Yes | `true` enables or updates the custom domain. `false` disables it. |
+| `custom_domain_config.custom_domain` | string | Yes when `is_enabled` is `true` | A valid fully qualified domain name (FQDN) in the form `<subdomain>.<primary-domain>`. Maximum 253 characters. Wildcards are not supported. Both CNAME records must already resolve to your cluster. |
+
+#### Response
+
+| Field | Type | Description |
+|---|---|---|
+| `operation.id` | string | The operation ID. Use it to [track the operation](#track-the-operation). |
+| `operation.state` | string | `PENDING` while HCP creates the certificate. The operation reaches `DONE` when the change is complete. |
+| `operation.link` | object | The cluster the operation applies to. |
+
+### Errors
+
+A rejected request returns an error body with a message and a numeric code.
+
+<CodeBlockConfig hideClipboard>
+
+```json
+{
+  "error": "Failed to lookup CNAME record",
+  "code": 9
+}
+```
+
+</CodeBlockConfig>
+
+| HTTP status | Error message | What to do |
+|---|---|---|
+| `400` | `custom_domain is required when is_enabled is true` | Set `custom_domain` to a value before you send the request. |
+| `400` | `Domain name too long` | Use a domain name of 253 characters or fewer. |
+| `400` | `Invalid domain format` | Use the form `<subdomain>.<primary-domain>`, for example `vault.example.com`. |
+| `400` | `Failed to lookup CNAME record` | A required record is missing or has not propagated. [Verify DNS](#verify-dns), wait, and retry. |
+| `400` | Empty message with code `3` | Certificate creation failed unexpectedly. [Verify DNS](#verify-dns) and retry. If it keeps happening, contact HashiCorp support and include the time of the request. |
+| `403` | `custom domain feature is not enabled` | Your organization is not enrolled in the private beta. Contact HashiCorp. |
+| `404` | Message beginning `CNAME validation failed` | A CNAME record exists but points to the wrong target. Make sure each value matches [the records you created](#create-the-cname-records) exactly, including the `_acme-challenge.` prefix on the second record. |
+| `424` | `custom domain certificate was updated recently` | You changed the custom domain within the last 24 hours, or an earlier attempt is still in its backoff period. Refer to [Throttling](#throttling). |
+
+### Throttling
+
+HCP creates a Let's Encrypt certificate for each custom domain change. To
+protect the shared certificate issuance quota, HCP limits how often you can
+change a custom domain.
+
+- After a successful change, you cannot change the custom domain again for 24
+  hours.
+- If a request fails because of the throttle (HTTP `424`), HCP enforces an
+  exponential backoff. The wait before you can retry grows with each failed
+  attempt.
+
+  | Retry | Wait before you can retry |
+  |---|---|
+  | 1st | 1 hour |
+  | 2nd | 3 hours |
+  | 3rd | 6 hours |
+  | 4th | 12 hours |
+
+  The ladder resets at 00:00 the next day. If a retry time falls in the next
+  day's window, you can retry as early as 00:00.
+
+During the private beta, HashiCorp can lift the throttle for testing. Contact
+HashiCorp if you need to test updates within 24 hours. The throttle is always
+enforced when the feature is generally available.
+
+## Audit logging
+
+HCP records success and failure events for enabling, updating, and disabling a
+custom domain in the HCP audit log. Each event includes the cluster ID and the
+organization ID.
 
 ## Troubleshooting
 
-{/* TODO: Common failure modes and fixes. */}
+### `Failed to lookup CNAME record` returned
+
+Verify that:
+- Both CNAME records exist in the **public** zone for your primary domain.
+- Both records have propagated. `dig +short CNAME` returns the expected HCP
+  name for the custom domain and for `_acme-challenge.<custom-domain>`.
+- You did not create the records only in a private hosted zone. Let's Encrypt
+  resolves the `_acme-challenge` record from the public internet.
+
+### `CNAME validation failed` returned
+
+Verify that:
+- The value of each record matches your cluster DNS name exactly. Copy the host
+  name from your cluster URL, without `https://` and without the port.
+- The value of the second record starts with `_acme-challenge.`.
+- The custom domain in the request is the same name you created the records for.
+
+### `custom domain certificate was updated recently` returned
+
+The custom domain changed within the last 24 hours, or an earlier attempt is in
+its backoff period. Wait for the period described in [Throttling](#throttling)
+and retry. Check the current configuration first, because the earlier request
+may have already succeeded.
+
+### The operation stays in `PENDING`
+
+The operation takes about 10 to 15 minutes. If it is still `PENDING` after
+that, [verify DNS](#verify-dns) and check the cluster configuration. If the
+operation does not finish, [create a support ticket](https://support.hashicorp.com/hc/en-us/requests/new)
+and include the cluster ID and the operation ID.
+
+### The custom domain does not resolve or shows a certificate warning
+
+- If the domain does not resolve, the first CNAME record is missing or
+  incorrect. Certificate creation can succeed without it, but clients cannot
+  reach the cluster until it exists.
+- If the domain resolves but the browser or client shows a certificate warning,
+  the `_acme-challenge` record is missing or incorrect, or the operation has
+  not reached `DONE`. Verify the records and the operation state.
+- For a privately accessible cluster, run your checks from a network connected
+  to the cluster. Use the [connectivity tester](/hcp/docs/vault/connectivity-tester)
+  to diagnose reachability from your HashiCorp Virtual Network (HVN).
 
 ## Next steps
 
-{/* TODO: Links to related pages, for example private DNS forwarding. */}
+- [Configure private DNS forwarding](/hcp/docs/vault/private-dns) to resolve
+  internal hostnames from your cluster.
+- [Test cluster connectivity](/hcp/docs/vault/connectivity-tester) from your
+  cluster to private resources.
+- [Configure private network access](/hcp/docs/vault/get-started/configure-private-access)
+  to your cluster.
