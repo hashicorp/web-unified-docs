@@ -165,3 +165,103 @@ spec:
 The pod mounts a CSI volume and specifies the Secret Provider Class (`vault-db-creds`) created above.
 The secrets created from that provider class are mounted to `/mnt/secrets-store`, additionally a Kubernetes
 secret called `vault-db-creds` is created and referenced in two environment variables.
+
+## AWS IAM auth with IRSA
+
+The following example uses the Vault [AWS auth method](/vault/docs/auth/aws) with
+[IAM roles for service accounts (IRSA)](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html)
+on Amazon EKS. The Vault Secrets Store CSI provider authenticates to Vault as the IAM role
+associated with the application pod's service account.
+
+The example has the following requirements:
+
+- An EKS cluster with an
+  [IAM OIDC provider](https://docs.aws.amazon.com/eks/latest/userguide/enable-iam-roles-for-service-accounts.html).
+- An IAM role named `app-role` with a trust policy that allows `sts:AssumeRoleWithWebIdentity`
+  for `system:serviceaccount:default:app` with the `sts.amazonaws.com` audience. The role does
+  not require permission policies, because Vault only verifies the identity of the caller.
+
+Annotate the `app` service account with the IAM role ARN:
+
+```shell-session
+$ kubectl annotate serviceaccount app \
+    eks.amazonaws.com/role-arn=arn:aws:iam::123456789012:role/app-role
+```
+
+Enable the AWS auth method in Vault and create a Vault role that is bound to the IAM role:
+
+```shell-session
+$ vault auth enable aws
+
+$ vault write auth/aws/role/app \
+    auth_type=iam \
+    bound_iam_principal_arn=arn:aws:iam::123456789012:role/app-role \
+    token_policies=app
+```
+
+By default, Vault calls `iam:GetRole` to resolve `bound_iam_principal_arn`. The Vault server
+requires AWS credentials with the `iam:GetRole` permission. Refer to the
+[AWS auth method](/vault/docs/auth/aws) documentation for more information.
+
+The provider reads the IAM role annotation from the service account of the requesting pod.
+The following ClusterRole and ClusterRoleBinding grant the provider permission to `get` service
+accounts, in addition to the permissions that the Vault Helm chart grants:
+
+```yaml
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: vault-csi-provider-serviceaccount-reader
+rules:
+  - apiGroups: ['']
+    resources: ['serviceaccounts']
+    verbs: ['get']
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: vault-csi-provider-serviceaccount-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: vault-csi-provider-serviceaccount-reader
+subjects:
+  - kind: ServiceAccount
+    name: vault-csi-provider
+    namespace: vault
+```
+
+The following Secret Provider Class uses the `aws` auth type to retrieve a password from Vault:
+
+```yaml
+---
+apiVersion: secrets-store.csi.x-k8s.io/v1
+kind: SecretProviderClass
+metadata:
+  name: vault-aws-creds
+spec:
+  provider: vault
+  parameters:
+    roleName: 'app'
+    auth: |
+      type: aws
+    objects: |
+      - objectName: "dbPassword"
+        secretPath: "secret/data/db"
+        secretKey: "password"
+```
+
+When a pod that uses the `app` service account mounts a CSI volume with the `vault-aws-creds`
+Secret Provider Class, the provider writes the password to `/mnt/secrets-store/dbPassword`. Refer
+to [File based dynamic database credentials](#file-based-dynamic-database-credentials) for an
+example deployment.
+
+If your AWS region is not `us-east-1`, set `aws.region` in the `auth` parameter. Then configure
+the Vault AWS auth method to use the regional STS endpoint for the same region:
+
+```shell-session
+$ vault write auth/aws/config/client \
+    sts_endpoint=https://sts.us-west-2.amazonaws.com \
+    sts_region=us-west-2
+```
