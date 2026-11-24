@@ -1,0 +1,116 @@
+---
+page_title: Prerequisites and personnel
+description: Infrastructure, tooling, licensing, and personnel required before deploying Boundary Enterprise.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-07-03T10:00:00.000Z
+last_modified: 2026-11-16T12:54:10.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Prerequisites and personnel
+
+<Note>
+
+This section is *emerging guidance* and is incomplete. It covers network, firewall, and endpoint protection prerequisites only. Tooling, licensing, and personnel requirements will be added in a future update. We continually update this guidance as we identify common best practices and configurations to help customers get the most from the product.
+
+</Note>
+
+Incorrect network configuration and endpoint security agents are the most common environmental causes of Boundary session failures in hardened deployments. Confirm the requirements on this page before deploying Boundary components, and use them as a verification reference when diagnosing failures. For TLS inspection and deep packet inspection (DPI) requirements, refer to [Security hardening](/validated-designs/boundary/installation-guide/security-hardening).
+
+## Network and firewall requirements
+
+### Component flow matrix
+
+Configure firewall rules to permit every flow relevant to your topology before deploying Boundary components.
+
+The _initiator_ is the party that opens the TCP connection. The receiver must have the listed port open for inbound connections from the initiator's address range.
+
+| Flow | Port | Initiator | TLS type | Notes |
+| --- | --- | --- | --- | --- |
+| Client or admin CLI → Controller API | 9200 | Client or CLI host | Standard PKI TLS | Session authorization, API calls, Desktop client authentication |
+| Worker → Controller control plane | 9201 | Worker host | TLS | Persistent outbound; worker registers, authorizes sessions, and fetches credentials |
+| Desktop client → Ingress worker | 9202 | Client host | Mutual TLS 1.3, dynamic SNI | Session proxy; Boundary-generated certificate chain — **exclude DPI** |
+| Downstream worker → Upstream worker | 9202 | Downstream worker host | Mutual TLS 1.3, dynamic SNI | Reverse-proxy tunnel for multi-hop sessions — **exclude DPI** |
+| Egress worker → Target | Target service port | Egress worker host | Application-level | SSH (22), RDP (3389), or custom port per target configuration |
+| Operator or monitoring → Controller ops | 9203 | Operator host or monitoring agent | HTTP (plain) | Health `/health`, metrics `/metrics`, pprof; restrict to management network |
+| Operator or monitoring → Worker ops | 9203 | Operator host or monitoring agent | HTTP (plain) | Health `/health`, metrics `/metrics`, pprof; restrict to management network |
+
+{/* human-input: Worker-to-worker port — confirm whether downstream workers connect to upstream workers on 9201 (control plane) in addition to 9202 (data plane), or 9202 only. The Secure proxy and Accessing private resources pages are inconsistent on this point. */}
+
+{/* human-input: TLS type on port 9201 — confirm whether the worker-to-controller cluster connection uses standard PKI TLS or a different certificate model, and whether port 9201 also needs a DPI exclusion. */}
+
+<Note>
+
+Default port values apply unless you have overridden them in the `listener` stanzas of your Boundary configuration files. Verify the configured addresses and ports on each component before relying on defaults for firewall rules.
+
+</Note>
+
+For worker roles and topologies, refer to [Secure proxy](/validated-designs/boundary/installation-guide/worker-architecture-and-secure-proxy) and [Accessing private resources](/validated-designs/boundary/installation-guide/multi-hop-and-private-resources).
+
+### Ephemeral port ranges
+
+When a session is authorized, the Boundary Desktop client opens a local TCP listener on `127.0.0.1` at an ephemeral port. The user's SSH or RDP client connects to this local address rather than to the target directly. The Boundary process also opens an outbound connection from the client host to the ingress worker on port 9202.
+
+Endpoint security agents on the client host must permit the Boundary Desktop client executable to:
+
+- Open outbound TCP connections to ingress worker hosts on destination port 9202.
+- Bind to local TCP ports in the OS ephemeral range.
+
+{/* human-input: Boundary Desktop client ephemeral port range — confirm whether Boundary uses a specific restricted port range for its local session listener or relies entirely on the OS-assigned ephemeral range (typically 49152–65535). Validate against a current Boundary Desktop client release. */}
+
+<Warning>
+
+**Draft recommendation** — human review required before merging.
+
+The local session listener port is assigned from the operating system's configured ephemeral port range. If your endpoint security policy restricts outbound connections by source port, permit outbound TCP from the Boundary Desktop client process across the full OS ephemeral range on the client host.
+
+If your environment enforces a custom ephemeral range through OS configuration, apply the same range to the Boundary Desktop client allow list.
+
+_This recommendation reflects standard OS behavior and may not account for Boundary-specific port configuration options. A practitioner must verify the exact range used in your environment._
+
+</Warning>
+
+### Network address translation
+
+Boundary works through network address translation (NAT) because the party closer to the controller or upstream worker initiates every connection. Clients, workers, and downstream workers all open outbound connections. No component requires inbound destination NAT (DNAT) to accept connections from Boundary infrastructure.
+
+Under NAT, persistent outbound TCP connections must not be silently dropped by the NAT device. Workers maintain long-lived TCP connections to the controller on port 9201 and, in multi-hop topologies, reverse-proxy tunnels to their upstream workers on port 9202. If the NAT device's idle-connection timeout is shorter than Boundary's keep-alive interval, the NAT state entry expires and the connection is dropped without either endpoint being notified. The worker eventually detects the dead connection and reconnects, but this causes a gap in session availability.
+
+To avoid this:
+
+- Configure the NAT device's TCP idle timeout for port 9201 and 9202 flows to exceed the Boundary worker keep-alive interval. A minimum of **5 minutes** is a reasonable starting point. Consult your NAT device documentation for the correct parameter.
+- Confirm that the NAT device does not reassign the source port in a way that breaks existing TCP sessions on reconnect.
+
+To validate worker connectivity under NAT, query the ops listener metrics after the worker has been running for several hours. A worker that periodically loses its upstream connection shows increased reconnect counters. Refer to [Observability setup](/validated-designs/boundary/installation-guide/observability-setup) for how to query these endpoints.
+
+<Note>
+
+DNAT that rewrites the destination address of client-to-worker connections on port 9202 breaks SNI-based routing, because the SNI value in the client hello no longer matches the worker's expected address. Avoid DNAT on port 9202 flows unless Boundary is configured with the translated address.
+
+</Note>
+
+## Endpoint protection requirements
+
+Endpoint security agents such as antivirus, EDR, or data loss prevention agents on hosts running the Boundary Desktop client or the `boundary` CLI can block session establishment in two ways:
+
+1. **Process-level blocking** — the agent blocks the Boundary client executable from opening network connections.
+1. **Port-level blocking** — the agent blocks outbound connections from the host on port 9202 or on high ephemeral ports.
+
+{/* human-input: Symantec Endpoint Protection allowlist procedure — the steps to add a process exclusion and a network exception in the SEP policy manager console require validation by a practitioner with current SEP experience. The policy structure varies across SEP versions. */}
+
+<Warning>
+
+**Draft recommendation** — human review required before merging.
+
+**Symantec Endpoint Protection (SEP):** Create a network exception in the SEP Firewall Policy that permits the `boundary` executable and, on macOS and Windows, the Boundary Desktop client process to:
+
+- Open outbound TCP connections to Boundary ingress worker addresses on destination port 9202.
+- Bind to local TCP ports in the OS ephemeral range.
+
+Apply the exception at the policy group level so that it propagates to all client hosts managed by that policy. Verify in the SEP event log that no Boundary-related connection attempts are blocked after applying the exception.
+
+_This recommendation describes the correct allow-listing intent. A practitioner with current SEP experience must confirm the exact steps before this content is merged._
+
+</Warning>
+
+For other endpoint agents, apply the equivalent process and network exceptions for the Boundary Desktop client executable and for outbound port 9202 connections from client hosts to Boundary worker addresses.

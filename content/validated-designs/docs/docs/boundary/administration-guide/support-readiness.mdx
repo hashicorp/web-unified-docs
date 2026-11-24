@@ -1,0 +1,277 @@
+---
+page_title: Support readiness
+description: Preparing for and engaging HashiCorp support for Boundary.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-07-03T10:00:00.000Z
+last_modified: 2026-11-16T12:54:08.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Support readiness
+
+<Note>
+
+This section is *emerging guidance* and is incomplete. It covers diagnostics collection and a troubleshooting workflow for session failures in low-observability environments. Support bundles and escalation paths will be added in a future update. We continually update this guidance as we identify common best practices and configurations to help customers get the most from the product.
+
+</Note>
+
+This page helps platform teams diagnose Boundary session failures and collect the evidence HashiCorp support needs, in environments where standard diagnostic assumptions do not hold. It complements the Boundary [common errors](/boundary/docs/troubleshoot/common-errors) and [FAQ](/boundary/docs/troubleshoot/faq) pages by focusing on systematic network-path and authentication-path diagnosis rather than error lookup.
+
+## Low-observability operating assumptions
+
+Every step on this page is designed to run under the following constraints:
+
+- **No outbound internet access** from Boundary components or the operator's workstation.
+- **No remote screen-share or remote SSH access** to component hosts from outside the network enclave.
+- **Restricted endpoints** — the operator's workstation or jump host may not permit installing troubleshooting tools.
+- **Manual log extraction** — log shipping may be unavailable, so you capture output to local files and transfer it manually, or photograph it from the screen.
+- **Limited onsite access** — you may have only one opportunity to collect evidence before leaving the site.
+
+Collecting the right evidence on a single visit is more valuable than returning multiple times. If time is constrained, prioritize the [evidence-capture checklist](#evidence-capture-checklist).
+
+## Prerequisites
+
+- The network, firewall, and endpoint protection requirements in [Prerequisites and personnel](/validated-designs/boundary/installation-guide/prerequisites-and-personnel) are met.
+- TLS inspection is excluded for Boundary session traffic, as described in [Security hardening](/validated-designs/boundary/installation-guide/security-hardening).
+- The ops listener and an event file sink are configured, as described in [Observability setup](/validated-designs/boundary/installation-guide/observability-setup).
+
+## Diagnostic toolkit
+
+Beyond the health and metrics endpoints and event logs described in [Observability setup](/validated-designs/boundary/installation-guide/observability-setup), the following tools are available on restricted hosts without installing additional software.
+
+### Client agent status
+
+On a client host where the Boundary Desktop client or client agent is installed, run:
+
+```shell-session
+$ boundary client-agent status
+```
+
+The output shows the agent's runtime state (running or paused), the authenticated token ID and its expiration time, and the number of sessions the agent is proxying. Record all fields.
+
+The client agent pauses itself after repeated network failures to avoid retry storms. A paused agent does not establish new sessions until you re-authenticate with `boundary authenticate` and resume it with `boundary client-agent resume`.
+
+{/* human-input: Verify that `boundary client-agent resume` is a valid subcommand in the current Boundary CLI release. If it does not exist, replace with the correct remediation path, for example re-authentication alone. */}
+
+### Debug mode and pprof
+
+When you start Boundary with the `-debug` flag, the ops listener exposes Go pprof endpoints for runtime profiling and tracing:
+
+```shell-session
+$ curl -s -o trace-$(hostname)-$(date +%Y%m%dT%H%M%S).out \
+    "http://127.0.0.1:9203/debug/pprof/trace?seconds=3"
+$ curl -s -o goroutines-$(hostname)-$(date +%Y%m%dT%H%M%S).txt \
+    "http://127.0.0.1:9203/debug/pprof/goroutine?debug=2"
+```
+
+Transfer these files offline for analysis with standard Go tooling or share them with HashiCorp support.
+
+<Note>
+
+Do not run Boundary with `-debug` in production continuously. Enable it for the duration of a diagnostic capture, then restart without the flag.
+
+</Note>
+
+### Packet capture
+
+Where the host OS and security policy permit, capture traffic on the session proxy port to confirm whether TCP sessions complete the TLS handshake:
+
+```shell-session
+$ tcpdump -i eth0 -c 10000 -w boundary-9202-$(hostname)-$(date +%Y%m%dT%H%M%S).pcap 'tcp port 9202'
+```
+
+Analyze the `.pcap` file offline in Wireshark:
+
+- TCP SYN and SYN-ACK with no data exchange after the client hello indicates a TLS failure, which DPI interception may cause.
+- TCP SYN with no SYN-ACK indicates a firewall is blocking the flow before the session proxy.
+
+If `tcpdump` is not available or not permitted, skip this step. The health endpoint, metrics, and event logs are typically sufficient to identify the failure layer.
+
+## Evidence-capture checklist
+
+Use this checklist before an onsite visit or a support escalation. Where only screenshots or hand transcription are possible, prioritize the **Required** items.
+
+| # | Item | Command or source | Priority |
+| --- | --- | --- | --- |
+| 1 | Boundary version on each host | `boundary version` | Required |
+| 2 | Listener addresses and ports | `listener` stanzas in controller and worker configuration files | Required |
+| 3 | Controller health response | `curl -s http://127.0.0.1:9203/health` on each controller | Required |
+| 4 | Worker health response | `curl -s http://127.0.0.1:9203/health` on each worker | Required |
+| 5 | Client agent status | `boundary client-agent status` on the client host | Required |
+| 6 | Error event lines (last 100 lines) | Event log file, filtered for `"type":"error"` | Required |
+| 7 | Correlation IDs from error events | `correlation_id` field in error events | Required |
+| 8 | System time on each host | `date -u` on each controller and worker | Required |
+| 9 | NTP sync status on each host | `timedatectl status`, `chronyc tracking`, or `ntpq -p` | Required |
+| 10 | Worker upstream metrics | `curl -s http://127.0.0.1:9203/metrics \| grep upstream` | Recommended |
+| 11 | Full event log (last 500 lines) | Event log file, all event types | Recommended |
+| 12 | Firewall and NAT topology sketch | Firewalls and NAT between client, ingress worker, egress worker, controller, and target | Recommended |
+| 13 | NAT device idle timeout settings | NAT configuration for TCP flows on ports 9201 and 9202 | Recommended |
+| 14 | Endpoint security agents on the client host | Names and versions of AV, EDR, and DLP agents | Recommended |
+| 15 | Packet capture on port 9202 | `tcpdump` on the ingress worker host | If permitted |
+
+When photographing a screen, capture the full terminal output including the command, timestamp, and hostname so each screenshot is self-contained.
+
+## Troubleshooting workflow
+
+This workflow targets the most common field symptom: a user cannot SSH, RDP, or connect to `127.0.0.1:<port>` from the Boundary Desktop client, or `boundary connect` exits with an error. Work through the phases in order. Each phase either resolves the incident or narrows the failure to a specific layer.
+
+### Phase 1: Baseline verification
+
+Run these checks at the start of every incident, regardless of the reported symptom.
+
+#### Verify component versions
+
+Run `boundary version` on every controller and worker host and record the output. Version mismatches between controllers and workers can produce unexpected authentication and session failures.
+
+#### Verify time synchronization
+
+<Warning>
+
+**Do not skip this step.** Clock skew between Boundary components is a confirmed root cause of "unauthorized credential" and certificate validation failures in production deployments. The controller generates per-session certificate chains with short validity windows. If a component's clock is skewed, those certificates appear expired on arrival and sessions fail, often with errors that resemble network or NAT issues.
+
+</Warning>
+
+Check the system clock and NTP synchronization status on every controller and worker host:
+
+```shell-session
+$ timedatectl status
+$ chronyc tracking
+$ ntpq -p
+```
+
+Use the command that matches the host's time service. Look for:
+
+- **System clock synchronized: yes**, or equivalent, on every host.
+- **Offset** from the NTP reference. An offset above a few seconds is a warning sign. An offset of a minute or more is almost certainly the cause of certificate or token failures.
+- **NTP server access.** In air-gapped environments, a local NTP server or GPS-disciplined clock source must be reachable from every Boundary host.
+
+If clocks are out of sync:
+
+1. Configure or fix the NTP client on the affected host.
+1. Force a synchronization with `chronyc makestep` or `ntpdate <ntp-server>`.
+1. Verify that the offset is within an acceptable range.
+1. Restart the Boundary component.
+1. Re-test the failing session.
+
+{/* human-input: NTP skew tolerance threshold — the maximum clock offset Boundary tolerates before certificate or token validation fails is not documented. A Boundary engineer must confirm the threshold and add it here. */}
+
+<Warning>
+
+**Human input required** — this section needs practitioner guidance before merging.
+
+The maximum clock offset that Boundary tolerates before issued session certificates or auth tokens are rejected is not documented. TLS certificate validation fails if the certificate's `notBefore` time is in the future or `notAfter` is in the past relative to the receiving component's clock. Because Boundary issues certificates with per-session lifetimes, even offsets of tens of seconds may push a new certificate outside its validity window.
+
+_A Boundary engineer or a practitioner who has observed the failure threshold in production must confirm the tolerance value and update this section._
+
+</Warning>
+
+#### Check component health
+
+Query the health endpoint on every controller and worker. A component that returns 5xx or refuses the connection has a component-level failure that you must resolve before session-level troubleshooting is meaningful. Check the event log on the affected host for the cause.
+
+### Phase 2: Identify the failure layer
+
+#### Can the user authenticate?
+
+Run `boundary authenticate` from the client host. If it returns a token, the controller is reachable on port 9200 and identity provider integration works.
+
+If authentication fails:
+
+- Check that port 9200 is reachable from the client host, for example with `nc -zv <controller-address> 9200`.
+- Check the controller health endpoint.
+- Check the controller event log for errors during the attempt, using the correlation ID to locate matching events.
+- If you see token or credential errors, re-run the time synchronization check and go to the [auth failure branch](#auth-failure-branch).
+
+#### Is the worker connected?
+
+On each worker host, check the metrics for reconnection activity:
+
+```shell-session
+$ curl -s http://127.0.0.1:9203/metrics | grep -E 'upstream|connected'
+```
+
+Elevated reconnect counters on `boundary_worker_upstream_*` strongly indicate NAT idle-timeout expiration. Go to the [NAT branch](#nat-branch). If the worker health endpoint returns 5xx or is unreachable, check the worker event log and go to the [network connectivity branch](#network-connectivity-branch).
+
+#### Does the session authorize but carry no data?
+
+If the session authorizes and a local port opens, but the SSH or RDP client times out or is refused, the failure is in the session proxy path on port 9202. Go to the [TLS and DPI branch](#tls-and-dpi-branch) or the [endpoint protection branch](#endpoint-protection-branch).
+
+### Phase 3: Targeted diagnosis
+
+#### Auth failure branch
+
+**Symptoms:** "unauthorized credential", "invalid token", "token is expired", or the session authorization call returns 401 or 403.
+
+1. Re-run the time synchronization check. Clock offset is the most likely cause. Fix the clock before proceeding.
+1. Run `boundary client-agent status`. If the agent is paused, run `boundary authenticate` and then `boundary client-agent resume`.
+1. Check the token expiration in the client agent status output. If the token has expired, the user must re-authenticate.
+1. Search the controller event log for the correlation ID of the failing request. Look for `"type":"error"` entries that reference certificate validation, token expiration, or auth method failures.
+1. If clock skew is the root cause, restart the controllers and workers after correcting NTP on all hosts. Terminate and re-establish existing long-lived sessions.
+
+#### Network connectivity branch
+
+**Symptoms:** connection refused or timeout to a Boundary port, worker health endpoint unreachable, or `boundary connect` fails before authorization.
+
+1. Verify that the `listener` stanzas in the controller and worker configuration files match the addresses and ports you expect.
+1. Test each required port from the initiating host:
+
+   ```shell-session
+   $ nc -zv <controller-address> 9200
+   $ nc -zv <controller-address> 9201
+   $ nc -zv <ingress-worker-address> 9202
+   $ nc -zv <upstream-worker-address> 9202
+   ```
+
+   Run the 9200 and ingress worker checks from the client host, the 9201 check from the worker host, and the upstream worker check from the downstream worker. Connection refused means the port is not listening or a host firewall blocks it. A timeout means a network firewall, ACL, or routing issue drops the packets.
+
+1. If a hop is blocked, check the firewall rules at every network boundary against the [component flow matrix](/validated-designs/boundary/installation-guide/prerequisites-and-personnel#component-flow-matrix). Apply missing rules and re-test.
+1. Verify routing between the hosts. A route may exist but an intermediate ACL may still block it. A successful `ping` does not confirm that TCP traffic is permitted.
+1. If permitted, capture packets to confirm that TCP SYN packets reach the receiving interface. Missing SYN-ACK responses confirm that packets are dropped before the receiving host.
+
+#### TLS and DPI branch
+
+**Symptoms:** the TCP connection completes but the TLS handshake fails or times out, the SSH or RDP client receives a reset immediately after the session authorizes, or firewall logs show TLS certificate errors on port 9202.
+
+1. Check whether any firewall or NGFW between the client and the ingress worker performs TLS inspection or DPI on port 9202.
+1. If so, apply the [DPI exclusion requirement](/validated-designs/boundary/installation-guide/security-hardening#dpi-exclusion-requirement) and re-test.
+1. If the handshake still fails, check for other inline security devices such as web proxies, SSL offload devices, or IDS/IPS sensors intercepting port 9202 traffic.
+1. Capture packets on port 9202 on the ingress worker while reproducing the failure:
+   - A client hello with a non-standard SNI value is expected for Boundary.
+   - An immediate RST from the worker after the client hello indicates the worker rejected the handshake because of a configuration mismatch or version incompatibility.
+   - An RST from an IP address that is neither the client nor the worker indicates an inline device is terminating the connection.
+
+#### NAT branch
+
+**Symptoms:** workers periodically lose and regain connectivity to the controller, sessions drop during or after idle periods, or worker metrics show elevated upstream reconnect counters.
+
+1. Compare the NAT device TCP idle timeout for port 9201 and 9202 flows against the Boundary worker keep-alive interval.
+1. Confirm that the NAT device does not apply DNAT to port 9202 flows in a way that breaks SNI routing. Refer to [Network address translation](/validated-designs/boundary/installation-guide/prerequisites-and-personnel#network-address-translation).
+1. If sessions drop after a predictable idle interval, that interval is likely the NAT idle timeout. Increase it for the relevant flows.
+1. If the NAT device does not support per-flow idle timeouts, enable OS-level TCP keep-alive on worker hosts with `net.ipv4.tcp_keepalive_time`, `net.ipv4.tcp_keepalive_intvl`, and `net.ipv4.tcp_keepalive_probes` on Linux, so that traffic refreshes NAT state entries before they expire.
+
+#### Endpoint protection branch
+
+**Symptoms:** the session authorizes and `boundary connect` reports an open local port, but connecting to `127.0.0.1:<port>` fails with connection refused or reset, Boundary logs show no errors, and the failure affects one client host.
+
+1. Check the endpoint security agent logs on the client host for blocked connections that reference the `boundary` process or outbound port 9202.
+1. Verify that the Boundary Desktop client executable or `boundary` binary is on the agent's allowed-process list. Many EDR and DLP agents block new or unsigned executables from opening network connections.
+1. Verify that the agent does not block outbound TCP on port 9202.
+1. Apply the [endpoint protection allow-list exceptions](/validated-designs/boundary/installation-guide/prerequisites-and-personnel#endpoint-protection-requirements) and re-test.
+1. If the agent is an antivirus scanner, add the Boundary Desktop client process directory to the scan exclusion list so that scanning does not add latency or reset local socket connections.
+
+## Escalation checklist
+
+If you cannot identify the root cause, collect the following before opening a support ticket:
+
+- Output of `boundary version` from every controller and worker host.
+- Output of `timedatectl status` or `chronyc tracking` from every host, with timestamps.
+- Health endpoint output from every controller and worker host.
+- Metrics endpoint output from every controller and worker host, captured to a file.
+- Output of `boundary client-agent status` from the client host.
+- Event log files from the controller and each worker in the failing session path, or the last 500 lines if the log is large.
+- The exact error message the user saw, including error codes.
+- The correlation ID of the failing request.
+- A description of the network topology, including the segments, NAT, firewalls, and DPI devices between the client, workers, and controller.
+- Confirmation of whether TLS inspection or DPI is enabled on port 9202 traffic and whether it is excluded.
+- The controller and worker configuration files, with secrets redacted.
+- A packet capture on port 9202 from the ingress worker host, if permitted.

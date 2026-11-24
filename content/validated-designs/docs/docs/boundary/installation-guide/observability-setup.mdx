@@ -1,0 +1,115 @@
+---
+page_title: Observability setup
+description: Wire Boundary telemetry and logs into your monitoring infrastructure at install time.
+# START AUTO GENERATED METADATA, DO NOT EDIT
+created_at: 2026-07-03T10:00:00.000Z
+last_modified: 2026-11-16T12:54:09.000Z
+# END AUTO GENERATED METADATA
+---
+
+# Observability setup
+
+<Note>
+
+This section is *emerging guidance* and is incomplete. It covers the on-box ops listener and event file sink, with a focus on restricted and air-gapped environments. Integration with external monitoring infrastructure will be added in a future update. We continually update this guidance as we identify common best practices and configurations to help customers get the most from the product.
+
+</Note>
+
+In low-observability environments you cannot assume that logs stream to a SIEM or that you can reach component hosts remotely. Configure the on-box telemetry on this page at install time so that diagnostic data is available on every controller and worker host when you need it. For how to use this telemetry during an incident, refer to [Support readiness](/validated-designs/boundary/administration-guide/support-readiness).
+
+## Ops listener
+
+Each Boundary controller and worker exposes health and metrics endpoints on the _ops listener_, which listens on port 9203 by default. Restrict access to the ops listener to the management network.
+
+<Note>
+
+The examples on this page query `127.0.0.1` on the component host. If your ops listener binds only to a loopback interface, run the commands directly on the host. To query it remotely, set the `address` field of the `listener "ops"` stanza to a reachable interface and restrict access to that interface at the firewall.
+
+</Note>
+
+### Health endpoint
+
+Validate that each component is healthy after installation:
+
+```shell-session
+$ curl -s http://127.0.0.1:9203/health
+```
+
+The endpoint returns an HTTP status code and a JSON body:
+
+- **200** — the component is healthy and ready to serve requests.
+- **503** — the component is shutting down gracefully.
+- **Other 5xx** — the component is unhealthy. Inspect the event logs for the cause.
+
+The JSON body includes the component type, version, and connectivity state.
+
+### Metrics endpoint
+
+Each component also exposes Prometheus-format metrics on the ops listener:
+
+```shell-session
+$ curl -s http://127.0.0.1:9203/metrics
+```
+
+For connectivity diagnosis, the most useful metric groups are:
+
+- `boundary_worker_upstream_*` — worker upstream connection state, reconnect counts, and latency.
+- `boundary_controller_*` — controller session counts and API request rates.
+- `boundary_worker_proxy_*` — active session proxy counts and error rates.
+
+Elevated reconnect counters on `boundary_worker_upstream_*` indicate that the worker is losing and re-establishing its upstream connection. This typically points to NAT idle-timeout expiration or a flapping network path. Refer to [Prerequisites and personnel](/validated-designs/boundary/installation-guide/prerequisites-and-personnel#network-address-translation).
+
+## Event file sink
+
+By default, Boundary writes events to `stderr`. Where log shipping is unavailable, configure a _file sink_ to write events to a local file for later transfer. Add or modify the `events` stanza in the Boundary configuration file:
+
+```hcl
+events {
+  audit_enabled        = true
+  observations_enabled = true
+  sysevents_enabled    = true
+
+  sink "file" {
+    name        = "all-events-file"
+    description = "All events written to local file for offline transfer"
+    event_types = ["*"]
+    format      = "cloudevents-json"
+
+    file {
+      path      = "/var/log/boundary"
+      file_name = "boundary-events.log"
+    }
+  }
+}
+```
+
+Restart the Boundary component for the change to take effect. The file sink writes one JSON event object per line.
+
+To reduce log volume in high-traffic environments, filter the sink to error and audit events:
+
+```hcl
+sink "file" {
+  name        = "errors-and-audit"
+  event_types = ["error", "audit"]
+  format      = "cloudevents-json"
+
+  file {
+    path      = "/var/log/boundary"
+    file_name = "boundary-errors-audit.log"
+  }
+}
+```
+
+For full configuration options, refer to [Audit logs](/validated-designs/boundary/administration-guide/audit-log-management) and the [Boundary events documentation](/boundary/docs/monitor/events/events).
+
+## Correlation IDs
+
+Boundary propagates an `X-Correlation-ID` header across API calls and includes it in every event emitted for that request chain. If the client application supplies its own `X-Correlation-ID` header, Boundary preserves it. Otherwise Boundary generates a random UUIDv4.
+
+To correlate events from the Desktop client, ingress worker, and controller for a single failed session:
+
+1. Note the `correlation_id` field of the error event in the event log.
+1. Search all component event logs for the same correlation ID.
+1. Use the matching entries across controller and worker logs to trace the request path and the point of failure.
+
+Include the correlation ID in every support escalation.
