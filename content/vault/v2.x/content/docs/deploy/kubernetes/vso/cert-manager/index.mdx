@@ -85,6 +85,13 @@ The Vault Secrets Operator only processes `CertificateRequest` resources whose
 `spec.issuerRef.group` is `secrets.hashicorp.com`. It ignores requests for
 other issuers.
 
+The issuer references a `VaultAuth`, which identifies the Vault credentials and
+connection used for signing. The Kubernetes API server stores the
+`CertificateRequest` and TLS Secret in etcd; workloads can then use the Secret.
+The CSR, signed certificate, and CA chain are not secret, but the private key
+in the TLS Secret is sensitive and never passes through the Vault Secrets
+Operator or Vault.
+
 ## Issuer types
 
 The Vault Secrets Operator provides a namespaced issuer and a cluster-scoped
@@ -156,14 +163,28 @@ each issuer type:
 - **`VaultClusterIssuer`**: The issuer does not have a namespace, so the Vault
   Secrets Operator checks the namespace of each `CertificateRequest` at signing
   time. The `VaultAuth` must allow every namespace that requests certificates
-  from the issuer. Set `allowedNamespaces` to a list of namespaces, or to
-  `["*"]` to allow all namespaces. Requests from namespaces that the
-  `VaultAuth` does not allow stay pending.
+  from the issuer. Set `allowedNamespaces` to an explicit list of namespaces.
+  Requests from namespaces that the `VaultAuth` does not allow stay pending.
 
-We recommend that you create a dedicated `VaultAuth` and Vault role for each
-PKI use case. When you share a `VaultAuth` with other Vault Secrets Operator
-resources, widening `allowedNamespaces` for certificates also widens access to
-those secrets.
+Always set `vaultAuthRef` explicitly. Do not grant PKI signing permissions to
+the default `VaultAuth`, and do not set `allowedNamespaces` to `["*"]` on a
+`VaultAuth` that can sign certificates. Create a dedicated `VaultAuth` and Vault
+PKI role for each unit of trust. A shared `VaultClusterIssuer` lets every
+allowed namespace request any name permitted by its Vault PKI role;
+`allowedNamespaces` does not restrict certificate names. Only share an issuer
+and role when every allowed namespace may legitimately request the same names.
+Sharing a `VaultAuth` with other operator resources also extends its Vault
+permissions to those resources.
+
+Restrict who can create or modify `VaultIssuer` and `VaultClusterIssuer`
+resources and the `VaultAuth`, `VaultAuthGlobal`, `VaultConnection`, and CA
+certificate Secret resources they reference. These resources determine the
+Vault server and identity used for signing. When requests can be approved, treat
+permission to create `Certificate` or `CertificateRequest` resources as
+permission to obtain certificates for names allowed by the PKI role. Set a short
+maximum certificate lifetime with the PKI role's `max_ttl`. Deleting a
+`Certificate`, `CertificateRequest`, or issuer does not revoke an issued
+certificate; it remains valid until it expires or you revoke it in Vault.
 
 ## Certificate request approval
 
@@ -171,7 +192,9 @@ cert-manager requires every `CertificateRequest` to be approved before an issuer
 signs it. cert-manager's built-in approver only approves requests for external
 issuers when its service account has the `approve` verb on the issuer's signer
 resources. cert-manager does not grant this permission for the
-`secrets.hashicorp.com` API group.
+`secrets.hashicorp.com` API group. cert-manager prevents changes to a
+`CertificateRequest` specification after creation, so the approved request is
+the request that the Vault Secrets Operator signs.
 
 You can approve requests for the Vault Secrets Operator issuers in the following
 ways:
@@ -182,8 +205,9 @@ ways:
   `vaultissuers.secrets.hashicorp.com/*` and
   `vaultclusterissuers.secrets.hashicorp.com/*` signers. cert-manager then
   approves every request for these issuers, and your Kubernetes RBAC rules for
-  `Certificate` resources and your Vault PKI role constraints are the only
-  limits on what cert-manager requests.
+  `Certificate` and `CertificateRequest` resources and your Vault PKI role
+  constraints are the remaining limits on issuance. In multi-tenant clusters,
+  leave this setting disabled and use policy-based approval instead.
 - **Policy-based approval**: Install
   [approver-policy](https://cert-manager.io/docs/policy/approval/approver-policy/)
   and grant its service account `approve` on the same signers. Use
@@ -196,6 +220,11 @@ ways:
 When an approver denies a request, the Vault Secrets Operator marks the
 `CertificateRequest` as failed with the `Denied` reason and does not contact
 Vault.
+
+## Security considerations
+
+Review the risks and mitigations for certificate issuance in the
+[security model for the cert-manager issuer](/vault/docs/deploy/kubernetes/vso/cert-manager/security).
 
 ## Certificate parameters
 

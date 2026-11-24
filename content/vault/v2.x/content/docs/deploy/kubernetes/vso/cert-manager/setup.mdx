@@ -83,6 +83,10 @@ accepts the key algorithms that cert-manager generates. Refer to
 [Create/Update role](/vault/api-docs/secret/pki#create-update-role) for all role
 parameters.
 
+Scope the role's permitted DNS names, URI and IP subject alternative names,
+and lifetime to the requesting unit of trust. Refer to
+[Signing permissions and shared issuers](/vault/docs/deploy/kubernetes/vso/cert-manager/security#signing-permissions-and-shared-issuers).
+
 ## Step 2: Create a Vault policy and auth role
 
 The Vault Secrets Operator authenticates to Vault as itself, not as
@@ -152,12 +156,16 @@ use when it signs certificates.
 
    </Tabs>
 
-## Step 3: Install the Vault Secrets Operator with approval enabled
+## Step 3: Install the Vault Secrets Operator
 
 cert-manager must approve each `CertificateRequest` before the Vault Secrets
-Operator signs it. Set `certManager.approverRBAC.enabled=true` to let the
-cert-manager built-in approver approve requests for the Vault Secrets Operator
-issuers.
+Operator signs it. The Helm chart disables approval permissions for the
+cert-manager built-in approver by default. In multi-tenant clusters, keep this
+setting disabled and use
+[approver-policy](https://cert-manager.io/docs/policy/approval/approver-policy/)
+to control which certificates each namespace can request. Refer to
+[Certificate request approval](/vault/docs/deploy/kubernetes/vso/cert-manager#certificate-request-approval)
+for the available approval options.
 
 1. Add the HashiCorp Helm repository:
 
@@ -172,30 +180,31 @@ issuers.
        --version <VSO_VERSION>                     \
        --create-namespace                          \
        --namespace vault-secrets-operator          \
-       --set certManager.approverRBAC.enabled=true \
        vault-secrets-operator                      \
        hashicorp/vault-secrets-operator
    ```
 
-When you enable this setting, cert-manager approves every request for the
-Vault Secrets Operator issuers. Use
-[approver-policy](https://cert-manager.io/docs/policy/approval/approver-policy/)
-instead when you need to restrict which certificates each namespace can
-request. Refer to
-[Certificate request approval](/vault/docs/deploy/kubernetes/vso/cert-manager#certificate-request-approval)
-for the available approval options.
+In a single-tenant cluster where every eligible request can be approved
+automatically, you can enable the built-in approver with
+`--set certManager.approverRBAC.enabled=true`. This setting lets cert-manager
+approve every request for every Vault Secrets Operator issuer. Do not enable it
+in a multi-tenant cluster; use approver-policy to restrict requests by namespace
+and certificate policy.
 
-If the cert-manager controller runs with a service account other than
-`cert-manager` in the `cert-manager` namespace, also set
+When you enable the built-in approver, set
 `certManager.approverRBAC.serviceAccountName` and
-`certManager.approverRBAC.serviceAccountNamespace`.
+`certManager.approverRBAC.serviceAccountNamespace` if the cert-manager
+controller uses a service account other than `cert-manager` in the
+`cert-manager` namespace.
 
 <Tip>
 
-To enable the issuers on an existing installation, upgrade the release with
-your current values and the `--set` flag. Refer to
+To enable issuer support on an existing installation, upgrade the release with
+your current values. Only set
+`certManager.approverRBAC.enabled=true` when you choose the built-in approver
+for a single-tenant cluster. Refer to
 [Migrate from the cert-manager Vault issuer](/vault/docs/deploy/kubernetes/vso/cert-manager/migrate#step-4-set-up-the-vault-secrets-operator)
-for the upgrade command.
+for the upgrade command and approval settings.
 
 </Tip>
 
@@ -248,8 +257,9 @@ spec:
 <Tab heading="VaultClusterIssuer" group="vaultclusterissuer">
 
 Create the resources in the Vault Secrets Operator namespace. Set
-`allowedNamespaces` to the namespaces that can request certificates from the
-cluster issuer, or to `["*"]` to allow all namespaces:
+`allowedNamespaces` to the specific namespaces that can request certificates
+from the cluster issuer. Do not use `["*"]` for a `VaultAuth` with PKI signing
+permissions.
 
 ```yaml
 apiVersion: v1
@@ -309,7 +319,9 @@ $ kubectl get vaultauth --all-namespaces
 Refer to the
 [`VaultConnection`](/vault/docs/deploy/kubernetes/vso/api-reference#vaultconnection)
 and [`VaultAuth`](/vault/docs/deploy/kubernetes/vso/api-reference#vaultauth) API
-reference for TLS settings and other authentication methods.
+reference for TLS settings and other authentication methods. Keep TLS
+verification enabled; for a private Vault CA, configure `caCertSecretRef` and,
+when necessary, `tlsServerName`.
 
 ## Step 5: Create the issuer
 
@@ -356,7 +368,10 @@ spec:
 
 You can also set the following optional fields:
 
-- `issuerRef` - Signs certificates with a specific issuer in the PKI mount.
+- `issuerRef` - Signs certificates with a specific issuer in the PKI mount. Use
+  the Vault PKI issuer ID to prevent changes to the mount's default issuer from
+  changing the signing CA. Grant the issuer-specific signing path in the Vault
+  policy.
 - `namespace` - Sets the Vault Enterprise namespace of the PKI mount.
 - `excludeCNFromSans` - Set to `false` to let Vault add the common name to the
   certificate SANs. Defaults to `true`.
@@ -443,9 +458,10 @@ Save the certificate to a file named `certificate.yaml` and apply it:
 $ kubectl apply --filename certificate.yaml
 ```
 
-cert-manager creates a `CertificateRequest`, the approver approves it, and the
-Vault Secrets Operator signs it. When you do not use automatic approval, approve
-the request with `cmctl`:
+cert-manager creates a `CertificateRequest`. After the configured approver
+approves the request, the Vault Secrets Operator signs it. For testing with
+manual approval, an identity with approval permission can approve the request
+with `cmctl`:
 
 ```shell-session
 $ cmctl approve --namespace app <CERTIFICATE_REQUEST_NAME>
