@@ -104,7 +104,7 @@ conditions, including:
 
 | Claim | Example value | Use for |
 |---|---|---|
-| `sub` | `repo:org/repo:environment:production/main` | Restrict to specific repository and branch |
+| `sub` | `repo:org/repo:environment:production` or `repo:org/repo:ref:refs/heads/main` | Restrict to a specific repository and environment, or repository and branch |
 | `repository` | `org/repo` | Restrict to specific repository |
 | `environment` | `production` | Restrict to specific deployment environment |
 | `ref` | `refs/heads/main` | Restrict to specific branch |
@@ -150,10 +150,10 @@ jobs:
       id-token: write   # Required: allows this job to request a GitHub OIDC token
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Retrieve secrets from Vault
-        uses: hashicorp/vault-action@v3
+        uses: hashicorp/vault-action@v4
         with:
           url: https://vault.example.com
           caCertificate: ${{ secrets.VAULT_CA_CERT }}
@@ -212,18 +212,22 @@ jobs:
     runs-on: self-hosted  # EC2 instance with IAM role attached
     steps:
       - name: Retrieve secrets via AWS IAM auth
-        uses: hashicorp/vault-action@v3
-        with:
-          url: https://vault.example.com
-          method: aws
-          role: github-runner
-          secrets: |
-            secret/data/ci/build/registry password | REGISTRY_PASSWORD
+        env:
+          VAULT_ADDR: https://vault.example.com
+        run: |
+          export VAULT_TOKEN=$(vault login -method=aws -token-only \
+            role=github-runner)
+
+          REGISTRY_PASSWORD=$(vault kv get -field=password secret/ci/build/registry)
+          echo "::add-mask::$REGISTRY_PASSWORD"
+          echo "REGISTRY_PASSWORD=$REGISTRY_PASSWORD" >> $GITHUB_ENV
 ```
 
 The runner authenticates with its AWS identity — no credential needs to be
-stored in GitHub. If Vault is configured with `iam_server_id_header_value`,
-add the matching `awsIamServerId` input to the vault-action step.
+stored in GitHub. The Vault GitHub Action does not support the AWS auth method,
+so the step uses the Vault CLI, which must be installed on the runner. If Vault
+is configured with `iam_server_id_header_value`, add the matching
+`header_value` argument to the login command.
 
 </Tab>
 <Tab heading="Azure">
@@ -260,6 +264,8 @@ jobs:
     runs-on: self-hosted  # Azure VM with managed identity assigned
     steps:
       - name: Retrieve secrets via Azure Managed Identity auth
+        env:
+          VAULT_ADDR: https://vault.example.com
         run: |
           AZURE_JWT=$(curl -s -H "Metadata: true" \
             "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://management.azure.com/" \
@@ -270,8 +276,9 @@ jobs:
             role=github-runner \
             jwt=$AZURE_JWT)
 
-          vault kv get -field=password secret/ci/build/registry \
-            | echo "REGISTRY_PASSWORD=$(cat)" >> $GITHUB_ENV
+          REGISTRY_PASSWORD=$(vault kv get -field=password secret/ci/build/registry)
+          echo "::add-mask::$REGISTRY_PASSWORD"
+          echo "REGISTRY_PASSWORD=$REGISTRY_PASSWORD" >> $GITHUB_ENV
 ```
 
 The runner retrieves an Azure access token from IMDS, exchanges it for a Vault
@@ -312,12 +319,15 @@ jobs:
     runs-on: self-hosted  # GCE instance with service account attached
     steps:
       - name: Retrieve secrets via GCP IAM auth
+        env:
+          VAULT_ADDR: https://vault.example.com
         run: |
           export VAULT_TOKEN=$(vault login -method=gcp -token-only \
             role=github-runner)
 
-          vault kv get -field=password secret/ci/build/registry \
-            | echo "REGISTRY_PASSWORD=$(cat)" >> $GITHUB_ENV
+          REGISTRY_PASSWORD=$(vault kv get -field=password secret/ci/build/registry)
+          echo "::add-mask::$REGISTRY_PASSWORD"
+          echo "REGISTRY_PASSWORD=$REGISTRY_PASSWORD" >> $GITHUB_ENV
 ```
 
 The runner logs in with its Google Cloud identity instead of using a bootstrap
@@ -363,7 +373,7 @@ jobs:
     runs-on: self-hosted  # ARC-managed runner on Kubernetes
     steps:
       - name: Retrieve secrets via Kubernetes auth
-        uses: hashicorp/vault-action@v3
+        uses: hashicorp/vault-action@v4
         with:
           url: https://vault.example.com
           method: kubernetes
@@ -410,7 +420,9 @@ single-use delivery and limits the Vault token lifetime for the job.
 ### Workflow configuration
 
 The workflow must include steps to unwrap the secret_id and authenticate with
-Vault using the AppRole method.
+Vault using the AppRole method. The Vault GitHub Action does not unwrap
+response-wrapped secret IDs, so the step uses the Vault CLI, which must be
+installed on the runner.
 
 ```yaml
 jobs:
@@ -418,17 +430,20 @@ jobs:
     runs-on: self-hosted  # Air-gapped runner
     steps:
       - name: Retrieve secrets via AppRole
-        uses: hashicorp/vault-action@v3
-        with:
-          url: https://vault.example.com
-          method: approle
-          roleId: ${{ secrets.VAULT_ROLE_ID }}
-          # wrapping token injected by external provisioning process
-          # vault-action unwraps it automatically when wrapped=true
-          secretId: ${{ secrets.VAULT_SECRET_ID_WRAPPING_TOKEN }}
-          wrapped: true
-          secrets: |
-            secret/data/ci/build/registry password | REGISTRY_PASSWORD
+        env:
+          VAULT_ADDR: https://vault.example.com
+          VAULT_ROLE_ID: ${{ secrets.VAULT_ROLE_ID }}
+          # Single-use wrapping token injected by an external provisioning process
+          VAULT_WRAP_TOKEN: ${{ secrets.VAULT_SECRET_ID_WRAPPING_TOKEN }}
+        run: |
+          SECRET_ID=$(VAULT_TOKEN="$VAULT_WRAP_TOKEN" vault unwrap -field=secret_id)
+          export VAULT_TOKEN=$(vault write -field=token auth/approle/login \
+            role_id="$VAULT_ROLE_ID" \
+            secret_id="$SECRET_ID")
+
+          REGISTRY_PASSWORD=$(vault kv get -field=password secret/ci/build/registry)
+          echo "::add-mask::$REGISTRY_PASSWORD"
+          echo "REGISTRY_PASSWORD=$REGISTRY_PASSWORD" >> $GITHUB_ENV
 ```
 
 The workflow unwraps the single-use bootstrap material and exchanges it for a
@@ -462,8 +477,9 @@ vault write auth/cert/certs/github-runner-fleet \
 
 The workflow authenticates to Vault using the client certificate provisioned on
 the runner. The pattern assumes the runner's TLS cert is already managed and
-rotated by Vault's PKI secrets engine. The workflow needs to reference the cert
-and key from GitHub Secrets or another secure store.
+rotated by Vault's PKI secrets engine and stored on the runner's file system.
+The Vault GitHub Action does not support the TLS certificate auth method, so
+the step uses the Vault CLI, which must be installed on the runner.
 
 ```yaml
 jobs:
@@ -471,15 +487,18 @@ jobs:
     runs-on: self-hosted  # Persistent runner with managed TLS cert
     steps:
       - name: Retrieve secrets via TLS cert auth
-        uses: hashicorp/vault-action@v3
-        with:
-          url: https://vault.example.com
-          method: cert
-          # Certificate and key path provisioned on runner by Vault PKI engine
-          clientKey: ${{ secrets.RUNNER_TLS_KEY }}
-          clientCertificate: ${{ secrets.RUNNER_TLS_CERT }}
-          secrets: |
-            secret/data/ci/build/signing key | SIGNING_KEY
+        env:
+          VAULT_ADDR: https://vault.example.com
+        run: |
+          # Certificate and key provisioned on the runner by the Vault PKI engine
+          export VAULT_TOKEN=$(vault login -method=cert -token-only \
+            name=github-runner-fleet \
+            -client-cert=/etc/vault/tls/tls.crt \
+            -client-key=/etc/vault/tls/tls.key)
+
+          SIGNING_KEY=$(vault kv get -field=key secret/ci/build/signing)
+          echo "::add-mask::$SIGNING_KEY"
+          echo "SIGNING_KEY=$SIGNING_KEY" >> $GITHUB_ENV
 ```
 
 The runner authenticates with its client certificate and retrieves only the
@@ -552,7 +571,7 @@ Radar.
 
 ## Use Vault secrets sync for GitHub Secrets
 
-Vault Secrets Sync provides an alternative solution for managing GitHub Actions
+Vault Secrets Sync, available in Vault Enterprise and HCP Vault Dedicated, provides an alternative solution for managing GitHub Actions
 pipeline secrets that is useful in cases where using the GitHub OIDC provider is
 not a feasible approach. Vault Secrets Sync simplifies configuration and lets you
 to select specific secrets or secret paths for synchronization from Vault to
@@ -594,7 +613,7 @@ organizational policies.
 ### Vault Secrets Sync
 
 - Watch [Developer's Guide to HCP Vault, Part 3: Secrets sync](https://www.youtube.com/watch?v=EPz9hYhDKmw) for an introduction to syncing Vault secrets to GitHub Actions.
-- Watch [Vault Enterprise secrets sync (beta)](https://www.youtube.com/watch?v=cel1GQ0wpQA) for an overview of the Vault Enterprise secrets sync feature.
+- Watch [Vault Enterprise secrets sync](https://www.youtube.com/watch?v=cel1GQ0wpQA) for an overview of the Vault Enterprise secrets sync feature, recorded during the feature's beta.
 
 ### Vault GitHub Action
 
@@ -612,7 +631,6 @@ organizational policies.
 - Read [HashiCorp Vault GitHub Secrets Sync with Terraform](https://www.infralovers.com/blog/2024-04-19-hcp-vault-github-secrets-sync/) to learn how to manage Vault secrets sync with Terraform.
 - Read [Push button security for your GitHub Actions](https://medium.com/hashicorp-engineering/push-button-security-for-your-github-actions-d4fffde1df20) for HashiCorp's guide to securing GitHub Actions pipelines.
 - Read [How to Use HashiCorp Vault Action](https://cicube.io/workflow-hub/hashicorp-vault--github-action/) for a practical guide to the Vault GitHub Action.
-- Read [Vault GitHub Actions example](https://github.com/umn-secm/hcp-vault-terraform-examples/blob/main/.github/workflows/vault_github_actions_example.yml) for a complete example workflow using the Vault GitHub Action.
 - Watch [Automate Workflows w/ HashiCorp Vault GitHub Actions](https://www.youtube.com/watch?v=BTneNK6N98U) for a video demonstration of automating workflows with the Vault GitHub Action.
 
 ## Next steps

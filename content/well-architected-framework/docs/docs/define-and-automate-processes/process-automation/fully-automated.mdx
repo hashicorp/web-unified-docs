@@ -62,10 +62,10 @@ jobs:
   build-image:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v6
 
       - name: Setup Packer
-        uses: hashicorp/setup-packer@main
+        uses: hashicorp/setup-packer@v3
 
       - name: Initialize Packer
         run: packer init packer/
@@ -82,28 +82,28 @@ jobs:
   deploy-infrastructure:
     needs: build-image
     runs-on: ubuntu-latest
+    env:
+      TF_TOKEN_app_terraform_io: ${{ secrets.TF_API_TOKEN }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v6
 
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v2
+        uses: hashicorp/setup-terraform@v4
 
       - name: Terraform Init
         working-directory: terraform/
-        env:
-          TF_TOKEN_app_terraform_io: ${{ secrets.TF_API_TOKEN }}
         run: terraform init
 
       - name: Terraform Plan
         working-directory: terraform/
-        run: terraform plan
+        run: terraform plan -out=tfplan
 
       - name: Terraform Apply
         working-directory: terraform/
-        run: terraform apply -auto-approve
+        run: terraform apply tfplan
 ```
 
-The GitHub Actions workflow automates your complete infrastructure pipeline. When you push changes to Packer templates or Terraform configurations, GitHub Actions validates the Packer template, builds a new image, registers it with HCP Packer, then triggers Terraform to deploy the updated infrastructure. The pipeline ensures every infrastructure change goes through validation before deployment, eliminating manual execution steps. CI/CD credentials for HCP Packer and HCP Terraform are stored as GitHub secrets, keeping sensitive values out of your code. 
+The GitHub Actions workflow automates your complete infrastructure pipeline. Terraform applies the exact plan file that the `Terraform Plan` step creates, so the apply cannot include changes that the plan did not show. For production pipelines, pin third-party actions to a full commit SHA rather than a version tag to protect against supply chain attacks. When you push changes to Packer templates or Terraform configurations, GitHub Actions validates the Packer template, builds a new image, registers it with HCP Packer, then triggers Terraform to deploy the updated infrastructure. The pipeline ensures every infrastructure change goes through validation before deployment, eliminating manual execution steps. CI/CD credentials for HCP Packer and HCP Terraform are stored as GitHub secrets, keeping sensitive values out of your code. 
 
 You can learn more about using Git and GitOps with [Learn how to implement a GitOps workflow](/well-architected-framework/define-and-automate-processes/process-automation/gitops).
 
@@ -115,7 +115,7 @@ Fully-automated CI/CD pipelines require access to sensitive credentials—cloud 
 
 Vault provides dynamic secrets and centralized secret management for CI/CD pipelines. Instead of storing long-lived credentials in GitHub secrets or CI/CD variables, your pipelines authenticate to Vault and retrieve short-lived, automatically rotating credentials. When a pipeline needs AWS access, Vault generates temporary AWS credentials that expire after the deployment completes, eliminating persistent credentials that can be compromised.
 
-The following example shows how a CI/CD pipeline integrates with Vault for dynamic secrets:
+The following example shows how a CI/CD pipeline integrates with Vault for dynamic secrets. The example assumes you configured the Vault [JWT auth method](/vault/docs/auth/jwt) to trust GitHub's OIDC provider, the [AWS secrets engine](/vault/docs/secrets/aws) with an `assumed_role` role named `deploy-role`, and the [HCP Terraform secrets engine](/vault/docs/secrets/terraform) with a role named `deploy`:
 
 ```yaml
 # .github/workflows/vault-integration.yml - Vault-integrated pipeline
@@ -128,30 +128,36 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    # Required for the job to request a GitHub OIDC token for Vault
+    permissions:
+      id-token: write
+      contents: read
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v6
 
       - name: Import Secrets from Vault
-        uses: hashicorp/vault-action@v2
+        uses: hashicorp/vault-action@v4
         with:
           url: https://vault.example.com:8200
           method: jwt
           role: github-actions
           secrets: |
-            secret/data/aws access_key | AWS_ACCESS_KEY_ID ;
-            secret/data/aws secret_key | AWS_SECRET_ACCESS_KEY ;
-            secret/data/terraform token | TF_API_TOKEN
+            aws/creds/deploy-role access_key | AWS_ACCESS_KEY_ID ;
+            aws/creds/deploy-role secret_key | AWS_SECRET_ACCESS_KEY ;
+            aws/creds/deploy-role security_token | AWS_SESSION_TOKEN ;
+            terraform/creds/deploy token | TF_TOKEN_app_terraform_io
 
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v2
+        uses: hashicorp/setup-terraform@v4
 
       - name: Deploy Infrastructure
         run: |
           terraform init
-          terraform apply -auto-approve
+          terraform plan -out=tfplan
+          terraform apply tfplan
 ```
 
-The GitHub Actions pipeline authenticates to Vault using JWT authentication, retrieves AWS credentials and Terraform tokens dynamically, and uses them for infrastructure deployment. The secrets never persist in GitHub's environment—Vault generates them at runtime and they expire after use. When you rotate credentials in Vault, all pipelines immediately use the new credentials without pipeline modifications. Vault's audit logs track which pipelines access which secrets, providing complete visibility into credential usage across your automation systems.
+The GitHub Actions pipeline authenticates to Vault with a short-lived GitHub OIDC token, then requests temporary AWS credentials and an HCP Terraform API token from Vault. You do not store any credentials in GitHub. The AWS credentials and the HCP Terraform token expire when their Vault leases end, so a leaked value has a limited lifetime. Vault's audit logs track which pipelines access which secrets, providing visibility into credential usage across your automation systems.
 
 ## Enforce policies with Sentinel
 
@@ -163,39 +169,47 @@ The following example shows Sentinel policies that enforce security and cost con
 
 <CodeBlockConfig filename="policy.sentinel">
 
-```hcl
+```sentinel
 # Policy enforcement for automated deployments
 import "tfplan/v2" as tfplan
 
-# Require all S3 buckets to be private
-mandatory_s3_encryption = rule {
-  all tfplan.resource_changes as _, rc {
-    rc.type is "aws_s3_bucket" implies
-      rc.change.after.acl is "private" and
-      rc.change.after.versioning[0].enabled is true
+# Return managed resources of a given type that the plan creates or updates
+changed_resources = func(type) {
+  return filter tfplan.resource_changes as _, rc {
+    rc.type is type and
+      rc.mode is "managed" and
+      (rc.change.actions contains "create" or rc.change.actions contains "update")
+  }
+}
+
+# Require S3 public access blocks to block all public access
+block_public_s3 = rule {
+  all changed_resources("aws_s3_bucket_public_access_block") as _, rc {
+    rc.change.after.block_public_acls is true and
+      rc.change.after.block_public_policy is true and
+      rc.change.after.ignore_public_acls is true and
+      rc.change.after.restrict_public_buckets is true
   }
 }
 
 # Limit EC2 instance sizes to control costs
 restrict_instance_types = rule {
-  all tfplan.resource_changes as _, rc {
-    rc.type is "aws_instance" implies
-      rc.change.after.instance_type in ["t3.micro", "t3.small", "t3.medium"]
+  all changed_resources("aws_instance") as _, rc {
+    rc.change.after.instance_type in ["t3.micro", "t3.small", "t3.medium"]
   }
 }
 
 # Require tags for resource management
 require_resource_tags = rule {
-  all tfplan.resource_changes as _, rc {
-    rc.type is "aws_instance" implies (
+  all changed_resources("aws_instance") as _, rc {
+    rc.change.after.tags is not null and
       "Environment" in keys(rc.change.after.tags) and
       "Owner" in keys(rc.change.after.tags)
-    )
   }
 }
 
 main = rule {
-  mandatory_s3_encryption and
+  block_public_s3 and
   restrict_instance_types and
   require_resource_tags
 }
@@ -203,7 +217,7 @@ main = rule {
 
 </CodeBlockConfig>
 
-The Sentinel policies automatically validate every Terraform plan in your CI/CD pipeline. When a developer tries to create a public S3 bucket, deploy an oversized instance, or skip required tags, Sentinel blocks the change and explains the violation. Approved changes that meet all policies proceed automatically to deployment without manual review. Policy automation enables rapid deployments while maintaining security and compliance standards. HCP Terraform enforces these policies before applying changes, preventing policy violations from reaching your infrastructure.
+The Sentinel policies automatically validate every Terraform plan in your CI/CD pipeline. When a developer tries to weaken an S3 public access block, deploy an oversized instance, or skip required tags, Sentinel blocks the change and explains the violation. Approved changes that meet all policies proceed automatically to deployment without manual review. Policy automation supports rapid deployments while maintaining security and compliance standards. HCP Terraform enforces these policies before applying changes, preventing policy violations from reaching your infrastructure.
 
 ## Deploy self-service infrastructure
 
@@ -261,7 +275,7 @@ Packer image automation:
 - Automate Packer with [GitHub Actions](/packer/tutorials/cloud-production/github-actions)
 - Build [golden image pipelines](/packer/tutorials/cloud-production/golden-image-with-hcp-packer)
 - Read about [HCP Packer](/hcp/docs/packer) for image metadata management
-- Use [HCP Packer channels](/hcp/docs/packer/manage-image-lifecycle) for environment promotion
+- Use [HCP Packer channels](/hcp/docs/packer/manage/channel) for environment promotion
 
 Vault secrets in CI/CD:
 

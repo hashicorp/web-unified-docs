@@ -31,9 +31,9 @@ GitOps follows four core principles that create a reliable, automated deployment
 
 **Git as single source of truth:** Git repositories serve as the authoritative source for system state. Any change to infrastructure or applications must go through Git. Changes made outside Git create drift that GitOps tooling automatically corrects by reconciling actual state with Git state.
 
-**Automated deployment from Git:** GitOps tools continuously monitor Git repositories and automatically apply changes when new commits are merged. When you merge a pull request updating Terraform configurations, HCP Terraform automatically plans and applies the changes, deploying infrastructure without manual intervention.
+**Automated deployment from Git:** GitOps tools continuously monitor Git repositories and automatically apply changes when you merge commits. When you merge a pull request updating Terraform configurations, HCP Terraform automatically plans the changes and, when you enable auto-apply on the workspace, applies them without manual intervention.
 
-**Continuous reconciliation:** GitOps systems continuously compare actual system state against desired state in Git and automatically correct any drift. If someone manually modifies infrastructure, GitOps detects the difference and reverts the change to match Git, maintaining consistency.
+**Continuous reconciliation:** GitOps systems compare actual system state against desired state in Git and correct drift. Kubernetes GitOps controllers reconcile continuously. For infrastructure, HCP Terraform [health assessments](/terraform/cloud-docs/workspaces/health) detect drift on a schedule, and the next apply restores the state defined in Git.
 
 When you implement GitOps, you gain the following benefits:
 
@@ -59,9 +59,9 @@ When you implement GitOps with HashiCorp tools, deployments follow the following
 
 1. **Developer merges pull request:** After receiving approvals and passing all checks, the developer merges the pull request into the main branch. This merge event triggers the automated deployment process.
 
-1. **HCP Terraform applies changes automatically:** HCP Terraform detects the merge to the main branch and automatically runs a new plan followed by an apply operation. The infrastructure changes deploy without manual intervention, using the exact code from the Git repository.
+1. **HCP Terraform applies changes:** HCP Terraform detects the merge to the main branch and runs a new plan. With auto-apply enabled on the workspace, HCP Terraform applies the plan without manual intervention. Otherwise, a team member confirms the apply in HCP Terraform.
 
-1. **System reconciles to desired state:** After the apply completes, your infrastructure matches the desired state defined in Git. If someone manually modifies infrastructure outside of Git, HCP Terraform detects the drift during the next run and reconciles the actual state back to match Git.
+1. **System reconciles to desired state:** After the apply completes, your infrastructure matches the desired state defined in Git. If someone manually modifies infrastructure outside of Git, HCP Terraform health assessments detect the drift, and the next apply restores the configuration defined in Git.
 
 This workflow ensures that every infrastructure change goes through version control, code review, automated validation, and policy enforcement before deployment. Git maintains a complete audit trail of who made changes, when they were made, and why they were necessary.
 
@@ -75,7 +75,7 @@ HashiCorp provides several tools that enable GitOps workflows for infrastructure
 
 **Packer for immutable image builds:** GitOps workflows use Packer to build immutable machine images and container images from version-controlled templates. When Packer templates change in Git, CI/CD pipelines automatically build new images, maintaining consistency between infrastructure code and deployment artifacts. After Packer builds an AMI or container image, you reference the artifact in Terraform using data sources or image tags, connecting your image building workflow to your infrastructure deployment workflow.
 
-**Vault for secrets management:** GitOps workflows require secrets without storing them in Git repositories. Vault provides dynamic secrets and centralized secret management, allowing your GitOps deployments to retrieve credentials at runtime without committing secrets to version control. When HCP Terraform applies your configuration during automated deployments, it retrieves database passwords, API keys, and cloud credentials from Vault dynamically, ensuring secrets never appear in Git history or Terraform state files.
+**Vault for secrets management:** GitOps workflows require secrets without storing them in Git repositories. Vault provides dynamic secrets and centralized secret management, so your GitOps deployments can retrieve credentials at runtime without committing secrets to version control. During automated deployments, HCP Terraform can use [Vault-backed dynamic credentials](/terraform/cloud-docs/workspaces/dynamic-provider-credentials/vault-backed) to authenticate to cloud providers, and your configuration can read secrets through [ephemeral resources](/terraform/language/manage-sensitive-data/ephemeral) so they never appear in Git history or Terraform state files.
 
 **Sentinel for policy as code:** Sentinel enforces organizational policies on infrastructure changes before they deploy. Policy files stored in Git define security requirements, compliance standards, and cost controls that automatically validate infrastructure changes during the GitOps workflow. During the pull request workflow, Sentinel evaluates the Terraform plan and blocks the apply if policies fail, preventing non-compliant infrastructure from deploying and requiring developers to fix violations before merging changes.
 
@@ -96,7 +96,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0"
+      version = "~> 6.0"
     }
   }
 }
@@ -146,20 +146,21 @@ resource "aws_lb" "app" {
 }
 ```
 
-When you commit this configuration to your Git repository and merge a pull request, HCP Terraform automatically applies the changes. The configuration uses a data source to query the latest AMI that Packer built and tagged, demonstrating how GitOps workflows connect multiple HashiCorp tools. The HCP Terraform cloud backend stores state remotely, enabling team collaboration and maintaining a single source of truth for infrastructure state alongside your code in Git.
+When you commit this configuration to your Git repository and merge a pull request, HCP Terraform plans the changes and applies them when the workspace has auto-apply enabled. The configuration uses a data source to query the latest AMI that Packer built and tagged, demonstrating how GitOps workflows connect multiple HashiCorp products. The HCP Terraform cloud backend stores state remotely, enabling team collaboration and maintaining a single source of truth for infrastructure state alongside your code in Git.
 
 ## Example: Sentinel policy for GitOps validation
 
 The following Sentinel policy enforces tagging requirements on all AWS resources, ensuring every infrastructure change includes proper metadata for tracking and cost allocation:
 
-```hcl
+```sentinel
 import "tfplan/v2" as tfplan
 
-# Find all AWS resources in the plan
+# Find all taggable AWS resources being created or updated in the plan
 all_resources = filter tfplan.resource_changes as _, rc {
   rc.provider_name is "registry.terraform.io/hashicorp/aws" and
     rc.mode is "managed" and
-    (rc.change.actions contains "create" or rc.change.actions contains "update")
+    (rc.change.actions contains "create" or rc.change.actions contains "update") and
+    "tags" in keys(rc.change.after)
 }
 
 # Require tags on all resources
@@ -169,7 +170,8 @@ required_tags = ["Environment", "ManagedBy"]
 resource_tags_valid = rule {
   all all_resources as _, resource {
     all required_tags as tag {
-      resource.change.after.tags[tag] is not null
+      resource.change.after.tags is not null and
+        tag in keys(resource.change.after.tags)
     }
   }
 }
@@ -202,7 +204,7 @@ Vault for GitOps secrets:
 
 - Get started with [Vault tutorials](/vault/tutorials) for hands-on examples
 - Read the [Vault documentation](/vault/docs) for secrets management features
-- Generate [dynamic secrets with Vault](/vault/tutorials/get-started-hcp-vault-dedicated/vault-get-started-intro) for automated deployments
+- Generate [dynamic secrets with Vault](/vault/tutorials/db-credentials) for automated deployments
 - Integrate Vault with [GitHub Actions](/vault/tutorials/app-integration/github-actions)
 - Use [Vault with Terraform](/terraform/tutorials/secrets/secrets-vault) for secure GitOps
 
