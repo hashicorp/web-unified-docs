@@ -47,10 +47,10 @@ Terraform docs render from. Because of this, a change that should affect both
 editions has to be made in two places: `terraform-docs-common/cloud-docs` and
 the corresponding `terraform-enterprise/<version>` directory. Editing only one
 leaves the two editions out of sync until the next content synchronization
-overwrites the un-mirrored change. Refer to [Terraform Enterprise quarterly
-releases](./publish-tfe-docs.md) for the synchronization workflow and exclusion
-tag syntax used to keep HCP Terraform-only or Terraform Enterprise-only content
-from leaking into the other edition.
+overwrites the un-mirrored change. Refer to [Contribute to Terraform
+documentation](./contribute-terraform-docs.md) for the synchronization
+workflow and exclusion tag syntax used to keep HCP Terraform-only or
+Terraform Enterprise-only content from leaking into the other edition.
 
 ### Contribute to a content directory
 
