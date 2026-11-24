@@ -1,0 +1,203 @@
+---
+layout: docs
+page_title: DR failover
+description: >-
+  A Vault Enterprise DR failover promotes a DR secondary to primary. Learn what
+  promote, demote, disable, and update primary do, and how to avoid two active
+  primaries.
+---
+
+# DR failover
+
+@include 'alerts/enterprise-and-hcp.mdx'
+
+A disaster recovery (DR) failover promotes a DR secondary cluster to primary
+when the original primary fails or when you plan a switch. This page explains
+the rules behind a failover and what each DR operation does to the clusters
+involved.
+
+For step-by-step practice, complete the [Set up disaster recovery
+replication](/vault/tutorials/disaster-recovery) tutorials. For request and
+response details, refer to the [DR replication
+API](/vault/api-docs/system/replication/replication-dr).
+
+## Only one primary at a time
+
+A DR replication set must have exactly one active primary. If the original
+primary recovers after you promote a secondary, both clusters can accept client
+requests. Their data then diverges, and Vault cannot tell which copy is correct.
+This situation is a split brain.
+
+To avoid a split brain:
+
+- When the original primary is still running, demote it before you promote the
+  DR secondary. Keep the time between the demote, promote, and update primary
+  operations as short as possible.
+- When the original primary was down, demote or disable it as soon as it comes
+  back and before it serves clients. Refer to [When the original primary
+  returns](#when-the-original-primary-returns).
+
+## No automatic failover
+
+Vault does not promote a DR secondary on its own. A secondary that loses its
+connection to the primary cannot tell whether the primary is down or whether the
+network between the clusters failed. If the secondary promoted itself in the
+second case, you would have two active primaries.
+
+You decide when to fail over. The replication APIs support automation, so you
+can write your own detection and promotion logic based on what you know about
+your environment. We recommend a tested triage runbook that confirms the outage
+before anyone promotes a secondary. Refer to the [HashiCorp Validated Design for
+DR operations](/validated-designs/vault/administration-guide/disaster-recovery-operations).
+
+## What each operation does
+
+The following table describes each DR operation:
+
+| Operation | Run on | Effect |
+| --- | --- | --- |
+| [Promote](/vault/api-docs/system/replication/replication-dr#promote-dr-secondary) | DR secondary | The cluster becomes the DR primary. Other DR secondaries need new secondary activation tokens from it. |
+| [Demote](/vault/api-docs/system/replication/replication-dr#demote-dr-primary) | DR primary | The cluster becomes a DR secondary that does not connect to any primary. It keeps its cluster ID, so you can reconnect it to the same replication set without wiping storage. |
+| [Disable primary](/vault/api-docs/system/replication/replication-dr#disable-dr-primary) | DR primary | DR replication stops on the cluster, and secondaries can no longer connect. Re-enabling the cluster changes its cluster ID. As a secondary, it needs a storage wipe. As a primary, secondaries that connect back to it need a storage wipe. |
+| [Update primary](/vault/api-docs/system/replication/replication-dr#update-dr-secondary-s-primary) | DR secondary | The secondary connects to a different primary, and keeps its existing data. |
+
+Promote and update primary need a [DR operation
+token](/vault/docs/enterprise/replication/disaster-recovery/operation-token).
+Demote and disable primary run on a primary, so they use a normal Vault token
+with permission on the endpoint.
+
+
+### Update primary after a failover
+
+After a promotion, every other cluster in the replication set still points at
+the old primary. Run update primary on each cluster that you want to connect to
+the new primary:
+
+- The original primary, after you demote it.
+- Any remaining DR secondaries.
+
+Update primary does not wipe data on the secondary. Each call needs two tokens:
+
+- **A DR operation token**, generated on the secondary you are updating. Refer
+  to [DR operation
+  tokens](/vault/docs/enterprise/replication/disaster-recovery/operation-token).
+- **A secondary activation token**, generated on the new primary with the
+  [generate DR secondary
+  token](/vault/api-docs/system/replication/replication-dr#generate-dr-secondary-token)
+  endpoint. Generate one for each secondary.
+
+To update a secondary:
+
+1. On the new primary, generate a secondary activation token for the secondary.
+1. On the secondary, generate a DR operation token.
+1. On the secondary, call [update
+   primary](/vault/api-docs/system/replication/replication-dr#update-dr-secondary-s-primary)
+   with the activation token in the `token` parameter and the DR operation
+   token in the `dr_operation_token` parameter.
+
+Use the `token` parameter. A demoted DR secondary does not accept the
+`update_primary_addrs` parameter.
+
+The secondary calls the new primary's API port to unwrap the activation token.
+If the secondary cannot reach that port, generate the activation token with a
+public key from the secondary instead. Refer to [Activation
+methods](/vault/docs/enterprise/replication#activation-methods).
+
+#### Stop a secondary from reconnecting to a failed primary
+
+If the old primary is down and you are not ready to point a secondary at the new
+primary, call update primary with an empty `token` value. The cluster stays a DR
+secondary, forgets its previous primary, and stops trying to reconnect to it.
+
+### Forced promotion
+
+<Warning>
+
+Do not use the `force` parameter on promote unless you accept data loss.
+A forced promotion skips safety checks, and the promoted cluster loses any data
+that did not replicate.
+
+</Warning>
+
+## When the original primary returns
+
+If the original primary, cluster A, becomes operational after you promote a
+secondary, cluster B, choose one of the following options. Act before cluster A
+serves clients.
+
+| Option | Operation on cluster A | Result |
+| --- | --- | --- |
+| Keep cluster A as a DR secondary | [Demote](/vault/api-docs/system/replication/replication-dr#demote-dr-primary), then [update primary](/vault/api-docs/system/replication/replication-dr#update-dr-secondary-s-primary) with a DR operation token and a secondary activation token from cluster B | Cluster A keeps its cluster ID, rejoins the replication set, and needs no storage wipe. |
+| Remove cluster A from DR replication | [Disable primary](/vault/api-docs/system/replication/replication-dr#disable-dr-primary) | Cluster A leaves the replication set. Re-enabling it changes its cluster ID and needs a storage wipe. |
+
+After you demote cluster A and reconnect it, cluster B serves all traffic. To
+make cluster A the primary again, reverse the process: demote cluster B, promote
+cluster A, and reconnect cluster B as a secondary. Before you fail back, confirm
+that cluster A is in sync. Refer to [Check whether clusters are in
+sync](/vault/docs/enterprise/replication/monitor#check-whether-clusters-are-in-sync).
+
+## Update the remaining DR secondaries
+
+A promotion does not move other DR secondaries to the new primary. For data
+safety and security, generate a new secondary activation token for each
+remaining DR secondary on the new primary with the [generate DR secondary
+token](/vault/api-docs/system/replication/replication-dr#generate-dr-secondary-token)
+endpoint. Then, on each remaining DR secondary, call [update
+primary](/vault/api-docs/system/replication/replication-dr#update-dr-secondary-s-primary)
+with the `token` parameter and a DR operation token.
+
+## Update clients
+
+DR secondaries do not serve client requests until you promote one. After a
+promotion, point clients to the new primary. DR replication mirrors tokens and
+leases, so applications continue to operate after the promotion. Refer to
+[Replicated data](/vault/docs/enterprise/replication#replicated-data).
+
+## Seal and leader changes
+
+A promote or a demote can change the active node of a cluster. Differences in
+the auto-unseal configuration between the clusters can require an extra unseal
+step after the operation. In that case, the standby nodes in the cluster seal,
+and the Vault log includes the following message:
+
+<CodeBlockConfig hideClipboard>
+
+```plaintext
+[WARN] core: encryption keys have changed out from underneath us (possibly due to replication enabling), must be unsealed again
+```
+
+</CodeBlockConfig>
+
+Unseal the sealed nodes to resume normal operation. For how replication
+changes the seal configuration, refer to [Seals and key
+holders](/vault/docs/enterprise/replication#seals-and-key-holders).
+
+## Combine DR and performance replication
+
+You can protect a performance replication topology with DR secondaries. The
+following rules apply:
+
+- **Setup order:** Enabling performance replication on a secondary immediately
+  clears all data in that cluster. Set up performance replication on a cluster
+  before you set up its DR secondary.
+- **Failover of a performance primary:** If the DR secondary's primary is a
+  performance primary, the promoted cluster joins that replication set as the
+  performance primary. After the promotion, check the replication status on
+  each performance secondary. If `connection_state` is not `ready`, run update
+  primary on the secondary to point it at the promoted cluster. Refer to
+  [Update a secondary's
+  primary](/vault/docs/enterprise/replication/performance/manage#update-a-secondary-s-primary).
+- **Failover of a performance secondary:** If the DR secondary's primary is a
+  performance secondary, the promoted cluster attempts to connect to the
+  performance primary with the same secondary token.
+- **One performance primary:** Only one performance primary can be active at a
+  time. Multiple performance primaries can cause data loss. When you promote a
+  DR secondary of a performance primary, confirm that the original performance
+  primary is demoted or down.
+
+## Reference
+
+- [Disaster recovery replication](/vault/docs/enterprise/replication/disaster-recovery)
+- [DR operation tokens](/vault/docs/enterprise/replication/disaster-recovery/operation-token)
+- [DR replication API](/vault/api-docs/system/replication/replication-dr)
+- [Recommended patterns: test disaster recovery](/vault/docs/internals/recommended-patterns#test-disaster-recovery)
