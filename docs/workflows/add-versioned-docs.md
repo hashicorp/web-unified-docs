@@ -1,11 +1,11 @@
-# Add a versioned docs to developer.hashicorp.com
+# Add a versioned docs set to developer.hashicorp.com
 
 You must create PRs to update the `dev-portal` and `web-unified-docs` APIs to add a new set of versioned docs. 
 
 ## Update the dev-portal API
 
 1. Create a new branch for your changes in the `github.com/hashicorp/dev-portal` repository. 
-1. In the `config/production.json` file, add a name for the new docs to the `"flags"."unified_docs_migraged_repos"` objects:
+1. In the `config/production.json` file, add a name for the new docs to the `"flags"."unified_docs_migrated_repos"` array:
 
    ```json
    "flags": {
@@ -28,7 +28,7 @@ You must create PRs to update the `dev-portal` and `web-unified-docs` APIs to ad
       - `iconName`: For documentation, specify `"docs"`. Refer to the web engineering team for details about other supported values.
       - `name`: Declares the public name for the docs.
       - `path`: Must match the value you specified for the `"basePaths"` and `"docsNavItems"` objects.
-      - `productSlugForLoader`: Must match the name you specified in the `"flags"."unified_docs_migraged_repos"` objects in the `config/production.json` file.
+      - `productSlugForLoader`: Must match the name you specified in the `"flags"."unified_docs_migrated_repos"` array in the `config/production.json` file.
 
       The following example adds the Terraform MCP server docs:
 
@@ -43,7 +43,7 @@ You must create PRs to update the `dev-portal` and `web-unified-docs` APIs to ad
 
 1. Complete the following steps to create a homepage for the docs: 
    1. Create the `dev-portal/src/pages/<main-product>/<new-docs>` directory path.
-   1. In the directory for the product docs, create a file named `[[...page]]].tsx`.
+   1. In the directory for the product docs, create a file named `[[...page]].tsx`.
    1. Add the following code to the new file:
 
    ```typescript
@@ -69,8 +69,10 @@ Before merging these changes, make changes to the `web-unified-docs` API. Refer 
 
 ## Update the web-unified-docs API
 
-1. Create a new branch for your changes in the `github.com/hashicorp/web-unified-docs repository` repository.
-1. Add the MDX files and a `nav.json` file for your new docs. 
+1. Create a new branch for your changes in the `github.com/hashicorp/web-unified-docs` repository, such as `tf-policy/0.1-beta`.
+1. Create a version folder for your new docs, such as `content/<new-docs>/v0.1.x`.
+   - To publish the docs as a beta, add the `beta` tag to the folder name, such as `v0.1.x (beta)`. The tag must be lowercase. For an example, refer to the `content/terraform-policy` folder.
+1. In the version folder, add the MDX files to the `docs` folder and a `<base-path>-nav-data.json` file to the `data` folder, such as `data/mcp-server-nav-data.json`.
 1. Add an entry for the GitHub labeler so that GitHub automatically adds labels to pull requests when someone updates files in your new directory. 
    1. Open the `.github/labeler.yml` file.
    1. Add an object using the following syntax:
@@ -84,7 +86,7 @@ Before merging these changes, make changes to the `web-unified-docs` API. Refer 
       ]
    ```
 
-1. If you need a specific team to act as reviewers, add the group to the repository `CODEOWERS` file. The following example adds the `team-devrel-infrastructure-education` team to the MCP server documentation:
+1. If you need a specific team to act as reviewers, add the group to the repository `CODEOWNERS` file. The following example adds the `team-devrel-infrastructure-education` team to the MCP server documentation:
 
    ```text
    content/terraform-mcp-server @hashicorp/team-devrel-infrastructure-education
@@ -93,7 +95,7 @@ Before merging these changes, make changes to the `web-unified-docs` API. Refer 
 1. Add an entry for your docs to the `productConfig.mjs` file. Use the following syntax:
 
    ```mjs
-   '<name-you-declared-in-config/base.json-and-config/development.json-files': {
+   '<name-you-added-to-unified_docs_migrated_repos>': {
 		assetDir: 'img',
 		basePaths: ['<basePath-value-you-declared-in-basePaths-object'],
 		contentDir: '<dir-where-you-added-mdx-files>',
@@ -120,7 +122,7 @@ Before merging these changes, make changes to the `web-unified-docs` API. Refer 
 	},
    ```
 
-1. Duplicate the changes from step 5 to the `__fixtures__/productConfig.mjs` file in the root directory. This file is for testing purposes.
+1. Duplicate the `productConfig.mjs` changes from the previous step to the `__fixtures__/productConfig.mjs` file in the root directory. This file is for testing purposes.
 
 Push your changes but do not merge until you've launched a preview to verify your updates. Refer to the [Example PRs](#example-prs) for guidance. 
 
@@ -141,7 +143,7 @@ Normal Vercel previews use the production state of the dev-portal API. As a resu
    1. Click the **Deployment** tab at the top of the page.
    1. Find your preview and choose **Redeploy** from the ellipses menu.
 
-After each commit to your working `web-unifed-docs` PR, you must update the variable with the new preview URL and redeploy to see changes. 
+After each commit to your working `web-unified-docs` PR, you must update the variable with the new preview URL and redeploy to see changes.
 
 ## Merge PRs
 
@@ -150,9 +152,23 @@ When you are ready to publish your changes, merge the PRs in the following order
 1. `web-unified-docs` 
 1. `dev-portal`
 
+If you are publishing a beta docs set, approve both PRs, but wait to merge them until Eng releases the beta.
+
 ## Redeploy the website
 
 After merging your changes, you must redeploy the website. If you do not have appropriate permissions, you can ask for assistance in the `#team-web-support` channel. This process takes approximately 10 to 15 minutes to complete. Verify that your changes appear. If you have any issues, reach out to `#team-web-support`.
+
+## Move a beta docs set to GA
+
+When Eng releases the GA version, rename the beta folder to remove the `beta` tag.
+
+1. Run the **Create GA PR** workflow, [`create-ga-pr.yml`](../../.github/workflows/create-ga-pr.yml), from the GitHub Actions UI. Enter the following values.
+   - The version without the `v` prefix, such as `0.1.x`
+   - The tag `beta`
+   - The product slug, which is the folder name under `content`, such as `terraform-policy`
+
+   The workflow opens a PR against `main` that renames `v0.1.x (beta)` to `v0.1.x`.
+1. Merge the PR to publish the GA docs.
 
 ## Example PRs
 

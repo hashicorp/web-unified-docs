@@ -104,8 +104,15 @@ takes three inputs:
 
 Whether `new_TFE_version` is set determines the action's mode:
 
-- **NewVersion mode** (`new_TFE_version` set): Used by Copy Cloud Docs for TFE to scaffold a brand-new version folder.
-- **Diff mode** (`new_TFE_version` omitted): Used by Sync Cloud Docs for TFE, and by the sync step inside Create TFE Release Notes, to refresh content already inside an existing version folder.
+- **NewVersion mode** applies when `new_TFE_version` is set. The action copies
+  the latest TFE version folder from the source checkout into the
+  `new_TFE_version` folder, then writes the transformed `cloud-docs` content
+  over it. Copy Cloud Docs for TFE and Sync Cloud Docs for TFE both use this
+  mode. Create TFE Release Notes also uses it through its call to Sync.
+- **Diff mode** applies when `new_TFE_version` is omitted. The action writes
+  the transformed `cloud-docs` content into the folder of the version marked
+  `isLatest` in `versionMetadata.json`. That is the current published version,
+  not the upcoming one. No workflow uses this mode today.
 
 For each `.mdx` file under `cloud-docs`, the action decides whether to copy
 the file. Then the GHA transforms the file's frontmatter and body before writing it to the
@@ -249,13 +256,19 @@ created. Its single `sync-docs` job does the following:
    either is missing.
 1. Regenerates `app/api/versionMetadata.json` the same way the Copy workflow does.
 1. Checks out `HCPTF-diff/<version>` into a second working directory.
-1. Runs `copy-cloud-docs-for-tfe` with `new_TFE_version: <version>` set again
-   (technically NewVersion mode, but because the target directory already
-   contains the version folder, this pass only refreshes files that changed in
-   `content/terraform-docs-common` since the last run).
-1. Commits and pushes any resulting changes directly to `HCPTF-diff/<version>` —
-   no new PR, since PR 2 already exists and tracks this branch. If nothing
-   changed, the commit step is a no-op (`|| echo "No changes to commit"`).
+1. Runs `copy-cloud-docs-for-tfe` with `new_TFE_version: <version>` set
+   again, so the action runs in NewVersion mode. Each run copies the whole
+   latest TFE version folder from `main` over the upcoming folder on the diff
+   branch, then writes the transformed `cloud-docs` content over that. The
+   diff branch picks up changes to both `content/terraform-docs-common` and the
+   latest TFE version folder. The action only adds and overwrites files, so a
+   file deleted from either source stays in the upcoming folder.
+1. Commits and pushes any resulting changes directly to `HCPTF-diff/<version>`.
+   It doesn't open a PR. While PR 2 is open, PR 2 shows the new commits. After
+   PR 2 merges, nothing tracks the new commits until someone opens a new PR
+   from `HCPTF-diff/<version>` into `tfe-release/<version>`. If nothing
+   changed, the commit step prints `No changes to commit` and the push is a
+   no-op.
 
 ```mermaid
 flowchart TD
@@ -263,8 +276,8 @@ flowchart TD
     B2 -->|No| B3["Fail:<br/>run Copy Cloud Docs for TFE first"]
     B2 -->|Yes| B4["Generate version metadata"]
     B4 --> B5["Checkout HCPTF-diff/&lt;version&gt;"]
-    B5 --> B6["Run copy-cloud-docs-for-tfe<br/>(re-copy latest cloud-docs content)"]
-    B6 --> B7["Commit and push refreshed content<br/>to HCPTF-diff/&lt;version&gt;<br/>(PR 2 already tracks this branch)"]
+    B5 --> B6["Run copy-cloud-docs-for-tfe<br/>Copy the latest TFE folder,<br/>then the cloud-docs content"]
+    B6 --> B7["Commit and push refreshed content<br/>to HCPTF-diff/&lt;version&gt;<br/>No PR is opened"]
 ```
 
 ### Create TFE Release Notes
@@ -273,12 +286,13 @@ The Create TFE Release Notes
 ([`create-tfe-release-notes.yml`](../../../.github/workflows/create-tfe-release-notes.yml))
 workflow triggers only on `workflow_dispatch`, with required `version`,
 `release-branch`, and `last-release-tag` inputs and optional `dev-mode` and
-`notify` flags. Every step in its second job is gated behind a check that
-`github.repository == hashicorp/web-unified-docs-internal`, so although the
-identical file also exists in the public `web-unified-docs` repository, it
-only completes successfully when run from the internal one. This is the job
-that runs on the **application code deadline**. It updates
-`HCPTF-diff/<version>` with the latest changes from `terraform-docs-common`
+`notify` flags. The `release-notes` job starts with a step that fails the
+job unless `github.repository` is `hashicorp/web-unified-docs-internal`. So
+although the identical file also exists in the public `web-unified-docs`
+repository, it only completes successfully when run from the internal one.
+The `sync-docs` job runs before that check. This is the workflow that runs on
+the **application code deadline**. It updates `HCPTF-diff/<version>` with the
+latest changes from `terraform-docs-common` and the latest TFE version folder
 one last time and then generates the release notes.
 
 The workflow has two jobs:
@@ -306,9 +320,11 @@ The workflow has two jobs:
      titled `TFE Release <version>`, from `docs-tfe-releases/<version>` into
      `tfe-release/<version>`.
 
-   Unless `dev-mode` or `notify` is false, the job then posts a Slack
-   notification and edits PR 1's body again, this time adding links to both PR
-   2 and PR 3.
+   When `dev-mode` is false and `notify` is true, the job then posts a Slack
+   notification. Its last step edits PR 1's body again. That step has no
+   `dev-mode` condition, so it also runs in dev mode. The new body links to PR
+   2, but its **Release Notes PR** link points to PR 1 itself, not PR 3. The
+   step uses the `release_branch_pr_url` output, which is the URL of PR 1.
 
 ```mermaid
 flowchart TD
@@ -322,8 +338,8 @@ flowchart TD
         D3 --> D4["clone-service-repos.sh:<br/>Clone TFE microservice repos,<br/>checkout release-branch in each"]
         D4 --> D5["execute-changelog-script.sh:<br/>Build releases/&lt;version&gt;.md,<br/>commit to docs-tfe-releases/&lt;version&gt;"]
         D5 --> D6["create-pull-request.sh:<br/>Open PR 3: docs-tfe-releases/&lt;version&gt; → tfe-release/&lt;version&gt;<br/>('TFE Release &lt;version&gt;')"]
-        D6 --> D7["Slack notification"]
-        D7 --> D8["Update PR 1's body<br/>with links to PR 2 and PR 3"]
+        D6 --> D7["Slack notification<br/>when dev-mode is false<br/>and notify is true"]
+        D7 --> D8["Update PR 1's body<br/>Runs in dev mode too<br/>Links PR 2, and links PR 1<br/>as the release notes PR"]
     end
     job1 --> job2
 ```
@@ -372,7 +388,7 @@ closer to the standing date.
 occurs a few weeks before the release date. It is when the release engineer
 runs **Create TFE Release Notes**, which creates the release notes and
 updates the `HCPTF-diff/<milestone>.<major>.x` branch with the latest changes
-from `terraform-docs-common`.
+from `terraform-docs-common` and the latest TFE version folder.
 
 **GA release publish**: On this date, the assembly branch is merged into
 `main` to publish the documentation.
@@ -478,12 +494,15 @@ Verify that the new version and related changes appear on the website.
    deadline](#prepare-for-app-deadline).
 1. As needed before the deadline, the release engineer runs **Sync Cloud Docs
    For TFE** to refresh `HCPTF-diff/<version>` with the latest
-   `content/terraform-docs-common` changes.
+   `content/terraform-docs-common` changes and the latest TFE version folder.
+   If PR 2 is already merged, the release engineer opens a new PR from
+   `HCPTF-diff/<version>` into `tfe-release/<version>`.
 1. On the **application code deadline**, the release engineer runs **Create TFE
    Release Notes** from `web-unified-docs-internal`. This performs one final
    sync of `HCPTF-diff/<version>`, generates the release notes, opens PR 3
-   (`docs-tfe-releases/<version>` → `tfe-release/<version>`), and links PR 2 and
-   PR 3 from PR 1's body.
+   (`docs-tfe-releases/<version>` → `tfe-release/<version>`), and updates PR
+   1's body. The updated body links PR 2, but its release notes link points to
+   PR 1 instead of PR 3, so add the PR 3 link by hand.
 1. Reviewers review and merge PR 2 into `tfe-release/<version>`, confirming
    every change is appropriate for TFE.
 1. The release engineer reviews and edits the generated release notes, then
