@@ -92,6 +92,14 @@ for use with Vault Kubernetes Key Management.
   }
   ```
 
+   The paths in the policy must match the mount and key name that you later pass
+   to the `--vault-key-path` flag in
+   [Step 3](#step-3-configure-kubernetes). For example,
+   `--vault-key-path=k8s-transit/keys/kms-kek` requires the policy to cover
+   `k8s-transit/keys/kms-kek`, `k8s-transit/encrypt/kms-kek`, and
+   `k8s-transit/decrypt/kms-kek`. The `update` capability is sufficient on the
+   encrypt and decrypt paths because the key already exists.
+
 4. Save the policy to Vault. For example, to save the policy as
    `k8s-kms-policy`:
 
@@ -280,6 +288,18 @@ resources:
   
   </CodeBlockConfig>
 
+  <Note title="The Transit key must already exist">
+
+  The `vault-kube-kms` process does not create the Transit key. The key in
+  `--vault-key-path` must already exist in Vault, which you created in
+  [Step 1](#step-1-configure-the-transit-plugin). The process does not fail at
+  startup if the key is missing. Instead, the health check and encryption
+  requests fail later. Refer to
+  [troubleshooting](/vault/docs/deploy/kubernetes/kms/troubleshooting#transit-key-does-not-exist-or-path-is-incorrect)
+  for details.
+
+  </Note>
+
 5. Save your manifest file to `/etc/kubernetes/manifests/` on the control-plane
    node where you run your Kubernetes API server. If you run multiple API
    servers, you must deploy the `vault-kube-kms` process on each control-plane node, so
@@ -399,3 +419,61 @@ volumeMounts:
   ```
 
 5. Save the manifest so the kubelet restarts the `kube-apiserver` static Pod.
+
+## Step 5: Verify encryption
+
+Confirm that the Kubernetes API server encrypts Secrets with Vault Kubernetes
+Key Management before it stores them in etcd.
+
+1. Verify that the API server reports the KMS provider as healthy:
+
+  ```shell-session
+  $ kubectl get --raw '/healthz?verbose' | grep kms
+
+  [+]kms-providers ok
+  ```
+
+2. Create a test Secret:
+
+  ```shell-session
+  $ kubectl create secret generic kms-test --from-literal=hello=world
+
+  secret/kms-test created
+  ```
+
+3. Read the Secret directly from etcd. Replace `<etcd_pod_name>` with the name of
+   your etcd Pod. Adjust the endpoint and certificate paths to match your etcd
+   deployment:
+
+  ```shell-session
+  $ kubectl exec -n kube-system <etcd_pod_name> -- etcdctl \
+      --endpoints=https://127.0.0.1:2379 \
+      --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+      --cert=/etc/kubernetes/pki/etcd/server.crt \
+      --key=/etc/kubernetes/pki/etcd/server.key \
+      get /registry/secrets/default/kms-test | hexdump -C | head
+  ```
+
+4. Check the beginning of the stored value. If encryption works, the value starts
+   with `k8s:enc:kms:v2:`, followed by the `name` that you set for the `kms`
+   provider in your `EncryptionConfiguration`, and a colon. For example, with
+   `name: vault-kms`, the value starts with the following text:
+
+  <CodeBlockConfig hideClipboard>
+
+  ```plaintext
+  k8s:enc:kms:v2:vault-kms:
+  ```
+
+  </CodeBlockConfig>
+
+  If the value contains the readable text `hello` or `world` instead, the API
+  server did not encrypt the Secret.
+
+5. Delete the test Secret:
+
+  ```shell-session
+  $ kubectl delete secret kms-test
+
+  secret "kms-test" deleted
+  ```
