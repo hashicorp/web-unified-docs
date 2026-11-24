@@ -10,7 +10,6 @@ last_modified: 2026-03-20T22:19:18.000Z
 
 # Vault Kubernetes Key Management parameters
 
-@include '../../../global/partials/alerts/status/beta.mdx'
 
 Configure the `vault-kube-kms` process to control how it exposes the KMS
 v2 gRPC endpoint to Kubernetes, connects to Vault, authenticates, selects a
@@ -23,11 +22,15 @@ required parameters, the process exits with an error.
 
 ## Connection parameters
 
-- `--listen-address` (`string : "unix:///tmp/vault-kube-kms.socket"`)  
+- `--listen-address` (`string : "unix:///tmp/vault-kube-kms.socket"`)
   Unix domain socket address where the `vault-kube-kms` process listens for requests from
   the Kubernetes API server. The `kube-apiserver` process must have filesystem
-  access to the socket to communicate with the `vault-kube-kms` process.  
-  **Environment variable**: `VAULT_KUBE_KMS_LISTEN_ADDRESS`  
+  access to the socket to communicate with the `vault-kube-kms` process.
+  **This value must exactly match the `endpoint:` field in your `EncryptionConfiguration`.**
+  The binary default (`unix:///tmp/vault-kube-kms.socket`) differs from the paths used in
+  the setup examples — always set this explicitly and update `EncryptionConfiguration` to
+  agree, or the Kubernetes API server will not start.
+  **Environment variable**: `VAULT_KUBE_KMS_LISTEN_ADDRESS`
 
 
 - `--vault-address` (`string : <required>`)  
@@ -38,27 +41,32 @@ required parameters, the process exits with an error.
 
 
 - `--vault-namespace` (`string : ""`)  
-  Vault namespace where you have the Transit plugin mounted. Leave
-  `vault-namespace` unset if you have the plugin mounted in the root namespace.
-  If you use namespaces with your Vault deployment, you must provide the plugin
-  namespace with `vault-namespace` rather than including it in the mount path.  
+  Vault namespace where the Transit secrets engine is mounted. Leave
+  `vault-namespace` unset if the Transit engine is in the root namespace.
+  When `--vault-auth-namespace` is not set, `vault-namespace` is also used
+  as the namespace for AppRole authentication.
   **Environment variable**: `VAULT_KUBE_KMS_VAULT_NAMESPACE`
 
 
-- `--transit-mount` (`string: "transit"`)  
-  Mount path to the Vault Transit plugin. The `vault-kube-kms` process uses
-  `transit-mount` to craft Vault requests to encrypt and decrypt data encryption
-  keys (DEKs).  
-  **Environment variable**: `VAULT_KUBE_KMS_TRANSIT_MOUNT`
+- `--vault-auth-namespace` (`string : ""`)
+  Vault namespace used exclusively for AppRole authentication. When set,
+  the `vault-kube-kms` process authenticates in this namespace and performs
+  Transit operations in the namespace specified by `--vault-namespace`. Leave
+  unset when the AppRole mount and the Transit engine share the same namespace
+  (the common case). Use this flag only when Vault is configured for
+  [cross-namespace access](https://developer.hashicorp.com/vault/docs/enterprise/namespaces/configure-cross-namespace-access).
+  **Environment variable**: `VAULT_KUBE_KMS_VAULT_AUTH_NAMESPACE`
 
 
-- `--transit-key` (`string: <required>`)
-  Name of an existing key in the Transit plugin that the `vault-kube-kms`
-  process should use for crafting requests to Vault during DEK encryption
-  and decryption. You must have a Vault policy configured that grants
-  the `vault-kube-kms` process permission to access the named key.
-  **Environment variable**: `VAULT_KUBE_KMS_TRANSIT_KEY`
-
+- `--vault-key-path` (`string: <required>`)
+  Path to the Transit encryption key in Vault, in the format
+  `<mount>/keys/<key-name>` (for example, `transit/keys/my-key`). The
+  `vault-kube-kms` process uses this single path to craft encrypt and decrypt
+  requests for data encryption keys (DEKs). You must have a Vault policy that
+  grants the `vault-kube-kms` process permission to read, encrypt, and decrypt
+  the named key. The path is validated at startup to prevent path traversal
+  attacks.  
+  **Environment variable**: `VAULT_KUBE_KMS_VAULT_KEY_PATH`
 
 - `--tls-ca-file` (`string: ""`)  
   Path to a CA certificate file that the `vault-kube-kms` process can 
@@ -96,6 +104,8 @@ You must include the following parameters for AppRole authentication:
 - `--auth-mount` (`string: "approle"`)
   Mount path to the Vault auth method plugin that the `vault-kube-kms`
   process uses to authenticate to Vault. Required.
+  When using cross-namespace auth,
+  this mount is looked up in the namespace specified by `--vault-auth-namespace`.
   **Environment variable**: `VAULT_KUBE_KMS_AUTH_MOUNT`
 
 
@@ -141,7 +151,32 @@ You must include the following parameters for AppRole authentication:
   statistics, goroutine counts, and memory usage are exposed.
   **Environment variable**: `VAULT_KUBE_KMS_DISABLE_RUNTIME_METRICS`
 
+- `--health-port` (`int: 8081`)
+  TCP port on all interfaces (`0.0.0.0`) where the `vault-kube-kms` process
+  exposes HTTP health check endpoints for use as Kubernetes liveness and
+  readiness probes:
 
+    - `/healthz` — liveness probe; always returns `200 OK` as long as the
+      `vault-kube-kms` process is alive and the HTTP server is responding.
+      This endpoint does not check Vault connectivity or gRPC socket status.
+    - `/readyz` — readiness probe; returns `200 OK` only when the gRPC KMS
+      server has fully initialized and is actively serving requests. Returns
+      `500` with the message `"plugin is not ready"` before the gRPC server
+      starts, and again if the gRPC server stops for any reason (including
+      a Unix socket failure), until the process is restarted.
+
+  Set to `0` or a negative value to disable health check endpoints.
+  **Environment variable**: `VAULT_KUBE_KMS_HEALTH_PORT`
+
+
+## systemd configuration
+
+When deploying as a systemd service on bare-metal nodes, set configuration
+via environment variables in `/etc/vault-kube-kms/vault-kube-kms.env` instead
+of CLI flags. Every parameter listed above has a corresponding environment
+variable shown under **Environment variable**. See
+[Set up Vault Kubernetes Key Management](/vault/docs/deploy/kubernetes/kms/setup#systemd-deployment-bare-metal)
+for the full installation steps.
 
 ## Minimal configuration example
 
@@ -155,8 +190,36 @@ metadata:
 data:
   listen-address:         "/var/run/kms/vault-kms.sock"
   vault-address:          "https://vault.example.com:8200"
-  transit-mount:          "transit"
-  transit-key:            "kubernetes-etcd"
+  vault-key-path:         "transit/keys/kubernetes-etcd"
   approle-role-id:        "example-role-id"
   approle-secret-id-path: "/var/run/secrets/vault/secret-id"
 ```
+
+## Cross-namespace configuration example
+
+Use this configuration when AppRole authentication lives in a different Vault
+namespace from the Transit secrets engine. This requires Vault Enterprise with
+[cross-namespace access](https://developer.hashicorp.com/vault/docs/enterprise/namespaces/configure-cross-namespace-access)
+configured.
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-kms-config
+data:
+  listen-address:         "/var/run/kms/vault-kms.sock"
+  vault-address:          "https://vault.example.com:8200"
+  vault-namespace:        "transit-ns"
+  vault-auth-namespace:   "auth-ns"
+  vault-key-path:         "transit/keys/kubernetes-etcd"
+  auth-mount:             "approle"
+  approle-role-id:        "example-role-id"
+  approle-secret-id-path: "/var/run/secrets/vault/secret-id"
+```
+
+In this example:
+- `vault-namespace` (`transit-ns`) is the Vault namespace where the Transit engine is mounted.
+- `vault-auth-namespace` (`auth-ns`) is the Vault namespace where the AppRole auth method is mounted.
+
+When `vault-auth-namespace` is omitted, both operations use the namespace set by `vault-namespace`.
