@@ -3,7 +3,7 @@ page_title: Terraform workflows
 description: Use VCS-driven, API-driven, pipeline-driven, and CLI-driven Terraform workflows.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2026-07-06T12:00:00.000Z
-last_modified: 2026-07-06T12:00:00.000Z
+last_modified: 2026-11-25T14:14:10.000Z
 # END AUTO GENERATED METADATA
 ---
 
@@ -263,6 +263,13 @@ For additional information and resources, you can refer to the following documen
 - <a href="https://www.hashicorp.com/blog/hashicorp-releases-new-ci-cd-pipeline-integration-tool-templates-for-terraform" target="_blank" rel="noreferrer">Announcement</a>
 - <a href="https://developer.hashicorp.com/terraform/tutorials/automation/github-actions" target="_blank" rel="noreferrer">Tutorial</a>
 
+If you adopt the API-driven workflow, we recommend building on the HashiCorp-maintained `tfc-workflows-tooling` (the `tfci` CLI and container image) and `tfc-workflows-github` templates rather than scripting raw API calls. They already implement speculative plans on pull requests, applies on merge, and pull request comments with plan results, while letting you keep existing pipeline steps such as formatting checks, documentation generation, and security scanning. This keeps your existing pipeline investment while reducing the custom code your team must maintain. If the API-driven workflow adds no step that a CLI-driven pipeline cannot run, prefer the simpler CLI-driven workflow.
+
+Common issues:
+
+- **Container-less CI runners:** The default GitHub Actions in `tfc-workflows-github` run as Docker container actions. CI runners on Kubernetes without access to a Docker daemon cannot run them; wrap the `tfci` steps in composite actions or call `tfci` directly instead.
+- **Private certificate authority (Terraform Enterprise):** If your Terraform Enterprise certificate is issued by an internal CA, `tfci` and `terraform` cannot reach the Terraform Enterprise API until they trust that CA. Build custom images from `hashicorp/tfci` and `hashicorp/terraform` that add the CA certificate to the system trust store, host them in your internal registry, and use them in your pipelines.
+
 ### Command line-driven workflow
 
 The command line-driven workflow, you can transition from using OSS command line commands to HCP Terraform Agents for triggering the build process. This workflow offers the flexibility to iterate on your configuration and work locally, allowing for efficient development and testing. Moreover, it simplifies integration with CI/CD tools, enabling the addition of testing steps and enhancing deployment reliability, streamlining the process compared to the VCS-driven approach. Also, the command line workflow promotes centralized code management, fostering effective collaboration and version control, which is valuable for organizations with complex requirements. Furthermore, it permits convenient local development of workspaces, minimizing the need for frequent code commits and enhancing the overall development experience. For organizations with existing CI/CD configurations, transitioning to the command line workflow can be straightforward, allowing them to retain their current setups and reducing the need for major adjustments. Lastly, the command line workflow provides faster feedback to practitioners, enabling greater flexibility in deploying changes across different environments, making it an attractive alternative to the VCS-driven approach for those who require rapid iterations and deployments.
@@ -281,3 +288,34 @@ This high-level command line-driven workflow includes the following steps:
 After making and validating code changes, merge pull requests to the main branch.
 
 ![Integration with a CI/CD tool](/img/terraform/operating-guides/adoption/terraform-workflow-cicd-tool-workflow.jpg)
+
+#### Running the command line-driven workflow from CI/CD pipelines
+
+When a pipeline runs Terraform against HCP Terraform or Terraform Enterprise, we recommend the following pattern. It suits teams that need external systems to act before or after a run, and it separates plan, approval, and apply into distinct pipeline stages.
+
+- **Authenticate with a team API token:** Store a team token as a masked pipeline secret and expose it as the `TF_TOKEN_<hostname>` environment variable (for example `TF_TOKEN_app_terraform_io`) instead of running `terraform login` in the pipeline. Team tokens are not tied to a person, so pipelines keep working when people change roles.
+- **Drive the `cloud` block from the environment:** Keep a `cloud` block in the configuration, even if it is empty (`cloud {}`), and set the organization, workspace, and project with the `TF_CLOUD_ORGANIZATION`, `TF_WORKSPACE`, and `TF_CLOUD_PROJECT` environment variables (and `TF_CLOUD_HOSTNAME` for Terraform Enterprise). The same code can then target different workspaces per environment without edits. Terraform only uses these variables when a `cloud` block is present.
+- **Use remote saved plans for approval gates:** With Terraform 1.6 or later, run `terraform plan -out=<file>` in one stage and `terraform apply <file>` in a later stage after approval. The plan runs remotely in the workspace, and the apply executes the reviewed plan without changes.
+
+### Execution mode
+
+We recommend that workspaces use the **Remote** execution mode, or **Agent** mode when runs must reach private networks. Use **Local** execution mode only as a short-lived step during migration. In local mode HCP Terraform and Terraform Enterprise only store state. Runs execute on the caller's machine, workspace variables and variable sets are not evaluated, and features that depend on remote runs do not apply. These include policy evaluation, run tasks, health assessments, cost estimation, notifications, run triggers, and the run history linked to each state version. Teams that use HCP Terraform only as a state backend forgo most of its governance value.
+
+## Migrating existing state
+
+Teams that adopt HCP Terraform or Terraform Enterprise often already manage infrastructure with Terraform Community Edition, using local state or a remote backend such as Amazon S3, Azure Blob Storage, Google Cloud Storage, or Consul. We recommend migrating that state with the `cloud` block rather than re-importing resources, because it preserves existing resource addresses and history. Validate every migration with a plan that shows no changes.
+
+1. Create the destination workspace with the CLI-driven workflow, in the correct project. Set its Terraform version to the version that last wrote the state, and attach the variable set that holds the provider credentials. Matching the version avoids state format mismatches during migration.
+2. Check out the exact configuration that produced the existing state and run `terraform init` against the current backend to confirm the state is reachable.
+3. Replace the `backend` block with a `cloud` block that names the organization and the destination workspace.
+4. Authenticate with `terraform login`, or export a team token in `TF_TOKEN_<hostname>` when running from a pipeline.
+5. Run `terraform init` and accept the prompt to copy the existing state into the workspace. The `-migrate-state` flag is not required when moving to the `cloud` block.
+6. Trigger a speculative plan. A plan that reports no changes confirms the configuration, variables, and credentials match the migrated state.
+7. Optionally connect the workspace to its VCS repository to move to the VCS-driven workflow.
+
+Common issues:
+
+- **Configuration does not match state:** If the original configuration was generated by templates or is no longer available, reconstruct it before migrating. Without the exact configuration you cannot get a no-change plan, and the first apply may modify or destroy resources.
+- **Many workspaces:** For bulk migrations, script the preceding steps with the API, or use [Terraform migrate](https://developer.hashicorp.com/terraform/migrate) instead of migrating workspaces by hand.
+
+For a detailed walkthrough, refer to the [Migrate state to HCP Terraform](https://developer.hashicorp.com/terraform/tutorials/cloud/cloud-migrate) tutorial.
