@@ -3,7 +3,7 @@ page_title: Organizing resources
 description: Design and manage Terraform organizations, projects, workspaces, and Stacks.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2026-07-06T12:00:00.000Z
-last_modified: 2026-07-06T12:00:00.000Z
+last_modified: 2026-11-25T14:13:52.000Z
 # END AUTO GENERATED METADATA
 ---
 
@@ -48,6 +48,8 @@ The set permission level defines the scope of this permission. For example, a pe
 
 You create and name a number of entities (teams, projects, workspaces, and so on) as you configure your HCP Terraform instance. We recommend that you create and maintain a naming convention document which includes the naming conventions for each entity, as well as any other conventions you decide to use such as prefixes or suffixes. This document helps ensure that your Terraform experience is well-organized as you scale out. Pass this document to all new internal clients to your HCP Terraform service to standardize their approach to operations.
 
+We recommend that the naming convention document covers every entity that participates in access and configuration, not only projects and workspaces: identity provider (IdP) groups, teams, projects, workspaces, VCS repositories or working directories, variable sets, and agent pools. A single schema lets you trace an IdP group to the team, project, and workspaces it grants access to, and lets your onboarding automation enforce the convention instead of relying on manual review. Field deployments use a range of formats, for example `<team>-<cloud>-<tier>-<application>-<environment>` or `<application>-<component>-<region>-<environment>`; consistency matters more than the exact format you choose. Use workspace tags for additional metadata (such as cost center or data classification) rather than adding more segments to names.
+
 ## Organizations, projects, workspaces, and Stacks
 
 ### Organizations
@@ -69,6 +71,20 @@ The organization in Terraform Enterprise serves as the highest-level construct, 
 We recommend centralizing core provisioning work within a single organization in HCP Terraform to ensure efficient provisioning and management.
 
 This approach is compatible with a multi-tenant environment where you have to support multiple business units (BUs) within the same organization. Our robust role-based access control system combined with projects ensures that each BU has its own set of permissions and access levels. Projects enable you to divide workspaces, Stacks, and teams within the organization. We discuss them in more detail below.
+
+Keep a single organization unless you have a pressing reason, such as a hard regulatory boundary. Each additional organization needs its own SSO configuration, teams, global variable sets, global policy sets, private registry content, and VCS connections, which multiplies platform team effort. When your VCS estate already has structure, map it onto the single organization rather than mirroring it with more organizations:
+
+- VCS enterprise or instance → HCP Terraform or Terraform Enterprise organization.
+- VCS organization or group (often one per line of business) → project.
+- Repository or working directory → workspace.
+
+If you consolidate several existing Terraform Enterprise organizations into one, for example during a migration to HCP Terraform, create one project per source organization, named after it, so ownership stays recognizable.
+
+<Note>
+
+In Terraform Enterprise, restrict organization creation to site administrators in the <a href="https://developer.hashicorp.com/terraform/enterprise/admin/application/general" target="_blank" rel="noreferrer">general settings</a>. Otherwise any user can create an organization and becomes its owner, which bypasses the governance model on this page.
+
+</Note>
 
 Terraform Enterprise uses workload concurrency to maintain a run queue, and a worker RAM allocation. Consider the following points.
 
@@ -102,6 +118,13 @@ As a member of the owners team, you have comprehensive access to all aspects of 
 - Viewing the full list of teams (including teams marked as <a href="https://developer.hashicorp.com/terraform/cloud-docs/users-teams-organizations/teams#team-visibility" target="_blank" rel="noreferrer">secret</a>).
 
 You can generate an organization-level API token to manage teams, team membership, workspaces and Stacks. It is important to note that this API token does _not_ have permission to perform plans and applies. Before assigning a workspace or Stack to a team, you can use either a member of the organization owners group or the organization API token to carry out initial setup.
+
+The owners team is the only team that sits outside SSO. Once you enable SSO, members of the owners team can still sign in with their HCP Terraform credentials, bypassing the IdP, and you cannot assign membership of the owners team through the SAML team attribute. This is intentional, because it provides break-glass access if the IdP is unavailable, but it also makes owners accounts the most attractive target in the organization. We recommend the following:
+
+- Keep owners membership to a small, named group (HashiCorp recommends designating two <a href="https://developer.hashicorp.com/terraform/cloud-docs/users-teams-organizations/single-sign-on#emergency-access-accounts" target="_blank" rel="noreferrer">emergency access accounts</a> before you configure SSO) and review it regularly.
+- Enable <a href="https://developer.hashicorp.com/terraform/cloud-docs/users-teams-organizations/2fa" target="_blank" rel="noreferrer">two-factor authentication</a> on every owners account.
+- Do day-to-day administration through SSO-mapped teams with delegated organization-level permissions, not through the owners team.
+- In Terraform Enterprise, treat any local site administrator account the same way: use it only for break-glass access and store its credentials in a secrets manager such as Vault.
 
 ##### Organization-level permissions
 
@@ -156,6 +179,19 @@ Automated onboarding is critical for the success of your project. Use either the
 
 We recommend assigning separate projects for each application within a business unit. The suggested naming convention for projects is: `<business-unit-name>-<application-name>`.
 
+#### Variable sets and provider credentials
+
+Variable sets are the main way to share provider credentials and common configuration across workspaces and Stacks. We recommend the following approach.
+
+- **Store provider credentials as sensitive environment variables**, not Terraform variables. Providers read credentials such as `AWS_ACCESS_KEY_ID` or `ARM_CLIENT_SECRET` directly from the environment, so the values never become Terraform input variables and are not written to state.
+- **Name credential variable sets after the identity they hold**, for example `aws-<iam-user-or-role>` or `azure-<service-principal-name>`. This makes it obvious which workspaces depend on which identity and simplifies rotation.
+- **Scope credential sets to projects (or individual workspaces), never globally.** Scoping keeps credentials away from workspaces that should not have them, and rotation happens in one place. Keep values that differ per workspace, such as a subscription or account ID, on the workspace itself.
+- **Only attach a credential set at project level if it applies to every workspace in the project.** A project that mixes workspaces for several clouds or several environments inherits every credential set attached to it. Either split the project (for example per cloud or per environment) or attach those sets to specific workspaces.
+- **Treat static credentials in variable sets as an interim step.** Move to <a href="https://developer.hashicorp.com/terraform/cloud-docs/workspaces/dynamic-provider-credentials" target="_blank" rel="noreferrer">dynamic provider credentials</a> as soon as your cloud platforms support it, as described in the User Guide.
+- **Manage variable sets as code** with the `tfe` provider (`tfe_variable_set`, `tfe_project_variable_set`, `tfe_workspace_variable_set`) as part of project onboarding.
+
+When the same variable key appears in more than one place, HCP Terraform and Terraform Enterprise apply a fixed <a href="https://developer.hashicorp.com/terraform/cloud-docs/variables#precedence" target="_blank" rel="noreferrer">order of precedence</a>. In summary, workspace-specific variables override variable sets, workspace-scoped and project-scoped sets override global sets, and conflicts between sets at the same level resolve by the lexical order of the set names. Priority variable sets reverse this: a priority set overrides values set at any more specific scope. Use priority sets for values the platform team must enforce, such as mandatory tags or a provider endpoint, and remember that a priority set does not stop a configuration from ignoring the variable; enforce that with policy as code. Teach consumer teams these rules during onboarding: HCP Terraform marks overwritten variables on each workspace's **Variables** page, which is the first place to look when a run uses an unexpected value.
+
 #### Access management and permissions
 
 Create teams without requiring any of the aforementioned organization-level permissions. Instead, permissions can be explicitly granted at the project and workspace levels. We recommend setting permissions at the project level as it offers better scalability and allows teams to have the flexibility to create their own workspaces and Stacks when necessary. By granting permissions at the project level, you can effectively manage access control while providing teams with the necessary privileges. Below are the permissions you can grant and their respective functionalities:
@@ -205,6 +241,24 @@ Splitting the configuration over multiple workspaces solves these problems, but 
 - It is more difficult for users to keep track of resources when spread over multiple workspaces
 
 Thus the overall function of a collection of workspaces may depend on multiple Terraform configurations, workspace variables and variable sets, workspace outputs and corresponding data sources, Terraform Enterprise workspace state sharing permissions, workspace run triggers, and CI/CD pipeline definitions.
+
+We recommend the following practices when you split a system across workspaces.
+
+- **One workspace per environment per Terraform configuration.** Map each workspace to a working directory in the repository rather than separating environments by branch; directories keep every environment visible on the default branch and make promotion a code change that you can review.
+- **Share outputs with the `tfe_outputs` data source**, not `terraform_remote_state`. The <a href="https://registry.terraform.io/providers/hashicorp/tfe/latest/docs/data-sources/outputs" target="_blank" rel="noreferrer">`tfe_outputs`</a> data source reads only the outputs of the upstream workspace, whereas `terraform_remote_state` requires access to the entire state, which can contain sensitive values. Combine it with run triggers so downstream workspaces plan after upstream changes.
+- **Document run trigger relationships.** There is no single view of every run trigger across an organization, so chains of triggers are hard to trace when something runs unexpectedly. Record trigger relationships alongside the workspace definitions, ideally by managing them as code with the `tfe_run_trigger` resource.
+
+##### Mapping repositories to workspaces
+
+How you map VCS repositories to workspaces is a trade-off between blast radius and management overhead. There are three common strategies:
+
+| Strategy | Benefits | Drawbacks |
+|---|---|---|
+| One repository, many workspaces sharing the same code | Convenient; little repeated code. | A push can trigger runs on every linked workspace, so the blast radius of a change is large. |
+| One repository, one working directory per workspace | Small blast radius; repeated code is mostly a module call per directory. | Repository size grows with the number of workspaces; avoid turning it into a monorepo for unrelated systems. |
+| One repository per workspace | Maximum isolation and independent access control. | Most repositories to manage; use repository templates and a dedicated VCS organization to reduce overhead. |
+
+We recommend one working directory per workspace in a shared repository per application as the default, and one repository per workspace where teams or compliance boundaries require full isolation. Use VCS trigger path filters so that only changes to a workspace's directory, or to the modules it depends on, start runs.
 
 ### Terraform Stacks
 
