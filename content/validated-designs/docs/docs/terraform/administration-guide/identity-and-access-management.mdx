@@ -3,7 +3,7 @@ page_title: Identity and access management
 description: Manage identity, teams, VCS integrations, audit setup, and agent access for Terraform.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2026-07-06T12:00:00.000Z
-last_modified: 2026-07-06T12:00:00.000Z
+last_modified: 2026-11-25T14:14:53.000Z
 # END AUTO GENERATED METADATA
 ---
 
@@ -25,6 +25,44 @@ The setup of SSO for HCP Terraform is not covered in detail in this document, as
 We recommend automating the creation of teams alongside projects, Stacks, and workspaces using the Terraform Enterprise provider. After creating the initial teams required, automate the addition of users within your strategic IdP platform. By adding a team attribute name (default: MemberOf) attribute within your IdP, you can automatically assign users to the created groups in the SAML configuration. You can find further details <a href="https://developer.hashicorp.com/terraform/enterprise/saml/configuration" target="_blank" rel="noreferrer">here</a>.
 
 Note: For user accounts used by pipelines, use `IsServiceAccount` set to true to flag these in SAML. See <a href="https://developer.hashicorp.com/terraform/enterprise/saml/attributes#isserviceaccount" target="_blank" rel="noreferrer">`isserviceaccount`</a>. Create teams in Terraform Enterprise with the _exact_ name of the group in the IdP. Do not create users manually - Terraform Enterprise creates these automatically after it processes the SAML assertion at login.
+
+### Team mapping with Microsoft Entra ID and Okta
+
+Automated team mapping only works if the IdP actually emits the team attribute. Most SSO issues we see in the field are caused by a missing or misformatted `MemberOf` claim rather than by HCP Terraform or Terraform Enterprise. We recommend one of the following patterns with Microsoft Entra ID:
+
+- **Group claim.** Add a group claim named `MemberOf` and set it to emit **Groups assigned to the application**. Other options such as **Security groups** can produce no usable values for the application. Entra ID emits group object IDs, so set each team's **SSO Team ID** to the object ID of the matching group and keep a human-readable team name.
+- **App roles.** Add a claim named `MemberOf` with the value `user.assignedroles`. For each team, create an Entra ID group, create an app role in the enterprise application, assign the group to the role, and create a team named exactly after the role.
+
+With either pattern:
+
+- Team names and role names are matched literally and are case sensitive. Avoid spaces in team and role names.
+- Teams are never created from the assertion. HCP Terraform and Terraform Enterprise ignore values that do not match an existing team, so create the team (with the `tfe` provider) before users sign in.
+- Use a group naming prefix (for example `tfc-`) and filter the claim to groups with that prefix. This keeps the assertion small and makes the onboarding runbook repeatable: create the IdP group, create the team with the group ID, grant project access, and ask the user to sign in.
+- Use a SAML tracing browser extension to inspect the assertion when a user lands in the wrong teams.
+
+With Okta, configure the `MemberOf` attribute statement to send the team names. If a user's first SSO login presents an email address that does not match their existing account, link the SSO identity to the existing account instead of creating a new one, so you do not end up with duplicate accounts.
+
+Identity providers without a dedicated HashiCorp guide, such as Keycloak, use the generic SAML configuration. Plan time for trial and error and secure access to the IdP administrators before the engagement starts; their availability is usually the critical path.
+
+### User lifecycle and offboarding
+
+The IdP only authenticates users. SAML SSO on its own does not deprovision accounts or remove organization membership:
+
+- Removing or disabling a user in the IdP blocks new SSO sign-ins, but the user remains a member of the organization and their user API tokens are not deleted.
+- To remove access immediately, also remove the user from the organization and revoke their tokens. Automate this with the `tfe` provider or the API as part of your offboarding process. In HCP Terraform, evaluate SCIM provisioning, which lets the IdP manage user and team lifecycle directly.
+- Team membership is recalculated from the assertion each time a user signs in, so changes to IdP groups take effect at the next login, not immediately.
+- In HCP Terraform, review the <a href="https://developer.hashicorp.com/terraform/cloud-docs/users-teams-organizations/users#idle-session-timeout" target="_blank" rel="noreferrer">idle session timeout</a> and forced re-authentication settings and reduce them to match your security policy. Set a maximum token expiration in the organization settings.
+- In Terraform Enterprise, user API tokens are only accepted while the user's SAML session is valid; the site-wide **API Token Session Timeout** (default 14 days) controls this. Align it with your security policy. Refer to <a href="https://developer.hashicorp.com/terraform/enterprise/saml/login" target="_blank" rel="noreferrer">API token expiration</a>.
+
+<Note>
+
+In HCP Terraform, account settings such as two-factor authentication and user API token generation are outside the scope of the organization's SSO configuration. Users are prompted to "step up" with their HCP Terraform or HCP credentials when they open these pages. This is expected behavior; tell users about it during onboarding.
+
+</Note>
+
+### Tokens for automation
+
+Do not tie pipelines and automation to a person. We recommend creating dedicated teams with no members to act as service accounts: generate a <a href="https://developer.hashicorp.com/terraform/cloud-docs/users-teams-organizations/api-tokens#team-api-tokens" target="_blank" rel="noreferrer">team API token</a> for each and grant the team only the project or workspace access the automation needs. For example, use one team to create workspaces and queue runs, and a separate team that can only read state and write variables. Store team tokens in your secrets manager; Vault's <a href="https://developer.hashicorp.com/vault/docs/secrets/terraform" target="_blank" rel="noreferrer">Terraform Cloud secrets engine</a> can generate and rotate organization, team, and user tokens.
 
 ## Connect to a version control system
 
@@ -56,6 +94,17 @@ For providers other than GitHub, authorize VCS connections using OAuth within ea
 OAuth authorizes Terraform Enterprise to act as a specific user or account on the VCS. The permissions of that account govern the access Terraform has to VCS organizations and repositories. For simplicity, we recommend setting up a single OAuth connection per VCS provider in each Terraform Enterprise organization. Use a service account with access to all IaC and policy-as-code repositories, to avoid any dependency on individual employee accounts.
 
 If you require a more granular or least-privilege permissions model, you can create multiple OAuth VCS connections, each mapping a subset of VCS repositories to a subset of Terraform projects. In this case it would be a function of a landing-zone module to create these OAuth connections and <a href="https://registry.terraform.io/providers/hashicorp/tfe/latest/docs/resources/project_oauth_client" target="_blank" rel="noreferrer">project mappings</a> on demand whenever a new project onboards.
+
+Whichever method you choose, scope the connection's service account or GitHub App installation to the repositories that hold Terraform and policy code. When you install the GitHub App on selected repositories only, remember to grant each new Terraform or Sentinel repository explicitly. Complete the OAuth authorization in a single browser session on one workstation, signed in to the VCS as the service account; splitting the handshake between people or machines fails.
+
+### Common VCS connectivity issues
+
+VCS-driven workflows need connectivity in both directions: HCP Terraform or Terraform Enterprise must reach the VCS to clone code, and the VCS must reach HCP Terraform or Terraform Enterprise to deliver webhooks. Check both directions before you onboard teams. The following issues recur in the field:
+
+- **Bitbucket Data Center (Terraform Enterprise):** Terraform Enterprise clones over SSH, so it needs the Bitbucket HTTP port (default 7990) and SSH port (default 7999), and the Terraform Enterprise CA bundle must trust Bitbucket's certificate. If Bitbucket rejects the SSH key generated during setup, regenerate it as an ECDSA key. In large Bitbucket estates, not every repository may appear in the repository list; enter the repository path manually, or use several service accounts each scoped to a smaller set of repositories.
+- **GitLab self-managed (Terraform Enterprise):** If Terraform Enterprise uses a private address, GitLab blocks its webhooks until an administrator enables **Allow requests to the local network from webhooks and integrations**.
+- **Azure DevOps (HCP Terraform):** Conditional access policies that require MFA block non-human access from HCP Terraform. Allowlist the <a href="https://developer.hashicorp.com/terraform/cloud-docs/architectural-details/ip-ranges" target="_blank" rel="noreferrer">HCP Terraform IP ranges</a> in your conditional access policy.
+- **Self-hosted VCS with HCP Terraform:** The VCS must be reachable from the internet with a publicly trusted certificate and DNS that resolves externally. If that is not acceptable, use <a href="/validated-designs/terraform/administration-guide/self-hosted-agents#request-forwarding-hcp-terraform-only-premium-sku">request forwarding</a> through self-hosted agents.
 
 ## Audit
 
