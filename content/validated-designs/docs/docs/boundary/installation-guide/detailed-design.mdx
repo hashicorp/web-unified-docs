@@ -3,7 +3,7 @@ page_title: Detailed Design
 description: Review sizing, networking, storage, KMS, TLS, load balancing, and failure considerations for Boundary Enterprise deployment.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2026-07-03T10:00:00.000Z
-last_modified: 2026-07-03T10:00:00.000Z
+last_modified: 2026-11-25T14:13:43.000Z
 # END AUTO GENERATED METADATA
 ---
 
@@ -52,6 +52,27 @@ Refer to [Network Connectivity](https://developer.hashicorp.com/boundary/tutoria
 - Remote log handlers, such as a Splunk or ELK environment
 - Metrics collection, such as Prometheus
 
+The following table summarizes the default network flows for the recommended architecture. Use it as the starting point for firewall and security group rules, and adjust the ports if you change listener defaults.
+
+| Source | Destination | Port | Purpose |
+|-|-|-|-|
+| Clients | Controller load balancer | TCP 443 | API and administrative console |
+| Controller load balancer | Controllers | TCP 9200 | Controller `api` listener |
+| Controller load balancer, metrics collectors | Controllers | TCP 9203 | `ops` listener for health checks and metrics |
+| Workers | Controllers | TCP 9201 | Controller `cluster` listener for worker registration and session authorization |
+| Clients and downstream workers | Ingress and intermediary workers | TCP 9202 | Worker `proxy` listener for sessions and multi-hop connections |
+| Workers | Vault | TCP 8200 | Vault credential stores and, when you use Vault Transit for KMS, worker authentication |
+| Controllers | PostgreSQL | TCP 5432 | Boundary database |
+| Egress workers | Targets | Target service port | Sessions to targets |
+
+## Database
+
+Boundary stores all configuration and state in PostgreSQL, so the availability of the database determines the availability of Boundary. Provide a highly available PostgreSQL service, for example a managed cloud PostgreSQL service with multi-zone failover, and size its backup and failover configuration to meet your recovery time and recovery point objectives.
+
+Only controllers connect to the database. Workers never require database access, so restrict network access to the database to the controller subnets.
+
+When you run `boundary database init`, the Boundary database user requires the `superuser` role plus all privileges on the Boundary database. After initialization, controllers only require data manipulation permissions (select, insert, update, and delete). Refer to the [PostgreSQL requirements](https://developer.hashicorp.com/boundary/docs/architecture/system-requirements) for details.
+
 ## Storage
 
 Enable audit logging in Boundary Enterprise. For optimal performance, writing audit logs on a separate disk is advisable. The worker stores session recordings locally during the recording process, if enabled. When estimating worker storage needs, consider the number of concurrent sessions recorded on that worker. Refer to the [storage guidelines](https://developer.hashicorp.com/boundary/docs/configuration/session-recording#storage-considerations) to determine the appropriate amount of storage to allocate for recordings on the worker nodes.
@@ -71,6 +92,14 @@ Boundary Enterprise is secure by default, and uses TLS for all network traffic c
 Refer to the [TLS](https://developer.hashicorp.com/boundary/docs/concepts/security/connections-tls#client-to-controller-tls) documentation for detailed information on each connection type.
 
 From a load balancing requirement, always configure TLS pass-through. The load balancing section provides more information on this.
+
+### Controller TLS certificate
+
+We recommend issuing one controller certificate per cluster from your organization's certificate authority. Include subject alternative names (SANs) for every name clients use to reach the controllers, for example the fully qualified domain names (FQDNs) of the regional load balancers and any common, primary, and secondary API names you publish. Build the PEM certificate chain in order, from the controller certificate through every intermediate certificate to the root, and keep the matching private key with it.
+
+Worker client-facing listeners do not need a certificate, because workers create session TLS dynamically and mutually authenticate it.
+
+When a deployment process requires base64-encoded certificates, for example to store them in a cloud secrets manager, encode them on the same operating system family that runs Boundary. Base64 encoding output differs between Windows and Linux tooling.
 
 ## Load balancing
 
