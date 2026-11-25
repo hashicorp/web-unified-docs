@@ -58,6 +58,7 @@ The scope of the API includes the following endpoints:
 |`POST`  | `/workspaces/:workspace_id/actions/lock` | Call this endpoint to [lock a workspace](#lock-a-workspace). |
 | `POST` | `/workspaces/:workspace_id/actions/unlock` | Call this endpoint to [unlock a workspace](#unlock-a-workspace).|
 | `POST` | `/workspaces/:workspace_id/actions/force-unlock` | Call this endpoint to [force a workspace to unlock](#force-unlock-a-workspace). |
+| `POST` | `/workspaces/:workspace_id/actions/retry-hyok-reencryption` | Call this endpoint to [retry a failed HYOK re-encryption](#retry-hyok-re-encryption). |
 | `POST` | `/workspaces/:workspace_id/relationships/remote-state-consumers` | Call this endpoint to [add remote state consumers](#get-remote-state-consumers). |
 | `POST` | `/workspaces/:workspace_id/relationships/tags` | Call this endpoint to [bind flat string tags to an existing workspace](#add-tags-to-a-workspace). |
 | `POST` | `/workspaces/:workspace_id/relationships/data-retention-policy` | Call this endpoint to [show the workspace data retention policy](#show-data-retention-policy). |
@@ -152,6 +153,7 @@ By supplying the necessary attributes under a `vcs-repository` object, you can c
 | `data.attributes.hyok-enabled`       | boolean | `false` | Whether this workspace secures HCP Terraform artifacts using hold your own key encryption. Hold your own key is only available in HCP Terraform, [learn more](/terraform/cloud-docs/hold-your-own-key).   |
 | `data.relationships` | object | none | Specifies a group of workspace associations. |
 | `data.relationships.project.data.id` | string  | default project | The ID of the project to create the workspace in. If left blank, Terraform creates the workspace in the organization's default project. You must have permission to create workspaces in the project, either by organization-level permissions or team admin access to a specific project. |
+| `data.relationships.hyok-configuration.data.id` | string | none | The ID of the [HYOK configuration](/terraform/cloud-docs/api-docs/hold-your-own-key/configurations) to pin to the workspace. Setting this value enables HYOK on the workspace, so you can omit `hyok-enabled`. If omitted, a workspace that enables HYOK uses its project's default configuration or the organization's primary configuration. The configuration must have a status of `available`. Only organization owners can set this value. You can also send this value as the `data.attributes.hyok-configuration-id` attribute. Refer to [How HCP Terraform chooses a configuration](/terraform/cloud-docs/hold-your-own-key/concepts#how-hcp-terraform-chooses-a-configuration). |
 | `data.relationships.tag-bindings.data`          | list of objects | none | Specifies a list of tags to attach to the workspace. |
 | `data.relationships.tag-bindings.data.type`     | string | none | Must be `tag-bindings` for each object in the list. |
 | `data.relationships.tag-bindings.data.attributes.key`   | string | none | Specifies the tag key for each object in the list. |
@@ -575,12 +577,46 @@ Properties without a default value are required.
 | `data.attributes.vcs-repo`                    | object or null | (previous value) | To delete a workspace's existing VCS repo, specify `null` instead of an object. To modify a workspace's existing VCS repo, include whichever of the keys below you wish to modify. To add a new VCS repo to a workspace that didn't previously have one, include at least the `oauth-token-id` and `identifier` keys.                                                                                                                                                           |
 | `data.attributes.working-directory`           | string         | (previous value) | A relative path that Terraform will execute within. This defaults to the root of your repository and is typically set to a subdirectory matching the environment when multiple environments exist within the same repository.                                                                                                                                                                                                                                                   |
 | `data.attributes.setting-overwrites` | object | | The keys in this object are attributes that have project-level defaults. Each attribute key stores a boolean value which is `false` by default. To overwrite the default inherited value, set an attribute's value to `true`. For example, to set `execution-mode` as the project default, you set `setting-overwrites.execution-mode = true`. |
+| `data.attributes.hyok-enabled` | boolean | (previous value) | Set to `true` to enable hold your own key encryption on the workspace. You cannot disable HYOK after you enable it. Hold your own key is only available in HCP Terraform. |
+| `data.relationships.hyok-configuration.data` | object or null | (previous value) | The [HYOK configuration](/terraform/cloud-docs/api-docs/hold-your-own-key/configurations) pinned to the workspace, as `{"type": "hyok-configurations", "id": "<ID>"}`. Only organization owners can change this value, but you can send the current value unchanged. The configuration must have a status of `available`. You can also send this value as the `data.attributes.hyok-configuration-id` attribute. Refer to [Change the HYOK configuration](#change-the-hyok-configuration). |
 | `data.relationships` | object | none | Specifies a group of workspace relationships. |
 | `data.relationships.project.data.id`          | string         | existing value | The ID of the project to move the workspace to. If left blank or unchanged, the workspace will not be moved. You must have admin permissions on both the source project and destination project in order to move a workspace between projects. |
 | `data.relationships.tag-bindings.data`        | list of objects | none | Specifies a list of tags to attach to the workspace. |
 | `data.relationships.tag-bindings.data.type`   | string | none | Must be `tag-bindings` for each object in the list. |
 | `data.relationships.tag-bindings.data.attributes.key`   | string | none | Specifies the tag key for each object in the list. |
 | `data.relationships.tag-bindings.data.attributes.value` | string | none | Specifies the tag value for each object in the list. |
+
+
+#### Change the HYOK configuration
+
+The effect of `data.relationships.hyok-configuration` depends on the workspace's state:
+
+| Workspace state | Value | Result |
+| --- | --- | --- |
+| HYOK not enabled | Configuration ID | Enables HYOK on the workspace with the configuration pinned. |
+| HYOK enabled | Different configuration ID | Pins the configuration and re-encrypts the workspace's keys in the background. The `hyok-reencryption-status` attribute is `pending` until re-encryption completes. |
+| HYOK enabled | `null` | Removes the pin. HCP Terraform does not re-encrypt anything, and the workspace keeps its current keys and configuration. |
+| Any | Current value | No change. |
+
+If you change or remove the pin while re-encryption is `pending`, the endpoint returns a `422`. If the configuration does not exist in the organization, the endpoint returns a `404`. If you are not an organization owner or the configuration is not `available`, the endpoint returns a `422`.
+
+The following payload pins a configuration to a workspace:
+
+```json
+{
+  "data": {
+    "type": "workspaces",
+    "relationships": {
+      "hyok-configuration": {
+        "data": {
+          "type": "hyok-configurations",
+          "id": "hyokc-fYGCJyLhmJwi8uDp"
+        }
+      }
+    }
+  }
+}
+```
 
 ### Sample Payload
 
@@ -713,6 +749,42 @@ The other refers to a workspace by its name and organization:
 | -------------------- | ----------------------------------------------------------------------------------------------------- |
 | `:organization_name` | The name of the organization the workspace belongs to.                                                |
 | `:name`              | The name of the workspace to show details for, which can only include letters, numbers, `-`, and `_`. |
+
+### HYOK attributes
+
+Workspaces that use [hold your own key](/terraform/cloud-docs/hold-your-own-key) encryption include the following fields. Only organization owners can read the re-encryption attributes.
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `data.attributes.hyok-enabled` | boolean | Whether the workspace uses HYOK encryption. |
+| `data.attributes.hyok-reencryption-status` | string or null | The status of re-encrypting the workspace's keys after a configuration change. `pending` means re-encryption is in progress, `failed` means re-encryption failed after automatic retries, and `null` means no re-encryption is outstanding. While the status is `pending` or `failed`, HCP Terraform pauses key rotation for the workspace. |
+| `data.attributes.hyok-reencryption-error` | string or null | The error from the most recent failed re-encryption. `null` unless `hyok-reencryption-status` is `failed`. |
+| `data.relationships.hyok-configuration.data` | object or null | The HYOK configuration pinned to the workspace, or `null` if the workspace has no pin. This is not necessarily the configuration that currently encrypts the workspace's keys. |
+
+```json
+{
+  "data": {
+    "id": "ws-SihZTyXKfNXUWuUa",
+    "type": "workspaces",
+    "attributes": {
+      "hyok-enabled": true,
+      "hyok-reencryption-status": "failed",
+      "hyok-reencryption-error": "failed to re-encrypt data key: agent pool has no active agents"
+    },
+    "relationships": {
+      "hyok-configuration": {
+        "data": {
+          "id": "hyokc-fYGCJyLhmJwi8uDp",
+          "type": "hyok-configurations"
+        },
+        "links": {
+          "related": "/api/v2/hyok-configurations/hyokc-fYGCJyLhmJwi8uDp"
+        }
+      }
+    }
+  }
+}
+```
 
 ### Workspace performance attributes
 
@@ -911,6 +983,58 @@ $ curl \
 ### Sample Response
 
 @include 'api-code-blocks/workspace-with-vcs.mdx'
+
+## Retry HYOK re-encryption
+
+Call this endpoint to retry re-encrypting a workspace's keys after re-encryption fails. HCP Terraform starts a new re-encryption with the workspace's pinned configuration and sets `hyok-reencryption-status` to `pending`. Only organization owners can call this endpoint. Refer to [Change a workspace configuration](/terraform/cloud-docs/hold-your-own-key/concepts#change-a-workspace-configuration) for details.
+
+`POST /workspaces/:workspace_id/actions/retry-hyok-reencryption`
+
+| Parameter       | Description      |
+| --------------- | ---------------- |
+| `:workspace_id` | The workspace ID |
+
+| Status  | Response                                     | Reason(s)                                                                    |
+| ------- | -------------------------------------------- | ---------------------------------------------------------------------------- |
+| [202][] | [JSON API document][] (`type: "workspaces"`) | Re-encryption restarted.                                                     |
+| [404][] | [JSON API error object][]                    | Workspace not found, or user is not an organization owner.                   |
+| [409][] | [JSON API error object][]                    | HYOK is not enabled on the workspace, or there is no failed re-encryption to retry. |
+
+### Sample Request
+
+```shell-session
+$ curl \
+  --header "Authorization: Bearer $TOKEN" \
+  --header "Content-Type: application/vnd.api+json" \
+  --request POST \
+  https://app.terraform.io/api/v2/workspaces/ws-SihZTyXKfNXUWuUa/actions/retry-hyok-reencryption
+```
+
+### Sample Response
+
+The response contains the workspace with `hyok-reencryption-status` set to `pending`. The following example omits other workspace fields:
+
+```json
+{
+  "data": {
+    "id": "ws-SihZTyXKfNXUWuUa",
+    "type": "workspaces",
+    "attributes": {
+      "hyok-enabled": true,
+      "hyok-reencryption-status": "pending",
+      "hyok-reencryption-error": null
+    },
+    "relationships": {
+      "hyok-configuration": {
+        "data": {
+          "id": "hyokc-fYGCJyLhmJwi8uDp",
+          "type": "hyok-configurations"
+        }
+      }
+    }
+  }
+}
+```
 
 ## Assign an SSH key to a workspace
 
