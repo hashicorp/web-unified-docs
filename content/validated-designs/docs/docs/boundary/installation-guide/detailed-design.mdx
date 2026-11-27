@@ -3,7 +3,7 @@ page_title: Detailed Design
 description: Review sizing, networking, storage, KMS, TLS, load balancing, and failure considerations for Boundary Enterprise deployment.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2026-07-03T10:00:00.000Z
-last_modified: 2026-07-03T10:00:00.000Z
+last_modified: 2026-11-27T14:45:28.000Z
 # END AUTO GENERATED METADATA
 ---
 
@@ -119,24 +119,47 @@ listener "tcp" {
 
 ### Worker-to-controller
 
-Workers connect directly to each Boundary Enterprise controller on TCP 9201 (the cluster port). A dedicated load balancer for worker-to-controller connectivity is not recommended.
+Workers connect directly to each Boundary Enterprise controller on TCP 9201 (the cluster port). We recommend listing each controller in the worker's `initial_upstreams`. This needs no load balancer.
 
-For multi-cloud or multi-region deployments operating a single control plane, for example workers in another cloud or on-premises, it may be necessary to expose TCP 9201 externally so that remote workers can reach each controller directly. Each controller must be individually addressable on TCP 9201 — do not route this traffic through a shared load balancer. Assign each controller a stable IP address or DNS hostname to minimise configuration changes when controllers are replaced.
+On its first connection, a worker receives the current set of controller addresses and from then on connects to each controller directly, balancing across them itself. Each address comes from that controller's `public_cluster_addr`, or from its `cluster` listener address if `public_cluster_addr` is not set.
+
+For multi-cloud or multi-region deployments operating a single control plane, for example workers in another cloud or on-premises, it may be necessary to expose TCP 9201 externally so that remote workers can reach each controller directly. Each controller must be individually addressable on TCP 9201. Set each controller's `public_cluster_addr` to an address at which workers can reach that controller directly, never to a shared load balancer address. Assign each controller a stable IP address or DNS hostname to minimise configuration changes when you replace controllers.
 
 ![Boundary Enterprise Worker-to-controller](/img/boundary/solution-design-guides/boundary-enterprise/0020-boundary-detailed-design-worker-to-controller.svg)
 
-Use the `worker` stanza to configure `initial_upstreams` with the address of each controller. List each controller individually — do not use a shared load balancer address.
+Use the `worker` stanza to configure `initial_upstreams` with the address of each controller.
 
 ##### Worker stanza configuration
 
 ```hcl
 worker {
-  # List each controller node individually by its cluster port address.
-  # Do not use a shared load balancer address.
+  # Recommended: list each controller node individually by its cluster port address.
   initial_upstreams = [
     "controller-1.internal.example.com:9201",
     "controller-2.internal.example.com:9201",
     "controller-3.internal.example.com:9201",
+  ]
+}
+```
+
+#### Optional load balancer for the first connection
+
+If you add and remove controllers often, for example in an auto scaling group, you can place a load balancer in front of the controller `cluster` listeners so that workers do not need their `initial_upstreams` updated each time the controller set changes. The load balancer serves only the worker's first connection. If you use one:
+
+- Run it in TCP (layer 4) mode, round-robin across each controller's `cluster` listener address.
+- Set each worker's `initial_upstreams` to the load balancer address.
+- Do not use the load balancer address as any controller's `public_cluster_addr` or `cluster` listener address. Load balancing worker traffic after the first connection breaks the workers' built-in client-side load balancing and causes connectivity failures.
+
+Refer to [Load balancing Boundary controllers](/boundary/docs/architecture/load-balancing) for more information.
+
+##### Worker stanza configuration with a first-connection load balancer
+
+```hcl
+worker {
+  # First connection only. The worker then connects to each controller's
+  # public_cluster_addr (or cluster listener address) directly.
+  initial_upstreams = [
+    "controller-cluster-lb.internal.example.com:9201",
   ]
 }
 ```
