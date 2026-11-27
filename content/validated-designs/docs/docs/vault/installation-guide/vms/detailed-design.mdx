@@ -3,7 +3,7 @@ page_title: Detailed design
 description: Detailed design requirements for Vault Enterprise including compute sizing, hardware considerations, and infrastructure components.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2026-06-09T20:55:58.000Z
-last_modified: 2026-06-09T20:55:58.000Z
+last_modified: 2026-11-25T14:13:59.000Z
 # END AUTO GENERATED METADATA
 ---
 
@@ -29,6 +29,8 @@ Large clusters are production environments with a consistently high workload. Th
 |-------|-----------|-----------|---------------|-----------|-----------------|
 | Small | 2-4 cores | 8-16 GB RAM | 100+ GB     | 3000+ IOPS | 75+ MB/s       |
 | Large | 4-8 cores | 32-64 GB RAM | 200+ GB    | 10000+ IOPS | 250+ MB/s     |
+
+If you do not yet have workload data, we recommend starting initial production clusters at the upper bound of the small size (4 cores, 16 GB RAM, 100 GB disk). This is the most common starting point in field deployments: it leaves headroom for growth in clients and secrets while you collect telemetry, and you can move to the large size when observed load requires it.
 
 For a mapping of these requirements to specific instance types for each cloud provider, refer to the cloud-focused sections below.
 
@@ -78,6 +80,8 @@ This Validated Design uses 3 availability zones, with 2 nodes per availability z
 
 In order for cluster members to stay properly in sync, we recommend network latency between availability zones be less than eight milliseconds (8 ms).
 
+In private datacenters, the equivalent of an availability zone is a separate failure domain, such as a separate hypervisor host, rack, or datacenter. We recommend configuring hypervisor anti-affinity rules so that the VMs of one Vault cluster never share a compute host or a backing datastore. Without anti-affinity, a single hardware failure can remove more than one node and break quorum. If Raft latency between nodes exceeds 8 ms on shared hypervisors, move the affected nodes to different compute hosts.
+
 #### Network connectivity
 
 ![HVD Vault networking diagram](/img/vault/solution-design-guides/vault-enterprise/080-hvd-vault-networking-diagram.png)
@@ -97,6 +101,21 @@ The following table outlines the minimum network connectivity requirements for V
 | Vault servers | Vault servers | 8200 | tcp | bidirectional | Cluster bootstrapping |
 | Vault servers | Vault servers | 8201 | tcp | bidirectional | Raft, replication, request forwarding; `cluster_addr` |
 | Vault servers | External systems | various | various | various | External APIs |
+
+The external systems row typically includes the following ports, depending on which features you enable. Confirm these with your network team before deployment, because firewall changes are a common source of delay:
+
+| Source | Destination | Port | Protocol | Purpose |
+| --- | --- | --- | --- | --- |
+| Vault servers | LDAP or Active Directory | 389 or 636 | tcp | LDAP auth method and LDAP secrets engine |
+| Vault servers | Databases | Database port (for example 5432 or 3306) | tcp | Database secrets engine |
+| KMIP clients | Vault servers | 5696 | tcp | KMIP secrets engine |
+| Vault servers | NTP servers | 123 | udp | Time synchronization |
+
+<Note>
+
+The `vault login -method=oidc` CLI flow starts a listener on the client machine on port `8250` by default to receive the OIDC callback. Make sure local security software on administrator workstations does not block it, and include the `http://localhost:8250/oidc/callback` redirect URI in your OIDC role configuration.
+
+</Note>
 
 Do not expose Vault to inbound traffic through a publicly accessible endpoint. This minimizes both the risk of exposing secrets and the risk of denial-of-service attacks. Wherever possible, limit access to the Vault API to the networks where you need to access Vault.
 
@@ -121,6 +140,14 @@ The amount of network bandwidth used by Vault depends entirely on the specific c
 Encrypt every segment of Vault-related network traffic in transit using TLS over HTTPS. This includes communication from clients to the Vault servers, as well as communication between cluster members.
 
 Create a standard X.509 public certificate from an existing trusted certificate authority internal to your organization. This certificate represents the Vault cluster, and each Vault server in the cluster serves it. Along with the certificate itself (`vault-public.pub`), also supply the certificate's private key (`vault-private.key`) and a bundle file from the certificate authority used to generate the certificate (`ca.pub`). The implementation section of this document references these files.
+
+We recommend issuing one certificate per cluster with subject alternative names (SANs) that cover every name clients and nodes use to reach it:
+
+- The load balancer FQDN that clients use (for example `vault.domain`), and any role-specific names such as `vault-dr.domain` if you route to clusters individually.
+- The FQDN of each long-lived Vault node, so that node-to-node API calls such as `retry_join` and direct troubleshooting requests pass certificate validation.
+- Optionally `localhost` and `127.0.0.1`, so operators can run the CLI on a node against its local listener.
+
+A wildcard SAN such as `*.vault.domain` is acceptable and often speeds up deployment, because new or replaced nodes do not require a new certificate. Supply the certificate in PEM format with the full chain ordered from the leaf certificate to the root, and an unencrypted private key, because Vault reads the key directly at listener startup. If you base64-encode certificate material for a secrets manager or Terraform variable, do so on the same operating system family that runs Vault, as line-ending and encoding differences between Windows and Linux corrupt the files. Validate the SANs with `openssl x509 -noout -text` before deployment, because reissuing a certificate is a common cause of delay.
 
 Vault also encrypts server-to-server communication, which requires no additional configuration. Vault automatically negotiates an mTLS connection between servers when new members join the cluster.
 
@@ -375,6 +402,21 @@ Rather than storing these values into Vault's configuration file, you can also s
 Your HSM's configuration may require additional fields, depending on the device. Consult the Vault HSM seal documentation and your HSM documentation as needed.
 
 </Note>
+
+##### Validate the seal path before deployment
+
+Auto-unseal is frequently planned but blocked during deployment, most often because Vault nodes cannot reach the KMS through a private endpoint or firewall, the identity lacks permissions on the key, or HSM hardware and libraries are not ready. We recommend that, before deployment begins, you:
+
+- Test network connectivity from each Vault node to the KMS endpoint or HSM, including private endpoints and DNS resolution.
+- Confirm the Vault node identity has the key permissions listed in the [IAM](#iam) section.
+- For HSMs, confirm the PKCS #11 library and its dependencies are installed on every node, and that you have the slot and PIN.
+- Decide on a fallback. If the seal is not ready, you can initialize with the Shamir seal and later migrate to auto-unseal using <a href="https://developer.hashicorp.com/vault/docs/concepts/seal#seal-migration" target="_blank" rel="noopener">seal migration</a>. Migration requires a threshold of the original unseal keys, so keep them in secure storage until the migration completes.
+
+After deployment, restart each node in turn and confirm it unseals automatically.
+
+##### Seal high availability
+
+To protect against an outage of a single seal service, Vault Enterprise 1.16 and later supports <a href="https://developer.hashicorp.com/vault/docs/configuration/seal/seal-ha" target="_blank" rel="noopener">Seal High Availability</a>. Set `enable_multiseal = true` and define two or three auto-unseal `seal` stanzas, each with a unique `name` and a `priority`, where Vault tries the lowest value first. Use keys in independent services or regions so that one failure does not affect both. Add or remove one seal at a time, take a snapshot before each change, and wait until `sys/sealwrap/rewrap` reports the data as fully re-wrapped before making another change. Seal HA works only with auto-unseal mechanisms, not with Shamir.
 
 #### `telemetry` stanza
 
