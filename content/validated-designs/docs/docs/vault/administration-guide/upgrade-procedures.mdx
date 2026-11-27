@@ -3,7 +3,7 @@ page_title: Upgrade procedures
 description: Upgrade Vault Enterprise clusters and validate upgrade automation.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2026-07-06T12:00:00.000Z
-last_modified: 2026-07-06T12:00:00.000Z
+last_modified: 2026-11-25T15:23:02.000Z
 # END AUTO GENERATED METADATA
 ---
 
@@ -40,81 +40,96 @@ Vault autopilot enables you to automatically upgrade a cluster of Vault nodes to
 - A basic knowledge of <a href="https://docs.aws.amazon.com/autoscaling/ec2/userguide/auto-scaling-groups.html" target="_blank" rel="noopener">AWS Auto Scaling</a>, including <a href="https://docs.aws.amazon.com/autoscaling/ec2/userguide/ec2-auto-scaling-instance-protection.html" target="_blank" rel="noopener">scale-in protection</a>.
 - A general understanding of <a href="https://developer.hashicorp.com/vault/docs/upgrading" target="_blank" rel="noopener">how Vault upgrades work</a>.
 - An <a href="https://docs.aws.amazon.com/autoscaling/ec2/userguide/auto-scaling-groups.html" target="_blank" rel="noopener">AWS Auto Scaling group</a> containing a Vault cluster running Vault Enterprise 1.11.0 or later.
-- Upgrade migration must not be disabled on the cluster. Vault Enterprise enables automated upgrade migrations by default. You can check the value of this parameter by running the following command.
-
-  ```
-  $ vault operator raft autopilot get-config | grep 'Upgrade Migration'
-  ```
-
-  Output.
-
-  ```
-  Disable Upgrade Migration             false
-  ```
-
-  If upgrade migration is disabled, you can re-enable it by running the following command:
-
-  ```
-  $ vault operator raft autopilot set-config -disable-upgrade-migration=true
-  ```
+- The cluster must have automated upgrade migration turned on. Vault Enterprise turns it on by default. The first step of the procedure shows how to check this.
 
 #### Procedure
+
+1. Check that the cluster has automated upgrade migration turned on.
+
+    Autopilot controls this feature with a setting named `disable-upgrade-migration`. Because the setting name is a negative, `true` means the feature is off and `false` means it is on:
+
+    | Output value | Meaning | Action |
+    | --- | --- | --- |
+    | `false` (default) | Upgrade migration is **on**. | None. Continue to the next step. |
+    | `true` | Upgrade migration is **off**. | Turn it back on before you continue. |
+
+    Check the current value with the following command:
+
+    ```
+    $ vault operator raft autopilot get-config | grep 'Upgrade Migration'
+    ```
+
+    Example output from a cluster with upgrade migration turned on:
+
+    ```
+    Disable Upgrade Migration             false
+    ```
+
+    If the value is `true`, turn upgrade migration back on by setting `disable-upgrade-migration` to `false`:
+
+    ```
+    $ vault operator raft autopilot set-config -disable-upgrade-migration=false
+    ```
+
+    Run the `get-config` command again and confirm that the value is now `false`.
 
 1. In your AWS account, create a <a href="https://docs.aws.amazon.com/autoscaling/ec2/userguide/launch-templates.html" target="_blank" rel="noopener">launch template</a> that can create new instances with the desired new version of Vault. This can be accomplished by using an AMI with Vault already installed, or via a userdata script that installs Vault at boot time.
 1. Configure the ASG for your Vault cluster to use the new launch template. Once the new launch template is in place, future instances created by the ASG will be created using the new version of Vault. Existing instances will not be affected.
 1. Update the ASG by changing the desired capacity count to at least double the current number of nodes. For example, if 3 nodes are currently deployed, change the desired capacity to `6`.
 
-<Note>
+    <Note>
 
-The number of new nodes running the target version of Vault must be equal to or greater than the number of existing nodes before the autopilot process will begin promoting new nodes to voters.
+    The number of new nodes running the target version of Vault must be equal to or greater than the number of existing nodes before the autopilot process will begin promoting new nodes to voters.
 
-</Note>
+    </Note>
 
 1. The ASG will begin creating additional instances up to the desired capacity. Once enough nodes running the target version have joined the cluster, the upgrade migration process should start. Monitor this process using the following command:
 
-  ```
-  $ watch -n 0.5 'curl \
-      -H "X-Vault-Token: $VAULT_TOKEN" \
-      $VAULT_ADDR/v1/sys/storage/raft/autopilot/state \
-      | jq -r ".data.upgrade_info"'
-  ```
+    ```
+    $ watch -n 0.5 'curl \
+        -H "X-Vault-Token: $VAULT_TOKEN" \
+        $VAULT_ADDR/v1/sys/storage/raft/autopilot/state \
+        | jq -r ".data.upgrade_info"'
+    ```
 
-  Continue to monitor the output until the `status` field reads `await-server-removal`. The output will look similar to the following:
+    Continue to monitor the output until the `status` field reads `await-server-removal`. The output will look similar to the following:
 
-  ```
-  {
-      "other_version_non_voters": [
-          "vault_2",
-          "vault_3",
-          "vault_4"
-      ],
-      "status": "await-server-removal",
-      "target_version": "1.12.0.1",
-      "target_version_voters": [
-          "vault_5",
-          "vault_6",
-          "vault_7"
-      ]
-  }
-  ```
+    ```
+    {
+        "other_version_non_voters": [
+            "vault_2",
+            "vault_3",
+            "vault_4"
+        ],
+        "status": "await-server-removal",
+        "target_version": "1.12.0.1",
+        "target_version_voters": [
+            "vault_5",
+            "vault_6",
+            "vault_7"
+        ]
+    }
+    ```
 
-  Collect the node ids from this output to refer to in subsequent steps. `other_version_non_voters` contains the list of nodes running the old version of Vault, which have been demoted to non-voting status. `target_version_voters` contains the list of nodes running the new version of Vault, which have been promoted to voting status.
+    Collect the node ids from this output to refer to in subsequent steps. `other_version_non_voters` contains the list of nodes running the old version of Vault, which have been demoted to non-voting status. `target_version_voters` contains the list of nodes running the new version of Vault, which have been promoted to voting status.
+
 1. Remove the nodes running the old version of Vault from the cluster. For each node that needs to be removed, run the following command:
 
-  ```
-  $ vault operator raft remove-peer <node id>
-  ```
+    ```
+    $ vault operator raft remove-peer <node id>
+    ```
 
 1. Temporarily enable scale-in protection for each instance running the new version of Vault. This will prevent the ASG from destroying the new nodes during scale-in events. Follow the steps found at <a href="https://docs.aws.amazon.com/autoscaling/ec2/userguide/ec2-auto-scaling-instance-protection.html#instance-protection-instance" target="_blank" rel="noopener">Change Scale-in Protection for an Instance</a> in the AWS Documentation to enable scale-in protection. You can verify that protection is enabled by checking the `Protected From` column in the AWS management console.
 
-![Autoscaling Console](/img/vault/operating-guides/adoption/image13.png)
+    ![Autoscaling Console](/img/vault/operating-guides/adoption/image13.png)
 
 1. Update the ASG again, this time reducing the desired capacity count to its original value. The ASG will begin terminating instances. Instances with scale-in protection enabled will be protected from termination, while instances without protection will be terminated. When this process is complete, all old nodes should be removed from the cluster.
 1. Verify that your Vault cluster is healthy and that the upgrade was successful by running the following command:
 
-  ```
-  $ vault status
-  ```
+    ```
+    $ vault status
+    ```
 
-  Verify that the version number matches the target version of Vault, and that `Sealed` is `false`.
+    Verify that the version number matches the target version of Vault, and that `Sealed` is `false`.
+
 1. Remove scale-in protection from the remaining instances. Follow the steps found at <a href="https://docs.aws.amazon.com/autoscaling/ec2/userguide/ec2-auto-scaling-instance-protection.html#instance-protection-instance" target="_blank" rel="noopener">Change scale-in protection for an instance</a> in the AWS Documentation to disable scale-in protection.
