@@ -3,7 +3,7 @@ page_title: Authentication for people
 description: Configure human authentication using LDAP or OIDC and establish admin policies for secure Vault access management.
 # START AUTO GENERATED METADATA, DO NOT EDIT
 created_at: 2026-06-09T20:55:54.000Z
-last_modified: 2026-06-09T20:55:54.000Z
+last_modified: 2026-11-25T14:18:37.000Z
 # END AUTO GENERATED METADATA
 ---
 
@@ -234,6 +234,19 @@ $ vault write auth/oidc/config \
 The `@` prefix can be used to read data from a file on disk. See the <a href="https://developer.hashicorp.com/vault/docs/commands#files">CLI documentation</a> for more information.
 
 </Tip>
+
+##### Prepare the identity provider application
+
+We recommend confirming identity provider prerequisites before the OIDC configuration work starts. Organizational restrictions on who can register applications are a common reason OIDC configuration stalls, and in some environments teams have fallen back to LDAP because an application could not be registered in time. Confirm that the engineer doing the work has the rights to register the application and grant admin consent, or schedule the identity team in advance.
+
+For Microsoft Entra ID, prepare the following:
+
+- Register an application using the web platform and add both the Vault UI redirect URI and the CLI redirect URI (`http://localhost:8250/oidc/callback`).
+- Create a client secret for the application, and record its expiry so that rotation is planned.
+- Enable ID tokens, and add the optional claims Vault uses for identity and group mapping, such as `email`, `groups`, `upn`, and `preferred_username`.
+- Grant the `GroupMember.Read.All` and `User.Read` Microsoft Graph permissions and give admin consent. Vault needs group claims to map users to external groups.
+- Create the groups that you will map to Vault external groups.
+- Allow outbound HTTPS (443) from every Vault node to the Microsoft identity endpoints.
 
 #### Step 3: Create the default role
 
@@ -515,9 +528,42 @@ Users who are mapped in the tenant namespace can still login to the root namespa
 
 </Note>
 
+#### Common LDAP configuration issues
+
+- We recommend LDAPS on port 636 with a dedicated bind service account in production. Gather `url`, `binddn`, `bindpass`, `userdn`, `groupdn`, `groupfilter`, `groupattr`, and `upndomain` from a directory subject matter expert before configuration, because most failed LDAP logins trace back to one of these values.
+- Escape special characters in distinguished names (DNs) correctly. Commas or other reserved characters that are not escaped in a DN cause user or group searches to silently return nothing.
+- Use `userfilter` to restrict login to members of specific directory groups when you want only a subset of directory users to authenticate to Vault.
+- Map directory groups to Vault external groups rather than attaching policies to individual users, so that access follows group membership in the directory.
+
 #### Reference material
 
 - <a href="https://developer.hashicorp.com/vault/docs/auth/ldap" target="_blank" rel="noopener">LDAP Auth Method documentation</a>
+
+### SAML auth method
+
+If your identity provider only offers SAML 2.0 for Vault, you can use the <a href="https://developer.hashicorp.com/vault/docs/auth/saml" target="_blank" rel="noopener">SAML auth method</a> (Vault Enterprise). Where the identity provider supports both, we recommend OIDC, because it is the method described in this guide and is better supported by the Vault Terraform provider. Teams have been unable to complete a Terraform-managed SAML configuration and switched to OIDC with Entra ID group claims instead.
+
+Common SAML configuration issues:
+
+- The error `callback address does not match any entries` means the assertion consumer service (ACS) URL registered in the identity provider does not exactly match the callback URL configured in Vault. Make the two values identical, including scheme, host, port, and path.
+- Identity provider attribute values that contain comma-separated entries have caused SAML logins to fail. Restructure the identity provider query or attribute so that each value is returned without embedded commas.
+
+## Break-glass access
+
+We recommend enabling a <a href="https://developer.hashicorp.com/vault/docs/auth/userpass" target="_blank" rel="noopener">userpass auth method</a> in the root namespace with a small number of administrative accounts for break-glass access, alongside your primary identity provider method. If the identity provider is unavailable, administrators can still log in to Vault and restore service without regenerating a root token.
+
+On HCP Vault this is particularly important: if the HCP control plane is unavailable you cannot generate new admin tokens, but the Vault data plane continues to serve logins, so a userpass account preserves administrative access.
+
+Consider the following trade-offs and controls:
+
+- Protect break-glass accounts with <a href="/validated-designs/vault/administration-guide/mfa-administration">TOTP MFA</a> and keep user lockout enabled on the mount.
+- Each userpass account counts towards your Vault client count.
+- Store break-glass credentials in a controlled location with split custody, and audit their use.
+- The alternative to userpass break-glass is regenerating a root token with `vault operator generate-root` using PGP-encrypted unseal or recovery key shares, as described in the next section. This works only for Vault Enterprise and requires the key holders to be available.
+
+### User lockout
+
+Vault 1.13 and later lock out a user after repeated failed logins on the userpass, LDAP, and AppRole auth methods. User lockout is enabled by default with a threshold of 5 attempts, a lockout duration of 15 minutes, and a counter reset of 15 minutes. We recommend keeping user lockout enabled on all supported mounts to protect against password-guessing attacks, and tuning the values per mount with `vault auth tune` only when you have a specific requirement. Do not set `VAULT_DISABLE_USER_LOCKOUT`. See the <a href="https://developer.hashicorp.com/vault/docs/concepts/user-lockout" target="_blank" rel="noopener">user lockout documentation</a> for configuration precedence.
 
 ## Revoke the root token
 
